@@ -2556,15 +2556,16 @@ fi
 # here to catch the case it can see, not to invent certainty it does not have.
 publishing_now() {
 	local cg procs cmd
-	cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
 	[ -r "\$cg" ] || return 1
 	procs=\$(cat "\$cg" 2>/dev/null) || return 1
 	for pid in \$procs; do
 		[ -r "/proc/\$pid/cmdline" ] || continue
 		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
 		case "\$cmd" in
-			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-				echo "\$cmd" | cut -c1-160 >&2
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				# The PID, never the command line: it carries the stream key.
+				echo "    pid \$pid is publishing" >&2
 				return 0 ;;
 		esac
 	done
@@ -2836,14 +2837,23 @@ SERVICE_NAME="$SERVICE_NAME"
 MEDIA_DIRS="recordings uploads hls playout models fonts logs"
 
 usage() {
-  echo "usage: rollback.sh <backup directory>" >&2
+  echo "usage: rollback.sh <backup directory> [--force]" >&2
+  echo "  --force  roll back even while publishing, and without asking" >&2
   echo "  the directory update.sh named, e.g. \${DATA_DIR}.bak-YYYY-MM-DD-HHMM" >&2
   echo "backups on this host:" >&2
   ls -d "\${DATA_DIR}".bak-* 2>/dev/null | sed 's/^/  /' >&2 || echo "  (none)" >&2
 }
 
-backup="\${1:-}"
-if [ -z "\$backup" ] || [ "\$backup" = -h ] || [ "\$backup" = --help ]; then
+FORCE=false
+backup=""
+for arg in "\$@"; do
+  case "\$arg" in
+    --force) FORCE=true ;;
+    -h|--help) usage; exit 2 ;;
+    *) if [ -z "\$backup" ]; then backup="\$arg"; else usage; exit 2; fi ;;
+  esac
+done
+if [ -z "\$backup" ]; then
   usage; exit 2
 fi
 backup="\${backup%/}"
@@ -2873,6 +2883,55 @@ is_media() {
   for m in \$MEDIA_DIRS; do [ "\$1" = "\$m" ] && return 0; done
   return 1
 }
+
+# THE SAME TWO-STEP GUARD AS update.sh AND uninstall.sh (poka-yoke audit
+# 2026-11-04). A rollback stops the service and overwrites the database, so it
+# ends any live broadcast (a YouTube broadcast that ends cannot resume) and
+# throws away everything saved since the backup. It used to do both without a
+# word. Asked of the unit's own cgroup, as update.sh's probe is; silent where
+# the cgroup cannot be read.
+publishing_now() {
+	local cg procs cmd
+	cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	[ -r "\$cg" ] || return 1
+	procs=\$(cat "\$cg" 2>/dev/null) || return 1
+	for pid in \$procs; do
+		[ -r "/proc/\$pid/cmdline" ] || continue
+		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
+		case "\$cmd" in
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				# The PID, never the command line: it carries the stream key.
+				echo "    pid \$pid is publishing" >&2
+				return 0 ;;
+		esac
+	done
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Rolling back stops the service, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
+# What is lost, said before anything is touched: the database goes back to the
+# moment of the backup, so every change saved since then -- destinations,
+# settings, schedules, accounts, tokens -- is gone. Media is kept (below).
+taken="\$(date -r "\$backup" '+%F %H:%M' 2>/dev/null || echo 'the time of the backup')"
+echo "Rolling back to \$backup."
+echo "Everything saved in polyemesis since \$taken -- destinations, settings,"
+echo "schedules, connected accounts, API tokens -- will be lost. Recordings and"
+echo "other media are kept."
+if [ "\$FORCE" != true ] && [ -t 0 ]; then
+	printf 'Roll back and lose those changes? [y/N] '
+	read -r answer
+	case "\$answer" in
+		y|Y|yes|YES) ;;
+		*) echo "Not rolled back."; exit 1 ;;
+	esac
+fi
 
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
   echo "stopping \$SERVICE_NAME"
@@ -2996,16 +3055,17 @@ fi
 # unrelated ffmpeg, or one left behind by a test run, is not this service's
 # broadcast and must not block an uninstall.
 publishing_now() {
-	local cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	local cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
 	local pid args n=0
 	[ -r "\$cg" ] || return 1
 	while read -r pid; do
 		[ -r "/proc/\$pid/cmdline" ] || continue
 		args=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null || true)
 		case "\$args" in
-			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
 				n=\$((n+1))
-				echo "    pid \$pid: \$(echo "\$args" | grep -oE '(rtmp|srt)://[^ ]{0,40}' | tail -1)" >&2 ;;
+				# The PID, never the URL: its path is the stream key.
+				echo "    pid \$pid is publishing" >&2 ;;
 		esac
 	done < "\$cg"
 	[ "\$n" -gt 0 ]
@@ -3158,8 +3218,9 @@ publishing_now() {
 	local out
 	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
-		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+		*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			# PIDs only, never the command line: it carries the stream key.
+			echo "\$out" | grep -E 'ffmpeg.*(rtmps?|srt):|ffmpeg.*-f flv' | awk '{print "    pid " \$2 " is publishing"}' | head -3 >&2
 			return 0 ;;
 	esac
 	return 1
@@ -3382,8 +3443,9 @@ publishing_now() {
 	local out
 	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
-		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+		*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			# PIDs only, never the command line: it carries the stream key.
+			echo "\$out" | grep -E 'ffmpeg.*(rtmps?|srt):|ffmpeg.*-f flv' | awk '{print "    pid " \$2 " is publishing"}' | head -3 >&2
 			return 0 ;;
 	esac
 	return 1

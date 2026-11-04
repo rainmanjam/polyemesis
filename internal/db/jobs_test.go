@@ -756,3 +756,26 @@ func TestPurgeSparesJobsFinishedSinceTheCutoff(t *testing.T) {
 			"timestamp is not evidence of age (%v)", unfinished.ID, err)
 	}
 }
+
+// TestDeleteJobRefusesARunningJob pins the guard in DeleteJob's own statement.
+// The handler's state check is a read before the write; a worker claiming the
+// job in between used to lose its row mid-run (and a clip.export its only
+// reference to the file it was writing). The store must refuse on its own.
+func TestDeleteJobRefusesARunningJob(t *testing.T) {
+	d := testDB(t)
+	queued := mustEnqueue(t, d, jobs.Job{Kind: "work"})
+	claimed, err := d.ClaimJob([]jobs.Kind{"work"}, time.Now())
+	if err != nil || claimed == nil || claimed.ID != queued.ID {
+		t.Fatalf("ClaimJob = %+v, %v; want job %d", claimed, err, queued.ID)
+	}
+	if err := d.DeleteJob(claimed.ID); !errors.Is(err, ErrStateConflict) {
+		t.Fatalf("DeleteJob(running) = %v, want ErrStateConflict", err)
+	}
+	got, err := d.GetJob(claimed.ID)
+	if err != nil {
+		t.Fatalf("running job's row is gone after a refused delete: %v", err)
+	}
+	if got.State != jobs.StateRunning {
+		t.Errorf("state = %s, want running", got.State)
+	}
+}

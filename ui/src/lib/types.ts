@@ -3298,6 +3298,12 @@ export interface JobWindow {
   days?: number[];
 }
 
+/** The job kinds POST /library/recordings/{id}/jobs/{kind} accepts. A union,
+ *  not a string, so a mistyped or renamed kind fails to compile instead of
+ *  failing as a 400 at runtime (poka-yoke audit 2026-11-04). Mirrors buildJob
+ *  in internal/api/library.go; library_job_kinds_test.go holds the two equal. */
+export type RecordingJobKind = "transcribe" | "media.proxy" | "media.thumbnails" | "media.archive";
+
 export interface JobKindInfo {
   kind: string;
   label: string;

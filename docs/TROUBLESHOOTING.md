@@ -598,6 +598,16 @@ level=WARN msg="ignoring unparseable expert arguments" dest="Twitch main" field=
 `field` is `input` or `output`. Re-save the destination with the argument list
 corrected and it applies again.
 
+**Arguments that touch files on the server are refused, and dropped at spawn
+if they were stored earlier.** Expert mode cannot write or read a file on the
+box: options such as `-progress` or `-vstats_file`, a bare token FFmpeg would
+create as a second output, a filter outside the allowlist (`movie`, `amovie`,
+`subtitles`, `drawtext`, `loudnorm`, ...), and an option FFmpeg's option table
+does not list are all refused with a sentence naming them. A destination saved
+with any of these before the rule existed starts on its generated command and
+logs `ignoring expert arguments that touch files on the server`. The expert
+routes are also session-only: an API token gets `403`.
+
 ### The platform accepts it and then disconnects
 
 - **Bitrate above what the platform allows.** The platform presets set limits

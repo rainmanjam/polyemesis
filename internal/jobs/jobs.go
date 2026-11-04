@@ -458,7 +458,8 @@ type Store interface {
 	DeferJob(id int64, at time.Time, reason string, now time.Time) error
 	// RetryJob re-arms a terminal job with a fresh attempt budget.
 	RetryJob(id int64, now time.Time) error
-	// DeleteJob removes a job row.
+	// DeleteJob removes a job row. It must refuse a running job in the same
+	// statement that deletes, not after a separate read.
 	DeleteJob(id int64) error
 	// PurgeJobs deletes terminal jobs that finished before cutoff, keeping at
 	// least keep of the newest regardless of age. It returns the rows it

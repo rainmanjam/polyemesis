@@ -494,6 +494,26 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// handleGetChatSettings reads one platform's current channel-wide chat rules,
+// so the rules card can start from the room's real state.
+func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	if platform == "" {
+		writeError(w, http.StatusBadRequest, "platform is required")
+		return
+	}
+	settings, err := s.chat.ReadChatSettings(r.Context(), platform, strings.TrimSpace(q.Get("account")))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
 // chatUserCard is what a moderator sees before deciding.
 type chatUserCard struct {
 	Platform db.Platform `json:"platform"`

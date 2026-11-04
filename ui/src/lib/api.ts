@@ -123,6 +123,7 @@ import type {
   UpgradePlan,
   UpgradeResult,
   TimelineRow,
+  RecordingJobKind,
 } from "./types";
 import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
 import type { Poll, PollSpec, PollsResponse } from "./polls";
@@ -1368,7 +1369,7 @@ export const api = {
   /** Queue one piece of post-production about one recording. The response's
    *  `created` is false when the queue folded it into work already running,
    *  which is what stops a double click transcribing twice. */
-  submitRecordingJob: (id: number, kind: string, body: Record<string, unknown> = {}) =>
+  submitRecordingJob: (id: number, kind: RecordingJobKind, body: Record<string, unknown> = {}) =>
     post<{ job: JobView; created: boolean }>(
       `/library/recordings/${id}/jobs/${encodeURIComponent(kind)}`,
       body,
@@ -1484,6 +1485,13 @@ export const api = {
 
   /** Channel-wide chat rules. Only Twitch publishes an API for these, and an
    *  omitted field means "leave it alone" rather than "turn it off". */
+  /** The room's CURRENT rules, read from the platform, so the rules card shows
+   *  the real state instead of assuming every mode is off. */
+  getChatSettings: (platform: ChatPlatform, account: string | undefined) => {
+    const q = new URLSearchParams({ platform });
+    if (account) q.set("account", account);
+    return get<ChatSettings>(`/chat/settings?${q.toString()}`);
+  },
   updateChatSettings: (platform: ChatPlatform, account: string | undefined, s: ChatSettings) => {
     const q = new URLSearchParams({ platform });
     if (account) q.set("account", account);

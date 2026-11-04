@@ -463,6 +463,10 @@ export function ChatComposer({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<ChatSendResult[] | null>(null);
+  // The text of a send that only SOME platforms took. The box is cleared --
+  // sending it again as-is would repeat it to the ones that accepted -- but it
+  // is kept here so it can be put back and re-sent where it failed.
+  const [unsent, setUnsent] = useState("");
 
   const senders = statuses.filter((s) => s.canSend);
   // The strictest published limit among the platforms that will actually
@@ -489,10 +493,19 @@ export function ChatComposer({
     const body = text.trim();
     if (!body || sending) return;
     setSending(true);
+    // A stale offer must not overwrite the next draft with an older message.
+    setUnsent("");
     try {
       const res = await api.sendChat(body);
       setResults(res.results);
-      setText("");
+      // THE DRAFT IS CLEARED ONLY WHEN SOMETHING TOOK IT (poka-yoke audit
+      // 2026-11-04). It used to be cleared before the answer was read, so a
+      // send no platform accepted lost the text mid-broadcast.
+      // Only if the box still holds what was sent: the field stays editable
+      // while the send is in flight, and a draft typed meanwhile is the
+      // operator's next message, not this one.
+      if (res.sent > 0) setText((cur) => (cur.trim() === body ? "" : cur));
+      setUnsent(res.sent > 0 && res.failed > 0 ? body : "");
       if (res.failed > 0) {
         toast.error(
           res.sent > 0
@@ -522,6 +535,19 @@ export function ChatComposer({
         <div className="mb-1.5">
           <SendVerdict results={results} />
         </div>
+      )}
+      {unsent && (
+        <Button
+          variant="link"
+          size="sm"
+          className="mb-1 h-auto p-0 text-[11px]"
+          onClick={() => {
+            setText(unsent);
+            setUnsent("");
+          }}
+        >
+          {t("chatpage.restoreDraft")}
+        </Button>
       )}
       <div className="flex items-end gap-1.5">
         <Textarea

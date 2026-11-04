@@ -709,11 +709,10 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteJob removes a job row, EXCEPT while a worker is on it.
 //
-// Queue.Delete is unconditional and stays that way: its documentation says
-// cancelling a running job first is the caller's choice, not something done
-// silently underneath it, and a delete that quietly cancelled would be a worse
-// surprise than one that refuses. So the refusal lives here, in the policy
-// layer, and it refuses rather than escalates.
+// Queue.Delete never cancels: its documentation says cancelling a running job
+// first is the caller's choice, not something done silently underneath it, and
+// a delete that quietly cancelled would be a worse surprise than one that
+// refuses. So it refuses rather than escalates.
 //
 // What it prevents: deleting a running row does not stop the worker. The
 // execution keeps its context and keeps burning CPU on work whose record is
@@ -721,10 +720,10 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 // against an id that no longer exists (#220). The operator saw a 200 and has no
 // route left to the thing still running.
 //
-// What it does NOT claim: this is a read followed by a write, not one atomic
-// statement. A job that is claimed in the window between them is still deleted.
-// That window is the two statements wide; the one this replaces was the whole
-// life of the job.
+// The read below only words the refusal for the common case. The rule itself
+// is in db.DeleteJob's statement (state <> 'running'), so a job claimed in the
+// window between the read and the delete is refused there with the same 409,
+// not deleted out from under its worker.
 // What it also does, since #222: takes the exported file with the row. A
 // clip.export's row is the ONLY reference to its file -- the download route is
 // keyed on the job, and the exports directory is deliberately outside the

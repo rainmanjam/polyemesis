@@ -83,3 +83,27 @@ func TestKickAdapterIsBuiltWithSignatureVerification(t *testing.T) {
 			resp.StatusCode)
 	}
 }
+
+// The production construction site must give Twitch a token SUPPLIER for its
+// PASS line. The Hub reconnects by re-running the same adapter, so a token
+// captured here was replayed after it expired and chat went dark until a
+// restart (poka-yoke audit 2026-11-04).
+func TestTwitchAdapterIsBuiltWithAFreshTokenForEveryConnect(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	id := connectAccount(t, store, s.box, db.PlatformTwitch, "dj")
+	acct, err := store.GetPlatformAccount(s.box, id)
+	if err != nil {
+		t.Fatalf("load account: %v", err)
+	}
+	adapter, err := s.chatAdapter(t.Context(), *acct)
+	if err != nil {
+		t.Fatalf("chatAdapter: %v", err)
+	}
+	tw, ok := adapter.(*chat.TwitchAdapter)
+	if !ok {
+		t.Fatalf("chatAdapter returned %T, want *chat.TwitchAdapter", adapter)
+	}
+	if !tw.RefreshesPassToken() {
+		t.Error("chatAdapter built Twitch without PassToken: every reconnect replays the attach-time token")
+	}
+}

@@ -17,8 +17,75 @@ its first tagged release.
   now name their programme, as status frames do, and the Meters and Routing pages keep only the
   selected programme's. Switching programme clears the old programme's meters until the new one
   reports, and the routing editor's "last peak" for a quiet track is kept per programme.
+### Security
+
+- **Expert mode is session-only, and refuses any argument that touches a file on the server.**
+  An admin API token could save FFmpeg arguments that overwrote a file (`-progress <db path>`),
+  created one (a second output) or read one out to a platform (`movie=`, `textfile=`). The five
+  expert routes (`/destinations/{id}/expert`, its `preview` and `dry-run`) now answer `403` to an
+  API token of any scope; nothing that ships uses them with a token. For the signed-in operator,
+  options are an allowlist generated from FFmpeg's own option table, with every option whose help
+  mentions a file, path, URL, log, dump, stats or device left out. Filter graphs may use only
+  filters vetted to open no file, the `/option=` form is refused, and so is any encoder-param key
+  outside an allowlist of tuning keys (`pass=`, `stats=`, `dump-yuv=` and their aliases are out), nested option lists such as `-format_opts`, `-f` values
+  other than streaming formats (`flv`, `mpegts`, `matroska`, `mp4`, ...), `-i`, and stray output
+  tokens. Arguments
+  saved before this are dropped when the destination starts, with a log line saying why. See
+  docs/API.md and docs/TROUBLESHOOTING.md.
+- **A publisher whose token is rotated, or whose source is disabled, is disconnected.** The SRT
+  and RTMP listeners check every live publisher again every five seconds. They close one whose
+  token no longer resolves, whose source is off, or (SRT) whose engine is gone. One failed lookup
+  is not enough: the check must fail twice in a row, so a busy database never drops a healthy
+  encoder.
+- **The OBS bridge script sends its token only over HTTPS**, or over plain HTTP only to the same
+  machine, which is the rule the Stream Deck plugin already applies. Any other address is
+  refused, and nothing is sent.
+
+### Fixed
+
+- **An unmounted recordings volume no longer wipes the archive's metadata.** A scan that lists no
+  recordings while the index has some now leaves the index alone and logs once. It used to
+  remove every recording with its transcripts, highlights and sessions. The offload ledger
+  likewise stays when every file it tracks is missing at once, so the archive is not uploaded
+  again in full when the volume returns.
+- **Deleting a job refuses one a worker has just started.** The check now happens in the same
+  database statement as the delete, so the job's row cannot vanish while it runs.
+- **A schedule that fired, but could not record that it fired, no longer fires again** on every
+  pass for the rest of its grace window.
+- **A replaced RTMP publisher's disconnect no longer cuts off its replacement's viewers.**
+- **Twitch chat no longer goes dark about four hours after it connects.** Each reconnect now
+  signs in with a fresh token, not the one captured when chat started.
+- **Automod never acts on the broadcaster, a moderator or the operator's own messages.**
+- **A revoked platform sign-in ends a publish with "reconnect the account"** right away. It used
+  to retry five times and report a token error.
+- **A YouTube rate limit is retried.** It used to be reported as the daily quota, and the clip was
+  dropped until midnight Pacific. YouTube's per-channel upload limit now has its own cause,
+  `upload_limited`, instead of the daily-quota one.
+- **The chat box keeps your message when no platform accepted it.** When only some accepted it,
+  **Put the message back** restores it.
+- **The chat rules card shows the room's real rules.** It reads them from Twitch first, and Apply
+  sets every rule as shown, off included. New route `GET /chat/settings`.
+- **A click outside, or Esc, no longer discards a half-filled destination or storage form.**
+  Cancel still closes it.
+- **rollback.sh refuses while this install is on the air** (unless you pass `--force`). Before
+  it starts, it says which changes it will lose and asks on a terminal.
+- **The website redeploys only after a release that actually published.** It used to redeploy
+  after failed runs and rehearsals too.
 
 ### Changed
+
+- **Expert arguments saved earlier may stop applying.** The stricter expert-mode rules (see
+  Security) also run when a destination starts. Saved arguments that now fail them are left out of
+  the command, and the destination starts on its generated command: for example, a `loudnorm` or
+  `drawtext` filter, an `-f` other than a streaming format, or an option FFmpeg's own option list
+  does not include. The expert editor names what was refused and says the destination starts
+  without those arguments, and the server log says it on every start.
+- **MQTT gets an instance of its own when you first set it up**, so two installs on one broker
+  cannot share a client ID or topic tree. Installs that were ever configured keep theirs, even after
+  switching MQTT off and on. The settings
+  page and the server log now warn when credentials go over `mqtt://`, `tcp://` or `ws://` to a
+  broker that is not on your network. They also say when **Accept a self-signed certificate** is
+  on but has nothing to act on.
 
 - **The home page hero is now an interactive signal path.** "One stream in. Your mix, everywhere."
   sits above a diagram of one upload from OBS going through polyemesis to Twitch, YouTube and a

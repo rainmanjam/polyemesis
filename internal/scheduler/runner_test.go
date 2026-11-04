@@ -432,3 +432,63 @@ func TestLastReportsTheMostRecentSweepThatDidSomething(t *testing.T) {
 		t.Errorf("Last after an idle sweep = %+v, want the previous result kept", got)
 	}
 }
+
+// A fired-marker write that fails used to leave the occurrence armed for its
+// whole grace window, so every sweep re-applied it -- re-enabling a
+// destination (or the playlist) the operator had just switched back off.
+func TestAFailedMarkDoesNotReArmTheOccurrence(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	t.Run("destinations", func(t *testing.T) {
+		store := &fakeStore{rows: []Schedule{oneShot(1, at)}, markEr: errors.New("database is locked")}
+		act := &fakeActuator{}
+		r := New(quietLog(), store, act)
+
+		first := r.Tick(at.Add(10 * time.Second))
+		if len(first) != 1 || !first[0].Fired || first[0].Err == "" {
+			t.Fatalf("first sweep = %+v, want fired with the mark error reported", first)
+		}
+		before := act.setCalls
+		r.Tick(at.Add(40 * time.Second))
+		r.Tick(at.Add(70 * time.Second))
+		if act.setCalls != before {
+			t.Errorf("later sweeps re-applied the occurrence: %d set calls, want %d", act.setCalls, before)
+		}
+	})
+	t.Run("playlist", func(t *testing.T) {
+		store := &fakeStore{rows: []Schedule{{
+			ID: 2, Name: "filler", Enabled: true,
+			Action: ActionPlaylistStart, Kind: KindOnce,
+			RunAt: at, GraceSeconds: 300,
+		}}, markEr: errors.New("database is locked")}
+		act := &fakeActuator{}
+		r := New(quietLog(), store, act)
+
+		r.Tick(at.Add(10 * time.Second))
+		if !act.playlistSet {
+			t.Fatal("the playlist schedule did not fire")
+		}
+		act.playlistSet, act.playlistEnabled = false, false // the operator turns it back off
+		r.Tick(at.Add(40 * time.Second))
+		if act.playlistSet {
+			t.Error("a later sweep re-enabled the playlist the operator had switched off")
+		}
+	})
+}
+
+// Once the store has the mark, the store decides again: an operator who
+// re-arms the schedule (resetting LastRunAt) gets it back, rather than having
+// it suppressed by a mark this process kept in memory.
+func TestAReArmedScheduleFiresAgainAfterASuccessfulMark(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	store := &fakeStore{rows: []Schedule{oneShot(1, at)}}
+	act := &fakeActuator{}
+	r := New(quietLog(), store, act)
+
+	r.Tick(at.Add(10 * time.Second))
+	first := act.setCalls
+	store.rows[0].LastRunAt = time.Time{} // the operator re-arms it
+	r.Tick(at.Add(40 * time.Second))
+	if act.setCalls == first {
+		t.Error("a re-armed schedule was suppressed by a mark the store already holds")
+	}
+}

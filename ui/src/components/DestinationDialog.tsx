@@ -87,6 +87,7 @@ import type {
   XGoLiveTweet,
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
+import { useDismissGuard } from "@/hooks/useDismissGuard";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -593,6 +594,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // translated at render; preset names stay as the platforms spell them.
   const t = useT();
   const tn = useTN();
+  // A four-step form with a stream key in it: a stray scrim click or Esc must
+  // not throw it away (poka-yoke audit 2026-11-04). Cancel still does.
+  const dismissGuard = useDismissGuard(() => toast.info(t("save.dirty")));
+  const resetDismissGuard = dismissGuard.reset;
+  useEffect(() => {
+    if (open) resetDismissGuard();
+  }, [open, resetDismissGuard]);
 
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
@@ -1195,7 +1203,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           rendition) are explained where they are used, not here. */}
       {/* A full-screen sheet below sm (A6): four steps of fields in a centred
           box on a phone left a strip of page around a form too narrow to read. */}
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none max-sm:border-0">
+      <DialogContent
+        {...dismissGuard.contentProps}
+        className="max-h-[90vh] max-w-2xl overflow-y-auto max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
+      >
         <DialogHeader>
           <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
           <DialogDescription>{t("addDest.description")}</DialogDescription>

@@ -180,6 +180,11 @@ func mqttSig(cfg db.MQTTSettings, password string) string {
 
 // connect opens a new link and starts its telemetry loop.
 func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password, sig string) {
+	// Said every time the publisher connects, so an operator reading the log
+	// for "why is MQTT doing X" finds the risk beside the connection.
+	for _, c := range cfg.Cautions() {
+		r.log.Warn(c)
+	}
 	clientID := cfg.ClientID
 	if clientID == "" {
 		// Derived from the instance, which is already the thing that has to be

@@ -230,6 +230,12 @@ const (
 	CauseCancelled Cause = "cancelled"
 	// CauseUnknown carries the raw line.
 	CauseUnknown Cause = "unknown"
+	// CauseUploadLimited: the channel reached the platform's limit on how many
+	// videos it may upload for now (YouTube's uploadLimitExceeded). Not the API
+	// allowance, so it is not CauseQuota, whose remedy ("after it resets at
+	// midnight Pacific") would be the wrong one. Appended, not inserted: the
+	// values are on the wire.
+	CauseUploadLimited Cause = "upload_limited"
 )
 
 // Reason is the failure shape shown on a publication; it matches
@@ -267,6 +273,11 @@ func GrantFailure(platform, scopes string) *Failure {
 	}
 	return fail(CauseUnknown, false, "unknown platform %q", platform)
 }
+
+// ErrReconnectRequired is what a TokenSource wraps when the account's grant is
+// gone (revoked, or expired with no refresh token). The worker ends the
+// publish as needs_reconnect on errors.Is, not by reading the error's text.
+var ErrReconnectRequired = errors.New("the platform no longer accepts this account's grant; connect it again in Settings")
 
 // TokenGate hands the worker a TokenSource that is filled in later. The queue
 // and its workers start before the API server exists, and the token refresh

@@ -64,6 +64,10 @@ type Client interface {
 type Recordings interface {
 	Dir() string
 	Resolve(name string) (string, error)
+	// HoldForMissing reports whether rows for missing files must be kept
+	// because the directory may not be the volume they were recorded on. See
+	// recording.Manager.HoldForMissing.
+	HoldForMissing(missing, total int) bool
 }
 
 const (
@@ -94,6 +98,9 @@ type Service struct {
 
 	passMu sync.Mutex
 	again  atomic.Bool
+	// pruneHeld is set while prune is holding because every tracked file is
+	// missing, so its warning fires once per episode, not once per pass.
+	pruneHeld atomic.Bool
 
 	stuckMu sync.Mutex
 	onStuck func(StuckEvent)
@@ -508,18 +515,40 @@ func (s *Service) candidates() ([]candidate, error) {
 
 // prune drops item rows for files that are no longer on disk. The remote object is left alone -- mirror mode keeps local
 // retention unchanged, and the bucket's own lifecycle rule owns the copy.
+//
+// A MISSING VOLUME IS NOT A MISSING FILE. With the recordings volume
+// unmounted every stat says "not exist", and pruning on that wiped every
+// item row: the archive re-uploaded in full when the volume came back, and
+// stuck or failed state (what Retry acts on) was lost. The recordings
+// manager's volume check decides (recording.Manager.HoldForMissing: a marker
+// file on the real volume), so the ledger and the index agree on what "gone"
+// means.
 func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
+	dir := s.rec.Dir()
 	seen := map[string]bool{}
-	changed := false
+	var gone []string
 	for _, it := range items {
 		if seen[it.RelPath] {
 			continue
 		}
 		seen[it.RelPath] = true
-		if _, err := os.Stat(filepath.Join(s.rec.Dir(), filepath.FromSlash(it.RelPath))); errors.Is(err, os.ErrNotExist) {
-			if err := s.store.DeleteOffloadItemsFor(it.RelPath); err == nil {
-				changed = true
-			}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(it.RelPath))); errors.Is(err, os.ErrNotExist) {
+			gone = append(gone, it.RelPath)
+		}
+	}
+	if s.rec.HoldForMissing(len(gone), len(seen)) {
+		if !s.pruneHeld.Swap(true) {
+			s.log.Warn("offload: the recordings directory is not confirmed as the recorded "+
+				"volume; not pruning the ledger (is the recordings volume mounted?)",
+				"dir", dir, "tracked", len(seen), "missing", len(gone))
+		}
+		return false
+	}
+	s.pruneHeld.Store(false)
+	changed := false
+	for _, rel := range gone {
+		if err := s.store.DeleteOffloadItemsFor(rel); err == nil {
+			changed = true
 		}
 	}
 	return changed

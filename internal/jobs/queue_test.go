@@ -373,8 +373,12 @@ func (m *memStore) RetryJob(id int64, now time.Time) error {
 func (m *memStore) DeleteJob(id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.rows[id]; !ok {
+	j, ok := m.rows[id]
+	if !ok {
 		return errMemNotFound
+	}
+	if j.State == StateRunning {
+		return fmt.Errorf("cannot delete job %d: it is %s", id, j.State)
 	}
 	delete(m.rows, id)
 	return nil

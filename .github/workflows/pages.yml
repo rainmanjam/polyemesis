@@ -120,6 +120,17 @@ jobs:
   # to carry no `if:` at all, which is the opposite of "gate every step".
   site-scope:
     name: which site changes
+    # ONLY A RELEASE THAT PUBLISHED REDEPLOYS THE SITE (poka-yoke audit
+    # 2026-11-04). workflow_run fires on EVERY completed release run -- a
+    # failed tag run, the weekly scheduled rehearsal, a dry-run dispatch -- and
+    # each of those redeployed the site, which then announced a version whose
+    # binaries were never published. A release publishes only on a tag push
+    # that succeeded, so that is the one workflow_run this lets through. A
+    # dispatch with dry_run: false also publishes, but the workflow_run payload
+    # does not carry the input, so it cannot be told from a rehearsal here: run
+    # this workflow by hand (workflow_dispatch below) after one of those.
+    # Every job needs this one, so skipping it skips the whole workflow_run.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     permissions:
       contents: read
     runs-on: ubuntu-latest

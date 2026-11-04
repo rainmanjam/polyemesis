@@ -87,7 +87,8 @@ func filesOnDisk(t *testing.T, dir string) []string {
 	}
 	out := []string{}
 	for _, e := range entries {
-		if !e.IsDir() {
+		// The volume marker is the manager's, not a recording.
+		if !e.IsDir() && e.Name() != VolumeMarker {
 			out = append(out, e.Name())
 		}
 	}
@@ -773,5 +774,139 @@ func TestDeleteRefusesAnEscapingFilename(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Errorf("file outside the recordings dir was deleted: %v", err)
+	}
+}
+
+// unmount simulates the recordings volume going away: the mountpoint left
+// behind has neither the files nor the volume's marker.
+func unmount(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// An unmounted volume used to de-index every recording and cascade their
+// transcripts, highlights and sessions away (poka-yoke audit 2026-11-04).
+func TestScanHoldsTheIndexWhenTheVolumeIsGone(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour, 1 * time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, VolumeMarker)); err != nil {
+		t.Fatalf("the first scan of a directory holding every indexed file did not mark it: %v", err)
+	}
+	unmount(t, dir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if got := indexedFilenames(t, store); len(got) != len(names) {
+		t.Errorf("indexed %v on a bare mountpoint, want all %d rows kept", got, len(names))
+	}
+}
+
+// The case a file count cannot see: the volume drops while a programme is
+// recording, and the recorder writes a new segment into the bare mountpoint.
+// The listing is not empty, and every older row is still not "deleted".
+func TestScanHoldsTheIndexWhenARecorderWritesIntoTheBareMountpoint(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	unmount(t, dir)
+	writeSegments(t, dir, now, []time.Duration{time.Minute}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	got := indexedFilenames(t, store)
+	for _, n := range names {
+		if !slices.Contains(got, n) {
+			t.Errorf("%s was de-indexed while the volume was gone", n)
+		}
+	}
+}
+
+// With the volume confirmed, files that are really gone are de-indexed, all of
+// them if need be: the hold must not latch.
+func TestScanDeIndexesEverythingGoneFromAConfirmedVolume(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	for _, n := range names {
+		if err := os.Remove(filepath.Join(dir, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if got := indexedFilenames(t, store); len(got) != 0 {
+		t.Errorf("indexed %v after every file was deleted from a confirmed volume, want none", got)
+	}
+}
+
+// A volume the marker cannot be written to falls back to the weaker rule:
+// hold only when every indexed file is missing at once.
+func TestScanFallsBackWhenTheVolumeCannotBeMarked(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour}, nil)
+	// A dangling symlink where the marker goes: the stat says "not there" and
+	// the write fails, for any user, root included -- which is what a
+	// read-only volume looks like to HoldForMissing.
+	if err := os.Symlink(filepath.Join(t.TempDir(), "no-such-dir", "marker"), filepath.Join(dir, VolumeMarker)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, VolumeMarker)); err == nil {
+		t.Fatal("a read-only directory was marked; this test cannot exercise the fallback")
+	}
+	if err := os.Remove(filepath.Join(dir, names[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if got := indexedFilenames(t, store); !slices.Equal(got, names[1:]) {
+		t.Errorf("indexed %v after one of two files went on an unmarkable volume, want %v", got, names[1:])
+	}
+}
+
+// "Nothing indexed and nothing missing" proves nothing. The offload pass asks
+// HoldForMissing(0, 0) on every tick with an empty ledger; if that wrote the
+// marker into a bare mountpoint, the next Scan would de-index the archive.
+func TestAnEmptyQuestionNeverMarksABareMountpoint(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour, time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	unmount(t, dir)
+	writeSegments(t, dir, now, []time.Duration{time.Minute}, nil)
+	m.HoldForMissing(0, 0) // the offload pass, with nothing tracked
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	got := indexedFilenames(t, store)
+	for _, n := range names {
+		if !slices.Contains(got, n) {
+			t.Errorf("%s was de-indexed after an empty offload pass marked the bare mountpoint", n)
+		}
 	}
 }

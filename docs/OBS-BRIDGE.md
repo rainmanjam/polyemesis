@@ -89,6 +89,9 @@ destinations yourself.
 4. In **Tools → Scripts**, press **+** and choose
    [`integrations/obs/polyemesis_obs.py`](../integrations/obs/polyemesis_obs.py).
 5. Fill in the polyemesis address (`https://host:8080`) and the token.
+   - The address must be `https://`, or `http://` only to the same machine
+     (`localhost`, `127.0.0.1`, `[::1]`). Anything else is refused and nothing is
+     sent: the token would cross the network unencrypted. The script log says so.
    - If your install uses its own self-signed certificate, download the CA from
      `GET /api/v1/tls/ca` and choose it as **CA certificate**. Verification is
      never switched off.

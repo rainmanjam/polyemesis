@@ -67,7 +67,7 @@ is still off; once a broker is configured the card always shows.
 | **Broker URL** | `mqtt://host:1883`, `mqtts://host:8883`, `ws://`, `wss://`, `tcp://`, `ssl://`. **Credentials in the URL are refused** — see below |
 | **Username / password** | Optional. The password is encrypted at rest and never returned by any API |
 | **Prefix** | Roots the tree, default `polyemesis`. Separators are preserved: `home/av` means two levels. At most 128 characters, and no `+`, `#` or NUL |
-| **Instance** | Distinguishes two installs sharing one broker, and keys the Home Assistant device. At most 64 characters |
+| **Instance** | Distinguishes two installs sharing one broker, and keys the Home Assistant device. At most 64 characters. When MQTT is set up for the first time (no broker URL saved before) and this is still the default `polyemesis`, the server replaces it with `polyemesis-<6 hex>`, unique to this install, so two installs on one broker cannot share a client id or a topic tree. An install that was ever configured keeps its instance, including after switching MQTT off and on; change it yourself if two of them share one |
 | **Client ID** | Must be unique on the broker. At most 128 characters. Leave empty to derive `polyemesis-<slugged instance>` |
 | **Interval** | How often state is checked, default 10s, range 1–3600s. Unchanged state is not republished. **Editing this alone has no effect** — see below |
 | **Keep-alive** | Default 30s, range 1–65535s. This is what bounds how long a dead link goes unnoticed |
@@ -113,7 +113,10 @@ stays 1.2 either way. Turn it on for a homelab Mosquitto you issued a
 certificate to yourself; leave it off for anything crossing a network you do not
 own, where the honest fix is to put the broker's CA in the host trust store
 instead. The toggle does nothing for `mqtt://`, `tcp://` or `ws://`, which have
-no TLS to skip.
+no TLS to skip; the settings page says so beside it, and the server log says so
+on every connect. The log also warns, on every connect, when a username or
+password goes over one of those plaintext schemes to a host that is not this
+machine or a private address.
 
 Settings are re-read every five seconds, and a change to the broker URL,
 username, password, prefix, instance, client ID, keep-alive, self-signed toggle,

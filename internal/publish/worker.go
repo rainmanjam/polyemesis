@@ -192,7 +192,7 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if strings.Contains(strings.ToLower(err.Error()), "reconnect") {
+			if errors.Is(err, ErrReconnectRequired) {
 				return d.giveUp(pub, p.Nonce, fail(CauseNeedsReconnect, false, "%s", scrubAll(err.Error())))
 			}
 			return d.settle(job, pub, p.Nonce, fail(CauseTokenRejected, true, "%s", scrubAll(err.Error())), cred)

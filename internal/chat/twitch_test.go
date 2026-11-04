@@ -924,3 +924,82 @@ func TestTwitchChatSettingsSendsNothingWhenNothingChanged(t *testing.T) {
 		t.Fatal("an empty settings change was sent to Twitch anyway")
 	}
 }
+
+// The Hub reconnects by calling Run again on the same adapter. The PASS line
+// used to replay the token captured at attach time, so after it expired every
+// reconnect was refused as fatal. Each connect must ask PassToken afresh.
+func TestTwitchReconnectSendsAFreshTokenEachConnect(t *testing.T) {
+	var calls int
+	tokens := []string{"first-token", "second-token"}
+	pass := func(context.Context) (string, error) {
+		tok := tokens[calls%len(tokens)]
+		calls++
+		return tok, nil
+	}
+	for i, want := range tokens {
+		a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Token: "attach-time-token"})
+		a.cfg.PassToken = pass
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
+		srv.readLine(t) // CAP
+		if got := srv.readLine(t); got != "PASS oauth:"+want {
+			t.Errorf("connect %d sent %q, want the fresh token %q", i, got, want)
+		}
+		cancel()
+		srv.conn.Close()
+		<-done
+	}
+}
+
+// A refresh that fails must not fall back to the attach-time token: by then
+// that is usually the expired one, Twitch refuses it as FATAL, and chat stays
+// dark until a restart. It fails the connect retryably and sends nothing.
+func TestTwitchRefreshFailureIsRetryableAndSendsNoToken(t *testing.T) {
+	dialled := false
+	a, err := NewTwitch(TwitchConfig{Nick: "streamer", Token: "attach-time-token",
+		Dial: func(context.Context) (net.Conn, error) { dialled = true; return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.cfg.PassToken = func(context.Context) (string, error) { return "", errors.New("refresh failed") }
+	runErr := a.Run(context.Background(), SinkFunc(func(Message) {}))
+	if runErr == nil {
+		t.Fatal("Run succeeded with no token to send")
+	}
+	if IsFatal(runErr) {
+		t.Errorf("a refresh failure was fatal (%v): the Hub would never retry", runErr)
+	}
+	if dialled {
+		t.Error("Run dialled Twitch without a fresh token; the stale one would have been sent")
+	}
+}
+
+// The rules card reads the room before it shows a switch, so a mode set
+// elsewhere is shown as on (poka-yoke audit 2026-11-04).
+func TestTwitchReadsTheRoomsCurrentChatSettings(t *testing.T) {
+	srv, got, _ := helixStub(t, http.StatusOK, `{"data":[{"broadcaster_id":"42","slow_mode":true,"slow_mode_wait_time":30,`+
+		`"follower_mode":false,"follower_mode_duration":null,"subscriber_mode":true,"emote_mode":false,`+
+		`"unique_chat_mode":false,"non_moderator_chat_delay":true,"non_moderator_chat_delay_duration":4}]}`)
+	a := twitchForDelete(t, srv.URL)
+	s, err := a.ReadChatSettings(context.Background())
+	if err != nil {
+		t.Fatalf("ReadChatSettings: %v", err)
+	}
+	if got.Get("broadcaster_id") != "42" || got.Get("moderator_id") != "42" {
+		t.Errorf("query = %v, want broadcaster and moderator ids", *got)
+	}
+	if s.SlowMode == nil || !*s.SlowMode || s.SlowModeSeconds == nil || *s.SlowModeSeconds != 30 {
+		t.Errorf("slow mode = %v/%v, want on at 30s", s.SlowMode, s.SlowModeSeconds)
+	}
+	if s.SubscriberMode == nil || !*s.SubscriberMode {
+		t.Error("subscriber mode read as off")
+	}
+	if s.FollowerMode == nil || *s.FollowerMode {
+		t.Error("follower mode must be read as an explicit off, not left unknown")
+	}
+	if s.NonModeratorChatDelay == nil || !*s.NonModeratorChatDelay ||
+		s.NonModeratorChatDelaySeconds == nil || *s.NonModeratorChatDelaySeconds != 4 {
+		t.Error("moderator delay not read")
+	}
+}

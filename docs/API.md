@@ -22,10 +22,12 @@ creation, and cannot be recovered. Revoke individually with
 `DELETE /auth/tokens/{id}`.
 
 **A token cannot manage other tokens**, change the account password, upload or
-delete media, complete an OAuth connect flow, or export a debug bundle. Those
-are session-only: a leaked token should not be able to mint replacements for
-itself, lock you out, write arbitrary bytes to the server's disk, attach a
-platform account, or take a copy of the server's own logs.
+delete media, complete an OAuth connect flow, export a debug bundle, or reach
+any expert-mode route (`/destinations/{id}/expert`, its `preview` and
+`dry-run`). Those are session-only: a leaked token should not be able to mint
+replacements for itself, lock you out, write arbitrary bytes to the server's
+disk, attach a platform account, take a copy of the server's own logs, or hand
+FFmpeg an argument list.
 
 The debug split is deliberate and worth stating: `GET /debug` and `PUT /debug`
 stay token-reachable, so a dashboard can read capture state and an automation
@@ -41,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-five `GET`s among the twenty-seven refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-seven routes are refused outright**, for three different reasons. Masking
+**Twenty-eight routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last eighteen are `403` because of what
+are `403` because of what they *do*. The last nineteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -163,6 +165,7 @@ are `403` because of what they *do*. The last eighteen are `403` because of what
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
+| `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
@@ -1135,8 +1138,26 @@ carries the field. The Stream Deck plugin reads all four; see
 [STREAM-DECK.md](STREAM-DECK.md#what-the-faces-mean).
 
 **Expert mode splices arbitrary arguments into an FFmpeg command line.** Treat
-access to it as equivalent to shell access. `dry-run` tells you whether the
-result would start, without starting it.
+access to it as equivalent to shell access. Its five routes are session-only;
+an API token of any scope gets `403`. Arguments that open a file on the server
+are refused outright, whatever is acknowledged: `-progress`, `-vstats`,
+`-vstats_file`, `-pass`, `-passlogfile`, `-dump_attachment`, `-attach`,
+`-sdp_file`, `-stats_*`, `-fpre`, `-filter_script`, `-filter_complex_script`,
+the HLS/segment file options, `-i`, nested option lists (`-format_opts`,
+`-protocol_opts`, ...), any `-f` other than a streaming format (`flv`, `mpegts`,
+`matroska`, `webm`, `mp4`, `mov`, `nut`, `rtp`, `rtp_mpegts`, `rtsp`, `ogg`,
+`adts`, `null` for output; `mpegts` for input), any key in `-x264-params`,
+`-x264opts`, `-x265-params`, `-svtav1-params` or `-aom-params` outside an
+allowlist of rate-control, GOP, quality and colour keys (so `stats=`, `pass=`,
+`dump-yuv=` and their negated or aliased forms are refused), and
+any bare token that FFmpeg would take as a second output.
+Filter graphs may use only filters on an allowlist of ones whose options name
+no file (`scale`, `fps`, `volume`, `aresample`, `overlay`, ...); any other
+filter, and the `/option=` form that loads a value from a file, is refused. Options
+themselves are an allowlist too: an option is accepted only if it is in the
+table generated from FFmpeg's own option list
+(`scripts/gen-expert-ffmpeg-options.sh`) and its help names no file, path, URL,
+log, dump or stats. Anything else is refused rather than guessed at. `dry-run` tells you whether the result would start, without starting it.
 
 ### Routing and renditions
 
@@ -1722,6 +1743,7 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |

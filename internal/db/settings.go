@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -1194,6 +1195,75 @@ func unwrapURLError(err error) error {
 // Nothing here is checked when MQTT is switched off. A half-configured block an
 // operator is still filling in must not block saving an unrelated setting, and
 // a disabled publisher cannot misbehave.
+// DefaultMQTTInstance is the instance every install is created with.
+const DefaultMQTTInstance = "polyemesis"
+
+// AssignInstanceOnFirstSetup gives MQTT a per-install instance the first time
+// it is set up, if the instance is still the shared default.
+//
+// TWO INSTALLS ON ONE BROKER WITH THE DEFAULT COLLIDED (poka-yoke audit
+// 2026-11-04): the same client id, so the broker kicked each session in turn,
+// and the same topic tree, so each sweep cleared the other's retained topics.
+// The instance is part of the topic tree Home Assistant and every subscriber
+// key on, so it is assigned ONLY when MQTT has never been configured on this
+// install -- off, and no broker URL stored. Switching MQTT off keeps the
+// broker URL, so switching it back on never renames anything; an install that
+// was ever set up keeps its topics where its subscribers expect them. An
+// instance the operator set to anything else is theirs and is left alone.
+func (m *MQTTSettings) AssignInstanceOnFirstSetup(neverConfigured bool, unique string) {
+	if !neverConfigured || !m.Enabled || unique == "" {
+		return
+	}
+	if inst := strings.TrimSpace(m.Instance); inst == "" || inst == DefaultMQTTInstance {
+		m.Instance = unique
+	}
+}
+
+// Cautions are what is legal about this MQTT configuration but unsafe enough
+// to say out loud each time it is used (poka-yoke audit 2026-11-04). Not
+// refusals: a plain mqtt:// broker on a trusted LAN is the normal Home
+// Assistant setup, and refusing it would block every settings save on an
+// install that already runs that way.
+//
+//   - credentials sent over a plaintext scheme (mqtt, tcp, ws) to a host that
+//     is not loopback or a private address: MQTT carries the username and
+//     password in its CONNECT packet, so both cross that network in the clear;
+//   - "accept self-signed" on a scheme with no TLS, where it does nothing.
+//
+// The broker URL itself is never echoed: only its scheme and host.
+func (m MQTTSettings) Cautions() []string {
+	if !m.Enabled {
+		return nil
+	}
+	u, err := url.Parse(strings.TrimSpace(m.BrokerURL))
+	if err != nil || u.Host == "" {
+		return nil // problems() refuses these
+	}
+	scheme := strings.ToLower(u.Scheme)
+	plain := scheme == "mqtt" || scheme == "tcp" || scheme == "ws"
+	var out []string
+	if plain && (m.Username != "" || m.HasPassword) && !localBrokerHost(u.Hostname()) {
+		out = append(out, fmt.Sprintf("mqtt credentials go to %s over %s://, which is unencrypted: "+
+			"the username and password cross the network in the clear. Use mqtts:// or wss:// "+
+			"unless every hop to that broker is a network you control", u.Hostname(), scheme))
+	}
+	if plain && m.TLSSkipVerify {
+		out = append(out, fmt.Sprintf("mqtt \"accept self-signed\" is on but %s:// has no TLS, so "+
+			"there is no certificate to check and the setting does nothing", scheme))
+	}
+	return out
+}
+
+// localBrokerHost reports whether a broker host is this machine or a private
+// network address: the case a plaintext broker is ordinarily safe on.
+func localBrokerHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+}
+
 func (m MQTTSettings) problems() []string {
 	if !m.Enabled {
 		return nil
@@ -2334,7 +2404,7 @@ func DefaultSettings() Settings {
 		MQTT: MQTTSettings{
 			Enabled:        false,
 			Prefix:         "polyemesis",
-			Instance:       "polyemesis",
+			Instance:       DefaultMQTTInstance,
 			IntervalSecond: 10,
 			KeepAliveSec:   30,
 			Discovery:      true,

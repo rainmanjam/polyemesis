@@ -819,14 +819,22 @@ func (d *DB) RetryJob(id int64, now time.Time) error {
 	return nil
 }
 
-// DeleteJob removes a job row.
+// DeleteJob removes a job row, unless a worker is running it.
+//
+// THE STATE GUARD IS IN THE STATEMENT. The API used to read the state and then
+// issue an unconditional DELETE, so a worker that claimed a queued job between
+// the two lost its row mid-run: finish() then wrote against a missing id, and a
+// clip.export's file -- whose only reference is that row -- was orphaned. The
+// WHERE now carries the rule, so no caller can delete a running job however it
+// interleaves with ClaimJob; a refusal maps through jobStateConflict exactly as
+// RetryJob's does (404 if the row is gone, 409 naming the state otherwise).
 func (d *DB) DeleteJob(id int64) error {
-	res, err := d.sql.Exec(`DELETE FROM jobs WHERE id = ?`, id)
+	res, err := d.sql.Exec(`DELETE FROM jobs WHERE id = ? AND state <> 'running'`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return jobStateConflict(d.sql, id, "delete")
 	}
 	return nil
 }

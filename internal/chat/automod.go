@@ -131,8 +131,10 @@ func (h *Hub) checkAutomod(m Message) {
 	h.mu.Lock()
 	s := h.automod
 	h.mu.Unlock()
-	if s == nil {
-		// No automod: nothing will judge it, so nothing need be waited for.
+	if s == nil || m.Trusted() {
+		// No automod, or a message automod does not judge (the operator's own,
+		// the broadcaster's, a moderator's): nothing will act on it, so
+		// nothing need be waited for.
 		h.offerDisplay(m, DisplayClear)
 		return
 	}

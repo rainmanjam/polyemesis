@@ -307,6 +307,17 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 			})
 		}
 	}
+	// File access LAST, so the refusals above keep their own, more specific
+	// wording (a second -i "renumbers" the routing graph). It is the same walk
+	// the engine runs at spawn; see ffmpeg.CheckExpertFileAccess.
+	for _, side := range []struct {
+		field string
+		argv  []string
+	}{{"input args", in}, {"output args", out}} {
+		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
+			return nil, err
+		}
+	}
 	return guards, nil
 }
 
@@ -385,8 +396,10 @@ func quoteArgv(bin string, args []string) string {
 // is now a lower-privileged principal inside the same requireAuth boundary, and
 // it is refused both streamKey on /destinations and these routes outright --
 // GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
-// in readScopeDeniedPatterns. A session and an admin token, which can rotate
-// the key anyway, still get the exact command.
+// in readScopeDeniedPatterns. Since the poka-yoke audit of 2026-11-04 no
+// token of either scope reaches these routes at all (they are session-only);
+// the signed-in operator, who can rotate the key anyway, gets the exact
+// command.
 //
 // Do not "fix" this by masking the argv. The next reader who is tempted should
 // read that list's comment first.
@@ -806,7 +819,12 @@ func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
 			Enabled:       saved.set(),
 			Passthrough:   row.RenditionID == nil,
 			Applied:       true,
-			Warning:       "the saved arguments no longer validate: " + err.Error(),
+			// And they are NOT RUNNING: the engine runs the same file-access
+			// walk at spawn and starts the destination without them
+			// (poka-yoke audit 2026-11-04 made the rules stricter; a stored
+			// loudnorm or an option FFmpeg's table lacks stops applying).
+			Warning: "the saved arguments no longer validate, so this destination starts " +
+				"without them: " + err.Error(),
 		})
 		return
 	}

@@ -4,7 +4,7 @@
   "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
-  "nonGetDifferentialFloor": 20,
+  "nonGetDifferentialFloor": 18,
   "unstableCeiling": 4,
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
@@ -12,10 +12,10 @@
   "guardedFloor": 31,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 305,
+    "methodPatternPairs": 306,
     "swept": 79,
     "excused": 60,
-    "denied": 166,
+    "denied": 167,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -269,6 +269,12 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "GET",
+      "pattern": "/api/v1/chat/settings",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "PATCH",
       "pattern": "/api/v1/chat/settings",
       "coverage": "denied-by-method",
@@ -475,7 +481,7 @@
     {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied-differential",
+      "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
     {
@@ -499,7 +505,7 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/expert/preview",
-      "coverage": "denied-differential",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -2512,6 +2518,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/chat/settings",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatSettings"
+    },
+    {
       "route": "GET /api/v1/chat/users",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2584,7 +2600,7 @@
     {
       "route": "GET /api/v1/destinations/{id}/expert",
       "scope": "route",
-      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "why": "session-only; no bearer of either scope reaches it",
       "want": {
         "as": "read",
         "status": 403

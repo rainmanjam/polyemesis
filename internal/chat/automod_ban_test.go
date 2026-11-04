@@ -199,3 +199,37 @@ func TestARuleNameDoesNotLeaveForThePlatform(t *testing.T) {
 		t.Fatalf("the platform was sent %q", got)
 	}
 }
+
+// Automod judged the broadcaster, moderators and the operator's own echoed
+// messages like any viewer's, so a flood or link rule could ban the channel
+// owner. A trusted author gets no action and no model call.
+func TestAutomodNeverActsOnATrustedAuthor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  Message
+	}{
+		{"broadcaster", Message{ID: "m1", Author: Author{ID: "owner", Broadcaster: true}, Text: "link"}},
+		{"moderator", Message{ID: "m2", Author: Author{ID: "mod", Moderator: true}, Text: "link"}},
+		{"operator echo", Message{ID: "m3", Author: Author{ID: "owner"}, Text: "link", Echo: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHub(t)
+			inner := &fakeAdapter{platform: db.PlatformTwitch, account: "acct", messages: []Message{tc.msg}}
+			a := &banningAdapter{fakeAdapter: inner}
+			mod := &stubModerator{verdict: automodFinding(automod.ActionBan, 0), modelOn: true}
+			h.SetModerator(mod)
+			if err := h.Attach(context.Background(), a); err != nil {
+				t.Fatalf("Attach: %v", err)
+			}
+			waitFor(t, "the message to arrive", func() bool { return len(h.History(10)) == 1 })
+			// Give the worker every chance to do the wrong thing.
+			time.Sleep(150 * time.Millisecond)
+			if got := a.recorded(); len(got) != 0 {
+				t.Errorf("automod banned a trusted author: %v", got)
+			}
+			if n, _ := mod.modelObserved(); n != 0 {
+				t.Errorf("the model was asked about a trusted author's message %d times", n)
+			}
+		})
+	}
+}

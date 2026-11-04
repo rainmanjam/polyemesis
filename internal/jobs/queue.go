@@ -601,8 +601,9 @@ func (q *Queue) Get(id int64) (*Job, error) { return q.store.GetJob(id) }
 // List returns jobs matching f.
 func (q *Queue) List(f Filter) ([]Job, error) { return q.store.ListJobs(f) }
 
-// Delete removes a job. Cancelling a running one first is the caller's choice,
-// not something done silently here.
+// Delete removes a job that is not running. The store refuses a running one
+// (ErrStateConflict); cancelling it first is the caller's choice, not something
+// done silently here.
 func (q *Queue) Delete(id int64) error { return q.store.DeleteJob(id) }
 
 // Purge drops terminal jobs older than cutoff, keeping the newest keep of them

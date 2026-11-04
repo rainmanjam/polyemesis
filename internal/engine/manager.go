@@ -642,6 +642,7 @@ func (m *Manager) reconcileSharedIngest() {
 		func(addr string) (*srtserver.Server, error) {
 			s := srtserver.New(m.log, addr, m.lookupToken)
 			s.SetPeerHost(m.srtPeerHost)
+			s.SetRevalidateLookup(m.lookupTokenE)
 			return s, s.Start()
 		})
 	// BOTH LISTENERS BIND, ALWAYS. The port is the switch, not the source list.
@@ -674,6 +675,7 @@ func (m *Manager) reconcileSharedIngest() {
 		(*rtmpserver.Server).Stop,
 		func(addr string) (*rtmpserver.Server, error) {
 			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
+			s.SetRevalidateLookup(m.lookupStreamKeyE)
 			// PUBLISHED BEFORE Start, because Start begins accepting and the
 			// Ready gate in lookupStreamKey reads m.rtmp: between Start and the
 			// assignment below, a publisher that arrived would find rtmp == nil,
@@ -825,10 +827,22 @@ func reconcileListener[T any](
 // window, which is what lets a rotation happen without cutting off an encoder
 // already publishing.
 func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
-	rows, err := m.store.ListSources()
+	t, ok, err := m.lookupTokenE(token)
 	if err != nil {
 		m.log.Warn("cannot read sources for an srt publish attempt", "err", err)
 		return srtserver.Target{}, false
+	}
+	return t, ok
+}
+
+// lookupTokenE is lookupToken that says when it could not answer. The live
+// publishers' revalidation needs the difference: "the sources table could not
+// be read" must never count as "this token was revoked" (poka-yoke audit
+// 2026-11-04 review), or one locked database would drop every encoder.
+func (m *Manager) lookupTokenE(token string) (srtserver.Target, bool, error) {
+	rows, err := m.store.ListSources()
+	if err != nil {
+		return srtserver.Target{}, false, err
 	}
 	now := time.Now()
 	type key struct {
@@ -916,10 +930,11 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 			}
 		}
 	}
-	return srtserver.ConstantTimeLookup(
+	t, ok := srtserver.ConstantTimeLookup(
 		func() []srtserver.Target { return targets },
 		func(t srtserver.Target) []string { return tokens[key{t.SourceID, t.Backup}] },
 	)(token)
+	return t, ok, nil
 }
 
 // backupTokenSuffix turns a source's publish token into its standby's address.
@@ -945,10 +960,20 @@ const backupTokenSuffix = ".backup"
 // TOKEN, all pointing at the same Target. Still constant-time -- the map is
 // bookkeeping, the comparison inside is what has to not short-circuit.
 func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
-	rows, err := m.store.ListSources()
+	t, ok, err := m.lookupStreamKeyE(key)
 	if err != nil {
 		m.log.Warn("cannot read sources for an rtmp publish attempt", "err", err)
 		return rtmpserver.Target{}, false
+	}
+	return t, ok
+}
+
+// lookupStreamKeyE is lookupStreamKey that says when it could not answer; see
+// lookupTokenE.
+func (m *Manager) lookupStreamKeyE(key string) (rtmpserver.Target, bool, error) {
+	rows, err := m.store.ListSources()
+	if err != nil {
+		return rtmpserver.Target{}, false, err
 	}
 	now := time.Now()
 	targets := make(map[string]rtmpserver.Target, len(rows)*2)
@@ -1055,7 +1080,8 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 			targets[legacy] = primary
 		}
 	}
-	return rtmpserver.ConstantTimeLookup(targets)(key)
+	t, ok := rtmpserver.ConstantTimeLookup(targets)(key)
+	return t, ok, nil
 }
 
 // legacyRTMPKeys maps each source that still answers to its pre-one-port stream

@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -69,6 +70,13 @@ type TwitchConfig struct {
 	// Token is the OAuth access token. It is written once, to the PASS line,
 	// and appears in no log, error or status message anywhere in this file.
 	Token string
+	// PassToken, when set, supplies the token for the PASS line on EVERY
+	// connect, and Token is used only if it fails. The Hub reconnects by
+	// calling Run again on this same adapter, so a Token captured at attach
+	// time was replayed on every reconnect; once it expired (about four hours
+	// on Twitch) the login was refused as fatal and chat stayed dark until a
+	// restart (poka-yoke audit 2026-11-04).
+	PassToken TokenFunc
 	// Dial replaces the TLS dial. It is the seam the tests use, and nothing at
 	// runtime sets it.
 	Dial func(ctx context.Context) (net.Conn, error)
@@ -157,6 +165,13 @@ func (t *TwitchAdapter) setHealth(state State, detail string) {
 
 // Run connects, joins and reads until ctx ends or the connection breaks.
 func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
+	// The token first, so a refresh that fails costs no connection and sends
+	// no stale credential; see passToken.
+	pass, err := t.passToken(ctx)
+	if err != nil {
+		t.setHealth(StateFailed, err.Error())
+		return err
+	}
 	conn, err := t.dial(ctx)
 	if err != nil {
 		t.setHealth(StateFailed, "could not reach Twitch chat: "+err.Error())
@@ -192,7 +207,7 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 	if err := t.writeLine(conn, "CAP REQ :twitch.tv/tags twitch.tv/commands"); err != nil {
 		return err
 	}
-	if err := t.writeLine(conn, "PASS oauth:"+t.cfg.Token); err != nil {
+	if err := t.writeLine(conn, "PASS oauth:"+pass); err != nil {
 		return fmt.Errorf("sending Twitch credentials failed: %w", err)
 	}
 	if err := t.writeLine(conn, "NICK "+t.cfg.Nick); err != nil {
@@ -227,6 +242,35 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 			return err
 		}
 	}
+}
+
+// RefreshesPassToken reports whether this adapter fetches a fresh token for
+// every connect. Exported for the API's wiring test: the adapter's own tests
+// build it with whatever config they like, so only a check at the production
+// construction site proves the field is set there.
+func (t *TwitchAdapter) RefreshesPassToken() bool { return t.cfg.PassToken != nil }
+
+// passToken is the token for this connect's PASS line: a fresh one from
+// PassToken, or the configured Token when there is no supplier.
+//
+// A SUPPLIER THAT FAILS FAILS THE CONNECT, retryably. It used to fall back to
+// the attach-time Token, which by then is usually the expired one: Twitch
+// refuses it with a FATAL login notice, the Hub stops retrying, and chat is
+// dark until a restart -- the very failure PassToken exists to prevent, now
+// triggered by a refresh outage. A plain error instead lets the Hub back off
+// and ask again (review follow-up).
+func (t *TwitchAdapter) passToken(ctx context.Context) (string, error) {
+	if t.cfg.PassToken == nil {
+		return t.cfg.Token, nil
+	}
+	tok, err := t.cfg.PassToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("could not get a fresh Twitch chat token: %w", err)
+	}
+	if tok == "" {
+		return "", errors.New("could not get a fresh Twitch chat token: the account has none")
+	}
+	return tok, nil
 }
 
 // handle processes one parsed line. It returns done=true when the connection
@@ -449,6 +493,56 @@ type ChatSettings struct {
 type ChatSettingsWriter interface {
 	Adapter
 	UpdateChatSettings(ctx context.Context, s ChatSettings) error
+}
+
+// ChatSettingsReader is the optional capability to read a room's current
+// rules, so a control can show the real state instead of assuming "off".
+type ChatSettingsReader interface {
+	Adapter
+	ReadChatSettings(ctx context.Context) (ChatSettings, error)
+}
+
+// ReadChatSettings reads the room's current rules from Helix. Every field
+// comes back set, so the caller knows the whole state (poka-yoke audit
+// 2026-11-04: the rules card used to start every switch "off" whatever the
+// room said, so a mode set elsewhere looked removed while it was on).
+func (t *TwitchAdapter) ReadChatSettings(ctx context.Context) (ChatSettings, error) {
+	if err := t.helixReady(); err != nil {
+		return ChatSettings{}, err
+	}
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+	}
+	var out struct {
+		Data []struct {
+			SlowMode                      bool `json:"slow_mode"`
+			SlowModeWaitTime              *int `json:"slow_mode_wait_time"`
+			FollowerMode                  bool `json:"follower_mode"`
+			FollowerModeDuration          *int `json:"follower_mode_duration"`
+			SubscriberMode                bool `json:"subscriber_mode"`
+			EmoteMode                     bool `json:"emote_mode"`
+			UniqueChatMode                bool `json:"unique_chat_mode"`
+			NonModeratorChatDelay         bool `json:"non_moderator_chat_delay"`
+			NonModeratorChatDelayDuration *int `json:"non_moderator_chat_delay_duration"`
+		} `json:"data"`
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodGet,
+		t.helixBase()+"/chat/settings?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, &out)
+	if err != nil {
+		return ChatSettings{}, t.moderationError(err, "chat settings read")
+	}
+	if len(out.Data) == 0 {
+		return ChatSettings{}, fmt.Errorf("twitch returned no chat settings for this channel")
+	}
+	d := out.Data[0]
+	return ChatSettings{
+		SlowMode: &d.SlowMode, SlowModeSeconds: d.SlowModeWaitTime,
+		FollowerMode: &d.FollowerMode, FollowerModeMinutes: d.FollowerModeDuration,
+		SubscriberMode: &d.SubscriberMode, EmoteMode: &d.EmoteMode, UniqueChatMode: &d.UniqueChatMode,
+		NonModeratorChatDelay: &d.NonModeratorChatDelay, NonModeratorChatDelaySeconds: d.NonModeratorChatDelayDuration,
+	}, nil
 }
 
 // UpdateChatSettings applies channel-wide chat rules.
