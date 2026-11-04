@@ -144,7 +144,7 @@ function RoomPanel({
               {!known ? t("common.loading") : live ? t("room.onAir") : t("room.offAir")}
             </div>
             <div className="tnum mt-2 font-mono text-[clamp(1rem,2.5vw,1.75rem)] text-muted-foreground">
-              {known && t("room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
+              {known && t(air.enabled === 1 ? "room.liveOfEnabledOne" : "room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
               {ingest?.state === "running" && ` · ${kbps(ingest.progress?.bitrateKbps ?? 0)}`}
             </div>
           </div>

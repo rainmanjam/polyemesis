@@ -772,9 +772,9 @@ function BulkDestinationControl({
       const done = res.results.filter((r) => r.outcome === "stopped").length;
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
-        toast.success(t("dash.bulkStopDone", params));
+        toast.success(t(params.total === 1 ? "dash.bulkStopDoneOne" : "dash.bulkStopDone", params));
       } else {
-        toast.warning(t("dash.bulkStopPartial", params));
+        toast.warning(t(params.total === 1 ? "dash.bulkStopPartialOne" : "dash.bulkStopPartial", params));
       }
       onFinished();
     } catch (err) {

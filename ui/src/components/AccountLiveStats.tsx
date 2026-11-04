@@ -73,7 +73,7 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
             {t("state.live")}
           </Badge>
           <span className={`text-sm ${toneText[toneForState("running")]}`}>
-            {t("stats.watching", {
+            {t(readout.count === 1 ? "stats.watchingOne" : "stats.watching", {
               count: new Intl.NumberFormat(lang).format(readout.count),
             })}
           </span>

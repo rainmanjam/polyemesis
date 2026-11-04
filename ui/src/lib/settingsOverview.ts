@@ -92,7 +92,7 @@ export function overviewTiles(
       tab: "platforms",
       title: "set.tabPlatforms",
       lines: [
-        t("settingsUx.tilePlatforms", { connected: connected.length, total: connectable.length }),
+        t(connectable.length === 1 ? "settingsUx.tilePlatformsOne" : "settingsUx.tilePlatforms", { connected: connected.length, total: connectable.length }),
         ...(refused > 0 ? [t("settingsUx.tileRefused", { n: refused })] : []),
         ...(reconnect ? [t("settingsUx.pillReconnect")] : []),
       ],

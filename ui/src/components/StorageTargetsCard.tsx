@@ -223,7 +223,7 @@ export function StorageTargetsCard() {
   const retry = async (target: StorageTarget) => {
     try {
       const { retried } = await api.storage.retry(target.id);
-      toast.success(t("storage.retried", { n: retried }));
+      toast.success(t(retried === 1 ? "storage.retriedOne" : "storage.retried", { n: retried }));
       await load();
     } catch (err) {
       toast.error(errText(err, t("storage.retryFailed")));
@@ -265,13 +265,13 @@ export function StorageTargetsCard() {
             {!x.enabled && <Badge variant="outline">{t("storage.badgeOff")}</Badge>}
             {x.secretUnreadable && <Badge variant="down">{t("storage.secretUnreadable")}</Badge>}
             {(x.counts.verified ?? 0) > 0 && (
-              <Badge variant="live">{t("storage.countVerified", { n: x.counts.verified ?? 0 })}</Badge>
+              <Badge variant="live">{t((x.counts.verified ?? 0) === 1 ? "storage.countVerifiedOne" : "storage.countVerified", { n: x.counts.verified ?? 0 })}</Badge>
             )}
             {(x.counts.failed ?? 0) > 0 && (
-              <Badge variant="warn">{t("storage.countFailed", { n: x.counts.failed ?? 0 })}</Badge>
+              <Badge variant="warn">{t((x.counts.failed ?? 0) === 1 ? "storage.countFailedOne" : "storage.countFailed", { n: x.counts.failed ?? 0 })}</Badge>
             )}
             {(x.counts.stuck ?? 0) > 0 && (
-              <Badge variant="down">{t("storage.countStuck", { n: x.counts.stuck ?? 0 })}</Badge>
+              <Badge variant="down">{t((x.counts.stuck ?? 0) === 1 ? "storage.countStuckOne" : "storage.countStuck", { n: x.counts.stuck ?? 0 })}</Badge>
             )}
             {(x.counts.pending ?? 0) + (x.counts.uploading ?? 0) > 0 && (
               <Badge variant="outline">

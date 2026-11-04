@@ -1074,7 +1074,7 @@ function RungRow({
         )}
         {st?.viewers ? (
           <Badge variant="outline" className="text-sm">
-            {t("stats.watching", { count: st.viewers })}
+            {t(st.viewers === 1 ? "stats.watchingOne" : "stats.watching", { count: st.viewers })}
           </Badge>
         ) : null}
         <Button

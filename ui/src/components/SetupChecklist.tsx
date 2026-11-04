@@ -101,7 +101,7 @@ export function SetupChecklist({
           <span
             className="h-1.5 w-28 overflow-hidden rounded-full bg-muted"
             role="progressbar"
-            aria-label={t("firstRun.progress", { done: checklist.done, total: 5 })}
+            aria-label={t(checklist.done === 1 ? "firstRun.progressOne" : "firstRun.progress", { done: checklist.done, total: 5 })}
             aria-valuemin={0}
             aria-valuemax={5}
             aria-valuenow={checklist.done}
@@ -112,7 +112,7 @@ export function SetupChecklist({
             />
           </span>
           <span className="tnum font-mono text-xs text-muted-foreground">
-            {t("firstRun.progress", { done: checklist.done, total: 5 })}
+            {t(checklist.done === 1 ? "firstRun.progressOne" : "firstRun.progress", { done: checklist.done, total: 5 })}
           </span>
         </div>
       </CardHeader>

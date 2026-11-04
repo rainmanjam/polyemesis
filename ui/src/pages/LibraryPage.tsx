@@ -403,7 +403,7 @@ export function LibraryPage() {
               {results && (
                 <span className="tnum ml-auto font-mono text-tiny text-muted-foreground">
                   {results.total < 0
-                    ? t("lib.hitsShown", { n: results.hits.length })
+                    ? t(results.hits.length === 1 ? "lib.hitsShownOne" : "lib.hitsShown", { n: results.hits.length })
                     : t("lib.hitsOf", { n: results.hits.length, total: results.total })}
                 </span>
               )}
@@ -930,7 +930,7 @@ function RecordingList({
                 <span className="tnum block font-mono text-micro text-muted-foreground">
                   {timestamp(r.startedAt)} · {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"} ·{" "}
                   {bytes(r.bytes)}
-                  {r.tracks > 0 ? ` · ${t("lib.trackCount", { n: r.tracks })}` : ""}
+                  {r.tracks > 0 ? ` · ${t(r.tracks === 1 ? "lib.trackCountOne" : "lib.trackCount", { n: r.tracks })}` : ""}
                 </span>
               </span>
             </button>
@@ -1274,7 +1274,7 @@ export function PlayerDialog({
                     <span className="tnum font-mono">{timestamp(rec.startedAt)}</span>
                     <span className="tnum font-mono">{shortDuration(rec.durationMs)}</span>
                     <span className="tnum font-mono">{bytes(rec.bytes)}</span>
-                    {rec.tracks > 0 && <span>{t("lib.audioTracksInMaster", { n: rec.tracks })}</span>}
+                    {rec.tracks > 0 && <span>{t(rec.tracks === 1 ? "lib.audioTracksInMasterOne" : "lib.audioTracksInMaster", { n: rec.tracks })}</span>}
                     <a
                       className="ml-auto text-primary-bright hover:underline"
                       href={api.downloadUrl(rec.id)}

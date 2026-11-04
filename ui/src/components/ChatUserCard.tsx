@@ -200,7 +200,7 @@ export function ChatUserCard({
     // get hidden are real and the moderator needs to know which ones.
     if (failed > 0) {
       throw new Error(
-        t("chatCard.hidePartial", { done: count, total: messages.length, failed }),
+        t(messages.length === 1 ? "chatCard.hidePartialOne" : "chatCard.hidePartial", { done: count, total: messages.length, failed }),
       );
     }
     // The COUNT, not just the fact. "Hidden" over a loop that ran zero times

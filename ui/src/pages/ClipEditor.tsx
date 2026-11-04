@@ -1039,7 +1039,7 @@ export function ClipEditor() {
               <CardTitle className="flex items-center justify-between gap-2">
                 {t("clipedit.transcript")}
                 {transcript.length > 0 && (
-                  <Badge variant="outline">{t("clipedit.lineCount", { n: transcript.length })}</Badge>
+                  <Badge variant="outline">{t(transcript.length === 1 ? "clipedit.lineCountOne" : "clipedit.lineCount", { n: transcript.length })}</Badge>
                 )}
               </CardTitle>
             </CardHeader>
