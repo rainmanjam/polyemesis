@@ -608,6 +608,21 @@ const DEMO_CHAT = [
 ] as const;
 
 test("chat — four platforms in one hub", async ({ page }) => {
+  // WHICH PLATFORMS THE SEND BOX MAY NAME comes from the server's capability
+  // matrix, the same one the Platforms page and docs/PLATFORMS.md print, rather
+  // than from a literal here. The fixture used to say `canSend: true` for all
+  // four, and the shot read "Send to YouTube, Twitch, Facebook, Kick" while
+  // PLATFORMS.md says Facebook chat send is "Not possible". The hub decides
+  // canSend from that matrix (chat.canPost); the stand-in now asks it too.
+  const capsRes = await page.request.get("/api/v1/platforms/capabilities");
+  expect(capsRes.ok()).toBe(true);
+  const caps = (await capsRes.json()) as {
+    platforms: { platform?: string; capabilities: Record<string, string> }[];
+  };
+  const canSend = (platform: string) =>
+    caps.platforms.find((p) => p.platform === platform)?.capabilities.chatSend !== "no";
+  expect(canSend("facebook"), "the matrix still marks Facebook chat send as not possible").toBe(false);
+
   // Matched on the PATH: the overview is requested as `/chat?limit=300`, and a
   // `**/chat` glob does not match a URL carrying a query string -- which fails
   // as "no messages rendered", several steps from the cause.
@@ -622,7 +637,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
             account: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis", kick: "polyemesis" }[platform],
             state: "live",
             channel: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis Live", kick: "polyemesis" }[platform],
-            canSend: true,
+            canSend: canSend(platform),
             received: DEMO_CHAT.filter((m) => m[0] === platform).length,
             sent: i === 0 ? 1 : 0,
             restarts: 0,
@@ -638,7 +653,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
             text,
             at: new Date(Date.now() - (DEMO_CHAT.length - i) * 17_000).toISOString(),
           })),
-          limits: CHAT_PLATFORMS.map((platform) => ({
+          limits: CHAT_PLATFORMS.filter(canSend).map((platform) => ({
             platform,
             maxChars: platform === "youtube" ? 200 : 500,
           })),
