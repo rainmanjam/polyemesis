@@ -32,6 +32,8 @@ export function surface(id: string, kind: SurfaceKind, settings: Surface["settin
   const rec = {
     states: [] as number[],
     titles: [] as string[],
+    /** Every setImage, in order: an SVG data URL, or undefined for the manifest's image. */
+    images: [] as (string | undefined)[],
     alerts: 0,
     oks: 0,
     feedback: [] as Feedback[],
@@ -45,6 +47,9 @@ export function surface(id: string, kind: SurfaceKind, settings: Surface["settin
     },
     async setTitle(title: string) {
       rec.titles.push(title);
+    },
+    async setImage(image: string | undefined) {
+      rec.images.push(image);
     },
     async showAlert() {
       rec.alerts++;

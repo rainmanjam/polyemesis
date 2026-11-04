@@ -71,12 +71,23 @@ function applyGlobals(raw: Record<string, unknown>): void {
 
 /** Wraps an SDK action in the runtime's Surface shape. Keys and dials differ in which calls they accept. */
 function surfaceFor(a: Action<JsonObject>, kind: SurfaceKind, settings: KeySettings): Surface {
+  // The last state and image sent, so a tick that changes neither sends no image. Keyed on the pair:
+  // an image is re-sent after every state change, whichever states Stream Deck applies it to.
+  let state: number | undefined;
+  let painted: string | undefined;
   return {
     id: a.id,
     kind,
     settings,
-    async setState(state) {
-      if (a.isKey()) await a.setState(state);
+    async setState(next) {
+      state = next;
+      if (a.isKey()) await a.setState(next);
+    },
+    async setImage(image) {
+      const key = `${state}|${image ?? ""}`;
+      if (key === painted || !a.isKey()) return;
+      painted = key;
+      await a.setImage(image);
     },
     async setTitle(title) {
       if (a.isKey()) await a.setTitle(title);

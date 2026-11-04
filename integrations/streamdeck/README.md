@@ -46,7 +46,7 @@ action settings, so it does not travel with a profile export.
 
 | Action | What it does |
 | --- | --- |
-| Destination | Shows one destination's live state. Tap to start it when it is off, or to retry it when it shows **Failed**, or **Held** after repeated quick rejections (the console's Retry). A tap in any other state does nothing. Needs admin to start or retry. |
+| Destination | Shows one destination's live state, with the destination's name and its platform's mark (YouTube, Twitch, Kick, Facebook or X; a neutral transmitter for custom RTMP and the rest) drawn in the key, above the state. Tap to start it when it is off, or to retry it when it shows **Failed**, or **Held** after repeated quick rejections (the console's Retry). A tap in any other state does nothing. Needs admin to start or retry. |
 | Go live | Starts every destination on the key's programme. Needs admin. |
 | Stop all | Hold to stop every destination on the key's programme. Shows how many YouTube broadcasts a stop would end, and refuses if that count cannot be loaded. Needs admin. |
 | Stop destination | Hold to stop one destination. Shows how many YouTube broadcasts that stop would end, read from the server for that destination, and refuses if the count cannot be loaded or the destination is unknown. With **Cut the delayed tail** ticked, the hold also cuts the destination's broadcast delay buffer (see below). Needs admin. |

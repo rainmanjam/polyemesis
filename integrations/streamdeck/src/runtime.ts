@@ -3,6 +3,7 @@ import type { StreamDeckKey } from "./keys.js";
 import { ConfigError, dumpSecondsValid, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
 import { destinationFace, failoverFace, retryable, type KeyFace } from "./keyFace.js";
+import { destinationImage } from "./keyImage.js";
 import { HoldToConfirm, type Scheduler } from "./holdToConfirm.js";
 import { meterFace } from "./levelsFeed.js";
 import type {
@@ -84,6 +85,11 @@ export interface Surface {
   readonly settings: KeySettings;
   setState(state: number): Promise<void>;
   setTitle(title: string): Promise<void>;
+  /**
+   * The key's image: an SVG data URL from src/keyImage.ts, or undefined for the manifest's own image
+   * for the current state. Optional: only a destination key draws its own image.
+   */
+  setImage?(image: string | undefined): Promise<void>;
   showAlert(): Promise<void>;
   showOk(): Promise<void>;
   setFeedback(payload: { title: string; value: string; indicator: number }): Promise<void>;
@@ -925,8 +931,14 @@ export class Runtime {
   }
 
   private async paintFace(s: Surface, face: KeyFace): Promise<void> {
+    const title = titleFor(face, this.locale);
     await s.setState(stateFor(face.tone));
-    await s.setTitle(titleFor(face, this.locale));
+    if (s.kind === "destination") {
+      // The destination's mark and name are drawn into the image; a face that is not about a
+      // destination (missing, other programme, unreachable) goes back to the manifest's tile.
+      await s.setImage?.(face.mark ? destinationImage(face.tone, face.mark, title.split("\n").length) : undefined);
+    }
+    await s.setTitle(title);
     if (s.kind === "destination") await this.sendIssues(s, inspectorLines(face, this.locale));
   }
 
@@ -1644,6 +1656,8 @@ export class Runtime {
   private async requireAdmin(s: Surface): Promise<boolean> {
     if (this.isAdmin) return true;
     await s.setState(KEY_STATE.needsAdmin);
+    // A destination key's own image would cover the padlock: back to the manifest's face.
+    if (s.kind === "destination") await s.setImage?.(undefined);
     await s.setTitle(t(this.locale, "streamdeck.auth.needsAdmin"));
     await s.showAlert();
     return false;

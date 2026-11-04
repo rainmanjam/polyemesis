@@ -1,0 +1,21 @@
+Third-party material shipped with the polyemesis Stream Deck plugin
+
+Simple Icons (https://simpleicons.org): the YouTube, Twitch, Kick, Facebook and X marks drawn on
+destination keys (src/keyImage.ts, bundled into bin/plugin.js). The SVG paths are copied verbatim
+from the published icons, the same paths as ui/src/components/platformGlyphs.tsx in the polyemesis
+repository. Source: https://github.com/simple-icons/simple-icons
+
+The marks are drawn in one colour, the key state's title colour, and are used only to identify the
+service a destination streams to. They remain the trade marks of their respective owners; their use
+here does not imply endorsement by, or affiliation with, those owners.
+
+------------------------------------------------------------------------
+
+CC0 1.0 Universal
+
+The Simple Icons project dedicates its icon data to the public domain under the Creative Commons
+CC0 1.0 Universal Public Domain Dedication: https://creativecommons.org/publicdomain/zero/1.0/
+The full legal text is at https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+CC0 does not grant rights in the trade marks the icons depict. Each brand's own guidelines apply to
+its mark.
