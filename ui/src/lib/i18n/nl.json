@@ -1821,7 +1821,7 @@
   "golive.pending": "Niet gestart",
   "golive.cancel": "Annuleren",
   "golive.goCount": "Live gaan · {count} klaar",
-  "golive.startingProgress": "Starten {done} van {total}…",
+  "golive.startingProgress": "{done} van {total} wordt gestart…",
   "golive.nothingReady": "Niets is klaar om te starten.",
   "golive.youtubeWarn": "{count} YouTube-uitzendingen eindigen als je stopt.",
   "golive.youtubeWarnOne": "{count} YouTube-uitzending eindigt als je stopt.",

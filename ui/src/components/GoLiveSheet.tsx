@@ -327,7 +327,10 @@ export function GoLiveSheet({
           <div role="status" aria-live="polite" className="sr-only" data-testid="golive-progress">
             {run ? t("golive.startingProgress", { done: run.done, total: run.total }) : ""}
           </div>
-          {readyNow.length === 0 && (
+          {/* Not while a press runs: the last start coming on empties readyNow
+              before the walk ends, and "nothing is ready" beside "Starting 3 of
+              3…" reads as a failure. */}
+          {!running && readyNow.length === 0 && (
             <p className="w-full text-sm text-muted-foreground">{t("golive.nothingReady")}</p>
           )}
         </DialogFooter>

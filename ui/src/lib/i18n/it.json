@@ -1821,7 +1821,7 @@
   "golive.pending": "Non avviato",
   "golive.cancel": "Annulla",
   "golive.goCount": "Vai in diretta · {count} pronti",
-  "golive.startingProgress": "Avvio {done} su {total}…",
+  "golive.startingProgress": "Avvio: {done} su {total}…",
   "golive.nothingReady": "Nulla è pronto per l'avvio.",
   "golive.youtubeWarn": "{count} dirette YouTube termineranno se fermate.",
   "golive.youtubeWarnOne": "{count} diretta YouTube terminerà se fermata.",

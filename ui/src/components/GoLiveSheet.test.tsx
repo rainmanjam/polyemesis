@@ -361,6 +361,36 @@ describe("Go live sheet: one press reads as one press while it runs", () => {
     expect(screen.getByTestId("golive-progress").textContent).toBe("");
   });
 
+  it("keeps counting, and does not say nothing is ready, as the live list catches up mid-run", async () => {
+    // In the console the live list updates as each start lands, so readyNow
+    // empties before the walk ends. Neither the button nor the empty-state line
+    // may follow it while the press is still running.
+    const { onStart, settle } = deferredStarts();
+    const idle = three();
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows(idle, sources),
+      youtubeAtRisk: 0,
+      onStart,
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} live={idle} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await settle(1);
+    await settle(2);
+    await screen.findByRole("button", { name: "Starting 3 of 3…" });
+    rerender(<GoLiveSheet {...props} live={idle.map((d) => ({ ...d, enabled: true }))} />);
+
+    expect(screen.getByRole("button", { name: "Starting 3 of 3…" })).toBeTruthy();
+    expect(screen.queryByText(T("golive.nothingReady"))).toBeNull();
+    await settle(3);
+    await screen.findByRole("button", { name: T("golive.goCount", { count: 0 }) });
+  });
+
   it("still counts through to the end when a start fails mid-run, and shows the failed row", async () => {
     const { onStart, settle } = deferredStarts();
     draw(three(), { onStart });

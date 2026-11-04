@@ -1823,7 +1823,7 @@
   "golive.goCount": "Выйти в эфир · готово: {count}",
   "golive.startingProgress": "Запуск: {done} из {total}…",
   "golive.nothingReady": "Нет готовых направлений для запуска.",
-  "golive.youtubeWarn": "{count} трансляций YouTube завершатся при остановке.",
+  "golive.youtubeWarn": "При остановке завершатся трансляции YouTube: {count}.",
   "golive.youtubeWarnOne": "{count} трансляция YouTube завершится при остановке.",
   "golive.summary": "{live} в эфире · {starting} запускается · {failed} с ошибкой · {blocked} заблокировано",
   "golive.colDestination": "Направление",
