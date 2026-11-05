@@ -93,6 +93,12 @@ export function departures(value: unknown, schema: Schema | undefined, path = "$
   return [];
 }
 
+/**
+ * Departures test/setup.ts found in the current test's fake answers. setup.ts fails the test after it if any
+ * are left; a test that serves a departure on purpose, to prove it is caught, takes them with splice(0).
+ */
+export const violations: string[] = [];
+
 /** Marks a fake answer as deliberately not the server's shape, so the conformance check leaves it alone. */
 export const NOT_THE_SERVERS_SHAPE = Symbol("not the server's shape");
 

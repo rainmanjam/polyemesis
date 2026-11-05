@@ -10,7 +10,7 @@ import {
 import { KEY_STATE } from "../src/render.js";
 import type { PollSpec } from "../src/model.js";
 import { golden as goldenRoute, runtimeFor, settle, surface, type Route } from "./fakeInstall.js";
-import { GOLDENS, SCHEMA, golden, goldenResponse, type Golden } from "./support/contract.js";
+import { GOLDENS, SCHEMA, departures, golden, goldenResponse, violations, type Golden } from "./support/contract.js";
 
 // THE PLUGIN AGAINST THE SERVER'S OWN ANSWERS.
 //
@@ -139,6 +139,26 @@ describe("the recorded answers", () => {
     const recorded = new Set(cases.map((g) => `${g.request.method} ${g.request.route}`));
     expect(API_CONTRACT.map((r) => `${r.method} ${r.path}`).filter((k) => !recorded.has(k))).toEqual([]);
     expect(API_CONTRACT.map((r) => `${r.method} ${r.path}`).filter((k) => !SCHEMA[k])).toEqual([]);
+  });
+});
+
+describe("every fake answer is held to the server's schema (test/setup.ts)", () => {
+  it("names a field the server does not send, and a value of a type it does not send there", () => {
+    const status = SCHEMA["GET /status"];
+    expect(departures({ destinations: [{ id: 1, process: { state: "failed", lastErr: "x" } }] }, status)).toEqual([
+      "$.destinations[0].process.lastErr: not a field the server sends",
+    ]);
+    expect(departures({ destinations: [{ id: "1" }] }, status)).toEqual([
+      "$.destinations[0].id: string, but the server sends number here",
+    ]);
+    // A field the server sends that a fake leaves out is fine: a fake may be partial.
+    expect(departures({ destinations: [{ id: 1 }] }, status)).toEqual([]);
+  });
+
+  it("catches a renamed field in a fake served to the client, in any test", async () => {
+    const renamed = { status: 200, body: JSON.stringify({ destinations: [{ id: 1, name: "x", reason: { cause: "dns", isHeld: true } }] }) };
+    await answering(renamed).client.status(1);
+    expect(violations.splice(0)).toEqual(["GET /status $.destinations[0].reason.isHeld: not a field the server sends"]);
   });
 });
 

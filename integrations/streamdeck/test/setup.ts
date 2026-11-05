@@ -1,6 +1,6 @@
 import { afterEach, expect } from "vitest";
 import { PolyemesisClient, contractRoute, type Method, type Transport, type TransportRequest, type TransportResponse } from "../src/api.js";
-import { NOT_THE_SERVERS_SHAPE, SCHEMA, departures } from "./support/contract.js";
+import { NOT_THE_SERVERS_SHAPE, SCHEMA, departures, violations } from "./support/contract.js";
 
 // EVERY FAKE ANSWER IN EVERY TEST IS HELD TO THE SERVER'S SCHEMA.
 //
@@ -14,7 +14,6 @@ import { NOT_THE_SERVERS_SHAPE, SCHEMA, departures } from "./support/contract.js
 //
 // The hook is on the client, below every fake: the first call of each client wraps its transport.
 
-const violations: string[] = [];
 const WRAPPED = Symbol("contract-checked transport");
 
 function check(req: TransportRequest, res: TransportResponse): void {
@@ -40,6 +39,9 @@ function check(req: TransportRequest, res: TransportResponse): void {
 
 const proto = PolyemesisClient.prototype as unknown as { call(this: { transport: Transport }, ...args: unknown[]): Promise<unknown> };
 const realCall = proto.call;
+// The client's one way out. If it is renamed, this hook would wrap nothing and every check below would pass
+// over nothing; contract.test.ts also proves the hook catches a renamed field.
+if (typeof realCall !== "function") throw new Error("test/setup.ts: PolyemesisClient has no call() to hold to the schema");
 proto.call = function (this: { transport: Transport & { [WRAPPED]?: true } }, ...args: unknown[]) {
   const inner = this.transport;
   if (!inner[WRAPPED]) {
