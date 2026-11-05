@@ -1,0 +1,16 @@
+{
+  "case": "settings",
+  "request": {
+    "method": "GET",
+    "route": "/settings",
+    "path": "/settings",
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "meters": {
+      "enabled": true,
+      "intervalMs": 100
+    }
+  }
+}

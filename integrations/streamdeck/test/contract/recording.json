@@ -1,0 +1,16 @@
+{
+  "case": "recording",
+  "request": {
+    "method": "GET",
+    "route": "/recording",
+    "path": "/recording",
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "enabled": false,
+    "halted": false,
+    "installWide": true,
+    "state": "off"
+  }
+}

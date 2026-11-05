@@ -29,6 +29,20 @@
 //     -- then pumps datagrams at the udp:// target in its argv so the relay
 //     hub's RxBytes advances and the probe loop has something to probe. Runs
 //     until it is killed.
+//
+// Three more, each chosen by a marker no other caller's argv contains, so the
+// two above are unchanged for every test that does not ask. They exist for the
+// Stream Deck contract (streamdeck_contract_test.go), whose goldens must hold a
+// destination in each state a key paints, metered by a live dial:
+//
+//   - the metering sidecar: an argv holding astats' print-to-stdout filter.
+//     Prints a fixed level per channel on stdout, every 100 ms, in the lines
+//     ffmpeg.ParseLevels reads, so GET /levels reports a live feed.
+//   - "faketool-refused" in an output URL: prints FFmpeg's connection-refused
+//     lines and exits 1, the way an ingest with nothing listening fails.
+//   - "faketool-rejected" in an output URL: prints an RTMP server's refusal of
+//     the stream key and exits 1, which the supervisor holds after repeated
+//     quick rejections.
 package main
 
 import (
@@ -47,7 +61,44 @@ func main() {
 			return
 		}
 	}
+	for _, a := range argv {
+		switch {
+		case strings.Contains(a, "ametadata=mode=print:file=-"):
+			meters()
+			return
+		case strings.Contains(a, "faketool-refused"):
+			fail("[tcp @ 0x0] Connection to tcp://refused.faketool.invalid:1935 failed: Connection refused",
+				"[out#0/flv @ 0x0] Error opening output files: Connection refused")
+		case strings.Contains(a, "faketool-rejected"):
+			fail("[rtmp @ 0x0] Server error: Authentication failed: the stream key was refused",
+				"[out#0/flv @ 0x0] Error opening output files: Operation not permitted")
+		}
+	}
 	transcode(argv)
+}
+
+// fail prints FFmpeg's banner and the given lines to stderr and exits 1: an
+// output that could not be opened.
+func fail(lines ...string) {
+	fmt.Fprintln(os.Stderr, "faketool version 0.0-test")
+	for _, l := range lines {
+		fmt.Fprintln(os.Stderr, l)
+	}
+	os.Exit(1)
+}
+
+// meters prints one astats frame every 100 ms until killed: a fixed peak and
+// RMS level for each of the probed layout's two channels. Fixed rather than
+// varying, so a recorded GET /levels is the same on every run.
+func meters() {
+	for frame := 0; ; frame++ {
+		fmt.Printf("frame:%d pts:%d pts_time:%.1f\n", frame, frame*4800, float64(frame)/10)
+		fmt.Println("lavfi.astats.1.Peak_level=-12.500000")
+		fmt.Println("lavfi.astats.1.RMS_level=-20.500000")
+		fmt.Println("lavfi.astats.2.Peak_level=-14.250000")
+		fmt.Println("lavfi.astats.2.RMS_level=-22.750000")
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // probe prints a layout the engine can measure: one h264 video track and one

@@ -1,0 +1,19 @@
+{
+  "case": "recording-off",
+  "request": {
+    "method": "POST",
+    "route": "/recording",
+    "path": "/recording",
+    "body": {
+      "enabled": false
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "enabled": false,
+    "halted": false,
+    "installWide": true,
+    "state": "off"
+  }
+}

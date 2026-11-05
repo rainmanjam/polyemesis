@@ -1,0 +1,31 @@
+{
+  "case": "levels",
+  "request": {
+    "method": "GET",
+    "route": "/levels",
+    "path": "/levels",
+    "query": {
+      "source": "1"
+    },
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "at": "2026-01-01T00:00:00Z",
+    "feed": "live",
+    "levels": {
+      "peak": [
+        [
+          -12.5,
+          -14.25
+        ]
+      ],
+      "rms": [
+        [
+          -20.5,
+          -22.75
+        ]
+      ]
+    }
+  }
+}

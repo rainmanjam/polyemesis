@@ -1,0 +1,18 @@
+{
+  "case": "stop-impact-destination",
+  "request": {
+    "method": "GET",
+    "route": "/destinations/stop-impact",
+    "path": "/destinations/stop-impact",
+    "query": {
+      "destination": "1",
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "destinations": 1,
+    "youtubeBroadcasts": 0
+  }
+}

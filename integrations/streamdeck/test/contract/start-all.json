@@ -1,0 +1,60 @@
+{
+  "case": "start-all",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/start-all",
+    "path": "/destinations/start-all",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "action": "start",
+    "results": [
+      {
+        "id": 1,
+        "name": "Main stage",
+        "outcome": "started",
+        "platform": "twitch",
+        "state": "volatile"
+      },
+      {
+        "id": 2,
+        "name": "Backup encoder",
+        "outcome": "started",
+        "platform": "custom",
+        "state": "volatile"
+      },
+      {
+        "id": 3,
+        "name": "Studio relay",
+        "outcome": "started",
+        "platform": "custom",
+        "state": "volatile"
+      },
+      {
+        "id": 4,
+        "name": "YouTube main",
+        "outcome": "started",
+        "platform": "youtube",
+        "state": "volatile"
+      },
+      {
+        "id": 5,
+        "name": "Delayed feed",
+        "outcome": "started",
+        "platform": "custom",
+        "state": "volatile"
+      },
+      {
+        "id": 6,
+        "name": "Delayed backup",
+        "outcome": "started",
+        "platform": "custom",
+        "state": "volatile"
+      }
+    ]
+  }
+}

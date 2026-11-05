@@ -1,0 +1,57 @@
+{
+  "case": "stop-all",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/stop-all",
+    "path": "/destinations/stop-all",
+    "query": {
+      "source": "1"
+    },
+    "body": {
+      "confirm": true
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "action": "stop",
+    "results": [
+      {
+        "id": 1,
+        "name": "Main stage",
+        "outcome": "stopped",
+        "platform": "twitch"
+      },
+      {
+        "id": 2,
+        "name": "Backup encoder",
+        "outcome": "stopped",
+        "platform": "custom"
+      },
+      {
+        "id": 3,
+        "name": "Studio relay",
+        "outcome": "stopped",
+        "platform": "custom"
+      },
+      {
+        "id": 4,
+        "name": "YouTube main",
+        "outcome": "stopped",
+        "platform": "youtube"
+      },
+      {
+        "id": 5,
+        "name": "Delayed feed",
+        "outcome": "stopped",
+        "platform": "custom"
+      },
+      {
+        "id": 6,
+        "name": "Delayed backup",
+        "outcome": "stopped",
+        "platform": "custom"
+      }
+    ]
+  }
+}

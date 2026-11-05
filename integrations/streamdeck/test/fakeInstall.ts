@@ -1,8 +1,9 @@
 import type { Transport, TransportRequest, TransportResponse } from "../src/api.js";
 import { Runtime, type Surface, type SurfaceKind } from "../src/runtime.js";
+import { goldenResponse, malformed } from "./support/contract.js";
 
-// The fake install, fake keys and hand-fired timers the track-level tests share.
-// The same shapes as the helpers at the top of runtime.test.ts.
+// The fake install, fake keys and hand-fired timers the key tests share. Every answer a route here gives is
+// held to the server's recorded schema by test/setup.ts; golden() serves the server's own recorded answer.
 
 export type Route = (req: TransportRequest) => TransportResponse | Error;
 
@@ -22,8 +23,14 @@ export function install(routes: Record<string, Route>) {
 }
 
 export const json = (status: number, body: unknown): Route => () => ({ status, body: JSON.stringify(body) });
-export const ADMIN = json(200, { name: "Stream Deck", prefix: "pmk", scope: "admin", adminScope: true });
-export const READ = json(200, { name: "Stream Deck", prefix: "pmk", scope: "read", adminScope: false });
+/** An answer that is deliberately not the server's shape: test/setup.ts leaves it out of the schema check. */
+export const malformedJson = (status: number, body: unknown): Route => () => malformed({ status, body: JSON.stringify(body) });
+/** The server's own recorded answer for a case in test/contract/. */
+export const golden = (name: string): Route => () => goldenResponse(name);
+/** The connection check, as the server answers it for an admin token and a read token. */
+export const ADMIN = golden("connection-admin");
+export const READ = golden("connection-read");
+
 export const PAIRED = { url: "https://studio.example", token: "t" };
 
 export type Feedback = { title: string; value: string; indicator: number };

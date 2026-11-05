@@ -8,7 +8,32 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **The Stream Deck plugin and the server are checked against each other in CI.** The plugin calls
+  about 25 routes with an API token, and nothing compiled the two together: a route renamed, moved
+  to the session-only group, or given a different scope, or a field renamed in an answer, left both
+  test suites green. Three checks now fail instead:
+  - **Routes.** The plugin's routes and the scope each needs are a table in the plugin
+    (`integrations/streamdeck/src/apiContract.json`), and the plugin uses it: a call it does not
+    list is refused before any request, and on a read token an admin route is refused in the plugin
+    and never sent (the Viewers key's analytics read is the one exception, kept so the key can show
+    **Needs admin token**). A Go test parses every call in the plugin's client and drives each route
+    through the real router: it must exist, take an API token rather than only a signed-in session,
+    and need exactly the scope the table says.
+  - **Answers.** A Go test records the real answers of every route the plugin reads, and the
+    answers and refusals it acts on, from a seeded install with a destination in each state a key
+    paints (live, off, failed, held, buffering a delay), into
+    `integrations/streamdeck/test/contract/`. It fails when an answer changes; `-update-streamdeck-contract`
+    rewrites them. The plugin's tests parse every recorded answer and paint every key kind from
+    them, and every hand-written fake in the plugin's tests is checked against the recorded schema,
+    so a renamed field fails there too.
+  - **End to end.** A new CI job, `streamdeck end to end`, builds the binary, starts it on a
+    temporary data directory, creates the admin and the tokens through the API, and runs the
+    plugin's runtime against it over HTTP with a local RTMP sink: pair, read, start a destination
+    and see it at the sink, kill the sink and see the key show **Failed** with its reason, retry from
+    the key, stop it. It skips when a pull request cannot reach the plugin or the server.
+    `./scripts/streamdeck-e2e.sh` runs it locally.
 
 ## [0.13.0] — 2026-11-04
 

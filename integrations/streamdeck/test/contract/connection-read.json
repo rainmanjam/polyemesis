@@ -1,0 +1,16 @@
+{
+  "case": "connection-read",
+  "request": {
+    "method": "GET",
+    "route": "/auth/connection",
+    "path": "/auth/connection",
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "adminScope": false,
+    "name": "streamdeck",
+    "prefix": "volatile",
+    "scope": "read"
+  }
+}

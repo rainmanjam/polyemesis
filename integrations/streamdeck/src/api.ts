@@ -16,12 +16,55 @@ import type {
   ViewersLive,
 } from "./model.js";
 import { MAX_GAIN } from "./trackLevel.js";
+import contractFile from "./apiContract.json" with { type: "json" };
 
 // The polyemesis REST client. It knows the routes and the error taxonomy and
 // nothing about Stream Deck. The transport is injected, so the tests run
 // against a fake and the plugin runs against node:https (see transport.ts).
 
 export type Method = "GET" | "POST";
+
+/** The token scope a route needs on the server. */
+export type Scope = "read" | "admin";
+
+/** One route the plugin calls, from apiContract.json. */
+export interface ContractRoute {
+  readonly method: Method;
+  /** Relative to /api/v1. A {name} segment stands for one path segment. */
+  readonly path: string;
+  readonly scope: Scope;
+  /**
+   * An admin route the plugin still sends on a read token, to paint the server's 403 as Needs admin token.
+   * Every other admin route is refused here on a read token, before any request.
+   */
+  readonly readTokenSends: boolean;
+}
+
+/**
+ * Every route the plugin may call, and the scope the server needs for it (apiContract.json). call() refuses a
+ * route that is not listed, and the Go contract test (internal/api/streamdeck_contract_test.go) drives each
+ * entry through the real router, so the list cannot drift from the server or from this file's call() sites.
+ */
+export const API_CONTRACT: readonly ContractRoute[] = contractFile.routes.map((r): ContractRoute => {
+  const raw = r as { method?: unknown; path?: unknown; scope?: unknown; readTokenSends?: unknown };
+  if (raw.method !== "GET" && raw.method !== "POST") throw new Error(`apiContract.json: ${String(raw.method)} is not GET or POST`);
+  if (typeof raw.path !== "string" || !raw.path.startsWith("/")) throw new Error(`apiContract.json: ${String(raw.path)} is not a path`);
+  if (raw.scope !== "read" && raw.scope !== "admin") throw new Error(`apiContract.json: ${raw.path} has scope ${String(raw.scope)}`);
+  if (raw.readTokenSends !== undefined && (raw.readTokenSends !== true || raw.scope !== "admin")) {
+    throw new Error(`apiContract.json: ${raw.path}: readTokenSends is only for an admin route, and only true`);
+  }
+  return { method: raw.method, path: raw.path, scope: raw.scope, readTokenSends: raw.readTokenSends === true };
+});
+
+/** The contract entry a request matches, segment by segment, or undefined when the plugin has none for it. */
+export function contractRoute(method: Method, path: string): ContractRoute | undefined {
+  const want = path.split("/");
+  return API_CONTRACT.find((r) => {
+    if (r.method !== method) return false;
+    const have = r.path.split("/");
+    return have.length === want.length && have.every((seg, i) => (/^\{\w+\}$/.test(seg) ? want[i] !== "" : seg === want[i]));
+  });
+}
 
 export interface TransportRequest {
   method: Method;
@@ -90,6 +133,9 @@ export class ApiError extends Error {
 }
 
 export class PolyemesisClient {
+  /** The token's scope, once connection() has answered. Until then nothing is refused here. */
+  private scope: Scope | undefined;
+
   constructor(
     private readonly base: URL,
     private readonly token: string,
@@ -97,8 +143,11 @@ export class PolyemesisClient {
   ) {}
 
   /** What this token is and may do. Answers for this token only. Any scope may call it. */
-  connection(): Promise<ConnectionInfo> {
-    return this.call<ConnectionInfo>("GET", "/auth/connection");
+  async connection(): Promise<ConnectionInfo> {
+    const info = await this.call<ConnectionInfo>("GET", "/auth/connection");
+    // Anything that is not admin is read-only on the server, a scope this build does not know included.
+    this.scope = info?.adminScope === true ? "admin" : "read";
+    return info;
   }
 
   /** The install's programmes, ids only. Install-wide: never scoped by ?source=. */
@@ -413,6 +462,14 @@ export class PolyemesisClient {
     query?: Record<string, string>,
     timeoutMs?: number,
   ): Promise<T> {
+    const route = contractRoute(method, path);
+    if (!route) {
+      // A programming error, not an answer from the install: the route is missing from apiContract.json.
+      throw new Error(`${method} ${path} is not in apiContract.json; list it there with the scope the server needs`);
+    }
+    if (route.scope === "admin" && !route.readTokenSends && this.scope === "read") {
+      throw new ApiError("forbidden", undefined, `${method} ${route.path} needs an admin token; a read token sends nothing`);
+    }
     const url = new URL(this.base.toString());
     url.pathname = `${this.base.pathname.replace(/\/$/, "")}/api/v1${path}`;
     url.search = "";

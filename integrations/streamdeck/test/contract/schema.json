@@ -1,0 +1,4213 @@
+{
+  "GET /analytics/live": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "at": {
+        "types": [
+          "null",
+          "string"
+        ]
+      },
+      "effectiveIntervalSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "enabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "intervalSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "onAir": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "partial": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "pending": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "player": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "rebufferMs": {
+            "types": [
+              "number"
+            ]
+          },
+          "rebuffers": {
+            "types": [
+              "number"
+            ]
+          },
+          "sessions": {
+            "types": [
+              "number"
+            ]
+          },
+          "sessionsWithErrors": {
+            "types": [
+              "number"
+            ]
+          },
+          "startupHistogram": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "number"
+              ]
+            }
+          },
+          "startupMs": {
+            "types": [
+              "number"
+            ]
+          },
+          "startups": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      },
+      "points": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "at": {
+              "types": [
+                "string"
+              ]
+            },
+            "partial": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "total": {
+              "types": [
+                "null",
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "readings": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "account": {
+              "types": [
+                "string"
+              ]
+            },
+            "live": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "reason": {
+              "types": [
+                "string"
+              ]
+            },
+            "viewers": {
+              "types": [
+                "null",
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "reported": {
+        "types": [
+          "number"
+        ]
+      },
+      "stream": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "averageTotal": {
+            "types": [
+              "null",
+              "number"
+            ]
+          },
+          "durationMs": {
+            "types": [
+              "number"
+            ]
+          },
+          "endedAt": {
+            "types": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "types": [
+              "number"
+            ]
+          },
+          "peakTotal": {
+            "types": [
+              "null",
+              "number"
+            ]
+          },
+          "startedAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "title": {
+            "types": [
+              "string"
+            ]
+          }
+        }
+      },
+      "stretched": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "total": {
+        "types": [
+          "null",
+          "number"
+        ]
+      }
+    }
+  },
+  "GET /auth/connection": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "adminScope": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "name": {
+        "types": [
+          "string"
+        ]
+      },
+      "prefix": {
+        "types": [
+          "string"
+        ]
+      },
+      "scope": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "GET /destinations": {
+    "types": [
+      "array",
+      "null"
+    ],
+    "items": {
+      "types": [
+        "object"
+      ],
+      "fields": {
+        "destination": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "accountId": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "audio": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "codec": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "copy": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "mono": {
+                  "types": [
+                    "boolean"
+                  ]
+                }
+              }
+            },
+            "audioBitrate": {
+              "types": [
+                "number"
+              ]
+            },
+            "backupIngestWanted": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "backupStreamKey": {
+              "types": [
+                "string"
+              ]
+            },
+            "backupUrl": {
+              "types": [
+                "string"
+              ]
+            },
+            "captionIngestReady": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "captionMode": {
+              "types": [
+                "string"
+              ]
+            },
+            "compliance": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "facebookPrivacy": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "labels": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "values": {
+                    "types": [
+                      "boolean"
+                    ]
+                  }
+                },
+                "madeForKids": {
+                  "types": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "privacy": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            },
+            "createdAt": {
+              "types": [
+                "string"
+              ]
+            },
+            "delayDumpSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "delaySeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "enabled": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "expertAckReencode": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "extraInputArgs": {
+              "types": [
+                "string"
+              ]
+            },
+            "extraOutputArgs": {
+              "types": [
+                "string"
+              ]
+            },
+            "facebook": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "announcements": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "broadcastId": {
+                        "types": [
+                          "string"
+                        ]
+                      },
+                      "occurrence": {
+                        "types": [
+                          "string"
+                        ]
+                      },
+                      "scheduleId": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "broadcastId": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "crosspost": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "createPost": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "pageId": {
+                        "types": [
+                          "string"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "donateCharityId": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "scheduledFor": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            },
+            "goLiveTitle": {
+              "types": [
+                "string"
+              ]
+            },
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "keyUnreadable": {
+              "types": [
+                "string"
+              ]
+            },
+            "kind": {
+              "types": [
+                "string"
+              ]
+            },
+            "lifecycle": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "attempts": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "broadcastId": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "fault": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "phase": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "renewed": {
+                  "types": [
+                    "boolean"
+                  ]
+                }
+              }
+            },
+            "multitrack": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "position": {
+              "types": [
+                "number"
+              ]
+            },
+            "profile": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "delayMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "ducking": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "attackMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "ratio": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "releaseMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "target": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    },
+                    "thresholdDb": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "trigger": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "excludeRoles": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "string"
+                    ]
+                  }
+                },
+                "loudness": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "rangeLu": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "targetLufs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "truePeakDb": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "matrix": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "channel": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "invert": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "out": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "mode": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "normalize": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "sampleRate": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "tracks": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "enabled": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "muted": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "renditionId": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "resilience": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "giveUpAfter": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "maxBackoffSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "minBackoffSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "retired": {
+              "types": [
+                "string"
+              ]
+            },
+            "sourceId": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "streamKey": {
+              "types": [
+                "string"
+              ]
+            },
+            "transport": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "muxQueueBytes": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "muxQueuePackets": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "noDurationFilesize": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "rwTimeoutSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "updatedAt": {
+              "types": [
+                "string"
+              ]
+            },
+            "url": {
+              "types": [
+                "string"
+              ]
+            },
+            "vodProfile": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "delayMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "ducking": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "attackMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "ratio": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "releaseMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "target": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    },
+                    "thresholdDb": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "trigger": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "excludeRoles": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "string"
+                    ]
+                  }
+                },
+                "loudness": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "rangeLu": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "targetLufs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "truePeakDb": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "matrix": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "channel": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "invert": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "out": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "mode": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "normalize": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "sampleRate": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "tracks": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "enabled": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "muted": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "xGoLiveTweet": {
+              "types": [
+                "string"
+              ]
+            }
+          }
+        },
+        "routing": {
+          "any": true
+        },
+        "routingError": {
+          "any": true
+        },
+        "routingProvisional": {
+          "any": true
+        }
+      }
+    }
+  },
+  "GET /destinations/stop-impact": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "destinations": {
+        "types": [
+          "number"
+        ]
+      },
+      "youtubeBroadcasts": {
+        "types": [
+          "number"
+        ]
+      }
+    }
+  },
+  "GET /levels": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "at": {
+        "types": [
+          "string"
+        ]
+      },
+      "feed": {
+        "types": [
+          "string"
+        ]
+      },
+      "levels": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "peak": {
+            "types": [
+              "array"
+            ],
+            "items": {
+              "types": [
+                "array"
+              ],
+              "items": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "rms": {
+            "types": [
+              "array"
+            ],
+            "items": {
+              "types": [
+                "array"
+              ],
+              "items": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "GET /polls": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "current": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "announced": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "detail": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "ok": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "platform": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "skipped": {
+                  "types": [
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          },
+          "byPlatform": {
+            "types": [
+              "null",
+              "object"
+            ],
+            "values": {
+              "types": [
+                "number"
+              ]
+            }
+          },
+          "durationSeconds": {
+            "types": [
+              "number"
+            ]
+          },
+          "endedAt": {
+            "types": [
+              "null",
+              "string"
+            ]
+          },
+          "endedEarly": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "endsAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "id": {
+            "types": [
+              "number"
+            ]
+          },
+          "native": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "platform": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "reason": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "status": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "votes": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "options": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "byPlatform": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "values": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                },
+                "label": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "votes": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            }
+          },
+          "question": {
+            "types": [
+              "string"
+            ]
+          },
+          "startedAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "state": {
+            "types": [
+              "string"
+            ]
+          },
+          "total": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      },
+      "history": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "announced": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "detail": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "ok": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "platform": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "skipped": {
+                    "types": [
+                      "boolean"
+                    ]
+                  }
+                }
+              }
+            },
+            "byPlatform": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "values": {
+                "types": [
+                  "number"
+                ]
+              }
+            },
+            "durationSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "endedAt": {
+              "types": [
+                "null",
+                "string"
+              ]
+            },
+            "endedEarly": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "endsAt": {
+              "types": [
+                "string"
+              ]
+            },
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "native": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "platform": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "reason": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "status": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "votes": {
+                    "types": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "options": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "byPlatform": {
+                    "types": [
+                      "null",
+                      "object"
+                    ],
+                    "values": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  },
+                  "label": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "votes": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              }
+            },
+            "question": {
+              "types": [
+                "string"
+              ]
+            },
+            "startedAt": {
+              "types": [
+                "string"
+              ]
+            },
+            "state": {
+              "types": [
+                "string"
+              ]
+            },
+            "total": {
+              "types": [
+                "number"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "GET /recording": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "enabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "halted": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "installWide": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "reason": {
+        "types": [
+          "string"
+        ]
+      },
+      "state": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "GET /routing/presets": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "defaults": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "cleanTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "micTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "musicTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "surroundTrack": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      },
+      "presets": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "description": {
+              "types": [
+                "string"
+              ]
+            },
+            "id": {
+              "types": [
+                "string"
+              ]
+            },
+            "loudness": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "targetLufs": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "needsCleanTrack": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "needsLanguage": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "needsMicTrack": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "needsMusicTrack": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "needsSurroundTrack": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "policy": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "exclude": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "overridden": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "platform": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "reason": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "summary": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "GET /settings": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "meters": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "enabled": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "intervalMs": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "GET /source": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "annotations": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "denoise": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "label": {
+              "types": [
+                "string"
+              ]
+            },
+            "language": {
+              "types": [
+                "string"
+              ]
+            },
+            "role": {
+              "types": [
+                "string"
+              ]
+            },
+            "track": {
+              "types": [
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "id": {
+        "types": [
+          "number"
+        ]
+      },
+      "metersDropped": {
+        "types": [
+          "number"
+        ]
+      },
+      "name": {
+        "types": [
+          "string"
+        ]
+      },
+      "probed": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "synthetic": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "tracks": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "channels": {
+              "types": [
+                "number"
+              ]
+            },
+            "codec": {
+              "types": [
+                "string"
+              ]
+            },
+            "index": {
+              "types": [
+                "number"
+              ]
+            },
+            "language": {
+              "types": [
+                "string"
+              ]
+            },
+            "layout": {
+              "types": [
+                "string"
+              ]
+            },
+            "title": {
+              "types": [
+                "string"
+              ]
+            }
+          }
+        }
+      },
+      "video": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "bitrate": {
+            "types": [
+              "number"
+            ]
+          },
+          "codec": {
+            "types": [
+              "string"
+            ]
+          },
+          "frameRate": {
+            "types": [
+              "number"
+            ]
+          },
+          "height": {
+            "types": [
+              "number"
+            ]
+          },
+          "level": {
+            "types": [
+              "number"
+            ]
+          },
+          "pixFmt": {
+            "types": [
+              "string"
+            ]
+          },
+          "profile": {
+            "types": [
+              "string"
+            ]
+          },
+          "width": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "GET /sources": {
+    "types": [
+      "array"
+    ],
+    "items": {
+      "types": [
+        "object"
+      ],
+      "fields": {
+        "createdAt": {
+          "types": [
+            "string"
+          ]
+        },
+        "destinations": {
+          "types": [
+            "number"
+          ]
+        },
+        "enabled": {
+          "types": [
+            "boolean"
+          ]
+        },
+        "id": {
+          "types": [
+            "number"
+          ]
+        },
+        "ingest": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "annotations": {
+              "types": [
+                "array"
+              ],
+              "items": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "label": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "track": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              }
+            },
+            "degraded": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "enabled": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "maxLossPercent": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "maxRttMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "minBitrateKbps": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "sustainSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "mode": {
+              "types": [
+                "string"
+              ]
+            },
+            "pull": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "reconnectDelayMaxSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "rtspTransport": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "url": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            },
+            "rtmp": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "app": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "streamKey": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            },
+            "srt": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "latencyMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "passphrase": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "isDefault": {
+          "types": [
+            "boolean"
+          ]
+        },
+        "name": {
+          "types": [
+            "string"
+          ]
+        },
+        "position": {
+          "types": [
+            "number"
+          ]
+        },
+        "publishUrls": {
+          "types": [
+            "null"
+          ]
+        },
+        "publishing": {
+          "types": [
+            "boolean"
+          ]
+        },
+        "renditions": {
+          "types": [
+            "number"
+          ]
+        },
+        "running": {
+          "types": [
+            "boolean"
+          ]
+        },
+        "token": {
+          "types": [
+            "string"
+          ]
+        },
+        "tokenEnforced": {
+          "types": [
+            "boolean"
+          ]
+        },
+        "updatedAt": {
+          "types": [
+            "string"
+          ]
+        }
+      }
+    }
+  },
+  "GET /status": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "clips": {
+        "any": true
+      },
+      "destinationHold": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "code": {
+            "types": [
+              "string"
+            ]
+          },
+          "reason": {
+            "types": [
+              "string"
+            ]
+          }
+        }
+      },
+      "destinations": {
+        "types": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "accountHealth": {
+              "types": [
+                "string"
+              ]
+            },
+            "backupError": {
+              "types": [
+                "string"
+              ]
+            },
+            "backupProcess": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "kind": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "lastError": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "name": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "nextRetryIn": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "pid": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "progress": {
+                  "types": [
+                    "object"
+                  ],
+                  "fields": {
+                    "bitrateKbps": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "done": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "dropFrames": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "dupFrames": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "fps": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "frame": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "outTimeMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "speed": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "totalSize": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "reason": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "at": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "cause": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "held": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "keyChanged": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "line": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "quick": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "rejections": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "restarts": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "stalled": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "stalledSec": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "startedAt": {
+                  "types": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "state": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "uptimeSec": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "delay": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "bufferedSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "diskBytes": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "drainRemainingSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "droppedBytes": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "dumpable": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "dumpedSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "dumping": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "effectiveSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "fill": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "memBytes": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "phase": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "problem": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "seconds": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "delayDumpSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "delaySeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "droppingFrames": {
+              "types": [
+                "number"
+              ]
+            },
+            "enabled": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "error": {
+              "types": [
+                "string"
+              ]
+            },
+            "facebookBroadcastId": {
+              "types": [
+                "string"
+              ]
+            },
+            "filterComplex": {
+              "types": [
+                "string"
+              ]
+            },
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "kind": {
+              "types": [
+                "string"
+              ]
+            },
+            "levelChange": {
+              "types": [
+                "string"
+              ]
+            },
+            "multitrackDivergences": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "detail": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "field": {
+                    "types": [
+                      "string"
+                    ]
+                  }
+                }
+              }
+            },
+            "multitrackNote": {
+              "types": [
+                "string"
+              ]
+            },
+            "multitrackVerdict": {
+              "types": [
+                "string"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "normalization": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "platformHealth": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "issues": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "string"
+                    ]
+                  }
+                },
+                "platform": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "status": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            },
+            "process": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "kind": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "lastError": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "name": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "nextRetryIn": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "pid": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "progress": {
+                  "types": [
+                    "object"
+                  ],
+                  "fields": {
+                    "bitrateKbps": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "done": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "dropFrames": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "dupFrames": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "fps": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "frame": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "outTimeMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "speed": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "totalSize": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "reason": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "at": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "cause": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "held": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "keyChanged": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "line": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "quick": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "rejections": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "restarts": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "stalled": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "stalledSec": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "startedAt": {
+                  "types": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "state": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "uptimeSec": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "reason": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "at": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "cause": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "held": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "keyChanged": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "line": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "quick": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "rejections": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
+            "renditionId": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "renditionName": {
+              "types": [
+                "string"
+              ]
+            },
+            "restartStorm": {
+              "types": [
+                "number"
+              ]
+            },
+            "rolledOverTo": {
+              "types": [
+                "string"
+              ]
+            },
+            "sourceId": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "stalled": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "stopWarning": {
+              "types": [
+                "string"
+              ]
+            },
+            "summary": {
+              "types": [
+                "string"
+              ]
+            },
+            "tracks": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "number"
+                ]
+              }
+            },
+            "transitioning": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "verticalHalfOf": {
+              "types": [
+                "null",
+                "number"
+              ]
+            },
+            "vodAudioDropped": {
+              "types": [
+                "string"
+              ]
+            },
+            "warnings": {
+              "types": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "types": [
+                  "string"
+                ]
+              }
+            },
+            "youtubeVertical": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "pairingConfirmed": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "verticalId": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "failover": {
+        "types": [
+          "null",
+          "object"
+        ],
+        "fields": {
+          "active": {
+            "types": [
+              "string"
+            ]
+          },
+          "backup": {
+            "types": [
+              "null",
+              "object"
+            ],
+            "fields": {
+              "kind": {
+                "types": [
+                  "string"
+                ]
+              },
+              "lastError": {
+                "types": [
+                  "string"
+                ]
+              },
+              "name": {
+                "types": [
+                  "string"
+                ]
+              },
+              "nextRetryIn": {
+                "types": [
+                  "number"
+                ]
+              },
+              "pid": {
+                "types": [
+                  "number"
+                ]
+              },
+              "progress": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "bitrateKbps": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "done": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "dropFrames": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "dupFrames": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "fps": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "frame": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "outTimeMs": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "speed": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "totalSize": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              },
+              "reason": {
+                "types": [
+                  "null",
+                  "object"
+                ],
+                "fields": {
+                  "at": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "cause": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "held": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "keyChanged": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "line": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "quick": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "rejections": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              },
+              "restarts": {
+                "types": [
+                  "number"
+                ]
+              },
+              "stalled": {
+                "types": [
+                  "boolean"
+                ]
+              },
+              "stalledSec": {
+                "types": [
+                  "number"
+                ]
+              },
+              "startedAt": {
+                "types": [
+                  "null",
+                  "string"
+                ]
+              },
+              "state": {
+                "types": [
+                  "string"
+                ]
+              },
+              "uptimeSec": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "backupEnabled": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "backupLive": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "degraded": {
+            "types": [
+              "string"
+            ]
+          },
+          "error": {
+            "types": [
+              "string"
+            ]
+          },
+          "feed": {
+            "types": [
+              "null",
+              "object"
+            ],
+            "fields": {
+              "kind": {
+                "types": [
+                  "string"
+                ]
+              },
+              "lastError": {
+                "types": [
+                  "string"
+                ]
+              },
+              "name": {
+                "types": [
+                  "string"
+                ]
+              },
+              "nextRetryIn": {
+                "types": [
+                  "number"
+                ]
+              },
+              "pid": {
+                "types": [
+                  "number"
+                ]
+              },
+              "progress": {
+                "types": [
+                  "object"
+                ],
+                "fields": {
+                  "bitrateKbps": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "done": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "dropFrames": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "dupFrames": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "fps": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "frame": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "outTimeMs": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "speed": {
+                    "types": [
+                      "number"
+                    ]
+                  },
+                  "totalSize": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              },
+              "reason": {
+                "types": [
+                  "null",
+                  "object"
+                ],
+                "fields": {
+                  "at": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "cause": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "held": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "keyChanged": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "line": {
+                    "types": [
+                      "string"
+                    ]
+                  },
+                  "quick": {
+                    "types": [
+                      "boolean"
+                    ]
+                  },
+                  "rejections": {
+                    "types": [
+                      "number"
+                    ]
+                  }
+                }
+              },
+              "restarts": {
+                "types": [
+                  "number"
+                ]
+              },
+              "stalled": {
+                "types": [
+                  "boolean"
+                ]
+              },
+              "stalledSec": {
+                "types": [
+                  "number"
+                ]
+              },
+              "startedAt": {
+                "types": [
+                  "null",
+                  "string"
+                ]
+              },
+              "state": {
+                "types": [
+                  "string"
+                ]
+              },
+              "uptimeSec": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "pinned": {
+            "types": [
+              "string"
+            ]
+          },
+          "primaryLink": {
+            "types": [
+              "null",
+              "object"
+            ],
+            "fields": {
+              "bitrateKbps": {
+                "types": [
+                  "null",
+                  "number"
+                ]
+              },
+              "lossPercent": {
+                "types": [
+                  "null",
+                  "number"
+                ]
+              },
+              "rttMs": {
+                "types": [
+                  "null",
+                  "number"
+                ]
+              }
+            }
+          },
+          "primaryLive": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "reason": {
+            "types": [
+              "string"
+            ]
+          },
+          "relayPort": {
+            "types": [
+              "number"
+            ]
+          },
+          "slateEnabled": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "switchedAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "switches": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      },
+      "ingest": {
+        "any": true
+      },
+      "loudness": {
+        "any": true
+      },
+      "meters": {
+        "any": true
+      },
+      "preview": {
+        "any": true
+      },
+      "recorder": {
+        "any": true
+      },
+      "relay": {
+        "any": true
+      },
+      "renditions": {
+        "any": true
+      },
+      "silence": {
+        "any": true
+      },
+      "source": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "annotations": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "denoise": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "label": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "language": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "role": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "track": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            }
+          },
+          "id": {
+            "types": [
+              "number"
+            ]
+          },
+          "metersDropped": {
+            "types": [
+              "number"
+            ]
+          },
+          "name": {
+            "types": [
+              "string"
+            ]
+          },
+          "probed": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "synthetic": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "tracks": {
+            "types": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "channels": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "codec": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "index": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "language": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "layout": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "title": {
+                  "types": [
+                    "string"
+                  ]
+                }
+              }
+            }
+          },
+          "video": {
+            "types": [
+              "null",
+              "object"
+            ],
+            "fields": {
+              "bitrate": {
+                "types": [
+                  "number"
+                ]
+              },
+              "codec": {
+                "types": [
+                  "string"
+                ]
+              },
+              "frameRate": {
+                "types": [
+                  "number"
+                ]
+              },
+              "height": {
+                "types": [
+                  "number"
+                ]
+              },
+              "level": {
+                "types": [
+                  "number"
+                ]
+              },
+              "pixFmt": {
+                "types": [
+                  "string"
+                ]
+              },
+              "profile": {
+                "types": [
+                  "string"
+                ]
+              },
+              "width": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "POST /destinations/delay/dump-all": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "action": {
+        "types": [
+          "string"
+        ]
+      },
+      "results": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "clamped": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "complete": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "configuredSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "delayAfterSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "delayBeforeSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "dumpedSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "forced": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "message": {
+              "types": [
+                "string"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "outcome": {
+              "types": [
+                "string"
+              ]
+            },
+            "recovery": {
+              "types": [
+                "boolean"
+              ]
+            },
+            "requestedSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "restoresOnNextStart": {
+              "types": [
+                "boolean"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "POST /destinations/start-all": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "action": {
+        "types": [
+          "string"
+        ]
+      },
+      "results": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "outcome": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "state": {
+              "types": [
+                "string"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "POST /destinations/stop-all": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "action": {
+        "types": [
+          "string"
+        ]
+      },
+      "results": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "outcome": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "POST /destinations/{destinationId}/tracks/{track}/gain": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "applied": {
+        "types": [
+          "string"
+        ]
+      },
+      "destination": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "audio": {
+            "types": [
+              "object"
+            ]
+          },
+          "audioBitrate": {
+            "types": [
+              "number"
+            ]
+          },
+          "captionMode": {
+            "types": [
+              "string"
+            ]
+          },
+          "compliance": {
+            "types": [
+              "object"
+            ]
+          },
+          "createdAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "enabled": {
+            "types": [
+              "boolean"
+            ]
+          },
+          "facebook": {
+            "types": [
+              "object"
+            ]
+          },
+          "id": {
+            "types": [
+              "number"
+            ]
+          },
+          "kind": {
+            "types": [
+              "string"
+            ]
+          },
+          "lifecycle": {
+            "types": [
+              "object"
+            ]
+          },
+          "name": {
+            "types": [
+              "string"
+            ]
+          },
+          "platform": {
+            "types": [
+              "string"
+            ]
+          },
+          "position": {
+            "types": [
+              "number"
+            ]
+          },
+          "profile": {
+            "types": [
+              "object"
+            ],
+            "fields": {
+              "matrix": {
+                "types": [
+                  "null"
+                ]
+              },
+              "mode": {
+                "types": [
+                  "string"
+                ]
+              },
+              "normalize": {
+                "types": [
+                  "string"
+                ]
+              },
+              "sampleRate": {
+                "types": [
+                  "number"
+                ]
+              },
+              "tracks": {
+                "types": [
+                  "array"
+                ],
+                "items": {
+                  "types": [
+                    "object"
+                  ],
+                  "fields": {
+                    "enabled": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "gain": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "muted": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "track": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "resilience": {
+            "types": [
+              "object"
+            ]
+          },
+          "sourceId": {
+            "types": [
+              "number"
+            ]
+          },
+          "streamKey": {
+            "types": [
+              "string"
+            ]
+          },
+          "transport": {
+            "types": [
+              "object"
+            ]
+          },
+          "updatedAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "url": {
+            "types": [
+              "string"
+            ]
+          }
+        }
+      },
+      "reason": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "POST /destinations/{id}/delay/dump": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "clamped": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "complete": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "configuredSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "delayAfterSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "delayBeforeSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "dumpedSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "forced": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "id": {
+        "types": [
+          "number"
+        ]
+      },
+      "name": {
+        "types": [
+          "string"
+        ]
+      },
+      "recovery": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "requestedSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "restoresOnNextStart": {
+        "types": [
+          "boolean"
+        ]
+      }
+    }
+  },
+  "POST /destinations/{id}/restart": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "status": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "POST /destinations/{id}/start": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "enabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "state": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "POST /destinations/{id}/stop": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "enabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "reaped": {
+        "types": [
+          "boolean"
+        ]
+      }
+    }
+  },
+  "POST /failover/source": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "active": {
+        "types": [
+          "string"
+        ]
+      },
+      "backupEnabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "backupLive": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "feed": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "kind": {
+            "types": [
+              "string"
+            ]
+          },
+          "name": {
+            "types": [
+              "string"
+            ]
+          },
+          "pid": {
+            "types": [
+              "number"
+            ]
+          },
+          "progress": {
+            "types": [
+              "object"
+            ],
+            "fields": {
+              "bitrateKbps": {
+                "types": [
+                  "number"
+                ]
+              },
+              "done": {
+                "types": [
+                  "boolean"
+                ]
+              },
+              "dropFrames": {
+                "types": [
+                  "number"
+                ]
+              },
+              "dupFrames": {
+                "types": [
+                  "number"
+                ]
+              },
+              "fps": {
+                "types": [
+                  "number"
+                ]
+              },
+              "frame": {
+                "types": [
+                  "number"
+                ]
+              },
+              "outTimeMs": {
+                "types": [
+                  "number"
+                ]
+              },
+              "speed": {
+                "types": [
+                  "number"
+                ]
+              },
+              "totalSize": {
+                "types": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "restarts": {
+            "types": [
+              "number"
+            ]
+          },
+          "startedAt": {
+            "types": [
+              "string"
+            ]
+          },
+          "state": {
+            "types": [
+              "string"
+            ]
+          },
+          "uptimeSec": {
+            "types": [
+              "number"
+            ]
+          }
+        }
+      },
+      "primaryLive": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "reason": {
+        "types": [
+          "string"
+        ]
+      },
+      "relayPort": {
+        "types": [
+          "number"
+        ]
+      },
+      "slateEnabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "switchedAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "switches": {
+        "types": [
+          "number"
+        ]
+      }
+    }
+  },
+  "POST /polls": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "byPlatform": {
+        "types": [
+          "object"
+        ]
+      },
+      "durationSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "endsAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "id": {
+        "types": [
+          "number"
+        ]
+      },
+      "options": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "byPlatform": {
+              "types": [
+                "object"
+              ]
+            },
+            "label": {
+              "types": [
+                "string"
+              ]
+            },
+            "votes": {
+              "types": [
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "question": {
+        "types": [
+          "string"
+        ]
+      },
+      "startedAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "state": {
+        "types": [
+          "string"
+        ]
+      },
+      "total": {
+        "types": [
+          "number"
+        ]
+      }
+    }
+  },
+  "POST /polls/{id}/end": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "byPlatform": {
+        "types": [
+          "object"
+        ]
+      },
+      "durationSeconds": {
+        "types": [
+          "number"
+        ]
+      },
+      "endedAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "endedEarly": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "endsAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "id": {
+        "types": [
+          "number"
+        ]
+      },
+      "options": {
+        "types": [
+          "array"
+        ],
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "byPlatform": {
+              "types": [
+                "object"
+              ]
+            },
+            "label": {
+              "types": [
+                "string"
+              ]
+            },
+            "votes": {
+              "types": [
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "question": {
+        "types": [
+          "string"
+        ]
+      },
+      "startedAt": {
+        "types": [
+          "string"
+        ]
+      },
+      "state": {
+        "types": [
+          "string"
+        ]
+      },
+      "total": {
+        "types": [
+          "number"
+        ]
+      }
+    }
+  },
+  "POST /recording": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "enabled": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "halted": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "installWide": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "reason": {
+        "types": [
+          "string"
+        ]
+      },
+      "state": {
+        "types": [
+          "string"
+        ]
+      }
+    }
+  },
+  "POST /routing/presets/{presetId}": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "profile": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "matrix": {
+            "types": [
+              "null"
+            ]
+          },
+          "mode": {
+            "types": [
+              "string"
+            ]
+          },
+          "normalize": {
+            "types": [
+              "string"
+            ]
+          },
+          "sampleRate": {
+            "types": [
+              "number"
+            ]
+          },
+          "tracks": {
+            "types": [
+              "array"
+            ],
+            "items": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "enabled": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "gain": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "track": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "routing": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "filterComplex": {
+            "types": [
+              "string"
+            ]
+          },
+          "normalization": {
+            "types": [
+              "string"
+            ]
+          },
+          "outLabel": {
+            "types": [
+              "string"
+            ]
+          },
+          "summary": {
+            "types": [
+              "string"
+            ]
+          },
+          "tracks": {
+            "types": [
+              "array"
+            ],
+            "items": {
+              "types": [
+                "number"
+              ]
+            }
+          },
+          "warnings": {
+            "types": [
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

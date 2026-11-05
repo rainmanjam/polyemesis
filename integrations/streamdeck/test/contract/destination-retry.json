@@ -1,0 +1,16 @@
+{
+  "case": "destination-retry",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/restart",
+    "path": "/destinations/3/restart",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "status": "restarting"
+  }
+}

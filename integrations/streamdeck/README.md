@@ -174,6 +174,37 @@ npm run pack      # validates again and writes dist/com.polyemesis.streamdeck.st
 node scripts/icons.mjs   # redraws every icon under com.polyemesis.streamdeck.sdPlugin/imgs
 ```
 
+### The contract with the server
+
+Every route the plugin calls, and the token scope it needs, is listed in
+`src/apiContract.json`. The client refuses a call that is not listed, and on a
+read token refuses an admin route without sending it (the analytics read the
+Viewers key paints from its 403 is marked `readTokenSends`). Adding a call means
+adding its route there; `test/apiContract.test.ts` fails until you do, and
+`internal/api/streamdeck_contract_test.go` then checks the server has the route,
+reaches it with an API token, and needs that scope.
+
+`test/contract/` holds the server's real answers, recorded from the handlers on a
+seeded install. `test/contract.test.ts` holds the client and every key kind to
+them, and `test/setup.ts` checks every fake answer in every test against their
+schema: a field the server does not send fails the test that served it. Wrap a
+deliberately malformed fake in `malformed()` (`test/support/contract.ts`), and
+serve a recorded answer with `golden(name)` from `test/fakeInstall.ts`. When the
+server's answers change on purpose, regenerate them from the repository root and
+review the diff:
+
+```sh
+go test ./internal/api/ -run TestTheStreamDeckContract -update-streamdeck-contract
+```
+
+The end-to-end run drives the runtime against the built binary over HTTP, with
+FFmpeg on both sides of a destination (RTMP only, so Homebrew's FFmpeg is
+enough). From the repository root:
+
+```sh
+make build-go && (cd integrations/streamdeck && npm ci) && ./scripts/streamdeck-e2e.sh
+```
+
 CI runs validate and pack on every pull request and uploads the
 `.streamDeckPlugin` as a workflow artifact. Each release attaches it, listed in
 `SHA256SUMS`, with the manifest Version set from the tag: v0.12.3 packs as

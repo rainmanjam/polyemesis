@@ -1,0 +1,315 @@
+{
+  "case": "status",
+  "request": {
+    "method": "GET",
+    "route": "/status",
+    "path": "/status",
+    "query": {
+      "source": "1"
+    },
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "destinations": [
+      {
+        "enabled": true,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 1,
+        "kind": "rtmp",
+        "name": "Main stage",
+        "normalization": "off",
+        "platform": "twitch",
+        "process": {
+          "kind": "destination",
+          "name": "dest:1",
+          "pid": 0,
+          "progress": {
+            "bitrateKbps": 0,
+            "done": false,
+            "dropFrames": 0,
+            "dupFrames": 0,
+            "fps": 0,
+            "frame": 0,
+            "outTimeMs": 0,
+            "speed": 0,
+            "totalSize": 0
+          },
+          "restarts": 0,
+          "startedAt": "2026-01-01T00:00:00Z",
+          "state": "running",
+          "uptimeSec": 0
+        },
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      },
+      {
+        "enabled": false,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 2,
+        "kind": "rtmp",
+        "name": "Backup encoder",
+        "normalization": "off",
+        "platform": "custom",
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      },
+      {
+        "enabled": true,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 3,
+        "kind": "rtmp",
+        "name": "Studio relay",
+        "normalization": "off",
+        "platform": "custom",
+        "process": {
+          "kind": "destination",
+          "lastError": "gave up after 1 consecutive restarts: exit status 1: [tcp @ 0x0] Connection to tcp://refused.faketool.invalid:1935 failed: Connection refused | [out#0/flv @ 0x0] Error opening output files: Connection refused",
+          "name": "dest:3",
+          "pid": 0,
+          "progress": {
+            "bitrateKbps": 0,
+            "done": false,
+            "dropFrames": 0,
+            "dupFrames": 0,
+            "fps": 0,
+            "frame": 0,
+            "outTimeMs": 0,
+            "speed": 0,
+            "totalSize": 0
+          },
+          "reason": {
+            "at": "2026-01-01T00:00:00Z",
+            "cause": "connection_refused",
+            "line": "[tcp @ 0x0] Connection to tcp://refused.faketool.invalid:1935 failed: Connection refused",
+            "quick": true
+          },
+          "restarts": 1,
+          "state": "failed",
+          "uptimeSec": 0
+        },
+        "reason": {
+          "at": "2026-01-01T00:00:00Z",
+          "cause": "connection_refused",
+          "line": "[tcp @ 0x0] Connection to tcp://refused.faketool.invalid:1935 failed: Connection refused",
+          "quick": true
+        },
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      },
+      {
+        "enabled": true,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 4,
+        "kind": "rtmp",
+        "name": "YouTube main",
+        "normalization": "off",
+        "platform": "youtube",
+        "process": {
+          "kind": "destination",
+          "lastError": "held after 3 quick rejections (stream key rejected); press Retry once it is fixed: exit status 1: [rtmp @ 0x0] Server error: Authentication failed: the stream key was refused | [out#0/flv @ 0x0] Error opening output files: Operation not permitted",
+          "name": "dest:4",
+          "pid": 0,
+          "progress": {
+            "bitrateKbps": 0,
+            "done": false,
+            "dropFrames": 0,
+            "dupFrames": 0,
+            "fps": 0,
+            "frame": 0,
+            "outTimeMs": 0,
+            "speed": 0,
+            "totalSize": 0
+          },
+          "reason": {
+            "at": "2026-01-01T00:00:00Z",
+            "cause": "key_rejected",
+            "held": true,
+            "line": "[rtmp @ 0x0] Server error: Authentication failed: the stream key was refused",
+            "quick": true,
+            "rejections": 3
+          },
+          "restarts": 2,
+          "state": "failed",
+          "uptimeSec": 0
+        },
+        "reason": {
+          "at": "2026-01-01T00:00:00Z",
+          "cause": "key_rejected",
+          "held": true,
+          "line": "[rtmp @ 0x0] Server error: Authentication failed: the stream key was refused",
+          "quick": true,
+          "rejections": 3
+        },
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      },
+      {
+        "delay": {
+          "bufferedSeconds": 0,
+          "diskBytes": 0,
+          "dumpable": false,
+          "effectiveSeconds": 900,
+          "fill": 0,
+          "memBytes": 0,
+          "phase": "buffering",
+          "seconds": 900
+        },
+        "delaySeconds": 900,
+        "enabled": true,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 5,
+        "kind": "rtmp",
+        "name": "Delayed feed",
+        "normalization": "off",
+        "platform": "custom",
+        "process": {
+          "kind": "destination",
+          "name": "dest:5",
+          "pid": 0,
+          "progress": {
+            "bitrateKbps": 0,
+            "done": false,
+            "dropFrames": 0,
+            "dupFrames": 0,
+            "fps": 0,
+            "frame": 0,
+            "outTimeMs": 0,
+            "speed": 0,
+            "totalSize": 0
+          },
+          "restarts": 0,
+          "state": "stopped",
+          "uptimeSec": 0
+        },
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      },
+      {
+        "delay": {
+          "bufferedSeconds": 0,
+          "diskBytes": 0,
+          "dumpable": false,
+          "effectiveSeconds": 900,
+          "fill": 0,
+          "memBytes": 0,
+          "phase": "buffering",
+          "seconds": 900
+        },
+        "delaySeconds": 900,
+        "enabled": true,
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "id": 6,
+        "kind": "rtmp",
+        "name": "Delayed backup",
+        "normalization": "off",
+        "platform": "custom",
+        "process": {
+          "kind": "destination",
+          "name": "dest:6",
+          "pid": 0,
+          "progress": {
+            "bitrateKbps": 0,
+            "done": false,
+            "dropFrames": 0,
+            "dupFrames": 0,
+            "fps": 0,
+            "frame": 0,
+            "outTimeMs": 0,
+            "speed": 0,
+            "totalSize": 0
+          },
+          "restarts": 0,
+          "state": "stopped",
+          "uptimeSec": 0
+        },
+        "sourceId": 1,
+        "summary": "Track 1 → stereo",
+        "tracks": [
+          0
+        ],
+        "warnings": null
+      }
+    ],
+    "failover": {
+      "active": "primary",
+      "backupEnabled": false,
+      "backupLive": false,
+      "feed": {
+        "kind": "source",
+        "name": "source:primary",
+        "pid": 0,
+        "progress": {
+          "bitrateKbps": 0,
+          "done": false,
+          "dropFrames": 0,
+          "dupFrames": 0,
+          "fps": 0,
+          "frame": 0,
+          "outTimeMs": 0,
+          "speed": 0,
+          "totalSize": 0
+        },
+        "restarts": 0,
+        "startedAt": "2026-01-01T00:00:00Z",
+        "state": "running",
+        "uptimeSec": 0
+      },
+      "primaryLive": true,
+      "reason": "the primary ingest is delivering again",
+      "relayPort": 0,
+      "slateEnabled": true,
+      "switchedAt": "2026-01-01T00:00:00Z",
+      "switches": 0
+    },
+    "source": {
+      "annotations": [
+        {
+          "label": "Host mic",
+          "track": 0
+        }
+      ],
+      "id": 1,
+      "name": "Main",
+      "probed": true,
+      "tracks": [
+        {
+          "channels": 2,
+          "codec": "aac",
+          "index": 0,
+          "language": "",
+          "layout": "stereo",
+          "title": ""
+        }
+      ],
+      "video": {
+        "bitrate": 4000000,
+        "codec": "h264",
+        "frameRate": 30,
+        "height": 1080,
+        "pixFmt": "yuv420p",
+        "width": 1920
+      }
+    }
+  }
+}

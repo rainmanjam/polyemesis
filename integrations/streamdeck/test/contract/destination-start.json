@@ -1,0 +1,17 @@
+{
+  "case": "destination-start",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/start",
+    "path": "/destinations/2/start",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "enabled": true,
+    "state": "volatile"
+  }
+}

@@ -5,27 +5,7 @@ import { Runtime, authKeyFor, type Surface, type SurfaceKind } from "../src/runt
 import { KEY_STATE } from "../src/render.js";
 import type { StatusPayload } from "../src/model.js";
 
-type Route = (req: TransportRequest) => TransportResponse | Error;
-
-/** A fake install. Routes are keyed "METHOD /api/v1/path"; anything unrouted is a 404. */
-function install(routes: Record<string, Route>) {
-  const sent: TransportRequest[] = [];
-  const transport: Transport = {
-    async send(req) {
-      sent.push(req);
-      const route = routes[`${req.method} ${req.url.pathname}`];
-      const out = route ? route(req) : { status: 404, body: '{"error":"no route"}' };
-      if (out instanceof Error) throw out;
-      return out;
-    },
-  };
-  return { transport, sent, writes: () => sent.filter((r) => r.method === "POST") };
-}
-
-const json = (status: number, body: unknown): Route => () => ({ status, body: JSON.stringify(body) });
-const ADMIN = json(200, { name: "Stream Deck", prefix: "pmk", scope: "admin", adminScope: true });
-const READ = json(200, { name: "Stream Deck", prefix: "pmk", scope: "read", adminScope: false });
-const PAIRED = { url: "https://studio.example", token: "t" };
+import { ADMIN, PAIRED, READ, install, json, type Route } from "./fakeInstall.js";
 
 function surface(id: string, kind: SurfaceKind, settings: Surface["settings"] = {}) {
   const rec = {

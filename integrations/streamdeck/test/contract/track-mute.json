@@ -1,0 +1,210 @@
+{
+  "case": "track-mute",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{destinationId}/tracks/{track}/gain",
+    "path": "/destinations/1/tracks/0/gain",
+    "query": {
+      "source": "1"
+    },
+    "body": {
+      "muted": true
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "applied": "restart",
+    "destination": {
+      "audio": {},
+      "audioBitrate": 160,
+      "captionMode": "off",
+      "compliance": {},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "enabled": true,
+      "facebook": {},
+      "id": 1,
+      "kind": "rtmp",
+      "lifecycle": {},
+      "name": "Main stage",
+      "platform": "twitch",
+      "position": 1,
+      "profile": {
+        "matrix": null,
+        "mode": "simple",
+        "normalize": "auto",
+        "sampleRate": 48000,
+        "tracks": [
+          {
+            "enabled": true,
+            "gain": 1,
+            "muted": true,
+            "track": 0
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 1
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 2
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 3
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 4
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 5
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 6
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 7
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 8
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 9
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 10
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 11
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 12
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 13
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 14
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 15
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 16
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 17
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 18
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 19
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 20
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 21
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 22
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 23
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 24
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 25
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 26
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 27
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 28
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 29
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 30
+          },
+          {
+            "enabled": false,
+            "gain": 1,
+            "track": 31
+          }
+        ]
+      },
+      "resilience": {},
+      "sourceId": 1,
+      "streamKey": "contract-key",
+      "transport": {},
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "url": "rtmp://live.faketool.invalid/app"
+    },
+    "reason": "volume@trk0: ffmpeg did not acknowledge the command in time"
+  }
+}

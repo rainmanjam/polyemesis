@@ -1,0 +1,42 @@
+{
+  "case": "source",
+  "request": {
+    "method": "GET",
+    "route": "/source",
+    "path": "/source",
+    "query": {
+      "source": "1"
+    },
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "annotations": [
+      {
+        "label": "Host mic",
+        "track": 0
+      }
+    ],
+    "id": 1,
+    "name": "Main",
+    "probed": true,
+    "tracks": [
+      {
+        "channels": 2,
+        "codec": "aac",
+        "index": 0,
+        "language": "",
+        "layout": "stereo",
+        "title": ""
+      }
+    ],
+    "video": {
+      "bitrate": 4000000,
+      "codec": "h264",
+      "frameRate": 30,
+      "height": 1080,
+      "pixFmt": "yuv420p",
+      "width": 1920
+    }
+  }
+}

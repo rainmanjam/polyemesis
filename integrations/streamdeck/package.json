@@ -10,6 +10,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "typecheck": "tsc --noEmit",
     "coverage": "vitest run --coverage",
     "validate": "streamdeck validate com.polyemesis.streamdeck.sdPlugin --no-update-check",

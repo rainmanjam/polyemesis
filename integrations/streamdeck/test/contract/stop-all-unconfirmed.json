@@ -1,0 +1,16 @@
+{
+  "case": "stop-all-unconfirmed",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/stop-all",
+    "path": "/destinations/stop-all",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 400,
+  "body": {
+    "error": "stopping every destination ends any live YouTube broadcast on this install, permanently -- starting them again puts video back on the wire but does not bring the broadcast back. Repeat this request with a JSON body of {\"confirm\": true} once that is intended."
+  }
+}

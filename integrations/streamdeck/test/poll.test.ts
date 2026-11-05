@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { keySettings, pollOptions } from "../src/config.js";
 import { KEY_STATE } from "../src/render.js";
 import { pollClock } from "../src/runtime.js";
-import { ADMIN, PAIRED, READ, json, runtimeFor, settle, surface } from "./fakeInstall.js";
+import { ADMIN, PAIRED, READ, json, malformedJson, runtimeFor, settle, surface } from "./fakeInstall.js";
 
 // The chat poll key (#14). Press starts the poll its settings describe, announced in every chat; while
 // a poll runs the face shows the votes and the time left, and a HELD press ends it -- the poll read at
@@ -143,7 +143,7 @@ describe("poll key", () => {
   });
 
   it("refuses a malformed poll answer", async () => {
-    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": ADMIN, "GET /api/v1/polls": json(200, { current: { id: "x" } }) });
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": ADMIN, "GET /api/v1/polls": malformedJson(200, { current: { id: "x" } }) });
     rt.configure(PAIRED);
     await rt.verify();
     const key = surface("k", "poll", SETTINGS);
