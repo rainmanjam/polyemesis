@@ -546,7 +546,7 @@ func TestARefusedBackupAnswersWithTheRowAsItStands(t *testing.T) {
 //
 // Mutation: in addBackupIngestAfterSave, drop the `case err != nil` branch so
 // the failed write falls through to `return updated, repairs`. Observed red:
-// the handler panics on a nil row.
+// the PUT answers 500, because a nil row reaches the response.
 func TestABackupForADestinationDeletedMeanwhileIsAWarning(t *testing.T) {
 	h, store, sign, stub, dest := backupFixture(t)
 	ran := landDuring(t, stub, isAddBackup, func() error { return store.DeleteDestination(dest.ID) })
