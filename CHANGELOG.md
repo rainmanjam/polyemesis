@@ -112,6 +112,25 @@ These follow from the lingering-state fixes below and are visible on purpose.
 
 ### Fixed
 
+- **Refresh stream key, the expert save and turning on a Facebook backup no longer undo a change
+  made while they ran.** Each one read a destination, waited (for the platform, up to 30 seconds,
+  or for a re-read), then wrote the whole destination back. A stop or start, a rename, a routing
+  change (a save, or a routing preset applied from the Stream Deck) or an expert save that landed
+  in that window was silently reverted, and a reverted stop was a destination the server then
+  started again.
+  - **Refresh stream key** now writes only what the platform answered: the ingest URL, the stream
+    key, the backup endpoint and its key. If the destination was linked to a different account
+    while the key was being fetched, the key is not saved and the request answers `409` with a
+    sentence saying so. A YouTube caption ingestion URL is now stored in the same write as its key,
+    so a destination is never left with the new key and no URL. If the URL cannot be stored for
+    any reason other than a missing secret key, the refresh now fails as a whole.
+  - **The expert save** (`PUT` and `DELETE /destinations/{id}/expert`) writes only the expert
+    arguments.
+  - **`PUT /destinations/{id}`** stores the edit first, then asks Facebook for the backup ingest it
+    has just turned on, and writes only the backup endpoint it gets back.
+  - Each write reads the destination again in the same transaction, runs the same checks as
+    before (validation, stream key sealing, and the repair of settings the platform cannot use),
+    and leaves every other column alone. Request and response shapes are unchanged.
 - **Deleting things now takes what referred to them** (the 2026-11-04 lingering-state audit):
   - A destination or programme delete removes the destination's id from schedules, its planned
     rollover settings, and its place in the OBS bridge configuration. A scene rule left naming

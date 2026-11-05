@@ -63,23 +63,41 @@ func (d *DB) PutCaptionIngestURL(destinationID int64, streamKey, ingestURL strin
 	if strings.TrimSpace(ingestURL) == "" {
 		return d.DeleteCaptionIngestURL(destinationID)
 	}
-	if d.box == nil {
-		return fmt.Errorf("no secret key is configured, so the caption ingestion URL cannot be stored sealed")
-	}
-	hash := streamKeyHash(streamKey)
-	if hash == "" {
-		return fmt.Errorf("a caption ingestion URL is stored with the stream key it belongs to, and this destination has none")
-	}
-	enc, err := d.box.Seal(ingestURL)
+	enc, hash, err := d.sealCaptionIngestURL(streamKey, ingestURL)
 	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(`INSERT INTO caption_ingest (destination_id, url_secret_enc, stream_key_hash, updated_at)
+	_, err = d.sql.Exec(captionIngestUpsertQuery, destinationID, enc, hash, time.Now().Unix())
+	return err
+}
+
+// ErrCaptionIngestUnsealable is why a caption ingestion URL cannot be stored on
+// this install at all: there is no secret key to seal it with.
+var ErrCaptionIngestUnsealable = errors.New("no secret key is configured, so the caption ingestion URL cannot be stored sealed")
+
+// captionIngestUpsertQuery stores a sealed caption URL and the fingerprint of
+// the key it belongs to. A constant because UpdateDestinationIngest runs it
+// inside its own transaction.
+const captionIngestUpsertQuery = `INSERT INTO caption_ingest (destination_id, url_secret_enc, stream_key_hash, updated_at)
 		VALUES (?,?,?,?)
 		ON CONFLICT(destination_id) DO UPDATE SET url_secret_enc=excluded.url_secret_enc,
-			stream_key_hash=excluded.stream_key_hash, updated_at=excluded.updated_at`,
-		destinationID, enc, hash, time.Now().Unix())
-	return err
+			stream_key_hash=excluded.stream_key_hash, updated_at=excluded.updated_at`
+
+// sealCaptionIngestURL is what PutCaptionIngestURL stores for a URL: the sealed
+// URL and the fingerprint of streamKey. It touches no table.
+func (d *DB) sealCaptionIngestURL(streamKey, ingestURL string) (enc []byte, hash string, err error) {
+	if d.box == nil {
+		return nil, "", ErrCaptionIngestUnsealable
+	}
+	hash = streamKeyHash(streamKey)
+	if hash == "" {
+		return nil, "", fmt.Errorf("a caption ingestion URL is stored with the stream key it belongs to, and this destination has none")
+	}
+	enc, err = d.box.Seal(ingestURL)
+	if err != nil {
+		return nil, "", err
+	}
+	return enc, hash, nil
 }
 
 // CaptionIngestURL returns the stored URL when it belongs to streamKey, and ""
@@ -116,9 +134,13 @@ func (d *DB) HasCaptionIngestURL(destinationID int64, streamKey string) (bool, e
 	return u != "", err
 }
 
+// captionIngestDeleteQuery forgets a destination's caption URL. A constant
+// because the narrow destination writers run it inside their own transaction.
+const captionIngestDeleteQuery = `DELETE FROM caption_ingest WHERE destination_id = ?`
+
 // DeleteCaptionIngestURL forgets a destination's caption URL.
 func (d *DB) DeleteCaptionIngestURL(destinationID int64) error {
-	_, err := d.sql.Exec(`DELETE FROM caption_ingest WHERE destination_id = ?`, destinationID)
+	_, err := d.sql.Exec(captionIngestDeleteQuery, destinationID)
 	return err
 }
 
