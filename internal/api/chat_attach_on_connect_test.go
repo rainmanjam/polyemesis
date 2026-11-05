@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -830,40 +831,80 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 				}
 			})
 
+			// A real reconnect and real disconnects through the router, with
+			// no seam. The disconnect does not fire once: a single one finishes
+			// before the connect has made its two platform round trips, the
+			// connect then tidies up after it, and the order that matters most
+			// -- a disconnect landing after the connect has attached -- never
+			// comes up. So it keeps disconnecting until the connect returns,
+			// and lands all along the connect, its end included.
+			//
+			// The connect must succeed every round (it stored its account,
+			// whatever came after), and the Hub must agree with the database.
+			// This is the test that caught the three-statement upsert on CI:
+			// a disconnect between its write and its read-back failed the
+			// connect with a bare "not found".
+			//
+			// Mutation: make detachAccountChat a no-op. Observed FAIL ("the
+			// account is gone and its chat is still attached").
 			t.Run("racing for real", func(t *testing.T) {
 				s, h, store, sign := connected(t)
 				for round := range 20 {
-					id := accountID(t, store, p, ref)
-					if id == 0 {
+					if accountID(t, store, p, ref) == 0 {
 						connect(t, h, sign, store, fmt.Sprintf("state-restore-%d", round))
-						id = accountID(t, store, p, ref)
 					}
-					var wg sync.WaitGroup
-					var connectErr error
-					var deleted int
+					var (
+						wg         sync.WaitGroup
+						finished   atomic.Bool
+						connectErr error
+						deleteErr  atomic.Value
+						deletes    atomic.Int64
+					)
 					start := make(chan struct{})
 					wg.Add(2)
 					go func() {
 						defer wg.Done()
+						defer finished.Store(true)
 						<-start
 						_, connectErr = oauthCallback(h, sign, store, p, fmt.Sprintf("state-round-%d", round))
 					}()
 					go func() {
 						defer wg.Done()
 						<-start
-						r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", id), nil)
-						sign(r)
-						w := httptest.NewRecorder()
-						h.ServeHTTP(w, r)
-						deleted = w.Code
+						for !finished.Load() {
+							accts, err := store.ListPlatformAccounts()
+							if err != nil {
+								deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
+								return
+							}
+							for _, a := range accts {
+								if a.Platform != p || a.AccountRef != ref {
+									continue
+								}
+								r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", a.ID), nil)
+								sign(r)
+								w := httptest.NewRecorder()
+								h.ServeHTTP(w, r)
+								// 404 is this loop's previous pass, or the
+								// connect's own re-created row already gone.
+								if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
+									deleteErr.Store(fmt.Sprintf("disconnect: status %d, body %s", w.Code, w.Body.String()))
+									return
+								}
+								deletes.Add(1)
+							}
+						}
 					}()
 					close(start)
 					wg.Wait()
 					if connectErr != nil {
 						t.Fatalf("round %d: connect: %v", round, connectErr)
 					}
-					if deleted != http.StatusOK && deleted != http.StatusNotFound {
-						t.Fatalf("round %d: disconnect: status %d", round, deleted)
+					if e := deleteErr.Load(); e != nil {
+						t.Fatalf("round %d: %s", round, e)
+					}
+					if deletes.Load() == 0 {
+						t.Fatalf("round %d: no disconnect ran during the connect, so the round raced nothing", round)
 					}
 					agrees(t, s, store, fmt.Sprintf("round %d", round))
 				}
