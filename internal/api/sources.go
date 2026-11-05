@@ -663,7 +663,13 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	// the schema does by CASCADE. Its recordings survive with a NULL source_id.
 	// The destinations' ids leave schedules and rollover in the same
 	// transaction (db.DeleteSourcePruned).
-	prune, err := s.store.DeleteSourcePruned(id)
+	prune, err := s.store.DeleteSourcePruned(id, *req.Destinations)
+	if errors.Is(err, db.ErrDestinationsChanged) {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"this programme's destinations changed while it was being deleted (%v); nothing was "+
+				"deleted. Read the count again and confirm the current number.", err))
+		return
+	}
 	if err != nil {
 		writeError(w, sourceStatus(err), err.Error())
 		return

@@ -303,6 +303,13 @@ const errText = (err: unknown, fallback: string) =>
 /** The tabs, so ?tab= can only name one that exists. */
 const AUTOMATION_TABS = ["alerts", "schedules", "hooks", "mcp"] as const;
 
+/** A schedule save or delete's `warnings`, in the server's words: an event
+ *  page the change could not withdraw (Facebook has no cancel call), or a
+ *  one-time schedule beyond Facebook's seven-day horizon. */
+function sayScheduleWarnings(res: { warnings?: string[] } | undefined): void {
+  for (const w of res?.warnings ?? []) toast.warning(w, { duration: 15000 });
+}
+
 export function AutomationPage() {
   const t = useT();
   // ?tab=mcp is where the System page's MCP status line and the docs point.
@@ -998,7 +1005,7 @@ function Schedules({
 
   const toggle = async (s: Schedule, enabled: boolean) => {
     try {
-      await autoApi.put(`/schedules/${s.id}`, {
+      const res = await autoApi.put<{ warnings?: string[] }>(`/schedules/${s.id}`, {
         name: s.name,
         enabled,
         action: s.action,
@@ -1013,6 +1020,9 @@ function Schedules({
         runAt: s.runAt,
         graceSeconds: s.graceSeconds,
       });
+      // Switching a schedule off withdraws the events it pre-announced; one
+      // that cannot be withdrawn from here is named.
+      sayScheduleWarnings(res);
       onReload();
     } catch (err) {
       toast.error(errText(err, t("auto.couldNotChangeTheSchedule")));
@@ -1023,8 +1033,11 @@ function Schedules({
 
   const remove = async (s: Schedule) => {
     try {
-      await autoApi.del(`/schedules/${s.id}`);
+      const res = await autoApi.del<{ status: string; warnings?: string[] }>(`/schedules/${s.id}`);
       toast.success(t("auto.scheduleDeleted"));
+      // What the delete could not withdraw -- a Facebook event page, which
+      // has no cancel call -- in the server's words.
+      sayScheduleWarnings(res);
       onReload();
     } catch (err) {
       toast.error(errText(err, t("auto.couldNotDeleteTheSchedule")));
@@ -1247,9 +1260,11 @@ function ScheduleDialog({
         runAt: form.runAt || new Date(0).toISOString(),
         graceSeconds: form.graceSeconds,
       };
-      if (editing) await autoApi.put(`/schedules/${form.id}`, body);
-      else await autoApi.post("/schedules", body);
+      const res = editing
+        ? await autoApi.put<{ warnings?: string[] }>(`/schedules/${form.id}`, body)
+        : await autoApi.post<{ warnings?: string[] }>("/schedules", body);
       toast.success(editing ? t("auto.scheduleSaved") : t("auto.scheduleCreated"));
+      sayScheduleWarnings(res);
       onSaved();
     } catch (err) {
       toast.error(errText(err, t("auto.couldNotSaveTheSchedule")));

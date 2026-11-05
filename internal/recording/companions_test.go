@@ -184,3 +184,17 @@ func TestRemoveTranscriptFilesForOneTrack(t *testing.T) {
 		t.Errorf("whole delete removed %v, want only rec-a-host.srt", removed)
 	}
 }
+
+// A master on disk that the scan has not indexed yet is still a neighbour: its
+// transcript, whose name starts with the deleted one's, is kept.
+func TestAnUnindexedNeighbourOnDiskKeepsItsFiles(t *testing.T) {
+	f := newCompanionFixture(t)
+	f.master(t, "show.mkv", 9*time.Hour)
+	writeFile(t, f.dir, "show-backup.mkv", 16) // on disk, not in the index
+	f.file(t, transcribe.TranscriptsSubdir, "show.json")
+	f.file(t, transcribe.TranscriptsSubdir, "show-backup.json")
+	f.del(t, "show.mkv")
+	if got := f.listing(t, transcribe.TranscriptsSubdir); !slices.Equal(got, []string{"show-backup.json"}) {
+		t.Errorf("transcripts after the delete: %v, want only the unindexed neighbour's", got)
+	}
+}

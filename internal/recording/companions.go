@@ -56,9 +56,22 @@ func splitMasterName(filename string) (string, time.Time, bool) {
 // deleted, a recording whose row and master are already gone. survivors is
 // every other recording still indexed. Best-effort, like removeDerived: a
 // leftover is logged, never a reason to fail the delete.
+//
+// THE DISK COUNTS AS A SURVIVOR TOO. survivors comes from the index, and a
+// master the scan has not indexed yet is still somebody's recording; its
+// stems and transcripts must not be read as this one's for want of a row. So
+// every master still on disk is added to the set the ownership rules protect.
 func (m *Manager) removeCompanions(deleted string, survivors []string) {
-	m.removeOwnStems(deleted, survivors)
-	if _, err := RemoveTranscriptFiles(m.dir, deleted, survivors, nil); err != nil {
+	protected := append([]string(nil), survivors...)
+	if entries, err := os.ReadDir(m.dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && isRecording(e.Name()) && e.Name() != filepath.Base(deleted) {
+				protected = append(protected, e.Name())
+			}
+		}
+	}
+	m.removeOwnStems(deleted, protected)
+	if _, err := RemoveTranscriptFiles(m.dir, deleted, protected, nil); err != nil {
 		m.log.Warn("cannot remove a deleted recording's transcripts", "file", deleted, "err", err)
 	}
 }

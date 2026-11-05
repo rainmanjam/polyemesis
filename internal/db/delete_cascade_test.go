@@ -148,7 +148,7 @@ func TestDeletingAProgrammePrunesItsDestinationsFromSchedules(t *testing.T) {
 	if _, err := f.d.UpdateSchedule(sc); err != nil {
 		t.Fatal(err)
 	}
-	prune, err := f.d.DeleteSourcePruned(f.source)
+	prune, err := f.d.DeleteSourcePruned(f.source, 2)
 	if err != nil {
 		t.Fatalf("DeleteSourcePruned: %v", err)
 	}
@@ -352,5 +352,21 @@ func TestDeletingCredentialsDropsTheirPendingAuthorizations(t *testing.T) {
 	}
 	if p, _, err := d.TakeOAuthState("youtube-state"); err != nil || p != PlatformYouTube {
 		t.Errorf("another platform's pending sign-in went too: platform=%q err=%v", p, err)
+	}
+}
+
+// The confirmed count is compared inside the delete's transaction, so a
+// destination added after the handler read it refuses the delete and nothing
+// goes.
+func TestAProgrammeDeleteRefusesWhenItsDestinationsChanged(t *testing.T) {
+	f := newCascadeFixture(t)
+	if _, err := f.d.DeleteSourcePruned(f.source, 1); !errors.Is(err, ErrDestinationsChanged) {
+		t.Fatalf("a delete confirmed for 1 destination on a programme with 2: %v, want ErrDestinationsChanged", err)
+	}
+	if _, err := f.d.GetSource(f.source); err != nil {
+		t.Fatalf("the refused delete removed the programme: %v", err)
+	}
+	if got := f.schedule(t, f.both); len(got.DestinationIDs) != 2 {
+		t.Errorf("the refused delete pruned schedules: %v", got.DestinationIDs)
 	}
 }
