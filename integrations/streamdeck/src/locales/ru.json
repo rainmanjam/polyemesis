@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Удерживайте, чтобы применить",
   "streamdeck.preset.applying": "Применяется",
   "streamdeck.preset.noIngest": "Нет входного потока",
+  "streamdeck.preset.applied": "Применено: {count}",
   "streamdeck.pi.presetLabel": "Пресет маршрутизации",
   "streamdeck.pi.presetHint": "Применение пресета может перезапустить назначения этой программы.",
   "streamdeck.pi.presetsFailed": "Не удалось загрузить список пресетов.",

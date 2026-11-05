@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "長押しで適用",
   "streamdeck.preset.applying": "適用中",
   "streamdeck.preset.noIngest": "入力なし",
+  "streamdeck.preset.applied": "{count}件に適用",
   "streamdeck.pi.presetLabel": "ルーティングプリセット",
   "streamdeck.pi.presetHint": "プリセットを適用すると、このプログラムの配信先が再起動することがあります。",
   "streamdeck.pi.presetsFailed": "プリセット一覧を読み込めませんでした。",

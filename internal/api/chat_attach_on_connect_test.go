@@ -50,9 +50,28 @@ type fakeConnectPlatform struct {
 	// tell one connect's adapter from the next by the token on its PASS line.
 	tokens []string
 	issued int
-	// duringExchange, when set, runs inside Twitch's token exchange: after the
-	// callback has read the credentials and before it stores the account.
+	// duringExchange, when set, runs inside Twitch's and X's token exchange:
+	// after the callback has read the credentials and before it stores the
+	// account. Set it with setDuringExchange once requests can be in flight.
 	duringExchange func()
+}
+
+// setDuringExchange arms (or, with nil, clears) duringExchange under the lock
+// serve reads it with.
+func (f *fakeConnectPlatform) setDuringExchange(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.duringExchange = fn
+}
+
+// exchanging runs duringExchange, if one is armed, outside the lock.
+func (f *fakeConnectPlatform) exchanging() {
+	f.mu.Lock()
+	during := f.duringExchange
+	f.mu.Unlock()
+	if during != nil {
+		during()
+	}
 }
 
 func newFakeConnectPlatform(t *testing.T, tokens ...string) *fakeConnectPlatform {
@@ -73,11 +92,8 @@ func (f *fakeConnectPlatform) serve(w http.ResponseWriter, r *http.Request) {
 		if len(f.tokens) > 0 {
 			tok, f.tokens = f.tokens[0], f.tokens[1:]
 		}
-		during := f.duringExchange
 		f.mu.Unlock()
-		if during != nil {
-			during()
-		}
+		f.exchanging()
 		write(w, stubAnswer{http.StatusOK, `{"access_token":"` + tok + `","refresh_token":"tw-rt",` +
 			`"expires_in":14400,"scope":["chat:read","chat:edit"],"token_type":"bearer"}`})
 	case "/users":
@@ -87,6 +103,7 @@ func (f *fakeConnectPlatform) serve(w http.ResponseWriter, r *http.Request) {
 		write(w, stubAnswer{http.StatusOK, `{"device_code":"DEV-CODE","user_code":"ABCD-1234",` +
 			`"verification_uri":"https://www.twitch.tv/activate","expires_in":1800,"interval":5}`})
 	case "/2/oauth2/token":
+		f.exchanging()
 		write(w, stubAnswer{http.StatusOK, `{"access_token":"x-at","refresh_token":"x-rt",` +
 			`"expires_in":7200,"scope":"tweet.read users.read offline.access","token_type":"bearer"}`})
 	case "/2/users/me":
@@ -520,13 +537,13 @@ func TestConnectingAPlatformWithoutCredentialsStartsNoChat(t *testing.T) {
 	// The fake platform answers on its own goroutine, so the status comes back
 	// over a channel rather than through a shared variable.
 	removed := make(chan int, 1)
-	fake.duringExchange = func() {
+	fake.setDuringExchange(func() {
 		r := jsonRequest(t, http.MethodDelete, "/api/v1/platforms/credentials/twitch", map[string]bool{"confirm": true})
 		sign(r)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		removed <- w.Code
-	}
+	})
 	connectTwitch(t, h, sign, store, "state-twitch-race")
 
 	if code := <-removed; code != http.StatusOK {
@@ -843,82 +860,223 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 				}
 			})
 
-			// A real reconnect and real disconnects through the router, with
-			// no seam. The disconnect does not fire once: a single one finishes
-			// before the connect has made its two platform round trips, the
-			// connect then tidies up after it, and the order that matters most
-			// -- a disconnect landing after the connect has attached -- never
-			// comes up. So it keeps disconnecting until the connect returns,
-			// and lands all along the connect, its end included.
+			// A real reconnect and real disconnects through the router, in two
+			// kinds of round that alternate, so that both outcomes of the race
+			// are asserted. In every round the disconnect overlaps the connect
+			// by construction, not by luck: on CI the connect once finished
+			// before a lone disconnect loop had a turn, and the round raced
+			// nothing.
 			//
-			// The connect must succeed every round (it stored its account,
-			// whatever came after), and the Hub must agree with the database.
-			// This is the test that caught the three-statement upsert on CI:
-			// a disconnect between its write and its read-back failed the
-			// connect with a bare "not found".
+			// EVEN ROUNDS: THE DISCONNECT WINS. A loop disconnects for as long
+			// as the connect runs, landing all along it, and the connect itself
+			// starts one more from inside its attach (whileChatAttach, under
+			// chatWire, after it has re-read the row). That one removes the row
+			// after the connect has read it; if the row is already gone there, a
+			// loop disconnect removed it between the connect's write and that
+			// point. Either way the round has raced, and it ends with the
+			// account gone and no chat left.
 			//
-			// Mutation: make detachAccountChat a no-op. Observed FAIL ("the
-			// account is gone and its chat is still attached").
+			// ODD ROUNDS: THE CONNECT WINS. A disconnect runs inside the
+			// connect's own token exchange (the fake's duringExchange), so it is
+			// in flight with the connect and finished before the connect writes.
+			// No loop runs. The connect re-creates the account under a new id,
+			// so the round ends connected with exactly one adapter, and a new
+			// one: never the adapter from before the round, whose row is gone.
+			//
+			// Every round: the connect succeeds (it stored its account, whatever
+			// came after), it reaches its attach exactly once, and the Hub
+			// agrees with the database. This is also the test that caught the
+			// three-statement upsert on CI: a disconnect between its write and
+			// its read-back failed the connect with a bare "not found".
+			//
+			// The account starts attached by StartChat, not by a connect, so a
+			// mutation of the connect's own attach is caught by the rounds
+			// rather than by the setup.
+			//
+			// Mutations:
+			//   - detachAccountChat made a no-op: FAIL in round 0, an even round
+			//     ("the account is gone and its chat is still attached").
+			//   - attachAccountChat never calls connectChat: FAIL in round 1, an
+			//     odd round ("the account is connected and has 0 chat
+			//     adapters").
 			t.Run("racing for real", func(t *testing.T) {
-				s, h, store, sign := connected(t)
+				fake := newFakeConnectPlatform(t)
+				s, h, store, sign := chatConnectServer(t, fake, newFakeTwitchIRC(t), p)
+				name := map[db.Platform]string{db.PlatformTwitch: "Dallas", db.PlatformX: "jev"}[p]
+				if _, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+					Platform: p, AccountName: name, AccountRef: ref,
+					AccessToken: "seed-at", RefreshToken: "seed-rt", ExpiresAt: time.Now().Add(4 * time.Hour),
+				}); err != nil {
+					t.Fatalf("seed the account: %v", err)
+				}
+				if n := startChat(t, s); n != 1 {
+					t.Fatalf("StartChat attached %d adapters, want the 1 seeded account", n)
+				}
+				agrees(t, s, store, "after StartChat")
+
+				// disconnect is a real disconnect through the router, safe off
+				// the test goroutine. 404 is another disconnect getting there
+				// first, which is the point of the race; the status is returned
+				// for the round that needs the delete to be its own.
+				disconnect := func(id int64) (int, error) {
+					r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", id), nil)
+					sign(r)
+					w := httptest.NewRecorder()
+					h.ServeHTTP(w, r)
+					if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
+						return w.Code, fmt.Errorf("disconnect: status %d, body %s", w.Code, w.Body.String())
+					}
+					return w.Code, nil
+				}
+				// rowID is the account's id, or zero when it is gone.
+				rowID := func() (int64, error) {
+					accts, err := store.ListPlatformAccounts()
+					if err != nil {
+						return 0, err
+					}
+					for _, a := range accts {
+						if a.Platform == p && a.AccountRef == ref {
+							return a.ID, nil
+						}
+					}
+					return 0, nil
+				}
+
 				for round := range 20 {
 					if accountID(t, store, p, ref) == 0 {
 						connect(t, h, sign, store, fmt.Sprintf("state-restore-%d", round))
 					}
+					before, _ := s.chat.Adapter(p, ref)
+					connectWins := round%2 == 1
 					var (
 						wg         sync.WaitGroup
 						finished   atomic.Bool
 						connectErr error
 						deleteErr  atomic.Value
-						deletes    atomic.Int64
+						attaches   atomic.Int32
+						exchanges  atomic.Int32
+						raced      atomic.Bool
 					)
-					start := make(chan struct{})
-					wg.Add(2)
-					go func() {
-						defer wg.Done()
-						defer finished.Store(true)
-						<-start
-						_, connectErr = oauthCallback(h, sign, store, p, fmt.Sprintf("state-round-%d", round))
-					}()
-					go func() {
-						defer wg.Done()
-						<-start
-						for !finished.Load() {
-							accts, err := store.ListPlatformAccounts()
+
+					if connectWins {
+						// Armed for this round's connect only, after the restore
+						// above; cleared once the connect has returned.
+						s.whileChatAttach = func() { attaches.Add(1) }
+						fake.setDuringExchange(func() {
+							exchanges.Add(1)
+							id, err := rowID()
 							if err != nil {
 								deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
 								return
 							}
-							for _, a := range accts {
-								if a.Platform != p || a.AccountRef != ref {
-									continue
+							if id == 0 {
+								deleteErr.Store("no account to disconnect before the connect's write")
+								return
+							}
+							code, err := disconnect(id)
+							if err != nil {
+								deleteErr.Store(err.Error())
+								return
+							}
+							if code != http.StatusOK {
+								deleteErr.Store(fmt.Sprintf("the disconnect before the write answered %d, want 200: it removed nothing", code))
+								return
+							}
+							raced.Store(true)
+						})
+						_, connectErr = oauthCallback(h, sign, store, p, fmt.Sprintf("state-round-%d", round))
+						fake.setDuringExchange(nil)
+					} else {
+						// Armed for this round's connect only; cleared once every
+						// goroutine below has finished.
+						s.whileChatAttach = func() {
+							attaches.Add(1)
+							id, err := rowID()
+							if err != nil {
+								deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
+								return
+							}
+							raced.Store(true)
+							if id == 0 {
+								return // a loop disconnect already got between the write and here
+							}
+							// The connect goroutine is still counted, so this Add
+							// cannot race the Wait below.
+							wg.Add(1)
+							go func() {
+								defer wg.Done()
+								if _, err := disconnect(id); err != nil {
+									deleteErr.Store(err.Error())
 								}
-								r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", a.ID), nil)
-								sign(r)
-								w := httptest.NewRecorder()
-								h.ServeHTTP(w, r)
-								// 404 is this loop's previous pass, or the
-								// connect's own re-created row already gone.
-								if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
-									deleteErr.Store(fmt.Sprintf("disconnect: status %d, body %s", w.Code, w.Body.String()))
+							}()
+						}
+
+						start := make(chan struct{})
+						wg.Add(2)
+						go func() {
+							defer wg.Done()
+							defer finished.Store(true)
+							<-start
+							_, connectErr = oauthCallback(h, sign, store, p, fmt.Sprintf("state-round-%d", round))
+						}()
+						go func() {
+							defer wg.Done()
+							<-start
+							for !finished.Load() {
+								id, err := rowID()
+								if err != nil {
+									deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
 									return
 								}
-								deletes.Add(1)
+								if id == 0 {
+									continue
+								}
+								if _, err := disconnect(id); err != nil {
+									deleteErr.Store(err.Error())
+									return
+								}
 							}
-						}
-					}()
-					close(start)
-					wg.Wait()
+						}()
+						close(start)
+						wg.Wait()
+					}
+					s.whileChatAttach = nil
+
+					what := fmt.Sprintf("round %d (the disconnect wins)", round)
+					if connectWins {
+						what = fmt.Sprintf("round %d (the connect wins)", round)
+					}
 					if connectErr != nil {
-						t.Fatalf("round %d: connect: %v", round, connectErr)
+						t.Fatalf("%s: connect: %v", what, connectErr)
 					}
 					if e := deleteErr.Load(); e != nil {
-						t.Fatalf("round %d: %s", round, e)
+						t.Fatalf("%s: %s", what, e)
 					}
-					if deletes.Load() == 0 {
-						t.Fatalf("round %d: no disconnect ran during the connect, so the round raced nothing", round)
+					// Invariants, not hopes: the connect reached its attach
+					// exactly once, and the round raced a disconnect.
+					if n := attaches.Load(); n != 1 {
+						t.Fatalf("%s: the connect reached its attach %d times, want exactly 1", what, n)
 					}
-					agrees(t, s, store, fmt.Sprintf("round %d", round))
+					if !raced.Load() {
+						t.Fatalf("%s: the connect returned without racing a disconnect", what)
+					}
+					row := accountID(t, store, p, ref) != 0
+					if connectWins {
+						if n := exchanges.Load(); n != 1 {
+							t.Fatalf("%s: the disconnect inside the token exchange ran %d times, want exactly 1", what, n)
+						}
+						if !row {
+							t.Fatalf("%s: the account is gone, but the connect re-created it after the disconnect", what)
+						}
+					} else if row {
+						t.Fatalf("%s: the account is still connected, but a disconnect removed it after the connect read it", what)
+					}
+					agrees(t, s, store, what)
+					if connectWins {
+						if after, _ := s.chat.Adapter(p, ref); after == before {
+							t.Fatalf("%s: the chat is still the adapter from before the round, whose account was disconnected", what)
+						}
+					}
 				}
 			})
 		})

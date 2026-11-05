@@ -222,7 +222,7 @@
           "tracks": [
             {
               "enabled": true,
-              "gain": 1,
+              "gain": 0.5,
               "track": 0
             },
             {

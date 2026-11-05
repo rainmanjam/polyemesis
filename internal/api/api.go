@@ -1439,6 +1439,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.With(s.requireSource).Post("/routing/compile", s.handleCompileRouting)
 			r.Get("/routing/presets", s.handleListPresets)
 			r.With(s.requireSource).Post("/routing/presets/{preset}", s.handleApplyPreset)
+			// The compile above stores nothing. This one stores the preset on
+			// the programme's destinations and reconciles, by a destination
+			// PUT's rules: see routing_preset_apply.go.
+			r.With(s.requireSource).Post("/routing/presets/{preset}/apply", s.handleApplyPresetToProgramme)
 
 			// Playout administration. The media itself is served outside this
 			// group; only the configuration and the operator's view of it are

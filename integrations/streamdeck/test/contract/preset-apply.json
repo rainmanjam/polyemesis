@@ -2,8 +2,8 @@
   "case": "preset-apply",
   "request": {
     "method": "POST",
-    "route": "/routing/presets/{presetId}",
-    "path": "/routing/presets/everything",
+    "route": "/routing/presets/{presetId}/apply",
+    "path": "/routing/presets/everything/apply",
     "query": {
       "source": "1"
     },
@@ -11,183 +11,1065 @@
   },
   "status": 200,
   "body": {
-    "profile": {
-      "matrix": null,
-      "mode": "simple",
-      "normalize": "auto",
-      "sampleRate": 48000,
-      "tracks": [
-        {
-          "enabled": true,
-          "gain": 1,
-          "track": 0
+    "mix": "live",
+    "preset": "everything",
+    "results": [
+      {
+        "applied": "volatile",
+        "id": 1,
+        "kept": {
+          "muted": [
+            0
+          ]
         },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 1
+        "name": "Main stage",
+        "outcome": "saved",
+        "platform": "twitch",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "muted": true,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
         },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 2
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 3
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 4
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 5
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 6
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 7
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 8
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 9
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 10
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 11
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 12
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 13
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 14
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 15
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 16
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 17
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 18
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 19
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 20
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 21
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 22
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 23
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 24
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 25
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 26
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 27
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 28
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 29
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 30
-        },
-        {
-          "enabled": false,
-          "gain": 1,
-          "track": 31
+        "reason": "volatile"
+      },
+      {
+        "id": 2,
+        "name": "Backup encoder",
+        "outcome": "saved",
+        "platform": "custom",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
         }
-      ]
-    },
-    "routing": {
-      "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
-      "normalization": "off",
-      "outLabel": "aout",
-      "summary": "Track 1 → stereo",
-      "tracks": [
-        0
-      ],
-      "warnings": null
-    }
+      },
+      {
+        "applied": "volatile",
+        "id": 3,
+        "name": "Studio relay",
+        "outcome": "saved",
+        "platform": "custom",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "reason": "volatile"
+      },
+      {
+        "applied": "volatile",
+        "id": 4,
+        "name": "YouTube main",
+        "outcome": "saved",
+        "platform": "youtube",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "reason": "volatile"
+      },
+      {
+        "id": 5,
+        "name": "Delayed feed",
+        "outcome": "saved",
+        "platform": "custom",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        }
+      },
+      {
+        "id": 6,
+        "name": "Delayed backup",
+        "outcome": "saved",
+        "platform": "custom",
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        }
+      }
+    ]
   }
 }

@@ -68,6 +68,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.preset.hold",
   "streamdeck.preset.applying",
   "streamdeck.preset.noIngest",
+  "streamdeck.preset.applied",
   "streamdeck.poll.start",
   "streamdeck.poll.live",
   "streamdeck.poll.votes",

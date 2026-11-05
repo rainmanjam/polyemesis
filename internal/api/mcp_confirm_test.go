@@ -25,8 +25,8 @@ import (
 // Mutation: drop the !a.Confirm refusal in retry_destination. Observed FAIL
 // (the unconfirmed retry dispatched a write). Mutation: drop it in
 // runApplyPreset. Observed FAIL (the profile changed). Mutation: let the
-// preview's compile count as a write (remove the wrote restore in
-// compilePreset). Observed FAIL (an unconfirmed preview was audited).
+// preview's dry run count as a write (remove the wrote restore in
+// previewPreset). Observed FAIL (an unconfirmed preview was audited).
 
 func TestRetryDestinationAsksFirstAndSaysWhatItWouldInterrupt(t *testing.T) {
 	rig := newMCPRig(t)

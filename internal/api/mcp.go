@@ -22,9 +22,9 @@ import (
 // token -- act on it.
 //
 // THE ONE DESIGN DECISION EVERYTHING ELSE RESTS ON: A TOOL IS A REST CALL.
-// Every tool is a typed description of one (or, for apply_routing_preset, two)
-// requests against the REST API, and it is carried out by serving that request
-// on this server's own router, in process, with the caller's own bearer token.
+// Every tool is a typed description of one request against the REST API (with,
+// for some writes, the reads that request needs), and it is carried out by
+// serving that request on this server's own router, in process, with the caller's own bearer token.
 // So requireAuth, requireScope, readScopeDeniedPatterns, requireSource, the
 // stop-all confirmation, the read-safe views and every publishAudit a handler
 // already makes apply to an MCP call exactly as they apply to curl. There is no

@@ -13,8 +13,9 @@
 #   3. run the deck (test/e2e/deck.e2e.test.ts): pair, read the state, start
 #      the destination and see it live at the sink, kill the sink and see the
 #      key say Failed with its reason, retry from the key and see it live
-#      again, stop it from a held stop key; then a read token's tap sends
-#      nothing.
+#      again, stop it from a held stop key, apply a routing preset from a held
+#      preset key and see the destination's stored routing carry it; then a
+#      read token's tap sends nothing.
 #
 # The deck asserts on the plugin's computed key faces, not on HTTP statuses.
 #
@@ -141,5 +142,5 @@ node "$PLUGIN/test/e2e/install.mjs" "http://127.0.0.1:$PORT" "$WORK/install.env"
 . "$WORK/install.env"
 export POLY_E2E_MARKER="$MARKER"
 
-step "3. The deck: pair, read, start, fail, retry, stop"
+step "3. The deck: pair, read, start, fail, retry, stop, apply a preset"
 (cd "$PLUGIN" && ./node_modules/.bin/vitest run --config vitest.e2e.config.ts --reporter=verbose)

@@ -81,6 +81,9 @@ type deckCase struct {
 	// Volatile lists dotted paths (with * for any array index) whose values are
 	// timing-dependent in this fixture and are normalised.
 	Volatile []string
+	// Check, when set, asserts what the request did to the install, beyond
+	// what it answered.
+	Check func(t *testing.T, f *deckFixture, g deckGolden)
 }
 
 // deckVolatileKeys are normalised wherever they appear: their values move
@@ -156,8 +159,13 @@ func (f *deckFixture) cases() []deckCase {
 		// The failover key hands control back to automatic.
 		{Name: "failover-auto", Method: "POST", Route: "/failover/source", Query: src,
 			Body: map[string]any{"source": "auto"}, Token: "admin"},
-		// The routing preset key.
-		{Name: "preset-apply", Method: "POST", Route: "/routing/presets/{presetId}", Query: src, Token: "admin"},
+		// The routing preset key. It must APPLY: the compile route it used to send
+		// answered 200 and stored nothing. How each running row took it is the
+		// platform's, as for the track keys above: the live destination's gain is
+		// back at unity on a muted track, which goes out live where live levels
+		// exist and restarts where they do not (Windows).
+		{Name: "preset-apply", Method: "POST", Route: "/routing/presets/{presetId}/apply", Query: src, Token: "admin",
+			Volatile: []string{"results.*.applied", "results.*.reason"}, Check: deckPresetApplied},
 
 		// The destination key's taps, and its refusals.
 		{Name: "destination-retry", Method: "POST", Route: "/destinations/{id}/restart",
@@ -198,6 +206,9 @@ type deckGolden struct {
 	Request deckGoldenReq `json:"request"`
 	Status  int           `json:"status"`
 	Body    any           `json:"body"`
+	// Raw is the answer as the handler wrote it, before normalising, for a
+	// case's Check. Never committed.
+	Raw []byte `json:"-"`
 }
 
 type deckGoldenReq struct {
@@ -213,14 +224,82 @@ type deckGoldenReq struct {
 // schema's reflected half. A route not here is described by its recorded
 // answers alone.
 var deckTypes = map[string]reflect.Type{
-	"GET /status":          reflect.TypeFor[engine.Status](),
-	"GET /source":          reflect.TypeFor[engine.SourceInfo](),
-	"GET /analytics/live":  reflect.TypeFor[analytics.Live](),
-	"GET /recording":       reflect.TypeFor[recordingState](),
-	"POST /recording":      reflect.TypeFor[recordingState](),
-	"GET /polls":           reflect.TypeFor[pollsResponse](),
-	"GET /destinations":    reflect.TypeFor[[]deckDestinationRow](),
-	"GET /auth/connection": reflect.TypeFor[connectionCheckBody](),
+	"GET /status":                            reflect.TypeFor[engine.Status](),
+	"GET /source":                            reflect.TypeFor[engine.SourceInfo](),
+	"GET /analytics/live":                    reflect.TypeFor[analytics.Live](),
+	"GET /recording":                         reflect.TypeFor[recordingState](),
+	"POST /recording":                        reflect.TypeFor[recordingState](),
+	"GET /polls":                             reflect.TypeFor[pollsResponse](),
+	"GET /destinations":                      reflect.TypeFor[[]deckDestinationRow](),
+	"GET /auth/connection":                   reflect.TypeFor[connectionCheckBody](),
+	"POST /routing/presets/{presetId}/apply": reflect.TypeFor[deckPresetApply](),
+}
+
+// deckPresetApply is POST /routing/presets/{preset}/apply's answer, as
+// handleApplyPresetToProgramme builds it from a map.
+type deckPresetApply struct {
+	Preset          string           `json:"preset"`
+	Mix             string           `json:"mix"`
+	DryRun          bool             `json:"dryRun,omitempty"`
+	Results         []presetApplyRow `json:"results"`
+	Warnings        []string         `json:"warnings,omitempty"`
+	ReconcileFailed bool             `json:"reconcileFailed,omitempty"`
+}
+
+// deckOffGain is the level the fixture's off destination starts at on track 0.
+// The preset key's case puts it back to unity.
+const deckOffGain = 0.5
+
+// deckPresetApplied is the preset key's case asserting that the preset was
+// APPLIED, not compiled: the off destination's stored track 0 is back at unity,
+// and the answer says so for it. Every destination of the programme is saved;
+// how a running one took it (live or restart) is the platform's, so it is not
+// asserted here -- TestAPresetAppliedThroughTheRouteIsStoredAndReachesTheRunningMix
+// holds that on a running destination.
+//
+// MUTATION: record this case against POST /routing/presets/{presetId}, the
+// compile route the key used to send. Observed: FAIL, the answer has no row for
+// the off destination (the compile route answers {profile, routing}).
+// MUTATION: roll back instead of committing in db.UpdateDestinationMixes.
+// Observed: FAIL, "the off destination's track 0 is still at 0.5: the routing
+// did not change".
+// MUTATION: leave applied and reason unset on saved rows. Observed: FAIL, the
+// live destination's row has no applied.
+func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
+	t.Helper()
+	if g.Status != http.StatusOK {
+		t.Fatalf("the preset key's apply answered %d: %v", g.Status, g.Body)
+	}
+	// The answer as written, not the golden: applied and reason are normalised
+	// there, and here they are held to what they may be.
+	var ans deckPresetApply
+	if err := json.Unmarshal(g.Raw, &ans); err != nil {
+		t.Fatalf("the preset key's apply answered %s: %v", g.Raw, err)
+	}
+	outcome := map[int64]presetApplyRow{}
+	for _, r := range ans.Results {
+		outcome[r.ID] = r
+	}
+	if r := outcome[f.off]; r.Outcome != presetSaved {
+		t.Errorf("the off destination's row is %+v, want saved", r)
+	}
+	// Running, so it took the preset one way or the other and says which: live
+	// or restart is the platform's, an empty answer is nobody's. A restart
+	// always says why (Engine.AppliedSince); a level sent live may not.
+	if r := outcome[f.live]; r.Outcome != presetSaved || (r.Applied != "live" && r.Applied != "restart") ||
+		(r.Applied == "restart" && r.Reason == "") {
+		t.Errorf("the live destination's row is %+v, want saved, and applied live or restart (with a reason)", r)
+	}
+	off, err := f.store.GetDestination(f.off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range off.Profile.Tracks {
+		if s.Track == 0 && s.Gain != 1 {
+			t.Fatalf("the preset key answered 200 and the off destination's track 0 is still at %v: "+
+				"the routing did not change", s.Gain)
+		}
+	}
 }
 
 // deckDestinationRow is one element of GET /destinations, as
@@ -249,6 +328,9 @@ func checkDeckGoldens(t *testing.T, f *deckFixture, routes []deckRoute) {
 			target = zero
 		}
 		g := target.record(t, c)
+		if c.Check != nil {
+			c.Check(t, target, g)
+		}
 		got[c.Name] = g
 		if g.Status >= 400 && g.Body != nil {
 			refusals = refusals.merge(schemaOfValue(g.Body))
@@ -321,7 +403,7 @@ func (f *deckFixture) record(t *testing.T, c deckCase) deckGolden {
 				"to deckVolatileKeys or the case's Volatile.\nfirst  %d %s\nsecond %d %s", c.Name, code, raw, again, raw2)
 		}
 	}
-	g := deckGolden{Case: c.Name, Status: code, Body: body,
+	g := deckGolden{Case: c.Name, Status: code, Body: body, Raw: raw,
 		Request: deckGoldenReq{Method: c.Method, Route: c.Route, Path: path, Body: c.Body, Token: c.Token}}
 	if len(c.Query) > 0 {
 		g.Request.Query = map[string]string{}
