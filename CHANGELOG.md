@@ -107,7 +107,9 @@ These follow from the lingering-state fixes below and are visible on purpose.
   - **Refresh stream key** now writes only what the platform answered: the ingest URL, the stream
     key, the backup endpoint and its key. If the destination was linked to a different account
     while the key was being fetched, the key is not saved and the request answers `409` with a
-    sentence saying so.
+    sentence saying so. A YouTube caption ingestion URL is now stored in the same write as its key,
+    so a destination is never left with the new key and no URL. If the URL cannot be stored for
+    any reason other than a missing secret key, the refresh now fails as a whole.
   - **The expert save** (`PUT` and `DELETE /destinations/{id}/expert`) writes only the expert
     arguments.
   - **`PUT /destinations/{id}`** stores the edit first, then asks Facebook for the backup ingest it
