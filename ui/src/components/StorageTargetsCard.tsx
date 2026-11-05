@@ -36,8 +36,12 @@ const errText = (err: unknown, fallback: string) =>
 
 /** A delete's unfinished uploads it could not abort on the service: the
  *  server's sentence, and the key and upload id the operator needs to abort
- *  each one with their provider. */
+ *  each one with their provider. One per deleted target, so a second delete
+ *  adds to the list instead of replacing the first -- whose rows, and target,
+ *  are gone, so nothing else could show them again. */
 interface Unaborted {
+  id: number;
+  target: string;
   warning: string;
   uploads: { key: string; uploadId: string; relPath: string }[];
 }
@@ -169,8 +173,8 @@ export function StorageTargetsCard() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<StorageTestResult | null>(null);
-  // What the last delete could not abort, until the operator closes it.
-  const [unaborted, setUnaborted] = useState<Unaborted | null>(null);
+  // What each delete could not abort, until the operator closes it.
+  const [unaborted, setUnaborted] = useState<Unaborted[]>([]);
   const confirmDelete = useConfirm<StorageTarget>();
 
   const load = useCallback(async () => {
@@ -252,7 +256,13 @@ export function StorageTargetsCard() {
       // target row that held them is gone, and a toast is gone in seconds. It
       // stays on the card, copyable, until it is closed.
       if (res?.warning || res?.unabortedUploads?.length) {
-        setUnaborted({ warning: res.warning ?? "", uploads: res.unabortedUploads ?? [] });
+        const left: Unaborted = {
+          id: Date.now() + Math.random(),
+          target: target.name,
+          warning: res.warning ?? "",
+          uploads: res.unabortedUploads ?? [],
+        };
+        setUnaborted((prev) => [...prev, left]);
       }
       confirmDelete.close();
       await load();
@@ -275,14 +285,16 @@ export function StorageTargetsCard() {
         <p className="text-sm text-muted-foreground">{t("storage.intro")}</p>
         {!available && <p className="text-sm text-warn">{t("storage.unavailable")}</p>}
         {loadFailed && <p className="text-sm text-down">{t("storage.loadFailed")}</p>}
-        {unaborted && (
+        {unaborted.map((left) => (
           <div
+            key={left.id}
             role="alert"
             data-testid="storage-unaborted"
             className="flex flex-col gap-1.5 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm"
           >
-            {unaborted.warning && <p>{unaborted.warning}</p>}
-            {unaborted.uploads.length > 0 && (
+            <span className="font-mono text-tiny">{left.target}</span>
+            {left.warning && <p>{left.warning}</p>}
+            {left.uploads.length > 0 && (
               <table className="text-tiny">
                 <thead>
                   <tr>
@@ -291,7 +303,7 @@ export function StorageTargetsCard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {unaborted.uploads.map((u) => (
+                  {left.uploads.map((u) => (
                     <tr key={`${u.key}\n${u.uploadId}`}>
                       <td className="select-all break-all pr-3 align-top font-mono">{u.key}</td>
                       <td className="select-all break-all align-top font-mono">{u.uploadId}</td>
@@ -301,14 +313,14 @@ export function StorageTargetsCard() {
               </table>
             )}
             <span className="flex gap-1.5">
-              {unaborted.uploads.length > 0 && (
+              {left.uploads.length > 0 && (
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() =>
                     copyToClipboard(
                       t,
-                      unaborted.uploads.map((u) => `${u.key}\t${u.uploadId}`).join("\n"),
+                      left.uploads.map((u) => `${u.key}\t${u.uploadId}`).join("\n"),
                       `${t("storage.uploadKey")} / ${t("storage.uploadId")}`,
                     )
                   }
@@ -316,12 +328,16 @@ export function StorageTargetsCard() {
                   {t("common.copy")}
                 </Button>
               )}
-              <Button size="sm" variant="ghost" onClick={() => setUnaborted(null)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setUnaborted((prev) => prev.filter((x) => x.id !== left.id))}
+              >
                 {t("common.close")}
               </Button>
             </span>
           </div>
-        )}
+        ))}
         {!loadFailed && targets.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("storage.empty")}</p>
         )}
