@@ -451,11 +451,10 @@ export function RoutingPage() {
       // What the save DID, as the server read it back after its reconcile,
       // not what the bar predicted: E3's music-rights save said "restarting"
       // while the engine kept YouTube's process running.
-      const levelsMoved = routingChanges({ stored: storedRow?.profile, draft: sentProfile }).some(
-        (c) => c.kind === "trackLevel",
-      );
       toast.success(
-        t(savedToastKey({ enabled: selected.enabled, applied: res.applied, levelsMoved }), { name: selected.name }),
+        t(savedToastKey({ enabled: selected.enabled, applied: res.applied, reason: res.reason }), {
+          name: selected.name,
+        }),
       );
       setSavedFor(selected.id);
       const fresh = await api.listDestinations();

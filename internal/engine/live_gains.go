@@ -421,34 +421,45 @@ func (e *Engine) DestinationRunOf(id int64) DestinationRun {
 // kept out of a mix the music track had already left.
 const nothingToApply = "nothing this destination sends changed, so it kept running"
 
+// backupOnlyRestart is said when the change replaced the redundant feed and the
+// primary output kept running.
+const backupOnlyRestart = "its backup feed was restarted with the change; the primary output kept running"
+
 // AppliedSince is how a change took effect on a destination that was running
 // on `before` when the change was saved, read once the reconcile that applied
-// it has run: "live" when it kept that process (a level sent on the command
-// channel, or nothing to apply), "restart" when the process was replaced, each
-// with a reason where one helps. Both empty when there is no honest answer:
-// nothing was running before, or nothing is running now (the change stopped
-// it), since a save that started or stopped a destination did neither.
+// it has run: "live" when it kept its processes (a level sent on the command
+// channel, or nothing to apply), "restart" when one was replaced. The reason is
+// empty only for a level that went to the running process live; every other
+// answer says why. Both empty when there is no honest answer: nothing was
+// running before, or nothing is running now (the change stopped it), since a
+// save that started or stopped a destination did neither.
 //
-// The level note is read first, so a caller must ForgetDestinationLive before
-// the write, or a note from an earlier change is reported as this one's.
+// The processes decide before the level note does, so a note can never hide a
+// replaced process. A caller must ForgetDestinationLive before the write, or a
+// note from an earlier change is reported as this one's.
 //
 // Read back, never predicted: E3 in the 2026-11-04 demo was a music-rights save
 // on a destination whose music track had already left the mix. The engine kept
 // the process, and the console, which only had its own guess, said it was
 // restarting.
 func (e *Engine) AppliedSince(id int64, before DestinationRun) (applied, reason string) {
-	if !before.Running() {
+	after := e.DestinationRunOf(id)
+	if !before.Running() || !after.Running() {
 		return "", ""
 	}
-	if a, r, ok := e.DestinationLive(id); ok {
-		return a, r
-	}
-	switch after := e.DestinationRunOf(id); {
-	case after == before:
-		return liveApplied, nothingToApply
-	case after.Running():
+	a, r, noted := e.DestinationLive(id)
+	switch {
+	case after.primary != before.primary:
+		// A refused live level falls back to this restart; its note says why.
+		if noted && a == liveRestart {
+			return a, r
+		}
 		return liveRestart, structuralRestart
+	case after.backup != before.backup:
+		return liveRestart, backupOnlyRestart
+	case noted:
+		return a, r
 	default:
-		return "", ""
+		return liveApplied, nothingToApply
 	}
 }

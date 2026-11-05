@@ -88,25 +88,28 @@ export function saveImpact(input: {
 }
 
 /** How a destination save took effect, read back by the server after its
- *  reconcile (PUT /destinations/{id}'s `applied`): "live" when the running
- *  FFmpeg kept running, "restart" when this save replaced it. Absent when
- *  nothing was running to apply it to, or when the reconcile failed. */
+ *  reconcile (PUT /destinations/{id}'s `applied`, Engine.AppliedSince): "live"
+ *  when the running FFmpeg kept running, "restart" when this save replaced it.
+ *  Absent when nothing was running to apply it to, or when the reconcile failed. */
 export type SaveApplied = "live" | "restart";
 
 /** The toast after a routing save, from the SERVER's answer rather than the
  *  prediction above: E3's "is restarting with the new mix" came from the page's
  *  own guess on a save the engine applied without restarting anything.
  *
- *  `levelsMoved` is whether the saved draft moved a track's gain or mute, which
- *  is what "the level change" in route.savedLive refers to. With no answer the
- *  toast claims nothing about a restart: "Routing saved." is true either way. */
+ *  A "live" answer with no `reason` is a level the running process took on its
+ *  command channel; any reason means it kept running without one (nothing it
+ *  sends changed, or a copy destination stored a level that reaches nothing).
+ *  The profile cannot tell these apart: a gain moved on a muted track changes
+ *  the profile and nothing the process plays. With no answer the toast claims
+ *  nothing about a restart: "Routing saved." is true either way. */
 export function savedToastKey(input: {
   enabled: boolean;
   applied?: string;
-  levelsMoved: boolean;
+  reason?: string;
 }): "route.saved" | "route.savedRestarting" | "route.savedLive" | "route.savedKeptRunning" {
   if (!input.enabled) return "route.saved";
   if (input.applied === "restart") return "route.savedRestarting";
-  if (input.applied === "live") return input.levelsMoved ? "route.savedLive" : "route.savedKeptRunning";
+  if (input.applied === "live") return input.reason ? "route.savedKeptRunning" : "route.savedLive";
   return "route.saved";
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maskLiveVolumes, saveImpact, type ArgvRouting } from "./saveImpact";
+import { maskLiveVolumes, saveImpact, savedToastKey, type ArgvRouting } from "./saveImpact";
 
 const graph = (g0: string, g1: string, extra = "") =>
   `[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=${g0}[a_t0];` +
@@ -88,5 +88,25 @@ describe("saveImpact", () => {
         secondMixChanged: false,
       }),
     ).toBe("none");
+  });
+});
+
+describe("savedToastKey follows the server's answer", () => {
+  it("a restart the server did says restarting", () => {
+    expect(savedToastKey({ enabled: true, applied: "restart", reason: "x" })).toBe("route.savedRestarting");
+  });
+
+  it("a live answer with no reason is a level that reached the output", () => {
+    expect(savedToastKey({ enabled: true, applied: "live" })).toBe("route.savedLive");
+  });
+
+  // E3: music rights on a mix the music track had already left.
+  it("a live answer with a reason kept running without a level going out", () => {
+    expect(savedToastKey({ enabled: true, applied: "live", reason: "nothing changed" })).toBe("route.savedKeptRunning");
+  });
+
+  it("no answer, or a disabled destination, claims nothing about a restart", () => {
+    expect(savedToastKey({ enabled: true })).toBe("route.saved");
+    expect(savedToastKey({ enabled: false, applied: "restart" })).toBe("route.saved");
   });
 });

@@ -549,7 +549,12 @@ describe("the toast after Save says what the server did, not what the page guess
   // `applied`). Observed: FAIL, "is restarting with the new mix".
   it("a save the server applied without a restart says it kept running", async () => {
     const success = vi.spyOn(toast, "success");
-    updateDestination.mockImplementation(async () => ({ destination: stored, routing: compiled, applied: "live" }));
+    updateDestination.mockImplementation(async () => ({
+      destination: stored,
+      routing: compiled,
+      applied: "live",
+      reason: "nothing this destination sends changed, so it kept running",
+    }));
     await renderPage();
     // An edit the page predicts as a restart, so only the server's answer can
     // say "kept running".
@@ -586,6 +591,25 @@ describe("the toast after Save says what the server did, not what the page guess
     await save();
     await waitFor(() => expect(success).toHaveBeenCalled());
     expect(String(success.mock.calls.at(-1)?.[0])).toMatch(/The level change reaches “Twitch” live/);
+  });
+
+  // A gain moved on a track the process does not play (muted, or out of the
+  // mix): the profile shows a level change, the server sent none. The toast
+  // follows the server, not the profile.
+  it("a level stored without reaching the output does not claim it went live", async () => {
+    const success = vi.spyOn(toast, "success");
+    updateDestination.mockImplementation(async () => ({
+      destination: stored,
+      routing: compiled,
+      applied: "live",
+      reason: "nothing this destination sends changed, so it kept running",
+    }));
+    await renderPage();
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    await save();
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(String(success.mock.calls.at(-1)?.[0])).toBe("Routing saved. “Twitch” kept running: nothing it sends changed.");
   });
 
   it("with no answer about how it applied, claims no restart", async () => {

@@ -931,10 +931,11 @@ The destination status carries the same outcome as `levelChange`
 `PUT /destinations/{id}` answers how the save took effect, with the same two
 fields, read back after the reconcile rather than predicted. `applied` is `live`
 when the destination kept the FFmpeg process it was running on: a level went to
-it on the command channel, or nothing it sends changed (`reason` then says so).
+it on the command channel (the only answer with no `reason`), or nothing it
+sends changed (`reason` says so).
 Music rights switched on for a mix the music track has already left is the
-second case. `applied` is `restart` when the save replaced the process, and
-`reason` says why. Both are absent when no process was running to apply the
+second case. `applied` is `restart` when the save replaced the process, or only
+its backup feed, and `reason` says which and why. Both are absent when no process was running to apply the
 change to (a disabled destination, or one held until the ingest is probed), when
 the save stopped it, or when the reconcile failed. A failed reconcile is still
 reported in `warnings` and `reconcileFailed`.
