@@ -1043,6 +1043,15 @@ func (m *Manager) Delete(id int64) error {
 		return err
 	}
 	m.removeDerived(r.Filename)
+	// Its stems and transcript files, which no index carries and which the
+	// sweeps cannot attribute to this recording on their own. See companions.go.
+	survivors := make([]string, 0, len(recs))
+	for _, other := range recs {
+		if other.ID != r.ID {
+			survivors = append(survivors, other.Filename)
+		}
+	}
+	m.removeCompanions(r.Filename, survivors)
 	// The session this belonged to may now be empty, and its span is wrong
 	// either way. Both are cheap and both are wrong until something says so.
 	if err := m.store.RecalcSessions(); err != nil {

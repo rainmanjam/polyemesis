@@ -671,6 +671,12 @@ func (p *Processor) resolveRecording(name string) (string, error) {
 	return resolved, nil
 }
 
+// SidecarSpeakerPart is the per-speaker part of a subtitle file's name the
+// worker writes for one track: "<base>-<part>.<ext>". Exported so a delete of
+// one transcript track can find that track's files without re-deriving the
+// rule.
+func SidecarSpeakerPart(speaker string, track int) string { return fileSafe(speaker, track) }
+
 // fileSafe reduces a speaker label to a filename component, falling back to the
 // track number when nothing survives. Same whitelist approach as the stem
 // namer: the result reaches a path, so anything not positively known to be

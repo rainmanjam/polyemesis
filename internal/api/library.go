@@ -18,6 +18,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/publish"
+	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -520,10 +521,14 @@ func (s *Server) handleDeleteTranscript(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "invalid track")
 			return
 		}
+		// The track's speaker label, read BEFORE the rows go: it is what the
+		// per-speaker files on disk are named after.
+		files := s.transcriptTrackFiles(id, n)
 		if err := s.store.DeleteTranscriptTrack(id, n); err != nil {
 			writeStoreError(w, err)
 			return
 		}
+		s.removeTranscriptFiles(id, &files)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -531,7 +536,63 @@ func (s *Server) handleDeleteTranscript(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
+	s.removeTranscriptFiles(id, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// transcriptTrackFiles names one track's per-speaker files: under its current
+// label, and under the bare track number the worker falls back to when a
+// label is blank. A best-effort read; a failure only narrows what is found.
+func (s *Server) transcriptTrackFiles(recordingID int64, track int) recording.TranscriptTrackFiles {
+	parts := []string{transcribe.SidecarSpeakerPart("", track)}
+	if tracks, err := s.store.ListTranscriptTracks(recordingID); err == nil {
+		for _, tt := range tracks {
+			if tt.Track == track {
+				parts = append(parts, transcribe.SidecarSpeakerPart(tt.Speaker, track))
+			}
+		}
+	}
+	return recording.TranscriptTrackFiles{SpeakerParts: parts}
+}
+
+// removeTranscriptFiles deletes a transcript's files from disk once its rows
+// are gone.
+//
+// THE FILES OUTLIVED THE DELETE. The transcript API and the caption exports
+// read the database, so after a delete the subtitle and JSON files under
+// recordings/transcripts served no purpose -- and they stayed, words and all,
+// where the offloader lists every settled file under that directory and
+// uploads it to any target with offloadTranscripts on. Nothing else removed
+// them while the recording existed: the transcript sweep only acts once the
+// RECORDING is gone. Objects already uploaded stay in the bucket, by design.
+//
+// Off the configured recordings directory rather than the engine's manager,
+// which a server with no engine running does not have. Best-effort: the rows
+// are already gone, so a file that will not go is logged, and the delete
+// still answers deleted.
+func (s *Server) removeTranscriptFiles(recordingID int64, track *recording.TranscriptTrackFiles) {
+	rec, err := s.store.GetRecording(recordingID)
+	if err != nil {
+		return
+	}
+	all, err := s.store.ListRecordings()
+	if err != nil {
+		s.log.Warn("cannot list recordings to remove a transcript's files", "err", err)
+		return
+	}
+	others := make([]string, 0, len(all))
+	for _, o := range all {
+		if o.ID != rec.ID {
+			others = append(others, o.Filename)
+		}
+	}
+	removed, err := recording.RemoveTranscriptFiles(s.cfg.RecordingsDir(), rec.Filename, others, track)
+	if err != nil {
+		s.log.Warn("cannot remove a deleted transcript's files", "recording", rec.Filename, "err", err)
+	}
+	if len(removed) > 0 {
+		s.log.Info("removed a deleted transcript's files", "recording", rec.Filename, "files", len(removed))
+	}
 }
 
 // handleSetTranscriptSpeaker relabels one track's speaker.
