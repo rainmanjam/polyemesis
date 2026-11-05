@@ -139,10 +139,10 @@ func TestTheExpertArgsWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 // run its repair and its account check against the truth rather than the
 // snapshot it took before the platform call.
 //
-// Mutation: in writeDestinationPart, hand apply a copy of the row read before
-// the transaction (scan with d.sql instead of tx, before landOperatorEdits
-// runs -- simplest: replace the scan with `cur := &Destination{ID: id}`).
-// Observed red: the callback saw an empty name.
+// Mutation: in writeDestinationPart, replace the scan with
+// `cur, err := &Destination{ID: id}, error(nil)`, which is the callback being
+// shown something other than the stored row. Observed red: the callback saw an
+// empty name.
 func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
 	d := testDB(t)
 	for name, write := range map[string]func(int64, func(*Destination) error) (*Destination, error){
@@ -153,14 +153,17 @@ func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
 			created := partialWriteDestination(t, d)
 			landOperatorEdits(t, d, created.ID)
 			var saw string
-			if _, err := write(created.ID, func(cur *Destination) error {
+			_, err := write(created.ID, func(cur *Destination) error {
 				saw = cur.Name
 				return nil
-			}); err != nil {
-				t.Fatalf("write: %v", err)
-			}
+			})
+			// What the callback saw first: a stale row may well fail to
+			// validate too, and that error would hide the reason.
 			if saw != "renamed by the operator" {
 				t.Fatalf("the callback was shown %q, not the row as it stands", saw)
+			}
+			if err != nil {
+				t.Fatalf("write: %v", err)
 			}
 		})
 	}

@@ -251,6 +251,56 @@ func TestARefreshedKeyIsNotStoredWhenTheAccountChangedDuringTheFetch(t *testing.
 	}
 }
 
+// The repair every destination write makes still runs on a key refresh, on the
+// row the refresh stores, and what it clears is stored cleared -- not merely
+// reported. The case is the one handleRefreshKey's own comment names: a
+// destination already carrying another platform's account (a YouTube
+// destination linked to a Facebook account, written by a direct API client or
+// before the check existed). Refresh fetches through the account's platform,
+// and the repair unlinks it.
+//
+// Mutations, both observed red: drop the dropUnsendableSettingsAgainst call
+// from handleRefreshKey's callback (no warning, the account still linked);
+// drop account_id from destRepairCols and its argument from repairColumnArgs
+// (the warning says unlinked, the account is still linked).
+func TestARefreshedKeyStillRepairsTheRowItStores(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	// The store does not repair, so it takes the mismatched pair as given.
+	dest, err := f.store.CreateDestination(&db.Destination{
+		Name: "YouTube", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live2", StreamKey: "yt-old", AccountID: &f.acctID,
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, destinationPath(dest.ID, "/refresh-key"), nil)
+	f.sign(r)
+	w := do(t, f.h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh-key: status %d, body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(strings.Join(resp.Warnings, "\n"), "connected account was unlinked") {
+		t.Errorf("warnings = %q, want the repair's sentence for the mismatched account", resp.Warnings)
+	}
+	got, err := f.store.GetDestination(dest.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if got.AccountID != nil {
+		t.Errorf("AccountID = %d: the repair said the account was unlinked and it is still linked", *got.AccountID)
+	}
+	if got.StreamKey != "sk-from-the-broadcast" {
+		t.Errorf("StreamKey = %q, want the refreshed key (the control: the write happened)", got.StreamKey)
+	}
+}
+
 // The save that first turns on a Facebook backup ingest asks Graph for it.
 // A stop and an expert save that land while Graph answers survive the save,
 // and the backup Facebook added is still stored.
@@ -346,9 +396,17 @@ func TestTurningOnABackupDoesNotUndoWhatLandedWhileFacebookAnswered(t *testing.T
 // Mutation: put saveExpertArgs back on `s.store.UpdateDestination(row)`.
 // Observed red, naming saveExpertArgs.
 func TestOnlyTheRoutesWhoseChangeIsTheRowWriteItAllBack(t *testing.T) {
+	// Neither is free of the race, and the reasons say how far it reaches.
+	// Both read and write within one request with no platform call between,
+	// under trackGainMu, so what can still land in their window is a stop,
+	// a key refresh or an expert save arriving in the same few milliseconds.
+	// Closing that needs a row version (the PUT) or #991's mix writer (the
+	// level route); neither is this guard's to demand.
 	allowed := map[string]string{
-		"handleUpdateDestination": "the PUT: the operator's body, decoded over the row, is the change",
-		"persistTrackLevels":      "the level route and OBS scene rules: in process, under trackGainMu",
+		"handleUpdateDestination": "the PUT: the operator's body, decoded over the row, is the change; " +
+			"its one platform call now runs after the write",
+		"persistTrackLevels": "the level route and OBS scene rules: in process, under trackGainMu; " +
+			"moves to the mix writer once #991 lands",
 	}
 	root := packageRoot(t)
 	fset := token.NewFileSet()

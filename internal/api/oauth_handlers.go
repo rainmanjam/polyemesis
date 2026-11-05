@@ -922,18 +922,6 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 				"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone.")
 		return
 	}
-	if sendsCaptionPOST(dest) {
-		if b.CaptionIngestURL == "" {
-			warnings = append(warnings, "YouTube returned no caption ingestion URL for this destination's "+
-				"stream, so captions cannot be posted to it and the destination will not start with captions "+
-				"set to HTTP POST. Press Refresh stream key again, or set captions to off or embedded.")
-		} else if err := s.keepCaptionIngest(dest, b); err != nil {
-			s.log.Warn("refresh key: the caption ingestion URL could not be stored",
-				"destination", dest.ID, "err", redactErr(err))
-			warnings = append(warnings, "the caption ingestion URL YouTube returned could not be stored, so "+
-				"captions cannot be posted to this destination yet: "+redactErr(err))
-		}
-	}
 	// Recorded even when empty: a destination that used to have a backup
 	// endpoint and no longer does must stop publishing to the old one, which
 	// belongs to a broadcast that no longer exists.
@@ -986,6 +974,22 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// The caption URL AFTER the write, and decided on the row as stored: a
+	// refusal above must leave caption_ingest as it was, and a destination
+	// whose captions were switched off during the fetch has no use for one. It
+	// is bound to the key it came with, which is the key just stored.
+	if sendsCaptionPOST(updated) {
+		if b.CaptionIngestURL == "" {
+			warnings = append(warnings, "YouTube returned no caption ingestion URL for this destination's "+
+				"stream, so captions cannot be posted to it and the destination will not start with captions "+
+				"set to HTTP POST. Press Refresh stream key again, or set captions to off or embedded.")
+		} else if err := s.keepCaptionIngest(updated, b); err != nil {
+			s.log.Warn("refresh key: the caption ingestion URL could not be stored",
+				"destination", updated.ID, "err", redactErr(err))
+			warnings = append(warnings, "the caption ingestion URL YouTube returned could not be stored, so "+
+				"captions cannot be posted to this destination yet: "+redactErr(err))
+		}
 	}
 	if updated.BackupIngestWanted && updated.BackupURL == "" {
 		warnings = append(warnings,
@@ -1686,18 +1690,31 @@ func (s *Server) fillFacebookBackupIngest(ctx context.Context, dest *db.Destinat
 // saved is the row the save stored. It returns the row to answer with (the one
 // stored last) and any warnings, which never mean the save failed.
 func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destination) (*db.Destination, []string) {
+	// Once Facebook has been asked, the row may have moved on (a stop or an
+	// expert save can land during the call), so every exit after it answers
+	// with the row as stored now, not with saved.
+	current := func() *db.Destination {
+		if cur, err := s.store.GetDestination(saved.ID); err == nil {
+			return cur
+		}
+		return saved
+	}
 	probe := *saved
 	if w := s.fillFacebookBackupIngest(ctx, &probe); w != "" {
-		return saved, []string{w}
+		return current(), []string{w}
 	}
 	if probe.BackupURL == "" {
+		// Facebook answered with no endpoint, which is a call like any other.
+		if saved.BackupIngestWanted && saved.BackupURL == "" && saved.Platform == db.PlatformFacebook {
+			return current(), nil
+		}
 		// Nothing was asked for: not Facebook, no backup wanted, or one is
-		// already stored. The common case, and no store read.
+		// already stored. The common case: no platform call, no store read.
 		return saved, nil
 	}
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
-		return saved, []string{backupNotStoredWarning(err)}
+		return current(), []string{backupNotStoredWarning(err)}
 	}
 	var repairs []string
 	updated, err := s.store.UpdateDestinationIngest(saved.ID, func(cur *db.Destination) error {
@@ -1717,12 +1734,9 @@ func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destina
 	switch {
 	case errors.Is(err, db.ErrIngestSkipped):
 		// Not a failure: the row moved on, and the answer is what it holds now.
-		if cur, gerr := s.store.GetDestination(saved.ID); gerr == nil {
-			return cur, nil
-		}
-		return saved, nil
+		return current(), nil
 	case err != nil:
-		return saved, []string{backupNotStoredWarning(err)}
+		return current(), []string{backupNotStoredWarning(err)}
 	}
 	return updated, repairs
 }

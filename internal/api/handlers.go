@@ -2669,16 +2669,19 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	//
 	// All four routes that write a destination call it --
 	// handleCreateDestination, handleUpdateDestination, saveExpertArgs, and the
-	// Facebook stream-key refresh in oauth_handlers.go. The fourth was added
-	// last and is the reason the previous draft said this held "by inspection":
-	// it wrote back a row it had re-read, so a destination already carrying a
-	// mismatched account was saved unrepaired every time somebody pressed
-	// Refresh stream key.
+	// Facebook stream-key refresh in oauth_handlers.go. The last two call its
+	// core, dropUnsendableSettingsAgainst, inside their narrow write, on the
+	// row that write stores. The fourth was added last and is the reason the
+	// previous draft said this held "by inspection": it wrote back a row it had
+	// re-read, so a destination already carrying a mismatched account was saved
+	// unrepaired every time somebody pressed Refresh stream key.
 	//
 	// A FIFTH ROUTE IS REFUSED BY A TEST rather than by a sentence asking
 	// people to remember. TestEveryDestinationWriteIsRepairedFirst walks this
-	// package and fails on a store.CreateDestination or store.UpdateDestination
-	// in a function that does not also call this helper. That makes the
+	// package and fails on a store.CreateDestination, store.UpdateDestination
+	// or one of the narrow writers that also store these columns
+	// (UpdateDestinationIngest, UpdateDestinationExpertArgs) in a function that
+	// does not also call this helper or its core. That makes the
 	// invariant rung 2 -- announced in CI -- where the sentence it replaced was
 	// rung 0.
 	//
