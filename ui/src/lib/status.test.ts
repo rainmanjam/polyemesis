@@ -4,6 +4,7 @@ import {
   chatSanctionStatus,
   clipBufferStatus,
   delayStatus,
+  destinationProcessState,
   destinationStatus,
   ingestPhaseStatus,
   outputStatus,
@@ -195,5 +196,19 @@ describe("chatSanctionStatus (A48)", () => {
     for (const k of ["chatCard.sanctionBanned", "chatCard.sanctionTimedOut", "chatCard.sanctionNone", "chatCard.sanctionUnknown"]) {
       expect((en as Record<string, string>)[k]).toBeTruthy();
     }
+  });
+});
+
+describe("destinationProcessState", () => {
+  // The supervisor says running from the moment FFmpeg is spawned; uptimeSec
+  // stays 0 until this run has carried media. Only then is it on air.
+  // Mutation: return process.state unchanged. Observed: FAIL on the first line.
+  it("reads a running process with no media yet as starting", () => {
+    expect(destinationProcessState({ state: "running", uptimeSec: 0 })).toBe("starting");
+    expect(destinationProcessState({ state: "running", uptimeSec: 3 })).toBe("running");
+    expect(destinationProcessState({ state: "reconnecting", uptimeSec: 0 })).toBe("reconnecting");
+    expect(destinationProcessState({ state: "failed", uptimeSec: 0 })).toBe("failed");
+    expect(destinationProcessState(null)).toBeUndefined();
+    expect(destinationStatus(true, destinationProcessState({ state: "running", uptimeSec: 0 }))).not.toHaveProperty("lamp");
   });
 });

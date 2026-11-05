@@ -1,0 +1,4 @@
+[tls @ 0x7c91434280] IO error: Connection reset by peer
+[out#0/flv @ 0x7c91430900] Error opening output rtmps://127.0.0.1:19443/sk_us-west-2_placeholderkey: Input/output error
+Error opening output file rtmps://127.0.0.1:19443/sk_us-west-2_placeholderkey.
+Error opening output files: Input/output error

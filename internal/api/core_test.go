@@ -257,9 +257,11 @@ func TestSwitchSourceIsRefusedWhenFailoverIsOff(t *testing.T) {
 // see it. A unit test on AnalyseURL proves the warning can be produced; this
 // proves it is delivered.
 //
-// The URL is the one Kick's Stream Settings page prints, verbatim -- the whole
-// defect is that pasting it changes nothing visible until the far end drops the
-// connection several minutes later.
+// The URL is a pathless ingest on a host the registry cannot prove wrong. It
+// used to be the one Kick's Stream Settings page prints, verbatim; that URL is
+// an Amazon IVS ingest, which IS provably wrong and is now refused outright
+// (ivs_app_path_test.go), so this keeps the advisory contract tested on a URL
+// that is still only advice.
 //
 // Proven able to fail against the committed tree by deleting the
 // `for _, w := range row.Warnings()` loop in handleCreateDestination: the
@@ -269,10 +271,10 @@ func TestAPathlessRTMPURLIsCreatedButWarnedAbout(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
 	raw := send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
-		"name":         "kick-pasted-verbatim",
+		"name":         "custom-pathless",
 		"kind":         "rtmp",
-		"platform":     "kick",
-		"url":          "rtmps://fa723fc1b171.global-contribute.live-video.net/",
+		"platform":     "custom",
+		"url":          "rtmps://ingest.example.com/",
 		"streamKey":    "sk_us-west-2_ThisIsFiftySixCharactersOfStreamKeyMaterial",
 		"enabled":      false,
 		"audioBitrate": 160,
@@ -295,8 +297,7 @@ func TestAPathlessRTMPURLIsCreatedButWarnedAbout(t *testing.T) {
 	ws, ok := out["warnings"].([]any)
 	if !ok || len(ws) == 0 {
 		t.Fatalf("no warning for a URL with no application path.\n"+
-			"This is the exact URL Kick's dashboard hands an operator, and it "+
-			"cannot be published to.\ngot: %s", raw)
+			"Almost no RTMP service can be published to without one.\ngot: %s", raw)
 	}
 	joined := ""
 	for _, w := range ws {

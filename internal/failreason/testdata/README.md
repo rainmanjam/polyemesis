@@ -70,6 +70,34 @@ comes from the C library. musl says `I/O error`, while glibc and Darwin say
 provided` on macOS, `Name does not resolve` on musl). The classifier accepts
 both forms of each.
 
+## The refused-after-connect fixtures
+
+The three `ffmpeg9-rtmps-refused-after-connect-*` files are what Amazon IVS --
+Kick's and Twitch's ingest -- does to `rtmps://<host>/<key>`, a URL with no
+`/app`. They were captured with the host's FFmpeg 9.0.2 on macOS against
+`capture/refuse-after-connect.go`, a listener on 127.0.0.1:19443 that completes
+TLS (with a certificate FFmpeg verifies through `-ca_file`) and the RTMP
+handshake, reads the connect command, and then closes the connection. The
+three files differ only in how it closes: `close` sends a TLS close_notify,
+`reset` resets the TCP connection, and `eof` closes the raw socket with the
+connect command unread.
+
+A real IVS ingest cannot be reached from a test, so which of the three it uses
+is not recorded here. The field report it reproduces -- a Kick destination with
+the dashboard's pathless URL, shown as "Secure (TLS) connection failed" -- is
+the `reset` shape, and `eof` prints the same. All three must classify as
+`key_rejected`, the same look-alike verdict as `rtmp-unknown-app`, because the
+far end refused the publish. None of them is `tls`: the TLS session opened,
+which is why none prints rtmpproto's `Cannot open connection tls://` line that
+every real TLS failure above carries. The classifier uses that line's absence
+to tell the two apart, for `rtmps://` output only.
+
+| Fixture | How the listener closed | Cause |
+| --- | --- | --- |
+| `ffmpeg9-rtmps-refused-after-connect-reset` | TCP reset | `key_rejected` |
+| `ffmpeg9-rtmps-refused-after-connect-eof` | raw close, connect unread | `key_rejected` |
+| `ffmpeg9-rtmps-refused-after-connect-close` | TLS close_notify | `key_rejected` |
+
 ## What these files cannot tell apart
 
 These limits are real. They are not gaps in the classifier.

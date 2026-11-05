@@ -854,6 +854,10 @@ export interface FailureReason {
   rejections?: number;
   /** The connected platform account reports a different stream key. */
   keyChanged?: boolean;
+  /** The server URL that works, set when this destination's URL is an Amazon
+   *  IVS ingest (Kick, Twitch) without /app -- the URL, not the cause above,
+   *  is what to change. */
+  urlFix?: string;
   /** When the run ended, ISO time. */
   at: string;
 }

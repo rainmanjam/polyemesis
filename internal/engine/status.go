@@ -650,6 +650,11 @@ func (e *Engine) Status() Status {
 				// explains, and the check costs a platform API call.
 				ds.Reason.KeyChanged = e.keyChanged(row)
 			}
+			// The URL that works, when this one is an IVS ingest without /app:
+			// the cause FFmpeg's output suggests is not the thing to change.
+			if ds.Reason != nil {
+				ds.Reason.URLFix = urlFixFor(ds.Reason, row.Kind, row.URL)
+			}
 			// The Stream Deck's signals (destsignals.go). Additive fields, each
 			// absent while there is nothing to say.
 			ds.RestartStorm = destinationRestartStorm(ds.Process)

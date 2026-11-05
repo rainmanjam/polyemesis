@@ -47,7 +47,7 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { destinationStatus } from "@/lib/status";
+import { destinationProcessState, destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -177,7 +177,12 @@ export function DestinationCard({
   const { unsettled } = useSettledAction(dest.enabled);
   const stateLabel = useStateLabel();
   const state = dest.process?.state;
-  const tone = dest.enabled ? toneForState(state) : "idle";
+  // What the badge and its tone say: "running" reads as starting until this
+  // run has carried media (see destinationProcessState). `running` below stays
+  // the server's word, because it gates the live readings, and a starting
+  // process's 0 kbps and blank uptime are true.
+  const shownState = destinationProcessState(dest.process);
+  const tone = dest.enabled ? toneForState(shownState) : "idle";
   const running = state === "running";
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
@@ -293,14 +298,14 @@ export function DestinationCard({
               data-testid="card-state-badge"
               variant={dest.enabled ? toneBadge[tone] : "outline"}
               className={cn(
-                destinationStatus(dest.enabled, state, dest.delay?.phase).lamp &&
+                destinationStatus(dest.enabled, shownState, dest.delay?.phase).lamp &&
                   "border-transparent bg-tally text-tally-foreground",
               )}
             >
-              {dest.enabled && state === "running" && (
+              {dest.enabled && shownState === "running" && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {t(destinationStatus(dest.enabled, state, dest.delay?.phase).labelKey)}
+              {t(destinationStatus(dest.enabled, shownState, dest.delay?.phase).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -465,7 +470,12 @@ export function DestinationCard({
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <StatusReason
                 reason={
-                  reason.cause === "unknown" && reason.line
+                  // The URL the server can prove wrong outranks whatever FFmpeg's
+                  // output looked like: an IVS ingest refusing a missing /app
+                  // reads as a refused key, and used to read as TLS.
+                  reason.urlFix
+                    ? t("reason.urlFix.cause")
+                    : reason.cause === "unknown" && reason.line
                     ? `${t(`reason.cause.${reason.cause}`)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
                     : t(`reason.cause.${reason.cause}`)
                 }
@@ -479,7 +489,17 @@ export function DestinationCard({
             {/* A9: what to do about it, and the control that does it. A
                 rotated key already has its own one-click fix below, so the
                 generic advice would only compete with it. */}
-            {!reason.keyChanged && (
+            {reason.urlFix && (
+              <div className="flex flex-col items-start gap-1" data-testid="card-url-fix">
+                <p className="text-[11px] leading-snug">
+                  {t("reason.urlFix.remedy", { url: reason.urlFix })}
+                </p>
+                <Button size="sm" variant="outline" onClick={onEdit}>
+                  <Pencil /> {t("reason.action.edit")}
+                </Button>
+              </div>
+            )}
+            {!reason.keyChanged && !reason.urlFix && (
               <FailureRemedy
                 cause={reason.cause}
                 process={dest.process?.name ?? `dest:${dest.id}`}

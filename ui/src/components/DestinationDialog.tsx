@@ -34,6 +34,7 @@ import {
   sourceIsChosen,
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
+import { ivsAppPathFix } from "@/lib/ivsIngest";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { DEST_STEPS, stepForError, type DestStep } from "@/lib/destinationSteps";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
@@ -740,6 +741,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   /** Whether the typed URL is one of the platform's own published servers.
    *  "no" is not an error: Twitch's regional hosts change, and an operator
    *  with a newer address than our copy is right and we are stale. */
+  const ivsFix = useMemo(() => ivsAppPathFix(url), [url]);
   const urlIsAPublishedServer = useMemo(
     () => !!service?.servers?.some((sv) => sv.url === url),
     [service, url],
@@ -1595,6 +1597,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
             />
             {kind === "file" && (
               <span className="text-sm text-muted-foreground">{t("addDest.fileHint")}</span>
+            )}
+            {/* AT THE FIELD, WHILE IT IS TYPED. The server refuses a save that
+                introduces this URL (an Amazon IVS ingest without /app, which is
+                what Kick's dashboard prints), and before that refusal the only
+                word about it was a ten-second toast as this dialog closed. The
+                fix is offered as a button, never applied for the operator. */}
+            {kind === "rtmp" && ivsFix && (
+              <div
+                className="flex flex-col items-start gap-1 rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down"
+                role="alert"
+                data-testid="dest-url-ivs-app"
+              >
+                <span>{t("addDest.ivsAppPath", { url: ivsFix })}</span>
+                <Button type="button" size="sm" variant="outline" onClick={() => setUrl(ivsFix)}>
+                  {t("addDest.ivsAppPathUse")}
+                </Button>
+              </div>
             )}
             {/* A preset that could not prefill a URL is not a broken preset; it
                 is one whose platform issues the hostname per account. Say that

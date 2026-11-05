@@ -72,6 +72,28 @@ export function processStatus(state?: ProcessState | null): StatusReading {
   return reading(stateLabelKey(state), state ? PROCESS_TONE[state] : "idle");
 }
 
+/** The state a destination's process is IN, for anything that draws it as on
+ *  air or not: the server's state, except that "running" with no media yet is
+ *  "starting".
+ *
+ *  RUNNING IS NOT ON AIR UNTIL MEDIA MOVES. The supervisor reports "running"
+ *  from the moment FFmpeg is spawned (supervisor.go sets StateRunning straight
+ *  after cmd.Start) -- before it has connected, let alone published -- and
+ *  leaves uptimeSec at 0 until this run's output has carried media. It also
+ *  keeps the previous run's failure reason until a run moves media. So a Kick
+ *  destination that Amazon IVS refused on every connect drew a red LIVE lamp
+ *  at 0 kbps with "--:--:--" uptime, beside the failure box, while each
+ *  respawn was in flight. The server's state is right about the process; it
+ *  is this reading of it as "on air" that was wrong, so it is corrected here
+ *  and nothing sent back to the server changes. */
+export function destinationProcessState(
+  process?: Pick<ProcessStatus, "state" | "uptimeSec"> | null,
+): ProcessState | undefined {
+  const state = process?.state;
+  if (state === "running" && !(process!.uptimeSec > 0)) return "starting";
+  return state ?? undefined;
+}
+
 /** A destination. Disabled means the operator switched it off, so the process
  *  state underneath is not what the card should say: it reads Off, never
  *  Stopped, so a switched-off card is not read as a broadcast that ended

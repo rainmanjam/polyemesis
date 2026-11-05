@@ -160,6 +160,13 @@ func AnalyseURL(raw string) []URLProblem {
 		return nil
 	}
 
+	// Amazon IVS gets its own, firmer finding, and only that one: the generic
+	// "this looks like a key" below would say the same thing a second time in
+	// vaguer words.
+	if p, ok := ivsAppPathProblem(u); ok {
+		return []URLProblem{p}
+	}
+
 	var probs []URLProblem
 	if strings.Trim(u.Path, "/") == "" {
 		fixed := *u
@@ -187,6 +194,77 @@ func AnalyseURL(raw string) []URLProblem {
 		})
 	}
 	return probs
+}
+
+// ivsIngestHostSuffix is Amazon IVS's contribute domain, which Kick and Twitch
+// both publish through. THE LEADING DOT IS LOAD-BEARING, as it is in
+// internal/multitrack: without it "evilglobal-contribute.live-video.net", a
+// different registrable domain, would match too.
+const ivsIngestHostSuffix = ".global-contribute.live-video.net"
+
+// ivsApp is the one RTMP application an IVS ingest accepts.
+const ivsApp = "app"
+
+// IsIVSIngestHost reports whether host -- a hostname, without a port -- is an
+// Amazon IVS contribute endpoint.
+func IsIVSIngestHost(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	return len(h) > len(ivsIngestHostSuffix) && strings.HasSuffix(h, ivsIngestHostSuffix)
+}
+
+// IVSAppPathFix reports whether raw is an RTMP(S) URL to an Amazon IVS ingest
+// whose application path is not /app, and if so the server URL that works.
+//
+// THIS IS THE ONE URL SHAPE POLYEMESIS CAN PROVE WRONG, which is why it -- and
+// nothing else AnalyseURL reports -- is refused on save. Every IVS ingest
+// takes the application "app": the Kick entry in services.json says so, Twitch's
+// own multitrack negotiation hands back
+// ingest.global-contribute.live-video.net/app/{stream_key}, and the
+// Kick URL that delivered media on a live run was <host>:443/app. Anything else
+// makes the stream key the application name and IVS drops the connection
+// during the RTMP connect, which FFmpeg reports as a reset TLS socket. The 11
+// pathless URLs in OBS's list that keep AnalyseURL advisory are none of them
+// IVS hosts.
+//
+// The fix is rtmps://<host>:443/app -- the form Kick's own documentation and
+// db/platforms.go give -- with any port the operator already typed kept, and
+// rtmp:// left as rtmp://, since IVS takes both and the scheme is not what is
+// wrong.
+func IVSAppPathFix(raw string) (fix string, wrong bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "rtmp" && u.Scheme != "rtmps") {
+		return "", false
+	}
+	p, ok := ivsAppPathProblem(u)
+	return p.Fix, ok
+}
+
+// ivsAppPathProblem is IVSAppPathFix's finding, worded for the operator.
+func ivsAppPathProblem(u *url.URL) (URLProblem, bool) {
+	if !IsIVSIngestHost(u.Hostname()) {
+		return URLProblem{}, false
+	}
+	path := strings.Trim(u.Path, "/")
+	first, _, _ := strings.Cut(path, "/")
+	if first == ivsApp {
+		return URLProblem{}, false
+	}
+	host := u.Host
+	if u.Port() == "" && u.Scheme == "rtmps" {
+		host += ":443"
+	}
+	fix := u.Scheme + "://" + host + "/" + ivsApp
+	detail := "this is an Amazon IVS ingest (Kick and Twitch both use them), and IVS " +
+		"only accepts the application path /app. "
+	if path == "" {
+		detail += "Without it the stream key becomes the application name, IVS drops " +
+			"the connection, and the destination never goes live. "
+	} else {
+		detail += "This URL's path is something else -- if it is your stream key, " +
+			"put it in the stream key field instead. "
+	}
+	detail += "Use " + fix + " as the server URL."
+	return URLProblem{Field: "url", Detail: detail, Fix: fix}, true
 }
 
 // CheckEncoder reports where a destination's settings exceed what the platform
