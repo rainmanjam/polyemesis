@@ -34,6 +34,7 @@ its first tagged release.
     and see it at the sink, kill the sink and see the key show **Failed** with its reason, retry from
     the key, stop it. It skips when a pull request cannot reach the plugin or the server.
     `./scripts/streamdeck-e2e.sh` runs it locally.
+
 ### Fixed
 
 - **A disconnected account leaves the chat pane at once.** Disconnecting an account, or removing a
