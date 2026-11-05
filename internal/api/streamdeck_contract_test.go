@@ -338,8 +338,8 @@ func deckDestinations(source int64) map[string]*db.Destination {
 	live := row("Main stage", db.PlatformTwitch, "rtmp://live.faketool.invalid/app", true)
 	off := row("Backup encoder", db.PlatformCustom, "rtmp://off.faketool.invalid/app", false)
 	// A level the routing preset key's case puts back to unity, so that case
-	// shows the apply changing stored routing (deckPresetApplied). The others
-	// already hold what the preset builds, and keep running untouched.
+	// shows the apply changing stored routing on a destination nothing else in
+	// the run touches (deckPresetApplied). It is off, so nothing restarts.
 	off.Profile.Tracks = []routing.TrackSel{{Track: 0, Enabled: true, Gain: deckOffGain}}
 	failed := row("Studio relay", db.PlatformCustom, "rtmp://faketool-refused.invalid/app", true)
 	failed.Resilience = db.DestResilience{GiveUpAfter: 1}

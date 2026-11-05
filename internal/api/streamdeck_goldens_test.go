@@ -160,9 +160,12 @@ func (f *deckFixture) cases() []deckCase {
 		{Name: "failover-auto", Method: "POST", Route: "/failover/source", Query: src,
 			Body: map[string]any{"source": "auto"}, Token: "admin"},
 		// The routing preset key. It must APPLY: the compile route it used to send
-		// answered 200 and stored nothing.
+		// answered 200 and stored nothing. How each running row took it is the
+		// platform's, as for the track keys above: the live destination's gain is
+		// back at unity on a muted track, which goes out live where live levels
+		// exist and restarts where they do not (Windows).
 		{Name: "preset-apply", Method: "POST", Route: "/routing/presets/{presetId}/apply", Query: src, Token: "admin",
-			Check: deckPresetApplied},
+			Volatile: []string{"results.*.applied", "results.*.reason"}, Check: deckPresetApplied},
 
 		// The destination key's taps, and its refusals.
 		{Name: "destination-retry", Method: "POST", Route: "/destinations/{id}/restart",
@@ -246,8 +249,10 @@ const deckOffGain = 0.5
 
 // deckPresetApplied is the preset key's case asserting that the preset was
 // APPLIED, not compiled: the off destination's stored track 0 is back at unity,
-// and the answer says so for it. The running destination held what the preset
-// builds already, so it kept its process.
+// and the answer says so for it. Every destination of the programme is saved;
+// how a running one took it (live or restart) is the platform's, so it is not
+// asserted here -- TestAPresetAppliedThroughTheRouteIsStoredAndReachesTheRunningMix
+// holds that on a running destination.
 //
 // MUTATION: record this case against POST /routing/presets/{presetId}, the
 // compile route the key used to send. Observed: FAIL, the answer has no row for
@@ -275,8 +280,8 @@ func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
 	if r := outcome[f.off]; r.Outcome != presetSaved {
 		t.Errorf("the off destination's row is %+v, want saved", r)
 	}
-	if r := outcome[f.live]; r.Outcome != presetSaved || r.Applied != "live" {
-		t.Errorf("the live destination's row is %+v, want saved and kept running (live)", r)
+	if r := outcome[f.live]; r.Outcome != presetSaved {
+		t.Errorf("the live destination's row is %+v, want saved", r)
 	}
 	off, err := f.store.GetDestination(f.off)
 	if err != nil {

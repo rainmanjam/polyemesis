@@ -15,7 +15,7 @@
     "preset": "everything",
     "results": [
       {
-        "applied": "live",
+        "applied": "volatile",
         "id": 1,
         "kept": {
           "muted": [
@@ -194,7 +194,7 @@
             }
           ]
         },
-        "reason": "nothing this destination sends changed, so it kept running"
+        "reason": "volatile"
       },
       {
         "id": 2,
@@ -371,7 +371,7 @@
         }
       },
       {
-        "applied": "live",
+        "applied": "volatile",
         "id": 3,
         "name": "Studio relay",
         "outcome": "saved",
@@ -544,10 +544,10 @@
             }
           ]
         },
-        "reason": "nothing this destination sends changed, so it kept running"
+        "reason": "volatile"
       },
       {
-        "applied": "live",
+        "applied": "volatile",
         "id": 4,
         "name": "YouTube main",
         "outcome": "saved",
@@ -720,7 +720,7 @@
             }
           ]
         },
-        "reason": "nothing this destination sends changed, so it kept running"
+        "reason": "volatile"
       },
       {
         "id": 5,
