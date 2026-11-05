@@ -915,17 +915,13 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// Behaviour for every other platform is unchanged: they always answer with
 	// a URL, so the branch is never taken for them.
 	var warnings []string
-	if b.Ingest.URL != "" {
-		dest.URL = b.Ingest.URL
-	} else if strings.TrimSpace(dest.URL) == "" {
+	if b.Ingest.URL == "" && strings.TrimSpace(dest.URL) == "" {
 		writeError(w, http.StatusBadRequest,
 			string(acct.Platform)+" supplies the stream key but does not publish an ingest URL, and this "+
 				"destination has none yet. Copy the server URL from the platform's own dashboard into "+
 				"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone.")
 		return
 	}
-	dest.StreamKey = b.Ingest.Key
-	dest.Kind = db.DestRTMP
 	if sendsCaptionPOST(dest) {
 		if b.CaptionIngestURL == "" {
 			warnings = append(warnings, "YouTube returned no caption ingestion URL for this destination's "+
@@ -941,43 +937,64 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// Recorded even when empty: a destination that used to have a backup
 	// endpoint and no longer does must stop publishing to the old one, which
 	// belongs to a broadcast that no longer exists.
-	dest.BackupURL, dest.BackupStreamKey = firstBackup(b)
-	if dest.BackupIngestWanted && dest.BackupURL == "" {
+	backupURL, backupKey := firstBackup(b)
+
+	// ONLY WHAT THE PLATFORM ANSWERED IS WRITTEN, onto the row as it stands NOW.
+	//
+	// dest was read before the platform call above, which can take thirty
+	// seconds, and this used to write all of it back with UpdateDestination. A
+	// stop in that window came back as enabled and the reconcile started it
+	// again; a rename, a routing change (the editor's save, or a routing preset
+	// applied from the Stream Deck) or an expert save was silently undone.
+	// UpdateDestinationIngest reads the row again inside its transaction and
+	// writes the ingest columns alone: the URL, the kind, the two keys and the
+	// backup endpoint.
+	//
+	// THE REPAIR STILL RUNS, on that current row. A destination already carrying
+	// a mismatched account -- from a direct API client, or from a row written
+	// before the check existed -- is repaired by every destination write
+	// (TestEveryDestinationWriteIsRepairedFirst), and this one writes the
+	// repaired columns from the same row it repaired. The accounts are listed
+	// first because the callback cannot read the store.
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var repairs []string
+	updated, err := s.store.UpdateDestinationIngest(id, func(cur *db.Destination) error {
+		// The key belongs to the account it was fetched with. A destination
+		// linked to another account, or to none, since the fetch began is not
+		// given it: that would publish to a channel the operator has just
+		// moved this destination away from.
+		if cur.AccountID == nil || *cur.AccountID != *dest.AccountID {
+			return errRefreshAccountChanged
+		}
+		if b.Ingest.URL != "" {
+			cur.URL = b.Ingest.URL
+		}
+		cur.StreamKey = b.Ingest.Key
+		cur.Kind = db.DestRTMP
+		cur.BackupURL, cur.BackupStreamKey = backupURL, backupKey
+		repairs = s.dropUnsendableSettingsAgainst(cur, accts)
+		return nil
+	})
+	if errors.Is(err, errRefreshAccountChanged) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if updated.BackupIngestWanted && updated.BackupURL == "" {
 		warnings = append(warnings,
 			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
 				"no redundant feed will be published. The destination is otherwise "+
 				"configured correctly and will go live normally.")
 	}
-
-	// THE LAST DESTINATION WRITER THAT DID NOT REPAIR ON THE WAY PAST, and it
-	// is here for the reason the helper's own comment gives rather than because
-	// this handler can create the mismatch.
-	//
-	// It cannot: nothing above assigns Platform or AccountID. What it does is
-	// WRITE BACK A ROW IT READ, so a destination already carrying a mismatched
-	// account -- from a direct API client, or from a row written before the
-	// check existed -- was saved again unrepaired every time an operator
-	// pressed Refresh stream key. The repair is idempotent and free on a row
-	// that has nothing wrong with it, so the cost of running it here is a
-	// store read on a path that has just made a network round trip to Facebook.
-	//
-	// The alternative was to keep the invariant as a note saying "any new
-	// destination-writing route must call this helper", which is the shape of
-	// thing this whole audit exists to remove: a rule that holds only while
-	// everyone remembers it. With this call there is no destination writer left
-	// that skips the repair, so the note can say something true instead.
-	repairs, err := s.dropUnsendableSettings(dest)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	warnings = append(warnings, repairs...)
 
-	updated, err := s.store.UpdateDestination(dest)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	rw := s.reconcileNow("the refreshed stream key")
 	resp := map[string]any{"destination": updated}
 	if len(warnings) > 0 {
@@ -985,6 +1002,11 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	}
 	writeMutation(w, http.StatusOK, rw, resp)
 }
+
+// errRefreshAccountChanged refuses a fetched key for a destination whose
+// connected account changed while the platform was being asked for it.
+var errRefreshAccountChanged = errors.New("this destination's connected account changed while its stream key " +
+	"was being fetched, so the key was not saved. Press Refresh stream key again")
 
 // firstBackup is the secondary ingest a destination will publish to, or empty.
 //
@@ -1649,4 +1671,65 @@ func (s *Server) fillFacebookBackupIngest(ctx context.Context, dest *db.Destinat
 	s.log.Info("added a backup ingest to an existing Facebook broadcast",
 		"destination", dest.ID, "liveVideo", liveVideoID)
 	return ""
+}
+
+// addBackupIngestAfterSave is fillFacebookBackupIngest for a row that has
+// already been stored: it asks Facebook for the redundant feed, then writes the
+// backup endpoint ALONE, with db.UpdateDestinationIngest, onto the row as it
+// stands once Facebook has answered.
+//
+// WHY AFTER THE SAVE. The PUT used to make this Graph call between reading the
+// row and writing all of it back, so a stop, a key refresh or an expert save
+// that landed while Facebook answered was undone by the save. See
+// handleUpdateDestination.
+//
+// saved is the row the save stored. It returns the row to answer with (the one
+// stored last) and any warnings, which never mean the save failed.
+func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destination) (*db.Destination, []string) {
+	probe := *saved
+	if w := s.fillFacebookBackupIngest(ctx, &probe); w != "" {
+		return saved, []string{w}
+	}
+	if probe.BackupURL == "" {
+		// Nothing was asked for: not Facebook, no backup wanted, or one is
+		// already stored. The common case, and no store read.
+		return saved, nil
+	}
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return saved, []string{backupNotStoredWarning(err)}
+	}
+	var repairs []string
+	updated, err := s.store.UpdateDestinationIngest(saved.ID, func(cur *db.Destination) error {
+		// Only onto the broadcast Facebook just added the feed to, and only if
+		// it is still wanted and nobody else has filled it in the meantime. A
+		// key refresh during the call has a broadcast and a backup of its own,
+		// and an operator who switched the toggle off has said they want none.
+		if !cur.BackupIngestWanted || cur.BackupURL != "" || cur.StreamKey != saved.StreamKey {
+			return db.ErrIngestSkipped
+		}
+		cur.BackupURL, cur.BackupStreamKey = probe.BackupURL, probe.BackupStreamKey
+		// The repair every destination write makes (see dropUnsendableSettings),
+		// on the row this write stores.
+		repairs = s.dropUnsendableSettingsAgainst(cur, accts)
+		return nil
+	})
+	switch {
+	case errors.Is(err, db.ErrIngestSkipped):
+		// Not a failure: the row moved on, and the answer is what it holds now.
+		if cur, gerr := s.store.GetDestination(saved.ID); gerr == nil {
+			return cur, nil
+		}
+		return saved, nil
+	case err != nil:
+		return saved, []string{backupNotStoredWarning(err)}
+	}
+	return updated, repairs
+}
+
+// backupNotStoredWarning is the sentence for a redundant feed Facebook added
+// that could not be saved.
+func backupNotStoredWarning(err error) string {
+	return "Facebook added a redundant ingest to this broadcast, but it could not be saved: " +
+		redactErr(err) + ". The destination is otherwise saved and will go live on its primary feed."
 }

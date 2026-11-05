@@ -1155,6 +1155,14 @@ The cases that produce one today are a destination carrying settings its
 platform cannot send (see [PLATFORMS.md](PLATFORMS.md#compliance-metadata)), and
 a destination that asked for backup ingest and was not offered an endpoint.
 
+**`refresh-key` writes only what the platform answered**: the ingest URL, the
+stream key and the backup endpoint, onto the destination as it stands when the
+platform has answered. A stop, rename or routing change made while it waited is
+kept. If the destination was linked to a different account (or unlinked) while
+the key was being fetched, nothing is saved and it answers `409`: the key
+belongs to the account it was fetched with. Press it again to fetch one for the
+account linked now.
+
 **Destination fields added in 0.2.0:** `backupUrl` and `backupStreamKey` — the
 platform's secondary ingest, stored when the broadcast was created and empty
 when it offered none — `backupIngestWanted`, the operator's request for a

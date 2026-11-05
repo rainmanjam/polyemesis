@@ -122,11 +122,15 @@ func clearExpertArgs(row *db.Destination) {
 	row.ExpertAckReencode = false
 }
 
-// saveExpertArgs writes the arguments back through the destination row, and
-// returns whatever dropUnsendableSettings had to repair on the way past.
+// saveExpertArgs writes the arguments onto the destination row, and returns
+// whatever dropUnsendableSettings had to repair on the way past.
 //
-// The row is re-read rather than taking the caller's copy, so a concurrent edit
-// to the name or the URL is not silently reverted by an expert-mode save.
+// ONLY THE THREE EXPERT COLUMNS ARE WRITTEN (and the repair's), through
+// db.UpdateDestinationExpertArgs, onto the row as it stands inside that write's
+// transaction. This used to re-read the row and write ALL of it back with
+// UpdateDestination, which narrowed the window but did not close it: a stop, a
+// key refresh or a routing preset applied between that read and that write was
+// reverted by an expert save that had nothing to do with it.
 //
 // IT RUNS dropUnsendableSettings FOR THE SAME REASON THE TWO DESTINATION
 // ROUTES DO. That repair belongs to the write, not to the handler that happened
@@ -142,18 +146,20 @@ func clearExpertArgs(row *db.Destination) {
 // not be; the expert response carries them so a link that vanishes has a
 // sentence attached saying why the stream key stopped refreshing.
 func (s *Server) saveExpertArgs(id int64, e expertArgs) (*db.Destination, []string, error) {
-	row, err := s.store.GetDestination(id)
+	// Listed first: the callback runs inside the write's transaction and cannot
+	// read the store. See dropUnsendableSettingsAgainst.
+	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		return nil, nil, err
 	}
-	row.ExtraInputArgs = e.InputArgs
-	row.ExtraOutputArgs = e.OutputArgs
-	row.ExpertAckReencode = e.AckReencode
-	warnings, err := s.dropUnsendableSettings(row)
-	if err != nil {
-		return nil, nil, err
-	}
-	updated, err := s.store.UpdateDestination(row)
+	var warnings []string
+	updated, err := s.store.UpdateDestinationExpertArgs(id, func(row *db.Destination) error {
+		row.ExtraInputArgs = e.InputArgs
+		row.ExtraOutputArgs = e.OutputArgs
+		row.ExpertAckReencode = e.AckReencode
+		warnings = s.dropUnsendableSettingsAgainst(row, accts)
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}

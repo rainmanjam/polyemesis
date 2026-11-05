@@ -1,0 +1,273 @@
+package db
+
+import (
+	"errors"
+	"path/filepath"
+	"testing"
+)
+
+func partialWriteDestination(t *testing.T, d *DB) *Destination {
+	t.Helper()
+	created, err := d.CreateDestination(&Destination{
+		Name: "fb", Kind: DestRTMP, Platform: PlatformFacebook,
+		URL: "rtmps://live.example/rtmp", StreamKey: "original-key",
+		AudioBitrate: 128, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	return created
+}
+
+// The operator's edits that land while a handler is away at the platform: a
+// stop, a rename and a routing change. Made through the store's own writers,
+// as the stop route and the editor's save make them.
+func landOperatorEdits(t *testing.T, d *DB, id int64) {
+	t.Helper()
+	if err := d.SetDestinationEnabled(id, false); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	row, err := d.GetDestination(id)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	row.Name = "renamed by the operator"
+	row.Profile.Tracks[0].Gain = 0.5
+	if _, err := d.UpdateDestination(row); err != nil {
+		t.Fatalf("rename and routing change: %v", err)
+	}
+}
+
+func assertOperatorEditsSurvived(t *testing.T, got *Destination) {
+	t.Helper()
+	if got.Enabled {
+		t.Error("the destination stopped during the write is enabled again, so the reconcile " +
+			"that follows starts it")
+	}
+	if got.Name != "renamed by the operator" {
+		t.Errorf("Name = %q: the rename made during the write was reverted", got.Name)
+	}
+	if g := got.Profile.Tracks[0].Gain; g != 0.5 {
+		t.Errorf("track 1 gain = %v: the routing change made during the write was reverted", g)
+	}
+}
+
+// Refresh stream key holds a destination across a platform call that can take
+// thirty seconds. Its write owns the ingest columns, and nothing else: a stop,
+// a rename and a routing change made in that window must survive it, even when
+// the callback is handed a snapshot from before them and writes it back.
+//
+// Mutation: add `name=?, enabled=?, profile=?` to destIngestCols and pass
+// cur.Name, cur.Enabled and the marshalled cur.Profile. Observed red: all three
+// operator edits reverted.
+func TestTheIngestWriteLeavesEveryOtherColumnAlone(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	stale := *created // what the handler read before it went to the platform
+
+	landOperatorEdits(t, d, created.ID)
+
+	got, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+		cur.URL = "rtmps://new-ingest.example/rtmp"
+		cur.StreamKey = "key-from-the-platform"
+		cur.BackupURL, cur.BackupStreamKey = "rtmps://backup.example/rtmp", "backup-key"
+		// The handler's stale copy, written back over the row. All dropped.
+		cur.Name, cur.Enabled, cur.Profile = stale.Name, stale.Enabled, stale.Profile
+		cur.AudioBitrate = 320
+		cur.ExtraOutputArgs = "-metadata title=stale"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateDestinationIngest: %v", err)
+	}
+	if got.URL != "rtmps://new-ingest.example/rtmp" || got.StreamKey != "key-from-the-platform" {
+		t.Errorf("ingest = %q / %q, want what the platform answered", got.URL, got.StreamKey)
+	}
+	if got.BackupURL != "rtmps://backup.example/rtmp" || got.BackupStreamKey != "backup-key" {
+		t.Errorf("backup = %q / %q, want it stored", got.BackupURL, got.BackupStreamKey)
+	}
+	assertOperatorEditsSurvived(t, got)
+	if got.AudioBitrate != 128 || got.ExtraOutputArgs != "" {
+		t.Errorf("AudioBitrate %d / expert %q: the ingest write reached columns it does not own",
+			got.AudioBitrate, got.ExtraOutputArgs)
+	}
+
+	// The answer is the stored row, not the callback's copy of it.
+	stored, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if stored.Name != got.Name || stored.Enabled != got.Enabled || stored.StreamKey != got.StreamKey {
+		t.Errorf("returned %+v, stored %+v", got, stored)
+	}
+}
+
+// The expert save's write owns the three expert columns, and nothing else.
+//
+// Mutation: add `name=?, enabled=?, profile=?` to destExpertArgsQuery and pass
+// the three. Observed red: all three operator edits reverted.
+func TestTheExpertArgsWriteLeavesEveryOtherColumnAlone(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	stale := *created
+
+	landOperatorEdits(t, d, created.ID)
+
+	got, err := d.UpdateDestinationExpertArgs(created.ID, func(cur *Destination) error {
+		cur.ExtraInputArgs = "-thread_queue_size 1024"
+		cur.ExtraOutputArgs = "-metadata title=x"
+		cur.ExpertAckReencode = true
+		cur.Name, cur.Enabled, cur.Profile = stale.Name, stale.Enabled, stale.Profile
+		cur.StreamKey, cur.URL = "stale-key", "rtmps://stale.example/rtmp"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateDestinationExpertArgs: %v", err)
+	}
+	if got.ExtraInputArgs != "-thread_queue_size 1024" || got.ExtraOutputArgs != "-metadata title=x" ||
+		!got.ExpertAckReencode {
+		t.Errorf("expert = %q / %q / %v, want all three stored",
+			got.ExtraInputArgs, got.ExtraOutputArgs, got.ExpertAckReencode)
+	}
+	assertOperatorEditsSurvived(t, got)
+	if got.StreamKey != "original-key" || got.URL != "rtmps://live.example/rtmp" {
+		t.Errorf("ingest %q / %q: the expert write reached columns it does not own", got.URL, got.StreamKey)
+	}
+}
+
+// The callback is shown the row as it stands now, which is what lets the API
+// run its repair and its account check against the truth rather than the
+// snapshot it took before the platform call.
+//
+// Mutation: in writeDestinationPart, hand apply a copy of the row read before
+// the transaction (scan with d.sql instead of tx, before landOperatorEdits
+// runs -- simplest: replace the scan with `cur := &Destination{ID: id}`).
+// Observed red: the callback saw an empty name.
+func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
+	d := testDB(t)
+	for name, write := range map[string]func(int64, func(*Destination) error) (*Destination, error){
+		"ingest": d.UpdateDestinationIngest,
+		"expert": d.UpdateDestinationExpertArgs,
+	} {
+		t.Run(name, func(t *testing.T) {
+			created := partialWriteDestination(t, d)
+			landOperatorEdits(t, d, created.ID)
+			var saw string
+			if _, err := write(created.ID, func(cur *Destination) error {
+				saw = cur.Name
+				return nil
+			}); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if saw != "renamed by the operator" {
+				t.Fatalf("the callback was shown %q, not the row as it stands", saw)
+			}
+		})
+	}
+}
+
+// A callback that refuses writes nothing, and its error is what comes back.
+//
+// Mutation: in writeDestinationPart, ignore apply's error. Observed red: the
+// refused key was stored.
+func TestARefusedPartialWriteStoresNothing(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	refusal := errors.New("not this row")
+	for _, want := range []error{ErrIngestSkipped, refusal} {
+		_, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+			cur.StreamKey = "should-not-land"
+			return want
+		})
+		if !errors.Is(err, want) {
+			t.Fatalf("err = %v, want %v", err, want)
+		}
+	}
+	got, _ := d.GetDestination(created.ID)
+	if got.StreamKey != "original-key" {
+		t.Errorf("StreamKey = %q after a refused write, want it untouched", got.StreamKey)
+	}
+}
+
+// Both writers check the row as UpdateDestination does, so neither can store
+// what that one refuses.
+func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	if _, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+		cur.URL = "" // an RTMP destination with nowhere to send to
+		return nil
+	}); err == nil {
+		t.Fatal("an RTMP destination with no URL was stored")
+	}
+	got, _ := d.GetDestination(created.ID)
+	if got.URL != "rtmps://live.example/rtmp" {
+		t.Errorf("URL = %q after a refused write", got.URL)
+	}
+	if _, err := d.UpdateDestinationIngest(404, func(*Destination) error { return nil }); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing row: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A key refresh on a destination whose stored keys cannot be opened replaces
+// the primary and must not destroy the backup's ciphertext: the same per-half
+// rule UpdateDestination keeps (TestRetypingThePrimaryKeyLeavesTheBackupCiphertextAlone).
+//
+// Mutation: in UpdateDestinationIngest, always use destIngestQuery. Observed
+// red: the backup ciphertext became NULL.
+func TestTheIngestWriteKeepsAnUnreadableBackupKeysCiphertext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "polyemesis.db")
+	d := keyDB(t, path, WithSecretBox(testBox(t)))
+	src := &Source{Name: "Main", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	saved, err := d.CreateDestination(&Destination{
+		Name: "has both halves", Kind: DestRTMP, URL: "rtmp://example.invalid/live",
+		StreamKey: "primary-secret", BackupStreamKey: "backup-secret", AudioBitrate: 160,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	sealedBefore := rawCol(t, d, "backup_stream_key_enc", saved.ID)
+
+	if _, err := d.UpdateDestinationIngest(saved.ID, func(cur *Destination) error {
+		// The row as it reads back after a restore with no key file.
+		cur.KeyUnreadable = "the stored key could not be opened with this secret.key"
+		cur.StreamKey = "key-from-the-platform"
+		cur.BackupStreamKey = ""
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateDestinationIngest: %v", err)
+	}
+	if got := rawCol(t, d, "backup_stream_key_enc", saved.ID); string(got) != string(sealedBefore) {
+		t.Error("the key refresh destroyed or rewrote the backup key's ciphertext")
+	}
+	if got, err := d.GetDestination(saved.ID); err != nil || got.StreamKey != "key-from-the-platform" {
+		t.Errorf("StreamKey = %v (%v), want the fetched key sealed and stored", got, err)
+	}
+}
+
+// A destination whose captions were switched off while a key refresh was
+// fetching has no use for the caption URL that refresh stored, and the write
+// forgets it, as UpdateDestination does.
+func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
+	// The caption URL is stored sealed, so this one needs a key.
+	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"), WithSecretBox(testBox(t)))
+	if err := d.CreateSource(&Source{Name: "Main", Enabled: true, Ingest: DefaultSettings().Ingest}); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	created := partialWriteDestination(t, d) // Facebook: posts no captions to YouTube
+	if err := d.PutCaptionIngestURL(created.ID, "key-from-the-platform", "https://captions.example/x"); err != nil {
+		t.Fatalf("PutCaptionIngestURL: %v", err)
+	}
+	if _, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+		cur.StreamKey = "key-from-the-platform"
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateDestinationIngest: %v", err)
+	}
+	if has, err := d.HasCaptionIngestURL(created.ID, "key-from-the-platform"); err != nil || has {
+		t.Errorf("caption URL still stored (%v, %v) for a destination that posts no captions", has, err)
+	}
+}

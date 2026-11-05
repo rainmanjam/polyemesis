@@ -116,9 +116,13 @@ func (d *DB) HasCaptionIngestURL(destinationID int64, streamKey string) (bool, e
 	return u != "", err
 }
 
+// captionIngestDeleteQuery forgets a destination's caption URL. A constant
+// because the narrow destination writers run it inside their own transaction.
+const captionIngestDeleteQuery = `DELETE FROM caption_ingest WHERE destination_id = ?`
+
 // DeleteCaptionIngestURL forgets a destination's caption URL.
 func (d *DB) DeleteCaptionIngestURL(destinationID int64) error {
-	_, err := d.sql.Exec(`DELETE FROM caption_ingest WHERE destination_id = ?`, destinationID)
+	_, err := d.sql.Exec(captionIngestDeleteQuery, destinationID)
 	return err
 }
 

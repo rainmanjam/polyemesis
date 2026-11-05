@@ -2565,6 +2565,26 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, sourceID *int64, profile 
 // and a repair that cannot run is not a repair that may be skipped. Failing
 // open on that one would leave the exact pairing it exists to make unstorable.
 func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
+	var accts []db.PlatformAccount
+	if row.AccountID != nil {
+		var err error
+		if accts, err = s.store.ListPlatformAccounts(); err != nil {
+			return nil, err
+		}
+	}
+	return s.dropUnsendableSettingsAgainst(row, accts), nil
+}
+
+// dropUnsendableSettingsAgainst is the repair itself, given the account list
+// it compares against: dropUnsendableSettings without the store read.
+//
+// IT EXISTS FOR THE NARROW WRITERS. db.UpdateDestinationIngest and
+// db.UpdateDestinationExpertArgs hand their callback the row as it stands
+// inside their transaction, and the repair has to run on THAT row, not on the
+// snapshot a handler read before it went to the platform. The callback cannot
+// read the store (the transaction holds the pool's only connection), so the
+// caller lists the accounts first and passes them in.
+func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.PlatformAccount) []string {
 	var warnings []string
 
 	// Discovered through ComplianceFor, never a list of platform names: the
@@ -2674,10 +2694,6 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 	// refuses the write, and inventing a second answer here would only disagree
 	// with it.
 	if row.AccountID != nil {
-		accts, err := s.store.ListPlatformAccounts()
-		if err != nil {
-			return nil, err
-		}
 		// The whole list rather than GetPlatformAccount, because this question
 		// is about the account's PLATFORM and nothing else. ListPlatformAccounts
 		// returns rows with no token material on them, so the check that exists
@@ -2729,7 +2745,7 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 		}
 	}
 
-	return warnings, nil
+	return warnings
 }
 
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
@@ -2887,22 +2903,6 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		warnings = append(warnings, w.Detail)
 	}
 
-	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.
-	//
-	// enable_backup_ingest is a CREATE parameter, so before this the only route
-	// to a backup endpoint was Refresh key -- which starts a new live video and
-	// discards the one this destination is configured against, with its comment
-	// thread and its title. The remedy cost more than the problem.
-	//
-	// Runs BEFORE the store write so the endpoint it obtains is saved with the
-	// rest of the change, rather than needing a second update the caller cannot
-	// see. Its failure is a warning and never a refusal: a redundant feed that
-	// could not be added leaves the destination going out on one path instead
-	// of two, which is the state it was already in.
-	if w := s.fillFacebookBackupIngest(r.Context(), existing); w != "" {
-		warnings = append(warnings, w)
-	}
-
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
 	before := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
@@ -2912,6 +2912,27 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.
+	//
+	// enable_backup_ingest is a CREATE parameter, so before this the only route
+	// to a backup endpoint was Refresh key -- which starts a new live video and
+	// discards the one this destination is configured against, with its comment
+	// thread and its title. The remedy cost more than the problem.
+	//
+	// AFTER THE WRITE ABOVE, NOT BEFORE IT. This is a Graph call, and it used to
+	// sit between the read at the top of this handler and the whole-row write,
+	// so a stop, a key refresh or an expert save that landed while Facebook was
+	// answering was written back over (trackGainMu serialises this route with
+	// the gain and preset routes only). Now the operator's edit is stored at
+	// once, and the endpoint Facebook hands back is added by a write of the
+	// ingest columns alone. The reconcile below runs once, after both. Its
+	// failure is a warning and never a refusal: a redundant feed that could not
+	// be added leaves the destination going out on one path instead of two,
+	// which is the state it was already in.
+	updated, backupWarnings := s.addBackupIngestAfterSave(r.Context(), updated)
+	warnings = append(warnings, backupWarnings...)
+
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
 	rw := s.reconcileNow("the destination")

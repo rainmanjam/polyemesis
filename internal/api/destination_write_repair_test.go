@@ -42,7 +42,18 @@ import (
 // a guard that gets deleted the first time it is inconvenient.
 func TestEveryDestinationWriteIsRepairedFirst(t *testing.T) {
 	const repair = "dropUnsendableSettings"
-	writers := map[string]bool{"CreateDestination": true, "UpdateDestination": true}
+	// The repair, and its core for the narrow writers: those run it inside
+	// their callback, on the row the write stores, so the store read happens
+	// first and the call they make is the one that takes the account list.
+	repairs := map[string]bool{repair: true, "dropUnsendableSettingsAgainst": true}
+	// The whole-row writers, and the two narrow ones that also write the
+	// columns the repair clears (account_id, compliance, facebook, the X title
+	// and announcement). A writer of those columns that skipped the repair
+	// could store the pairing it exists to prevent.
+	writers := map[string]bool{
+		"CreateDestination": true, "UpdateDestination": true,
+		"UpdateDestinationIngest": true, "UpdateDestinationExpertArgs": true,
+	}
 
 	root := packageRoot(t)
 	fset := token.NewFileSet()
@@ -81,7 +92,7 @@ func TestEveryDestinationWriteIsRepairedFirst(t *testing.T) {
 					return true
 				}
 				switch {
-				case sel.Sel.Name == repair:
+				case repairs[sel.Sel.Name]:
 					repairsHere = true
 				case writers[sel.Sel.Name]:
 					// s.store.UpdateDestination — the receiver must be the
