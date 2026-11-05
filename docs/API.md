@@ -348,6 +348,23 @@ tokens are for.
   An absent body means unconfirmed. A body that is present and malformed — or
   that misspells the field — is a `400`, so a client that meant to confirm is
   never read as one that did not.
+
+  Every successful disconnect also carries a `warnings` entry saying the
+  platform still lists the connection: polyemesis forgets the tokens and does
+  not call the platform's revoke endpoint (Google's and Facebook's revoke every
+  grant the login gave the app, not one account's). Remove the app in the
+  platform's own connected-apps settings to revoke it fully.
+- **`DELETE /platforms/credentials/{platform}` refuses an unconfirmed removal
+  while accounts are still connected through that app**, with `409` and
+  `{"error", "code": "creds_in_use", "accounts": [{"id", "accountName"}]}`.
+  Removing the app does not disconnect them: each keeps working until its
+  access token expires (a token issued with no expiry keeps working), and then
+  cannot refresh. Send `{"confirm": true}` to remove the credentials anyway; it
+  never deletes an account (that is `DELETE /platforms/accounts/{id}`, with its
+  own guard). With no account on the app the bare `DELETE` answers `200` as
+  before. Removing them also drops any sign-in begun with them that has not
+  come back, and a device-code sign-in started with them answers `expired` at
+  its next poll.
 - **A start or stop schedule says what it acts on.** It names destinations in
   `destinationIds`, or sets `allDestinations: true` for every destination on
   this install — never neither and never both, or the answer is `400` naming
@@ -635,6 +652,12 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 | `GET` | `/tour` |
 | `POST` | `/tour/complete` |
 
+**`POST /auth/logout` ends every browser session of the user, not only the
+one that sent it.** It moves the user's token epoch, as a password change does,
+so a copy of the session cookie stops working and the `/ws` and `/events`
+sockets opened with it close. API tokens are not sessions and are untouched;
+a Bearer-token call to this route signs nobody out.
+
 `GET /auth/connection` answers for the token that made the request, and for no other:
 `{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
 `adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
@@ -835,6 +858,12 @@ false`, it answers `400`; with a count that no longer matches (a destination
 was added or removed since it was read) it answers `409` and deletes nothing.
 A source that does not exist is `404` whatever the body.
 
+A successful delete answers `204`, or `200` with `{"warnings": [...]}` when
+there is something to report: a scheduled platform event of one of its
+destinations that could not be cancelled (named, so it can be removed in the
+platform's studio), or a schedule that was switched off or narrowed because its
+destinations went (see `DELETE /destinations/{id}`).
+
 ```sh
 curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"confirm": true, "destinations": 3}' "$POLYEMESIS_URL/api/v1/sources/2"
@@ -1030,6 +1059,17 @@ and a completed YouTube broadcast cannot return to live. Any other destination
 deletes with no body, as before. A body that is sent is read strictly, so an
 unknown field is `400` rather than ignored.
 
+A delete also takes what referred to the destination by id. Its upcoming
+scheduled platform events (recurring-template occurrences, and YouTube
+pre-announcements) are cancelled first, while its account can still reach the
+platform; a Facebook pre-announcement cannot be cancelled from here and is
+named instead. Its id leaves every schedule: a schedule that still names other
+destinations keeps them, and one that named only this one is **switched off**
+(with the id left in place, never emptied into "every destination"). It leaves
+the OBS bridge configuration too. The answer is `{"status": "deleted"}`, plus a
+`warnings` array only when one of these is worth saying. Platform cleanup is
+best-effort: a platform error never blocks the delete.
+
 ```sh
 curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"confirm": true}' "$POLYEMESIS_URL/api/v1/destinations/stop-all?source=2"
@@ -1178,6 +1218,12 @@ entry per concern, each carrying the `detail`, the documentation `source` and th
 date it was `checked`. An unknown or empty platform is an empty list, not an
 error: a custom RTMP destination has nothing published to be outside of, and the
 console asks the same question either way.
+
+`DELETE /renditions/{id}` answers `{"status", "destinations",
+"enabledDestinations", "playoutVariants", "enabledPlayoutVariants"}` and a
+`warning` when anything named the rendition: destinations fall back to
+passthrough, and a public playout rung that named it is left as it is and will
+not start until another rendition is picked for it on the Playout page.
 
 The comparison lives here rather than in the browser on purpose. Its whole value
 is that it reads researched, dated figures out of one committed file, and a
@@ -1678,8 +1724,11 @@ it, and answers `{"ok", "steps": [{"step": "put"|"get"|"delete", "ok", "error",
 
 **A literal private address is `400`** unless `"allowPrivateTarget": true`, and
 the same netguard check runs again at dial time, as for webhooks. **`DELETE`**
-aborts the target's unfinished multipart uploads on the service first; objects
-already in the bucket stay there.
+tries to abort the target's unfinished multipart uploads on the service first;
+objects already in the bucket stay there. The delete always succeeds. Uploads
+it could not abort keep billing until a bucket lifecycle rule removes them, so
+the answer then adds `warning` and `unabortedUploads: [{"key", "uploadId",
+"relPath"}]` for aborting them with the provider.
 
 **Updating a target is an admin call, like webhooks and the automod key**:
 an `admin` token may change any field; a `read` token may not. The Test route
@@ -1727,6 +1776,13 @@ The template is a title pattern, description, privacy, category and thumbnail; t
 look-ahead creates the next occurrences as upcoming YouTube events. The calendar
 (`/recurring/occurrences`, at most 90 days wide) lists them; skip cancels one occurrence's
 event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
+
+`DELETE /schedules/{id}` deletes the schedule's template with it. A schedule
+without a template may have pre-announced events (Facebook, or YouTube without a
+template); deleting it, switching it off, making it a stop or taking a
+destination out of it withdraws those: YouTube's are cancelled, and Facebook's,
+which cannot be cancelled from here, are named in `warnings` (on the delete) or
+in the schedule's `warnings` (on an update) for removal on Facebook.
 
 ### Platforms, metadata, chat
 

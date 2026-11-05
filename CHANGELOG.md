@@ -8,7 +8,81 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+These follow from the lingering-state fixes below and are visible on purpose.
+
+- **Signing out ends every session of the account, on every browser and phone.** Sign-out used to
+  clear only the current browser's cookie, and a copy of that cookie kept working for the rest of
+  its seven days. It now revokes the user's sessions the way a password change does: other tabs
+  are told the session ended, and their live sockets close. API tokens, the Stream Deck, the OBS
+  script and MCP clients are unaffected. A Bearer-token call to `POST /auth/logout` signs nobody
+  out.
+- **Removing a platform's app credentials while accounts still use them needs a confirmation.**
+  `DELETE /api/v1/platforms/credentials/{platform}` without `{"confirm": true}` now answers `409`
+  with `code: "creds_in_use"` and the accounts, because removing the app does not disconnect
+  them: they keep working until their tokens expire. The console's two removal dialogs are typed
+  confirmations already and send the confirmed request. With no account on the app, nothing
+  changes. Accounts are never deleted by this route.
+- **Deleting the programme published on the public playout page takes the page down.** It
+  answers `503 playout is not running` until another programme is published in Playout >
+  Programme, instead of silently showing the audience a different programme. A published
+  programme that exists but is not running yet still falls back to the default, as before.
+- **Deleting a destination cancels its upcoming scheduled events on the platform.** YouTube
+  events created by a recurring template or a pre-announcement are deleted (this cannot be
+  undone, and is what deleting the destination asks for). A Facebook pre-announcement cannot be
+  deleted from here and is named in the response for removal on Facebook. A show that has
+  started, or a destination that is on air, is left alone and named. A platform error never
+  blocks the delete.
+- **A schedule whose only destinations were deleted is switched off** rather than failing at
+  every occurrence; one that names other destinations simply loses the deleted one. The delete
+  response says which.
+- **`DELETE /api/v1/sources/{id}` answers `200` with `{"warnings": [...]}`** instead of `204`
+  when it has something to report (an event it could not cancel, a schedule it switched off).
+  The response to `DELETE /api/v1/destinations/{id}` gains the same additive `warnings` array.
+- **Switching MQTT off deletes the retained state topics** it was publishing, so other consumers
+  stop reading a stale "running"; the status stays `offline` and the Home Assistant device stays
+  (its entities show unavailable). Changing the topic prefix deletes the old tree's state and
+  status; changing the instance also deletes the old Home Assistant device. Shutdown and every
+  other settings change delete nothing.
+- **Deleting one track of a transcript also removes the merged transcript files** (the JSON and
+  the `-all` subtitles, which carry that track's words). The next transcription writes them
+  again; the database, which captions and exports read, is unaffected.
+
+### Fixed
+
+- **Deleting things now takes what referred to them** (the 2026-11-04 lingering-state audit):
+  - A destination or programme delete removes the destination's id from schedules, its planned
+    rollover settings, and its place in the OBS bridge configuration. A scene rule left naming
+    only deleted destinations is removed rather than widened to every destination. An OBS
+    configuration that already named a deleted destination, which could not be saved at all,
+    is cleaned at startup. A save naming a missing programme now gets its own `400` sentence
+    instead of a bare `404`.
+  - The recurring sweep drops, once and with an error in the log, an event whose destination is
+    gone, instead of retrying a cancel it can never make until the row ages out.
+  - Deleting, switching off, retargeting or turning a template-less schedule into a stop withdraws
+    the events it pre-announced (YouTube cancelled, Facebook named), and its marker no longer
+    hides a replacement show at the same time.
+  - Deleting a schedule deletes its recurring-broadcast template and thumbnail; orphaned
+    templates are removed at startup.
+  - Deleting a recording removes its stems and transcript files straight away, including when it
+    was the last recording. Stems are matched to the nearest master of the same programme, and a
+    neighbour's files are never taken.
+  - Deleting a transcript removes its files from `recordings/transcripts`, where the offloader
+    would otherwise upload them. Objects already uploaded stay in the bucket.
+  - Removing platform credentials drops the sign-ins begun with them, and a device-code sign-in
+    started with them (or with credentials since replaced) answers `expired` instead of storing
+    an account for an app that is gone.
+  - A storage target delete names, in `warning` and `unabortedUploads`, any unfinished upload it
+    could not abort on the service; the console shows the warning. The delete still always
+    succeeds.
+  - A rendition delete reports public playout rungs that named it (`playoutVariants`,
+    `enabledPlayoutVariants`, and the `warning`), and such a rung's error now says the rendition
+    no longer exists.
+  - Every account disconnect says the platform still lists the connection and where to remove
+    it; the disconnect dialog says the same in every language.
+  - Home Assistant discovery is republished when the entity set changes, and a removed entity
+    is removed from the device rather than left behind.
 
 ## [0.13.0] — 2026-11-04
 
