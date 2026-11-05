@@ -45,6 +45,10 @@ These follow from the lingering-state fixes below and are visible on purpose.
   (its entities show unavailable). Changing the topic prefix deletes the old tree's state and
   status; changing the instance also deletes the old Home Assistant device. Shutdown and every
   other settings change delete nothing.
+- **The Automation page shows a schedule's warnings when it is saved, switched or deleted**: an
+  event page the change could not withdraw (Facebook has no call to remove one), and the existing
+  note that a one-time schedule more than seven days out gets no Facebook event page, which the
+  console never showed before.
 - **Deleting one track of a transcript also removes the merged transcript files** (the JSON and
   the `-all` subtitles, which carry that track's words). The next transcription writes them
   again; the database, which captions and exports read, is unaffected.
