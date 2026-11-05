@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -32,13 +33,21 @@ import (
 // This route is the apply, once, for every client that has no editor of its
 // own. It does what the console's preset-then-Save does, by the same rules:
 //
-//   - THE SAME WRITE AS A DESTINATION PUT. Held under trackGainMu, repaired by
-//     dropUnsendableSettings, stored by UpdateDestination, reconciled once, and
-//     each row answers `applied`/`reason` read back from the engine
-//     (destinationApplied): "live" where the destination kept its process,
-//     "restart" where the reconcile replaced it, absent where nothing was
-//     running. A preset that changes only levels goes out live; one that
-//     changes what is in the graph restarts that destination and no other.
+//   - LIVE WHERE IT CAN BE, A RESTART ONLY WHERE IT MUST, as a destination PUT:
+//     held under trackGainMu, reconciled once, and each row answers
+//     `applied`/`reason` read back from the engine (destinationApplied) --
+//     "live" where the destination kept its process, "restart" where the
+//     reconcile replaced it, absent where nothing was running. A preset that
+//     changes only levels goes out live; one that changes what is in the graph
+//     restarts that destination and no other.
+//   - ONLY THE MIX IS WRITTEN. Not the whole row, as a PUT writes it: this
+//     route reads every destination of a programme and writes them afterwards,
+//     and a stop, a scheduled start or a key refresh that landed in between
+//     (none take trackGainMu) would be reverted -- a destination just stopped,
+//     written back enabled and started by the reconcile. UpdateAnnouncement
+//     was written for the same hazard. db.UpdateDestinationMixes reads each row
+//     again inside one transaction and writes its two mix columns, all of the
+//     rows or none.
 //   - EVERY DESTINATION OF THE PROGRAMME, or the one `?destination=` names. A
 //     disabled destination is stored for its next start, as a PUT stores it.
 //   - THE LIVE MIX by default; `?mix=vod` replaces the second (VOD) mix, and
@@ -54,18 +63,19 @@ import (
 //     compile route reads it. With no body the pickers follow the programme's
 //     track roles (routing.PresetOptsFromRoles), as the console's do.
 //
-// ATOMIC WHERE IT CAN BE. Every destination's new mix is built and checked --
-// the row's own Validate, which UpdateDestination will run, and a compile
-// against the programme's tracks, which the compile route runs -- before any
-// row is written. One refusal refuses the request with 400 and every reason,
-// and nothing is stored. What can still fail after that is the store itself or
-// a row deleted in between (DELETE does not take trackGainMu); such a row is
-// answered "failed" with the store's reason, the others stay saved, and a
-// warning says how many of how many.
+// ATOMIC. Every destination's new mix is built and checked -- the row's own
+// Validate, which UpdateDestination runs, and a compile against the
+// programme's tracks, which the compile route runs -- on the row as the
+// transaction reads it, before any row is written. One refusal refuses the
+// request with 400 and every reason, and nothing is stored. A destination
+// deleted between the listing and the transaction is answered skipped. What can
+// still go wrong after the commit is the reconcile: the mixes are stored, no row
+// says how it applied, and `warnings` with `reconcileFailed` say why, as on
+// every mutation.
 //
-// `?dryRun=true` stops after the checks and answers each new mix without
-// storing it: the MCP tool's preview, so it shows what this route will write
-// rather than its own guess.
+// `?dryRun=true` runs the same checks on the rows as listed and answers each new
+// mix without storing it: the MCP tool's preview, so it shows what this route
+// will write rather than its own guess.
 // ============================================================================
 
 // presetMixParam and presetDryRunParam are the apply route's own query
@@ -91,14 +101,12 @@ const (
 	presetSaved presetOutcome = "saved"
 	// presetReady: a dry run's row. Checked and would be saved; nothing stored.
 	presetReady presetOutcome = "ready"
-	// presetSkipped: not this preset's to change (no second mix, audio copy).
-	// Untouched.
+	// presetSkipped: not this preset's to change (no second mix, audio copy, or
+	// deleted while the preset was applied). Untouched.
 	presetSkipped presetOutcome = "skipped"
 	// presetRefused: the check refused this row's new mix, so the whole request
 	// was refused and nothing was stored anywhere.
 	presetRefused presetOutcome = "refused"
-	// presetFailed: checked, then the write failed. Left as it was.
-	presetFailed presetOutcome = "failed"
 )
 
 // presetApplyRow is one destination's answer.
@@ -119,17 +127,18 @@ type presetApplyRow struct {
 	Profile *routing.Profile `json:"profile,omitempty"`
 }
 
-// presetApplyBetweenPhases runs after every row is checked and before the
-// first is written. A seam for the one failure the check cannot rule out -- a
-// row deleted in between -- and nothing else. Never written outside a test.
+// presetApplyBetweenPhases runs after the destinations are listed and before
+// the transaction that writes them. A seam for what can land in between -- a
+// stop, a rename, a delete -- and nothing else. Never written outside a test.
 var presetApplyBetweenPhases = func() {}
 
-// presetApplyPlan is one destination the check passed: the row with its new
-// mix already in place, ready for UpdateDestination.
-type presetApplyPlan struct {
-	row *db.Destination
-	out presetApplyRow
-}
+// presetReconcile is the one reconcile an apply makes. A var so a test can stand
+// in a reconcile that fails, which nothing in a test fixture does for real.
+// Never written outside a test.
+var presetReconcile = func(s *Server) string { return s.reconcileNow("the routing preset") }
+
+// errPresetRefused is the presetRow verdict that refuses the whole request.
+var errPresetRefused = errors.New("the destination cannot take the preset")
 
 func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Request) {
 	eng, ok := s.scopedEngine(w, r)
@@ -188,9 +197,12 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	p := presetPlan{preset: preset, mix: mix, built: built, src: src}
 
-	// The PUT's lock, from the read to the reconcile, so a mute stored by the
-	// gain route in between is neither lost nor read as this request's outcome.
+	// The PUT's lock, from the listing to the reconcile: a PUT or a gain write
+	// that read a row before the transaction and wrote it after would put the old
+	// mix back, and a level note one of them leaves must not be read as this
+	// request's outcome.
 	s.trackGainMu.Lock()
 	defer s.trackGainMu.Unlock()
 
@@ -199,71 +211,112 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var (
-		plans   []presetApplyPlan
-		skipped []presetApplyRow
-		refused []presetApplyRow
-	)
-	for _, row := range rows {
-		out := presetApplyRow{ID: row.ID, Name: row.Name, Platform: row.Platform}
-		if why := presetSkipReason(row, mix); why != "" {
-			out.Outcome, out.Message = presetSkipped, why
-			skipped = append(skipped, out)
-			continue
+	if dryRun {
+		results := make([]presetApplyRow, 0, len(rows))
+		for _, row := range rows {
+			out, _ := p.row(row)
+			if out.Outcome == presetSaved {
+				out.Outcome = presetReady
+			}
+			results = append(results, out)
 		}
-		next, why := presetMixFor(row, mix, built, src)
-		if why != "" {
-			out.Outcome, out.Message = presetRefused, why
-			refused = append(refused, out)
-			continue
+		if writePresetRefusal(w, preset, only, results) {
+			return
 		}
-		out.Profile = &next.mix
-		if len(next.kept.Muted) > 0 || len(next.kept.Excluded) > 0 {
-			kept := next.kept
-			out.Kept = &kept
-		}
-		plans = append(plans, presetApplyPlan{row: row, out: out})
+		writeJSON(w, http.StatusOK, map[string]any{"preset": preset, "mix": mix, "dryRun": true, "results": results})
+		return
 	}
 
-	if only != nil && len(skipped) == 1 {
-		// Named, and not this preset's to change: a refusal, not a 200 that
-		// changed nothing.
-		writeError(w, http.StatusConflict, skipped[0].Message)
+	ids := make([]int64, 0, len(rows))
+	before := make(map[int64]engine.DestinationRun, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+		// What each runs on now, and its last level note forgotten, before the
+		// write: the answer is read back from what the reconcile then did.
+		before[row.ID] = s.destinationRunBefore(row.ID, row.SourceID, row.SourceID)
+	}
+	presetApplyBetweenPhases()
+
+	// The verdicts, from the rows as the transaction reads them. The callback
+	// is pure: no store or engine call while the transaction is open.
+	byID := make(map[int64]presetApplyRow, len(rows))
+	written, missing, err := s.store.UpdateDestinationMixes(ids, func(cur *db.Destination) error {
+		out, verdict := p.row(cur)
+		byID[cur.ID] = out
+		return verdict
+	})
+	for _, id := range missing {
+		byID[id] = presetApplyRow{ID: id, Outcome: presetSkipped,
+			Message: "the destination was deleted while the preset was being applied"}
+	}
+	results := make([]presetApplyRow, 0, len(rows))
+	for _, row := range rows {
+		out := byID[row.ID]
+		if out.Name == "" {
+			out.Name, out.Platform = row.Name, row.Platform
+		}
+		results = append(results, out)
+	}
+	if only != nil && len(missing) == 1 {
+		writeError(w, http.StatusNotFound, "not found")
 		return
+	}
+	if writePresetRefusal(w, preset, only, results) {
+		return
+	}
+	if err != nil {
+		// Not a row's refusal (those are answered above): the store or the
+		// commit failed, and the transaction stored nothing.
+		writeError(w, http.StatusInternalServerError,
+			"the preset was not applied, and nothing was changed on any destination: "+err.Error())
+		return
+	}
+
+	var reconcileWarn string
+	if len(written) > 0 {
+		reconcileWarn = presetReconcile(s)
+		for _, d := range written {
+			out := byID[d.ID]
+			out.Applied, out.Reason = s.destinationApplied(d.ID, d.SourceID, before[d.ID], reconcileWarn)
+			byID[d.ID] = out
+		}
+		for i := range results {
+			if r, ok := byID[results[i].ID]; ok && r.Outcome == presetSaved {
+				results[i] = r
+			}
+		}
+	}
+	writeMutation(w, http.StatusOK, reconcileWarn, map[string]any{"preset": preset, "mix": mix, "results": results})
+}
+
+// writePresetRefusal answers a request that cannot go ahead, and reports
+// whether it did: any refused row refuses the request (400, every refused row
+// listed), and a named destination that is not this preset's to change is a
+// 409 rather than a 200 that changed nothing.
+func writePresetRefusal(w http.ResponseWriter, preset string, only *int64, results []presetApplyRow) bool {
+	var refused []presetApplyRow
+	for _, r := range results {
+		if r.Outcome == presetRefused {
+			refused = append(refused, r)
+		}
 	}
 	if len(refused) > 0 {
 		names := make([]string, 0, len(refused))
-		for _, row := range refused {
-			names = append(names, fmt.Sprintf("%q", row.Name))
+		for _, r := range refused {
+			names = append(names, fmt.Sprintf("%q", r.Name))
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": fmt.Sprintf("the %s preset was not applied: %s cannot take it, so nothing was changed on any destination",
 				preset, strings.Join(names, ", ")),
 			"results": refused,
 		})
-		return
+		return true
 	}
-
-	resp := map[string]any{"preset": preset, "mix": mix}
-	if dryRun {
-		results := make([]presetApplyRow, 0, len(rows))
-		for _, p := range plans {
-			p.out.Outcome = presetReady
-			results = append(results, p.out)
-		}
-		resp["dryRun"] = true
-		resp["results"] = append(results, skipped...)
-		writeJSON(w, http.StatusOK, resp)
-		return
+	if only != nil && len(results) == 1 && results[0].Outcome == presetSkipped {
+		writeError(w, http.StatusConflict, results[0].Message)
+		return true
 	}
-
-	presetApplyBetweenPhases()
-	results, warnings, rw := s.writePresetPlans(plans)
-	resp["results"] = append(results, skipped...)
-	if len(warnings) > 0 {
-		resp["warnings"] = warnings
-	}
-	writeMutation(w, http.StatusOK, rw, resp)
+	return false
 }
 
 // presetParam is the {preset} segment, unescaped.
@@ -320,111 +373,69 @@ func (s *Server) presetTargets(w http.ResponseWriter, programme int64, named boo
 	return rows, true
 }
 
-// presetSkipReason is why a preset does not apply to this destination at all,
-// or "".
-func presetSkipReason(row *db.Destination, mix string) string {
+// presetPlan is one request's preset, built once against the programme's
+// ingest, and what it replaces.
+type presetPlan struct {
+	preset string
+	mix    string
+	built  routing.Profile
+	src    routing.Source
+}
+
+// row decides one destination: skipped, refused, or its new mix put in place
+// and checked. It edits cur's live or VOD mix in place -- the caller writes it,
+// or throws it away -- and answers the row with its verdict for
+// db.UpdateDestinationMixes: nil to write, db.ErrMixSkipped, or errPresetRefused.
+//
+// Pure: it reads only cur and the plan. The dry run calls it on the rows as
+// listed and the apply on the rows as its transaction reads them, so the
+// preview and the write cannot decide differently.
+func (p presetPlan) row(cur *db.Destination) (presetApplyRow, error) {
+	out := presetApplyRow{ID: cur.ID, Name: cur.Name, Platform: cur.Platform}
 	// The gain route's test, and its reason: audio copy forwards the ingest's
 	// audio untouched, so there is no mix here for a preset to replace.
-	if row.Audio.Copy && row.Kind != db.DestAudio {
-		return "this destination passes its audio through unchanged (audio copy), so it has no mix for a preset to replace"
+	if cur.Audio.Copy && cur.Kind != db.DestAudio {
+		out.Outcome, out.Message = presetSkipped,
+			"this destination passes its audio through unchanged (audio copy), so it has no mix for a preset to replace"
+		return out, db.ErrMixSkipped
 	}
-	if mix == presetMixVOD && row.VODProfile == nil {
-		return "this destination has no second (VOD) mix; turn one on in the routing editor first"
+	stored := &cur.Profile
+	if p.mix == presetMixVOD {
+		if cur.VODProfile == nil {
+			out.Outcome, out.Message = presetSkipped,
+				"this destination has no second (VOD) mix; turn one on in the routing editor first"
+			return out, db.ErrMixSkipped
+		}
+		stored = cur.VODProfile
 	}
-	return ""
-}
-
-// presetMix is one destination's new mix and what it kept.
-type presetMix struct {
-	mix  routing.Profile
-	kept routing.Kept
-}
-
-// presetMixFor puts the preset, with the stored mix's mutes and guards, into
-// row's live or VOD mix, and checks the row exactly as UpdateDestination will
-// and the compile route does. It answers why the row cannot take it, or "".
-// The row is edited in place: the caller writes it, or throws it away.
-func presetMixFor(row *db.Destination, mix string, built routing.Profile, src routing.Source) (presetMix, string) {
-	stored := &row.Profile
-	if mix == presetMixVOD {
-		stored = row.VODProfile
-	}
-	next, kept := routing.KeepOperatorDecisions(built, stored)
-	if mix == presetMixVOD {
+	next, kept := routing.KeepOperatorDecisions(p.built, stored)
+	if p.mix == presetMixVOD {
 		v := next
-		row.VODProfile = &v
+		cur.VODProfile = &v
 	} else {
-		row.Profile = next
+		cur.Profile = next
 	}
-	// UpdateDestination's own first steps, so its refusal is had here, before
-	// any row is written.
-	row.Profile.ApplyDefaults()
-	if err := row.Validate(); err != nil {
-		return presetMix{}, err.Error()
+	// UpdateDestination's own checks, so a refusal is had for every row before
+	// any is written; db.UpdateDestinationMixes runs them again on the write.
+	cur.Profile.ApplyDefaults()
+	if err := cur.Validate(); err != nil {
+		out.Outcome, out.Message = presetRefused, err.Error()
+		return out, errPresetRefused
 	}
-	if mix == presetMixLive {
-		next = row.Profile
+	if p.mix == presetMixLive {
+		next = cur.Profile
 	}
 	// Against the programme's tracks, as POST /routing/presets/{preset} checks
 	// the preset alone. A kept exclusion can take out every track the preset
 	// selected, and a destination that would stream silence is refused, never
 	// saved (refuseIfSilent's rule).
-	if _, err := routing.Compile(next, src); err != nil {
-		return presetMix{}, err.Error()
+	if _, err := routing.Compile(next, p.src); err != nil {
+		out.Outcome, out.Message = presetRefused, err.Error()
+		return out, errPresetRefused
 	}
-	return presetMix{mix: next, kept: kept}, ""
-}
-
-// writePresetPlans stores every checked row, reconciles once, and reads back
-// how each took effect. Called with trackGainMu held.
-//
-// One reconcile for the lot rather than one per row: every row changes at the
-// same moment, and a row that has to restart restarts in that one pass rather
-// than one after another while the others wait on stale mixes.
-func (s *Server) writePresetPlans(plans []presetApplyPlan) (results []presetApplyRow, warnings []string, reconcileWarn string) {
-	type written struct {
-		i      int
-		source *int64
-		before engine.DestinationRun
+	out.Outcome, out.Profile = presetSaved, &next
+	if len(kept.Muted) > 0 || len(kept.Excluded) > 0 {
+		out.Kept = &kept
 	}
-	results = make([]presetApplyRow, len(plans))
-	var done []written
-	var failed []string
-	for i, p := range plans {
-		row := p.row
-		results[i] = p.out
-		before := s.destinationRunBefore(row.ID, row.SourceID, row.SourceID)
-		// The same repair every destination write makes first
-		// (TestEveryDestinationWriteIsRepairedFirst).
-		repairs, err := s.dropUnsendableSettings(row)
-		if err != nil {
-			results[i].Outcome, results[i].Message, results[i].Profile, results[i].Kept = presetFailed, err.Error(), nil, nil
-			failed = append(failed, fmt.Sprintf("%q (%s)", row.Name, err.Error()))
-			continue
-		}
-		updated, err := s.store.UpdateDestination(row)
-		if err != nil {
-			results[i].Outcome, results[i].Message, results[i].Profile, results[i].Kept = presetFailed, err.Error(), nil, nil
-			failed = append(failed, fmt.Sprintf("%q (%s)", row.Name, err.Error()))
-			continue
-		}
-		for _, line := range repairs {
-			warnings = append(warnings, row.Name+": "+line)
-		}
-		results[i].Outcome = presetSaved
-		done = append(done, written{i: i, source: updated.SourceID, before: before})
-	}
-	if len(done) > 0 {
-		reconcileWarn = s.reconcileNow("the routing preset")
-		for _, d := range done {
-			applied, reason := s.destinationApplied(results[d.i].ID, d.source, d.before, reconcileWarn)
-			results[d.i].Applied, results[d.i].Reason = applied, reason
-		}
-	}
-	if len(failed) > 0 {
-		warnings = append(warnings, fmt.Sprintf(
-			"the preset was saved on %d of %d destinations; not saved, and left as they were: %s",
-			len(done), len(plans), strings.Join(failed, ", ")))
-	}
-	return results, warnings, reconcileWarn
+	return out, nil
 }

@@ -48,8 +48,9 @@ its first tagged release.
   the change live. A destination whose audio graph changes restarts. Each
   destination's row answers `applied` and `reason`. Muted tracks stay muted and
   a music guard (`excludeRoles`) stays on. A destination that copies its audio
-  is skipped. Every destination is checked before any is written, and if one
-  cannot take the preset, nothing is saved. `?mix=vod` replaces the second mix
+  is skipped. Only the two mixes are written, in one transaction, so a stop or
+  a key refresh that lands meanwhile is kept, and if one destination cannot
+  take the preset, nothing is saved. `?mix=vod` replaces the second mix
   where there is one, and `?dryRun=true` previews without saving. Without a
   body, the track pickers follow the programme's track roles, as the routing
   editor's do. It needs an admin token. `POST /routing/presets/{preset}` still
@@ -157,8 +158,9 @@ These follow from the lingering-state fixes below and are visible on purpose.
   `POST /routing/presets/{preset}`, which only compiles a preset, and showed OK
   while nothing changed. It now sends the apply route above to every destination
   on its programme. It shows **Applied to N** with the OK mark when the preset
-  was saved, and an alert when no destination took it. If some destinations took
-  it and others did not, the key shows both the count and the alert. See
+  was saved, and an alert when no destination took it. If the preset was saved
+  but the running pipeline could not be updated, the key shows both the count
+  and the alert. See
   [docs/STREAM-DECK.md](docs/STREAM-DECK.md#routing-preset).
 - **Platform routing presets are no longer refused as unknown.** A platform
   preset's id has a colon (`platform:youtube`). The Stream Deck plugin and the
@@ -171,7 +173,9 @@ These follow from the lingering-state fixes below and are visible on purpose.
   music guard now stays on, as muted tracks already did. One behaviour changed:
   a destination with no second mix is refused with `mix: vod`. Before, the tool
   created a second mix there. A destination that copies its audio is refused
-  too. See [docs/MCP.md](docs/MCP.md).
+  too. The preview's `wouldRestart` now covers a change to the second mix, which
+  restarts a running destination as a live-mix change does. See
+  [docs/MCP.md](docs/MCP.md).
 
 - **Routing Overview shows music that is routed live.** The Music rights column
   used to say "No music routed" beside a filled Music cell. In the 2026-11-04

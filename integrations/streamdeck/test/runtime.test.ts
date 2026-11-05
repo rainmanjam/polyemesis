@@ -1289,7 +1289,7 @@ describe("routing preset key", () => {
     }
   });
 
-  it("alerts as well as counting when the preset was saved on some destinations and not others", async () => {
+  it("alerts as well as counting when the preset was saved but a row or the pipeline did not take it", async () => {
     for (const answer of [
       APPLIED(row(1, "saved"), row(2, "failed", { message: "not found" })),
       json(200, { preset: "music", mix: "live", results: [row(1, "saved")], reconcileFailed: true, warnings: ["x"] }),

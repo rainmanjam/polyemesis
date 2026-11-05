@@ -250,9 +250,11 @@ const deckOffGain = 0.5
 // builds already, so it kept its process.
 //
 // MUTATION: record this case against POST /routing/presets/{presetId}, the
-// compile route the key used to send. Observed: FAIL, "the off destination's
-// track 0 is still at 0.5: the routing did not change".
-// MUTATION: skip UpdateDestination in writePresetPlans. Observed: FAIL, the same.
+// compile route the key used to send. Observed: FAIL, the answer has no row for
+// the off destination (the compile route answers {profile, routing}).
+// MUTATION: roll back instead of committing in db.UpdateDestinationMixes.
+// Observed: FAIL, "the off destination's track 0 is still at 0.5: the routing
+// did not change".
 func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
 	t.Helper()
 	if g.Status != http.StatusOK {

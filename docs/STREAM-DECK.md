@@ -234,11 +234,13 @@ does, and reports back what happened to each one:
 - **Nothing is saved unless every destination can take it.** If one
   destination cannot take the preset, for example because a music guard would
   leave it silent, the server saves nothing.
+- **Only the mix changes.** A stop, a start or a key refresh that lands while
+  the preset is being applied is kept.
 
 The key shows **Applied to N** and the OK mark when the preset was saved on N
 destinations. It shows the alert instead if no destination took the preset. If
-some took it and others did not, or the running pipeline could not be updated,
-it shows both the count and the alert.
+the preset was saved but the running pipeline could not be updated to match, it
+shows both the count and the alert.
 
 Before this route existed, the key sent `POST /api/v1/routing/presets/{preset}`.
 That route only compiles a preset and saves nothing, so the key showed OK while

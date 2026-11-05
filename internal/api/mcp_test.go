@@ -1097,6 +1097,38 @@ func TestApplyRoutingPresetGoesThroughTheApplyRouteAndKeepsTheGuard(t *testing.T
 	}
 }
 
+// A 200 from the apply route is the request; the destination's row is what was
+// done to it. A row that is not "saved" is a failed tool call, audited as not
+// applied, with no "applied" for an agent to read as success. The route answers
+// a narrowed request that changes nothing with 404 or 409 today, so the row is
+// served here by hand: this pins the tool's reading, not the route's.
+//
+// MUTATION: drop the outcome check in runApplyPreset. Observed: FAIL, the tool
+// answered {"applied": ...} and the audit said done (200).
+func TestApplyRoutingPresetReadsTheRowNotTheStatus(t *testing.T) {
+	rig := newMCPRig(t)
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/apply") && r.URL.Query().Get("dryRun") == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"preset": "everything", "mix": "live",
+				"results": []map[string]any{{"id": 1, "name": "x", "outcome": "skipped", "message": "not this preset's to change"}}})
+			return
+		}
+		rig.h.ServeHTTP(w, r)
+	})
+	mux := http.NewServeMux()
+	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
+	mux.Handle("/", rig.h)
+	text, isErr := callText(t, mcpClient(t, mux, rig.admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": routing.PresetEverything, "confirm": true})
+	if !isErr || strings.Contains(text, `"applied"`) || !strings.Contains(text, "not this preset's to change") {
+		t.Fatalf("a skipped row answered (isError=%v): %s", isErr, text)
+	}
+	evs := rig.mcpEvents()
+	if len(evs) != 1 || !strings.Contains(fieldOf(evs[0], fieldMCPOutcome), "not applied") {
+		t.Fatalf("the audit does not say the preset was not applied: %+v", evs)
+	}
+}
+
 // --- the ledger's counterpart ---
 
 // proveMCPToolOutputs is POST /mcp's counterpart proof: every read tool, as a

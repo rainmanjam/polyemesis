@@ -102,10 +102,11 @@ func destChild(t *testing.T, h http.Handler, sign func(*http.Request)) (command 
 // happens only when the graph moved. Applying the same preset again changes
 // nothing the destination sends, so it keeps its process and says "live".
 //
-// MUTATION: skip UpdateDestination in writePresetPlans (count the row saved).
-// Observed: FAIL, the stored profile has no loudness target.
-// MUTATION: drop the reconcileNow call. Observed: FAIL, the running command
-// line kept its old graph and the answer carried no "applied".
+// MUTATION: roll back instead of committing in db.UpdateDestinationMixes.
+// Observed: FAIL, applied="live" ("nothing ... changed") where a restart onto
+// the stored loudness stage was due.
+// MUTATION: drop the reconcile (reconcileWarn = ""). Observed: FAIL, the same:
+// the running destination kept its old graph.
 // MUTATION: restart every saved row after the reconcile (Engine.RestartDestination,
 // which restarts the child inside the same process record). Observed: FAIL, the
 // second apply's child pid changed.
@@ -432,8 +433,8 @@ func TestNarrowingAPresetToOneDestination(t *testing.T) {
 // preset would leave it silent: refused, and plain -- which could take it -- is
 // not changed either.
 //
-// MUTATION: write each row as soon as it is checked (call writePresetPlans per
-// row inside the check loop). Observed: FAIL, plain was changed by a refused
+// MUTATION: in db.UpdateDestinationMixes, write and commit the rows that passed
+// even when another was refused. Observed: FAIL, plain was changed by a refused
 // request.
 func TestOneDestinationThatCannotTakeAPresetRefusesTheWholeRequest(t *testing.T) {
 	f := newPresetFixture(t)
@@ -461,13 +462,58 @@ func TestOneDestinationThatCannotTakeAPresetRefusesTheWholeRequest(t *testing.T)
 	}
 }
 
-// What the check cannot rule out -- a destination deleted between the check and
-// the write (DELETE does not take the PUT's lock) -- is answered per row: the
-// rest are saved, the lost one says why, and a warning counts them.
+// ONLY THE MIX IS WRITTEN, from the row as it stands when the transaction reads
+// it. A stop, a scheduled start or a key refresh does not take the PUT's lock,
+// so one that lands between the listing and the write must survive it: written
+// back whole, the destination just stopped would come back enabled and the
+// reconcile would start it. Here a start and a rename land in between.
 //
-// MUTATION: count a failed write as saved. Observed: FAIL, plain answered saved.
-// MUTATION: drop the "saved on N of M" warning. Observed: FAIL.
-func TestAWriteThatFailsAfterTheCheckIsReportedAndTheRestStand(t *testing.T) {
+// MUTATION: write the listed rows back whole with UpdateDestination in place of
+// db.UpdateDestinationMixes (the first version of this route). Observed: FAIL,
+// "switched off a destination started meanwhile".
+func TestAPresetDoesNotUndoAWriteThatLandedWhileItWasApplied(t *testing.T) {
+	f := newPresetFixture(t)
+	presetApplyBetweenPhases = func() {
+		if err := f.store.SetDestinationEnabled(f.plain, true); err != nil {
+			t.Errorf("start between the phases: %v", err)
+		}
+		d := f.get(t, f.guarded)
+		d.Name = "renamed meanwhile"
+		if _, err := f.store.UpdateDestination(d); err != nil {
+			t.Errorf("rename between the phases: %v", err)
+		}
+	}
+	t.Cleanup(func() { presetApplyBetweenPhases = func() {} })
+
+	out := applyPreset(t, f.h, f.sign, routing.PresetEverything, f.q(), nil, http.StatusOK)
+	for _, id := range []int64{f.plain, f.guarded} {
+		if r := out.row(t, id); r.Outcome != presetSaved {
+			t.Errorf("destination %d: %q (%s), want saved", id, r.Outcome, r.Message)
+		}
+	}
+	plain := f.get(t, f.plain)
+	if !plain.Enabled {
+		t.Error("the preset wrote back the listed row and switched off a destination started meanwhile")
+	}
+	if len(enabledTracks(plain.Profile)) <= 2 {
+		t.Errorf("plain did not take the preset: %v", enabledTracks(plain.Profile))
+	}
+	guarded := f.get(t, f.guarded)
+	if guarded.Name != "renamed meanwhile" {
+		t.Errorf("the preset wrote back the listed row and lost a rename: %q", guarded.Name)
+	}
+	if !sameInts(mutedTracks(guarded.Profile), []int{1}) {
+		t.Errorf("the mutes were not carried from the row as it stood: %v", mutedTracks(guarded.Profile))
+	}
+}
+
+// A destination deleted between the listing and the transaction (DELETE does not
+// take the PUT's lock) is answered skipped, and the others are saved. Named, it
+// is a 404.
+//
+// MUTATION: in db.UpdateDestinationMixes, return ErrNotFound for a missing row
+// instead of listing it in missing. Observed: FAIL, 500 and nothing saved.
+func TestADestinationDeletedWhileAPresetIsAppliedIsSkipped(t *testing.T) {
 	f := newPresetFixture(t)
 	presetApplyBetweenPhases = func() {
 		if err := f.store.DeleteDestination(f.plain); err != nil {
@@ -478,23 +524,92 @@ func TestAWriteThatFailsAfterTheCheckIsReportedAndTheRestStand(t *testing.T) {
 
 	out := applyPreset(t, f.h, f.sign, routing.PresetEverything, f.q(), nil, http.StatusOK)
 	lost := out.row(t, f.plain)
-	if lost.Outcome != presetFailed || lost.Message == "" || lost.Profile != nil {
-		t.Errorf("the lost destination answered %+v, want failed with the store's reason", lost)
+	if lost.Outcome != presetSkipped || !strings.Contains(lost.Message, "deleted") || lost.Name != "plain" {
+		t.Errorf("the deleted destination answered %+v, want skipped, named, saying it was deleted", lost)
 	}
 	if r := out.row(t, f.guarded); r.Outcome != presetSaved {
-		t.Errorf("guarded: %q, want saved; one row's failure is not the others'", r.Outcome)
+		t.Errorf("guarded: %q, want saved", r.Outcome)
 	}
 	if got := enabledTracks(f.get(t, f.guarded).Profile); len(got) <= 2 {
 		t.Errorf("guarded was answered saved and not stored: %v", got)
 	}
-	found := false
-	for _, w := range out.Warnings {
-		if strings.Contains(w, "saved on 2 of 3") && strings.Contains(w, `"plain"`) {
-			found = true
+
+	presetApplyBetweenPhases = func() {
+		if err := f.store.DeleteDestination(f.guarded); err != nil {
+			t.Errorf("delete between the phases: %v", err)
 		}
 	}
-	if !found {
-		t.Errorf("no warning counts the partial apply: %v", out.Warnings)
+	mustJSONError(t, f.h, f.sign, http.MethodPost, presetApplyPath(routing.PresetEverything,
+		f.q("destination", strconv.FormatInt(f.guarded, 10))), nil, http.StatusNotFound)
+}
+
+// PARTIAL FAILURE, the one an all-or-nothing write leaves: the mixes are stored
+// and the reconcile that should apply them fails. The answer is 200, every row
+// saved and none claiming how it applied, with the reconcile's sentence in
+// warnings and reconcileFailed set -- what the Stream Deck key alerts on.
+//
+// MUTATION: hand writeMutation "" instead of the reconcile's sentence. Observed:
+// FAIL, reconcileFailed=false and no warning.
+func TestAReconcileThatFailsAfterThePresetIsStoredIsReported(t *testing.T) {
+	f := newPresetFixture(t)
+	const broken = "the routing preset was saved, but the running pipeline could not be updated to match it: test"
+	presetReconcile = func(*Server) string { return broken }
+	t.Cleanup(func() { presetReconcile = func(s *Server) string { return s.reconcileNow("the routing preset") } })
+
+	out := applyPreset(t, f.h, f.sign, routing.PresetEverything, f.q(), nil, http.StatusOK)
+	if !out.ReconcileFailed || len(out.Warnings) != 1 || out.Warnings[0] != broken {
+		t.Fatalf("a failed reconcile was not reported: reconcileFailed=%v warnings=%v", out.ReconcileFailed, out.Warnings)
+	}
+	for _, id := range []int64{f.plain, f.guarded, f.withVOD} {
+		r := out.row(t, id)
+		if r.Outcome != presetSaved || r.Applied != "" {
+			t.Errorf("destination %d answered %q applied=%q; want saved, and no claim of how it applied", id, r.Outcome, r.Applied)
+		}
+	}
+	if got := enabledTracks(f.get(t, f.plain).Profile); len(got) <= 2 {
+		t.Errorf("the preset was not stored: %v", got)
+	}
+}
+
+// A destination whose stream key this machine cannot read reads back switched
+// off and keyless (scanDestination). Written back whole, it would be stored
+// switched off for good, and restoring the key file would no longer bring it
+// back. The mix-only write leaves both columns as they are.
+//
+// MUTATION: write the whole row (UpdateDestination) for each saved row after
+// the transaction. Observed: FAIL, the enabled column went from 1 to 0.
+func TestAPresetLeavesAnUnreadableKeysDestinationSwitchedOn(t *testing.T) {
+	f := newPresetFixture(t)
+	if err := f.store.SetDestinationEnabled(f.plain, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SQL().Exec(`UPDATE destinations SET stream_key='', stream_key_enc=? WHERE id=?`,
+		[]byte("not a ciphertext this box can open"), f.plain); err != nil {
+		t.Fatal(err)
+	}
+	if d := f.get(t, f.plain); d.KeyUnreadable == "" || d.Enabled {
+		t.Fatalf("the fixture's key is readable (%q) or the row reads enabled (%v); this test measures nothing",
+			d.KeyUnreadable, d.Enabled)
+	}
+
+	out := applyPreset(t, f.h, f.sign, routing.PresetEverything, f.q(), nil, http.StatusOK)
+	if r := out.row(t, f.plain); r.Outcome != presetSaved {
+		t.Fatalf("plain: %q (%s), want saved", r.Outcome, r.Message)
+	}
+	var enabled bool
+	var enc []byte
+	if err := f.store.SQL().QueryRow(`SELECT enabled, stream_key_enc FROM destinations WHERE id=?`, f.plain).
+		Scan(&enabled, &enc); err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Error("the preset stored a destination with an unreadable key switched off")
+	}
+	if string(enc) != "not a ciphertext this box can open" {
+		t.Errorf("the preset rewrote the sealed key: %q", enc)
+	}
+	if got := enabledTracks(f.get(t, f.plain).Profile); len(got) <= 2 {
+		t.Errorf("the preset was not stored: %v", got)
 	}
 }
 

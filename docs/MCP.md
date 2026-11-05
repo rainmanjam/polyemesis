@@ -198,13 +198,16 @@ The other previews say what each call would do:
 - `apply_routing_preset` answers the `tracks` whose enabled, mute or gain
   setting would change, before and after, and `wouldRestart`. It also answers
   `kept`, the mutes and music guard the preset leaves in place. A running
-  destination restarts when its live mix changes in anything but a level or a
-  mute. The preview gets the new mix from
+  destination restarts when the mix changes in anything but a level or a
+  mute, whether the live mix or the second (VOD) mix. The preview gets the new mix from
   `POST /routing/presets/{preset}/apply` with `dryRun=true`, which runs the same
   checks as the apply, stores nothing and is not audited.
 - Confirmed, `apply_routing_preset` makes that same request without
   `dryRun`, narrowed to the one destination. It answers `result`, which holds
-  `applied` (`live` or `restart`) and `reason` as the server reported them. A
+  `applied` (`live` or `restart`) and `reason` as the server reported them, and
+  `reconcileFailed` when the preset was saved but the running pipeline was not
+  updated. A row the server did not save is a failed call, audited as not
+  applied. A
   destination that copies its audio, or (with `mix: vod`) one that has no
   second mix, is refused: the preset has no mix there to replace.
 

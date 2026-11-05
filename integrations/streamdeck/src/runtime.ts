@@ -1390,9 +1390,10 @@ export class Runtime {
 
   /**
    * Sends the armed preset and shows what the server says it did, never the request going out: OK and "Applied
-   * to N" only when it was saved on at least one destination, none failed and the pipeline took it. A preset
-   * saved on some and failed on others flashes the count AND alerts; nothing saved (no destinations, all skipped,
-   * or the server refused it because one could not take it) alerts and leaves the face as it was.
+   * to N" only when it was saved on at least one destination, no row is one this build cannot read as saved or
+   * skipped, and the pipeline took it. Saved but not reconciled flashes the count AND alerts; nothing saved (no
+   * destinations, all skipped, or the server refused it because one could not take it) alerts and leaves the
+   * face as it was.
    */
   private async applyArmedPreset(s: Surface, presetId: string, sourceId: number | undefined): Promise<void> {
     try {

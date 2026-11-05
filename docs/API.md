@@ -1287,6 +1287,12 @@ It follows the same rules as `PUT /destinations/{id}`. A destination whose mix
 changes only in levels gets the change live. A destination whose audio graph
 changes restarts. A destination the change does not touch keeps running.
 
+Unlike a PUT, it writes only the two mixes (`profile` and `vodProfile`), never
+the whole row. Each destination is read again inside one database transaction,
+so a stop, a start, a rename or a key refresh that lands while the preset is
+being applied is kept. Writing the row back whole would revert it, and the
+reconcile would then start a destination that was just stopped.
+
 | Query | Default | |
 |---|---|---|
 | `source` | the only programme | Required on a multi-source install, as for every programme-scoped route. |
@@ -1311,10 +1317,13 @@ What it keeps, and what it skips:
   so it is skipped.
 - **No second mix.** With `mix=vod`, a destination with no second mix is
   skipped. The route does not add a second audio track.
+- **Deleted meanwhile.** A destination deleted while the preset is being
+  applied is skipped.
 - **A narrowed request.** With `destination=` set, a destination that would be
-  skipped is refused with `409` instead.
+  skipped is refused with `409` instead, and one deleted meanwhile with `404`.
 
-Every destination is checked before any is written. The check is the row's own
+Every destination is checked before any is written, and the writes are one
+transaction: all of them are saved, or none. The check is the row's own
 validation, which the store runs on save, plus a compile against the
 programme's tracks. If one destination cannot take the preset, the request is
 refused with `400`, the refused rows are listed, and nothing is saved. A common
@@ -1347,9 +1356,10 @@ On success the answer has one row per destination:
 | `saved` | The preset is stored. `applied` and `reason` mean what they mean on `PUT /destinations/{id}`. Both are absent when nothing was running to apply it to, as for a stopped destination, which keeps the preset for its next start. |
 | `ready` | Only with `dryRun=true`: the preset passed the check, and `profile` is what would be stored. |
 | `skipped` | Not changed. `message` says why. |
-| `failed` | The preset passed the check, but the write failed. One cause is the destination being deleted in between. The destination is left as it was, the other rows stand, and `warnings` counts the destinations that saved and lists the ones that failed. |
 
-A reconcile that fails after the writes adds `warnings` and
+The one partial failure left is the reconcile after the commit. If it fails,
+the presets are saved but the running pipeline was not updated to match. No row
+then carries `applied`, and the answer has `warnings` and
 `reconcileFailed: true`, as on every mutation.
 
 ### Failover

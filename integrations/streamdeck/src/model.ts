@@ -172,7 +172,8 @@ export interface PresetSummary {
 /**
  * One destination's row of POST /routing/presets/{preset}/apply. `saved`: the preset is stored on it, and
  * `applied` says how it reached the running output ("live" or "restart"; absent when it was not running).
- * `skipped`: not this preset's to change (audio copy). `failed`: the write failed and it was left as it was.
+ * `skipped`: not this preset's to change (audio copy, or deleted meanwhile). `failed`: any outcome this build
+ * does not know, which is never counted as saved.
  */
 export interface PresetApplyRow {
   id: number;

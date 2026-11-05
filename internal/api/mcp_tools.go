@@ -1603,9 +1603,12 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 			return nil, err
 		}
 		running := processRunning(health)
+		// Either mix: the second one is compiled into the same FFmpeg graph
+		// (routing.CompilePair), so a structural change to it restarts the
+		// destination as surely as one to the live mix.
 		structural := profileStructureChanged(current, profile)
 		return c.refusal("Not done: applying a preset replaces this destination's audio routing"+
-			restartClause(running && field == "profile" && structural)+
+			restartClause(running && structural)+
 			". Show the user these changes, then call apply_routing_preset again with confirm:true.",
 			map[string]any{
 				"destination":  destSummary(d),
@@ -1614,7 +1617,7 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 				"tracks":       trackChanges(current, profile),
 				"kept":         row["kept"],
 				"running":      running,
-				"wouldRestart": running && field == "profile" && structural,
+				"wouldRestart": running && structural,
 			})
 	}
 	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(a.Preset)+"/apply", q, nil)
@@ -1624,6 +1627,14 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	row, err := presetRowFor(res, a.DestinationID)
 	if err != nil {
 		return nil, err
+	}
+	// A 200 is the request, not this destination: only a saved row is an
+	// apply. Anything else is said as a failure, and audited as one, with no
+	// "applied" for an agent to read as success.
+	if outcome, _ := row["outcome"].(string); outcome != string(presetSaved) {
+		msg, _ := row["message"].(string)
+		c.outcome = fmt.Sprintf("not applied (%s)", outcome)
+		return nil, fmt.Errorf("the preset was not applied to destination %d (%s): %s", a.DestinationID, outcome, msg)
 	}
 	out := map[string]any{"applied": a.Preset, "mix": field, "profile": row["profile"]}
 	result := map[string]any{"outcome": row["outcome"]}
@@ -1635,6 +1646,10 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	out["result"] = result
 	if w := pick(res, "warnings")["warnings"]; w != nil {
 		out["warnings"] = w
+	}
+	if failed, _ := pick(res, "reconcileFailed")["reconcileFailed"].(bool); failed {
+		// Stored, and the running pipeline was not updated to match it.
+		out["reconcileFailed"] = true
 	}
 	return c.result(out, false)
 }
