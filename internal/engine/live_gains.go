@@ -390,3 +390,65 @@ func (e *Engine) DestinationRunning(id int64) bool {
 	d := e.dests[id]
 	return d != nil && d.proc != nil
 }
+
+// DestinationRun identifies the FFmpeg processes a destination is running on:
+// its primary and, when it has one, its redundant feed. Two reads compare equal
+// exactly when neither process was replaced in between, which is how a caller
+// tells a reconcile that restarted a destination from one that left it running.
+// A live level change keeps the process (the reconcile republishes the same one
+// with the new graph); a restart, structural or a refused live change falling
+// back, builds a new one. The zero value is a destination with no process.
+type DestinationRun struct {
+	primary, backup *supervisor.Process
+}
+
+// Running reports whether the read found a primary process.
+func (r DestinationRun) Running() bool { return r.primary != nil }
+
+// DestinationRunOf reads which processes a destination is running on now.
+func (e *Engine) DestinationRunOf(id int64) DestinationRun {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	d := e.dests[id]
+	if d == nil {
+		return DestinationRun{}
+	}
+	return DestinationRun{primary: d.proc, backup: d.backup}
+}
+
+// nothingToApply is said of a saved change that reaches nothing the destination
+// runs from: a profile edit that compiles to the same command line, say music
+// kept out of a mix the music track had already left.
+const nothingToApply = "nothing this destination sends changed, so it kept running"
+
+// AppliedSince is how a change took effect on a destination that was running
+// on `before` when the change was saved, read once the reconcile that applied
+// it has run: "live" when it kept that process (a level sent on the command
+// channel, or nothing to apply), "restart" when the process was replaced, each
+// with a reason where one helps. Both empty when there is no honest answer:
+// nothing was running before, or nothing is running now (the change stopped
+// it), since a save that started or stopped a destination did neither.
+//
+// The level note is read first, so a caller must ForgetDestinationLive before
+// the write, or a note from an earlier change is reported as this one's.
+//
+// Read back, never predicted: E3 in the 2026-11-04 demo was a music-rights save
+// on a destination whose music track had already left the mix. The engine kept
+// the process, and the console, which only had its own guess, said it was
+// restarting.
+func (e *Engine) AppliedSince(id int64, before DestinationRun) (applied, reason string) {
+	if !before.Running() {
+		return "", ""
+	}
+	if a, r, ok := e.DestinationLive(id); ok {
+		return a, r
+	}
+	switch after := e.DestinationRunOf(id); {
+	case after == before:
+		return liveApplied, nothingToApply
+	case after.Running():
+		return liveRestart, structuralRestart
+	default:
+		return "", ""
+	}
+}

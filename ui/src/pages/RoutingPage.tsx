@@ -50,7 +50,7 @@ import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
 import { readVodStash, writeVodStash } from "@/lib/vodStash";
-import { isLevelOnlySave } from "@/lib/saveImpact";
+import { saveImpact, savedToastKey } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
 import { isLiveMix, outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
 import { OutputStrip } from "@/components/signature/OutputStrip";
@@ -248,15 +248,17 @@ export function RoutingPage() {
   }, [profile, vodProfile, dirty]);
 
   // The live editor's latest compile and the draft it was compiled from. The
-  // save bar compares it, levels masked, with the stored graph to say whether
-  // Save restarts the destination or only moves levels (lib/saveImpact). A
-  // compile of an older draft is never used: identity with `profile` decides.
+  // save bar compares it with the stored compile, levels masked, to say whether
+  // Save restarts the destination, only moves levels, or changes nothing it
+  // sends (lib/saveImpact). A compile of an older draft is never used: identity
+  // with `profile` decides, and until this draft's compile answers the bar
+  // claims neither a restart nor a live change.
   const [liveGraph, setLiveGraph] = useState<{
     profile: RoutingProfile;
-    graph: string | null;
+    result: RoutingResult | null;
   } | null>(null);
   const noteLiveGraph = useCallback(
-    (p: RoutingProfile, graph: string | null) => setLiveGraph({ profile: p, graph }),
+    (p: RoutingProfile, result: RoutingResult | null) => setLiveGraph({ profile: p, result }),
     [],
   );
 
@@ -442,16 +444,18 @@ export function RoutingPage() {
       // vodProfile leaves the stored pointer alone and the operator would watch
       // a delete undo itself on the next load; an explicit `null` sets the
       // pointer to nil, which marshalVODProfile stores as the empty string.
-      await api.updateDestination(selected.id, {
+      const res = await api.updateDestination(selected.id, {
         profile: wireProfile(profile),
         vodProfile: vodProfile ? wireProfile(vodProfile) : null,
       });
+      // What the save DID, as the server read it back after its reconcile,
+      // not what the bar predicted: E3's music-rights save said "restarting"
+      // while the engine kept YouTube's process running.
+      const levelsMoved = routingChanges({ stored: storedRow?.profile, draft: sentProfile }).some(
+        (c) => c.kind === "trackLevel",
+      );
       toast.success(
-        !selected.enabled
-          ? t("route.saved")
-          : levelOnly
-            ? t("route.savedLive", { name: selected.name })
-            : t("route.savedRestarting", { name: selected.name }),
+        t(savedToastKey({ enabled: selected.enabled, applied: res.applied, levelsMoved }), { name: selected.name }),
       );
       setSavedFor(selected.id);
       const fresh = await api.listDestinations();
@@ -641,15 +645,17 @@ export function RoutingPage() {
     () => list.find((r) => r.destination.id === selected?.id)?.routing ?? null,
     [list, selected?.id],
   );
-  // What Save will do to a running destination: a level-only change applies
-  // live where the server supports it; anything else restarts it.
-  const levelOnly = isLevelOnlySave({
-    storedGraph: storedRouting?.filterComplex,
-    draftGraph: liveGraph && liveGraph.profile === profile ? liveGraph.graph : null,
+  // What Save will do to a running destination, by the engine's own rule
+  // (lib/saveImpact): a level-only change applies live where the server
+  // supports it, a change that reaches nothing it sends leaves it running, and
+  // anything else restarts it. "pending" until THIS draft has compiled.
+  const impact = saveImpact({
+    stored: storedRouting,
+    draft: liveGraph && liveGraph.profile === profile ? liveGraph.result : undefined,
+    storedSampleRate: storedRow?.profile.sampleRate,
+    draftSampleRate: profile?.sampleRate,
     secondMixChanged:
       JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
-    storedProfile: storedRow?.profile,
-    draftProfile: profile,
   });
 
   // What the pending save moves, for the save bar's scope line and live diff.
@@ -1133,7 +1139,7 @@ export function RoutingPage() {
         blocked={!!blockingError}
         destinationName={selected?.name ?? ""}
         restarts={!!selected?.enabled}
-        levelOnly={levelOnly}
+        impact={impact}
         changes={pendingChanges}
         saveState={saveState}
         reason={saveReason}
@@ -1243,9 +1249,10 @@ function ProfileEditor({
    *  not. MUST be referentially stable — a raw setState function is ideal —
    *  because it is a dependency of the compile effect below. */
   onCompileError: (message: string) => void;
-  /** Called with each compile of `profile`: its graph, or null when it did not
-   *  compile. Must be referentially stable, like onCompileError. */
-  onCompiledGraph?: (profile: RoutingProfile, graph: string | null) => void;
+  /** Called with each compile of `profile`: the routing it compiled to, or
+   *  null when it did not compile. Must be referentially stable, like
+   *  onCompileError. */
+  onCompiledGraph?: (profile: RoutingProfile, result: RoutingResult | null) => void;
   /** Track roles describe the SOURCE, so one editor owns the labelling UI and
    *  the other reads the result. Two buttons toggling one flag would look like
    *  two independent controls that mysteriously move together. */
@@ -1292,7 +1299,7 @@ function ProfileEditor({
           setCompiled(res.routing);
           setCompileError("");
           onCompileError("");
-          onCompiledGraph?.(profile, res.routing.filterComplex);
+          onCompiledGraph?.(profile, res.routing);
         })
         .catch((err) => {
           if (cancelled) return;

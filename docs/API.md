@@ -928,6 +928,17 @@ overwrite each other. Admin scope; the destination's programme is the one asked.
 The destination status carries the same outcome as `levelChange`
 (`"applied live"` or `"applied by restart: <reason>"`).
 
+`PUT /destinations/{id}` answers how the save took effect, with the same two
+fields, read back after the reconcile rather than predicted. `applied` is `live`
+when the destination kept the FFmpeg process it was running on: a level went to
+it on the command channel, or nothing it sends changed (`reason` then says so).
+Music rights switched on for a mix the music track has already left is the
+second case. `applied` is `restart` when the save replaced the process, and
+`reason` says why. Both are absent when no process was running to apply the
+change to (a disabled destination, or one held until the ingest is probed), when
+the save stopped it, or when the reconcile failed. A failed reconcile is still
+reported in `warnings` and `reconcileFailed`.
+
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
 

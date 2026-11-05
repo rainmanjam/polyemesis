@@ -7,7 +7,9 @@
  * risk the operator needs to see: it reaches the archive. */
 
 /** The tracks a mix sends, read off the mode it is in: a matrix mix sends a track
- *  when any of its cells has gain, a simple mix when the track is enabled. */
+ *  when any of its cells has gain, a simple mix when the track is enabled. A
+ *  MUTED track is still sent: a mute is a level on its volume stage, the track
+ *  stays in the graph, and unmuting it is a live change. */
 export function routedTracks(p: {
   mode: "simple" | "matrix";
   tracks: { track: number; enabled: boolean }[];
@@ -49,7 +51,12 @@ export interface OverviewDest {
 }
 
 export type CellState = "off" | "routed" | "musicVod";
-export type MusicRights = "blocked" | "reachesVod" | "none";
+/** What the Music rights column says of one destination:
+ *  - reachesVod: a music track is in its VOD mix, which does not keep music out.
+ *  - blocked: a guard keeps music out of what it sends.
+ *  - routed: a music track is in its live mix, unguarded, so music goes out.
+ *  - none: no music track is in any of its mixes. */
+export type MusicRights = "blocked" | "reachesVod" | "routed" | "none";
 
 export function cellState(dest: OverviewDest, track: number, music: number[]): CellState {
   const isMusic = music.includes(track);
@@ -65,7 +72,16 @@ export function musicRights(dest: OverviewDest, music: number[]): MusicRights {
   if (dest.vodBound && !dest.vodGuardedMusic && music.some((t) => dest.vodRouted.includes(t))) {
     return "reachesVod";
   }
-  if (dest.guardedMusic || (dest.vodBound && dest.vodGuardedMusic)) return "blocked";
+  // The live mix's guard drops a music track even where it is ticked (the
+  // server's role policy), so nothing below can put music on the output.
+  if (dest.guardedMusic) return "blocked";
+  // Read off the routing itself, the same set the Music cells draw. "No music
+  // routed" here, beside a filled Music cell, was the demo's Twitch and Kick
+  // rows: both sent track 4, and only VOD risk and guards were ever checked. A
+  // guard on the VOD mix alone does not stop this either: the live output still
+  // carries the track.
+  if (music.some((t) => dest.routed.includes(t))) return "routed";
+  if (dest.vodBound && dest.vodGuardedMusic) return "blocked";
   return "none";
 }
 

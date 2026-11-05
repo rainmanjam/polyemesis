@@ -4,6 +4,7 @@ import { translate } from "@/lib/i18n";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { toast } from "sonner";
 
 import { RoutingPage } from "./RoutingPage";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -463,16 +464,19 @@ describe("a stored mute survives every routing-page save path", () => {
 });
 
 describe("the save bar says what Save will do to a running destination", () => {
-  const bar = () => screen.getAllByRole("status").find((e) => /Saving|Only levels/.test(e.textContent ?? ""));
+  const bar = () =>
+    screen
+      .getAllByRole("status")
+      .find((e) => /Saving|Only levels|Unsaved routing changes|No unsaved changes/.test(e.textContent ?? ""));
 
-  it("a structural change warns of a restart", async () => {
+  it("a structural change warns of a restart once this draft has compiled", async () => {
     await renderPage();
     // Let the stored mix's own compile land first, so a stale graph is on hand.
     await waitFor(() => expect(api.compileRouting).toHaveBeenCalled());
     await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
     // Before the new draft has compiled, the older compile must not be read as
-    // this draft's: the answer is the conservative one.
-    expect(bar()?.textContent).toMatch(/^Saving restarts Twitch/);
+    // this draft's, and nothing is claimed either way.
+    expect(bar()?.textContent).toMatch(/^Unsaved routing changes for Twitch/);
     await waitFor(() => expect(bar()?.textContent).toMatch(/^Saving restarts Twitch/));
   });
 
@@ -487,6 +491,111 @@ describe("the save bar says what Save will do to a running destination", () => {
     );
     await save();
     await waitFor(() => expect(savedTracks().find((x) => x.track === 0)?.gain).toBe(0.95));
+  });
+
+  // E1, the demo's Kick fader: while the slider moves, every tick starts a
+  // compile, and the bar read the not-yet-answered compile as a restart. It
+  // flashed "Saving restarts Kick with this mix." in amber on a level change.
+  // MUTATION: saveImpact answers "restart" for an undefined draft. Observed:
+  // FAIL, the bar read "Saving restarts Twitch with this mix." mid-drag.
+  it("a fader drag never flashes a restart while its compile is out", async () => {
+    await renderPage();
+    await waitFor(() => expect(api.compileRouting).toHaveBeenCalled());
+    await waitFor(() => expect(bar()?.textContent).toMatch(/^No unsaved changes/));
+    // From here on every compile waits until the test releases it.
+    const pending: Array<() => void> = [];
+    vi.mocked(api.compileRouting).mockImplementation(
+      ((p: RoutingProfile) =>
+        new Promise((resolve) => pending.push(() => resolve({ routing: compile(p) })))) as never,
+    );
+    const calls = vi.mocked(api.compileRouting).mock.calls.length;
+    const thumb = screen.getAllByRole("slider")[0];
+    const restartShown = () => screen.queryByText(/Saving restarts/) !== null;
+    for (let i = 0; i < 3; i++) {
+      await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+      expect(restartShown()).toBe(false);
+    }
+    // The debounce has sent the last tick's compile; it has not answered.
+    await waitFor(() => expect(vi.mocked(api.compileRouting).mock.calls.length).toBeGreaterThan(calls));
+    expect(pending.length).toBeGreaterThan(0);
+    expect(restartShown()).toBe(false);
+    expect(bar()?.textContent).toMatch(/^Unsaved routing changes for Twitch/);
+    await act(async () => pending.forEach((release) => release()));
+    await waitFor(() =>
+      expect(bar()?.textContent).toMatch(/applies them to Twitch live, without a restart, where the server supports it/),
+    );
+    expect(restartShown()).toBe(false);
+  });
+
+  // E3, the pre-save half: music rights switched on for a destination whose
+  // music track is not in the mix. The profile changes, the compile does not,
+  // and the engine keeps the process, so the bar must not promise a restart.
+  it("a change that moves nothing it sends says saving does not restart it", async () => {
+    await renderPage();
+    await waitFor(() => expect(api.compileRouting).toHaveBeenCalled());
+    await act(async () =>
+      fireEvent.click(screen.getAllByRole("switch", { name: "Keep music out of this destination" })[0]),
+    );
+    await waitFor(() => expect(bar()?.textContent).toMatch(/^Saving does not restart Twitch/));
+    expect(screen.queryByText(/Saving restarts/)).toBeNull();
+  });
+});
+
+describe("the toast after Save says what the server did, not what the page guessed", () => {
+  // E3: saving YouTube's music-rights switch, with track 4 already out of its
+  // mix, raised "“YouTube” is restarting with the new mix." The server had
+  // applied it with no restart: no new child, no new publish.
+  // MUTATION: pick the toast from the page's own prediction again (ignore
+  // `applied`). Observed: FAIL, "is restarting with the new mix".
+  it("a save the server applied without a restart says it kept running", async () => {
+    const success = vi.spyOn(toast, "success");
+    updateDestination.mockImplementation(async () => ({ destination: stored, routing: compiled, applied: "live" }));
+    await renderPage();
+    // An edit the page predicts as a restart, so only the server's answer can
+    // say "kept running".
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await waitFor(() => expect(screen.queryByText(/^Saving restarts Twitch/)).not.toBeNull());
+    await save();
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    const said = String(success.mock.calls.at(-1)?.[0]);
+    expect(said).toBe("Routing saved. “Twitch” kept running: nothing it sends changed.");
+    expect(said).not.toMatch(/restarting/);
+  });
+
+  it("a save the server restarted for says it is restarting", async () => {
+    const success = vi.spyOn(toast, "success");
+    updateDestination.mockImplementation(async () => ({
+      destination: stored,
+      routing: compiled,
+      applied: "restart",
+    }));
+    await renderPage();
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    await save();
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(String(success.mock.calls.at(-1)?.[0])).toBe("Routing saved. “Twitch” is restarting with the new mix.");
+  });
+
+  it("a level change the server applied live says it reached the destination live", async () => {
+    const success = vi.spyOn(toast, "success");
+    updateDestination.mockImplementation(async () => ({ destination: stored, routing: compiled, applied: "live" }));
+    await renderPage();
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    await save();
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(String(success.mock.calls.at(-1)?.[0])).toMatch(/The level change reaches “Twitch” live/);
+  });
+
+  it("with no answer about how it applied, claims no restart", async () => {
+    // The server omits `applied` when nothing was running to apply it to.
+    const success = vi.spyOn(toast, "success");
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await save();
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(String(success.mock.calls.at(-1)?.[0])).toBe("Routing saved.");
   });
 });
 
