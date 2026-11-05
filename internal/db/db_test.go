@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1142,10 +1143,11 @@ func TestUpsertPlatformAccountKeepsTheRefreshTokenWhenNoneIsSupplied(t *testing.
 	d := testDB(t)
 	box := testBox(t)
 
-	if _, err := d.UpsertPlatformAccount(box, &PlatformAccount{
+	first, err := d.UpsertPlatformAccount(box, &PlatformAccount{
 		Platform: PlatformTwitch, AccountRef: "42",
 		AccessToken: "access-1", RefreshToken: "refresh-1",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 
@@ -1162,6 +1164,12 @@ func TestUpsertPlatformAccountKeepsTheRefreshTokenWhenNoneIsSupplied(t *testing.
 	if got.RefreshToken != "refresh-1" {
 		t.Errorf("RefreshToken = %q, want the retained %q", got.RefreshToken, "refresh-1")
 	}
+	// The row returned is the row as updated: a reconnect keeps the account's
+	// id, which every destination links by, and when it was first connected.
+	if got.ID != first.ID || !got.CreatedAt.Equal(first.CreatedAt) {
+		t.Errorf("second upsert returned id %d created %v, want the first's %d created %v",
+			got.ID, got.CreatedAt, first.ID, first.CreatedAt)
+	}
 }
 
 // TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces is a connect
@@ -1174,6 +1182,12 @@ func TestUpsertPlatformAccountKeepsTheRefreshTokenWhenNoneIsSupplied(t *testing.
 // reason connecting failed. Found by the API's racing connect/disconnect test
 // on CI (PR #989).
 //
+// The deleter does not fire once: it deletes the account over and over for as
+// long as the upsert is running. The store has one connection, so each of its
+// statements queues behind the upsert's and lands in every gap the upsert
+// leaves -- which is what made the three-statement version fail at once,
+// rather than when the scheduler happened to line the two up.
+//
 // Mutation: restore the three-statement upsert. Observed FAIL ("a connect
 // racing a delete failed").
 func TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces(t *testing.T) {
@@ -1181,13 +1195,18 @@ func TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces(t *testing.T
 	box := testBox(t)
 	for round := range 300 {
 		token := fmt.Sprintf("access-%d", round)
-		var wg sync.WaitGroup
+		var (
+			wg        sync.WaitGroup
+			done      atomic.Bool
+			got       *PlatformAccount
+			upsertErr error
+			deleteErr error
+		)
 		start := make(chan struct{})
-		var got *PlatformAccount
-		var upsertErr error
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
+			defer done.Store(true)
 			<-start
 			got, upsertErr = d.UpsertPlatformAccount(box, &PlatformAccount{
 				Platform: PlatformTwitch, AccountName: "dallas", AccountRef: "42",
@@ -1197,22 +1216,35 @@ func TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces(t *testing.T
 		go func() {
 			defer wg.Done()
 			<-start
-			accts, err := d.ListPlatformAccounts()
-			if err != nil {
-				return
-			}
-			for _, a := range accts {
-				_ = d.DeletePlatformAccount(a.ID)
+			for !done.Load() {
+				accts, err := d.ListPlatformAccounts()
+				if err != nil {
+					deleteErr = err
+					return
+				}
+				for _, a := range accts {
+					// Not found is the delete losing to the previous pass of
+					// this same loop, which is fine; anything else is not.
+					if err := d.DeletePlatformAccount(a.ID); err != nil && !errors.Is(err, ErrNotFound) {
+						deleteErr = err
+						return
+					}
+				}
 			}
 		}()
 		close(start)
 		wg.Wait()
+		if deleteErr != nil {
+			t.Fatalf("round %d: the racing delete failed: %v", round, deleteErr)
+		}
 		if upsertErr != nil {
 			t.Fatalf("round %d: a connect racing a delete failed: %v", round, upsertErr)
 		}
-		if got.AccountRef != "42" || got.AccessToken != token {
-			t.Fatalf("round %d: the connect returned %q with token %q, want the row it wrote (42, %q)",
-				round, got.AccountRef, got.AccessToken, token)
+		if got.ID == 0 || got.Platform != PlatformTwitch || got.AccountRef != "42" || got.AccountName != "dallas" ||
+			got.AccessToken != token || got.RefreshToken != "refresh" {
+			t.Fatalf("round %d: the connect returned id %d %s/%s %q (access token matches: %v, refresh token matches: %v), "+
+				"want the row it wrote", round, got.ID, got.Platform, got.AccountRef, got.AccountName,
+				got.AccessToken == token, got.RefreshToken == "refresh")
 		}
 	}
 }
