@@ -74,31 +74,59 @@ const (
 // roll back and are returned as they are. The keys are sealed the way
 // UpdateDestination seals them, per half, so a half whose stored key cannot be
 // read and that apply left empty keeps its ciphertext.
-func (d *DB) UpdateDestinationIngest(id int64, apply func(*Destination) error) (*Destination, error) {
+//
+// captionURL is the YouTube caption ingestion URL the platform issued with the
+// new key, or "". It is stored IN THE SAME TRANSACTION, bound to the key just
+// written, when the current row posts captions by HTTP POST -- so no reader
+// ever sees the new key without its URL, or a URL stored for a write that was
+// refused, and the row handed back reports CaptionIngestReady truthfully. A
+// URL that cannot be sealed (ErrCaptionIngestUnsealable) is not stored and
+// does not refuse the key; the row handed back then says it is not ready.
+func (d *DB) UpdateDestinationIngest(id int64, captionURL string, apply func(*Destination) error) (*Destination, error) {
 	return d.writeDestinationPart(id, apply, func(tx *sql.Tx, cur *Destination, now int64) error {
-		keepPrimary, keepBackup, keyArgs, err := d.sealedKeyArgs(cur)
-		if err != nil {
+		if err := d.writeIngestColumns(tx, cur, now); err != nil {
 			return err
 		}
-		var query string
-		switch {
-		case keepPrimary && keepBackup:
-			query = destIngestKeepKeyQuery
-		case keepPrimary:
-			query = destIngestKeepPrimaryQuery
-		case keepBackup:
-			query = destIngestKeepBackupQuery
-		default:
-			query = destIngestQuery
+		if captionURL == "" || !sendsYouTubeCaptionPOST(cur.Platform, cur.CaptionMode) {
+			// Nothing to store. A row that does not post captions has its URL
+			// forgotten by writeDestinationPart.
+			return nil
 		}
-		repair, err := repairColumnArgs(cur)
+		enc, hash, err := d.sealCaptionIngestURL(cur.StreamKey, captionURL)
 		if err != nil {
-			return err
+			// Not a refusal: the key is what makes the destination publish,
+			// and the stored row reports that captions are not ready.
+			return nil
 		}
-		args := append(keyArgs, cur.Kind, cur.URL, cur.BackupURL)
-		args = append(args, repair...)
-		return execOneDestination(tx, query, append(args, now, cur.ID)...)
+		_, err = tx.Exec(captionIngestUpsertQuery, cur.ID, enc, hash, now)
+		return err
 	})
+}
+
+// writeIngestColumns is UpdateDestinationIngest's UPDATE.
+func (d *DB) writeIngestColumns(tx *sql.Tx, cur *Destination, now int64) error {
+	keepPrimary, keepBackup, keyArgs, err := d.sealedKeyArgs(cur)
+	if err != nil {
+		return err
+	}
+	var query string
+	switch {
+	case keepPrimary && keepBackup:
+		query = destIngestKeepKeyQuery
+	case keepPrimary:
+		query = destIngestKeepPrimaryQuery
+	case keepBackup:
+		query = destIngestKeepBackupQuery
+	default:
+		query = destIngestQuery
+	}
+	repair, err := repairColumnArgs(cur)
+	if err != nil {
+		return err
+	}
+	args := append(keyArgs, cur.Kind, cur.URL, cur.BackupURL)
+	args = append(args, repair...)
+	return execOneDestination(tx, query, append(args, now, cur.ID)...)
 }
 
 // UpdateDestinationExpertArgs writes ONLY the three expert-mode columns --

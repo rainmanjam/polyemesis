@@ -57,9 +57,9 @@ func assertOperatorEditsSurvived(t *testing.T, got *Destination) {
 // a rename and a routing change made in that window must survive it, even when
 // the callback is handed a snapshot from before them and writes it back.
 //
-// Mutation: add `name=?, enabled=?, profile=?` to destIngestCols and pass
-// cur.Name, cur.Enabled and the marshalled cur.Profile. Observed red: all three
-// operator edits reverted.
+// Mutation: in UpdateDestinationIngest's write, also store name, enabled and
+// profile from cur (`UPDATE destinations SET name=?, enabled=?, profile=?` in
+// the same transaction). Observed red: all three operator edits reverted.
 func TestTheIngestWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 	d := testDB(t)
 	created := partialWriteDestination(t, d)
@@ -67,7 +67,7 @@ func TestTheIngestWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 
 	landOperatorEdits(t, d, created.ID)
 
-	got, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+	got, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
 		cur.URL = "rtmps://new-ingest.example/rtmp"
 		cur.StreamKey = "key-from-the-platform"
 		cur.BackupURL, cur.BackupStreamKey = "rtmps://backup.example/rtmp", "backup-key"
@@ -104,8 +104,9 @@ func TestTheIngestWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 
 // The expert save's write owns the three expert columns, and nothing else.
 //
-// Mutation: add `name=?, enabled=?, profile=?` to destExpertArgsQuery and pass
-// the three. Observed red: all three operator edits reverted.
+// Mutation: the same extra UPDATE of name, enabled and profile in
+// UpdateDestinationExpertArgs's write. Observed red: all three operator edits
+// reverted.
 func TestTheExpertArgsWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 	d := testDB(t)
 	created := partialWriteDestination(t, d)
@@ -146,7 +147,9 @@ func TestTheExpertArgsWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
 	d := testDB(t)
 	for name, write := range map[string]func(int64, func(*Destination) error) (*Destination, error){
-		"ingest": d.UpdateDestinationIngest,
+		"ingest": func(id int64, apply func(*Destination) error) (*Destination, error) {
+			return d.UpdateDestinationIngest(id, "", apply)
+		},
 		"expert": d.UpdateDestinationExpertArgs,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -172,13 +175,13 @@ func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
 // A callback that refuses writes nothing, and its error is what comes back.
 //
 // Mutation: in writeDestinationPart, ignore apply's error. Observed red: the
-// refused key was stored.
+// refusal came back as success (err = nil), and the refused key was written.
 func TestARefusedPartialWriteStoresNothing(t *testing.T) {
 	d := testDB(t)
 	created := partialWriteDestination(t, d)
 	refusal := errors.New("not this row")
 	for _, want := range []error{ErrIngestSkipped, refusal} {
-		_, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+		_, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
 			cur.StreamKey = "should-not-land"
 			return want
 		})
@@ -194,10 +197,13 @@ func TestARefusedPartialWriteStoresNothing(t *testing.T) {
 
 // Both writers check the row as UpdateDestination does, so neither can store
 // what that one refuses.
+//
+// Mutation: drop the Validate call in writeDestinationPart. Observed red: an
+// RTMP destination with no URL was stored.
 func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
 	d := testDB(t)
 	created := partialWriteDestination(t, d)
-	if _, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
 		cur.URL = "" // an RTMP destination with nowhere to send to
 		return nil
 	}); err == nil {
@@ -207,7 +213,7 @@ func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
 	if got.URL != "rtmps://live.example/rtmp" {
 		t.Errorf("URL = %q after a refused write", got.URL)
 	}
-	if _, err := d.UpdateDestinationIngest(404, func(*Destination) error { return nil }); !errors.Is(err, ErrNotFound) {
+	if _, err := d.UpdateDestinationIngest(404, "", func(*Destination) error { return nil }); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing row: err = %v, want ErrNotFound", err)
 	}
 }
@@ -216,8 +222,9 @@ func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
 // the primary and must not destroy the backup's ciphertext: the same per-half
 // rule UpdateDestination keeps (TestRetypingThePrimaryKeyLeavesTheBackupCiphertextAlone).
 //
-// Mutation: in UpdateDestinationIngest, always use destIngestQuery. Observed
-// red: the backup ciphertext became NULL.
+// Mutation: in UpdateDestinationIngest, ignore the per-half decision and reseal
+// both halves with destIngestQuery. Observed red: the key refresh destroyed the
+// backup key's ciphertext.
 func TestTheIngestWriteKeepsAnUnreadableBackupKeysCiphertext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "polyemesis.db")
 	d := keyDB(t, path, WithSecretBox(testBox(t)))
@@ -234,7 +241,7 @@ func TestTheIngestWriteKeepsAnUnreadableBackupKeysCiphertext(t *testing.T) {
 	}
 	sealedBefore := rawCol(t, d, "backup_stream_key_enc", saved.ID)
 
-	if _, err := d.UpdateDestinationIngest(saved.ID, func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(saved.ID, "", func(cur *Destination) error {
 		// The row as it reads back after a restore with no key file.
 		cur.KeyUnreadable = "the stored key could not be opened with this secret.key"
 		cur.StreamKey = "key-from-the-platform"
@@ -254,6 +261,9 @@ func TestTheIngestWriteKeepsAnUnreadableBackupKeysCiphertext(t *testing.T) {
 // A destination whose captions were switched off while a key refresh was
 // fetching has no use for the caption URL that refresh stored, and the write
 // forgets it, as UpdateDestination does.
+//
+// Mutation: skip the caption delete in writeDestinationPart. Observed red: the
+// caption URL was still stored.
 func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
 	// The caption URL is stored sealed, so this one needs a key.
 	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"), WithSecretBox(testBox(t)))
@@ -264,7 +274,7 @@ func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
 	if err := d.PutCaptionIngestURL(created.ID, "key-from-the-platform", "https://captions.example/x"); err != nil {
 		t.Fatalf("PutCaptionIngestURL: %v", err)
 	}
-	if _, err := d.UpdateDestinationIngest(created.ID, func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
 		cur.StreamKey = "key-from-the-platform"
 		return nil
 	}); err != nil {
@@ -273,4 +283,80 @@ func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
 	if has, err := d.HasCaptionIngestURL(created.ID, "key-from-the-platform"); err != nil || has {
 		t.Errorf("caption URL still stored (%v, %v) for a destination that posts no captions", has, err)
 	}
+}
+
+// A key refresh's caption ingestion URL is stored in the same transaction as
+// the key it belongs to: the row handed back reports it ready, a refused write
+// stores neither, and a row that no longer posts captions is not given one.
+//
+// Mutations, each observed red: delete the caption upsert from
+// UpdateDestinationIngest (the returned row is not ready, and no URL is
+// stored for the new key); store the URL with d.PutCaptionIngestURL before
+// writeDestinationPart begins (the refused write still stores the URL).
+func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
+	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"), WithSecretBox(testBox(t)))
+	if err := d.CreateSource(&Source{Name: "Main", Enabled: true, Ingest: DefaultSettings().Ingest}); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	newCaptioned := func(name string) *Destination {
+		t.Helper()
+		created, err := d.CreateDestination(&Destination{
+			Name: name, Kind: DestRTMP, Platform: PlatformYouTube,
+			URL: "rtmp://a.example/live2", StreamKey: "held-key", AudioBitrate: 128,
+			DelaySeconds: 30, CaptionMode: "youtube_post",
+		})
+		if err != nil {
+			t.Fatalf("CreateDestination: %v", err)
+		}
+		return created
+	}
+	const captionURL = "https://upload.youtube.com/closedcaption?cid=fake"
+
+	t.Run("stored with the key", func(t *testing.T) {
+		dst := newCaptioned("stored")
+		got, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+			cur.StreamKey = "fresh-key"
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("UpdateDestinationIngest: %v", err)
+		}
+		if !got.CaptionIngestReady {
+			t.Error("the row handed back says captions are not ready, though the URL came with the key")
+		}
+		if u, _ := d.CaptionIngestURL(dst.ID, "fresh-key"); u != captionURL {
+			t.Errorf("CaptionIngestURL(fresh-key) = %q, want the URL stored for the new key", u)
+		}
+	})
+
+	t.Run("a refused write stores neither", func(t *testing.T) {
+		dst := newCaptioned("refused")
+		if _, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+			cur.StreamKey = "fresh-key"
+			return ErrIngestSkipped
+		}); !errors.Is(err, ErrIngestSkipped) {
+			t.Fatalf("err = %v, want ErrIngestSkipped", err)
+		}
+		if has, _ := d.HasCaptionIngestURL(dst.ID, "fresh-key"); has {
+			t.Error("a caption URL was stored for a key refresh that was refused")
+		}
+	})
+
+	t.Run("captions switched off during the fetch", func(t *testing.T) {
+		dst := newCaptioned("switched off")
+		row, _ := d.GetDestination(dst.ID)
+		row.CaptionMode = "off"
+		if _, err := d.UpdateDestination(row); err != nil {
+			t.Fatalf("switch captions off: %v", err)
+		}
+		if _, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+			cur.StreamKey = "fresh-key"
+			return nil
+		}); err != nil {
+			t.Fatalf("UpdateDestinationIngest: %v", err)
+		}
+		if has, _ := d.HasCaptionIngestURL(dst.ID, "fresh-key"); has {
+			t.Error("a caption URL was stored for a destination that no longer posts captions")
+		}
+	})
 }

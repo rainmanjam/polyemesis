@@ -950,7 +950,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var repairs []string
-	updated, err := s.store.UpdateDestinationIngest(id, func(cur *db.Destination) error {
+	updated, err := s.store.UpdateDestinationIngest(id, b.CaptionIngestURL, func(cur *db.Destination) error {
 		// The key belongs to the account it was fetched with. A destination
 		// linked to another account, or to none, since the fetch began is not
 		// given it: that would publish to a channel the operator has just
@@ -975,20 +975,22 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// The caption URL AFTER the write, and decided on the row as stored: a
-	// refusal above must leave caption_ingest as it was, and a destination
-	// whose captions were switched off during the fetch has no use for one. It
-	// is bound to the key it came with, which is the key just stored.
+	// The caption URL was stored by that same write, bound to the new key, when
+	// the row as it stands posts captions: never for a refused write, never for
+	// a destination whose captions were switched off during the fetch, and
+	// never as a second commit a start could fall between. The stored row says
+	// whether it took.
 	if sendsCaptionPOST(updated) {
-		if b.CaptionIngestURL == "" {
+		switch {
+		case b.CaptionIngestURL == "":
 			warnings = append(warnings, "YouTube returned no caption ingestion URL for this destination's "+
 				"stream, so captions cannot be posted to it and the destination will not start with captions "+
 				"set to HTTP POST. Press Refresh stream key again, or set captions to off or embedded.")
-		} else if err := s.keepCaptionIngest(updated, b); err != nil {
+		case !updated.CaptionIngestReady:
 			s.log.Warn("refresh key: the caption ingestion URL could not be stored",
-				"destination", updated.ID, "err", redactErr(err))
+				"destination", updated.ID, "err", db.ErrCaptionIngestUnsealable)
 			warnings = append(warnings, "the caption ingestion URL YouTube returned could not be stored, so "+
-				"captions cannot be posted to this destination yet: "+redactErr(err))
+				"captions cannot be posted to this destination yet: "+db.ErrCaptionIngestUnsealable.Error())
 		}
 	}
 	if updated.BackupIngestWanted && updated.BackupURL == "" {
@@ -1694,10 +1696,15 @@ func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destina
 	// expert save can land during the call), so every exit after it answers
 	// with the row as stored now, not with saved.
 	current := func() *db.Destination {
-		if cur, err := s.store.GetDestination(saved.ID); err == nil {
-			return cur
+		cur, err := s.store.GetDestination(saved.ID)
+		if err != nil {
+			// Deleted during the call, most often. The save itself succeeded,
+			// so the answer is the row it stored rather than a failure.
+			s.log.Warn("backup ingest: the destination could not be read back after the save",
+				"destination", saved.ID, "err", err)
+			return saved
 		}
-		return saved
+		return cur
 	}
 	probe := *saved
 	if w := s.fillFacebookBackupIngest(ctx, &probe); w != "" {
@@ -1717,7 +1724,7 @@ func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destina
 		return current(), []string{backupNotStoredWarning(err)}
 	}
 	var repairs []string
-	updated, err := s.store.UpdateDestinationIngest(saved.ID, func(cur *db.Destination) error {
+	updated, err := s.store.UpdateDestinationIngest(saved.ID, "", func(cur *db.Destination) error {
 		// Only onto the broadcast Facebook just added the feed to, and only if
 		// it is still wanted and nobody else has filled it in the meantime. A
 		// key refresh during the call has a broadcast and a backup of its own,
