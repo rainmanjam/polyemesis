@@ -9,14 +9,17 @@ package api
 // reason rather than an aborted pass, because one misconfigured platform must
 // not cost the operator the other three.
 //
-// REMOVAL IS LIVE, CONNECTION IS NOT. Disconnecting an account or removing a
-// platform's developer credentials ends the matching chat at once (see
-// detachAccountChat and detachPlatformChat), because a chat the operator has
-// just taken away and can still see is the worse of the two failures: the
-// Dashboard went on drawing a FACEBOOK chip reading "Connected and waiting"
-// over an install with no Facebook account, credentials or destination left.
-// A newly connected account still starts reading chat at the next restart;
-// nothing attaches one mid-process yet.
+// CONNECTION AND REMOVAL ARE BOTH LIVE. Connecting an account, or connecting it
+// again, starts its chat at once (attachAccountChat); disconnecting it or
+// removing its platform's developer credentials ends it at once
+// (detachAccountChat, detachPlatformChat). Until the connect half existed, a
+// Twitch account connected in Settings → Platforms read no chat until the
+// process restarted, and the reconnect a failed Twitch login asks for left the
+// chip reading Failed. StartChat and a connect decide through the same
+// function, connectChat, so a restart and a connect cannot disagree about an
+// account; and all four run under chatWire, each reading the database again
+// under it, so a connect and a disconnect that race leave the Hub agreeing with
+// whichever wrote last.
 //
 // Adapters are attached as soon as an account exists rather than when a
 // broadcast starts. That is on purpose. Twitch IRC and Kick's webhook work
@@ -84,10 +87,19 @@ func publicBaseURL(cfg config.Config) string {
 // StartChat attaches an adapter for every connected account. Failures are
 // logged and skipped; the return value is the number attached, for the caller's
 // startup line.
+//
+// ctx is the server's lifetime, and StartChat keeps it: every account connected
+// after startup attaches under it too (see attachAccountChat).
 func (s *Server) StartChat(ctx context.Context) int {
 	if s.chat == nil || s.store == nil {
 		return 0
 	}
+	s.chatWire.Lock()
+	defer s.chatWire.Unlock()
+	// Kept before anything below can fail, so an install whose startup could
+	// not read its accounts still starts the chat of the next one connected.
+	s.chatLife = ctx
+
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		s.log.Warn("chat: could not list connected accounts", "err", err)
@@ -101,28 +113,9 @@ func (s *Server) StartChat(ctx context.Context) int {
 
 	attached := 0
 	for _, a := range accts {
-		// THE SAME RULE detachPlatformChat applies live. Removing a platform's
-		// developer credentials ends its chat and leaves its account rows in
-		// place, so a startup that attached every account regardless would put
-		// back, on the next restart, the very chat the removal took away.
-		if !withCreds[a.Platform] {
-			s.log.Info("chat: not connecting a platform", "platform", a.Platform, "account", a.AccountName,
-				"reason", "no developer credentials are stored for it; add them in Settings → Platform credentials")
-			continue
+		if s.connectChat(ctx, a, withCreds) {
+			attached++
 		}
-		adapter, err := s.chatAdapter(ctx, a)
-		if err != nil {
-			// Info, not Warn: "you have not gone live yet" and "this platform
-			// has no chat adapter" are both normal, and a warning for either
-			// trains operators to ignore the ones that matter.
-			s.log.Info("chat: not connecting a platform", "platform", a.Platform, "account", a.AccountName, "reason", err)
-			continue
-		}
-		if err := s.chat.Attach(ctx, adapter); err != nil {
-			s.log.Warn("chat: could not attach", "platform", a.Platform, "err", err)
-			continue
-		}
-		attached++
 	}
 
 	// Rumble hangs off no account row, so it cannot come out of the loop above.
@@ -131,6 +124,127 @@ func (s *Server) StartChat(ctx context.Context) int {
 		attached++
 	}
 	return attached
+}
+
+// connectChat attaches one account's chat when the rules allow it, and reports
+// whether it did. Caller holds chatWire.
+//
+// THE ONE RULE, shared by StartChat and attachAccountChat so a restart and a
+// connect cannot come to different answers about the same account:
+//   - no developer credentials, no chat (the rule detachPlatformChat applies
+//     live);
+//   - chatAdapter's refusals, the X Livestream gate among them;
+//   - Hub.Attach's, which reads the capability matrix to decide whether the
+//     platform can be offered as a send target.
+func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCreds map[db.Platform]bool) bool {
+	// THE SAME RULE detachPlatformChat applies live. Removing a platform's
+	// developer credentials ends its chat and leaves its account rows in place,
+	// so a startup that attached every account regardless would put back, on
+	// the next restart, the very chat the removal took away.
+	if !withCreds[a.Platform] {
+		s.log.Info("chat: not connecting a platform", "platform", a.Platform, "account", a.AccountName,
+			"reason", "no developer credentials are stored for it; add them in Settings → Platform credentials")
+		return false
+	}
+	adapter, err := s.chatAdapter(ctx, a)
+	if err != nil {
+		// Info, not Warn: "you have not gone live yet" and "this platform has
+		// no chat adapter" are both normal, and a warning for either trains
+		// operators to ignore the ones that matter.
+		s.log.Info("chat: not connecting a platform", "platform", a.Platform, "account", a.AccountName, "reason", err)
+		return false
+	}
+	if err := s.chat.Attach(ctx, adapter); err != nil {
+		s.log.Warn("chat: could not attach", "platform", a.Platform, "err", err)
+		return false
+	}
+	return true
+}
+
+// attachAccountChat starts the chat of an account that has just been
+// connected, or restarts it for one connected again. The OAuth callback and the
+// device-code poll call it once the row is stored. Nothing here fails the
+// connect, which has already succeeded: a chat that cannot start says why in
+// the log, exactly as it would at startup.
+//
+// REPLACE, NOT SKIP. Connecting over an attached account swaps its adapter for
+// a new one rather than leaving the old one running. The old one may be why the
+// operator is connecting again: a Twitch adapter whose login was refused stops
+// for good and says "reconnect the Twitch account in Settings → Platforms", and
+// a reconnect that found it attached and left it alone would leave the chip
+// reading Failed until a restart. The Hub refuses a second adapter for one
+// account, so this is also what keeps a reconnect at exactly one.
+//
+// THE ROW IS READ AGAIN UNDER chatWire, never taken from the caller. A
+// disconnect can land between the caller's write and this lock, and attaching
+// from the caller's copy would start a chat for an account that no longer
+// exists, with nothing left to end it. detachAccountChat reads again under the
+// same lock, so whichever of the two runs second sees what the other did.
+//
+// UNDER THE SERVER'S LIFETIME, not the request's. The callback's context ends
+// with its redirect, and an adapter started under it would stop at once and
+// stay in the Hub as a chip over a chat that never arrives.
+func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
+	// Rumble's chat hangs off an environment variable, not an account (see
+	// attachRumble), and no connect has any claim on it.
+	if s.chat == nil || s.store == nil || p == db.PlatformRumble {
+		return
+	}
+	if s.beforeChatAttach != nil {
+		s.beforeChatAttach()
+	}
+	s.chatWire.Lock()
+	defer s.chatWire.Unlock()
+	if s.chatLife == nil {
+		// StartChat has not run, so there is no lifetime to attach under. When
+		// it runs it lists every account, this one included.
+		s.log.Info("chat: not connecting a platform yet", "platform", p,
+			"reason", "chat has not started; it attaches every connected account when it does")
+		return
+	}
+	// A READ THAT FAILS CHANGES NOTHING. With the row unknown there is nothing
+	// to build from, and detaching anyway would trade a chat that may well be
+	// working for none at all over a read that may only have hiccupped. The
+	// next connect, or a restart, puts it right.
+	a, found, err := s.accountByKey(p, accountRef)
+	if err != nil {
+		s.log.Warn("chat: could not read the account just connected; its chat is left as it was until it is connected again or polyemesis restarts",
+			"platform", p, "err", err)
+		return
+	}
+	withCreds, err := s.platformsWithCreds()
+	if err != nil {
+		s.log.Warn("chat: could not list platform credentials; the account's chat is left as it was until it is connected again or polyemesis restarts",
+			"platform", p, "err", err)
+		return
+	}
+	if s.whileChatAttach != nil {
+		s.whileChatAttach()
+	}
+	// The old adapter goes whatever happens next, so the Hub ends up holding
+	// what a restart would build for this row: one fresh adapter, or none.
+	s.detachChat(p, accountRef)
+	if !found {
+		return
+	}
+	s.connectChat(s.chatLife, a, withCreds)
+}
+
+// accountByKey finds the account the Hub knows as (platform, account_ref), the
+// pair platform_accounts holds UNIQUE. Read through ListPlatformAccounts for
+// the reason accountChatKey gives -- it decrypts nothing -- and because it is
+// the shape StartChat builds every adapter from.
+func (s *Server) accountByKey(p db.Platform, accountRef string) (db.PlatformAccount, bool, error) {
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return db.PlatformAccount{}, false, err
+	}
+	for _, a := range accts {
+		if a.Platform == p && a.AccountRef == accountRef {
+			return a, true, nil
+		}
+	}
+	return db.PlatformAccount{}, false, nil
 }
 
 // platformsWithCreds is the set of platforms that have a developer app stored.
@@ -177,9 +291,25 @@ func (s *Server) accountChatKey(id int64) (db.Platform, string, error) {
 // video never calls its token, so it never noticed; it went on reporting
 // "waiting for a broadcast", and the Dashboard went on drawing its chip, until
 // the process restarted.
+//
+// A RECONNECT MAY HAVE PUT THE ROW BACK between the delete and chatWire -- the
+// same platform and account_ref under a new id -- and attached its chat.
+// Ending that chat would leave a connected account silent until a restart, so
+// a row found here is left to the connect that wrote it. A read that fails
+// detaches anyway: the delete this follows did happen.
 func (s *Server) detachAccountChat(p db.Platform, accountRef string) {
 	if s.chat == nil {
 		return
+	}
+	s.chatWire.Lock()
+	defer s.chatWire.Unlock()
+	_, found, err := s.accountByKey(p, accountRef)
+	if err == nil && found {
+		return
+	}
+	if err != nil {
+		s.log.Warn("chat: could not check whether the account was connected again; ending its chat, since the disconnect went through",
+			"platform", p, "account", accountRef, "err", err)
 	}
 	s.detachChat(p, accountRef)
 }
@@ -190,8 +320,9 @@ func (s *Server) detachAccountChat(p db.Platform, accountRef string) {
 // otherwise hold the operator's request open with the delete already done.
 const chatDetachWait = 5 * time.Second
 
-// detachChat is the one place the delete handlers end a chat: unlisted and
-// cancelled at once, with the wait bounded (see chat.Hub.DetachWithin).
+// detachChat is the one place a handler ends a chat -- a delete, or a connect
+// replacing the adapter it had: unlisted and cancelled at once, with the wait
+// bounded (see chat.Hub.DetachWithin). Caller holds chatWire.
 func (s *Server) detachChat(p db.Platform, account string) {
 	if !s.chat.DetachWithin(p, account, chatDetachWait) {
 		s.log.Warn("chat adapter is slow to stop; it is detached and will finish in the background",
@@ -216,6 +347,10 @@ func (s *Server) detachPlatformChat(p db.Platform) {
 	if s.chat == nil || p == db.PlatformRumble {
 		return
 	}
+	// Under chatWire, so a connect that read the credentials just before they
+	// went cannot attach after this has looked.
+	s.chatWire.Lock()
+	defer s.chatWire.Unlock()
 	for _, st := range s.chat.Statuses() {
 		if st.Platform == p {
 			s.detachChat(st.Platform, st.Account)
@@ -293,12 +428,12 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// default ten thousand -- polling roughly a hundred times slower than
 		// it was entitled to, with nothing saying so.
 		//
-		// This is the STARTUP half of the answer only. chatAdapter runs once
-		// per process -- from StartChat, from main -- so a value read here and
-		// held would be a value a settings save could not change until a
-		// restart. ApplyYouTubeQuota is the other half, pushing a saved
-		// allowance into the adapter this built; settingsReload records the
-		// pair as ClassLive on the strength of it.
+		// This is the BUILD half of the answer only. chatAdapter runs when an
+		// adapter is built -- at startup, and when an account is connected --
+		// so a value read here and held would be a value a settings save could
+		// not change until the next build. ApplyYouTubeQuota is the other
+		// half, pushing a saved allowance into the adapter this built;
+		// settingsReload records the pair as ClassLive on the strength of it.
 		units, reserve := youtubeQuotaPair(s.youtubeQuota())
 		return chat.NewYouTube(chat.YouTubeConfig{
 			AccountRef:   a.AccountRef,
@@ -324,7 +459,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// carries: a Client-Id, the channel's numeric id, and a token that is
 		// still fresh an hour after connect.
 		//
-		// StartChat has already checked that a credentials ROW exists; this
+		// connectChat has already checked that a credentials ROW exists; this
 		// reads it for the client id. A read that still fails here -- a secret
 		// that will not open -- is NOT an error: IRC has the token it needs,
 		// and refusing to open the pane because a moderation call might one
@@ -349,6 +484,8 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			// channel is worse than one that refuses.
 			BroadcasterID: a.AccountRef,
 			ModeratorID:   a.AccountRef,
+			// Nil in production. The tests' fake IRC server.
+			Dial: s.twitchChatDial,
 		})
 
 	case db.PlatformKick:

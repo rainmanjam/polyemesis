@@ -564,6 +564,26 @@ type Server struct {
 	// above it: a build with no chat wired serves the pane read-only from the
 	// stored scrollback rather than hiding it.
 	chat *chat.Hub
+	// chatWire serialises every change to WHICH accounts have a chat attached:
+	// StartChat, a connect (attachAccountChat) and the two detaches. Each one
+	// re-reads the database under it, so whichever runs last sees the last
+	// write, and the Hub agrees with platform_accounts whatever order a connect
+	// and a disconnect land in. See chat_wiring.go.
+	chatWire sync.Mutex
+	// chatLife is the server-lifetime context StartChat was given. A connect
+	// attaches under it rather than under its request, whose context ends with
+	// the redirect and would take the new chat with it. Nil until StartChat
+	// runs; guarded by chatWire.
+	chatLife context.Context
+	// twitchChatDial replaces the Twitch IRC dial. A test seam: nil in
+	// production, where the adapter dials irc.chat.twitch.tv itself.
+	twitchChatDial func(context.Context) (net.Conn, error)
+	// beforeChatAttach and whileChatAttach are test seams on a connect's attach:
+	// the first runs after the account is stored and before chatWire is taken,
+	// the second under chatWire once the row has been re-read. They are how the
+	// tests land a disconnect at exactly those two points. Nil in production.
+	beforeChatAttach func()
+	whileChatAttach  func()
 	// automodBudget is the install's hourly model spend, owned here rather
 	// than by the connector because ApplyAutomod rebuilds the connector on
 	// every settings save. See internal/automod/budget.go.

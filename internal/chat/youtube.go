@@ -665,8 +665,9 @@ func (y *YouTubeAdapter) classify(err error) error {
 // dropping the connection.
 //
 // #732 wired the operator's number into NewYouTube, which answered the question
-// only for a process that had not started yet: chatAdapter runs once, from
-// StartChat, from main. An operator granted a larger quota by a YouTube API
+// only for an adapter not yet built: chatAdapter reads the allowance when it
+// builds one, at startup or when an account is connected, and never again for
+// that adapter. An operator granted a larger quota by a YouTube API
 // Services audit would set it, be told it was saved, and go on polling at the
 // default rate until the next restart -- which is the same defect #732 was
 // filed for, moved one step later.
