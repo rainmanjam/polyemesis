@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -501,6 +502,11 @@ func TestReconnectingReplacesTheAdapterRatherThanAddingOne(t *testing.T) {
 // them before they went, so it still stores the account; the chat must not
 // start, or it would be the chip #985 removed, back again.
 //
+// The removal is confirmed, as Settings sends it once warned (#988 refuses an
+// unconfirmed one while an account uses the app). #988 also drops pending
+// sign-ins with the app, but this one had already taken its state before the
+// exchange began, so it completes: that is the outcome asserted below.
+//
 // A guard rather than a regression test: before this change nothing attached
 // on connect at all, so it passed then too. Proven by its mutation: drop the
 // withCreds check from connectChat. Observed FAIL ("a connect attached chat
@@ -515,7 +521,7 @@ func TestConnectingAPlatformWithoutCredentialsStartsNoChat(t *testing.T) {
 	// over a channel rather than through a shared variable.
 	removed := make(chan int, 1)
 	fake.duringExchange = func() {
-		r := jsonRequest(t, http.MethodDelete, "/api/v1/platforms/credentials/twitch", nil)
+		r := jsonRequest(t, http.MethodDelete, "/api/v1/platforms/credentials/twitch", map[string]bool{"confirm": true})
 		sign(r)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -525,6 +531,9 @@ func TestConnectingAPlatformWithoutCredentialsStartsNoChat(t *testing.T) {
 
 	if code := <-removed; code != http.StatusOK {
 		t.Fatalf("removing the credentials mid-exchange: status %d", code)
+	}
+	if _, err := store.GetPlatformCreds(s.box, db.PlatformTwitch); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("the credentials are still stored after the confirmed removal (err %v), so this test proves nothing", err)
 	}
 	if accountID(t, store, db.PlatformTwitch, twitchUserRef) == 0 {
 		t.Fatal("the connect did not store the account, so this test proves nothing about the chat it would start")
@@ -735,13 +744,13 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 		// attach, on its own goroutine, and gives it a second to finish there.
 		// Serialised, it cannot: it waits on chatWire until the attach is done.
 		// The returned channel yields its status.
-		whileAttaching := func(t *testing.T, s *Server, h http.Handler, sign func(*http.Request), method, path string) <-chan int {
+		whileAttaching := func(t *testing.T, s *Server, h http.Handler, sign func(*http.Request), method, path string, body any) <-chan int {
 			var once sync.Once
 			done := make(chan int, 1)
 			s.whileChatAttach = func() {
 				once.Do(func() {
 					go func() {
-						r := jsonRequest(t, method, path, nil)
+						r := jsonRequest(t, method, path, body)
 						sign(r)
 						w := httptest.NewRecorder()
 						h.ServeHTTP(w, r)
@@ -804,7 +813,7 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 			t.Run("the disconnect lands while the attach is under way", func(t *testing.T) {
 				s, h, store, sign := connected(t)
 				id := accountID(t, store, p, ref)
-				done := whileAttaching(t, s, h, sign, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", id))
+				done := whileAttaching(t, s, h, sign, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", id), nil)
 				connect(t, h, sign, store, "state-race-c")
 				if code := <-done; code != http.StatusOK {
 					t.Fatalf("the disconnect: status %d", code)
@@ -821,7 +830,10 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 			// its chat is still attached").
 			t.Run("the credentials go while the attach is under way", func(t *testing.T) {
 				s, h, store, sign := connected(t)
-				done := whileAttaching(t, s, h, sign, http.MethodDelete, "/api/v1/platforms/credentials/"+string(p))
+				// Confirmed: the account is connected, so #988 refuses an
+				// unconfirmed removal with creds_in_use.
+				done := whileAttaching(t, s, h, sign, http.MethodDelete, "/api/v1/platforms/credentials/"+string(p),
+					map[string]bool{"confirm": true})
 				connect(t, h, sign, store, "state-race-creds")
 				if code := <-done; code != http.StatusOK {
 					t.Fatalf("removing the credentials: status %d", code)
