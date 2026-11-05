@@ -384,6 +384,11 @@ var freshInstallNotWalked = map[string]string{
 		"suite that fails on an aeroplane is a suite people learn to ignore. Its " +
 		"zero-source behaviour is not in question either way: handleCheckUpdate reads " +
 		"neither the engine nor a source.",
+	"POST /api/v1/auth/logout": "it ends every session of the user who sends it (it moves the " +
+		"token epoch, as a password change does), and the walk sends it with its own session -- so " +
+		"every route walked after it would answer 401, a verdict about the walk rather than about " +
+		"the install. Its zero-source behaviour is not in question: handleLogout reads neither the " +
+		"engine nor a source. logout_session_test.go covers it.",
 }
 
 // freshInstallServer is the walk's fixture: a database file that has never

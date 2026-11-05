@@ -85,10 +85,13 @@ has to be entered again.
 ## Recommended bucket settings
 
 - **A lifecycle rule that aborts incomplete multipart uploads** after a few
-  days. polyemesis aborts the uploads it gives up on, the uploads of a target
-  you delete or move, and orphans it finds at startup, but a process that dies
-  between starting an upload and recording it can leave parts that only a
-  lifecycle rule will clean up. On AWS this is `AbortIncompleteMultipartUpload`;
+  days. polyemesis aborts the uploads it gives up on and orphans it finds at
+  startup, and tries to abort the uploads of a target you delete or move. When
+  that abort fails (revoked keys, a policy that denies it, an endpoint that is
+  gone) the target is still deleted, and the response's `warning` and
+  `unabortedUploads` name each upload's key and upload id so you can abort it
+  with your provider. A process that dies between starting an upload and
+  recording it can also leave parts that only a lifecycle rule will clean up. On AWS this is `AbortIncompleteMultipartUpload`;
   R2, B2, MinIO and Wasabi have the same setting.
 - A lifecycle rule for how long recordings live in the bucket, if they should
   not live for ever. polyemesis never deletes objects.

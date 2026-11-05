@@ -183,6 +183,10 @@ func (s *Server) recordCredCheck(platform db.Platform, clientID, secret string, 
 
 func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 	platform := db.Platform(chi.URLParam(r, "platform"))
+	// Not blind while accounts still use the app. See creds_in_use.go.
+	if s.refuseCredsInUse(w, r, platform) {
+		return
+	}
 	if err := s.store.DeletePlatformCreds(platform); err != nil {
 		writeStoreError(w, err)
 		return
@@ -355,6 +359,9 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Which platform, for the revoke note below: after the delete nothing
+	// says. Best-effort -- a failed read only loses the platform's name.
+	revokeNote := accountRevokeNote(s.accountPlatform(id))
 	// COUNTED BEFORE THE DELETE, and it has to be: once the row is gone the
 	// destinations no longer point at it, and there is no query left that could
 	// say which ones used to.
@@ -389,7 +396,46 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	if len(attached) > 0 {
 		resp["warnings"] = []string{accountDeleteWarning(attached)}
 	}
+	ws, _ := resp["warnings"].([]string)
+	resp["warnings"] = append(ws, revokeNote)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// accountPlatform is the platform of one connected account, or "" when it
+// cannot be read.
+func (s *Server) accountPlatform(id int64) db.Platform {
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return ""
+	}
+	for _, a := range accts {
+		if a.ID == id {
+			return a.Platform
+		}
+	}
+	return ""
+}
+
+// accountRevokeNote is what every disconnect says, whatever was attached:
+// polyemesis forgot the tokens, and the platform still lists the grant.
+//
+// NOT A REVOKE CALL, deliberately. Google's revoke ends every grant the
+// project holds for that Google login -- a second channel connected under the
+// same login, or another install sharing the developer project, would be
+// disconnected with it -- and Facebook's DELETE /me/permissions has the same
+// reach. Twitch and TikTok need the app's client secret, which the operator
+// may already have removed. Removing the connection in the platform's own
+// settings is the precise version of the same thing, so the operator is told
+// where it is.
+func accountRevokeNote(p db.Platform) string {
+	name := platformTitle(p)
+	where := name + "'s"
+	if name == "the platform" {
+		where = "the platform's"
+	}
+	return fmt.Sprintf("polyemesis has forgotten this account's tokens, but %s still lists the connection. "+
+		"To revoke it fully, remove the developer app this install connects through from the connected "+
+		"apps in %s own account or security settings.", name, where)
 }
 
 // deleteConfirmed reads the optional {"confirm": true} body off a DELETE.

@@ -134,6 +134,85 @@ describe("StorageTargetsCard: adding and deleting", () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith(1));
   });
 
+  // #14 of the 2026-11-04 lingering-state audit: the delete always succeeds,
+  // and says which unfinished uploads it could not abort. The sentence sends
+  // the operator to their provider "using the keys and upload ids below", so
+  // the key and upload id of each are what has to stay on screen -- not a
+  // ten-second toast of the sentence alone.
+  it("keeps the key and upload id of each upload a delete could not abort on screen, copyable", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: true });
+    vi.spyOn(api.storage, "remove").mockResolvedValue({
+      status: "deleted",
+      warning: "2 unfinished uploads could not be cancelled and will keep billing",
+      unabortedUploads: [
+        { key: "recordings/2026/rec-a.mkv", uploadId: "upload-id-aaa111", relPath: "rec-a.mkv" },
+        { key: "recordings/2026/rec-b.mkv", uploadId: "upload-id-bbb222", relPath: "rec-b.mkv" },
+      ],
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<StorageTargetsCard />);
+    const row = await screen.findByTestId("storage-target");
+    fireEvent.click(within(row).getByRole("button", { name: "Delete target" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+
+    const panel = await screen.findByTestId("storage-unaborted");
+    expect(panel.textContent).toContain("2 unfinished uploads could not be cancelled and will keep billing");
+    const cells = within(panel)
+      .getAllByRole("cell")
+      .map((c) => c.textContent);
+    expect(cells).toEqual([
+      "recordings/2026/rec-a.mkv",
+      "upload-id-aaa111",
+      "recordings/2026/rec-b.mkv",
+      "upload-id-bbb222",
+    ]);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(
+      "recordings/2026/rec-a.mkv\tupload-id-aaa111\nrecordings/2026/rec-b.mkv\tupload-id-bbb222",
+    );
+
+    // It stays until it is closed: the reload after the delete does not clear it.
+    await waitFor(() => expect(api.storage.list).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("storage-unaborted")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("storage-unaborted")).toBeNull();
+  });
+
+  // The first delete's ids exist nowhere else once its target is gone, so a
+  // second delete adds its own list rather than replacing the first.
+  it("keeps every delete's unaborted uploads until each is closed", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({
+      targets: [target({ id: 1, name: "archive", counts: {} }), target({ id: 2, name: "backup", counts: {} })],
+      available: true,
+    });
+    vi.spyOn(api.storage, "remove").mockImplementation(async (id: number) => ({
+      status: "deleted",
+      warning: `target ${id}: 1 unfinished upload could not be cancelled`,
+      unabortedUploads: [{ key: `k/${id}.mkv`, uploadId: `upload-${id}`, relPath: `${id}.mkv` }],
+    }));
+    render(<StorageTargetsCard />);
+    const del = async (name: string) => {
+      const row = (await screen.findAllByTestId("storage-target")).find((r) => r.textContent?.includes(name));
+      if (!row) throw new Error(`no row for ${name}`);
+      fireEvent.click(within(row).getByRole("button", { name: "Delete target" }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    };
+    await del("archive");
+    await screen.findByTestId("storage-unaborted");
+    await del("backup");
+    await waitFor(() => expect(screen.getAllByTestId("storage-unaborted")).toHaveLength(2));
+    const [first, second] = screen.getAllByTestId("storage-unaborted");
+    expect(first.textContent).toContain("upload-1");
+    expect(second.textContent).toContain("upload-2");
+
+    fireEvent.click(within(first).getByRole("button", { name: "Close" }));
+    const left = screen.getAllByTestId("storage-unaborted");
+    expect(left).toHaveLength(1);
+    expect(left[0].textContent).toContain("upload-2");
+  });
+
   it("reports a failed save and keeps the dialog open", async () => {
     vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: false });
     vi.spyOn(api.storage, "update").mockRejectedValue(new Error("bucket must be 3-63 characters"));

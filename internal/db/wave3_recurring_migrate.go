@@ -78,5 +78,10 @@ func (d *DB) MigrateWave3RecurringTemplates() error {
 			return err
 		}
 	}
-	return nil
+	// Templates whose schedule was deleted before DeleteSchedule took the
+	// template with it. Safe on every boot: schedule ids are never reused, and
+	// the sweep needs only the occurrence rows, never the template, to cancel
+	// an orphan's events. Touches nothing on an ordinary boot.
+	_, err = d.sql.Exec(`DELETE FROM broadcast_templates WHERE schedule_id NOT IN (SELECT id FROM schedules)`)
+	return err
 }

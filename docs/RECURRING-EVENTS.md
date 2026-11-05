@@ -98,7 +98,12 @@ show starts instead:
   The schedule keeps running. Upcoming events for that schedule are cancelled
   at the next look-ahead pass.
 - **Delete the schedule** has the same effect: its upcoming events are
-  cancelled at the next pass.
+  cancelled at the next pass, and its template is deleted with it.
+- **Delete a destination** (or the programme it is on), and its upcoming
+  events are cancelled during the delete, while its account can still reach
+  the platform. One the platform refuses, or one whose show has started, is
+  left there and named in the delete's `warnings`, so you can remove it in the
+  platform's own studio; the delete itself always goes ahead.
 - **Switch the schedule off**, make it a stop schedule, or take a destination
   out of its targets, and that destination's upcoming events are cancelled at the
   next pass too. **Lower the look-ahead**, and the events beyond the new number

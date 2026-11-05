@@ -189,7 +189,9 @@ func TestRemovingPlatformCredentialsDetachesThatPlatformsChat(t *testing.T) {
 		t.Fatalf("attach twitch: %v", err)
 	}
 
-	r := jsonRequest(t, http.MethodDelete, "/api/v1/platforms/credentials/facebook", nil)
+	// Confirmed: accounts still use the app, and an unconfirmed removal is
+	// refused with creds_in_use (creds_in_use.go).
+	r := jsonRequest(t, http.MethodDelete, "/api/v1/platforms/credentials/facebook", map[string]bool{"confirm": true})
 	sign(r)
 	if w := do(t, h, r); w.Code != http.StatusOK {
 		t.Fatalf("remove credentials: status %d, body %s", w.Code, w.Body.String())

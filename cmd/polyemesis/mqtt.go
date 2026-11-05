@@ -83,13 +83,78 @@ type mqttRunner struct {
 	// does not set it. See mqttAudienceFeed.
 	audience *mqttAudienceFeed
 
+	// dial opens a broker connection: mqtt.Connect, through dialMQTT. A field
+	// so a test can hand the runner a link whose publishes it can read -- the
+	// teardown's clears, its `offline` and its retire happen only on a link
+	// that is up, and no test can bring up a real one on a port it knows will
+	// answer.
+	dial func(ctx context.Context, cfg mqtt.Config, log *slog.Logger) (mqttLink, error)
+	// teardownStep bounds each step of a teardown; zero is mqttTeardownStep.
+	// Shortened by a test that makes a step run out.
+	teardownStep time.Duration
+
 	mu     sync.Mutex
-	client *mqtt.Client
+	client mqttLink
 	cancel context.CancelFunc
+	// tel is the live connection's Telemetry, kept so a teardown can clear the
+	// retained tree it published. done closes once the telemetry loop and the
+	// discovery announcer have both returned: Clear must not race a tick that
+	// would put the state straight back.
+	tel  *mqtt.Telemetry
+	done chan struct{}
 	// sig hashes the settings the live connection was built from. Comparing it
 	// is what stops an unrelated settings save from cycling a healthy
 	// connection -- the same trick the engine's *Sig fields play.
 	sig string
+}
+
+// teardownMode is what a teardown does to the retained tree before it goes.
+type teardownMode int
+
+const (
+	// teardownKeep leaves every retained topic as it is and publishes the
+	// clean `offline`. Shutdown, restart, and every reconnect that keeps the
+	// same topic tree (a password, broker, keep-alive or discovery change):
+	// the tree is about to be written again, and clearing it would blank Home
+	// Assistant in between.
+	teardownKeep teardownMode = iota
+	// teardownClearState deletes the retained state topics and keeps the
+	// status (`offline`) and the discovery payload. MQTT switched off: other
+	// consumers stop reading a stale "running", and Home Assistant shows the
+	// entities unavailable rather than losing them.
+	teardownClearState
+	// teardownRetire is leaving the tree for good -- the prefix moved:
+	// state topics and the status go.
+	teardownRetire
+	// teardownRetireDevice is teardownRetire when the instance moved too: the
+	// old Home Assistant device payload goes with it, or HA keeps a device
+	// nothing will ever update.
+	teardownRetireDevice
+)
+
+// mqttTeardownStep bounds each step of a teardown -- waiting for the loop,
+// clearing the state, removing the device, disconnecting -- separately, so a
+// broker that is down costs seconds, not a stuck reconcile.
+const mqttTeardownStep = 5 * time.Second
+
+// mqttLink is the broker connection the runner drives: *mqtt.Client, or a
+// fake in a test. Exactly what the runner and its telemetry call on it.
+type mqttLink interface {
+	mqtt.Publisher
+	Topics() *mqtt.Topics
+	Close(ctx context.Context) error
+	Retire(ctx context.Context) error
+}
+
+// dialMQTT is mqtt.Connect as a dial. The nil check is the point of it: a
+// failed Connect returns a nil *mqtt.Client, which as an mqttLink would be a
+// non-nil interface holding nil.
+func dialMQTT(ctx context.Context, cfg mqtt.Config, log *slog.Logger) (mqttLink, error) {
+	c, err := mqtt.Connect(ctx, cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // startMQTT begins watching the settings and returns a shutdown function.
@@ -101,7 +166,7 @@ func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets
 	audience *mqttAudienceFeed) func(context.Context) {
 	r := &mqttRunner{
 		log: log, store: store, box: box, engines: managerEngines(eng),
-		version: version, started: time.Now(), audience: audience,
+		version: version, started: time.Now(), audience: audience, dial: dialMQTT,
 	}
 	go r.watch(ctx)
 	return r.stop
@@ -137,7 +202,9 @@ func (r *mqttRunner) reconcile(ctx context.Context) {
 	cfg := settings.MQTT
 
 	if !cfg.Enabled {
-		r.disconnect(ctx)
+		// Switched off: the retained state goes with the connection. A no-op
+		// on every later poll, because there is no connection left to clear.
+		r.teardown(ctx, teardownClearState)
 		return
 	}
 	password, err := r.store.GetMQTTPassword(r.box)
@@ -155,8 +222,33 @@ func (r *mqttRunner) reconcile(ctx context.Context) {
 		return
 	}
 
-	r.disconnect(ctx)
+	r.teardown(ctx, r.reconnectMode(cfg))
 	r.connect(ctx, cfg, password, sig)
+}
+
+// reconnectMode is how a reconnect leaves the tree it was publishing: kept
+// when the new connection writes the same topics, retired when the prefix or
+// instance moved them (and the device with them, when the instance moved).
+// Settings that will not build topics are left to connect to refuse.
+func (r *mqttRunner) reconnectMode(cfg db.MQTTSettings) teardownMode {
+	r.mu.Lock()
+	client := r.client
+	r.mu.Unlock()
+	if client == nil {
+		return teardownKeep
+	}
+	next, err := mqtt.NewTopics(cfg.Prefix, cfg.Instance)
+	if err != nil {
+		return teardownKeep
+	}
+	old := client.Topics()
+	switch {
+	case next.Discovery() != old.Discovery():
+		return teardownRetireDevice
+	case next.Status() != old.Status():
+		return teardownRetire
+	}
+	return teardownKeep
 }
 
 // mqttSig hashes everything a live connection was built from. Comparing it is
@@ -195,7 +287,11 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
 
-	client, err := mqtt.Connect(loopCtx, mqtt.Config{
+	dial := r.dial
+	if dial == nil {
+		dial = dialMQTT
+	}
+	client, err := dial(loopCtx, mqtt.Config{
 		BrokerURL:     cfg.BrokerURL,
 		Username:      cfg.Username,
 		Password:      password,
@@ -220,25 +316,35 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 		every = 10 * time.Second
 	}
 
+	done := make(chan struct{})
 	r.mu.Lock()
-	r.client, r.cancel, r.sig = client, cancel, sig
+	r.client, r.cancel, r.sig, r.tel, r.done = client, cancel, sig, tel, done
 	r.mu.Unlock()
 
-	go tel.Loop(loopCtx, every, r.snapshot)
+	var wg sync.WaitGroup
+	wg.Go(func() { tel.Loop(loopCtx, every, r.snapshot) })
 	if cfg.Discovery {
-		go r.announceDiscovery(loopCtx, client, tel)
+		wg.Go(func() { r.announceDiscovery(loopCtx, client, tel) })
 	}
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 	r.log.Info("mqtt telemetry started",
 		"instance", client.Topics().Instance(), "everySeconds", int(every.Seconds()))
 }
 
 // announceDiscovery publishes the Home Assistant device payload once the link
-// is up, and again after every reconnect.
+// is up, again after every reconnect, and again whenever the set of entities
+// changes -- a destination added or deleted mid-connection. PublishDiscovery
+// sends nothing when the set is the one already announced, and sends a removal
+// stub for each entity that went, so asking every tick costs one snapshot and
+// usually no publish.
 //
 // Separate from the telemetry loop because discovery is a different contract:
 // it describes the entities, it changes only when the topology does, and a
 // consumer that is not Home Assistant does not want it at all.
-func (r *mqttRunner) announceDiscovery(ctx context.Context, client *mqtt.Client, tel *mqtt.Telemetry) {
+func (r *mqttRunner) announceDiscovery(ctx context.Context, client mqttLink, tel *mqtt.Telemetry) {
 	tick := time.NewTicker(mqttSettingsPoll)
 	defer tick.Stop()
 	wasUp := false
@@ -252,10 +358,11 @@ func (r *mqttRunner) announceDiscovery(ctx context.Context, client *mqtt.Client,
 				wasUp = false
 				continue
 			}
-			if wasUp {
-				continue
+			if !wasUp {
+				// A broker that restarted lost the retained payload.
+				tel.ForgetDiscovery()
+				wasUp = true
 			}
-			wasUp = true
 			if err := tel.PublishDiscovery(ctx, r.snapshot()); err != nil {
 				r.log.Warn("could not publish Home Assistant discovery", "err", err)
 			}
@@ -263,11 +370,24 @@ func (r *mqttRunner) announceDiscovery(ctx context.Context, client *mqtt.Client,
 	}
 }
 
-// disconnect tears down the live connection, publishing a clean `offline`.
-func (r *mqttRunner) disconnect(ctx context.Context) {
+// teardown ends the live connection, first clearing what mode says to.
+//
+// THE LOOP STOPS FIRST, AND IS WAITED FOR. Clearing while the telemetry loop
+// can still tick would have the next tick republish the state just deleted.
+// Each step is bounded by mqttTeardownStep on a context of its own, not
+// derived from ctx: this runs on the shutdown path too, where ctx is already
+// cancelled and a clean `offline` is exactly what must still get out. A broker
+// that is unreachable is logged and the teardown goes on.
+//
+// THE DEVICE REMOVAL IS A STEP OF ITS OWN, not the tail of the state clear.
+// Clear waits for an acknowledgement per retained topic, and a slow broker can
+// spend the whole step on them; sharing that context handed ClearDiscovery one
+// already expired, and the old Home Assistant device outlived the instance
+// move it was there for.
+func (r *mqttRunner) teardown(ctx context.Context, mode teardownMode) {
 	r.mu.Lock()
-	client, cancel := r.client, r.cancel
-	r.client, r.cancel, r.sig = nil, nil, ""
+	client, cancel, tel, done := r.client, r.cancel, r.tel, r.done
+	r.client, r.cancel, r.sig, r.tel, r.done = nil, nil, "", nil, nil
 	r.mu.Unlock()
 
 	if cancel != nil {
@@ -276,18 +396,59 @@ func (r *mqttRunner) disconnect(ctx context.Context) {
 	if client == nil {
 		return
 	}
-	// Bounded, and not derived from ctx: this runs on the shutdown path too,
-	// where ctx is already cancelled and a clean `offline` is exactly what must
-	// still get out.
-	closeCtx, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer done()
-	if err := client.Close(closeCtx); err != nil {
+	bound := r.teardownStep
+	if bound <= 0 {
+		bound = mqttTeardownStep
+	}
+	step := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.WithoutCancel(ctx), bound)
+	}
+	if done != nil {
+		wctx, finish := step()
+		select {
+		case <-done:
+		case <-wctx.Done():
+			r.log.Warn("the MQTT telemetry loop did not stop in time; tearing the connection down anyway")
+		}
+		finish()
+	}
+	if mode != teardownKeep && tel != nil {
+		if client.Connected() {
+			cctx, finish := step()
+			if err := tel.Clear(cctx); err != nil {
+				r.log.Warn("could not clear every retained MQTT topic", "err", err)
+			}
+			finish()
+			if mode == teardownRetireDevice {
+				dctx, finish := step()
+				if err := tel.ClearDiscovery(dctx); err != nil {
+					r.log.Warn("could not remove the old Home Assistant device", "err", err)
+				}
+				finish()
+			}
+		} else {
+			// Nothing can be deleted over a link that is down, and the next
+			// process does not know this tree was published. Said, so the
+			// operator who switched MQTT off or moved it knows what to remove.
+			r.log.Warn("the MQTT broker was not connected, so the retained topics this install published "+
+				"were left on it; remove them with mosquitto_sub --remove-retained (see docs/MQTT.md)",
+				"topics", client.Topics().All())
+		}
+	}
+	closeCtx, finish := step()
+	defer finish()
+	closeFn := client.Close
+	if mode == teardownRetire || mode == teardownRetireDevice {
+		closeFn = client.Retire
+	}
+	if err := closeFn(closeCtx); err != nil {
 		r.log.Warn("mqtt disconnect was not clean", "err", err)
 	}
 }
 
-// stop is the shutdown hook handed back to main.
-func (r *mqttRunner) stop(ctx context.Context) { r.disconnect(ctx) }
+// stop is the shutdown hook handed back to main. It never clears anything: a
+// restart is about to publish the same tree again.
+func (r *mqttRunner) stop(ctx context.Context) { r.teardown(ctx, teardownKeep) }
 
 // managerEngines adapts the real manager to mqttEngine.
 //

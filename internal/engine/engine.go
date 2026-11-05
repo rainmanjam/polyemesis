@@ -2970,6 +2970,17 @@ func (e *Engine) reconcileOutputs() error {
 	return nil
 }
 
+// renditionGone reports whether the store has no rendition with this id. A
+// store error is "not gone": the message then stays the cautious "not
+// running" rather than claiming a deletion nobody confirmed.
+func (e *Engine) renditionGone(id int64) bool {
+	if e.store == nil {
+		return false
+	}
+	_, err := e.store.GetRendition(id)
+	return errors.Is(err, db.ErrNotFound)
+}
+
 // playoutUpstream resolves which relay a playout variant reads: the ingest hub
 // for a passthrough rung, the named rendition's own hub otherwise.
 //
@@ -3004,8 +3015,13 @@ func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
 		// Packaging it anyway would publish a rung that resolves to a playlist
 		// nothing ever writes a segment into.
 		reason := "is not running"
-		if r != nil && r.err != "" {
+		switch {
+		case r != nil && r.err != "":
 			reason = "failed to start: " + r.err
+		case r == nil && e.renditionGone(*id):
+			// A rung naming a rendition that was deleted. "Not running" sent
+			// the operator looking for why it would not start; it never will.
+			reason = "no longer exists; pick another rendition for this rung on the Playout page"
 		}
 		return playout.Upstream{}, fmt.Errorf("rendition %d %s", *id, reason)
 	}

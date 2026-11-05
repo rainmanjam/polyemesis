@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -274,13 +275,29 @@ func (s *Server) playoutManager() *playout.Manager {
 	// somebody stated it. Nil there means the default programme, which is every
 	// single-source install and is the behaviour this has always had.
 	//
-	// Falls back to the default when the named programme is not running: a
-	// public page that 404s because a source was renamed is worse for an
-	// audience than one showing the install's only other feed, and the operator
-	// can see which is on air from the console.
+	// TWO CASES WHEN THE NAMED PROGRAMME HAS NO ENGINE, and they get opposite
+	// answers.
+	//
+	// The programme exists and is not running yet -- the manager has not
+	// reconciled, or its engine failed to start. That falls back to the
+	// default: a public page that 404s because a source is mid-restart is
+	// worse for an audience than one showing the install's other feed, and the
+	// operator can see which is on air from the console.
+	//
+	// The programme was DELETED. That fails closed (nil: the public mount
+	// answers 503 "playout is not running"). Falling back there published
+	// another programme to the public origin that nobody chose to publish --
+	// delete the published Studio B and the audience is silently handed Studio
+	// A -- and nothing in the console could undo it on a single-programme
+	// install, where the programme picker is not drawn. Programme ids are
+	// AUTOINCREMENT and never reused, so the dead id stays in the settings as
+	// it is, and no settings write bumps the version under an open tab.
 	if set, err := s.store.GetSettings(); err == nil && set.Playout.SourceID != nil {
 		if e := s.engineForSource(set.Playout.SourceID); e != nil {
 			return e.Playout()
+		}
+		if _, gerr := s.store.GetSource(*set.Playout.SourceID); errors.Is(gerr, db.ErrSourceNotFound) {
+			return nil
 		}
 	}
 	e := s.engOrNil()
@@ -288,6 +305,28 @@ func (s *Server) playoutManager() *playout.Manager {
 		return nil
 	}
 	return e.Playout()
+}
+
+// publishedProgrammeWarning is what a programme delete says when the public
+// playout page is published from that programme, read BEFORE the delete.
+// Empty for any other programme.
+//
+// playoutManager fails closed on the dead id it leaves, so the delete is the
+// moment to say so: the page answers 503 from then on, and the operator learns
+// it here and not from the audience. The Playout page's programme picker draws
+// itself for a dead id and offers the default, so the sentence has somewhere to
+// send them on a one-programme install too.
+func (s *Server) publishedProgrammeWarning(sourceID int64) string {
+	set, err := s.store.GetSettings()
+	if err != nil || set.Playout.SourceID == nil || *set.Playout.SourceID != sourceID {
+		return ""
+	}
+	if set.Playout.Enabled {
+		return "The public playout page was published from this programme, so it now answers " +
+			`"playout is not running". Pick another programme, or the default, on the Playout page.`
+	}
+	return "Public playout was set to publish this programme. Pick another programme, or the default, " +
+		"on the Playout page before switching playout on."
 }
 
 // playoutSettings is the stored configuration, which is authoritative for the

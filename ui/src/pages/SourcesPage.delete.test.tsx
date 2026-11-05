@@ -27,12 +27,15 @@ import { asSourceId, type SourceView } from "@/lib/types";
  * NoProgrammeYet, links back into the app shell.
  */
 
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
+
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return { ...actual, api: { ...actual.api, listSources: vi.fn(), deleteSource: vi.fn() } };
 });
 
 import { api, ApiError } from "@/lib/api";
+import { toast } from "sonner";
 
 const source: SourceView = {
   id: asSourceId(1),
@@ -66,8 +69,8 @@ describe("SourcesPage, deleting a source", () => {
     let resolveDelete: () => void = () => {};
     vi.mocked(api.listSources).mockResolvedValue([source]);
     vi.mocked(api.deleteSource).mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolveDelete = resolve;
+      new Promise((resolve) => {
+        resolveDelete = () => resolve(undefined);
       }),
     );
 
@@ -142,5 +145,30 @@ describe("SourcesPage, deleting a source", () => {
     vi.mocked(api.listSources).mockResolvedValue([]);
     await confirmDelete();
     await waitFor(() => expect(api.deleteSource).toHaveBeenLastCalledWith(source.id, 1));
+  });
+  it("says what the delete could not take with it, and not the reconcile sentence twice", async () => {
+    vi.mocked(api.listSources).mockResolvedValueOnce([source]).mockResolvedValue([]);
+    vi.mocked(api.deleteSource).mockResolvedValue({
+      warnings: ['"Main yt": the scheduled event yt-1 was left on YouTube (refused).', "reconcile sentence"],
+      reconcileFailed: true,
+    });
+    render(
+      <MemoryRouter>
+        <LiveDataProvider>
+          <SourcesPage />
+        </LiveDataProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByLabelText("Delete Main"));
+    fireEvent.change(await screen.findByLabelText(/Type/), { target: { value: "Main" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete source" }));
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        '"Main yt": the scheduled event yt-1 was left on YouTube (refused).',
+        expect.anything(),
+      ),
+    );
+    // The transport raises the reconcile one itself (reportReconcileFailure).
+    expect(vi.mocked(toast.warning).mock.calls.some((c) => c[0] === "reconcile sentence")).toBe(false);
   });
 });

@@ -2054,16 +2054,12 @@ func (d *DB) ReorderDestinations(ids []int64) error {
 	return tx.Commit()
 }
 
-// DeleteDestination removes a destination.
+// DeleteDestination removes a destination, and with it everything that names
+// it by id without a foreign key: its rollover row and its id in schedules.
+// See DeleteDestinationPruned, which also reports the schedules it changed.
 func (d *DB) DeleteDestination(id int64) error {
-	res, err := d.sql.Exec(`DELETE FROM destinations WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	_, err := d.DeleteDestinationPruned(id)
+	return err
 }
 
 // MigrateDestinationExpertArgs adds the expert-mode columns to a destinations

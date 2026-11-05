@@ -57,11 +57,13 @@ export function DangerZone() {
 
   const removeCreds = async (platform: string) => {
     try {
-      await api.deleteCreds(platform);
+      // Confirmed: this card's dialog is a typed confirmation that already
+      // names what removal costs. The server refuses only an UNCONFIRMED
+      // removal while accounts still use the app (creds_in_use).
+      await api.confirmDeleteCreds(platform);
       toast.success(t("danger.credsRemoved", { platform }));
     } catch (err) {
-      // The server's own reason: it refuses while accounts still use the app,
-      // and says which, which is more than this page could.
+      // The server's own reason, which is more than this page could say.
       toast.error(err instanceof Error ? err.message : t("danger.credsFailed", { platform }));
     }
     load();

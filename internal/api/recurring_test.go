@@ -49,6 +49,9 @@ type fakeYouTubeEditor struct {
 	cancelCtxErr []error
 	// onEdit, when set, runs inside each title write.
 	onEdit func()
+	// onCancel, when set, runs inside each cancel call, outside the lock: the
+	// seconds a delete spends on the platform, in which the store can change.
+	onCancel func()
 }
 
 func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
@@ -87,10 +90,14 @@ func (f *fakeYouTubeEditor) SetScheduledThumbnail(_ context.Context, _, broadcas
 
 func (f *fakeYouTubeEditor) CancelScheduledBroadcast(ctx context.Context, _, broadcastID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, broadcastID)
 	f.cancelCtxErr = append(f.cancelCtxErr, ctx.Err())
-	return f.cancelErr
+	hook, err := f.onCancel, f.cancelErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return err
 }
 
 func (f *fakeYouTubeEditor) createCount() int {

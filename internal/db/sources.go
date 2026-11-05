@@ -370,15 +370,12 @@ func (d *DB) UpdateSource(s *Source) error {
 // Deleting a source that is not there is still ErrSourceNotFound, which is what
 // the API turns into a 404 -- for a stale row on a screen nobody reloaded, or a
 // client retrying a delete that already succeeded.
+//
+// Its destinations go by ON DELETE CASCADE, and what names them without a
+// foreign key goes with them: see DeleteSourcePruned.
 func (d *DB) DeleteSource(id int64) error {
-	res, err := d.sql.Exec(`DELETE FROM sources WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return ErrSourceNotFound
-	}
-	return nil
+	_, err := d.deleteSource(id, nil, false)
+	return err
 }
 
 // TokenGrace is how long a rotated-out token keeps working.

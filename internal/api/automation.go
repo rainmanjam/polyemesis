@@ -739,6 +739,9 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	view := scheduleViewOf(*out, now)
 	view.Warnings = s.scheduleWarnings(*out, now)
+	// Switched off, turned into a stop or retargeted: the events it had
+	// pre-announced for destinations it no longer starts are withdrawn now.
+	view.Warnings = append(view.Warnings, s.withdrawStaleAnnouncements(r.Context(), now, out.ID)...)
 	writeJSON(w, http.StatusOK, view)
 }
 
@@ -752,7 +755,13 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	// The events it pre-announced without a template, now that nothing will
+	// air them. Its template occurrences are the recurring sweep's to cancel.
+	resp := map[string]any{"status": "deleted"}
+	if ws := s.withdrawStaleAnnouncements(r.Context(), time.Now(), id); len(ws) > 0 {
+		resp["warnings"] = ws
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleScheduleRuns reports what the last sweep did, fired and skipped alike.

@@ -32,9 +32,18 @@ func (d *DB) MigrateWave3RolloverState() error {
 	}
 	// The optional chat notice (#19), added to a table that may already exist from an earlier boot.
 	has, err := columnExists(d.sql, "destination_rollover", "chat_notice")
-	if err != nil || has {
+	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(`ALTER TABLE destination_rollover ADD COLUMN chat_notice INTEGER NOT NULL DEFAULT 0`)
+	if !has {
+		if _, err := d.sql.Exec(`ALTER TABLE destination_rollover ADD COLUMN chat_notice INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	// Rows of destinations deleted before DeleteDestination took the row with it. Keyed by
+	// destination id and read by nothing else, and destination ids are never reused, so an orphan
+	// is only ever the planner asking about a destination that is gone. Touches nothing on an
+	// ordinary boot.
+	_, err = d.sql.Exec(`DELETE FROM destination_rollover WHERE destination_id NOT IN (SELECT id FROM destinations)`)
 	return err
 }

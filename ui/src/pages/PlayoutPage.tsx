@@ -474,10 +474,23 @@ export function ExposureBanner({
  *  while the operator broadcasts, and believes they are sharing, the
  *  vertical one.
  *
- *  Hidden entirely on a single-source install, the same call ShareCard's
- *  sibling controls and DestinationDialog's own source picker make: with one
+ *  Hidden on a single-source install, the same call ShareCard's sibling
+ *  controls and DestinationDialog's own source picker make: with one
  *  programme there is nothing to choose, and a Select whose every use lands
- *  on the same answer is not a choice, it is a shape occupying a slot. */
+ *  on the same answer is not a choice, it is a shape occupying a slot.
+ *
+ *  EXCEPT WHEN THE PUBLISHED PROGRAMME WAS DELETED. The server keeps the dead
+ *  id and fails closed on it (playout.go, playoutManager): the public page
+ *  answers 503 rather than hand the audience a programme nobody chose. This
+ *  card is the only control that writes `sourceId`, and every other playout
+ *  save sends the dead id back -- so a two-programme install that deleted the
+ *  published one was left with one programme, no card, and a public page
+ *  nothing in the console could bring back. The card draws itself for a dead
+ *  id, says so, and offers the default.
+ *
+ *  "Dead" is judged only against a list that loaded and is not empty: the page
+ *  turns a failed sources read into [], and an empty list proves nothing about
+ *  any id. */
 export function ProgrammeCard({
   play,
   sources,
@@ -491,9 +504,14 @@ export function ProgrammeCard({
 }) {
   const t = useT();
   const choices = useMemo(() => sourceChoices(sources), [sources]);
-  if (choices.length < 2) return null;
+  const gone =
+    play.sourceId != null && sources.length > 0 && !sources.some((s) => s.id === play.sourceId);
+  if (choices.length < 2 && !gone) return null;
 
-  const value = play.sourceId != null ? String(play.sourceId) : "default";
+  // A dead id matches no item, so the trigger shows nothing rather than
+  // claiming the default -- which is not what is stored, and not what the
+  // public page is doing.
+  const value = gone ? "" : play.sourceId != null ? String(play.sourceId) : "default";
 
   return (
     <Card className="mb-3">
@@ -502,29 +520,50 @@ export function ProgrammeCard({
         <CardDescription>{t("play.programmeNote")}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-1.5">
-        <Label htmlFor="playout-source">{t("play.programme")}</Label>
-        <Select
-          value={value}
-          disabled={busy}
-          onValueChange={(v) =>
-            void onSave({
-              ...play,
-              sourceId: v === "default" ? null : asSourceId(Number(v)),
-            })
-          }
-        >
-          <SelectTrigger id="playout-source" className="max-w-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="default">{t("play.defaultProgramme")}</SelectItem>
-            {choices.map((c) => (
-              <SelectItem key={c.id} value={String(c.id)}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {gone && (
+          <div
+            role="alert"
+            data-programme-gone
+            className="mb-1.5 flex flex-wrap items-center gap-2 rounded-md border border-down/40 bg-down/5 px-3 py-2 text-sm"
+          >
+            <span>{t("play.publishedGone")}</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void onSave({ ...play, sourceId: null })}
+            >
+              {t("play.useDefaultProgramme")}
+            </Button>
+          </div>
+        )}
+        {choices.length >= 2 && (
+          <>
+            <Label htmlFor="playout-source">{t("play.programme")}</Label>
+            <Select
+              value={value}
+              disabled={busy}
+              onValueChange={(v) =>
+                void onSave({
+                  ...play,
+                  sourceId: v === "default" ? null : asSourceId(Number(v)),
+                })
+              }
+            >
+              <SelectTrigger id="playout-source" className="max-w-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">{t("play.defaultProgramme")}</SelectItem>
+                {choices.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
       </CardContent>
     </Card>
   );

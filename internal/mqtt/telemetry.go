@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -35,12 +36,22 @@ type SourceSnapshot struct {
 
 // Telemetry publishes a Snapshot to a topic tree and keeps the tree tidy.
 //
-// It is not safe for concurrent use: one telemetry loop owns one Telemetry, in
-// the same way one alertLoop owns one alerts.Watcher.
+// Its methods are serialised by mu. One loop still owns the ticking, but the
+// discovery announcer publishes beside it and a disconnect clears the tree
+// after it, and both read and write the state below.
 type Telemetry struct {
 	pub    Publisher
 	topics *Topics
 	log    *slog.Logger
+
+	mu sync.Mutex
+	// discovered is the component key -> platform set of the last discovery
+	// payload, so a republish can tell Home Assistant which entities went.
+	// Omitting a component from a device payload does NOT remove its entity;
+	// sending the key with only its platform does.
+	discovered map[string]string
+	// rediscover forces the next PublishDiscovery; see ForgetDiscovery.
+	rediscover bool
 
 	// published maps topic -> the last payload sent on it, with the timestamp
 	// zeroed. Two jobs, both load-bearing:
@@ -77,13 +88,19 @@ func NewTelemetry(pub Publisher, topics *Topics, log *slog.Logger) *Telemetry {
 // Called when the connection comes back up. A broker that restarted has lost
 // the retained messages it was holding, and nothing tells us whether it did --
 // so the reconnect is treated as though it did.
-func (t *Telemetry) Resync() { t.forceAll = true }
+func (t *Telemetry) Resync() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.forceAll = true
+}
 
 // Announce publishes the retained `online` availability message.
 //
 // Its counterpart is the will message set at connect time, which the broker
 // publishes if polyemesis dies without disconnecting cleanly.
 func (t *Telemetry) Announce(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.pub.Publish(ctx, t.topics.Status(), QoS, true, []byte(Online))
 }
 
@@ -93,6 +110,8 @@ func (t *Telemetry) Announce(ctx context.Context) error {
 // rejects one topic should not stop the other thirty from being published, and
 // the caller wants to know the tick was partial rather than where it stopped.
 func (t *Telemetry) Publish(ctx context.Context, snap Snapshot) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	force := t.forceAll
 	t.forceAll = false
 
@@ -193,12 +212,62 @@ func (t *Telemetry) sweep(ctx context.Context, seen map[string][]byte) []error {
 	return errs
 }
 
-// Clear removes every retained topic this instance has published, used on a
-// clean shutdown when the operator has asked for it and by the acceptance
-// suite. It does not touch the status topic, which must survive to say
-// `offline`.
+// Clear deletes every retained state topic this Telemetry has published,
+// plus the host state and audience topics, by publishing a zero-length
+// retained payload to each.
+//
+// It used to be Publish(ctx, Snapshot{}), which sent a zeroed host payload to
+// the state topic instead of deleting it, and nothing called it at all. It is
+// called now when the operator switches MQTT off and when the topic tree moves
+// to a new prefix or instance, so the broker stops serving the last "running"
+// for ever.
+//
+// It never touches the status topic, which must go on saying `offline` (Home
+// Assistant shows the entities as unavailable from it), nor the discovery
+// payload: see ClearDiscovery. Only topics THIS Telemetry published are known
+// to it; a tree a previous process left is the operator's to clear.
+//
+// The caller must have stopped the loop first, or the next tick puts the
+// state back.
 func (t *Telemetry) Clear(ctx context.Context) error {
-	return t.Publish(ctx, Snapshot{})
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	topics := map[string]bool{t.topics.State(): true, t.topics.Audience(): true}
+	for topic := range t.published {
+		topics[topic] = true
+	}
+	delete(topics, t.topics.Status())
+	ordered := make([]string, 0, len(topics))
+	for topic := range topics {
+		ordered = append(ordered, topic)
+	}
+	sort.Strings(ordered)
+	var errs []error
+	for _, topic := range ordered {
+		if err := t.pub.Publish(ctx, topic, QoS, true, nil); err != nil {
+			errs = append(errs, fmt.Errorf("clearing %s: %w", topic, err))
+			continue
+		}
+		delete(t.published, topic)
+	}
+	// The next publish, if any, resends everything.
+	t.forceAll = true
+	if len(errs) > 0 {
+		return fmt.Errorf("mqtt: %d of %d retained topics could not be cleared: %w", len(errs), len(ordered), errs[0])
+	}
+	return nil
+}
+
+// ClearDiscovery deletes the Home Assistant device payload, which removes the
+// device and every entity on it. Only for a device this install is leaving
+// behind -- a moved instance -- never for a routine disconnect: docs/MQTT.md
+// tells the operator to toggle discovery off and on to re-announce, and that
+// must not delete the entities they built dashboards on.
+func (t *Telemetry) ClearDiscovery(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.discovered = nil
+	return t.pub.Publish(ctx, t.topics.Discovery(), QoS, true, nil)
 }
 
 // stripTimestamp returns a change-detection key: the payload with every `"at"`

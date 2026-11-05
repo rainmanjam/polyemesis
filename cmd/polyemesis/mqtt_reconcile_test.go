@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -51,7 +50,7 @@ func reconcileFixture(t *testing.T) (*mqttRunner, *db.DB, context.Context) {
 	}
 	// The shutdown path, driven as the cleanup. It is also the only coverage
 	// stop() gets, and it is honest coverage: stop is a one-line delegate to
-	// disconnect and this is exactly how main calls it.
+	// teardown and this is exactly how main calls it.
 	t.Cleanup(func() { r.stop(ctx) })
 
 	return r, store, ctx
@@ -77,7 +76,7 @@ func enableMQTT(t *testing.T, store *db.DB, mutate func(*db.MQTTSettings)) {
 }
 
 // liveClient reads the runner's connection under its own lock.
-func liveClient(r *mqttRunner) (*mqtt.Client, string) {
+func liveClient(r *mqttRunner) (mqttLink, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.client, r.sig
@@ -87,7 +86,7 @@ func liveClient(r *mqttRunner) (*mqtt.Client, string) {
 //
 // The middle step is the one that matters and the one nothing asserted. When an
 // operator moves the MQTT switch to off in the web UI, the ONLY thing that acts
-// on that is `if !cfg.Enabled { r.disconnect(ctx); return }` in reconcile. If
+// on that is `if !cfg.Enabled { r.teardown(ctx, teardownClearState); return }` in reconcile. If
 // that disconnect goes away, reconcile returns having done nothing, the live
 // client keeps publishing, and the telemetry keeps arriving on a RETAINED topic
 // tree that the broker will replay to every future subscriber. The switch in
@@ -126,7 +125,7 @@ func TestDisablingMQTTTearsTheConnectionDown(t *testing.T) {
 	off, offSig := liveClient(r)
 	if off != nil {
 		t.Errorf("MQTT was switched off and the runner still holds a live client (%p).\n\n"+
-			"reconcile's `if !cfg.Enabled { r.disconnect(ctx) }` is the only thing that "+
+			"reconcile's `if !cfg.Enabled { r.teardown(ctx, teardownClearState) }` is the only thing that "+
 			"acts on that switch. Without it the publisher keeps running: telemetry keeps "+
 			"flowing to a RETAINED topic tree, the broker replays it to every subscriber "+
 			"that connects afterwards, and the operator's only evidence that they stopped "+

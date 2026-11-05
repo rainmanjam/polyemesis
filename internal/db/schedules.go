@@ -199,16 +199,35 @@ func (d *DB) MarkScheduleRun(id int64, at time.Time) error {
 	return err
 }
 
-// DeleteSchedule removes a schedule.
+// DeleteSchedule removes a schedule and its recurring-broadcast template.
+//
+// THE TEMPLATE GOES WITH IT. broadcast_templates is keyed by schedule id with
+// no foreign key (see MigrateWave3RecurringTemplates), and nothing else ever
+// deleted the row: the sweep skips a template whose schedule is gone, so its
+// title, description and thumbnail sat in the database for ever, attached to
+// nothing. Schedule ids are AUTOINCREMENT, so it could never re-attach either.
+//
+// THE OCCURRENCES DO NOT. recurring_occurrences rows are the only record of
+// the platform events already created, and the sweep reads them to cancel
+// those events now that the schedule is gone (reconcileOccurrences treats a
+// missing schedule as withdrawn). It never reads the template to do that.
 func (d *DB) DeleteSchedule(id int64) error {
-	res, err := d.sql.Exec(`DELETE FROM schedules WHERE id = ?`, id)
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(`DELETE FROM schedules WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM broadcast_templates WHERE schedule_id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func marshalScheduleLists(s scheduler.Schedule) (dest, days string, err error) {

@@ -231,7 +231,35 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"username": user.Username})
 }
 
+// handleLogout ends the operator's sessions, not only this browser's cookie.
+//
+// A session is a stateless JWT valid for a week, so clearing the cookie used
+// to be all sign-out did: a copied cookie -- from a shared machine, a proxy
+// log, a browser profile someone else can open -- went on working for the
+// rest of the seven days, and the /ws and /events sockets it opened stayed
+// open. Moving the user's token epoch is the one revocation the session
+// already honours (checkEpoch, and the socket heartbeat in ws.go and
+// events.go), so it is what signing out now does.
+//
+// THAT ENDS EVERY SESSION OF THIS USER, every browser and phone, exactly as a
+// password change does. The other tabs get the 401 they already handle as
+// "session ended". API tokens, the Stream Deck, the OBS script and MCP
+// clients are not sessions and are untouched.
+//
+// A BEARER TOKEN DOES NOT SIGN ANYONE OUT. It reaches this route (the route
+// takes any admin principal), but a token's caller is a script, and a script
+// that "logs out" must not end the operator's browser sessions. For it this
+// stays what it always was: a cookie clear that clears nothing.
+//
+// A failed bump is a failed sign-out, and is not reported as a success.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if p, ok := principalFrom(r.Context()); ok && p.token == nil && p.userID != 0 {
+		if err := s.store.BumpTokenEpoch(p.userID); err != nil {
+			s.log.Error("sign-out could not end the session", "err", err)
+			writeError(w, http.StatusInternalServerError, "could not end the session; try again")
+			return
+		}
+	}
 	s.sessions.ClearSession(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
@@ -2975,6 +3003,9 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	// What the delete could not take with it, said in the response. Empty in
+	// the ordinary case, and then the body is exactly {"status":"deleted"}.
+	var leftovers []string
 	if dest, err := s.store.GetDestination(id); err == nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
@@ -2989,12 +3020,16 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		s.noteOrphanedIngestStream(dest)
+		// Its scheduled platform events, while the row, its account and its
+		// token still exist to cancel them with. See delete_cascade.go.
+		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
 	}
 	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
 	// airing what is buffered. Marked before the reconcile so no drain starts,
 	// and cut after it for one already playing from an earlier stop.
 	s.mgr.CutOnStop(id)
-	if err := s.store.DeleteDestination(id); err != nil {
+	prune, err := s.store.DeleteDestinationPruned(id)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -3004,7 +3039,12 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
 	s.mgr.CutDelay(id)
-	writeMutation(w, http.StatusOK, rw, map[string]string{"status": "deleted"})
+	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
+	resp := map[string]any{"status": "deleted"}
+	if len(leftovers) > 0 {
+		resp["warnings"] = leftovers
+	}
+	writeMutation(w, http.StatusOK, rw, resp)
 }
 
 // destEffect is what one press of start or stop actually did to one row: the

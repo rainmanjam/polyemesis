@@ -390,6 +390,17 @@ function reportReconcileFailure(body: unknown): void {
   void import("sonner").then(({ toast }) => toast.warning(msg, { duration: 15000 }));
 }
 
+/** The warnings a mutation's own handler attached -- what a delete could not
+ *  take with it, say -- WITHOUT the reconcile sentence, which
+ *  reportReconcileFailure has already raised. The server appends that one
+ *  last, so it is dropped from the end when the flag says it is there. */
+export function mutationWarnings(body: unknown): string[] {
+  if (!body || typeof body !== "object") return [];
+  const b = body as { reconcileFailed?: unknown; warnings?: unknown };
+  const list = Array.isArray(b.warnings) ? b.warnings.filter((w): w is string => typeof w === "string") : [];
+  return b.reconcileFailed === true ? list.slice(0, -1) : list;
+}
+
 const get = <T,>(p: string) => request<T>(p);
 const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
@@ -826,7 +837,9 @@ export const api = {
    *  broadcast in testing or live -- deleting that ends the broadcast, which on
    *  YouTube is terminal -- and ignores it otherwise. */
   deleteDestination: (id: DestinationId) =>
-    delWithBody<{ status: string }>(`/destinations/${id}`, { confirm: true }),
+    delWithBody<{ status: string; warnings?: string[]; reconcileFailed?: boolean }>(`/destinations/${id}`, {
+      confirm: true,
+    }),
   /** Display order only — the server does not restart anything for this. */
   reorderDestinations: (ids: DestinationId[]) =>
     put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
@@ -1021,8 +1034,13 @@ export const api = {
    *  (SourceView.destinations), and it is required: the server refuses the
    *  delete unless it still matches, so a destination added from another tab
    *  after the dialog opened is not swept away by a click that never saw it. */
+  /** 204 when there is nothing to say, otherwise 200 with `warnings`: a
+   *  scheduled event left on a platform, a schedule switched off. */
   deleteSource: (id: SourceId, destinations: number) =>
-    delWithBody<void>(`/sources/${id}`, { confirm: true, destinations }),
+    delWithBody<{ warnings?: string[]; reconcileFailed?: boolean } | undefined>(`/sources/${id}`, {
+      confirm: true,
+      destinations,
+    }),
   rotateSourceToken: (id: SourceId) =>
     post<SourceView>(`/sources/${id}/token`),
 
@@ -1537,8 +1555,17 @@ export const api = {
    *  rate-limits the operator's whole app, not this feature. */
   pollDeviceAuth: (platform: string, handle: string) =>
     post<DevicePoll>(`/platforms/credentials/${platform}/device/poll`, { handle }),
+  /** Removes the app's credentials, UNCONFIRMED: refused with a 409
+   *  (`creds_in_use`) naming the accounts while any are connected through the
+   *  app, because removing the app does not disconnect them. Nothing is
+   *  deleted when it rejects. */
   deleteCreds: (platform: string) =>
     del<{ status: string }>(`/platforms/credentials/${platform}`),
+  /** Removes the app's credentials ANYWAY. For a caller whose own dialog has
+   *  already said what removing them costs; the accounts stay connected until
+   *  their tokens expire. */
+  confirmDeleteCreds: (platform: string) =>
+    delWithBody<{ status: string }>(`/platforms/credentials/${platform}`, { confirm: true }),
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
   /** Disconnects an account, UNCONFIRMED.
    *
@@ -1598,7 +1625,14 @@ export const api = {
     list: () => get<StorageTargetList>("/storage/targets"),
     create: (body: StorageTargetBody) => post<StorageTarget>("/storage/targets", body),
     update: (id: number, body: StorageTargetBody) => put<StorageTarget>(`/storage/targets/${id}`, body),
-    remove: (id: number) => del<{ status: string }>(`/storage/targets/${id}`),
+    /** Always deletes. `warning` and `unabortedUploads` say which unfinished
+     *  uploads could not be aborted on the service and keep billing. */
+    remove: (id: number) =>
+      del<{
+        status: string;
+        warning?: string;
+        unabortedUploads?: { key: string; uploadId: string; relPath: string }[];
+      }>(`/storage/targets/${id}`),
     /** Session-only: put, get and delete a small object; reports the failed step. */
     test: (body: StorageTargetBody) => post<StorageTestResult>("/storage/targets/test", body),
     /** Retry now: every failed or stuck item on the target. */

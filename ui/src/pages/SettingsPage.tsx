@@ -2882,7 +2882,19 @@ export function PlatformCredCard({
   const [deviceOpen, setDeviceOpen] = useState(false);
 
   const remove = async () => {
-    await api.deleteCreds(guide.platform);
+    try {
+      // Confirmed: the dialog in front of this is a typed confirmation whose
+      // copy says what removing the app costs. The server refuses only an
+      // UNCONFIRMED removal while accounts still use it (creds_in_use).
+      await api.confirmDeleteCreds(guide.platform);
+    } catch (err) {
+      // Toasted rather than rethrown: ConfirmDestructive awaits this with no
+      // catch of its own, so a rejection would escape as an unhandled promise
+      // and the button would appear to do nothing -- the same failure the
+      // disconnect below documents.
+      toast.error(err instanceof Error ? err.message : t("danger.credsFailed", { platform: guide.platform }));
+      return;
+    }
     toast.success(t("set.credsRemoved"));
     onChanged();
   };

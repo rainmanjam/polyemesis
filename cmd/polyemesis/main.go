@@ -503,6 +503,11 @@ func run(h *hooks) error {
 	// After api.New, which is what installs the server as the bridge's
 	// Actions: a fact OBS reports before that would be recorded and acted on
 	// by nothing.
+	//
+	// Pruned first: an install whose OBS bridge document still names a
+	// destination or programme deleted before deletes cleaned it up could not
+	// save its OBS settings at all. Once, idempotent, and a no-op otherwise.
+	srv.PruneOBSReferences()
 	go obsBridge.Run(ctx)
 	go srv.RefreshLoop(ctx)
 	// The native Twitch poll mirror reads accounts and tokens through the API.
