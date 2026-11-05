@@ -4209,5 +4209,22 @@
         }
       }
     }
+  },
+  "refusal": {
+    "types": [
+      "object"
+    ],
+    "fields": {
+      "code": {
+        "types": [
+          "string"
+        ]
+      },
+      "error": {
+        "types": [
+          "string"
+        ]
+      }
+    }
   }
 }

@@ -34,7 +34,7 @@ import (
 //     body, which token) and the status and body the server answered. Every
 //     GET the plugin reads, and the POST answers and refusals it branches on.
 //   - schema.json: per route, every field each 2xx answer can carry and its
-//     JSON type. It is the union of what the recorded answers carry and, where
+//     JSON type; and under "refusal", every field a 4xx or 5xx answer can. It is the union of what the recorded answers carry and, where
 //     the handler writes a Go type, every json-tagged field of that type, so a
 //     field this install never fills (platformHealth, restartStorm) is still
 //     listed under the name the server would send it.
@@ -183,6 +183,9 @@ func (f *deckFixture) cases() []deckCase {
 	}
 }
 
+// deckRefusalKey is schema.json's entry for every 4xx and 5xx answer.
+const deckRefusalKey = "refusal"
+
 // deckStatusKeep is what the plugin reads of GET /status (src/model.ts's
 // StatusPayload).
 var deckStatusKeep = []string{"destinations", "destinationHold", "failover", "source"}
@@ -234,6 +237,9 @@ func checkDeckGoldens(t *testing.T, f *deckFixture, routes []deckRoute) {
 
 	got := map[string]deckGolden{}
 	samples := map[string][]any{}
+	// Every refusal the cases record, whatever the route: the one error shape
+	// the plugin reads (error, and code for no_source).
+	refusals := schemaOfType(reflect.TypeFor[apiError](), map[reflect.Type]bool{})
 	keeps := map[string][]string{}
 	for _, c := range f.cases() {
 		target := f
@@ -242,6 +248,9 @@ func checkDeckGoldens(t *testing.T, f *deckFixture, routes []deckRoute) {
 		}
 		g := target.record(t, c)
 		got[c.Name] = g
+		if g.Status >= 400 && g.Body != nil {
+			refusals = refusals.merge(schemaOfValue(g.Body))
+		}
 		if g.Status >= 200 && g.Status < 300 {
 			key := c.Method + " " + c.Route
 			samples[key] = append(samples[key], g.Body)
@@ -262,6 +271,7 @@ func checkDeckGoldens(t *testing.T, f *deckFixture, routes []deckRoute) {
 		}
 		schema[key] = s
 	}
+	schema[deckRefusalKey] = refusals
 	for key := range deckTypes {
 		if schema[key] == nil {
 			t.Errorf("deckTypes names %s, which no case records a 2xx answer for", key)

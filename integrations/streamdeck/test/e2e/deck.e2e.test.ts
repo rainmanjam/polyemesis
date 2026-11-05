@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Transport, TransportRequest } from "../../src/api.js";
 import { HOLD_MS, Runtime } from "../../src/runtime.js";
@@ -72,13 +73,48 @@ async function stop(child: Child, what: string): Promise<void> {
   await until(`${what} to exit`, 10_000, () => child.exited);
 }
 
-/** The local RTMP sink: one publisher, then it exits. -progress reports the media it has received. */
-function startSink(): Child {
-  return start([
+const SINK_PORT = Number(new URL(SINK_URL).port);
+
+/**
+ * Whether something is listening on the sink's port, read from the kernel's socket table rather than by
+ * connecting: the sink takes exactly one connection, and a probe would be it.
+ */
+function listening(port: number): boolean {
+  if (process.platform === "linux") {
+    const hex = port.toString(16).toUpperCase().padStart(4, "0");
+    return ["/proc/net/tcp", "/proc/net/tcp6"].some((f) => {
+      try {
+        // local_address is ADDR:PORT in hex; state 0A is LISTEN.
+        return readFileSync(f, "utf8").split("\n").some((l) => {
+          const cols = l.trim().split(/\s+/);
+          return cols[1]?.endsWith(`:${hex}`) && cols[3] === "0A";
+        });
+      } catch {
+        return false;
+      }
+    });
+  }
+  try {
+    return execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" }).trim() !== "";
+  } catch {
+    return false; // lsof exits 1 when nothing matches
+  }
+}
+
+/**
+ * The local RTMP sink: one publisher, then it exits. -progress reports the media it has received. Returned
+ * once it is listening, so the destination's first connection cannot beat it: with one restart allowed, a
+ * sink that is late twice would read as a failure the test did not cause.
+ */
+async function startSink(): Promise<Child> {
+  const sink = start([
     "-hide_banner", "-nostats", "-loglevel", "warning",
     "-listen", "1", "-i", SINK_URL,
     "-progress", "pipe:1", "-c", "copy", "-f", "null", "-",
   ]);
+  await until(`the sink to listen on ${SINK_PORT}`, 15_000, () => sink.exited || listening(SINK_PORT), () => sink.out.slice(-300));
+  if (sink.exited) throw new Error(`the sink exited before it listened: ${sink.out.slice(-300)}`);
+  return sink;
 }
 
 /** Microseconds of media the sink has received, from its -progress lines. */
@@ -180,7 +216,7 @@ describe("a Stream Deck paired with a real polyemesis", () => {
   });
 
   it("starts the destination from its key, and it goes live at the sink", async () => {
-    sink = startSink();
+    sink = await startSink();
     await rt.pressDestination("dest");
     expect(net.sent.at(-1)?.url.pathname).toMatch(new RegExp(`/destinations/${DEST}/(start|restart)$`));
     await waitFace(/^Live$/, KEY_STATE.live);
@@ -194,7 +230,7 @@ describe("a Stream Deck paired with a real polyemesis", () => {
   });
 
   it("retries from a tap on the Failed key, and is live again", async () => {
-    sink = startSink();
+    sink = await startSink();
     const before = net.sent.length;
     await rt.pressDestination("dest");
     const writes = net.sent.slice(before).filter((r) => r.method === "POST");

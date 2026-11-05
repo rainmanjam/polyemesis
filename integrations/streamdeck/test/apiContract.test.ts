@@ -38,11 +38,12 @@ function parseCallSites(src: string): CallSite[] {
   };
   const out: CallSite[] = [];
   // Every token "call" followed by "<" or "(": the definition and the call sites. Nothing else may exist,
-  // except on a comment line (one that starts with //, /* or *), where prose may name call().
+  // except on a comment line (one that starts with // or a doc comment's *), where prose may name call().
+  // Not /*: code can follow a block comment on its line.
   for (const m of src.matchAll(/\bcall\s*[<(]/g)) {
     const at = m.index;
     const lineStart = src.lastIndexOf("\n", at) + 1;
-    if (/^\s*(\/\/|\/\*|\*)/.test(src.slice(lineStart, at))) continue;
+    if (/^\s*(\/\/|\*)/.test(src.slice(lineStart, at))) continue;
     if (/private\s+async\s+$/.test(src.slice(Math.max(0, at - 32), at))) continue; // the definition
     if (src.slice(at - 5, at) !== "this.") fail(at, "a call( that is not this.call(");
     let i = skipWs(at + "call".length);
@@ -113,6 +114,7 @@ describe("apiContract.json against src/api.ts", () => {
     expect(() => parseCallSites("this.call(\"GET\", `/destinations/${dest.id}/start`)")).toThrow(/identifier/);
     expect(() => parseCallSites('client.call("GET", "/status")')).toThrow(/not this.call/);
     expect(parseCallSites('// call() is documented here\n * and call(here)\n')).toEqual([]);
+    expect(() => parseCallSites('/* a note */ client.call("GET", "/status")')).toThrow(/not this.call/);
     expect(parseCallSites('this.call<Record<string, unknown>>(\n  "POST",\n  `/polls/${id}/end`)')).toEqual([
       { method: "POST", path: "/polls/{id}/end", line: 1 },
     ]);

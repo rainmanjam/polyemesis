@@ -64,7 +64,7 @@ type deckCall struct {
 
 var (
 	deckCallToken = regexp.MustCompile(`\bcall\s*[<(]`)
-	deckCommentLn = regexp.MustCompile(`^\s*(//|/\*|\*)`)
+	deckCommentLn = regexp.MustCompile(`^\s*(//|\*)`)
 	deckVerb      = regexp.MustCompile(`^"(GET|POST)"`)
 	deckParamExpr = regexp.MustCompile(`^(?:encodeURIComponent\(\s*(\w+)\s*\)|(\w+))$`)
 	deckThirdArg  = regexp.MustCompile(`^(\w+)\s*[,)]`)
@@ -77,7 +77,8 @@ var (
 // that is sourceId or undefined. Anything else is an error, never a skip, so a
 // call written some other way cannot slip past the contract. "call" followed by
 // < or ( may otherwise appear only in the method's own definition or on a
-// comment line.
+// comment line: one starting with // or a doc comment's *. Not /*, which code
+// can follow on the same line.
 func parseDeckCalls(src string) ([]deckCall, error) {
 	lineOf := func(i int) int { return strings.Count(src[:i], "\n") + 1 }
 	failAt := func(i int, why string, a ...any) error {
@@ -264,6 +265,7 @@ func TestTheStreamDeckCallParserRefusesWhatItCannotRead(t *testing.T) {
 		`client.call("GET", "/status")`,
 		`this.call("GET", "/status", this.source)`,
 		`this.call("GET", "/sta` + "\n" + `tus")`,
+		`/* a note */ client.call("GET", "/status")`,
 	} {
 		if got, err := parseDeckCalls(bad); err == nil {
 			t.Errorf("parsed %q as %+v; want a refusal", bad, got)

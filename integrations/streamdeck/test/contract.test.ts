@@ -153,6 +153,9 @@ describe("every fake answer is held to the server's schema (test/setup.ts)", () 
     ]);
     // A field the server sends that a fake leaves out is fine: a fake may be partial.
     expect(departures({ destinations: [{ id: 1 }] }, status)).toEqual([]);
+    // A refusal, on any route, has the server's one error shape.
+    expect(departures({ message: "nope" }, SCHEMA.refusal)).toEqual(["$.message: not a field the server sends"]);
+    expect(departures({ error: "nope", code: "no_source" }, SCHEMA.refusal)).toEqual([]);
   });
 
   it("catches a renamed field in a fake served to the client, in any test", async () => {
@@ -182,6 +185,8 @@ describe("the client parses every answer the server gives it", () => {
     it(g.case, async () => {
       const { client } = answering(goldenResponse(g.case));
       const out = await invoke(client, g);
+      // Every 2xx answer recorded has a body, so every parser has something to return.
+      expect(out).not.toBeUndefined();
       expect(holes(out)).toEqual([]);
     });
   }

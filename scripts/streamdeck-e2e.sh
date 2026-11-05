@@ -98,7 +98,11 @@ cleanup() {
 		stop_pid "$SERVER_PID" "the server" || rc=1
 	fi
 	for pid in $kids; do
-		stop_pid "$pid" "a child of the server" || rc=1
+		# Still an FFmpeg, the only thing the server runs here: a PID the server
+		# reaped on its way out could, however unlikely, be somebody else's now.
+		case "$(ps -o comm= -p "$pid" 2>/dev/null)" in
+		*ffmpeg* | *ffprobe*) stop_pid "$pid" "a child of the server" || rc=1 ;;
+		esac
 	done
 	for pid in $(pgrep -f "$MARKER" 2>/dev/null); do
 		stop_pid "$pid" "a media process of this run" || rc=1

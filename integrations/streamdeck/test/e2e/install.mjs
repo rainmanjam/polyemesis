@@ -108,5 +108,6 @@ const env = {
   POLY_E2E_DESTINATION: String(destination),
   POLY_E2E_SINK_URL: sinkURL,
 };
-writeFileSync(envFile, Object.entries(env).map(([k, v]) => `export ${k}='${v}'\n`).join(""), { mode: 0o600 });
+const quoted = (v) => `'${v.replaceAll("'", "'\\''")}'`;
+writeFileSync(envFile, Object.entries(env).map(([k, v]) => `export ${k}=${quoted(v)}\n`).join(""), { mode: 0o600 });
 console.log(`install: admin and tokens created; programme ${source}, destination ${destination} -> ${sinkURL}`);

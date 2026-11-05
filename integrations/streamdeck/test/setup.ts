@@ -9,7 +9,7 @@ import { NOT_THE_SERVERS_SHAPE, SCHEMA, departures, violations } from "./support
 // copy keeps the old name and the suite stays green. So every answer any fake gives the client is checked here
 // against test/contract/schema.json, which internal/api/streamdeck_goldens_test.go records from the real
 // handlers: a field the server never sends, or a value of a type it never sends there, fails the test that
-// served it. A fake that is deliberately not the server's shape (a malformed-answer test) says so with
+// served it; a refusal is held to the one error shape the server sends. A fake that is deliberately not the server's shape (a malformed-answer test) says so with
 // malformed() from support/contract.ts.
 //
 // The hook is on the client, below every fake: the first call of each client wraps its transport.
@@ -17,7 +17,7 @@ import { NOT_THE_SERVERS_SHAPE, SCHEMA, departures, violations } from "./support
 const WRAPPED = Symbol("contract-checked transport");
 
 function check(req: TransportRequest, res: TransportResponse): void {
-  if (res.status < 200 || res.status >= 300 || (res as { [NOT_THE_SERVERS_SHAPE]?: boolean })[NOT_THE_SERVERS_SHAPE]) return;
+  if ((res as { [NOT_THE_SERVERS_SHAPE]?: boolean })[NOT_THE_SERVERS_SHAPE]) return;
   if (res.body.trim() === "") return;
   let body: unknown;
   try {
@@ -25,6 +25,12 @@ function check(req: TransportRequest, res: TransportResponse): void {
   } catch {
     return; // not JSON: the client's own malformed path, which its tests cover
   }
+  // A refusal has one shape whatever the route: {"error": ..., "code": ...}.
+  if (res.status >= 400) {
+    for (const d of departures(body, SCHEMA.refusal)) violations.push(`${req.method} ${req.url.pathname} ${res.status} ${d}`);
+    return;
+  }
+  if (res.status < 200 || res.status >= 300) return;
   const rel = req.url.pathname.replace(/^.*?\/api\/v1(?=\/)/, "");
   const route = contractRoute(req.method as Method, rel);
   if (!route) return; // the client refuses it before sending; apiContract.test.ts covers that
