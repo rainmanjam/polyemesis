@@ -243,6 +243,62 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.14.0
+
+**A Stream Deck Routing preset key now changes the routing.** Before 0.14.0,
+holding it only compiled the preset and showed OK; nothing was saved. With this
+release's plugin (`com.polyemesis.streamdeck.streamDeckPlugin` on the release
+page) it saves the preset on every destination of the key's programme: a change
+in levels only goes out live, and a destination whose audio graph changes
+restarts, on the air as well. The plugin from an earlier release still calls the
+compile-only route and still changes nothing.
+
+**Signing out ends the account's sessions everywhere**, on every browser and
+phone, as a password change does. API tokens, the Stream Deck, the OBS script and
+MCP clients keep working.
+
+**Scripts that call the API** see three changed answers:
+
+- `DELETE /api/v1/platforms/credentials/{platform}` answers `409` with
+  `code: "creds_in_use"` while accounts still use the app. Send
+  `{"confirm": true}` to remove it anyway.
+- `DELETE /api/v1/sources/{id}` answers `200` with `{"warnings": [...]}` instead
+  of `204` when it has something to report, so treat any `2xx` as success.
+  `DELETE /api/v1/destinations/{id}` gains the same `warnings` array.
+- The MCP tool `apply_routing_preset` refuses `mix: vod` on a destination that
+  has no second mix (it used to create one), and refuses a destination that
+  copies its audio.
+
+**Deletes now reach what referred to them.** Deleting a destination deletes its
+upcoming YouTube events made by a recurring template or a pre-announcement,
+which cannot be undone, and names a Facebook pre-announcement for you to remove
+on Facebook; a show that has started, or a destination on the air, is left alone.
+Deleting the programme the public playout page is published from takes the page
+down (`503`) until you publish another in Playout > Programme for viewers. A
+schedule left with no destinations is switched off.
+
+**At startup, 0.14.0 tidies two leftovers**: an OBS bridge configuration's
+references to destinations that no longer exist (such a configuration could not
+be saved), and recurring-broadcast templates whose schedule is gone. Nothing to
+do.
+
+**Chat follows the platform's developer credentials.** An account whose platform
+has no developer credentials stored no longer starts reading chat. If a
+platform's chat is missing after the upgrade, add its credentials in Settings →
+Platform credentials. Rumble, which is keyed by an environment variable, is
+unaffected.
+
+**MQTT:** switching MQTT off now deletes the retained state topics it published,
+and changing the topic prefix or the instance deletes the old tree or the old
+Home Assistant device. A consumer reading those topics sees them go away rather
+than go stale.
+
+**Schema:** unchanged. 0.14.0 adds no tables and no columns, and the schema
+version stamped into the database is still `1`; a fresh 0.14.0 database is
+identical to a fresh 0.13.0 one (`internal/db/testdata/release-v0.14.0.db`
+against `release-v0.13.0.db`). **A 0.13.0 binary opens a 0.14.0 database.**
+Restoring the backup you took is still the rollback this page recommends.
+
 ### Upgrading to 0.13.0
 
 **Expert-mode arguments are checked again when a destination starts.** Expert
