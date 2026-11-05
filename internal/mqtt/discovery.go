@@ -3,6 +3,7 @@ package mqtt
 import (
 	"context"
 	"encoding/json"
+	"maps"
 )
 
 // Home Assistant discovery.
@@ -75,7 +76,16 @@ type haDiscovery struct {
 // Retained, like everything else here: Home Assistant reads discovery topics
 // when it starts, and a non-retained payload would only ever be seen by an
 // instance that happened to be running at the moment polyemesis connected.
+//
+// It returns without publishing when the set of components is the one already
+// announced on this connection, so the announcer can call it on every tick and
+// a destination added or removed mid-connection still reaches Home Assistant.
+// A component that was in the last payload and is not in this one is sent as
+// its key with only its platform, which is how a device payload removes one
+// entity; omitting it would leave a ghost entity on the device for ever.
 func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	inst := t.topics.Instance()
 	d := haDiscovery{
 		Device: haDevice{
@@ -180,11 +190,57 @@ func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
 		}
 	}
 
-	body, err := json.Marshal(d)
+	now := make(map[string]string, len(d.Component))
+	for key, c := range d.Component {
+		now[key] = c.Platform
+	}
+	if !t.rediscover && t.discovered != nil && maps.Equal(now, t.discovered) {
+		return nil
+	}
+	// Built as raw JSON per component so a removal stub can be exactly
+	// {"p": platform}: haComponent's other fields have no omitempty and would
+	// otherwise ride along as empty strings.
+	cmps := make(map[string]json.RawMessage, len(d.Component)+len(t.discovered))
+	for key, c := range d.Component {
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return err
+		}
+		cmps[key] = raw
+	}
+	for key, platform := range t.discovered {
+		if _, still := now[key]; still {
+			continue
+		}
+		raw, err := json.Marshal(map[string]string{"p": platform})
+		if err != nil {
+			return err
+		}
+		cmps[key] = raw
+	}
+	body, err := json.Marshal(struct {
+		haDiscovery
+		Component map[string]json.RawMessage `json:"cmps"`
+	}{haDiscovery: d, Component: cmps})
 	if err != nil {
 		return err
 	}
-	return t.pub.Publish(ctx, t.topics.Discovery(), QoS, true, body)
+	if err := t.pub.Publish(ctx, t.topics.Discovery(), QoS, true, body); err != nil {
+		return err
+	}
+	t.discovered, t.rediscover = now, false
+	return nil
+}
+
+// ForgetDiscovery makes the next PublishDiscovery send the payload even if
+// the component set has not changed. Called when the link comes back: a broker
+// that restarted lost the retained payload, and an unchanged set is no reason
+// not to send it again. What was announced is kept, so removal stubs are
+// still computed against it.
+func (t *Telemetry) ForgetDiscovery() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rediscover = true
 }
 
 // audienceEntities is the fixed set of viewer sensors: one per platform

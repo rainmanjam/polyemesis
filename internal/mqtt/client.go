@@ -235,6 +235,25 @@ func (c *Client) Close(ctx context.Context) error {
 	return err
 }
 
+// Retire disconnects from a topic tree this install is leaving -- the prefix or
+// instance changed -- deleting its retained status instead of writing
+// `offline` to it. Close's offline is right for a tree that will be back; for
+// one that will not, a retained `offline` is the last state left there for
+// ever. A clean disconnect discards the will, so nothing rewrites it.
+func (c *Client) Retire(ctx context.Context) error {
+	var err error
+	c.closeOnce.Do(func() {
+		if c.Connected() {
+			if perr := c.Publish(ctx, c.topics.Status(), QoS, true, nil); perr != nil {
+				c.log.Warn("could not clear the status of the old topic tree", "err", perr)
+			}
+		}
+		err = c.cm.Disconnect(ctx)
+		c.up.Store(false)
+	})
+	return err
+}
+
 // parseBroker accepts the four schemes autopaho supports and refuses anything
 // else by name rather than failing later inside the dialler.
 func parseBroker(raw string) (*url.URL, error) {
