@@ -99,3 +99,40 @@ func TestTheKickPresetSaysToAppendTheApplicationPath(t *testing.T) {
 			kick.Notes)
 	}
 }
+
+// Instagram's ingest host carries a region (edgetee-upload-<region>), so the
+// preset prefills nothing and its notes carry the shape instead, along with
+// the three things that cost an operator a broadcast when met halfway through:
+// the Go live click in Instagram, the one-hour cap, and the persistent key that
+// keeps a pasted destination from going stale.
+func TestTheInstagramPresetDocumentsItsIngestShapeAndItsLimits(t *testing.T) {
+	var ig *DestinationPreset
+	for _, p := range DestinationPresets() {
+		if p.ID == "instagram" {
+			p := p
+			ig = &p
+		}
+	}
+	if ig == nil {
+		t.Fatal("no instagram preset")
+	}
+	if ig.URL != "" {
+		t.Errorf("the instagram preset prefills %q; Instagram's ingest host carries a per-account region", ig.URL)
+	}
+	if ig.Kind != DestRTMP || ig.Transport != PresetRTMPS {
+		t.Errorf("instagram is %s/%s, want an RTMPS destination", ig.Kind, ig.Transport)
+	}
+	for _, want := range []string{
+		"rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/",
+		"PERSISTENT key",
+		"click Go live in Instagram",
+		"one hour",
+	} {
+		if !strings.Contains(ig.Notes, want) {
+			t.Errorf("instagram notes do not say %q.\ngot: %s", want, ig.Notes)
+		}
+	}
+	if ig.Video == nil || ig.Video.Width != 720 || ig.Video.Height != 1280 {
+		t.Errorf("instagram video guidance = %+v, want vertical 720x1280", ig.Video)
+	}
+}

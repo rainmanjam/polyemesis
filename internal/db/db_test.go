@@ -588,6 +588,15 @@ func TestDestinationTarget(t *testing.T) {
 			want: "rtmp://ingest.example/live/abc-123",
 		},
 		{
+			// Instagram's and Facebook's keys carry a query string. The key is
+			// joined verbatim, so ? and & reach FFmpeg as the platform wrote
+			// them. Synthetic, low-entropy key: the shape, not a real one.
+			name: "rtmps joins a query-string key verbatim",
+			dest: Destination{Kind: DestRTMP, URL: "rtmps://edgetee-upload-test1.xx.fbcdn.net:443/rtmp/",
+				StreamKey: "12345?s_bl=1&s_fbp=test&s_igps=1&s_ow=1"},
+			want: "rtmps://edgetee-upload-test1.xx.fbcdn.net:443/rtmp/12345?s_bl=1&s_fbp=test&s_igps=1&s_ow=1",
+		},
+		{
 			name: "rtmp without a stream key is left alone",
 			dest: Destination{Kind: DestRTMP, URL: "rtmp://ingest.example/live"},
 			want: "rtmp://ingest.example/live",

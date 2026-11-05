@@ -3,6 +3,8 @@ package oauth
 import (
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // The platform caps that Wave 3 rollover (#19) has to plan around are facts
@@ -60,6 +62,8 @@ func TestTheRolloverCapsAreRecordedWithTheirValues(t *testing.T) {
 		"youtube":  {LimitKindArchiveDuration, 12, LimitDocumented},
 		"facebook": {LimitKindBroadcastDuration, 8, LimitDocumented},
 		"kick":     {LimitKindBroadcastDuration, 0, LimitUnverified},
+		// Restream's help, not Meta's, so reported rather than documented.
+		"instagram": {LimitKindBroadcastDuration, 1, LimitReported},
 	}
 	got := map[string]PlatformLimit{}
 	for _, l := range PlatformLimits() {
@@ -98,4 +102,25 @@ func TestTheYouTubeArchiveLimitCitesTheArchivePage(t *testing.T) {
 		return
 	}
 	t.Fatal("no YouTube archive limit recorded")
+}
+
+// Instagram's one-hour cap is recorded with no platform, because Instagram
+// destinations save as custom. It must never be handed to a destination by
+// platform -- least of all to one whose platform is empty, which a naive match
+// on the empty string would do.
+func TestTheInstagramCapIsOnRecordButDrivesNoCountdown(t *testing.T) {
+	for _, p := range []db.Platform{"", db.PlatformCustom} {
+		if l, ok := RolloverLimitFor(p); ok {
+			t.Errorf("RolloverLimitFor(%q) = %+v; a custom or unset platform has no cap to count to", p, l)
+		}
+	}
+	for _, l := range PlatformLimits() {
+		if l.PresetID == "instagram" {
+			if l.Platform != "" {
+				t.Errorf("instagram limit carries platform %q; Instagram has no integration behind it", l.Platform)
+			}
+			return
+		}
+	}
+	t.Fatal("no instagram limit recorded")
 }

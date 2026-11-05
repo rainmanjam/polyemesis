@@ -6,8 +6,8 @@ package chat
 // webhook. Its live-stream API is a single unauthenticated GET whose entire
 // credential is a key in the query string, issued from the operator's own
 // account settings at rumble.com/account/livestream-api rather than from a
-// partner programme. That is what made it reachable where TikTok, Instagram and
-// LinkedIn are not: there is nobody to be approved by.
+// partner programme. That is what made it reachable where TikTok and LinkedIn
+// are not: there is nobody to be approved by.
 //
 // WHAT WAS MEASURED, and what was not. The endpoint is real and key-gated: an
 // invalid key answers 403 with a structured body, and no key at all answers 400

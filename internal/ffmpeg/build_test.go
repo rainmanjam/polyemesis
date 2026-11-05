@@ -476,6 +476,27 @@ func TestDestinationArgsNeverReencodesVideo(t *testing.T) {
 	}
 }
 
+// Instagram's and Facebook's stream keys carry a query string. FFmpeg is
+// spawned with an argv, never through a shell, so the target reaches it as one
+// argument with its ? and & intact -- nothing splits, escapes or drops the
+// query. Synthetic, low-entropy key: the shape of one, not a real one.
+func TestDestinationArgsPassAQueryStringKeyThroughAsOneArgument(t *testing.T) {
+	const target = "rtmps://edgetee-upload-test1.xx.fbcdn.net:443/rtmp/12345?s_bl=1&s_fbp=test&s_igps=1&s_ow=1"
+	args := DestinationArgs(DestSpec{
+		Kind:          DestRTMP,
+		Target:        target,
+		RelayURL:      "udp://127.0.0.1:20001",
+		FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+		AudioBitrate:  160,
+	})
+	if got := args[len(args)-1]; got != target {
+		t.Fatalf("output URL = %q, want the query-string key verbatim %q", got, target)
+	}
+	if f, _ := argsAfter(args, "-f"); f != "flv" {
+		t.Errorf("-f = %q, want flv for an RTMPS target", f)
+	}
+}
+
 // If the explicit maps regress, FFmpeg picks one arbitrary audio track and the
 // entire routing feature silently stops working.
 func TestDestinationArgsMapsTheFilterOutputNotARawTrack(t *testing.T) {

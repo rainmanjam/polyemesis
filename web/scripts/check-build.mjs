@@ -1159,8 +1159,8 @@ function compareIso(a, b) {
  * about the same Go literal, and it was wrong by six. Same reasoning as above:
  * count it, do not trust it. "Other" means not backed by an OAuth integration;
  * the sentence's own qualifier is "over RTMP, RTMPS or SRT", so an HLS push
- * preset does not count; and Instagram is excluded because the same page says
- * two paragraphs later that it is listed as unsupported. */
+ * preset does not count. Instagram counts: it is a pasted-key RTMPS preset like
+ * the rest. */
 const NUMBER_WORDS = {
   20: "twenty", 21: "twenty-one", 22: "twenty-two", 23: "twenty-three",
   24: "twenty-four", 25: "twenty-five", 26: "twenty-six", 27: "twenty-seven",
@@ -1168,7 +1168,7 @@ const NUMBER_WORDS = {
 };
 if (goPresets.size && pages.includes("features.html")) {
   const pasteable = [...goPresets].filter(
-    ([id, p]) => !p.integrated && id !== "instagram" && ["RTMP", "RTMPS", "SRT"].includes(p.transport),
+    ([, p]) => !p.integrated && ["RTMP", "RTMPS", "SRT"].includes(p.transport),
   ).length;
   const word = NUMBER_WORDS[pasteable];
   const features = norm(readFileSync(join(DIST, "features.html"), "utf8"));

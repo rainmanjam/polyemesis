@@ -68,7 +68,9 @@ hot. One upload, one video encode, different audio per platform.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. TikTok signs in for clip publishing.
   X sign-in, go-live and chat are built and stay switched off until X
-  whitelists the app for its Livestream API. [→ PLATFORMS.md](docs/PLATFORMS.md)
+  whitelists the app for its Livestream API. Instagram Live streams with a
+  persistent key pasted from instagram.com; you click Go live in Instagram,
+  and each live video runs up to an hour. [→ PLATFORMS.md](docs/PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
   card showing what one person has said across every platform at once, which no
   single platform's own tooling does.
@@ -133,7 +135,6 @@ roadmap.
 | **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on every supported FFmpeg (8.0 or later) — verified end to end — but is not yet confirmed with OBS publishing. SRT is what is operated. See `docs/evidence/enhanced-rtmp-multitrack.md`. |
 | **No per-source ports.** | Every push source is addressed by its token on one SRT port, or its stream key on one RTMP port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
 | **One user, no roles.** | No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming — and, through file destinations and expert mode, meaningful control of the machine. |
-| **Instagram Live cannot work.** | There is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. It is listed and marked unsupported rather than shipped as a preset that quietly never connects. |
 | **Your source video is your problem.** | Renditions can re-encode down, but polyemesis will not rescue a 4K60 ingest on a box that cannot software-encode it in realtime. |
 
 ### Platform maturity

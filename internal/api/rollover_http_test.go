@@ -60,8 +60,11 @@ func TestTheRolloverLimitsRouteServesTheCapsWithHowWellEachIsEstablished(t *test
 	if kick, ok := byPreset["kick"]; !ok || kick.Hours != 0 || kick.Status != string(oauth.LimitUnverified) {
 		t.Fatalf("kick limit = %+v (present %v), want it served as unverified with no number", kick, ok)
 	}
-	if len(got) != 4 {
-		t.Fatalf("served %d limits, want the table's 4", len(got))
+	if ig, ok := byPreset["instagram"]; !ok || ig.Hours != 1 || ig.Status != string(oauth.LimitReported) {
+		t.Fatalf("instagram limit = %+v (present %v), want the one-hour cap, reported", ig, ok)
+	}
+	if len(got) != 5 {
+		t.Fatalf("served %d limits, want the table's 5", len(got))
 	}
 }
 
