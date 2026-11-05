@@ -336,6 +336,14 @@ func (s *Server) handlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The app it was started for must still be the stored one, checked before
+	// anything goes out to the platform. See deviceFlowCredsCurrent: without
+	// this a code started before the credentials were removed still connected
+	// an account to the removed app.
+	if !s.expireStaleDeviceFlow(w, req.Handle, flow, false) {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), devicePollTimeout)
 	defer cancel()
 
@@ -376,6 +384,11 @@ func (s *Server) handlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Again, just before the account is stored: the credentials may have been
+	// removed while this poll was out at the platform.
+	if !s.expireStaleDeviceFlow(w, req.Handle, flow, true) {
+		return
+	}
 	saved, err := s.store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
 		Platform:     flow.platform,
 		AccountName:  acct.Name,
@@ -415,4 +428,62 @@ func secondsUntil(at, now time.Time) int {
 		return 0
 	}
 	return int((d + time.Second - 1) / time.Second)
+}
+
+// deviceFlowCredsCurrent reports whether the developer app a device flow was
+// started with is still the one stored for its platform.
+//
+// THE FLOW CARRIES ITS OWN CLIENT ID. handleStartDeviceAuth copies it into the
+// in-memory flow, and the poll never read the credentials again -- so a code
+// issued before the operator removed (or replaced) the app went on to redeem,
+// and stored a connected account for an app that no longer existed here. With
+// tokenFor handing out any unexpired token without reading the credentials,
+// that account then worked. A Twitch device code lives 30 minutes.
+//
+// False when the credentials are gone or name a different client id. Any other
+// store error is returned, and the flow is kept for the next poll.
+func (s *Server) deviceFlowCredsCurrent(flow *deviceFlow) (bool, error) {
+	creds, err := s.store.GetPlatformCreds(s.box, flow.platform)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return creds.ClientID == flow.clientID, nil
+}
+
+// expireStaleDeviceFlow answers the poll itself, and reports false, when the
+// flow must not go on: it was started with credentials that are no longer
+// stored (the dialog's existing "expired" branch), or they could not be read.
+//
+// spent says the device code has already been redeemed for a token.
+//
+// Before that, a read that FAILS lets the poll go on: nothing is stored on the
+// strength of it, because the same check runs again, spent, right before the
+// account is written. After it, a failed read ends the flow as every other
+// failure past that point does -- Twitch will not mint a second token from the
+// same code -- and nothing is stored.
+func (s *Server) expireStaleDeviceFlow(w http.ResponseWriter, handle string, flow *deviceFlow, spent bool) bool {
+	current, err := s.deviceFlowCredsCurrent(flow)
+	if err != nil {
+		if !spent {
+			s.log.Warn("device flow: cannot read the credentials yet; checked again before anything is stored",
+				"platform", flow.platform, "err", err)
+			return true
+		}
+		s.devices.forget(handle)
+		writeStoreError(w, err)
+		return false
+	}
+	if current {
+		return true
+	}
+	s.devices.forget(handle)
+	writeJSON(w, http.StatusOK, devicePollView{
+		State: deviceExpired,
+		Reason: "the developer credentials were removed or changed since this code was issued; " +
+			"start again",
+	})
+	return false
 }

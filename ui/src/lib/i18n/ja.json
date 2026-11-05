@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "サーバーが接続するのは次のみです：{schemes}。",
   "set.disconnect": "接続を解除",
   "set.disconnectAnyway": "それでも切断する",
-  "set.disconnectDesc": "これを使用している配信先は設定を保持しますが、ストリームキーの更新を停止します。同じアカウントは後から再接続できます。",
+  "set.disconnectDesc": "これを使用している配信先は設定を保持しますが、ストリームキーの更新を停止します。同じアカウントは後から再接続できます。プラットフォーム側のアカウント設定でアプリを削除するまで、接続はプラットフォームに表示されたままです。",
   "set.disconnectInUseList": "このアカウントを失う配信先",
   "set.disconnectInUseTitle": "それでも切断しますか？",
   "set.disconnectMidBroadcast": "配信中",

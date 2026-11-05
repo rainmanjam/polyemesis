@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "The server dials only: {schemes}.",
   "set.disconnect": "Disconnect",
   "set.disconnectAnyway": "Disconnect anyway",
-  "set.disconnectDesc": "Destinations using it keep their settings but stop refreshing their stream key. You can reconnect the same account afterwards.",
+  "set.disconnectDesc": "Destinations using it keep their settings but stop refreshing their stream key. You can reconnect the same account afterwards. The platform keeps listing the connection until you remove the app in your account settings there.",
   "set.disconnectInUseList": "Destinations that lose this account",
   "set.disconnectInUseTitle": "Disconnect anyway?",
   "set.disconnectMidBroadcast": "mid-broadcast",

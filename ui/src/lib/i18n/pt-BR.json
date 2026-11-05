@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "O servidor só disca: {schemes}.",
   "set.disconnect": "Desconectar",
   "set.disconnectAnyway": "Desconectar mesmo assim",
-  "set.disconnectDesc": "Os destinos que a usam mantêm suas configurações, mas param de renovar a chave de transmissão. Você pode reconectar a mesma conta depois.",
+  "set.disconnectDesc": "Os destinos que a usam mantêm suas configurações, mas param de renovar a chave de transmissão. Você pode reconectar a mesma conta depois. A plataforma continua listando a conexão até que você remova o aplicativo nas configurações da sua conta lá.",
   "set.disconnectInUseList": "Destinos que perdem esta conta",
   "set.disconnectInUseTitle": "Desconectar mesmo assim?",
   "set.disconnectMidBroadcast": "transmitindo agora",

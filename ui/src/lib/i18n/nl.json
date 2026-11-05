@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "De server belt uitsluitend: {schemes}.",
   "set.disconnect": "Loskoppelen",
   "set.disconnectAnyway": "Toch loskoppelen",
-  "set.disconnectDesc": "Bestemmingen die het gebruiken behouden hun instellingen maar vernieuwen hun streamsleutel niet meer. Je kunt hetzelfde account daarna opnieuw verbinden.",
+  "set.disconnectDesc": "Bestemmingen die het gebruiken behouden hun instellingen maar vernieuwen hun streamsleutel niet meer. Je kunt hetzelfde account daarna opnieuw verbinden. Het platform blijft de koppeling tonen totdat je de app daar in je accountinstellingen verwijdert.",
   "set.disconnectInUseList": "Bestemmingen die dit account verliezen",
   "set.disconnectInUseTitle": "Toch loskoppelen?",
   "set.disconnectMidBroadcast": "nu in uitzending",

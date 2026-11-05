@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Le serveur ne compose que : {schemes}.",
   "set.disconnect": "Déconnecter",
   "set.disconnectAnyway": "Déconnecter quand même",
-  "set.disconnectDesc": "Les destinations qui l'utilisent conservent leurs réglages mais cessent de renouveler leur clé de flux. Vous pourrez reconnecter le même compte ensuite.",
+  "set.disconnectDesc": "Les destinations qui l'utilisent conservent leurs réglages mais cessent de renouveler leur clé de flux. Vous pourrez reconnecter le même compte ensuite. La plateforme continue d'afficher la connexion tant que vous n'avez pas retiré l'application dans les paramètres de votre compte chez elle.",
   "set.disconnectInUseList": "Destinations qui perdent ce compte",
   "set.disconnectInUseTitle": "Déconnecter quand même ?",
   "set.disconnectMidBroadcast": "en cours de diffusion",

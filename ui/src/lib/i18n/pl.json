@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Serwer łączy się wyłącznie z: {schemes}.",
   "set.disconnect": "Odłącz",
   "set.disconnectAnyway": "Odłącz mimo to",
-  "set.disconnectDesc": "Cele, które go używają, zachowują swoje ustawienia, ale przestają odświeżać klucz strumienia. To samo konto można później podłączyć ponownie.",
+  "set.disconnectDesc": "Cele, które go używają, zachowują swoje ustawienia, ale przestają odświeżać klucz strumienia. To samo konto można później podłączyć ponownie. Platforma nadal pokazuje to połączenie, dopóki aplikacja nie zostanie usunięta w ustawieniach konta na tej platformie.",
   "set.disconnectInUseList": "Cele, które tracą to konto",
   "set.disconnectInUseTitle": "Odłączyć mimo to?",
   "set.disconnectMidBroadcast": "trwa transmisja",

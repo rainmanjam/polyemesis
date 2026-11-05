@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Der Server wählt ausschließlich: {schemes}.",
   "set.disconnect": "Trennen",
   "set.disconnectAnyway": "Trotzdem trennen",
-  "set.disconnectDesc": "Ziele, die es verwenden, behalten ihre Einstellungen, aktualisieren aber ihren Streamschlüssel nicht mehr. Sie können dasselbe Konto danach wieder verbinden.",
+  "set.disconnectDesc": "Ziele, die es verwenden, behalten ihre Einstellungen, aktualisieren aber ihren Streamschlüssel nicht mehr. Sie können dasselbe Konto danach wieder verbinden. Die Plattform führt die Verbindung weiter, bis Sie die App dort in Ihren Kontoeinstellungen entfernen.",
   "set.disconnectInUseList": "Ziele, die dieses Konto verlieren",
   "set.disconnectInUseTitle": "Trotzdem trennen?",
   "set.disconnectMidBroadcast": "läuft gerade",

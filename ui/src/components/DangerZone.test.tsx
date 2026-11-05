@@ -49,7 +49,11 @@ describe("DangerZone", () => {
 
   it("removes a platform's app credentials after the platform name is typed, and says so", async () => {
     mock();
-    const del = vi.spyOn(api, "deleteCreds").mockResolvedValue({ status: "ok" } as never);
+    // CONFIRMED: the typed dialog is the confirmation. The unconfirmed call is
+    // refused with creds_in_use while accounts use the app, which is exactly
+    // the state this card shows ("Connected accounts using this app: 1").
+    const del = vi.spyOn(api, "confirmDeleteCreds").mockResolvedValue({ status: "ok" } as never);
+    const unconfirmed = vi.spyOn(api, "deleteCreds");
     const ok = vi.spyOn(toast, "success").mockImplementation(() => "");
     render(<DangerZone />);
     await screen.findByText(/Connected accounts using this app: 1\./);
@@ -58,18 +62,19 @@ describe("DangerZone", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Remove credentials" }).at(-1) as HTMLButtonElement);
     await waitFor(() => expect(del).toHaveBeenCalledWith("twitch"));
     await waitFor(() => expect(ok).toHaveBeenCalled());
+    expect(unconfirmed).not.toHaveBeenCalled();
   });
 
   it("shows the server's own refusal when the credentials cannot be removed", async () => {
     mock();
-    vi.spyOn(api, "deleteCreds").mockRejectedValue(new Error("2 accounts still use this app"));
+    vi.spyOn(api, "confirmDeleteCreds").mockRejectedValue(new Error("could not remove: database is locked"));
     const err = vi.spyOn(toast, "error").mockImplementation(() => "");
     render(<DangerZone />);
     await screen.findByText(/Connected accounts using this app: 1\./);
     fireEvent.click(screen.getByRole("button", { name: "Remove credentials" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "twitch" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Remove credentials" }).at(-1) as HTMLButtonElement);
-    await waitFor(() => expect(err).toHaveBeenCalledWith("2 accounts still use this app"));
+    await waitFor(() => expect(err).toHaveBeenCalledWith("could not remove: database is locked"));
   });
 
   it("reports a partial revoke as the number that went", async () => {

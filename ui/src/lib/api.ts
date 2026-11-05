@@ -1544,8 +1544,17 @@ export const api = {
    *  rate-limits the operator's whole app, not this feature. */
   pollDeviceAuth: (platform: string, handle: string) =>
     post<DevicePoll>(`/platforms/credentials/${platform}/device/poll`, { handle }),
+  /** Removes the app's credentials, UNCONFIRMED: refused with a 409
+   *  (`creds_in_use`) naming the accounts while any are connected through the
+   *  app, because removing the app does not disconnect them. Nothing is
+   *  deleted when it rejects. */
   deleteCreds: (platform: string) =>
     del<{ status: string }>(`/platforms/credentials/${platform}`),
+  /** Removes the app's credentials ANYWAY. For a caller whose own dialog has
+   *  already said what removing them costs; the accounts stay connected until
+   *  their tokens expire. */
+  confirmDeleteCreds: (platform: string) =>
+    delWithBody<{ status: string }>(`/platforms/credentials/${platform}`, { confirm: true }),
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
   /** Disconnects an account, UNCONFIRMED.
    *

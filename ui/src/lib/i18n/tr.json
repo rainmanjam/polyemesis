@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Sunucu yalnızca şunları arar: {schemes}.",
   "set.disconnect": "Bağlantıyı kes",
   "set.disconnectAnyway": "Yine de bağlantıyı kes",
-  "set.disconnectDesc": "Onu kullanan hedefler ayarlarını korur ancak yayın anahtarlarını yenilemeyi bırakır. Aynı hesabı sonradan yeniden bağlayabilirsiniz.",
+  "set.disconnectDesc": "Onu kullanan hedefler ayarlarını korur ancak yayın anahtarlarını yenilemeyi bırakır. Aynı hesabı sonradan yeniden bağlayabilirsiniz. Platform, uygulamayı oradaki hesap ayarlarınızdan kaldırana kadar bağlantıyı listelemeye devam eder.",
   "set.disconnectInUseList": "Bu hesabı kaybedecek hedefler",
   "set.disconnectInUseTitle": "Yine de bağlantı kesilsin mi?",
   "set.disconnectMidBroadcast": "yayın sürüyor",

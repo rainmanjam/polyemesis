@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "服务器仅会连接：{schemes}。",
   "set.disconnect": "断开连接",
   "set.disconnectAnyway": "仍要断开",
-  "set.disconnectDesc": "使用它的推流目标会保留各自的设置，但不再刷新推流密钥。之后可以重新连接同一个账号。",
+  "set.disconnectDesc": "使用它的推流目标会保留各自的设置，但不再刷新推流密钥。之后可以重新连接同一个账号。在平台的账号设置中移除该应用之前，平台仍会列出此连接。",
   "set.disconnectInUseList": "将失去该账号的推流目标",
   "set.disconnectInUseTitle": "仍要断开连接吗？",
   "set.disconnectMidBroadcast": "正在直播",

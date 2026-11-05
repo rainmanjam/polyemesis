@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Server hanya menghubungi: {schemes}.",
   "set.disconnect": "Putuskan",
   "set.disconnectAnyway": "Tetap putuskan",
-  "set.disconnectDesc": "Tujuan yang memakainya tetap menyimpan pengaturannya tetapi berhenti memperbarui kunci siarannya. Anda dapat menghubungkan kembali akun yang sama setelahnya.",
+  "set.disconnectDesc": "Tujuan yang memakainya tetap menyimpan pengaturannya tetapi berhenti memperbarui kunci siarannya. Anda dapat menghubungkan kembali akun yang sama setelahnya. Platform tetap mencantumkan koneksi ini sampai Anda menghapus aplikasinya di pengaturan akun Anda di sana.",
   "set.disconnectInUseList": "Tujuan yang kehilangan akun ini",
   "set.disconnectInUseTitle": "Tetap putuskan?",
   "set.disconnectMidBroadcast": "sedang siaran",

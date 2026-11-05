@@ -1492,7 +1492,7 @@
   "set.dialsOnly": "Il server compone soltanto: {schemes}.",
   "set.disconnect": "Disconnetti",
   "set.disconnectAnyway": "Disconnetti comunque",
-  "set.disconnectDesc": "Le destinazioni che lo usano mantengono le impostazioni ma smettono di rinnovare la propria chiave di stream. Potrai ricollegare lo stesso account in seguito.",
+  "set.disconnectDesc": "Le destinazioni che lo usano mantengono le impostazioni ma smettono di rinnovare la propria chiave di stream. Potrai ricollegare lo stesso account in seguito. La piattaforma continua a elencare la connessione finché non rimuovi l'app dalle impostazioni del tuo account su di essa.",
   "set.disconnectInUseList": "Destinazioni che perdono questo account",
   "set.disconnectInUseTitle": "Disconnettere comunque?",
   "set.disconnectMidBroadcast": "in diretta",

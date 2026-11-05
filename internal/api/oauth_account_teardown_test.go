@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,8 +223,11 @@ func TestDeleteAccountWithNoDestinationsIsUntouched(t *testing.T) {
 	if got.Status != "disconnected" {
 		t.Errorf("status = %q, want %q", got.Status, "disconnected")
 	}
-	if len(got.Warnings) != 0 {
-		t.Errorf("warnings = %v, want none for an account nothing was using", got.Warnings)
+	// One warning and only one: that the platform still lists the grant, which
+	// every disconnect says (#8 of the 2026-11-04 lingering-state audit).
+	// Nothing about destinations, because nothing was using it.
+	if len(got.Warnings) != 1 || !strings.Contains(got.Warnings[0], "still lists the connection") {
+		t.Errorf("warnings = %v, want only the still-listed note for an account nothing was using", got.Warnings)
 	}
 	if accountIsStillConnected(t, store, s.box, acctID) {
 		t.Fatal("the account was not deleted")
