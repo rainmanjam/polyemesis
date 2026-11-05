@@ -144,16 +144,21 @@ func digestOf(r io.ReadSeeker) (string, string, error) {
 }
 
 // abortUpload abandons a file's multipart upload on the service and forgets it.
-func (s *Service) abortUpload(ctx context.Context, c Client, target int64, rel string) {
+// It reports whether the service confirmed the abort; a failure keeps the row,
+// and the log names the key and upload id an operator would need to abort it
+// by hand.
+func (s *Service) abortUpload(ctx context.Context, c Client, target int64, rel string) bool {
 	mp, err := s.store.GetOffloadMultipart(target, rel)
 	if err != nil {
-		return
+		return false
 	}
 	if err := c.AbortMultipart(context.WithoutCancel(ctx), mp.Key, mp.UploadID); err != nil {
-		s.log.Warn("offload: abort multipart upload", "file", rel, "err", clipErr(err))
-		return
+		s.log.Warn("offload: abort multipart upload", "file", rel, "key", mp.Key, "uploadId", mp.UploadID,
+			"err", clipErr(err))
+		return false
 	}
 	_ = s.store.DeleteOffloadMultipart(target, rel)
+	return true
 }
 
 // AbortUploads aborts the given multipart uploads on target t (its OLD
@@ -176,18 +181,37 @@ func (s *Service) AbortUploads(ctx context.Context, t db.StorageTarget, rows []d
 
 // AbortTarget aborts every multipart upload in progress on a target. Called
 // before the target is deleted, while its credentials are still readable.
-func (s *Service) AbortTarget(ctx context.Context, t db.StorageTarget) {
+//
+// It returns the uploads it could NOT confirm aborted: every one when no
+// client can be built for the target (revoked keys, a dead endpoint), and each
+// one the service refused. The caller deletes the target anyway -- a target
+// whose credentials no longer work must still be deletable -- so these are the
+// only record left of uploads that keep billing until the bucket's lifecycle
+// rule removes them, and the caller says so. A failure to LIST them returns
+// nil and is logged: there is nothing to name.
+func (s *Service) AbortTarget(ctx context.Context, t db.StorageTarget) []db.OffloadMultipart {
 	rows, err := s.store.ListOffloadMultipart(t.ID)
-	if err != nil || len(rows) == 0 {
-		return
+	if err != nil {
+		s.log.Warn("offload: cannot list the unfinished uploads of a target being deleted", "target", t.ID,
+			"err", clipErr(err))
+		return nil
+	}
+	if len(rows) == 0 {
+		return nil
 	}
 	c, err := s.newClient(t)
 	if err != nil {
-		return
+		s.log.Warn("offload: cannot reach a target being deleted to abort its unfinished uploads",
+			"target", t.ID, "uploads", len(rows), "err", clipErr(err))
+		return rows
 	}
+	var left []db.OffloadMultipart
 	for _, mp := range rows {
-		s.abortUpload(ctx, c, t.ID, mp.RelPath)
+		if !s.abortUpload(ctx, c, t.ID, mp.RelPath) {
+			left = append(left, mp)
+		}
 	}
+	return left
 }
 
 // Recover is restart safety, run once before the first pass:

@@ -1614,7 +1614,14 @@ export const api = {
     list: () => get<StorageTargetList>("/storage/targets"),
     create: (body: StorageTargetBody) => post<StorageTarget>("/storage/targets", body),
     update: (id: number, body: StorageTargetBody) => put<StorageTarget>(`/storage/targets/${id}`, body),
-    remove: (id: number) => del<{ status: string }>(`/storage/targets/${id}`),
+    /** Always deletes. `warning` and `unabortedUploads` say which unfinished
+     *  uploads could not be aborted on the service and keep billing. */
+    remove: (id: number) =>
+      del<{
+        status: string;
+        warning?: string;
+        unabortedUploads?: { key: string; uploadId: string; relPath: string }[];
+      }>(`/storage/targets/${id}`),
     /** Session-only: put, get and delete a small object; reports the failed step. */
     test: (body: StorageTargetBody) => post<StorageTestResult>("/storage/targets/test", body),
     /** Retry now: every failed or stuck item on the target. */

@@ -347,14 +347,39 @@ func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Reques
 	}
 	// Abandon its multipart uploads on the service while its credentials
 	// can still be read; after the delete nothing could.
+	//
+	// The delete goes ahead whatever the abort managed -- a target whose keys
+	// were revoked or whose bucket is gone must still be deletable -- and
+	// what could not be aborted is said, with the key and upload id, because
+	// the rows below are the last record of them and they keep billing until
+	// the bucket's lifecycle rule removes them. With no offload service
+	// nothing was even tried, so every recorded upload is reported.
+	var left []db.OffloadMultipart
 	if s.offload != nil {
-		s.offload.AbortTarget(r.Context(), t)
+		left = s.offload.AbortTarget(r.Context(), t)
+	} else if rows, err := s.store.ListOffloadMultipart(id); err == nil {
+		left = rows
 	}
 	if err := s.store.DeleteStorageTarget(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	resp := map[string]any{"status": "deleted"}
+	if len(left) > 0 {
+		uploads := make([]map[string]string, 0, len(left))
+		for _, mp := range left {
+			uploads = append(uploads, map[string]string{"key": mp.Key, "uploadId": mp.UploadID, "relPath": mp.RelPath})
+			s.log.Warn("storage target deleted with an unfinished upload that could not be aborted",
+				"target", t.Name, "key", mp.Key, "uploadId", mp.UploadID)
+		}
+		resp["warning"] = fmt.Sprintf("%s could not be cancelled and will keep billing until the bucket's "+
+			"lifecycle rule removes %s. Abort %s with your provider (list-multipart-uploads, then "+
+			"abort-multipart-upload) using the keys and upload ids below.",
+			plural(len(left), "unfinished upload", "unfinished uploads"), wordFor(len(left), "it", "them"),
+			wordFor(len(left), "it", "them"))
+		resp["unabortedUploads"] = uploads
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleTestStorageTarget runs put, get and delete against the target the

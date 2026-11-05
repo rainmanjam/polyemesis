@@ -134,6 +134,28 @@ describe("StorageTargetsCard: adding and deleting", () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith(1));
   });
 
+  // #14 of the 2026-11-04 lingering-state audit: the delete always succeeds,
+  // and says which unfinished uploads it could not abort.
+  it("says when a delete could not abort the target's unfinished uploads", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: true });
+    vi.spyOn(api.storage, "remove").mockResolvedValue({
+      status: "deleted",
+      warning: "1 unfinished upload could not be cancelled and will keep billing",
+      unabortedUploads: [{ key: "k/rec.mkv", uploadId: "u1", relPath: "rec.mkv" }],
+    });
+    const { toast } = await import("sonner");
+    const warn = vi.spyOn(toast, "warning").mockImplementation(() => "");
+    render(<StorageTargetsCard />);
+    const row = await screen.findByTestId("storage-target");
+    fireEvent.click(within(row).getByRole("button", { name: "Delete target" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("1 unfinished upload could not be cancelled and will keep billing", {
+        duration: 10000,
+      }),
+    );
+  });
+
   it("reports a failed save and keeps the dialog open", async () => {
     vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: false });
     vi.spyOn(api.storage, "update").mockRejectedValue(new Error("bucket must be 3-63 characters"));

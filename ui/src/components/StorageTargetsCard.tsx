@@ -232,8 +232,11 @@ export function StorageTargetsCard() {
 
   const remove = async (target: StorageTarget) => {
     try {
-      await api.storage.remove(target.id);
+      const res = await api.storage.remove(target.id);
       toast.success(t("storage.deleted"));
+      // The server's own sentence: unfinished uploads it could not abort,
+      // which keep billing until the bucket's lifecycle rule removes them.
+      if (res?.warning) toast.warning(res.warning, { duration: 10000 });
       confirmDelete.close();
       await load();
     } catch (err) {
