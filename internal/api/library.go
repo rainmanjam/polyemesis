@@ -549,9 +549,10 @@ func (s *Server) handleDeleteTranscript(w http.ResponseWriter, r *http.Request) 
 // two can land on the same one -- "Host" and "host!" are both "host", and a
 // label of "track2" is the second track's fallback -- and the worker already
 // writes both tracks into that one file. Deleting one track must not take the
-// file the other still owns, so any part a surviving track produces, under its
-// label or its fallback, is dropped from the list. Left behind is the safe way
-// to be wrong: the next transcription rewrites it.
+// file the other still owns, so any part a surviving track produces is dropped
+// from the list. A surviving track produces exactly one: its label's, which is
+// its fallback when the label is blank. Left behind is the safe way to be
+// wrong: the next transcription rewrites it.
 //
 // A failed read finds nothing at all rather than guessing: without the other
 // tracks there is no telling which name is shared.
@@ -568,7 +569,6 @@ func (s *Server) transcriptTrackFiles(recordingID int64, track int) recording.Tr
 			continue
 		}
 		kept[transcribe.SidecarSpeakerPart(tt.Speaker, tt.Track)] = true
-		kept[transcribe.SidecarSpeakerPart("", tt.Track)] = true
 	}
 	parts = slices.DeleteFunc(parts, func(p string) bool { return kept[p] })
 	return recording.TranscriptTrackFiles{SpeakerParts: parts}
