@@ -196,6 +196,9 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 	if platform == db.PlatformYouTube {
 		s.ytQuotaShared.Unbind()
 	}
+	// And no app, no chat: the platform leaves the chat pane now rather than
+	// at the next restart. See detachPlatformChat.
+	s.detachPlatformChat(platform)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -375,10 +378,20 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// WHICH CHAT TO END, read before the delete for the same reason the
+	// destinations were: once the row is gone nothing says which platform and
+	// account_ref it was. Read AFTER the guard, so a refused disconnect -- which
+	// deletes nothing -- touches nothing.
+	chatPlatform, chatRef, err := s.accountChatKey(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if err := s.store.DeletePlatformAccount(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	s.detachAccountChat(chatPlatform, chatRef)
 	resp := map[string]any{"status": "disconnected", "destinations": attached}
 	if len(attached) > 0 {
 		resp["warnings"] = []string{accountDeleteWarning(attached)}

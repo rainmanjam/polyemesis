@@ -674,6 +674,61 @@ func TestDetachStopsOnlyThatAdapter(t *testing.T) {
 	h.Detach(db.PlatformYouTube, "nope")
 }
 
+// TestDetachWithinDoesNotHangOnAnAdapterThatIgnoresCancellation is the bound
+// the API's delete handlers rely on: an adapter stuck somewhere that does not
+// watch its context must not hold the operator's request open. It is unlisted
+// at once, the call returns false once the bound runs out, and the adapter
+// finishes on its own when it is finally released.
+//
+// Mutation: make DetachWithin wait on <-r.done with no timer. Observed FAIL
+// ("DetachWithin did not return within its bound").
+func TestDetachWithinDoesNotHangOnAnAdapterThatIgnoresCancellation(t *testing.T) {
+	h := testHub(t)
+	release := make(chan struct{})
+	stuck := &fakeAdapter{platform: db.PlatformYouTube, account: "yt",
+		runFn: func(context.Context, Sink) error { <-release; return nil }}
+	if err := h.Attach(context.Background(), stuck); err != nil {
+		t.Fatal(err)
+	}
+	// Released before the Hub's own Close waits on it, which runs later.
+	t.Cleanup(func() { close(release) })
+	// INSIDE Run before detaching. A runner cancelled before its goroutine
+	// reaches Run never calls it and closes done at once, which would let an
+	// unbounded wait pass this test.
+	deadline := time.Now().Add(2 * time.Second)
+	for stuck.runCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the adapter never started running")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	done := make(chan bool, 1)
+	go func() { done <- h.DetachWithin(db.PlatformYouTube, "yt", 20*time.Millisecond) }()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("DetachWithin reported the adapter stopped, though it ignores cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DetachWithin did not return within its bound")
+	}
+	if got := h.Statuses(); len(got) != 0 {
+		t.Fatalf("statuses = %+v; a detached adapter is still listed while it finishes", got)
+	}
+
+	// The ordinary case: an adapter that honours cancellation is reported stopped.
+	if err := h.Attach(context.Background(), &fakeAdapter{platform: db.PlatformKick, account: "kk"}); err != nil {
+		t.Fatal(err)
+	}
+	if !h.DetachWithin(db.PlatformKick, "kk", 2*time.Second) {
+		t.Fatal("DetachWithin timed out on an adapter that returns when cancelled")
+	}
+	if !h.DetachWithin(db.PlatformKick, "never-attached", time.Millisecond) {
+		t.Fatal("detaching something absent reported a timeout")
+	}
+}
+
 func TestAdapterHealthOverridesTheHubsView(t *testing.T) {
 	h := testHub(t)
 	ctx, cancel := context.WithCancel(context.Background())
