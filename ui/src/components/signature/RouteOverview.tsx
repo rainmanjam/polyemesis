@@ -1,6 +1,6 @@
 import { useId, type KeyboardEvent } from "react";
 import { DisabledReason } from "@/components/DisabledReason";
-import { ShieldAlert, ShieldCheck, Minus } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Minus, Music } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -192,6 +192,16 @@ function RightsChip({ state }: { state: MusicRights }) {
       <span className="inline-flex items-center gap-1 text-xs text-primary-bright">
         <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
         {t("routing.overview.rights.blocked")}
+      </span>
+    );
+  }
+  if (state === "routed") {
+    // Neutral, not amber: music on a live output is often licensed. The chip
+    // states the routing; the VOD case above is the one that warns.
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-foreground">
+        <Music className="h-3.5 w-3.5" aria-hidden />
+        {t("routing.overview.rights.routed")}
       </span>
     );
   }

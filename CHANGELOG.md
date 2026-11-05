@@ -107,6 +107,41 @@ These follow from the lingering-state fixes below and are visible on purpose.
   - Home Assistant discovery is republished when the entity set changes, and a removed entity
     is removed from the device rather than left behind.
 
+### Added
+
+- **`PUT /destinations/{id}` reports how a save took effect.** The response
+  carries `applied` (`live` or `restart`) and `reason`, the same fields as
+  `POST /destinations/{id}/tracks/{track}/gain`. The server reads them back from
+  the reconcile; they are not a prediction. `applied` describes the primary
+  output, and a backup feed that was started, stopped or restarted is named in
+  `reason`. Both are absent when nothing was running, including a delayed
+  destination whose buffer is still filling. See [docs/API.md](docs/API.md).
+
+### Fixed
+
+- **Routing Overview shows music that is routed live.** The Music rights column
+  used to say "No music routed" beside a filled Music cell. In the 2026-11-04
+  demo, Twitch sent track 4 at 100% and Kick sent it at 25%, and both rows showed
+  that label. The column now reads "Music routed" whenever a music-role track is
+  in a destination's live mix and no guard keeps it out. "No music routed" now
+  means no music track is in any mix and no guard is set. A destination whose VOD mix keeps music
+  out, but whose live mix still sends it, now shows "Music routed" instead of
+  "Music blocked".
+- **The toast after a routing save reports what the server did.** It used to
+  predict the result itself, so turning on music rights for YouTube after its
+  music track had already left the mix said "“YouTube” is restarting with the
+  new mix". The server had applied the change without restarting anything. The
+  toast now follows the server's answer. When the destination's output kept
+  running without a level going out, it says it kept running without a restart.
+- **The save bar no longer flashes "Saving restarts" while a fader is dragged.**
+  Each step of a drag starts a new compile, and until it answered, the bar showed
+  the restart warning in amber. While a compile is out the bar now claims neither
+  a restart nor a live change. Once the compile answers, it applies the engine's
+  own rule to the live mix: the argv fields and masked levels the engine
+  compares, and only the track list for an audio-copy destination. It also
+  reports a change that moves nothing the destination sends as "Saving does not
+  restart". A change to the second (VOD) mix is still warned of as a restart,
+  because the page does not have its stored compile.
 - **A disconnected account leaves the chat pane at once.** Disconnecting an account, or removing a
   platform's developer credentials in Settings → Platform credentials, left that platform's chat
   running until the next restart: the Dashboard's chat card went on showing its chip ("Connected

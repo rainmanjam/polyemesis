@@ -2818,6 +2818,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
+	// The programme the destination runs on before this save, read before the
+	// decode below can move it: what it is running now is asked of that engine.
+	storedSourceID := existing.SourceID
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
@@ -2900,6 +2903,10 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		warnings = append(warnings, w)
 	}
 
+	// What is running for this destination before the write, so the answer
+	// below is read back from what the reconcile did rather than predicted.
+	before := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
+
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -2910,6 +2917,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	rw := s.reconcileNow("the destination")
 
 	resp := map[string]any{"destination": updated}
+	if applied, reason := s.destinationApplied(id, updated.SourceID, before, rw); applied != "" {
+		resp["applied"] = applied
+		if reason != "" {
+			resp["reason"] = reason
+		}
+	}
 	updSrc, updKnown := s.sourceForDestination(updated.SourceID)
 	if c, err := routing.Compile(updated.Profile, updSrc); err == nil {
 		resp["routing"] = c

@@ -195,6 +195,9 @@ export interface RoutingProfile {
 export interface RoutingResult {
   filterComplex: string;
   outLabel: string;
+  /** The second (VOD) mix's output label. Set only on a paired compile; the
+   *  argv maps it, so it is part of what decides a restart (lib/saveImpact). */
+  secondOutLabel?: string;
   summary: string;
   tracks: number[];
   normalization: NormalizeMode;

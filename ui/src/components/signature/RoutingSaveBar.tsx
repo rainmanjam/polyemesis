@@ -6,6 +6,7 @@ import { disabledDescribedBy } from "@/lib/disabledReason";
 import type { SaveState } from "@/lib/saveModel";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { changedTracks, type RoutingChange } from "@/lib/routingDiff";
+import type { SaveImpact } from "@/lib/saveImpact";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Loader2, Save, Undo2 } from "lucide-react";
 
@@ -22,10 +23,13 @@ export interface RoutingSaveBarProps {
   /** An enabled destination restarts when saved, so the bar says so. Not the
    *  same as on air: a disabled destination saves without a restart. */
   restarts: boolean;
-  /** The pending change moves nothing but live volume levels (lib/saveImpact),
-   *  so an enabled destination takes it on its command channel instead of
-   *  restarting, on a server that supports that. */
-  levelOnly?: boolean;
+  /** What saving does to an enabled destination, by the engine's rule
+   *  (lib/saveImpact): "restart"; "levels", taken live on its command channel
+   *  where the server supports that; "none", nothing it sends changes; or
+   *  "pending" while the draft's compile is still out, when the bar claims
+   *  neither a restart nor a live change. Defaults to "restart", the
+   *  conservative answer. */
+  impact?: SaveImpact;
   /** What the save moves (lib/routingDiff). Counted in the summary; spelled out
    *  line by line when the destination is enabled, so a track leaving a live
    *  mix is read before it is applied rather than heard after. */
@@ -70,7 +74,7 @@ export function RoutingSaveBar({
   blocked,
   destinationName,
   restarts,
-  levelOnly = false,
+  impact = "restart",
   changes = [],
   saveState = dirty ? "dirty" : "clean",
   reason = null,
@@ -79,7 +83,7 @@ export function RoutingSaveBar({
 }: RoutingSaveBarProps) {
   const t = useT();
   const reasonId = useId();
-  const warnRestart = dirty && restarts && !levelOnly;
+  const warnRestart = dirty && restarts && impact === "restart";
   const tracks = changedTracks(changes);
   // Four lines is what fits above the buttons without the bar becoming a page.
   const shown = changes.slice(0, 4);
@@ -101,9 +105,13 @@ export function RoutingSaveBar({
             ? t("routingUx.unsavedNone")
             : warnRestart
               ? t("routing.saveBar.restarts", { name: destinationName })
-              : restarts
+              : restarts && impact === "levels"
                 ? t("routing.saveBar.appliesLive", { name: destinationName })
-                : t("routing.saveBar.changed", { name: destinationName })}
+                : restarts && impact === "none"
+                  ? t("routing.saveBar.noRestart", { name: destinationName })
+                  : // A disabled destination, or a draft whose compile is
+                    // still out: nothing is claimed about a restart.
+                    t("routing.saveBar.changed", { name: destinationName })}
         </p>
         {dirty && changes.length > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="save-bar-scope">

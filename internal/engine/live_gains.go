@@ -390,3 +390,104 @@ func (e *Engine) DestinationRunning(id int64) bool {
 	d := e.dests[id]
 	return d != nil && d.proc != nil
 }
+
+// DestinationRun identifies the FFmpeg processes a destination is running on:
+// its primary and, when it has one, its redundant feed. Two reads compare equal
+// exactly when neither process was replaced in between, which is how a caller
+// tells a reconcile that restarted a destination from one that left it running.
+// A live level change keeps the process (the reconcile republishes the same one
+// with the new graph); a restart, structural or a refused live change falling
+// back, builds a new one. The zero value is a destination with no process.
+//
+// Only a STARTED process counts. A delayed destination's process is published
+// while its buffer fills and started only when the first delayed packet is due
+// (delayDue), and until then nothing is running to keep or restart.
+type DestinationRun struct {
+	primary, backup *supervisor.Process
+}
+
+// Running reports whether the read found a started primary process.
+func (r DestinationRun) Running() bool { return r.primary != nil }
+
+// DestinationRunOf reads which processes a destination is running on now.
+func (e *Engine) DestinationRunOf(id int64) DestinationRun {
+	e.mu.RLock()
+	d := e.dests[id]
+	var primary, backup *supervisor.Process
+	if d != nil {
+		primary, backup = d.proc, d.backup
+	}
+	e.mu.RUnlock()
+	// Started takes the process's own lock, so it is asked outside e.mu.
+	if primary == nil || !primary.Started() {
+		return DestinationRun{}
+	}
+	if backup != nil && !backup.Started() {
+		backup = nil
+	}
+	return DestinationRun{primary: primary, backup: backup}
+}
+
+// nothingToApply is said of a saved change that reaches nothing the destination
+// runs from: a profile edit that compiles to the same command line, say music
+// kept out of a mix the music track had already left.
+const nothingToApply = "nothing this destination sends changed, so it kept running"
+
+// What happened to the redundant feed when the primary output kept running.
+// The answer is "live" then -- `applied` is about the output the audience
+// watches -- and the reason says what the backup did.
+const (
+	backupRestarted = "the primary output kept running; its backup feed was restarted"
+	backupStarted   = "the primary output kept running; its backup feed was started"
+	backupStopped   = "the primary output kept running; its backup feed was stopped"
+)
+
+// AppliedSince is how a change took effect on a destination that was running
+// on `before` when the change was saved, read once the reconcile that applied
+// it has run: "live" when its primary process kept running (a level sent on the
+// command channel, nothing to apply, or only the backup feed moved), "restart"
+// when the primary was replaced. The reason is empty only for a level that went
+// to the running process live; every other answer says why. Both empty when
+// there is no honest answer: nothing was running before, or nothing is running
+// now (the change stopped it), since a save that started or stopped a
+// destination did neither.
+//
+// The processes decide before the level note does, so a note can never hide a
+// replaced process. A caller must ForgetDestinationLive before the write, or a
+// note from an earlier change is reported as this one's.
+//
+// HONEST LIMITATION, the same one LastReload states: this reads the engine as
+// the reconcile left it, and a reconcile from elsewhere (a scheduler, an ingest
+// event, a settings save) that lands in the same window is folded in. What it
+// reports did happen to the destination; that this save alone caused it is
+// not guaranteed.
+//
+// Read back, never predicted: E3 in the 2026-11-04 demo was a music-rights save
+// on a destination whose music track had already left the mix. The engine kept
+// the process, and the console, which only had its own guess, said it was
+// restarting.
+func (e *Engine) AppliedSince(id int64, before DestinationRun) (applied, reason string) {
+	after := e.DestinationRunOf(id)
+	if !before.Running() || !after.Running() {
+		return "", ""
+	}
+	a, r, noted := e.DestinationLive(id)
+	switch {
+	case after.primary != before.primary:
+		// A refused live level falls back to this restart; its note says why.
+		if noted && a == liveRestart {
+			return a, r
+		}
+		return liveRestart, structuralRestart
+	case before.backup != nil && after.backup != nil && after.backup != before.backup:
+		return liveApplied, backupRestarted
+	case before.backup == nil && after.backup != nil:
+		return liveApplied, backupStarted
+	case before.backup != nil && after.backup == nil:
+		return liveApplied, backupStopped
+	case noted:
+		return a, r
+	default:
+		return liveApplied, nothingToApply
+	}
+}

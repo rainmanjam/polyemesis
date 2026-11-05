@@ -85,7 +85,7 @@ describe("RoutingSaveBar", () => {
     // Since I4 a gain or mute change is applied on the running process's
     // command channel. Warning of a restart there overstates the cost; a
     // Windows server still restarts, so the wording is "where supported".
-    const { container } = render(<RoutingSaveBar {...base} restarts levelOnly />);
+    const { container } = render(<RoutingSaveBar {...base} restarts impact="levels" />);
     const text = bar().textContent ?? "";
     expect(text).toContain("YouTube main");
     expect(text).toMatch(/live, without a restart, where the server supports it/);
@@ -93,8 +93,27 @@ describe("RoutingSaveBar", () => {
   });
 
   it("still warns of a restart for a structural change", () => {
-    render(<RoutingSaveBar {...base} restarts levelOnly={false} />);
+    render(<RoutingSaveBar {...base} restarts impact="restart" />);
     expect(bar().textContent).toMatch(/^Saving restarts/);
+  });
+
+  // E1: dragging Kick's fader, each tick starts a compile, and until it answers
+  // the page does not know the save's cost. The bar used to read that as
+  // "restart" and flash amber on a level change.
+  it("claims neither a restart nor a live change while the draft's compile is out", () => {
+    const { container } = render(<RoutingSaveBar {...base} restarts impact="pending" />);
+    const text = bar().textContent ?? "";
+    expect(text.toLowerCase()).not.toContain("restart");
+    expect(text).not.toMatch(/live/);
+    expect(container.firstElementChild?.className).not.toMatch(/border-warn/);
+  });
+
+  // E3: music rights switched on for a destination the music track had already
+  // left. The profile changes; nothing the destination sends does.
+  it("says saving does not restart when nothing the destination sends changes", () => {
+    const { container } = render(<RoutingSaveBar {...base} restarts impact="none" />);
+    expect(bar().textContent).toMatch(/^Saving does not restart YouTube main/);
+    expect(container.firstElementChild?.className).not.toMatch(/border-warn/);
   });
 
   it("does not claim a restart for a destination that is disabled", () => {

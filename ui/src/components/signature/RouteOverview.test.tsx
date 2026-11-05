@@ -84,6 +84,25 @@ describe("RouteOverview music-rights state", () => {
     const cell = screen.getByRole("button", { name: /Music bed to YouTube — full mix.*music reaches VOD/i });
     expect(within(cell).getByText("VOD")).toBeTruthy();
   });
+
+  // The demo's Overview: Twitch and Kick sent the music track live (their Music
+  // cells were filled) and the chip beside them said "No music routed".
+  it("says music is routed on a live-only row whose Music cell is filled", () => {
+    const live: OverviewRow[] = [
+      { ...rows[1], id: 7, name: "Twitch", guardedMusic: false, routed: [0, 1] },
+      { ...rows[1], id: 8, name: "Kick", guardedMusic: false, routed: [0, 1] },
+      { ...rows[1], id: 9, name: "YouTube" },
+    ];
+    renderGrid({ rows: live });
+    for (const name of ["Twitch", "Kick"]) {
+      const row = screen.getByText(name).closest("tr") as HTMLElement;
+      expect(within(row).getByRole("button", { name: `Music bed to ${name}, routed` })).toBeTruthy();
+      expect(within(row).getByText("Music routed")).toBeTruthy();
+      expect(within(row).queryByText("No music routed")).toBeNull();
+    }
+    const yt = screen.getByText("YouTube").closest("tr") as HTMLElement;
+    expect(within(yt).getByText("Music blocked")).toBeTruthy();
+  });
 });
 
 describe("RouteOverview editing", () => {
