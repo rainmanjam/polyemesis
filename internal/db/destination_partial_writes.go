@@ -182,10 +182,12 @@ func (d *DB) writeDestinationPart(id int64, apply func(*Destination) error,
 		return nil, err
 	}
 
-	// UpdateDestination's checks, on the row as it will be stored. Its other
-	// refusals -- retyping to a retired platform, the caption go-live edge, a
-	// rendition from another programme -- are about platform, enabled and
-	// rendition_id, which neither writer touches.
+	// UpdateDestination's checks, on the row as it will be stored: its defaults,
+	// so a row stored before they existed is not made unsaveable, and
+	// Validate. Its other refusals -- a retired platform switched on or retyped
+	// to, the caption go-live edge, a rendition from another programme -- are
+	// about platform, enabled and rendition_id, which neither writer touches;
+	// and scanDestination already reports a retired platform's row as off.
 	if cur.AudioBitrate == 0 {
 		cur.AudioBitrate = 160
 	}
@@ -195,9 +197,6 @@ func (d *DB) writeDestinationPart(id int64, apply func(*Destination) error,
 	cur.Profile.ApplyDefaults()
 	if err := cur.Validate(); err != nil {
 		return nil, err
-	}
-	if cur.Enabled && cur.Platform.RetiredReason() != "" {
-		return nil, retiredError(cur.Platform, "this destination can no longer be started")
 	}
 
 	if err := write(tx, cur, time.Now().Unix()); err != nil {

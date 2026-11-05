@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -464,5 +465,162 @@ func TestOnlyTheRoutesWhoseChangeIsTheRowWriteItAllBack(t *testing.T) {
 			"handler decides (db.UpdateDestinationIngest, db.UpdateDestinationExpertArgs, or a new "+
 			"narrow writer), or add the function here with the reason its window cannot hold one.",
 			strings.Join(unexpected, "\n  "))
+	}
+}
+
+// backupFixture is TestTurningOnABackupDoesNotUndo...'s setup: an engine-backed
+// server on the stub, a linked Facebook account, and an enabled destination
+// with a fetched key (one that names its live video).
+func backupFixture(t *testing.T) (http.Handler, *db.DB, func(*http.Request), *platformStub, *db.Destination) {
+	t.Helper()
+	stub := newPlatformStub(t)
+	s, h, store, sign := engineServer(t, defaultTools(), Options{Providers: stub.set()})
+	acctID := linkFacebookAccount(t, s, store)
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp", StreamKey: "778899",
+		Enabled: true, AccountID: &acctID,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	return h, store, sign, stub, dest
+}
+
+func isAddBackup(c stubCall) bool {
+	return c.Method == http.MethodPost && strings.HasSuffix(c.Path, "/input_streams")
+}
+
+// turnOnBackup sends the save that first turns on backup ingest and returns
+// the answer.
+func turnOnBackup(t *testing.T, h http.Handler, sign func(*http.Request), id int64) (db.Destination, []string) {
+	t.Helper()
+	r := jsonRequest(t, http.MethodPut, destinationPath(id, ""), map[string]any{"backupIngestWanted": true})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT: status %d, body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Destination db.Destination `json:"destination"`
+		Warnings    []string       `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp.Destination, resp.Warnings
+}
+
+// When Facebook refuses the backup, the save still stands, the refusal is a
+// warning, and the answer is the row as it stands after the call -- so a stop
+// that landed while Facebook answered is what the console is shown.
+//
+// Mutation: in addBackupIngestAfterSave, answer the warning path with saved
+// instead of current(). Observed red: the answer says enabled.
+func TestARefusedBackupAnswersWithTheRowAsItStands(t *testing.T) {
+	h, store, sign, stub, dest := backupFixture(t)
+	stub.setReject(func(c stubCall) string {
+		if isAddBackup(c) {
+			return "stub: no redundant ingest today"
+		}
+		return ""
+	})
+	ran := landDuring(t, stub, isAddBackup, func() error { return store.SetDestinationEnabled(dest.ID, false) })
+
+	got, warnings := turnOnBackup(t, h, sign, dest.ID)
+	ran()
+	if !strings.Contains(strings.Join(warnings, "\n"), "would not add a redundant ingest") {
+		t.Errorf("warnings = %q, want Facebook's refusal", warnings)
+	}
+	if got.Enabled {
+		t.Error("the answer says enabled, but the destination was stopped while Facebook answered")
+	}
+	if !got.BackupIngestWanted {
+		t.Error("the save itself was lost: backupIngestWanted is off")
+	}
+}
+
+// A destination deleted while Facebook adds its backup: the save succeeded
+// before the call, so the answer is a 200 with the row it stored and a warning
+// that the feed could not be kept -- not a failure, and nothing recreated.
+//
+// Mutation: in addBackupIngestAfterSave, drop the `case err != nil` branch so
+// the failed write falls through to `return updated, repairs`. Observed red:
+// the handler panics on a nil row.
+func TestABackupForADestinationDeletedMeanwhileIsAWarning(t *testing.T) {
+	h, store, sign, stub, dest := backupFixture(t)
+	ran := landDuring(t, stub, isAddBackup, func() error { return store.DeleteDestination(dest.ID) })
+
+	got, warnings := turnOnBackup(t, h, sign, dest.ID)
+	ran()
+	if !strings.Contains(strings.Join(warnings, "\n"), "could not be saved") {
+		t.Errorf("warnings = %q, want the sentence for a backup that could not be stored", warnings)
+	}
+	if got.ID != dest.ID || !got.BackupIngestWanted {
+		t.Errorf("answer = %+v, want the row the save stored", got)
+	}
+	if _, err := store.GetDestination(dest.ID); err == nil {
+		t.Error("the deleted destination exists again")
+	}
+}
+
+// A refresh for a destination that asked for a backup, where Facebook offers
+// none, says so. Decided on the row as stored.
+//
+// Mutation: delete the warning's if-block in handleRefreshKey. Observed red: no
+// warning.
+func TestARefreshWithNoBackupOfferedSaysSo(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	row := *f.dest
+	row.BackupIngestWanted = true
+	if _, err := f.store.UpdateDestination(&row); err != nil {
+		t.Fatalf("ask for a backup: %v", err)
+	}
+	f.stub.mu.Lock()
+	f.stub.fbBackups = false
+	f.stub.mu.Unlock()
+
+	r := jsonRequest(t, http.MethodPost, destinationPath(f.dest.ID, "/refresh-key"), nil)
+	f.sign(r)
+	w := do(t, f.h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh-key: status %d, body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "did not offer a backup ingest endpoint") {
+		t.Errorf("body %s: want the no-backup warning", w.Body.String())
+	}
+}
+
+// A destination that posts captions to YouTube, refreshed when YouTube answers
+// with no caption ingestion URL, is told it will not start with captions --
+// decided on the row as stored, after the key is written.
+//
+// Mutation: delete the `case b.CaptionIngestURL == ""` arm in handleRefreshKey.
+// Observed red: no warning.
+func TestARefreshedCaptionDestinationWithNoCaptionURLIsWarned(t *testing.T) {
+	stub := newYouTubeRefreshStub(t)
+	s, h, store, sign := engineServer(t, defaultTools(),
+		Options{Providers: oauth.NewSet(oauth.WithBaseURL(stub.URL))})
+	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "night-owl")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "Captioned", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live2", StreamKey: "key-abc", AccountID: &acct,
+		DelaySeconds: 30, CaptionMode: "youtube_post",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, destinationPath(dest.ID, "/refresh-key"), nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh-key: status %d, body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "YouTube returned no caption ingestion URL") {
+		t.Errorf("body %s: want the missing caption URL warning", w.Body.String())
 	}
 }

@@ -388,3 +388,112 @@ func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
 		}
 	})
 }
+
+// A row stored before UpdateDestination's defaults existed -- no audio bitrate,
+// no platform -- stays saveable through the narrow writers, as it does through
+// UpdateDestination: the defaults are applied for the check and nothing else.
+//
+// Mutation: delete the two defaults from writeDestinationPart. Observed red:
+// both writes refused with "audio bitrate 0 kbps out of range".
+func TestThePartialWritesKeepALegacyRowSaveable(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	if _, err := d.sql.Exec(`UPDATE destinations SET audio_bitrate = 0, platform = '' WHERE id = ?`,
+		created.ID); err != nil {
+		t.Fatalf("age the row: %v", err)
+	}
+	if _, err := d.UpdateDestinationIngest(created.ID, nil, func(cur *Destination) error {
+		cur.StreamKey = "key-from-the-platform"
+		return nil
+	}); err != nil {
+		t.Errorf("ingest write on a legacy row: %v", err)
+	}
+	if _, err := d.UpdateDestinationExpertArgs(created.ID, func(cur *Destination) error {
+		cur.ExtraOutputArgs = "-metadata title=x"
+		return nil
+	}); err != nil {
+		t.Errorf("expert write on a legacy row: %v", err)
+	}
+}
+
+// The other two halves of the per-half rule: a half whose key cannot be read
+// and that the write leaves empty keeps its ciphertext, whichever half it is.
+//
+// Mutation: make UpdateDestinationIngest reseal both halves regardless
+// (destIngestQuery). Observed red in both cases.
+func TestTheIngestWriteKeepsWhicheverUnreadableHalfItLeavesEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		primary, backup         string // what the write sets; "" leaves the half
+		keepPrimary, keepBackup bool
+	}{
+		{name: "both left", keepPrimary: true, keepBackup: true},
+		{name: "backup set, primary left", backup: "new-backup", keepPrimary: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"), WithSecretBox(testBox(t)))
+			if err := d.CreateSource(&Source{Name: "Main", Enabled: true, Ingest: DefaultSettings().Ingest}); err != nil {
+				t.Fatalf("CreateSource: %v", err)
+			}
+			saved, err := d.CreateDestination(&Destination{
+				Name: "both halves", Kind: DestRTMP, URL: "rtmp://example.invalid/live",
+				StreamKey: "primary-secret", BackupStreamKey: "backup-secret", AudioBitrate: 160,
+			})
+			if err != nil {
+				t.Fatalf("CreateDestination: %v", err)
+			}
+			primaryBefore := rawCol(t, d, "stream_key_enc", saved.ID)
+			backupBefore := rawCol(t, d, "backup_stream_key_enc", saved.ID)
+
+			if _, err := d.UpdateDestinationIngest(saved.ID, nil, func(cur *Destination) error {
+				cur.KeyUnreadable = "the stored key could not be opened with this secret.key"
+				cur.StreamKey, cur.BackupStreamKey = tc.primary, tc.backup
+				cur.URL = "rtmp://moved.example.invalid/live" // the write did happen
+				return nil
+			}); err != nil {
+				t.Fatalf("UpdateDestinationIngest: %v", err)
+			}
+			if kept := string(rawCol(t, d, "stream_key_enc", saved.ID)) == string(primaryBefore); kept != tc.keepPrimary {
+				t.Errorf("primary ciphertext kept = %v, want %v", kept, tc.keepPrimary)
+			}
+			if kept := string(rawCol(t, d, "backup_stream_key_enc", saved.ID)) == string(backupBefore); kept != tc.keepBackup {
+				t.Errorf("backup ciphertext kept = %v, want %v", kept, tc.keepBackup)
+			}
+			if got, _ := d.GetDestination(saved.ID); got.URL != "rtmp://moved.example.invalid/live" {
+				t.Errorf("URL = %q: the write did not happen, so the checks above prove nothing", got.URL)
+			}
+		})
+	}
+}
+
+// A caption URL that cannot be stored for any reason but the missing secret
+// key refuses the whole write, so the key and its URL never part company. A
+// destination left with no key is the case here: a URL is bound to the key it
+// came with, and there is none.
+//
+// Mutation: treat every sealing error as ErrCaptionIngestUnsealable in
+// UpdateDestinationIngest. Observed red: the write succeeded.
+func TestTheIngestWriteRefusesACaptionURLItCannotBindToTheKey(t *testing.T) {
+	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"), WithSecretBox(testBox(t)))
+	if err := d.CreateSource(&Source{Name: "Main", Enabled: true, Ingest: DefaultSettings().Ingest}); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	dst, err := d.CreateDestination(&Destination{
+		Name: "captioned", Kind: DestRTMP, Platform: PlatformYouTube,
+		URL: "rtmp://a.example/live2", StreamKey: "held-key", AudioBitrate: 128,
+		DelaySeconds: 30, CaptionMode: "youtube_post",
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	caption := &IngestCaption{URL: "https://upload.youtube.com/closedcaption?cid=fake"}
+	if _, err := d.UpdateDestinationIngest(dst.ID, caption, func(cur *Destination) error {
+		cur.StreamKey = ""
+		return nil
+	}); err == nil {
+		t.Fatal("a caption URL with no key to bind it to was accepted")
+	}
+	if got, _ := d.GetDestination(dst.ID); got.StreamKey != "held-key" {
+		t.Errorf("StreamKey = %q after a refused write, want it untouched", got.StreamKey)
+	}
+}

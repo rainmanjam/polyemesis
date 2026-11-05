@@ -1712,12 +1712,10 @@ func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destina
 		return current(), []string{w}
 	}
 	if probe.BackupURL == "" {
-		// Facebook answered with no endpoint, which is a call like any other.
-		if saved.BackupIngestWanted && saved.BackupURL == "" && saved.Platform == db.PlatformFacebook {
-			return current(), nil
-		}
-		// Nothing was asked for: not Facebook, no backup wanted, or one is
-		// already stored. The common case: no platform call, no store read.
+		// Nothing was asked for: not Facebook, no backup wanted, one already
+		// stored, or no linked account. The common case, and no platform call
+		// was made: a call answers with an endpoint or a warning, because
+		// AddBackupIngest refuses an answer with no URL.
 		return saved, nil
 	}
 	accts, err := s.store.ListPlatformAccounts()
