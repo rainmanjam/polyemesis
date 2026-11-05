@@ -173,7 +173,7 @@ describe("Dashboard: the Ingest card's uptime on the shared SRT listener", () =>
   it("reads loading on the first frame, then Stopped once a rate says nothing arrives", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
-    const running = { id: 7, name: "Twitch", kind: "rtmp", platform: "twitch", enabled: true, sourceId: 1, process: { state: "running" } };
+    const running = { id: 7, name: "Twitch", kind: "rtmp", platform: "twitch", enabled: true, sourceId: 1, process: { state: "running", uptimeSec: 60 } };
     const first = { ...srtFrame(1, "Studio A", 1_000_000), destinations: [running] } as unknown as Status;
     const { rerender } = render(view(first));
     await ingestCard().findByText(translate("en", "common.loading"));

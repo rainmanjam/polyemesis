@@ -33,7 +33,7 @@ const dest = (over: Partial<DestStatus> = {}): DestStatus =>
   }) as DestStatus;
 
 const proc = (id: number, state: string) =>
-  dest({ id: did(id), name: `Dest ${id}`, process: { state } } as Partial<DestStatus>);
+  dest({ id: did(id), name: `Dest ${id}`, process: { state, uptimeSec: state === "running" ? 60 : 0 } } as Partial<DestStatus>);
 
 const switchedOff = (id: number) =>
   dest({ id: did(id), name: `Dest ${id}`, enabled: false, process: null } as Partial<DestStatus>);

@@ -39,7 +39,7 @@ const dest = (over: Partial<DestStatus> = {}): DestStatus =>
   }) as DestStatus;
 
 const proc = (state: string, over: Partial<DestStatus> = {}) =>
-  dest({ process: { state }, ...over } as Partial<DestStatus>);
+  dest({ process: { state, uptimeSec: state === "running" ? 60 : 0 }, ...over } as Partial<DestStatus>);
 
 const status = (destinations: DestStatus[] = []): Status =>
   ({ ingest: null, destinations }) as Status;

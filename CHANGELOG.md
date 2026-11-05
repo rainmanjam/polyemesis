@@ -20,7 +20,8 @@ its first tagged release.
   switched off and saved, and is warned about on every save. Every other URL without an
   application path is still only a warning, because some services really have none. The
   destination dialog says so under the URL field as it is typed, with a **Use the corrected URL**
-  button; it never rewrites the URL on its own.
+  button; it never rewrites the URL on its own. **Refresh stream key** stores the corrected URL
+  if a platform answers with an IVS URL without `/app`, and its response says so.
 
 ### Fixed
 
@@ -40,9 +41,10 @@ its first tagged release.
 - **A destination card no longer shows LIVE before anything is on air.** The server reports a
   destination's process as `running` from the moment FFmpeg starts, before it has connected, and
   `uptimeSec` stays 0 until media moves. The card, the YouTube vertical row and the Renditions
-  page drew any `running` destination as on air, so a destination being refused on every connect
-  showed a LIVE lamp at 0 kbps with uptime `--:--:--` beside its failure. They now show
-  **Starting** until the run has carried media. The API's `state` is unchanged.
+  page drew any `running` destination as on air, and the on-air bar counted it as live, so a
+  destination being refused on every connect showed a LIVE lamp at 0 kbps with uptime `--:--:--`
+  beside its failure. They now show **Starting**, and the on-air bar counts it as trying, until
+  the run has carried media. The API's `state` is unchanged.
 
 ## [0.14.0] — 2026-11-05
 

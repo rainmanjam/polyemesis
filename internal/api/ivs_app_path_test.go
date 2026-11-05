@@ -1,12 +1,15 @@
 package api
 
 import (
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -122,5 +125,55 @@ func TestARowAlreadyHoldingTheKickURLStaysEditableAndIsWarned(t *testing.T) {
 	}
 	if !strings.Contains(joined, kickWorkingURL) {
 		t.Errorf("the legacy row's save is not warned with the working URL:\n%s", raw)
+	}
+}
+
+// Refresh stream key writes the ingest URL the platform answers. If Kick's API
+// answers with the shape its dashboard prints -- an IVS host with no /app -- that
+// write would put back the URL a save now refuses, over one the operator had
+// already corrected. It is corrected instead, and the response says so.
+//
+// Proven able to fail by deleting the IVSAppPathFix branch in
+// handleRefreshStreamKey: the stored URL becomes the pathless one.
+func TestRefreshKeyDoesNotStoreAKickURLWithoutApp(t *testing.T) {
+	kick := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
+			"stream":{"is_live":false,"url":"`+kickDashboardURL+`","key":"sk_placeholder_fetched"}}]}`)
+	}))
+	t.Cleanup(kick.Close)
+
+	s, h, store, sign := engineServer(t, defaultTools(), Options{
+		Providers: oauth.NewSet(oauth.WithBaseURL(kick.URL)),
+	})
+	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
+	if err := store.PutPlatformCreds(s.box, db.PlatformKick, "cid", "placeholder-secret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "Kick", Kind: db.DestRTMP, Platform: db.PlatformKick,
+		URL: kickWorkingURL, StreamKey: "sk_placeholder_old", AccountID: &acctID,
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+strconv.FormatInt(dest.ID, 10)+"/refresh-key", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", w.Code, w.Body.String())
+	}
+	got, err := store.GetDestination(dest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != kickWorkingURL {
+		t.Errorf("stored URL = %q, want %q", got.URL, kickWorkingURL)
+	}
+	if got.StreamKey != "sk_placeholder_fetched" {
+		t.Errorf("the fetched key was not stored")
+	}
+	if !strings.Contains(w.Body.String(), "/app") {
+		t.Errorf("the correction is not said out loud: %s", w.Body.String())
 	}
 }
