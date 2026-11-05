@@ -18,7 +18,10 @@
 #
 # The deck asserts on the plugin's computed key faces, not on HTTP statuses.
 #
-# Usage:  ./scripts/streamdeck-e2e.sh [workdir]
+# Usage:  ./scripts/streamdeck-e2e.sh [parent-dir]
+#         The run's files go in a new directory made inside parent-dir (default
+#         $TMPDIR). Nothing that already exists is ever deleted; a run that
+#         passes removes only the directory it made.
 # Needs:  ./polyemesis (make build-go), ffmpeg with libx264, node, and
 #         `npm ci` in integrations/streamdeck. No SRT: everything is RTMP or
 #         the relay's own UDP, so Homebrew's FFmpeg is enough.
@@ -35,7 +38,8 @@ set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
-WORK="${1:-${TMPDIR:-/tmp}/polyemesis-streamdeck-e2e}"
+PARENT="${1:-${TMPDIR:-/tmp}}"
+WORK=""
 PORT="${POLY_E2E_PORT:-18497}"
 SINK_PORT="${POLY_E2E_SINK_PORT:-19357}"
 BIN="${POLY_E2E_BIN:-$ROOT/polyemesis}"
@@ -107,19 +111,24 @@ cleanup() {
 	for pid in $(pgrep -f "$MARKER" 2>/dev/null); do
 		stop_pid "$pid" "a media process of this run" || rc=1
 	done
-	if [ "$rc" -ne 0 ] && [ -s "$WORK/server.log" ]; then
+	if [ "$rc" -ne 0 ] && [ -n "$WORK" ] && [ -s "$WORK/server.log" ]; then
 		printf "\n--- the last of server.log ---\n"
 		tail -n 60 "$WORK/server.log"
+		printf "\nthe run's files are kept in %s\n" "$WORK"
+	elif [ "$rc" -eq 0 ] && [ -n "$WORK" ]; then
+		# Only the directory mktemp made for this run.
+		rm -rf "$WORK"
 	fi
 	return "$rc"
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-rm -rf "$WORK"
-mkdir -p "$WORK"
+mkdir -p "$PARENT" || exit 1
+WORK="$(mktemp -d "$PARENT/polyemesis-streamdeck-e2e.XXXXXX")" || exit 1
 cd "$WORK" || exit 1
-# Seven minutes: the run takes about one, and the job ceiling is ten.
-poly_watchdog_arm 420
+# Five minutes: the run takes about one, and this fires before the CI step's
+# own timeout, so a hang names what it was waiting for.
+poly_watchdog_arm 300
 
 step "1. Start the binary on 127.0.0.1:$PORT"
 "$BIN" -addr "127.0.0.1:$PORT" -data "$WORK/data" -log warn >"$WORK/server.log" 2>&1 &

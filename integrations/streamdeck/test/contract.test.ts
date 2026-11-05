@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   API_CONTRACT,
@@ -158,6 +160,21 @@ describe("every fake answer is held to the server's schema (test/setup.ts)", () 
     expect(departures({ error: "nope", code: "no_source" }, SCHEMA.refusal)).toEqual([]);
   });
 
+  it("fails the test that served it: the hook's afterEach is what enforces this", () => {
+    // In a child vitest, so the failure it must produce is not this suite's.
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const vitest = fileURLToPath(new URL("../node_modules/vitest/vitest.mjs", import.meta.url));
+    const run = spawnSync(process.execPath, [vitest, "run", "--config", "test/fixtures/vitest.fixture.config.ts"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, CI: "1", NO_COLOR: "1" },
+    });
+    const out = `${run.stdout}${run.stderr}`;
+    expect(out).toContain("a fake answered with a shape the server does not send");
+    expect(out).toContain("$.destinations[0].reason.isHeld: not a field the server sends");
+    expect(run.status).toBe(1);
+  }, 60_000);
+
   it("catches a renamed field in a fake served to the client, in any test", async () => {
     const renamed = { status: 200, body: JSON.stringify({ destinations: [{ id: 1, name: "x", reason: { cause: "dns", isHeld: true } }] }) };
     await answering(renamed).client.status(1);
@@ -222,6 +239,28 @@ describe("the client parses every answer the server gives it", () => {
     expect(dumped.map((r) => r.outcome)).toEqual(["dumped", "skipped"]);
     expect(dumped[1]!.message).toMatch(/\w/);
   });
+});
+
+describe("a client paired with a read token", () => {
+  // Every admin route, called the way its recorded case calls it, after a read token's connection check.
+  for (const r of API_CONTRACT.filter((x) => x.scope === "admin")) {
+    const g = cases.find((c) => c.request.method === r.method && c.request.route === r.path && c.status < 300)!;
+    it(`${r.readTokenSends ? "sends" : "refuses, sending nothing,"} ${r.method} ${r.path}`, async () => {
+      const sent: TransportRequest[] = [];
+      const transport: Transport = {
+        async send(req) {
+          sent.push(req);
+          return req.url.pathname.endsWith("/auth/connection") ? goldenResponse("connection-read") : goldenResponse("analytics-live-read-token");
+        },
+      };
+      const client = new PolyemesisClient(BASE, "t", transport);
+      await client.connection();
+      const err = await invoke(client, g).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).kind).toBe("forbidden");
+      expect(sent.slice(1).map((q) => `${q.method} ${q.url.pathname}`)).toEqual(r.readTokenSends ? [`${r.method} /api/v1${g.request.path}`] : []);
+    });
+  }
 });
 
 describe("the client reads the server's refusals the way the keys expect", () => {

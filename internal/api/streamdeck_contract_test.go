@@ -68,6 +68,7 @@ var (
 	deckVerb      = regexp.MustCompile(`^"(GET|POST)"`)
 	deckParamExpr = regexp.MustCompile(`^(?:encodeURIComponent\(\s*(\w+)\s*\)|(\w+))$`)
 	deckThirdArg  = regexp.MustCompile(`^(\w+)\s*[,)]`)
+	deckComputed  = regexp.MustCompile("\\[\\s*[\"'`]call[\"'`]\\s*\\]")
 )
 
 // parseDeckCalls finds every this.call(...) in the client and parses it the
@@ -89,6 +90,11 @@ func parseDeckCalls(src string) ([]deckCall, error) {
 			i++
 		}
 		return i
+	}
+	// this["call"](...) would pass both the token scan below and the this.call
+	// count.
+	if loc := deckComputed.FindStringIndex(src); loc != nil {
+		return nil, failAt(loc[0], `a computed ["call"] access; write this.call(...)`)
 	}
 	var out []deckCall
 	for _, m := range deckCallToken.FindAllStringIndex(src, -1) {
@@ -266,6 +272,7 @@ func TestTheStreamDeckCallParserRefusesWhatItCannotRead(t *testing.T) {
 		`this.call("GET", "/status", this.source)`,
 		`this.call("GET", "/sta` + "\n" + `tus")`,
 		`/* a note */ client.call("GET", "/status")`,
+		`this["call"]("GET", "/status")`,
 	} {
 		if got, err := parseDeckCalls(bad); err == nil {
 			t.Errorf("parsed %q as %+v; want a refusal", bad, got)

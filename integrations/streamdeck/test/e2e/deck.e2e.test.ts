@@ -263,7 +263,8 @@ describe("a Stream Deck paired with a read token", () => {
     await rt.tick();
     expect(key.titles.at(-1)).toBe("Off");
     await rt.pressDestination("dest");
-    expect(net.sent.filter((r) => r.method === "POST")).toEqual([]);
+    // Method and path only: a request object carries the token, and a failing diff would print it.
+    expect(net.sent.filter((r) => r.method === "POST").map((r) => r.url.pathname)).toEqual([]);
     expect(key.states.at(-1)).toBe(KEY_STATE.needsAdmin);
   });
 });

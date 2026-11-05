@@ -37,6 +37,9 @@ function parseCallSites(src: string): CallSite[] {
     return i;
   };
   const out: CallSite[] = [];
+  // this["call"](...) would pass both the token scan below and the this.call count.
+  const computed = /\[\s*["'`]call["'`]\s*\]/.exec(src);
+  if (computed) fail(computed.index, 'a computed ["call"] access; write this.call(...)');
   // Every token "call" followed by "<" or "(": the definition and the call sites. Nothing else may exist,
   // except on a comment line (one that starts with // or a doc comment's *), where prose may name call().
   // Not /*: code can follow a block comment on its line.
@@ -115,6 +118,7 @@ describe("apiContract.json against src/api.ts", () => {
     expect(() => parseCallSites('client.call("GET", "/status")')).toThrow(/not this.call/);
     expect(parseCallSites('// call() is documented here\n * and call(here)\n')).toEqual([]);
     expect(() => parseCallSites('/* a note */ client.call("GET", "/status")')).toThrow(/not this.call/);
+    expect(() => parseCallSites('this["call"]("GET", "/status")')).toThrow(/computed/);
     expect(parseCallSites('this.call<Record<string, unknown>>(\n  "POST",\n  `/polls/${id}/end`)')).toEqual([
       { method: "POST", path: "/polls/{id}/end", line: 1 },
     ]);
@@ -174,7 +178,8 @@ describe("PolyemesisClient: the contract's scope column", () => {
     expect(sent).toEqual([]);
   });
 
-  it("marks readTokenSends only on admin routes", () => {
-    expect(API_CONTRACT.filter((r) => r.readTokenSends).every((r) => r.scope === "admin")).toBe(true);
+  it("marks readTokenSends on the Viewers key's read and nothing else", () => {
+    // Each one is an admin request a read-token deck sends on purpose. A new one is a decision, made here.
+    expect(API_CONTRACT.filter((r) => r.readTokenSends).map((r) => `${r.method} ${r.path}`)).toEqual(["GET /analytics/live"]);
   });
 });
