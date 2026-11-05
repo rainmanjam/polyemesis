@@ -1164,6 +1164,59 @@ func TestUpsertPlatformAccountKeepsTheRefreshTokenWhenNoneIsSupplied(t *testing.
 	}
 }
 
+// TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces is a connect
+// and a disconnect of one account landing together. Whichever goes first, the
+// connect stored its account and must say so, with the row it wrote.
+//
+// It used to write, look the id up and read the row back as three statements,
+// and a delete between them made the connect fail with "sql: no rows in result
+// set" or "not found" -- which the OAuth callback showed the operator as the
+// reason connecting failed. Found by the API's racing connect/disconnect test
+// on CI (PR #989).
+//
+// Mutation: restore the three-statement upsert. Observed FAIL ("a connect
+// racing a delete failed").
+func TestUpsertPlatformAccountReturnsTheRowItWroteWhileADeleteRaces(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+	for round := range 300 {
+		token := fmt.Sprintf("access-%d", round)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var got *PlatformAccount
+		var upsertErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, upsertErr = d.UpsertPlatformAccount(box, &PlatformAccount{
+				Platform: PlatformTwitch, AccountName: "dallas", AccountRef: "42",
+				AccessToken: token, RefreshToken: "refresh",
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			accts, err := d.ListPlatformAccounts()
+			if err != nil {
+				return
+			}
+			for _, a := range accts {
+				_ = d.DeletePlatformAccount(a.ID)
+			}
+		}()
+		close(start)
+		wg.Wait()
+		if upsertErr != nil {
+			t.Fatalf("round %d: a connect racing a delete failed: %v", round, upsertErr)
+		}
+		if got.AccountRef != "42" || got.AccessToken != token {
+			t.Fatalf("round %d: the connect returned %q with token %q, want the row it wrote (42, %q)",
+				round, got.AccountRef, got.AccessToken, token)
+		}
+	}
+}
+
 // ------------------------------------------------------------- pull settings
 
 // The pull URL only has to be dialable when pull is actually the ingest mode.

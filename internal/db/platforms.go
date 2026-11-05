@@ -293,7 +293,13 @@ func (a PlatformAccount) Expired() bool {
 }
 
 // UpsertPlatformAccount stores a connected account, replacing any previous
-// tokens for the same (platform, accountRef).
+// tokens for the same (platform, accountRef), and returns the row it wrote.
+//
+// ONE STATEMENT, WRITE AND READ. RETURNING hands back the row as written, so
+// nothing can come between the two. It used to write, then look the id up,
+// then read the row by id, and a disconnect that landed between the write and
+// either read made a connect that had stored its account fail with a bare
+// "not found" -- shown to the operator as the reason the connect failed.
 func (d *DB) UpsertPlatformAccount(box *secrets.Box, a *PlatformAccount) (*PlatformAccount, error) {
 	accessEnc, err := box.Seal(a.AccessToken)
 	if err != nil {
@@ -309,7 +315,7 @@ func (d *DB) UpsertPlatformAccount(box *secrets.Box, a *PlatformAccount) (*Platf
 		exp = a.ExpiresAt.Unix()
 	}
 
-	_, err = d.sql.Exec(`INSERT INTO platform_accounts
+	return scanPlatformAccount(box, d.sql.QueryRow(`INSERT INTO platform_accounts
 		(platform, account_name, account_ref, access_token_enc, refresh_token_enc, expires_at, scopes, scope_ver, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(platform, account_ref) DO UPDATE SET
@@ -319,33 +325,32 @@ func (d *DB) UpsertPlatformAccount(box *secrets.Box, a *PlatformAccount) (*Platf
 			expires_at=excluded.expires_at,
 			scopes=excluded.scopes,
 			scope_ver=excluded.scope_ver,
-			updated_at=excluded.updated_at`,
-		a.Platform, a.AccountName, a.AccountRef, accessEnc, refreshEnc, exp, a.Scopes, a.ScopeVer, now, now)
-	if err != nil {
-		return nil, err
-	}
-
-	var id int64
-	if err := d.sql.QueryRow(`SELECT id FROM platform_accounts WHERE platform=? AND account_ref=?`,
-		a.Platform, a.AccountRef).Scan(&id); err != nil {
-		return nil, err
-	}
-	return d.GetPlatformAccount(box, id)
+			updated_at=excluded.updated_at
+		RETURNING `+platformAccountColumns,
+		a.Platform, a.AccountName, a.AccountRef, accessEnc, refreshEnc, exp, a.Scopes, a.ScopeVer, now, now))
 }
+
+// platformAccountColumns is the column list scanPlatformAccount reads, in its
+// order.
+const platformAccountColumns = `id, platform, account_name, account_ref, access_token_enc,
+		refresh_token_enc, expires_at, scopes, scope_ver, created_at, updated_at`
 
 // GetPlatformAccount loads and decrypts one account.
 func (d *DB) GetPlatformAccount(box *secrets.Box, id int64) (*PlatformAccount, error) {
+	return scanPlatformAccount(box, d.sql.QueryRow(`SELECT `+platformAccountColumns+`
+		FROM platform_accounts WHERE id = ?`, id))
+}
+
+// scanPlatformAccount reads and decrypts one row of platformAccountColumns.
+func scanPlatformAccount(box *secrets.Box, row *sql.Row) (*PlatformAccount, error) {
 	var (
 		a                 PlatformAccount
 		accessEnc         []byte
 		refreshEnc        []byte
 		exp, created, upd int64
 	)
-	err := d.sql.QueryRow(`SELECT id, platform, account_name, account_ref, access_token_enc,
-		refresh_token_enc, expires_at, scopes, scope_ver, created_at, updated_at
-		FROM platform_accounts WHERE id = ?`, id).
-		Scan(&a.ID, &a.Platform, &a.AccountName, &a.AccountRef, &accessEnc, &refreshEnc,
-			&exp, &a.Scopes, &a.ScopeVer, &created, &upd)
+	err := row.Scan(&a.ID, &a.Platform, &a.AccountName, &a.AccountRef, &accessEnc, &refreshEnc,
+		&exp, &a.Scopes, &a.ScopeVer, &created, &upd)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

@@ -537,6 +537,95 @@ func TestConnectingAPlatformWithoutCredentialsStartsNoChat(t *testing.T) {
 	}
 }
 
+// TestAConnectBeforeChatStartsIsLeftToStartChat covers the window before
+// StartChat has run, when there is no server lifetime to attach under yet. The
+// connect attaches nothing, and StartChat, when it runs, picks the account up
+// with every other one. main runs StartChat before it serves a request, so in
+// production the window is closed; the order still has to be safe.
+func TestAConnectBeforeChatStartsIsLeftToStartChat(t *testing.T) {
+	irc := newFakeTwitchIRC(t)
+	s, h, store, sign := chatConnectServer(t, newFakeConnectPlatform(t), irc, db.PlatformTwitch)
+
+	connectTwitch(t, h, sign, store, "state-early")
+	if got := chatsOn(s.chat, db.PlatformTwitch); len(got) != 0 {
+		t.Fatalf("a connect before StartChat attached chat with no lifetime to run under: %v", got)
+	}
+
+	if n := startChat(t, s); n != 1 {
+		t.Fatalf("StartChat attached %d adapters, want the 1 account connected before it ran", n)
+	}
+	waitFor(t, "the early account's chat to sign in", func() bool { return len(irc.open()) == 1 })
+}
+
+// TestAConnectAfterChatHasClosedStillConnects is a connect that lands during
+// shutdown, after the Hub has closed. The Hub refuses the attach; the account
+// is connected all the same, because a chat that cannot start is a log line,
+// never a failed sign-in.
+func TestAConnectAfterChatHasClosedStillConnects(t *testing.T) {
+	s, h, store, sign := chatConnectServer(t, newFakeConnectPlatform(t), newFakeTwitchIRC(t), db.PlatformTwitch)
+	startChat(t, s)
+	s.chat.Close()
+
+	connectTwitch(t, h, sign, store, "state-late")
+	if accountID(t, store, db.PlatformTwitch, twitchUserRef) == 0 {
+		t.Fatal("a connect whose chat could not attach did not store the account")
+	}
+	if got := chatsOn(s.chat, db.PlatformTwitch); len(got) != 0 {
+		t.Fatalf("a closed Hub took an adapter: %v", got)
+	}
+}
+
+// TestAFailedReadLeavesAConnectsChatAsItWasAndStillEndsADisconnects pins what
+// the two halves do when the database read under chatWire fails, which is
+// deliberately not the same:
+//   - a connect leaves the chat as it was. With the row unknown there is nothing
+//     to build from, and detaching anyway would trade a chat that may well be
+//     working for none over a read that may only have hiccupped.
+//   - a disconnect ends the chat anyway. The delete it follows went through,
+//     and leaving the chat attached is the bug #985 fixed.
+//
+// A table renamed out from under the server is the failing read.
+func TestAFailedReadLeavesAConnectsChatAsItWasAndStillEndsADisconnects(t *testing.T) {
+	connected := func(t *testing.T) (*Server, *db.DB, chat.Adapter) {
+		t.Helper()
+		s, h, store, sign := chatConnectServer(t, newFakeConnectPlatform(t), newFakeTwitchIRC(t), db.PlatformTwitch)
+		startChat(t, s)
+		connectTwitch(t, h, sign, store, "state-read")
+		a, ok := s.chat.Adapter(db.PlatformTwitch, twitchUserRef)
+		if !ok {
+			t.Fatal("the connect attached no chat")
+		}
+		return s, store, a
+	}
+	breakTable := func(t *testing.T, store *db.DB, table string) {
+		t.Helper()
+		if _, err := store.SQL().Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_unreadable`); err != nil {
+			t.Fatalf("rename %s: %v", table, err)
+		}
+	}
+
+	for _, table := range []string{"platform_accounts", "platform_creds"} {
+		t.Run("a connect whose "+table+" read fails", func(t *testing.T) {
+			s, store, before := connected(t)
+			breakTable(t, store, table)
+			s.attachAccountChat(db.PlatformTwitch, twitchUserRef)
+			if now, ok := s.chat.Adapter(db.PlatformTwitch, twitchUserRef); !ok || now != before {
+				t.Fatalf("a connect that could not read %s changed the chat (still attached: %v, same adapter: %v)",
+					table, ok, now == before)
+			}
+		})
+	}
+
+	t.Run("a disconnect whose re-read fails", func(t *testing.T) {
+		s, store, _ := connected(t)
+		breakTable(t, store, "platform_accounts")
+		s.detachAccountChat(db.PlatformTwitch, twitchUserRef)
+		if got := chatsOn(s.chat, db.PlatformTwitch); len(got) != 0 {
+			t.Fatalf("a disconnect that could not re-read left the chat attached: %v", got)
+		}
+	})
+}
+
 // TestConnectingXRespectsTheLivestreamGate is the X gate, on a connect exactly
 // as at startup: X chat belongs to the Livestream family, so it is attached only
 // while POLYEMESIS_X_LIVESTREAM is set.
