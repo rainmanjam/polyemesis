@@ -1,0 +1,18 @@
+{
+  "case": "destination-stop-now",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/stop",
+    "path": "/destinations/5/stop",
+    "query": {
+      "now": "true",
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "enabled": false,
+    "reaped": true
+  }
+}

@@ -6,6 +6,7 @@ import {
   type TransportRequest,
   type TransportResponse,
 } from "../src/api.js";
+import { goldenResponse } from "./support/contract.js";
 
 // The routes the new keys call: per-destination stop preview, the Record switch,
 // and the routing preset list and apply. The fake transport answers from a queue.
@@ -101,7 +102,7 @@ describe("routingPresets", () => {
 
 describe("applyPreset", () => {
   it("posts to the preset path, encoded, scoped to the programme, with no body", async () => {
-    const { transport, sent } = fakeTransport([ok({ ok: true })]);
+    const { transport, sent } = fakeTransport([goldenResponse("preset-apply")]);
     await new PolyemesisClient(BASE, "t", transport).applyPreset("music/live", 3);
     expect(sent[0]!.method).toBe("POST");
     expect(sent[0]!.url.pathname).toBe("/api/v1/routing/presets/music%2Flive");

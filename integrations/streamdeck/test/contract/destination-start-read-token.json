@@ -1,0 +1,16 @@
+{
+  "case": "destination-start-read-token",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/start",
+    "path": "/destinations/2/start",
+    "query": {
+      "source": "1"
+    },
+    "token": "read"
+  },
+  "status": 403,
+  "body": {
+    "error": "this API token is read-only; mint a token with the \"admin\" scope to make changes"
+  }
+}

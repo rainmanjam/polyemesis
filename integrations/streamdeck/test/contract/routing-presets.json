@@ -1,0 +1,259 @@
+{
+  "case": "routing-presets",
+  "request": {
+    "method": "GET",
+    "route": "/routing/presets",
+    "path": "/routing/presets",
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "defaults": {
+      "cleanTrack": 1,
+      "micTrack": 2,
+      "musicTrack": 0,
+      "surroundTrack": 0
+    },
+    "presets": [
+      {
+        "description": "Sum every audio track the ingest is carrying.",
+        "id": "everything",
+        "name": "Everything",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Sum every track except the one carrying copyrighted music.",
+        "id": "no-music",
+        "name": "No music",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Just the microphone track. Commentary, no game or media audio.",
+        "id": "mic-only",
+        "name": "Mic only",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": true,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Downmix one surround track to stereo with standard ITU coefficients, as an editable matrix.",
+        "id": "surround-downmix",
+        "name": "5.1 → stereo",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": true,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "The commentary tracks in one language. Falls back to the mic track when the ingest carries no role or language metadata.",
+        "id": "commentary-language",
+        "name": "Commentary",
+        "needsCleanTrack": false,
+        "needsLanguage": true,
+        "needsMicTrack": true,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Programme audio with no commentary on it — what a rights holder, an archive or a second-language broadcast wants.",
+        "id": "clean-feed",
+        "name": "Clean feed",
+        "needsCleanTrack": true,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Every track except the ones marked as music, and a standing instruction to keep excluding music if it moves to another track.",
+        "id": "except-music",
+        "name": "Everything except music",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "",
+          "reason": "",
+          "summary": ""
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music excluded (YouTube Content ID). Loudness target -14 LUFS.",
+        "id": "platform:youtube",
+        "loudness": {
+          "targetLufs": -14
+        },
+        "name": "YouTube",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "platform": "youtube",
+        "policy": {
+          "exclude": true,
+          "overridden": false,
+          "platform": "youtube",
+          "reason": "YouTube Content ID",
+          "summary": "music excluded (YouTube Content ID)"
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music excluded (Twitch DMCA policy). Loudness target -14 LUFS.",
+        "id": "platform:twitch",
+        "loudness": {
+          "targetLufs": -14
+        },
+        "name": "Twitch",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "platform": "twitch",
+        "policy": {
+          "exclude": true,
+          "overridden": false,
+          "platform": "twitch",
+          "reason": "Twitch DMCA policy",
+          "summary": "music excluded (Twitch DMCA policy)"
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music excluded (Kick DMCA policy). Loudness target -14 LUFS.",
+        "id": "platform:kick",
+        "loudness": {
+          "targetLufs": -14
+        },
+        "name": "Kick",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "platform": "kick",
+        "policy": {
+          "exclude": true,
+          "overridden": false,
+          "platform": "kick",
+          "reason": "Kick DMCA policy",
+          "summary": "music excluded (Kick DMCA policy)"
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music excluded (Facebook Rights Manager). Loudness target -14 LUFS.",
+        "id": "platform:facebook",
+        "loudness": {
+          "targetLufs": -14
+        },
+        "name": "Facebook",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": true,
+        "needsSurroundTrack": false,
+        "platform": "facebook",
+        "policy": {
+          "exclude": true,
+          "overridden": false,
+          "platform": "facebook",
+          "reason": "Facebook Rights Manager",
+          "summary": "music excluded (Facebook Rights Manager)"
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music included (local recording).",
+        "id": "platform:file",
+        "name": "Local recording",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "platform": "file",
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "file",
+          "reason": "local recording",
+          "summary": "music included (local recording)"
+        }
+      },
+      {
+        "description": "Everything the ingest is carrying, with this destination's defaults applied: music included (custom destination).",
+        "id": "platform:custom",
+        "name": "Custom",
+        "needsCleanTrack": false,
+        "needsLanguage": false,
+        "needsMicTrack": false,
+        "needsMusicTrack": false,
+        "needsSurroundTrack": false,
+        "platform": "custom",
+        "policy": {
+          "exclude": false,
+          "overridden": false,
+          "platform": "custom",
+          "reason": "custom destination",
+          "summary": "music included (custom destination)"
+        }
+      }
+    ]
+  }
+}

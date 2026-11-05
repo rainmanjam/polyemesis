@@ -1,0 +1,39 @@
+{
+  "$comment": [
+    "Every route the plugin calls, and the token scope the server needs for it. src/api.ts reads this:",
+    "a call() whose method and path match no entry throws before any request is sent, and a call() of an",
+    "admin route on a read token is refused in the plugin, so a read token never sends one. The one",
+    "exception is an admin route marked readTokenSends: the plugin sends it on a read token on purpose and",
+    "paints the server's 403 as Needs admin token. internal/api/streamdeck_contract_test.go reads this file",
+    "too and drives each entry through the real router: the route must exist, take an API token, and need",
+    "exactly this scope. test/apiContract.test.ts fails when a call() in src/api.ts is not listed here.",
+    "Paths are relative to /api/v1. A {name} segment is the template literal's ${name} in src/api.ts."
+  ],
+  "routes": [
+    { "method": "GET", "path": "/auth/connection", "scope": "read" },
+    { "method": "GET", "path": "/sources", "scope": "read" },
+    { "method": "GET", "path": "/status", "scope": "read" },
+    { "method": "GET", "path": "/levels", "scope": "read" },
+    { "method": "GET", "path": "/settings", "scope": "read" },
+    { "method": "GET", "path": "/destinations/stop-impact", "scope": "read" },
+    { "method": "GET", "path": "/recording", "scope": "read" },
+    { "method": "POST", "path": "/recording", "scope": "admin" },
+    { "method": "GET", "path": "/polls", "scope": "read" },
+    { "method": "GET", "path": "/analytics/live", "scope": "admin", "readTokenSends": true },
+    { "method": "POST", "path": "/polls", "scope": "admin" },
+    { "method": "POST", "path": "/polls/{id}/end", "scope": "admin" },
+    { "method": "GET", "path": "/routing/presets", "scope": "read" },
+    { "method": "POST", "path": "/routing/presets/{presetId}", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/start-all", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/stop-all", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/{id}/start", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/{id}/restart", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/{id}/stop", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/{id}/delay/dump", "scope": "admin" },
+    { "method": "POST", "path": "/destinations/delay/dump-all", "scope": "admin" },
+    { "method": "POST", "path": "/failover/source", "scope": "admin" },
+    { "method": "GET", "path": "/destinations", "scope": "read" },
+    { "method": "GET", "path": "/source", "scope": "read" },
+    { "method": "POST", "path": "/destinations/{destinationId}/tracks/{track}/gain", "scope": "admin" }
+  ]
+}

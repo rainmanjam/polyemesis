@@ -8,6 +8,7 @@ import {
   type TransportResponse,
 } from "../src/api.js";
 import { classify } from "../src/transport.js";
+import { malformed } from "./support/contract.js";
 
 type Reply = TransportResponse | Error;
 
@@ -198,7 +199,7 @@ describe("PolyemesisClient: programmes", () => {
   });
 
   it("refuses an answer that is not a list, so a key cannot read it as no programmes", async () => {
-    const { transport } = fakeTransport([ok({ sources: [] })]);
+    const { transport } = fakeTransport([malformed({ status: 200, body: JSON.stringify({ sources: [] }) })]);
     await expect(new PolyemesisClient(BASE, "t", transport).sources()).rejects.toMatchObject({ kind: "malformed" });
   });
 });

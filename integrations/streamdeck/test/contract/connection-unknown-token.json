@@ -1,0 +1,13 @@
+{
+  "case": "connection-unknown-token",
+  "request": {
+    "method": "GET",
+    "route": "/auth/connection",
+    "path": "/auth/connection",
+    "token": "unknown"
+  },
+  "status": 401,
+  "body": {
+    "error": "not signed in"
+  }
+}

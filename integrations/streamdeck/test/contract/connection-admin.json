@@ -1,0 +1,16 @@
+{
+  "case": "connection-admin",
+  "request": {
+    "method": "GET",
+    "route": "/auth/connection",
+    "path": "/auth/connection",
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "adminScope": true,
+    "name": "streamdeck-admin",
+    "prefix": "volatile",
+    "scope": "admin"
+  }
+}

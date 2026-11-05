@@ -1,0 +1,13 @@
+{
+  "case": "analytics-live-read-token",
+  "request": {
+    "method": "GET",
+    "route": "/analytics/live",
+    "path": "/analytics/live",
+    "token": "read"
+  },
+  "status": 403,
+  "body": {
+    "error": "this API token is read-only; this endpoint returns a credential or does real work, so it needs a token with the \"admin\" scope"
+  }
+}

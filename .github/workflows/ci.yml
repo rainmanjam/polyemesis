@@ -116,6 +116,14 @@ jobs:
   #
   # THIS FILE COUNTS AS CODE, for the reason the container-suites job already
   # gives about itself: a change to how the suites run must run the suites.
+  #
+  # `deck` IS A NARROWER QUESTION FOR ONE JOB, streamdeck-e2e: can this change
+  # reach the Stream Deck plugin or the server it talks to? It is false only
+  # when every changed path is one the plugin and the binary it runs against
+  # cannot see -- documentation, the web UI (the e2e binary is built without
+  # it), the website, deploy files, the other integrations. Same failure
+  # direction as `code`: anything not on that list runs the job, and so does
+  # anything that is not a pull request. Read from step `if:`s only, like `code`.
   changes:
     name: which changes
     permissions:
@@ -124,6 +132,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.detect.outputs.code }}
+      deck: ${{ steps.detect.outputs.deck }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -138,11 +147,21 @@ jobs:
           # and a scheduled run have no diff to reason about.
           if [ "$EVENT" != "pull_request" ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "deck=true" >> "$GITHUB_OUTPUT"
             echo "not a pull request: running everything"
             exit 0
           fi
           CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
+          # Can any of it reach the Stream Deck plugin or the binary it runs
+          # against? Decided before the documentation exit below, which ends
+          # the step.
+          if [ -n "$CHANGED" ] && ! grep -qvE '^(docs/|ui/|web/|deploy/|integrations/(obs|streamerbot)/|[^/]*\.md$)' <<<"$CHANGED"; then
+            echo "deck=false" >> "$GITHUB_OUTPUT"
+            echo "nothing the Stream Deck end-to-end run can see: skipping it"
+          else
+            echo "deck=true" >> "$GITHUB_OUTPUT"
+          fi
           # Every line documentation? Then no suite can be affected by it.
           if [ -n "$CHANGED" ] && ! grep -qvE '^(docs/|[^/]*\.md$)' <<<"$CHANGED"; then
             echo "code=false" >> "$GITHUB_OUTPUT"
@@ -1974,6 +1993,121 @@ jobs:
           # For sideloading a pull request's build by hand; nothing downloads
           # it, and a release attaches its own copy.
           retention-days: 3
+
+  # THE PLUGIN AGAINST THE REAL BINARY. The streamdeck job above tests the
+  # plugin against fakes and against the server's recorded answers
+  # (integrations/streamdeck/test/contract/, held to the handlers by
+  # internal/api/streamdeck_goldens_test.go in the go job). This runs the
+  # plugin's own Runtime against the built polyemesis over real HTTP, with real
+  # FFmpeg on both sides of a destination: pair, read the state, start a
+  # destination and see it at a local RTMP sink, kill the sink and see the key
+  # say Failed with its reason, retry from the key, stop it. The assertions are
+  # on the plugin's key faces. See scripts/streamdeck-e2e.sh.
+  #
+  # Not a required check. Gated step by step on `code`, like every job here
+  # (internal/testenv/docsgate_test.go), and on the narrower `deck`, so a pull
+  # request that cannot reach the plugin or the server reports success
+  # without building anything.
+  streamdeck-e2e:
+    name: streamdeck end to end
+    permissions:
+      contents: read
+    needs: changes
+    runs-on: ubuntu-latest
+    # About two minutes of work once FFmpeg is cached. The same ceiling as the
+    # plugin's other job; the script's own watchdog fires first.
+    timeout-minutes: 10
+    steps:
+      - name: Nothing the deck can see changed, so this job did no work
+        if: needs.changes.outputs.code != 'true' || needs.changes.outputs.deck != 'true'
+        run: |
+          echo "::notice title=streamdeck end to end::this check did no work -- no changed path can reach the Stream Deck plugin or the server. See the 'which changes' job."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        with:
+          go-version-file: go.mod
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        uses: ./.github/actions/restore-go-cache
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        with:
+          node-version: 24
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
+          cache-dependency-path: integrations/streamdeck/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: integrations/streamdeck/package-lock.json
+      # The pinned FFmpeg the acceptance suites use, from the same cache key;
+      # this job only restores it. See the acceptance job for why it is pinned
+      # and cached rather than taken from apt.
+      - name: Cache FFmpeg
+        id: ffcache
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+      - name: Install FFmpeg
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        timeout-minutes: 8
+        env:
+          FFCACHE: /tmp/ffcache
+        run: |
+          set -euo pipefail
+          cd /tmp
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
+            done
+            echo "97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79  /tmp/ff.tar.xz" | sha256sum -c -
+            mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+            mkdir -p "$FFCACHE"
+            cp ffbuild/bin/ffmpeg ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          ffmpeg -hide_banner -version | head -1
+      # Without the web UI: the deck never asks for it, and building it is
+      # most of `make build`'s time.
+      - name: Build the binary
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        run: make build-go
+      - name: Install the plugin's dependencies
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        working-directory: integrations/streamdeck
+        run: npm ci --ignore-scripts
+      - name: ./scripts/streamdeck-e2e.sh
+        if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        timeout-minutes: 6
+        run: ./scripts/streamdeck-e2e.sh "$RUNNER_TEMP/streamdeck-e2e"
+      # The server's log, for a failure the deck's own output does not
+      # explain. Only *.log: the run's install.env holds its tokens, which
+      # die with the run's server but are still not an artifact.
+      - name: Upload the server log
+        if: failure() && needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: streamdeck-e2e-logs
+          path: ${{ runner.temp }}/streamdeck-e2e/*/*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #

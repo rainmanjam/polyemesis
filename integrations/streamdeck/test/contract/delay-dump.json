@@ -1,0 +1,30 @@
+{
+  "case": "delay-dump",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/delay/dump",
+    "path": "/destinations/5/delay/dump",
+    "query": {
+      "source": "1"
+    },
+    "body": {
+      "seconds": 10
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "clamped": false,
+    "complete": true,
+    "configuredSeconds": 900,
+    "delayAfterSeconds": 20,
+    "delayBeforeSeconds": 30,
+    "dumpedSeconds": 10,
+    "forced": false,
+    "id": 5,
+    "name": "Delayed feed",
+    "recovery": false,
+    "requestedSeconds": 10,
+    "restoresOnNextStart": true
+  }
+}

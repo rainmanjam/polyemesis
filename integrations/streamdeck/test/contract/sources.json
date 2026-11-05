@@ -1,0 +1,57 @@
+{
+  "case": "sources",
+  "request": {
+    "method": "GET",
+    "route": "/sources",
+    "path": "/sources",
+    "token": "read"
+  },
+  "status": 200,
+  "body": [
+    {
+      "createdAt": "2026-01-01T00:00:00Z",
+      "destinations": 6,
+      "enabled": true,
+      "id": 1,
+      "ingest": {
+        "annotations": [
+          {
+            "label": "Host mic",
+            "track": 0
+          }
+        ],
+        "degraded": {
+          "enabled": false,
+          "maxLossPercent": 15,
+          "maxRttMs": 1500,
+          "minBitrateKbps": 800,
+          "sustainSeconds": 5
+        },
+        "mode": "pull",
+        "pull": {
+          "reconnectDelayMaxSeconds": 30,
+          "rtspTransport": "tcp",
+          "url": "https://cam.example/[redacted]"
+        },
+        "rtmp": {
+          "app": "live",
+          "streamKey": ""
+        },
+        "srt": {
+          "latencyMs": 200,
+          "passphrase": ""
+        }
+      },
+      "isDefault": true,
+      "name": "Main",
+      "position": 1,
+      "publishUrls": null,
+      "publishing": false,
+      "renditions": 0,
+      "running": true,
+      "token": "",
+      "tokenEnforced": false,
+      "updatedAt": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

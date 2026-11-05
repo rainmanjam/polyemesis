@@ -1,0 +1,34 @@
+{
+  "case": "poll-end",
+  "request": {
+    "method": "POST",
+    "route": "/polls/{id}/end",
+    "path": "/polls/1/end",
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "byPlatform": {},
+    "durationSeconds": 60,
+    "endedAt": "2026-01-01T00:00:00Z",
+    "endedEarly": true,
+    "endsAt": "2026-01-01T00:00:00Z",
+    "id": 1,
+    "options": [
+      {
+        "byPlatform": {},
+        "label": "Dust",
+        "votes": 0
+      },
+      {
+        "byPlatform": {},
+        "label": "Mirage",
+        "votes": 0
+      }
+    ],
+    "question": "Next map?",
+    "startedAt": "2026-01-01T00:00:00Z",
+    "state": "ended",
+    "total": 0
+  }
+}

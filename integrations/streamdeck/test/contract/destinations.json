@@ -1,0 +1,1162 @@
+{
+  "case": "destinations",
+  "request": {
+    "method": "GET",
+    "route": "/destinations",
+    "path": "/destinations",
+    "token": "read"
+  },
+  "status": 200,
+  "body": [
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "enabled": true,
+        "facebook": {},
+        "id": 1,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "Main stage",
+        "platform": "twitch",
+        "position": 1,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {},
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://live.faketool.invalid/[redacted]"
+      }
+    },
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "enabled": false,
+        "facebook": {},
+        "id": 2,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "Backup encoder",
+        "platform": "custom",
+        "position": 2,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {},
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://off.faketool.invalid/[redacted]"
+      }
+    },
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "enabled": true,
+        "facebook": {},
+        "id": 3,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "Studio relay",
+        "platform": "custom",
+        "position": 3,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {
+          "giveUpAfter": 1
+        },
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://faketool-refused.invalid/[redacted]"
+      }
+    },
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "enabled": true,
+        "facebook": {},
+        "id": 4,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "YouTube main",
+        "platform": "youtube",
+        "position": 4,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {},
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://faketool-rejected.invalid/[redacted]"
+      }
+    },
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "delaySeconds": 900,
+        "enabled": true,
+        "facebook": {},
+        "id": 5,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "Delayed feed",
+        "platform": "custom",
+        "position": 5,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {},
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://delayed.faketool.invalid/[redacted]"
+      }
+    },
+    {
+      "destination": {
+        "audio": {},
+        "audioBitrate": 160,
+        "captionMode": "off",
+        "compliance": {},
+        "createdAt": "2026-01-01T00:00:00Z",
+        "delaySeconds": 900,
+        "enabled": true,
+        "facebook": {},
+        "id": 6,
+        "kind": "rtmp",
+        "lifecycle": {},
+        "name": "Delayed backup",
+        "platform": "custom",
+        "position": 6,
+        "profile": {
+          "matrix": null,
+          "mode": "simple",
+          "normalize": "auto",
+          "sampleRate": 48000,
+          "tracks": [
+            {
+              "enabled": true,
+              "gain": 1,
+              "track": 0
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 1
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 2
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 3
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 4
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 5
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 6
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 7
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 8
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 9
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 10
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 11
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 12
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 13
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 14
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 15
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 16
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 17
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 18
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 19
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 20
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 21
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 22
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 23
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 24
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 25
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 26
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 27
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 28
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 29
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 30
+            },
+            {
+              "enabled": false,
+              "gain": 1,
+              "track": 31
+            }
+          ]
+        },
+        "resilience": {},
+        "sourceId": 1,
+        "streamKey": "",
+        "transport": {},
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "url": "rtmp://delayed-idle.faketool.invalid/[redacted]"
+      }
+    }
+  ]
+}

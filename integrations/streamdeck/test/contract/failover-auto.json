@@ -1,0 +1,47 @@
+{
+  "case": "failover-auto",
+  "request": {
+    "method": "POST",
+    "route": "/failover/source",
+    "path": "/failover/source",
+    "query": {
+      "source": "1"
+    },
+    "body": {
+      "source": "auto"
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "active": "primary",
+    "backupEnabled": false,
+    "backupLive": false,
+    "feed": {
+      "kind": "source",
+      "name": "source:primary",
+      "pid": 0,
+      "progress": {
+        "bitrateKbps": 0,
+        "done": false,
+        "dropFrames": 0,
+        "dupFrames": 0,
+        "fps": 0,
+        "frame": 0,
+        "outTimeMs": 0,
+        "speed": 0,
+        "totalSize": 0
+      },
+      "restarts": 0,
+      "startedAt": "2026-01-01T00:00:00Z",
+      "state": "running",
+      "uptimeSec": 0
+    },
+    "primaryLive": true,
+    "reason": "the primary ingest is delivering again",
+    "relayPort": 0,
+    "slateEnabled": true,
+    "switchedAt": "2026-01-01T00:00:00Z",
+    "switches": 0
+  }
+}

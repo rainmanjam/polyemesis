@@ -1,0 +1,16 @@
+{
+  "case": "destination-retry-refused",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/restart",
+    "path": "/destinations/999/restart",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 404,
+  "body": {
+    "error": "not found"
+  }
+}

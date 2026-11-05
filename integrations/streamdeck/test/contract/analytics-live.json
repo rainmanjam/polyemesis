@@ -1,0 +1,20 @@
+{
+  "case": "analytics-live",
+  "request": {
+    "method": "GET",
+    "route": "/analytics/live",
+    "path": "/analytics/live",
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "effectiveIntervalSeconds": 60,
+    "enabled": true,
+    "intervalSeconds": 60,
+    "onAir": true,
+    "pending": true,
+    "points": [],
+    "readings": [],
+    "reported": 0
+  }
+}

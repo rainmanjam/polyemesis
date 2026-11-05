@@ -1,0 +1,19 @@
+{
+  "case": "no-source-status",
+  "request": {
+    "method": "GET",
+    "route": "/status",
+    "path": "/status",
+    "token": "read"
+  },
+  "status": 200,
+  "body": {
+    "destinations": [],
+    "source": {
+      "id": 0,
+      "name": "",
+      "probed": false,
+      "tracks": null
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, PolyemesisClient, type Transport, type TransportRequest, type TransportResponse } from "../src/api.js";
 import { MAX_GAIN } from "../src/trackLevel.js";
+import { malformed } from "./support/contract.js";
 
 // The client side of live track gain (I4): the destination list it reads the
 // stored mute and gain from, the track names, and the one write route.
@@ -91,7 +92,7 @@ describe("destinations()", () => {
 
   it("refuses a list that is not the server's shape", async () => {
     for (const body of [{ destinations: [] }, [{ destination: { id: "5" } }], [{ destination: { id: 5, name: "x", profile: { tracks: [{ track: 0 }] } } }]]) {
-      const { transport } = fakeTransport([ok(body)]);
+      const { transport } = fakeTransport([malformed({ status: 200, body: JSON.stringify(body) })]);
       await expect(client(transport).destinations()).rejects.toMatchObject({ kind: "malformed" });
     }
   });

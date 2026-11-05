@@ -1,0 +1,16 @@
+{
+  "case": "delay-dump-nothing",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/{id}/delay/dump",
+    "path": "/destinations/1/delay/dump",
+    "query": {
+      "source": "1"
+    },
+    "token": "admin"
+  },
+  "status": 409,
+  "body": {
+    "error": "this destination is not running a broadcast delay, so there is nothing to dump"
+  }
+}

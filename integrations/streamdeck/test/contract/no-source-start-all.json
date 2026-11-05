@@ -1,0 +1,14 @@
+{
+  "case": "no-source-start-all",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/start-all",
+    "path": "/destinations/start-all",
+    "token": "admin"
+  },
+  "status": 503,
+  "body": {
+    "code": "no_source",
+    "error": "this install has no source yet, so there is no programme to act on. Create one on the Sources page first."
+  }
+}

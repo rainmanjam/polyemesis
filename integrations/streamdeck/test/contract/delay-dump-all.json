@@ -1,0 +1,42 @@
+{
+  "case": "delay-dump-all",
+  "request": {
+    "method": "POST",
+    "route": "/destinations/delay/dump-all",
+    "path": "/destinations/delay/dump-all",
+    "query": {
+      "source": "1"
+    },
+    "body": {
+      "confirm": true
+    },
+    "token": "admin"
+  },
+  "status": 200,
+  "body": {
+    "action": "dump",
+    "results": [
+      {
+        "clamped": false,
+        "complete": true,
+        "configuredSeconds": 900,
+        "delayAfterSeconds": 20,
+        "delayBeforeSeconds": 30,
+        "dumpedSeconds": 10,
+        "forced": false,
+        "id": 5,
+        "name": "Delayed feed",
+        "outcome": "dumped",
+        "recovery": false,
+        "requestedSeconds": 0,
+        "restoresOnNextStart": true
+      },
+      {
+        "id": 6,
+        "message": "not on the air: still filling its delay, or stopped and airing its tail",
+        "name": "Delayed backup",
+        "outcome": "skipped"
+      }
+    ]
+  }
+}
