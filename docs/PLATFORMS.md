@@ -605,10 +605,10 @@ needed" once.
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
 that is already there keeps it, and its destinations, linked; disconnecting
-first unlinks them. Chat follows the account list in one direction only:
-disconnecting an account, or removing a platform's credentials, ends that chat
-at once, while a newly connected account starts reading chat at the next
-restart.
+first unlinks them. Chat follows the account list both ways, at once:
+connecting an account starts its chat, connecting it again restarts its chat
+with the new token (which is also how a chat whose login Twitch refused comes
+back), and disconnecting it, or removing its platform's credentials, ends it.
 
 polyemesis now says so itself. Each platform carries a scope version that is
 stored with the account, and **Settings → Platform credentials marks an account

@@ -170,8 +170,15 @@ These follow from the lingering-state fixes below and are visible on purpose.
   noticed, because it never asked for its token. Disconnecting an account now ends that account's
   chat immediately, and removing credentials ends the chat of every account on that platform (Rumble,
   which is keyed by an environment variable, is untouched). A restart agrees: an account whose
-  platform has no developer credentials stored no longer starts reading chat. A newly connected
-  account still starts reading chat at the next restart.
+  platform has no developer credentials stored no longer starts reading chat.
+- **A newly connected account reads chat at once.** Connecting Twitch (or any chat platform) in
+  Settings → Platforms left the Dashboard's chat card without it until polyemesis restarted, because
+  chat was only started at startup. Connecting an account, by sign-in or by device code, now starts
+  its chat immediately. Connecting it again restarts its chat with the new token, which is also what
+  brings back a Twitch chat whose login was refused (its own message says to reconnect, and before
+  this the chip went on reading Failed). The same rules apply as at startup: no chat without the
+  platform's developer credentials, and X chat only with `POLYEMESIS_X_LIVESTREAM` set. A connect and
+  a disconnect that overlap leave the chat matching whether the account is still connected.
 
 ## [0.13.0] — 2026-11-04
 
