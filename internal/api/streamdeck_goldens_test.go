@@ -139,10 +139,12 @@ func (f *deckFixture) cases() []deckCase {
 		{Name: "recording-off", Method: "POST", Route: "/recording", Body: map[string]any{"enabled": false}, Token: "admin"},
 
 		// The track mute key and the gain dial, on the live destination.
+		// The reason is the server's prose for how the level reached the output,
+		// and it is the platform's: live gain is not verified on Windows.
 		{Name: "track-mute", Method: "POST", Route: "/destinations/{destinationId}/tracks/{track}/gain",
-			Query: src, Body: map[string]any{"muted": true}, Token: "admin"},
+			Query: src, Body: map[string]any{"muted": true}, Token: "admin", Volatile: []string{"reason"}},
 		{Name: "track-gain", Method: "POST", Route: "/destinations/{destinationId}/tracks/{track}/gain",
-			Query: src, Body: map[string]any{"gain": 0.5}, Token: "admin"},
+			Query: src, Body: map[string]any{"gain": 0.5}, Token: "admin", Volatile: []string{"reason"}},
 
 		// The dump keys: one destination, the programme, and one with no delay.
 		{Name: "delay-dump", Method: "POST", Route: "/destinations/{id}/delay/dump",

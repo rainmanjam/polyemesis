@@ -17,26 +17,27 @@ if (!base || !envFile || !sinkURL) {
 }
 const api = `${base.replace(/\/$/, "")}/api/v1`;
 
+/** One line, printable characters only: what the server said goes into the job log. */
+const printable = (text) => String(text).replaceAll(/[^\x20-\x7e]+/g, " ").slice(0, 500);
+
 function fail(what, res, body) {
-  console.error(`install: ${what}: ${res ? `${res.status} ${body}` : body}`);
+  const said = res ? `${res.status} ${printable(body)}` : printable(body);
+  console.error(`install: ${printable(what)}: ${said}`);
   process.exit(1);
 }
 
 /** Waits for the server to answer, observing it rather than sleeping a fixed time. */
-async function waitUp() {
-  const deadline = Date.now() + 60_000;
-  let last = "";
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${api}/health`);
-      if (res.ok) return;
-      last = `HTTP ${res.status}`;
-    } catch (err) {
-      last = String(err?.cause?.code ?? err);
-    }
-    await new Promise((r) => setTimeout(r, 200));
+async function waitUp(deadline = Date.now() + 60_000, last = "") {
+  if (Date.now() >= deadline) fail("the server never answered /health", undefined, last);
+  try {
+    const res = await fetch(`${api}/health`);
+    if (res.ok) return;
+    last = `HTTP ${res.status}`;
+  } catch (err) {
+    last = String(err?.cause?.code ?? err);
   }
-  fail("the server never answered /health", undefined, last);
+  await new Promise((r) => setTimeout(r, 200));
+  return waitUp(deadline, last);
 }
 
 /** One JSON request; fails the run on anything but the status it expects. */
@@ -108,6 +109,6 @@ const env = {
   POLY_E2E_DESTINATION: String(destination),
   POLY_E2E_SINK_URL: sinkURL,
 };
-const quoted = (v) => `'${v.replaceAll("'", "'\\''")}'`;
+const quoted = (v) => `'${v.replaceAll("'", String.raw`'\''`)}'`;
 writeFileSync(envFile, Object.entries(env).map(([k, v]) => `export ${k}=${quoted(v)}\n`).join(""), { mode: 0o600 });
 console.log(`install: admin and tokens created; programme ${source}, destination ${destination} -> ${sinkURL}`);

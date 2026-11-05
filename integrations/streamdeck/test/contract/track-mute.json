@@ -205,6 +205,6 @@
       "updatedAt": "2026-01-01T00:00:00Z",
       "url": "rtmp://live.faketool.invalid/app"
     },
-    "reason": "volume@trk0: ffmpeg did not acknowledge the command in time"
+    "reason": "volatile"
   }
 }

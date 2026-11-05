@@ -7,8 +7,8 @@ import { PolyemesisClient, type Transport } from "../../src/api.js";
 
 it("serves a renamed field and does not take the violation", async () => {
   const transport: Transport = {
-    async send() {
-      return { status: 200, body: JSON.stringify({ destinations: [{ id: 1, name: "x", reason: { cause: "dns", isHeld: true } }] }) };
+    send() {
+      return Promise.resolve({ status: 200, body: JSON.stringify({ destinations: [{ id: 1, name: "x", reason: { cause: "dns", isHeld: true } }] }) });
     },
   };
   await new PolyemesisClient(new URL("https://studio.example"), "t", transport).status(1);
