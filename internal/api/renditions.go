@@ -289,23 +289,29 @@ func (s *Server) playoutVariantsUsing(renditionID int64) (total, enabled int, er
 	return total, enabled, nil
 }
 
-// warnPlayoutVariantsOfSource logs the playout rungs a programme delete is
+// warnPlayoutVariantsOfSource names the playout rungs a programme delete is
 // about to strand: its renditions go with it by ON DELETE CASCADE, and a rung
-// naming one stops starting. A log line rather than a response, because the
-// programme delete answers 204 and the rung is the operator's to repoint.
-func (s *Server) warnPlayoutVariantsOfSource(sourceID int64) {
+// naming one stops starting. Read BEFORE the delete, while the renditions still
+// say which programme they belong to.
+//
+// Said in the delete's response, not only logged. The rung is the operator's
+// to repoint, and the programme delete already answers 200 with warnings when
+// it has something to say -- a log line nobody reads left them to find a rung
+// that would not start with no word of why.
+func (s *Server) warnPlayoutVariantsOfSource(sourceID int64) []string {
 	rends, err := s.store.ListRenditionsBySource(sourceID)
 	if err != nil || len(rends) == 0 {
-		return
+		return nil
 	}
 	set, err := s.store.GetSettings()
 	if err != nil {
-		return
+		return nil
 	}
 	gone := make(map[int64]string, len(rends))
 	for _, r := range rends {
 		gone[r.ID] = r.Name
 	}
+	var stranded []string
 	for _, v := range set.Playout.Variants {
 		if v.RenditionID == nil {
 			continue
@@ -314,8 +320,16 @@ func (s *Server) warnPlayoutVariantsOfSource(sourceID int64) {
 			s.log.Warn("programme delete: a playout rung names a rendition this delete removes, and will not "+
 				"start until another rendition is picked on the Playout page",
 				"variant", v.Name, "rendition", name)
+			stranded = append(stranded, v.Name)
 		}
 	}
+	if len(stranded) == 0 {
+		return nil
+	}
+	n := len(stranded)
+	return []string{fmt.Sprintf("%s named a rendition of the deleted programme and will not start until "+
+		"you pick another one on the Playout page: %s.", plural(n, "playout rung", "playout rungs"),
+		quoteNames(stranded))}
 }
 
 // renditionDeleteWarning says what a rendition delete did to the things that

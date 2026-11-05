@@ -26,7 +26,10 @@ These follow from the lingering-state fixes below and are visible on purpose.
   changes. Accounts are never deleted by this route.
 - **Deleting the programme published on the public playout page takes the page down.** It
   answers `503 playout is not running` until another programme is published in Playout >
-  Programme, instead of silently showing the audience a different programme. A published
+  Programme for viewers, instead of silently showing the audience a different programme. The
+  delete says so in its `warnings`, and the Playout page shows the programme picker with a
+  **Use the default programme** button whenever the published programme no longer exists,
+  including on a one-programme install, where the picker is otherwise hidden. A published
   programme that exists but is not running yet still falls back to the default, as before.
 - **Deleting a destination cancels its upcoming scheduled events on the platform.** YouTube
   events created by a recurring template or a pre-announcement are deleted (this cannot be
@@ -38,8 +41,14 @@ These follow from the lingering-state fixes below and are visible on purpose.
   every occurrence; one that names other destinations simply loses the deleted one. The delete
   response says which.
 - **`DELETE /api/v1/sources/{id}` answers `200` with `{"warnings": [...]}`** instead of `204`
-  when it has something to report (an event it could not cancel, a schedule it switched off).
-  The response to `DELETE /api/v1/destinations/{id}` gains the same additive `warnings` array.
+  when it has something to report: an event it could not cancel, a schedule it switched off, the
+  public playout page losing the programme it was published from, or a public playout rung
+  losing its rendition (which used to go only to the log). The response to
+  `DELETE /api/v1/destinations/{id}` gains the same additive `warnings` array.
+- **A programme delete is checked against the destinations it was confirmed for, by id.** One
+  destination deleted and another created on the programme while the delete was cancelling
+  platform events now refuses it with `409`, as an added or removed one already did, instead of
+  taking the new destination with the programme because the count still matched.
 - **Switching MQTT off deletes the retained state topics** it was publishing, so other consumers
   stop reading a stale "running"; the status stays `offline` and the Home Assistant device stays
   (its entities show unavailable). Changing the topic prefix deletes the old tree's state and
@@ -78,8 +87,18 @@ These follow from the lingering-state fixes below and are visible on purpose.
     started with them (or with credentials since replaced) answers `expired` instead of storing
     an account for an app that is gone.
   - A storage target delete names, in `warning` and `unabortedUploads`, any unfinished upload it
-    could not abort on the service; the console shows the warning. The delete still always
-    succeeds.
+    could not abort on the service; the console keeps the warning and each upload's key and
+    upload id on the card, copyable, until it is closed. The delete still always succeeds.
+  - Deleting a destination leaves a show that already aired alone, as it leaves an old
+    pre-announcement, instead of reporting each recent show as an event "left on YouTube (start
+    time has passed)".
+  - Deleting one track of a transcript keeps a per-speaker file another track also writes to:
+    two labels that reduce to the same file name (`Host` and `host!`), or a label that is
+    another track's fallback name (`track2`).
+  - A destination delete that fails on the Dashboard no longer also says "Destination deleted".
+  - Switching MQTT off or moving it while the broker is unreachable says in the log which
+    retained tree was left, and removing the old Home Assistant device after an instance move
+    has its own time budget rather than what the state clear left of a shared one.
   - A rendition delete reports public playout rungs that named it (`playoutVariants`,
     `enabledPlayoutVariants`, and the `warning`), and such a rung's error now says the rendition
     no longer exists.

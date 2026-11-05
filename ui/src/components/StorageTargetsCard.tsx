@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import type {
   StorageProvider,
@@ -32,6 +33,14 @@ import type {
 
 const errText = (err: unknown, fallback: string) =>
   err instanceof Error && err.message ? err.message : fallback;
+
+/** A delete's unfinished uploads it could not abort on the service: the
+ *  server's sentence, and the key and upload id the operator needs to abort
+ *  each one with their provider. */
+interface Unaborted {
+  warning: string;
+  uploads: { key: string; uploadId: string; relPath: string }[];
+}
 
 const PROVIDERS: StorageProvider[] = ["s3", "r2", "b2", "minio", "wasabi"];
 const PROVIDER_LABEL: Record<StorageProvider, string> = {
@@ -160,6 +169,8 @@ export function StorageTargetsCard() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<StorageTestResult | null>(null);
+  // What the last delete could not abort, until the operator closes it.
+  const [unaborted, setUnaborted] = useState<Unaborted | null>(null);
   const confirmDelete = useConfirm<StorageTarget>();
 
   const load = useCallback(async () => {
@@ -234,9 +245,15 @@ export function StorageTargetsCard() {
     try {
       const res = await api.storage.remove(target.id);
       toast.success(t("storage.deleted"));
-      // The server's own sentence: unfinished uploads it could not abort,
-      // which keep billing until the bucket's lifecycle rule removes them.
-      if (res?.warning) toast.warning(res.warning, { duration: 10000 });
+      // The server's own sentence -- unfinished uploads it could not abort,
+      // which keep billing until the bucket's lifecycle rule removes them --
+      // AND THE KEY AND UPLOAD ID OF EACH. Not a toast: the sentence sends the
+      // operator to their provider "using the keys and upload ids below", the
+      // target row that held them is gone, and a toast is gone in seconds. It
+      // stays on the card, copyable, until it is closed.
+      if (res?.warning || res?.unabortedUploads?.length) {
+        setUnaborted({ warning: res.warning ?? "", uploads: res.unabortedUploads ?? [] });
+      }
       confirmDelete.close();
       await load();
     } catch (err) {
@@ -258,6 +275,53 @@ export function StorageTargetsCard() {
         <p className="text-sm text-muted-foreground">{t("storage.intro")}</p>
         {!available && <p className="text-sm text-warn">{t("storage.unavailable")}</p>}
         {loadFailed && <p className="text-sm text-down">{t("storage.loadFailed")}</p>}
+        {unaborted && (
+          <div
+            role="alert"
+            data-testid="storage-unaborted"
+            className="flex flex-col gap-1.5 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm"
+          >
+            {unaborted.warning && <p>{unaborted.warning}</p>}
+            {unaborted.uploads.length > 0 && (
+              <table className="text-tiny">
+                <thead>
+                  <tr>
+                    <th className="pr-3 text-left font-medium">{t("storage.uploadKey")}</th>
+                    <th className="text-left font-medium">{t("storage.uploadId")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unaborted.uploads.map((u) => (
+                    <tr key={`${u.key}\n${u.uploadId}`}>
+                      <td className="select-all break-all pr-3 align-top font-mono">{u.key}</td>
+                      <td className="select-all break-all align-top font-mono">{u.uploadId}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <span className="flex gap-1.5">
+              {unaborted.uploads.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    copyToClipboard(
+                      t,
+                      unaborted.uploads.map((u) => `${u.key}\t${u.uploadId}`).join("\n"),
+                      `${t("storage.uploadKey")} / ${t("storage.uploadId")}`,
+                    )
+                  }
+                >
+                  {t("common.copy")}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setUnaborted(null)}>
+                {t("common.close")}
+              </Button>
+            </span>
+          </div>
+        )}
         {!loadFailed && targets.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("storage.empty")}</p>
         )}

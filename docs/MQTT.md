@@ -386,7 +386,9 @@ the old tree's state topics and its `status`; changing the **instance** also
 deletes the old Home Assistant device. Shutdown, restart and every other
 settings change delete nothing. Only topics this process published are known to
 it: a tree left by an earlier run, or by a different install, is yours to
-clear (see Troubleshooting).
+clear (see Troubleshooting). Nothing can be deleted while the broker is
+unreachable either; the log then says `the MQTT broker was not connected, so the
+retained topics this install published were left on it`, and names the tree.
 
 If you use the Mosquitto add-on, point the broker URL at
 `mqtt://homeassistant.local:1883` and use the add-on's username and password.
@@ -480,10 +482,15 @@ same save, or restart. See [Setting it up](#setting-it-up) — the `mqtt telemet
 started` log line reports the interval actually in use, as `everySeconds`.
 
 **A new source has no Home Assistant entity, but its topic is there.** Discovery
-is published only when the broker link comes up. Force a reconnect by changing
-any MQTT setting *except the publish interval* — the interval is not compared by
-the reconciler, so changing it rebuilds nothing — or restart polyemesis. See
-[Home Assistant](#home-assistant).
+is republished within a few seconds of a source, destination or storage target
+being added or removed while the broker link is up, so give it that long first.
+If it still does not appear, check that **Home Assistant discovery** is on in
+the MQTT settings, that the log shows no `could not publish Home Assistant
+discovery` warning, and that Home Assistant's MQTT integration is using the
+`homeassistant` discovery prefix. To make polyemesis announce everything again,
+toggle discovery off, save, and back on — the least invasive rebuild, which
+deletes nothing — or restart. Changing the publish interval rebuilds nothing.
+See [Home Assistant](#home-assistant).
 
 **TLS fails against a self-signed broker.** `mqtt connect failed` with a
 certificate error means verification is doing its job. Either install the

@@ -135,25 +135,49 @@ describe("StorageTargetsCard: adding and deleting", () => {
   });
 
   // #14 of the 2026-11-04 lingering-state audit: the delete always succeeds,
-  // and says which unfinished uploads it could not abort.
-  it("says when a delete could not abort the target's unfinished uploads", async () => {
+  // and says which unfinished uploads it could not abort. The sentence sends
+  // the operator to their provider "using the keys and upload ids below", so
+  // the key and upload id of each are what has to stay on screen -- not a
+  // ten-second toast of the sentence alone.
+  it("keeps the key and upload id of each upload a delete could not abort on screen, copyable", async () => {
     vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: true });
     vi.spyOn(api.storage, "remove").mockResolvedValue({
       status: "deleted",
-      warning: "1 unfinished upload could not be cancelled and will keep billing",
-      unabortedUploads: [{ key: "k/rec.mkv", uploadId: "u1", relPath: "rec.mkv" }],
+      warning: "2 unfinished uploads could not be cancelled and will keep billing",
+      unabortedUploads: [
+        { key: "recordings/2026/rec-a.mkv", uploadId: "upload-id-aaa111", relPath: "rec-a.mkv" },
+        { key: "recordings/2026/rec-b.mkv", uploadId: "upload-id-bbb222", relPath: "rec-b.mkv" },
+      ],
     });
-    const { toast } = await import("sonner");
-    const warn = vi.spyOn(toast, "warning").mockImplementation(() => "");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<StorageTargetsCard />);
     const row = await screen.findByTestId("storage-target");
     fireEvent.click(within(row).getByRole("button", { name: "Delete target" }));
     fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
-    await waitFor(() =>
-      expect(warn).toHaveBeenCalledWith("1 unfinished upload could not be cancelled and will keep billing", {
-        duration: 10000,
-      }),
+
+    const panel = await screen.findByTestId("storage-unaborted");
+    expect(panel.textContent).toContain("2 unfinished uploads could not be cancelled and will keep billing");
+    const cells = within(panel)
+      .getAllByRole("cell")
+      .map((c) => c.textContent);
+    expect(cells).toEqual([
+      "recordings/2026/rec-a.mkv",
+      "upload-id-aaa111",
+      "recordings/2026/rec-b.mkv",
+      "upload-id-bbb222",
+    ]);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(
+      "recordings/2026/rec-a.mkv\tupload-id-aaa111\nrecordings/2026/rec-b.mkv\tupload-id-bbb222",
     );
+
+    // It stays until it is closed: the reload after the delete does not clear it.
+    await waitFor(() => expect(api.storage.list).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("storage-unaborted")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("storage-unaborted")).toBeNull();
   });
 
   it("reports a failed save and keeps the dialog open", async () => {

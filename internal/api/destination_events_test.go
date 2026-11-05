@@ -170,6 +170,130 @@ func TestDeletingAProgrammeCancelsItsDestinationsEvents(t *testing.T) {
 	}
 }
 
+// A show that already aired keeps its row `upcoming` for 30 days
+// (occurrenceRetention). The delete leaves it alone, as it leaves a past
+// pre-announce marker, and says nothing about it: before, every recent show was
+// reported "left on YouTube (start time has passed)".
+func TestADestinationDeleteLeavesAShowThatAlreadyAiredAlone(t *testing.T) {
+	f := newDeleteEventsFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	upcoming := f.openEventIDs(t)
+	if len(upcoming) != 2 {
+		t.Fatalf("the look-ahead created %v, want two upcoming events", upcoming)
+	}
+	aired, err := f.store.ClaimOccurrence(scheduler.Occurrence{ScheduleID: f.schedule, DestinationID: f.dest.ID,
+		At: time.Now().Add(-2 * time.Hour), State: scheduler.OccurrencePending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ResolveOccurrence(aired, "yt-aired-1", "Last week"); err != nil {
+		t.Fatal(err)
+	}
+
+	var got deleteReply
+	decodeInto(t, send(t, f.h, f.sign, http.MethodDelete, "/api/v1/destinations/"+itoa(f.dest.ID), nil,
+		http.StatusOK), &got)
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "yt-aired-1") || strings.Contains(w, "has passed") {
+			t.Errorf("the delete reported a show that already aired: %q", w)
+		}
+	}
+	cancelled := f.fake.cancelled()
+	slices.Sort(cancelled)
+	if !slices.Equal(cancelled, upcoming) {
+		t.Errorf("the delete cancelled %v, want only the upcoming %v", cancelled, upcoming)
+	}
+}
+
+// A programme delete takes its renditions with it by CASCADE, and a public
+// playout rung naming one stops starting. The delete says so in its response,
+// where it used to be a log line under a 204. A programme that is not the
+// published one says nothing about the public page.
+func TestAProgrammeDeleteNamesThePlayoutRungsItStrands(t *testing.T) {
+	f := newDeleteEventsFixture(t)
+	src := &db.Source{Name: "Studio B", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := f.store.CreateSource(src); err != nil {
+		t.Fatal(err)
+	}
+	rend, err := f.store.CreateRendition(&db.Rendition{Name: "b-720", Width: 1280, Height: 720, FPS: 30,
+		VideoBitrate: 2500, GOPSeconds: 2, SourceID: &src.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.UpdateSettings(func(s *db.Settings) error {
+		s.Playout.Variants = []db.PlayoutVariant{{Name: "720p", Enabled: true, RenditionID: &rend.ID}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got deleteReply
+	decodeInto(t, send(t, f.h, f.sign, http.MethodDelete, "/api/v1/sources/"+itoa(src.ID),
+		map[string]any{"confirm": true, "destinations": 0}, http.StatusOK), &got)
+	joined := strings.Join(got.Warnings, "\n")
+	if !strings.Contains(joined, "1 playout rung named a rendition of the deleted programme") ||
+		!strings.Contains(joined, `"720p"`) {
+		t.Errorf("warnings %q do not name the stranded rung", got.Warnings)
+	}
+	if strings.Contains(joined, "public playout page") || strings.Contains(joined, "Public playout") {
+		t.Errorf("a programme nobody published was reported as the published one: %q", got.Warnings)
+	}
+}
+
+// The programme delete's id check, through the route. While the delete is on
+// the platform cancelling events, one of the programme's destinations is
+// deleted and another created: the count the operator confirmed is still the
+// count, and only the ids say the new destination was never confirmed. It must
+// be refused, not swept away with the programme.
+func TestAProgrammeDeleteIsRefusedWhenADestinationIsSwappedDuringIt(t *testing.T) {
+	f := newDeleteEventsFixture(t)
+	src := &db.Source{Name: "Studio B", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := f.store.CreateSource(src); err != nil {
+		t.Fatal(err)
+	}
+	acct := connectAccount(t, f.store, f.s.box, db.PlatformYouTube, "studio-b")
+	mk := func(name string) *db.Destination {
+		t.Helper()
+		d, err := f.store.CreateDestination(&db.Destination{Name: name, Kind: "rtmp", Platform: db.PlatformYouTube,
+			URL: "rtmps://live.example/rtmp", StreamKey: "k", AccountID: &acct, SourceID: &src.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	withEvents := mk("yt b")
+	other := mk("yt b2")
+	f.schedule = seedStartSchedule(t, f.store, scheduler.KindWeekly, f.now.Add(3*time.Hour), withEvents.ID)
+	f.attachTemplate(t)
+	f.sweep(t)
+
+	var swapped *db.Destination
+	f.fake.onCancel = func() {
+		if swapped != nil {
+			return
+		}
+		if err := f.store.DeleteDestination(other.ID); err != nil {
+			t.Errorf("swap: delete: %v", err)
+		}
+		swapped = mk("created mid-delete")
+	}
+	body := send(t, f.h, f.sign, http.MethodDelete, "/api/v1/sources/"+itoa(src.ID),
+		map[string]any{"confirm": true, "destinations": 2}, http.StatusConflict)
+	if !strings.Contains(string(body), "changed while it was being deleted") {
+		t.Errorf("the refusal %q does not say the destinations changed", body)
+	}
+	if swapped == nil {
+		t.Fatal("no cancel ran, so nothing was swapped: the fixture is not testing what it means to")
+	}
+	if _, err := f.store.GetSource(src.ID); err != nil {
+		t.Fatalf("the refused delete removed the programme: %v", err)
+	}
+	if _, err := f.store.GetDestination(swapped.ID); err != nil {
+		t.Fatalf("a destination nobody confirmed went with the programme: %v", err)
+	}
+}
+
 // The fallback for what the delete could not reach. A row for a destination
 // that no longer exists, on a schedule that would otherwise keep it (every
 // destination, template present), is dropped by one sweep and the platform is

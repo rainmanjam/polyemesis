@@ -307,6 +307,28 @@ func (s *Server) playoutManager() *playout.Manager {
 	return e.Playout()
 }
 
+// publishedProgrammeWarning is what a programme delete says when the public
+// playout page is published from that programme, read BEFORE the delete.
+// Empty for any other programme.
+//
+// playoutManager fails closed on the dead id it leaves, so the delete is the
+// moment to say so: the page answers 503 from then on, and the operator learns
+// it here and not from the audience. The Playout page's programme picker draws
+// itself for a dead id and offers the default, so the sentence has somewhere to
+// send them on a one-programme install too.
+func (s *Server) publishedProgrammeWarning(sourceID int64) string {
+	set, err := s.store.GetSettings()
+	if err != nil || set.Playout.SourceID == nil || *set.Playout.SourceID != sourceID {
+		return ""
+	}
+	if set.Playout.Enabled {
+		return "The public playout page was published from this programme, so it now answers " +
+			`"playout is not running". Pick another programme, or the default, on the Playout page.`
+	}
+	return "Public playout was set to publish this programme. Pick another programme, or the default, " +
+		"on the Playout page before switching playout on."
+}
+
 // playoutSettings is the stored configuration, which is authoritative for the
 // access decision even when no manager is running yet.
 func (s *Server) playoutSettings() db.PlayoutSettings {

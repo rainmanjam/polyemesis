@@ -127,7 +127,17 @@ func (s *Server) cancelDestinationEvents(ctx context.Context, ds []*db.Destinati
 			if o.State != scheduler.OccurrenceUpcoming && o.State != scheduler.OccurrenceStranded {
 				continue
 			}
+			// Covered before the time check, so a pre-announce marker for the
+			// same event is never taken up by the loop below either.
 			covered[o.PlatformEventID] = true
+			// A show that already aired is left alone, as its marker is below.
+			// Its row stays `upcoming` until the sweep ages it out, 30 days
+			// after the show (occurrenceRetention), and cancelOccurrence would
+			// only refuse it: every recent show would be reported "left on the
+			// platform", and turn a clean programme delete from 204 into 200.
+			if !o.At.After(now) {
+				continue
+			}
 			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
 				s.log.Warn("destination delete: a scheduled event was left on the platform",
 					"destination", d.Name, "event", o.PlatformEventID, "err", redactErr(err))

@@ -103,6 +103,48 @@ describe("ProgrammeCard", () => {
     expect(next.sourceId).toBe(2);
   });
 
+  /* The published programme was deleted. The server keeps the dead id and
+   * the public page answers 503; this card is the only control that writes
+   * sourceId, and on what is now a one-programme install it used to hide --
+   * leaving nothing in the console that could bring the page back. */
+  it("draws itself for a deleted published programme on a one-programme install, and recovers to the default", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProgrammeCard play={play({ sourceId: asSourceId(7) })} sources={sources(1)} busy={false} onSave={onSave} />,
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain(translate("en", "play.publishedGone"));
+    // One programme is still no choice: the picker stays hidden, the way back is the button.
+    expect(screen.queryByLabelText(translate("en", "play.programme"))).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: translate("en", "play.useDefaultProgramme") }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect((onSave.mock.calls[0][0] as PlayoutSettings).sourceId).toBeNull();
+  });
+
+  it("says the published programme is gone on a multi-source install too", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProgrammeCard play={play({ sourceId: asSourceId(7) })} sources={sources(2)} busy={false} onSave={onSave} />,
+    );
+    expect(screen.getByRole("alert").textContent).toContain(translate("en", "play.publishedGone"));
+    expect(screen.getByLabelText(translate("en", "play.programme"))).toBeTruthy();
+  });
+
+  it("claims nothing about an id it cannot check: no sources loaded, or the id is live", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(
+      <ProgrammeCard play={play({ sourceId: asSourceId(7) })} sources={[]} busy={false} onSave={onSave} />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    unmount();
+    render(
+      <ProgrammeCard play={play({ sourceId: asSourceId(1) })} sources={sources(1)} busy={false} onSave={onSave} />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByLabelText(translate("en", "play.programme"))).toBeNull();
+  });
+
   it("saves null for the default programme, not the sentinel string", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(

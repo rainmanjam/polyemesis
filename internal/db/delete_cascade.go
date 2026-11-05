@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -67,9 +68,9 @@ func (d *DB) DeleteDestinationPruned(id int64) (SchedulePrune, error) {
 	return prune, tx.Commit()
 }
 
-// ErrDestinationsChanged is a programme delete confirmed against a destination
-// count that is no longer the count: something was added or removed between
-// the confirmation and the delete. Nothing is deleted.
+// ErrDestinationsChanged is a programme delete confirmed against a set of
+// destinations that is no longer the set: something was added or removed
+// between the confirmation and the delete. Nothing is deleted.
 var ErrDestinationsChanged = errors.New("the programme's destinations changed since the delete was confirmed")
 
 // DeleteSourcePruned removes a programme. Its destinations and renditions go
@@ -79,11 +80,23 @@ var ErrDestinationsChanged = errors.New("the programme's destinations changed si
 // The ids are read INSIDE the transaction, before the delete: once the cascade
 // has run there is no query left that says which destinations were on it.
 //
-// expectDestinations, when not negative, is the count the operator confirmed.
-// It is compared inside the same transaction, so a destination created after
-// the handler read the count -- while it was cancelling platform events, which
-// can take seconds -- refuses the delete instead of being swept away unseen.
-func (d *DB) DeleteSourcePruned(id int64, expectDestinations int) (SchedulePrune, error) {
+// confirmed is the destinations the operator's delete was checked against, by
+// id. It is compared inside the same transaction, so a destination created
+// after the handler read them -- while it was cancelling platform events,
+// which can take seconds -- refuses the delete instead of being swept away
+// unseen.
+//
+// THE IDS, NOT THEIR COUNT. A count cannot see one destination deleted and
+// another created in that window: the number the operator confirmed is still
+// the number, and the new destination would go with the programme. A nil or
+// empty confirmed is a programme with no destinations, never "do not check".
+func (d *DB) DeleteSourcePruned(id int64, confirmed []int64) (SchedulePrune, error) {
+	return d.deleteSource(id, confirmed, true)
+}
+
+// deleteSource is DeleteSourcePruned, comparing the confirmed set only when
+// check is set. DeleteSource, which no operator confirmed, does not.
+func (d *DB) deleteSource(id int64, confirmed []int64, check bool) (SchedulePrune, error) {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return SchedulePrune{}, err
@@ -93,9 +106,9 @@ func (d *DB) DeleteSourcePruned(id int64, expectDestinations int) (SchedulePrune
 	if err != nil {
 		return SchedulePrune{}, err
 	}
-	if expectDestinations >= 0 && len(ids) != expectDestinations {
-		return SchedulePrune{}, fmt.Errorf("%w: it has %d, not the %d confirmed", ErrDestinationsChanged,
-			len(ids), expectDestinations)
+	if check && !sameIDs(ids, confirmed) {
+		return SchedulePrune{}, fmt.Errorf("%w: it has %d (ids %v), and the delete was confirmed for %d (ids %v)",
+			ErrDestinationsChanged, len(ids), sortedIDs(ids), len(confirmed), sortedIDs(confirmed))
 	}
 	res, err := tx.Exec(`DELETE FROM sources WHERE id = ?`, id)
 	if err != nil {
@@ -109,6 +122,18 @@ func (d *DB) DeleteSourcePruned(id int64, expectDestinations int) (SchedulePrune
 		return SchedulePrune{}, err
 	}
 	return prune, tx.Commit()
+}
+
+// sameIDs reports whether two id lists hold the same ids, in any order.
+func sameIDs(a, b []int64) bool {
+	return slices.Equal(sortedIDs(a), sortedIDs(b))
+}
+
+// sortedIDs is a sorted copy: the caller's slice is never reordered.
+func sortedIDs(ids []int64) []int64 {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return out
 }
 
 func destinationIDsOfSource(tx *sql.Tx, sourceID int64) ([]int64, error) {

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,8 +152,20 @@ func TestDeletingThePublishedProgrammeTakesThePublicPageDown(t *testing.T) {
 		t.Fatalf("before the delete the audience got %d %q, want studio-b", w.Code, w.Body.String())
 	}
 
-	send(t, h, sign, http.MethodDelete, "/api/v1/sources/"+itoa(second.ID),
-		map[string]any{"confirm": true, "destinations": 0}, http.StatusNoContent)
+	// The delete says so, at the delete: 200 with the sentence, where it used
+	// to answer a bare 204 and leave the operator to hear it from the audience.
+	var reply struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(send(t, h, sign, http.MethodDelete, "/api/v1/sources/"+itoa(second.ID),
+		map[string]any{"confirm": true, "destinations": 0}, http.StatusOK), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(reply.Warnings, func(s string) bool {
+		return strings.Contains(s, "public playout page was published from this programme")
+	}) {
+		t.Errorf("the delete's warnings %q do not say the public page was published from it", reply.Warnings)
+	}
 	mark(first.SourceID(), "studio-a")
 	w := anon()
 	if w.Code == http.StatusOK && strings.TrimSpace(w.Body.String()) == "studio-a" {

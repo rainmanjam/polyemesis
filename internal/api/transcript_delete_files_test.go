@@ -84,3 +84,76 @@ func TestDeletingATranscriptRemovesItsFiles(t *testing.T) {
 		t.Fatalf("after deleting the transcript: %v\nwant %v", got, want)
 	}
 }
+
+// Labels are reduced to a file name, so two tracks can share one: "Host" and
+// "host!" are both "-host", and a label of "track2" is the second track's own
+// fallback name. The worker already writes both tracks into that file, so
+// deleting one of them must leave it for the other.
+func TestDeletingATranscriptTrackKeepsAFileAnotherTrackShares(t *testing.T) {
+	dir := t.TempDir()
+	s, h, store := testServer(t, config.Config{DataDir: dir})
+	sign := login(t, h)
+	sub := filepath.Join(s.cfg.RecordingsDir(), transcribe.TranscriptsSubdir)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seg := func(track int) []db.TranscriptSegment {
+		return []db.TranscriptSegment{{Track: track, StartMS: 0, EndMS: 1000, Text: "words"}}
+	}
+	for _, tc := range []struct {
+		name     string
+		file     string
+		speakers [2]string
+		files    []string
+		want     []string
+	}{
+		{
+			name: "two labels, one file name", file: "rec-20240116-100000.mkv",
+			speakers: [2]string{"Host", "host!"},
+			// -track2 is track 1's own fallback file and nobody else's: it goes.
+			files: []string{"rec-20240116-100000-host.srt", "rec-20240116-100000-track2.srt"},
+			want:  []string{"rec-20240116-100000-host.srt"},
+		},
+		{
+			name: "a label that is another track's fallback", file: "rec-20240117-100000.mkv",
+			speakers: [2]string{"track2", ""},
+			files:    []string{"rec-20240117-100000-track2.srt"},
+			want:     []string{"rec-20240117-100000-track2.srt"},
+		},
+	} {
+		if err := store.UpsertRecording(&db.Recording{Filename: tc.file, StartedAt: time.Now().Add(-time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		recs, err := store.ListRecordings()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		for _, r := range recs {
+			if r.Filename == tc.file {
+				id = r.ID
+			}
+		}
+		if err := store.SaveTranscript(&db.Transcript{RecordingID: id, Tracks: []db.TranscriptTrack{
+			{Track: 0, Speaker: tc.speakers[0], Segments: seg(0)},
+			{Track: 1, Speaker: tc.speakers[1], Segments: seg(1)},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range tc.files {
+			if err := os.WriteFile(filepath.Join(sub, n), []byte("words"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		send(t, h, sign, http.MethodDelete, "/api/v1/library/recordings/"+itoa(id)+"/transcript?track=1", nil, http.StatusOK)
+		var left []string
+		for _, n := range tc.files {
+			if _, err := os.Stat(filepath.Join(sub, n)); err == nil {
+				left = append(left, n)
+			}
+		}
+		if !slices.Equal(left, tc.want) {
+			t.Errorf("%s: after deleting track 1 these remain %v, want %v", tc.name, left, tc.want)
+		}
+	}
+}

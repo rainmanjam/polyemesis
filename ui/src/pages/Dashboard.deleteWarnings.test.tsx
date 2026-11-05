@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { Dashboard } from "./Dashboard";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
+import { translate } from "@/lib/i18n";
 import type { Status } from "@/lib/types";
 
 const originalFetch = globalThis.fetch;
@@ -112,5 +113,29 @@ describe("Dashboard: deleting a destination says what it left behind", () => {
       ),
     );
     expect(vi.mocked(toast.warning).mock.calls.some((c) => c[0] === "reconcile sentence")).toBe(false);
+  });
+
+  // act() toasted the refusal and returned, and the delete then said "deleted"
+  // in green under it regardless.
+  it("does not report a refused delete as deleted", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const del = vi.spyOn(api, "deleteDestination").mockRejectedValue(new Error("the store is locked"));
+    render(
+      <MemoryRouter>
+        <LiveDataContext.Provider value={live}>
+          <Dashboard />
+        </LiveDataContext.Provider>
+      </MemoryRouter>,
+    );
+    const trigger = await screen.findByLabelText(/Weekly YouTube/, { selector: "button[aria-haspopup]" });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+    const dialog = await screen.findByRole("alertdialog").catch(() => screen.findByRole("dialog"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete/ }));
+
+    await waitFor(() => expect(del).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("the store is locked"));
+    expect(vi.mocked(toast.success).mock.calls.map((c) => c[0])).not.toContain(translate("en", "dash.destDeleted"));
   });
 });

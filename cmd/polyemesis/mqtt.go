@@ -83,8 +83,18 @@ type mqttRunner struct {
 	// does not set it. See mqttAudienceFeed.
 	audience *mqttAudienceFeed
 
+	// dial opens a broker connection: mqtt.Connect, through dialMQTT. A field
+	// so a test can hand the runner a link whose publishes it can read -- the
+	// teardown's clears, its `offline` and its retire happen only on a link
+	// that is up, and no test can bring up a real one on a port it knows will
+	// answer.
+	dial func(ctx context.Context, cfg mqtt.Config, log *slog.Logger) (mqttLink, error)
+	// teardownStep bounds each step of a teardown; zero is mqttTeardownStep.
+	// Shortened by a test that makes a step run out.
+	teardownStep time.Duration
+
 	mu     sync.Mutex
-	client *mqtt.Client
+	client mqttLink
 	cancel context.CancelFunc
 	// tel is the live connection's Telemetry, kept so a teardown can clear the
 	// retained tree it published. done closes once the telemetry loop and the
@@ -123,9 +133,29 @@ const (
 )
 
 // mqttTeardownStep bounds each step of a teardown -- waiting for the loop,
-// clearing, disconnecting -- separately, so a broker that is down costs
-// seconds, not a stuck reconcile.
+// clearing the state, removing the device, disconnecting -- separately, so a
+// broker that is down costs seconds, not a stuck reconcile.
 const mqttTeardownStep = 5 * time.Second
+
+// mqttLink is the broker connection the runner drives: *mqtt.Client, or a
+// fake in a test. Exactly what the runner and its telemetry call on it.
+type mqttLink interface {
+	mqtt.Publisher
+	Topics() *mqtt.Topics
+	Close(ctx context.Context) error
+	Retire(ctx context.Context) error
+}
+
+// dialMQTT is mqtt.Connect as a dial. The nil check is the point of it: a
+// failed Connect returns a nil *mqtt.Client, which as an mqttLink would be a
+// non-nil interface holding nil.
+func dialMQTT(ctx context.Context, cfg mqtt.Config, log *slog.Logger) (mqttLink, error) {
+	c, err := mqtt.Connect(ctx, cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
 
 // startMQTT begins watching the settings and returns a shutdown function.
 //
@@ -136,7 +166,7 @@ func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets
 	audience *mqttAudienceFeed) func(context.Context) {
 	r := &mqttRunner{
 		log: log, store: store, box: box, engines: managerEngines(eng),
-		version: version, started: time.Now(), audience: audience,
+		version: version, started: time.Now(), audience: audience, dial: dialMQTT,
 	}
 	go r.watch(ctx)
 	return r.stop
@@ -257,7 +287,11 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
 
-	client, err := mqtt.Connect(loopCtx, mqtt.Config{
+	dial := r.dial
+	if dial == nil {
+		dial = dialMQTT
+	}
+	client, err := dial(loopCtx, mqtt.Config{
 		BrokerURL:     cfg.BrokerURL,
 		Username:      cfg.Username,
 		Password:      password,
@@ -310,7 +344,7 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 // Separate from the telemetry loop because discovery is a different contract:
 // it describes the entities, it changes only when the topology does, and a
 // consumer that is not Home Assistant does not want it at all.
-func (r *mqttRunner) announceDiscovery(ctx context.Context, client *mqtt.Client, tel *mqtt.Telemetry) {
+func (r *mqttRunner) announceDiscovery(ctx context.Context, client mqttLink, tel *mqtt.Telemetry) {
 	tick := time.NewTicker(mqttSettingsPoll)
 	defer tick.Stop()
 	wasUp := false
@@ -344,6 +378,12 @@ func (r *mqttRunner) announceDiscovery(ctx context.Context, client *mqtt.Client,
 // derived from ctx: this runs on the shutdown path too, where ctx is already
 // cancelled and a clean `offline` is exactly what must still get out. A broker
 // that is unreachable is logged and the teardown goes on.
+//
+// THE DEVICE REMOVAL IS A STEP OF ITS OWN, not the tail of the state clear.
+// Clear waits for an acknowledgement per retained topic, and a slow broker can
+// spend the whole step on them; sharing that context handed ClearDiscovery one
+// already expired, and the old Home Assistant device outlived the instance
+// move it was there for.
 func (r *mqttRunner) teardown(ctx context.Context, mode teardownMode) {
 	r.mu.Lock()
 	client, cancel, tel, done := r.client, r.cancel, r.tel, r.done
@@ -356,8 +396,12 @@ func (r *mqttRunner) teardown(ctx context.Context, mode teardownMode) {
 	if client == nil {
 		return
 	}
+	bound := r.teardownStep
+	if bound <= 0 {
+		bound = mqttTeardownStep
+	}
 	step := func() (context.Context, context.CancelFunc) {
-		return context.WithTimeout(context.WithoutCancel(ctx), mqttTeardownStep)
+		return context.WithTimeout(context.WithoutCancel(ctx), bound)
 	}
 	if done != nil {
 		wctx, finish := step()
@@ -368,17 +412,28 @@ func (r *mqttRunner) teardown(ctx context.Context, mode teardownMode) {
 		}
 		finish()
 	}
-	if mode != teardownKeep && tel != nil && client.Connected() {
-		cctx, finish := step()
-		if err := tel.Clear(cctx); err != nil {
-			r.log.Warn("could not clear every retained MQTT topic", "err", err)
-		}
-		if mode == teardownRetireDevice {
-			if err := tel.ClearDiscovery(cctx); err != nil {
-				r.log.Warn("could not remove the old Home Assistant device", "err", err)
+	if mode != teardownKeep && tel != nil {
+		if client.Connected() {
+			cctx, finish := step()
+			if err := tel.Clear(cctx); err != nil {
+				r.log.Warn("could not clear every retained MQTT topic", "err", err)
 			}
+			finish()
+			if mode == teardownRetireDevice {
+				dctx, finish := step()
+				if err := tel.ClearDiscovery(dctx); err != nil {
+					r.log.Warn("could not remove the old Home Assistant device", "err", err)
+				}
+				finish()
+			}
+		} else {
+			// Nothing can be deleted over a link that is down, and the next
+			// process does not know this tree was published. Said, so the
+			// operator who switched MQTT off or moved it knows what to remove.
+			r.log.Warn("the MQTT broker was not connected, so the retained topics this install published "+
+				"were left on it; remove them with mosquitto_sub --remove-retained (see docs/MQTT.md)",
+				"topics", client.Topics().All())
 		}
-		finish()
 	}
 	closeCtx, finish := step()
 	defer finish()

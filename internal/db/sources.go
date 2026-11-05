@@ -374,7 +374,7 @@ func (d *DB) UpdateSource(s *Source) error {
 // Its destinations go by ON DELETE CASCADE, and what names them without a
 // foreign key goes with them: see DeleteSourcePruned.
 func (d *DB) DeleteSource(id int64) error {
-	_, err := d.DeleteSourcePruned(id, -1)
+	_, err := d.deleteSource(id, nil, false)
 	return err
 }
 

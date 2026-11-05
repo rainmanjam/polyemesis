@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -77,7 +76,7 @@ func enableMQTT(t *testing.T, store *db.DB, mutate func(*db.MQTTSettings)) {
 }
 
 // liveClient reads the runner's connection under its own lock.
-func liveClient(r *mqttRunner) (*mqtt.Client, string) {
+func liveClient(r *mqttRunner) (mqttLink, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.client, r.sig

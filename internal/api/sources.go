@@ -654,20 +654,35 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 				"confirm the current number.", len(dests), *req.Destinations))
 		return
 	}
+	// The ids, kept for the delete's own transaction to compare: the count above
+	// is what the operator confirmed, and these are what it was confirmed
+	// against. Never nil, though nil would read the same: "no destinations".
+	confirmed := make([]int64, 0, len(dests))
+	for _, d := range dests {
+		confirmed = append(confirmed, d.ID)
+	}
 	// The destinations' scheduled platform events first, while the rows,
 	// accounts and tokens that can cancel them still exist; the cascade below
 	// leaves nothing to cancel with. See delete_cascade.go.
 	leftovers := s.beforeDestinationsRemoved(r.Context(), dests, time.Now())
-	s.warnPlayoutVariantsOfSource(id)
+	// What public playout loses, read while the programme and its renditions
+	// still exist to be asked about, and said only once the delete has
+	// happened.
+	var playoutLeft []string
+	if msg := s.publishedProgrammeWarning(id); msg != "" {
+		playoutLeft = append(playoutLeft, msg)
+	}
+	playoutLeft = append(playoutLeft, s.warnPlayoutVariantsOfSource(id)...)
 	// Deleting a source takes its destinations and renditions with it, which
 	// the schema does by CASCADE. Its recordings survive with a NULL source_id.
 	// The destinations' ids leave schedules and rollover in the same
 	// transaction (db.DeleteSourcePruned).
-	prune, err := s.store.DeleteSourcePruned(id, *req.Destinations)
+	prune, err := s.store.DeleteSourcePruned(id, confirmed)
 	if errors.Is(err, db.ErrDestinationsChanged) {
 		writeError(w, http.StatusConflict, fmt.Sprintf(
 			"this programme's destinations changed while it was being deleted (%v); nothing was "+
-				"deleted. Read the count again and confirm the current number.", err))
+				"deleted, though any scheduled platform event already cancelled for its destinations "+
+				"stays cancelled. Read the count again and confirm the current number.", err))
 		return
 	}
 	if err != nil {
@@ -675,6 +690,7 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw := s.reconcileNow("the programme delete")
+	leftovers = append(leftovers, playoutLeft...)
 	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
 	writeMutationNoContentOrWarnings(w, rw, leftovers)
 }

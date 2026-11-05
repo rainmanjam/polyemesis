@@ -148,7 +148,7 @@ func TestDeletingAProgrammePrunesItsDestinationsFromSchedules(t *testing.T) {
 	if _, err := f.d.UpdateSchedule(sc); err != nil {
 		t.Fatal(err)
 	}
-	prune, err := f.d.DeleteSourcePruned(f.source, 2)
+	prune, err := f.d.DeleteSourcePruned(f.source, []int64{f.b, f.a})
 	if err != nil {
 		t.Fatalf("DeleteSourcePruned: %v", err)
 	}
@@ -355,18 +355,38 @@ func TestDeletingCredentialsDropsTheirPendingAuthorizations(t *testing.T) {
 	}
 }
 
-// The confirmed count is compared inside the delete's transaction, so a
-// destination added after the handler read it refuses the delete and nothing
-// goes.
+// The confirmed destinations are compared inside the delete's transaction, by
+// id, so a destination added after the handler read them refuses the delete and
+// nothing goes -- including when another was removed in the same window and the
+// count still matches.
 func TestAProgrammeDeleteRefusesWhenItsDestinationsChanged(t *testing.T) {
 	f := newCascadeFixture(t)
-	if _, err := f.d.DeleteSourcePruned(f.source, 1); !errors.Is(err, ErrDestinationsChanged) {
-		t.Fatalf("a delete confirmed for 1 destination on a programme with 2: %v, want ErrDestinationsChanged", err)
+	for _, tc := range []struct {
+		name      string
+		confirmed []int64
+	}{
+		{"one fewer", []int64{f.a}},
+		{"the same count, a different destination", []int64{f.a, f.b + 1000}},
+		{"none, on a programme that has two", nil},
+	} {
+		if _, err := f.d.DeleteSourcePruned(f.source, tc.confirmed); !errors.Is(err, ErrDestinationsChanged) {
+			t.Errorf("%s: confirmed %v on a programme with [%d %d]: %v, want ErrDestinationsChanged",
+				tc.name, tc.confirmed, f.a, f.b, err)
+		}
 	}
 	if _, err := f.d.GetSource(f.source); err != nil {
-		t.Fatalf("the refused delete removed the programme: %v", err)
+		t.Fatalf("a refused delete removed the programme: %v", err)
 	}
 	if got := f.schedule(t, f.both); len(got.DestinationIDs) != 2 {
-		t.Errorf("the refused delete pruned schedules: %v", got.DestinationIDs)
+		t.Errorf("a refused delete pruned schedules: %v", got.DestinationIDs)
+	}
+
+	// A programme with no destinations is confirmed with none, and goes.
+	empty := &Source{Name: "studio c", Ingest: DefaultSettings().Ingest, Position: 3}
+	if err := f.d.CreateSource(empty); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.DeleteSourcePruned(empty.ID, nil); err != nil {
+		t.Fatalf("deleting a programme with no destinations, confirmed with none: %v", err)
 	}
 }

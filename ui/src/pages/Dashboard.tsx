@@ -1387,11 +1387,16 @@ export function Dashboard() {
     [programme, t],
   );
 
+  /** Runs one destination control and says whether it WORKED. A caller with
+   *  something to say after it -- the delete's success toast and warnings --
+   *  says it only on true: the failure has already been toasted here, and a
+   *  green "deleted" after a red refusal reads as the delete having happened. */
   const act = useCallback(
-    async (id: DestinationId, fn: () => Promise<unknown>, label: string) => {
+    async (id: DestinationId, fn: () => Promise<unknown>, label: string): Promise<boolean> => {
       setBusyId(id);
       try {
         await fn();
+        return true;
       } catch (err) {
         // THE RED TOAST THIS EXISTS TO REPLACE. Every destination control on
         // this page is behind requireSource, so on an install whose last source
@@ -1415,9 +1420,10 @@ export function Dashboard() {
         if (isNoSource(err)) {
           const n = await readSourceCount();
           if (n !== 0) toast.error(t("dash.noEngineRunning"));
-          return;
+          return false;
         }
         toast.error(err instanceof Error ? err.message : `Could not ${label}.`);
+        return false;
       } finally {
         setBusyId(null);
       }
@@ -1444,15 +1450,21 @@ export function Dashboard() {
     // platform, a schedule it switched off -- comes back as warnings, in the
     // server's words, and is said after the success.
     let warnings: string[] = [];
-    await act(
+    const deleted = await act(
       id,
       async () => {
         warnings = mutationWarnings(await api.deleteDestination(id));
       },
       "delete the destination",
     );
-    toast.success(t("dash.destDeleted"));
-    for (const w of warnings) toast.warning(w, { duration: 15000 });
+    // Only a delete that happened is reported as one. A refused delete has had
+    // its error toasted by act; a green "deleted" under it was a lie.
+    if (deleted) {
+      toast.success(t("dash.destDeleted"));
+      for (const w of warnings) toast.warning(w, { duration: 15000 });
+    }
+    // Reloaded either way: a delete refused because the row is already gone
+    // is exactly when the list on screen is stale.
     setRefreshKey((k) => k + 1);
   };
 
