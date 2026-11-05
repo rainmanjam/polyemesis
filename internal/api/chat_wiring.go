@@ -202,15 +202,19 @@ func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
 			"reason", "chat has not started; it attaches every connected account when it does")
 		return
 	}
+	// A READ THAT FAILS CHANGES NOTHING. With the row unknown there is nothing
+	// to build from, and detaching anyway would trade a chat that may well be
+	// working for none at all over a read that may only have hiccupped. The
+	// next connect, or a restart, puts it right.
 	a, found, err := s.accountByKey(p, accountRef)
 	if err != nil {
-		s.log.Warn("chat: could not read the account just connected; its chat starts at the next restart",
+		s.log.Warn("chat: could not read the account just connected; its chat is left as it was until it is connected again or polyemesis restarts",
 			"platform", p, "err", err)
 		return
 	}
 	withCreds, err := s.platformsWithCreds()
 	if err != nil {
-		s.log.Warn("chat: could not list platform credentials; the account's chat starts at the next restart",
+		s.log.Warn("chat: could not list platform credentials; the account's chat is left as it was until it is connected again or polyemesis restarts",
 			"platform", p, "err", err)
 		return
 	}
@@ -299,8 +303,13 @@ func (s *Server) detachAccountChat(p db.Platform, accountRef string) {
 	}
 	s.chatWire.Lock()
 	defer s.chatWire.Unlock()
-	if _, found, err := s.accountByKey(p, accountRef); err == nil && found {
+	_, found, err := s.accountByKey(p, accountRef)
+	if err == nil && found {
 		return
+	}
+	if err != nil {
+		s.log.Warn("chat: could not check whether the account was connected again; ending its chat, since the disconnect went through",
+			"platform", p, "account", accountRef, "err", err)
 	}
 	s.detachChat(p, accountRef)
 }
