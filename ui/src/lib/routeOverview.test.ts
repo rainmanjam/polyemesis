@@ -78,9 +78,28 @@ describe("musicRights", () => {
     expect(musicRights({ ...base, guardedMusic: true }, MUSIC)).toBe("blocked");
   });
 
-  it("reads blocked when only the VOD mix keeps music out", () => {
-    const vod: OverviewDest = { ...base, vodBound: true, vodRouted: [1], vodGuardedMusic: true };
+  it("reads blocked when only the VOD mix keeps music out and the live mix carries none", () => {
+    // Was written with `base`, whose live mix carries the music track: it
+    // pinned "Music blocked" on a destination sending music live.
+    const vod: OverviewDest = { ...base, routed: [0], vodBound: true, vodRouted: [1], vodGuardedMusic: true };
     expect(musicRights(vod, MUSIC)).toBe("blocked");
+  });
+
+  it("reads routed, not blocked, when the VOD mix keeps music out but the live mix sends it", () => {
+    const vod: OverviewDest = { ...base, routed: [0, 1], vodBound: true, vodRouted: [1], vodGuardedMusic: true };
+    expect(musicRights(vod, MUSIC)).toBe("routed");
+  });
+
+  // The demo's Twitch (track 4 at 100%) and Kick (track 4 at 0.25) rows: the
+  // Music cell was filled and the chip said "No music routed".
+  // MUTATION: drop the `routed` branch of musicRights. Observed: FAIL, "none".
+  it("reads routed when a music track is in the live mix and nothing keeps it out", () => {
+    expect(musicRights({ ...base, routed: [0, 1] }, MUSIC)).toBe("routed");
+  });
+
+  it("reads blocked, not routed, when the live mix is guarded even with the music track ticked", () => {
+    // The role policy drops a ticked music track from a guarded mix on the server.
+    expect(musicRights({ ...base, routed: [0, 1], guardedMusic: true }, MUSIC)).toBe("blocked");
   });
 
   it("reads reachesVod even when the live mix is guarded", () => {
@@ -98,7 +117,13 @@ describe("musicRights", () => {
   });
 
   it("reads none for a live-only destination with no music on it", () => {
-    expect(musicRights(base, MUSIC)).toBe("none");
+    // `base` sends track 1, the music track, so it is not this case: the old
+    // fixture asserted "none" on a destination carrying music.
+    expect(musicRights({ ...base, routed: [0] }, MUSIC)).toBe("none");
+  });
+
+  it("reads none when no track has the music role", () => {
+    expect(musicRights(base, [])).toBe("none");
   });
 });
 

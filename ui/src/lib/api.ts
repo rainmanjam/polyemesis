@@ -1,6 +1,7 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
 import type { LevelChange, TrackLevelResult } from "@/lib/liveTrackLevel";
+import type { SaveApplied } from "@/lib/saveImpact";
 import type {
   BroadcastWindowRow,
   MetaJob,
@@ -808,8 +809,18 @@ export const api = {
    */
   createDestination: (d: Partial<Destination>) =>
     post<{ destination: Destination; warnings?: string[] }>("/destinations", d),
+  /**
+   * `applied` is how the save took effect, read back after the reconcile:
+   * "live" when the running FFmpeg kept running (a level went over its command
+   * channel, or nothing it sends changed), "restart" when this save replaced
+   * it, with `reason` saying why where it is not plain. Absent when nothing was
+   * running to apply it to, or when the reconcile failed.
+   */
   updateDestination: (id: DestinationId, d: Partial<Destination>) =>
-    put<DestinationWithRouting & { warnings?: string[] }>(`/destinations/${id}`, d),
+    put<DestinationWithRouting & { warnings?: string[]; applied?: SaveApplied; reason?: string }>(
+      `/destinations/${id}`,
+      d,
+    ),
   /** Always confirmed, because the only caller is behind the dashboard's own
    *  confirm dialog. The server asks for it only when the row carries a
    *  broadcast in testing or live -- deleting that ends the broadcast, which on
