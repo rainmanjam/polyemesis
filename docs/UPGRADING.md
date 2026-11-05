@@ -243,6 +243,92 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.14.0
+
+**Check two things before you upgrade: the first start of 0.14.0 acts on both.**
+
+- **Pre-announced events of shows no schedule will air are cancelled.** The
+  pre-announce sweep runs at start and on every tick, and it now withdraws the
+  upcoming event of each pre-announcement whose schedule was deleted, switched
+  off, turned into a stop, or no longer names the destination. On YouTube that
+  cancels the event, which cannot be undone; a Facebook event is forgotten and
+  named in the log at `WARN` for you to remove on Facebook. A destination that is
+  on the air is left alone. If a schedule you switched off under 0.13.0
+  pre-announced a show you still mean to air, switch the schedule back on before
+  you upgrade.
+- **The public playout page answers `503` if the programme it was published
+  from no longer exists.** Under 0.13.0, deleting that programme silently showed
+  viewers the default programme instead. 0.14.0 refuses to, so such a page goes
+  down at the first start. Choose a programme in Playout > Programme for viewers,
+  which offers **Use the default programme**.
+
+**A Stream Deck Routing preset key now changes the routing.** Before 0.14.0,
+holding it only compiled the preset and showed OK; nothing was saved. With this
+release's plugin (`com.polyemesis.streamdeck.streamDeckPlugin` on the release
+page) it saves the preset on the destinations of the key's programme: a change
+in levels only goes out live, and a destination whose audio graph changes
+restarts, on the air as well. A destination that copies its audio is skipped,
+and if one destination cannot take the preset, nothing is saved. The plugin from
+an earlier release still calls the compile-only route and still changes nothing.
+
+**Signing out ends the account's sessions everywhere**, on every browser and
+phone, as a password change does. API tokens, the Stream Deck, the OBS script and
+MCP clients keep working.
+
+**Scripts that call the API** see four changed answers:
+
+- `DELETE /api/v1/platforms/credentials/{platform}` answers `409` with
+  `code: "creds_in_use"` while accounts still use the app. Send
+  `{"confirm": true}` to remove it anyway.
+- `DELETE /api/v1/sources/{id}` answers `200` with `{"warnings": [...]}` instead
+  of `204` when it has something to report, so treat any `2xx` as success.
+  `DELETE /api/v1/destinations/{id}` gains the same `warnings` array.
+- `PUT /api/v1/obs` naming a programme that no longer exists answers `400` with
+  a sentence instead of a bare `404`.
+- The MCP tool `apply_routing_preset` refuses `mix: vod` on a destination that
+  has no second mix (it used to create one), and refuses a destination that
+  copies its audio.
+
+**Deletes now reach what referred to them, and say what they could not do.**
+Deleting a destination or a programme cancels the destinations' upcoming YouTube
+events made by a recurring template or a pre-announcement, which cannot be
+undone, and deleting, switching off or retargeting a schedule withdraws the
+events it pre-announced the same way. Cancelling is best effort: a Facebook
+event, a show that has started, a destination on the air, or a platform error
+leaves the event in place. Deleting the programme the public playout page is
+published from takes the page down, as above. A schedule left with no
+destinations is switched off. Deleting a recording removes its stems and
+transcript files at once. Read the `warnings` a delete answers with: they name
+what is left for you to do, such as an event to remove on Facebook, an
+unfinished upload to abort at the storage provider, or a playout rung to
+repoint.
+
+**At startup, 0.14.0 tidies leftovers**: an OBS bridge configuration's
+references to destinations that no longer exist (such a configuration could not
+be saved), recurring-broadcast templates whose schedule is gone, and the planned
+rollover settings of deleted destinations. The first recurring sweep also drops
+the events of destinations that no longer exist, with one `ERROR` line per event
+naming it, for you to remove on the platform. Read the log after the first start.
+
+**Chat follows the platform's developer credentials.** An account whose platform
+has no developer credentials stored no longer starts reading chat. If a
+platform's chat is missing after the upgrade, add its credentials in Settings →
+Platform credentials, then reconnect the account or restart polyemesis: saving
+the credentials starts no chat by itself. Rumble, which is keyed by an
+environment variable, is unaffected.
+
+**MQTT:** switching MQTT off now deletes the retained state topics it published,
+and changing the topic prefix or the instance deletes the old tree or the old
+Home Assistant device. A consumer reading those topics sees them go away rather
+than go stale. This needs the broker connected at that moment; if it is not, the
+log names the tree that was left.
+
+**Schema:** unchanged. 0.14.0 adds no tables and no columns, and the schema
+version stamped into the database is still `1`; a fresh 0.14.0 database is
+identical to a fresh 0.13.0 one (`internal/db/testdata/release-v0.14.0.db`
+against `release-v0.13.0.db`). **A 0.13.0 binary opens a 0.14.0 database.**
+Restoring the backup you took is still the rollback this page recommends.
+
 ### Upgrading to 0.13.0
 
 **Expert-mode arguments are checked again when a destination starts.** Expert

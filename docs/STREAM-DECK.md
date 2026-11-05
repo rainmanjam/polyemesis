@@ -37,9 +37,14 @@ The plugin's source, and the notes for working on it, are in
 
 ## Install
 
-No packaged plugin is published yet, so it is built from the repository. You
-need Node 24 and npm, and Elgato's Stream Deck CLI (`npm install -g
-@elgato/cli`).
+Every release since 0.12.0 attaches the packaged plugin,
+`com.polyemesis.streamdeck.streamDeckPlugin`, to its
+[GitHub release](https://github.com/rainmanjam/polyemesis/releases). Download
+the one from the release your install runs and open it; the Stream Deck app
+installs it.
+
+To build it from the repository instead, you need Node 24 and npm, and Elgato's
+Stream Deck CLI (`npm install -g @elgato/cli`).
 
 ```sh
 cd integrations/streamdeck
