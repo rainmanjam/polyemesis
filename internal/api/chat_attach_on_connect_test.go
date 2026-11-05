@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -221,7 +222,9 @@ func (f *fakeTwitchIRC) send(fc *fakeIRCConn, line string) {
 	_, _ = fc.c.Write([]byte(line + "\r\n"))
 }
 
-// open is the token of every connection still open, in the order accepted.
+// open is the token of every connection still open, in the order accepted,
+// whether or not it has joined its channel yet. A connection is listed from
+// the moment it signs in; see sayTo for why that is too early to talk to it.
 func (f *fakeTwitchIRC) open() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -241,9 +244,37 @@ func (f *fakeTwitchIRC) accepted() int {
 	return len(f.conns)
 }
 
-// say posts a chat line, as a viewer, to every open connection that has
-// joined its channel.
-func (f *fakeTwitchIRC) say(text string) {
+// joined is the token of every connection still open that has joined its
+// channel, in the order accepted: the ones a chat line can reach.
+func (f *fakeTwitchIRC) joined() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, c := range f.conns {
+		if !c.closed && c.joined != "" {
+			out = append(out, c.token)
+		}
+	}
+	return out
+}
+
+// sayTo posts a chat line, as a viewer, once the connection signed in with
+// token has joined its channel.
+//
+// THE WAIT IS THE POINT. An adapter's connection is open, and listed by open,
+// from the moment it signs in, but it sends JOIN only after the welcome, and a
+// line posted before this server has read that JOIN has no channel to go to:
+// it reaches nobody, and a test waiting for it times out. Naming the
+// connection the line is for, and waiting for that one, closes the gap for
+// every caller.
+//
+// The line still goes to EVERY joined connection, not only the named one, so a
+// second adapter left behind on the same account would get its own copy.
+func (f *fakeTwitchIRC) sayTo(t *testing.T, token, text string) {
+	t.Helper()
+	waitFor(t, "the connection signed in with "+token+" to join its channel", func() bool {
+		return slices.Contains(f.joined(), token)
+	})
 	f.mu.Lock()
 	f.sent++
 	id := f.sent
@@ -416,7 +447,7 @@ func TestConnectingAnAccountStartsItsChatAtOnce(t *testing.T) {
 		return len(st) == 1 && st[0].State == chat.StateLive
 	})
 
-	irc.say("hello from after the redirect")
+	irc.sayTo(t, "tw-at-1", "hello from after the redirect")
 	deadline := time.Now().Add(5 * time.Second)
 	for !heard(s.chat, "hello from after the redirect") {
 		if time.Now().After(deadline) {
@@ -466,8 +497,12 @@ func TestConnectingByDeviceCodeStartsItsChatAtOnce(t *testing.T) {
 // chat and counts the open connections, so the old adapter's socket must
 // actually close.
 //
-// Mutation: drop the detachChat call from attachAccountChat (attach only).
-// Observed FAIL ("the reconnect kept the adapter whose login was refused").
+// Mutations:
+//   - drop the detachChat call from attachAccountChat (attach only). Observed
+//     FAIL ("the reconnect kept the adapter whose login was refused").
+//   - make Hub.DetachWithin unlist the old runner without cancelling it, so
+//     the healthy adapter keeps its socket. Observed FAIL ("timed out waiting
+//     for exactly one open IRC connection, signed in with the newest token").
 func TestReconnectingReplacesTheAdapterRatherThanAddingOne(t *testing.T) {
 	fake := newFakeConnectPlatform(t, "tw-fresh-2", "tw-fresh-3")
 	irc := newFakeTwitchIRC(t, "tw-revoked")
@@ -507,7 +542,9 @@ func TestReconnectingReplacesTheAdapterRatherThanAddingOne(t *testing.T) {
 		open := irc.open()
 		return len(open) == 1 && open[0] == "tw-fresh-3"
 	})
-	irc.say("one copy only")
+	// Open is not yet joined: the line waits for the new connection's JOIN.
+	// Sent in that gap it went to nobody, and timed out in #992's CI.
+	irc.sayTo(t, "tw-fresh-3", "one copy only")
 	waitFor(t, "the line to arrive", func() bool { return heard(s.chat, "one copy only") })
 }
 
