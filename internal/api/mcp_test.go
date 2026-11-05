@@ -816,7 +816,8 @@ func TestAPatternInvalidPresetIsRefusedBeforeAnyRequestIsMade(t *testing.T) {
 	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
 	mux.Handle("/", rig.h)
 	cs := mcpClient(t, mux, rig.admin)
-	for _, preset := range []string{"x/../../destinations/1/expert", "-/option", "UPPER", "a b"} {
+	for _, preset := range []string{"x/../../destinations/1/expert", "-/option", "UPPER", "a b",
+		"platform:", "a:b:c", "platform:../x", ":youtube"} {
 		text, isErr := callText(t, cs, "apply_routing_preset", map[string]any{"destinationId": 1, "preset": preset})
 		if !isErr || !strings.Contains(text, "invalid arguments") {
 			t.Errorf("preset %q answered (isError=%v): %s", preset, isErr, text)
@@ -1094,6 +1095,61 @@ func TestApplyRoutingPresetGoesThroughTheApplyRouteAndKeepsTheGuard(t *testing.T
 	}
 	if after, _ := rig.store.GetDestination(1); after.VODProfile != nil {
 		t.Fatal("the tool created a second mix the destination did not have")
+	}
+}
+
+// Saved but not reconciled: the answer says so with reconcileFailed and the
+// warning, and so does the audit, rather than the dispatch's "done (200)".
+//
+// MUTATION: drop the c.outcome line in runApplyPreset's reconcileFailed branch.
+// Observed: FAIL, the audit said "done (200)".
+func TestApplyRoutingPresetSaysAndAuditsAReconcileThatFailed(t *testing.T) {
+	rig := newMCPRig(t)
+	presetReconcile = func(*Server) string {
+		return "the routing preset was saved, but the running pipeline could not be updated"
+	}
+	t.Cleanup(func() { presetReconcile = func(s *Server) string { return s.reconcileNow("the routing preset") } })
+	text, isErr := callText(t, mcpClient(t, rig.h, rig.admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": routing.PresetEverything, "confirm": true})
+	if isErr || !strings.Contains(text, `"reconcileFailed":true`) || !strings.Contains(text, "could not be updated") {
+		t.Fatalf("a saved but unreconciled preset answered (isError=%v): %s", isErr, text)
+	}
+	evs := rig.mcpEvents()
+	if len(evs) != 1 || !strings.Contains(fieldOf(evs[0], fieldMCPOutcome), "reconcile failed") {
+		t.Fatalf("the audit does not say the reconcile failed: %+v", evs)
+	}
+}
+
+// The preview's wouldRestart covers the second mix: it is compiled into the same
+// FFmpeg graph (routing.CompilePair), so a structural change to it restarts a
+// running destination as one to the live mix does. On a destination that is
+// really running.
+//
+// MUTATION: put back `field == "profile" &&` in wouldRestart. Observed: FAIL,
+// wouldRestart false for a VOD loudness stage on a running destination.
+func TestApplyRoutingPresetPreviewsAVODRestartOnARunningDestination(t *testing.T) {
+	h, store, sign := runningDestServer(t)
+	if _, err := store.PutMCPAccess(true, db.MCPLevels()); err != nil {
+		t.Fatal(err)
+	}
+	d, err := store.GetDestination(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vod := routing.Profile{Mode: routing.ModeSimple, Normalize: routing.NormOff, SampleRate: 48000,
+		Tracks: []routing.TrackSel{{Track: 0, Enabled: true, Gain: 1}}}
+	d.VODProfile = &vod
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatal(err)
+	}
+	admin := createScopedToken(t, h, sign, "assistant-admin", db.ScopeMCPAdmin)
+	text, isErr := callText(t, mcpClient(t, h, admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": loudnessPreset(t), "mix": "vod"})
+	if !isErr || !strings.HasPrefix(text, "Not done:") {
+		t.Fatalf("the preview answered (isError=%v): %s", isErr, text)
+	}
+	if !strings.Contains(text, `"running":true`) || !strings.Contains(text, `"wouldRestart":true`) || !strings.Contains(text, "restarts it") {
+		t.Fatalf("a structural VOD change on a running destination was not previewed as a restart: %s", text)
 	}
 }
 

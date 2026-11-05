@@ -174,8 +174,11 @@ These follow from the lingering-state fixes below and are visible on purpose.
   a destination with no second mix is refused with `mix: vod`. Before, the tool
   created a second mix there. A destination that copies its audio is refused
   too. The preview's `wouldRestart` now covers a change to the second mix, which
-  restarts a running destination as a live-mix change does. See
-  [docs/MCP.md](docs/MCP.md).
+  restarts a running destination as a live-mix change does. A row the server
+  did not save is a failed call, and a reconcile that failed is audited as one.
+  The tool also accepts platform preset ids such as `platform:youtube`, which
+  its argument check used to refuse even though `list_routing_presets` lists
+  them. See [docs/MCP.md](docs/MCP.md).
 
 - **Routing Overview shows music that is routed live.** The Music rights column
   used to say "No music routed" beside a filled Music cell. In the 2026-11-04

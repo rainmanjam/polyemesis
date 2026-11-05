@@ -436,7 +436,11 @@ func checkText(name, v string, min, max int) error {
 
 var platformName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
-var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+// presetName admits one "prefix:name" pair because every platform preset's id is
+// one ("platform:youtube", routing.PlatformPresetID): without it the tool
+// refused, as not "an id from list_routing_presets", ids that tool lists. A
+// colon is not a path separator, and the allowlist check still follows.
+var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,31})?$`)
 
 func mcpDestPath(id int64, suffix string) string {
 	return "/destinations/" + strconv.FormatInt(id, 10) + suffix
@@ -1648,8 +1652,10 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 		out["warnings"] = w
 	}
 	if failed, _ := pick(res, "reconcileFailed")["reconcileFailed"].(bool); failed {
-		// Stored, and the running pipeline was not updated to match it.
+		// Stored, and the running pipeline was not updated to match it: the
+		// audit says so too, rather than call()'s "done (200)".
 		out["reconcileFailed"] = true
+		c.outcome = "saved, but the running pipeline was not updated (reconcile failed)"
 	}
 	return c.result(out, false)
 }
