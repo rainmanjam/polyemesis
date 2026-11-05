@@ -857,10 +857,50 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 			// a disconnect between its write and its read-back failed the
 			// connect with a bare "not found".
 			//
+			// EVERY ROUND RACES BY CONSTRUCTION, not by luck. The loop alone
+			// could miss: on CI the connect once finished before the loop had
+			// a turn, and the round raced nothing. So the connect also starts
+			// a real disconnect itself, from inside its attach (whileChatAttach,
+			// under chatWire, after it has re-read the row). That disconnect
+			// is in flight while the connect is, and it removes the row after
+			// the connect has read it, so the attach it races is the one that
+			// matters. If the row is already gone by then, a loop disconnect
+			// removed it between the connect's write and that point, which is
+			// a race too. Either way the round has raced before the connect
+			// returns, whatever the scheduler does.
+			//
 			// Mutation: make detachAccountChat a no-op. Observed FAIL ("the
 			// account is gone and its chat is still attached").
 			t.Run("racing for real", func(t *testing.T) {
 				s, h, store, sign := connected(t)
+
+				// disconnect is a real disconnect through the router, safe off
+				// the test goroutine. 404 is another disconnect getting there
+				// first, which is the point of the race.
+				disconnect := func(id int64) error {
+					r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", id), nil)
+					sign(r)
+					w := httptest.NewRecorder()
+					h.ServeHTTP(w, r)
+					if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
+						return fmt.Errorf("disconnect: status %d, body %s", w.Code, w.Body.String())
+					}
+					return nil
+				}
+				// rowID is the account's id, or zero when it is gone.
+				rowID := func() (int64, error) {
+					accts, err := store.ListPlatformAccounts()
+					if err != nil {
+						return 0, err
+					}
+					for _, a := range accts {
+						if a.Platform == p && a.AccountRef == ref {
+							return a.ID, nil
+						}
+					}
+					return 0, nil
+				}
+
 				for round := range 20 {
 					if accountID(t, store, p, ref) == 0 {
 						connect(t, h, sign, store, fmt.Sprintf("state-restore-%d", round))
@@ -870,8 +910,35 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 						finished   atomic.Bool
 						connectErr error
 						deleteErr  atomic.Value
-						deletes    atomic.Int64
+						attaches   atomic.Int32
+						raced      atomic.Bool
 					)
+
+					// Armed for this round's connect only, after the restore
+					// above and before the goroutines start; cleared once they
+					// have all finished.
+					s.whileChatAttach = func() {
+						attaches.Add(1)
+						id, err := rowID()
+						if err != nil {
+							deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
+							return
+						}
+						raced.Store(true)
+						if id == 0 {
+							return // a loop disconnect already got between the write and here
+						}
+						// The connect goroutine is still counted, so this Add
+						// cannot race the Wait below.
+						wg.Add(1)
+						go func() {
+							defer wg.Done()
+							if err := disconnect(id); err != nil {
+								deleteErr.Store(err.Error())
+							}
+						}()
+					}
+
 					start := make(chan struct{})
 					wg.Add(2)
 					go func() {
@@ -884,39 +951,37 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 						defer wg.Done()
 						<-start
 						for !finished.Load() {
-							accts, err := store.ListPlatformAccounts()
+							id, err := rowID()
 							if err != nil {
 								deleteErr.Store(fmt.Sprintf("list accounts: %v", err))
 								return
 							}
-							for _, a := range accts {
-								if a.Platform != p || a.AccountRef != ref {
-									continue
-								}
-								r := jsonRequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/platforms/accounts/%d", a.ID), nil)
-								sign(r)
-								w := httptest.NewRecorder()
-								h.ServeHTTP(w, r)
-								// 404 is this loop's previous pass, or the
-								// connect's own re-created row already gone.
-								if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
-									deleteErr.Store(fmt.Sprintf("disconnect: status %d, body %s", w.Code, w.Body.String()))
-									return
-								}
-								deletes.Add(1)
+							if id == 0 {
+								continue
+							}
+							if err := disconnect(id); err != nil {
+								deleteErr.Store(err.Error())
+								return
 							}
 						}
 					}()
 					close(start)
 					wg.Wait()
+					s.whileChatAttach = nil
+
 					if connectErr != nil {
 						t.Fatalf("round %d: connect: %v", round, connectErr)
 					}
 					if e := deleteErr.Load(); e != nil {
 						t.Fatalf("round %d: %s", round, e)
 					}
-					if deletes.Load() == 0 {
-						t.Fatalf("round %d: no disconnect ran during the connect, so the round raced nothing", round)
+					// Invariants, not hopes: the connect reached its attach
+					// exactly once, and so the round raced a disconnect.
+					if n := attaches.Load(); n != 1 {
+						t.Fatalf("round %d: the connect reached its attach %d times, want exactly 1", round, n)
+					}
+					if !raced.Load() {
+						t.Fatalf("round %d: the connect returned without racing a disconnect", round)
 					}
 					agrees(t, s, store, fmt.Sprintf("round %d", round))
 				}
