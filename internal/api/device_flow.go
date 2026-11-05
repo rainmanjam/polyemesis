@@ -411,6 +411,9 @@ func (s *Server) handlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.devices.forget(req.Handle)
+	// Its chat starts now, exactly as after the code flow. See
+	// attachAccountChat.
+	s.attachAccountChat(saved.Platform, saved.AccountRef)
 	s.log.Info("platform account connected by device flow",
 		"platform", flow.platform, "account", acct.Name)
 	writeJSON(w, http.StatusOK, devicePollView{State: deviceConnected, Account: saved})

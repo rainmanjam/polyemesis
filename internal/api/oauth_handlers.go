@@ -684,6 +684,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		s.oauthDone(w, r, "", err.Error())
 		return
 	}
+	// Its chat starts now, or restarts on a reconnect, rather than at the next
+	// restart. Before the redirect, so the Dashboard the operator lands on
+	// already has the chip. See attachAccountChat.
+	s.attachAccountChat(saved.Platform, saved.AccountRef)
 
 	s.log.Info("platform account connected", "platform", platform, "account", acct.Name)
 	s.oauthWarn(w, r, fmt.Sprintf("Connected %s as %s", platform, saved.AccountName),
