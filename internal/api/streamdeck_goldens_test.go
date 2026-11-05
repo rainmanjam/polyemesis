@@ -249,9 +249,10 @@ const deckOffGain = 0.5
 // and the answer says so for it. The running destination held what the preset
 // builds already, so it kept its process.
 //
-// MUTATION: point the plugin back at POST /routing/presets/{presetId} (the
-// compile route) in api.ts and apiContract.json. Observed: FAIL, nothing stored
-// and the answer carries no results.
+// MUTATION: record this case against POST /routing/presets/{presetId}, the
+// compile route the key used to send. Observed: FAIL, "the off destination's
+// track 0 is still at 0.5: the routing did not change".
+// MUTATION: skip UpdateDestination in writePresetPlans. Observed: FAIL, the same.
 func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
 	t.Helper()
 	if g.Status != http.StatusOK {
