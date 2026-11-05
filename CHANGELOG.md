@@ -34,6 +34,17 @@ its first tagged release.
     and see it at the sink, kill the sink and see the key show **Failed** with its reason, retry from
     the key, stop it. It skips when a pull request cannot reach the plugin or the server.
     `./scripts/streamdeck-e2e.sh` runs it locally.
+### Fixed
+
+- **A disconnected account leaves the chat pane at once.** Disconnecting an account, or removing a
+  platform's developer credentials in Settings → Platform credentials, left that platform's chat
+  running until the next restart: the Dashboard's chat card went on showing its chip ("Connected
+  and waiting") and Settings showed nothing connected. A Facebook page with no live video never
+  noticed, because it never asked for its token. Disconnecting an account now ends that account's
+  chat immediately, and removing credentials ends the chat of every account on that platform (Rumble,
+  which is keyed by an environment variable, is untouched). A restart agrees: an account whose
+  platform has no developer credentials stored no longer starts reading chat. A newly connected
+  account still starts reading chat at the next restart.
 
 ## [0.13.0] — 2026-11-04
 
