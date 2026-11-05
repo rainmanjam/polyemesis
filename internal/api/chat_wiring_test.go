@@ -220,6 +220,15 @@ func TestStartChatSkipsAPlatformItCannotBuildWithoutLosingTheOthers(t *testing.T
 	// Twitch builds from an account name alone. Kick cannot, because
 	// connectAccount stores a slug ref rather than the numeric broadcaster id —
 	// which is exactly the shape of a row written by an older build.
+	//
+	// Both have developer credentials stored, because StartChat skips an
+	// account whose platform has none (see platformsWithCreds): without them
+	// this would attach nothing and the Kick skip would go unexercised.
+	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformKick} {
+		if err := store.PutPlatformCreds(s.box, p, string(p)+"-app", string(p)+"-secret"); err != nil {
+			t.Fatalf("store %s credentials: %v", p, err)
+		}
+	}
 	connectAccount(t, store, s.box, db.PlatformTwitch, "dj")
 	connectAccount(t, store, s.box, db.PlatformKick, "kicker")
 

@@ -4,11 +4,19 @@ package api
 //
 // internal/chat knows how to talk to four platforms and internal/api knows how
 // to answer questions about them; this file is the only place that knows which
-// accounts exist. It runs once at startup and again whenever the operator
-// connects or disconnects an account, and it is deliberately total: every
-// account that cannot produce an adapter contributes a named reason rather than
-// an aborted pass, because one misconfigured platform must not cost the
-// operator the other three.
+// accounts exist. StartChat runs once, at startup, and it is deliberately
+// total: every account that cannot produce an adapter contributes a named
+// reason rather than an aborted pass, because one misconfigured platform must
+// not cost the operator the other three.
+//
+// REMOVAL IS LIVE, CONNECTION IS NOT. Disconnecting an account or removing a
+// platform's developer credentials ends the matching chat at once (see
+// detachAccountChat and detachPlatformChat), because a chat the operator has
+// just taken away and can still see is the worse of the two failures: the
+// Dashboard went on drawing a FACEBOOK chip reading "Connected and waiting"
+// over an install with no Facebook account, credentials or destination left.
+// A newly connected account still starts reading chat at the next restart;
+// nothing attaches one mid-process yet.
 //
 // Adapters are attached as soon as an account exists rather than when a
 // broadcast starts. That is on purpose. Twitch IRC and Kick's webhook work
@@ -85,9 +93,23 @@ func (s *Server) StartChat(ctx context.Context) int {
 		s.log.Warn("chat: could not list connected accounts", "err", err)
 		return 0
 	}
+	withCreds, err := s.platformsWithCreds()
+	if err != nil {
+		s.log.Warn("chat: could not list platform credentials", "err", err)
+		return 0
+	}
 
 	attached := 0
 	for _, a := range accts {
+		// THE SAME RULE detachPlatformChat applies live. Removing a platform's
+		// developer credentials ends its chat and leaves its account rows in
+		// place, so a startup that attached every account regardless would put
+		// back, on the next restart, the very chat the removal took away.
+		if !withCreds[a.Platform] {
+			s.log.Info("chat: not connecting a platform", "platform", a.Platform, "account", a.AccountName,
+				"reason", "no developer credentials are stored for it; add them in Settings → Platform credentials")
+			continue
+		}
 		adapter, err := s.chatAdapter(ctx, a)
 		if err != nil {
 			// Info, not Warn: "you have not gone live yet" and "this platform
@@ -109,6 +131,96 @@ func (s *Server) StartChat(ctx context.Context) int {
 		attached++
 	}
 	return attached
+}
+
+// platformsWithCreds is the set of platforms that have a developer app stored.
+// Read through ListPlatformCreds, which decrypts nothing: the question is
+// whether a row exists, and a secret that fails to open is the refresh path's
+// problem to report, not a reason to skip chat here.
+func (s *Server) platformsWithCreds() (map[db.Platform]bool, error) {
+	creds, err := s.store.ListPlatformCreds()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[db.Platform]bool, len(creds))
+	for _, c := range creds {
+		out[c.Platform] = true
+	}
+	return out, nil
+}
+
+// accountChatKey is the (platform, account_ref) the Hub knows one account by.
+//
+// Read through ListPlatformAccounts rather than GetPlatformAccount because the
+// latter decrypts the tokens, and a token that will not open is no reason to
+// refuse a disconnect -- it is a reason to want one. An id with no row is
+// db.ErrNotFound, the answer DeletePlatformAccount would have given.
+func (s *Server) accountChatKey(id int64) (db.Platform, string, error) {
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return "", "", err
+	}
+	for _, a := range accts {
+		if a.ID == id {
+			return a.Platform, a.AccountRef, nil
+		}
+	}
+	return "", "", db.ErrNotFound
+}
+
+// detachAccountChat ends the chat of an account that has just been
+// disconnected. The Hub keys adapters by (platform, account_ref), which
+// platform_accounts holds UNIQUE, so this ends exactly that account's chat and
+// no other.
+//
+// Without it the adapter outlived its row. A Facebook adapter with no live
+// video never calls its token, so it never noticed; it went on reporting
+// "waiting for a broadcast", and the Dashboard went on drawing its chip, until
+// the process restarted.
+func (s *Server) detachAccountChat(p db.Platform, accountRef string) {
+	if s.chat == nil {
+		return
+	}
+	s.detachChat(p, accountRef)
+}
+
+// chatDetachWait bounds how long a delete handler waits for an adapter to
+// return after it is cancelled. Every adapter honours its context, so this is
+// normally milliseconds; the bound is for the one that does not, which would
+// otherwise hold the operator's request open with the delete already done.
+const chatDetachWait = 5 * time.Second
+
+// detachChat is the one place the delete handlers end a chat: unlisted and
+// cancelled at once, with the wait bounded (see chat.Hub.DetachWithin).
+func (s *Server) detachChat(p db.Platform, account string) {
+	if !s.chat.DetachWithin(p, account, chatDetachWait) {
+		s.log.Warn("chat adapter is slow to stop; it is detached and will finish in the background",
+			"platform", p, "account", account, "waited", chatDetachWait)
+	}
+}
+
+// detachPlatformChat ends every chat on a platform whose developer credentials
+// have just been removed.
+//
+// Every token on the platform was issued to the app being removed, and none of
+// them can be refreshed without it -- YouTube's reads are already refused the
+// moment its client goes (ytQuotaShared.Unbind). Leaving the chat attached
+// would keep the platform on the Dashboard until a token expired, and then show
+// it failing for a reason the operator chose. StartChat applies the same rule
+// at startup, so a restart agrees with this.
+//
+// RUMBLE IS EXEMPT. Its chat hangs off an environment variable rather than an
+// app or an account (see attachRumble), so no credentials route has any claim
+// on it, and a DELETE that names it -- which deletes nothing -- must not end it.
+func (s *Server) detachPlatformChat(p db.Platform) {
+	if s.chat == nil || p == db.PlatformRumble {
+		return
+	}
+	for _, st := range s.chat.Statuses() {
+		if st.Platform == p {
+			s.detachChat(st.Platform, st.Account)
+		}
+	}
 }
 
 // attachRumble connects Rumble chat when a key is present in the environment,
@@ -212,11 +324,12 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// carries: a Client-Id, the channel's numeric id, and a token that is
 		// still fresh an hour after connect.
 		//
-		// Missing developer credentials are NOT an error here. Chat itself
-		// works without them -- IRC has the token it needs -- and refusing to
-		// open the pane because a moderation call might one day fail would
-		// trade a working feature for one that is not being used yet. Delete
-		// says so plainly if it is ever called.
+		// StartChat has already checked that a credentials ROW exists; this
+		// reads it for the client id. A read that still fails here -- a secret
+		// that will not open -- is NOT an error: IRC has the token it needs,
+		// and refusing to open the pane because a moderation call might one
+		// day fail would trade a working feature for one that is not being
+		// used yet. Delete says so plainly if it is ever called.
 		var clientID string
 		if creds, cerr := s.store.GetPlatformCreds(s.box, db.PlatformTwitch); cerr == nil {
 			clientID = creds.ClientID
