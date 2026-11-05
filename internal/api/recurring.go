@@ -115,7 +115,11 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 		tplByID[t.ScheduleID] = t
 	}
 
-	s.reconcileOccurrences(ctx, now, schedByID, tplByID)
+	liveDest := make(map[int64]bool, len(dests))
+	for _, d := range dests {
+		liveDest[d.ID] = true
+	}
+	s.reconcileOccurrences(ctx, now, schedByID, tplByID, liveDest)
 
 	for _, tpl := range tpls {
 		sc, ok := schedByID[tpl.ScheduleID]
@@ -465,8 +469,13 @@ func (s *Server) pointGoLiveAt(d *db.Destination, sc scheduler.Schedule, at time
 // reconcileOccurrences cancels the platform events of occurrences whose template or schedule is gone,
 // releases abandoned claims, and prunes the rows of occurrences long past. An event that cannot be
 // cancelled keeps its row, so the next sweep tries again.
+//
+// liveDest is the set of destinations that exist. A row for one that does not is withdrawn like any
+// other orphan: the destination delete cancels its events while it still can (cancelDestinationEvents),
+// so what reaches here is a create that finished after the delete, or an event the delete was refused.
+// Nil means the set is unknown and no row is judged on it.
 func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
-	schedByID map[int64]scheduler.Schedule, tplByID map[int64]scheduler.BroadcastTemplate) {
+	schedByID map[int64]scheduler.Schedule, tplByID map[int64]scheduler.BroadcastTemplate, liveDest map[int64]bool) {
 	open, err := s.store.ListOpenOccurrences()
 	if err != nil {
 		s.log.Warn("recurring: cannot read occurrences", "err", redactErr(err))
@@ -495,8 +504,9 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 		// look-ahead was lowered below it. docs/RECURRING-EVENTS.md tells the operator to switch the schedule off
 		// to stop a show, and before this every event already created stayed up, announcing shows that would
 		// never run. cancelOccurrence keeps its own refusals: a show that has started, or a destination on air.
+		destGone := liveDest != nil && !liveDest[o.DestinationID]
 		withdrawn := !schedOK || !tplOK || !sc.Enabled || sc.Action != scheduler.ActionStart ||
-			!scheduleTargets(sc, o.DestinationID) || beyond[o.ID]
+			!scheduleTargets(sc, o.DestinationID) || beyond[o.ID] || destGone
 		if withdrawn {
 			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
 				if errors.Is(err, errDestinationDelivering) {
@@ -504,6 +514,15 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 					// next pass tries again, which cancels the event once the destination stops.
 					s.log.Warn("recurring: an orphaned event's destination is live, so the event is kept and will be "+
 						"retried after the destination stops", "schedule", o.ScheduleID, "event", o.PlatformEventID)
+					continue
+				}
+				if errors.Is(err, errDestinationGone) {
+					// Nothing can reach this event any more: the row names a destination and no account.
+					// Retrying cannot change that, so the row goes, once, and the event is named loudly.
+					s.log.Error("recurring: an event's destination was deleted before the event could be "+
+						"cancelled, so it was left on the platform; remove it in the platform's own studio",
+						"schedule", o.ScheduleID, "event", o.PlatformEventID)
+					_ = s.store.DeleteOccurrence(o.ID)
 					continue
 				}
 				if errors.Is(err, oauth.ErrScheduledNotCancellable) {
@@ -578,6 +597,17 @@ func (s *Server) releaseOpenOccurrence(ctx context.Context, o scheduler.Occurren
 	if err == nil {
 		return
 	}
+	// Its destination was deleted: no retry can reach the account, so waiting for the show to pass
+	// only keeps a row nothing can act on.
+	if errors.Is(err, errDestinationGone) {
+		if derr := s.store.DeleteOccurrence(o.ID); derr != nil {
+			s.log.Warn("recurring: cannot drop a stranded record whose destination is gone",
+				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(derr))
+		}
+		s.log.Error("recurring: a stranded event's destination was deleted, so the event was left on the "+
+			"platform; remove it in the platform's own studio", "schedule", o.ScheduleID, "event", o.PlatformEventID)
+		return
+	}
 	// The retry is bounded by the show's own time. Until the show passes, a refused cancel is retried (a
 	// transient failure clears, and a show the operator started is refused every pass). Once it has passed,
 	// the record is dropped and the event is named for removal in the platform's studio: a refusal that never
@@ -641,6 +671,10 @@ func occurrenceCancelRefusal(o scheduler.Occurrence, now time.Time, delivering b
 	return nil
 }
 
+// errDestinationGone is the reason an event cannot be cancelled once its destination row is deleted:
+// the occurrence names a destination, not an account, so there is no token left to cancel with.
+var errDestinationGone = errors.New("the destination for this show no longer exists")
+
 // errDestinationDelivering is the reason an event is refused while its destination is live. Unlike a passed
 // start, it is temporary: the event is kept, so the sweep cancels it once the destination stops.
 var errDestinationDelivering = errors.New("its destination is delivering, so the event may be bound to the live broadcast")
@@ -654,10 +688,16 @@ func (s *Server) destinationLive(destinationID int64) bool {
 }
 
 // cancelOccurrence deletes one occurrence's platform event, clears the destination's mirror if it
-// named that event, and then either keeps the row as skipped or removes it. A destination that no
-// longer exists cannot be reached for its account, so the event is named in the error and its row is
-// kept: the operator removes the event on the platform, and the row is the only thing that still knows
-// it exists.
+// named that event, and then either keeps the row as skipped or removes it.
+//
+// A destination that no longer exists cannot be reached for its account, so the event cannot be
+// cancelled from here at all. That error wraps errDestinationGone and oauth.ErrScheduledNotCancellable,
+// so the sweep drops the row ONCE and names the event, rather than retrying a call that can never
+// succeed every five minutes until the row ages out. The destination delete cancels the events while
+// it still can (cancelDestinationEvents); only what that could not reach arrives here.
+//
+// Only a destination that is GONE is final. Any other failure to read it is returned as it is, and
+// the row is retried.
 func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, removeRow bool, now time.Time) error {
 	// A show that has already started or aired, or whose destination is live, is not deleted from here: the
 	// platform page is a record of it, and removing it is the operator's choice on the platform. Only the
@@ -667,9 +707,12 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 			return err
 		}
 		d, err := s.store.GetDestination(o.DestinationID)
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: %w: its event %s cannot be removed from here; delete it in the "+
+				"platform's own studio", oauth.ErrScheduledNotCancellable, errDestinationGone, o.PlatformEventID)
+		}
 		if err != nil {
-			return fmt.Errorf("the destination for this show no longer exists, so its event %s cannot be "+
-				"removed from here; delete it in the platform's own studio: %w", o.PlatformEventID, err)
+			return fmt.Errorf("cannot read the destination for event %s: %w", o.PlatformEventID, err)
 		}
 		// The operator's skip checked Enabled before it got here, and the scheduler can switch the destination on
 		// in between to take this very show live. The row just read is the latest word, so the skip is refused again

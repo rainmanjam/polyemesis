@@ -121,6 +121,9 @@ func (s *Server) handlePutOBS(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &cfg) {
 		return
 	}
+	// One writer of the stored document at a time; see pruneOBSReferences.
+	s.obsDocMu.Lock()
+	defer s.obsDocMu.Unlock()
 	// Output only. Stored as false and filled in on the way out, so a PUT that
 	// echoes a GET cannot claim a password exists.
 	cfg.HasPassword = false
@@ -178,7 +181,11 @@ func (s *Server) obsDestinationProblems(cfg obsbridge.Config) ([]string, error) 
 	var probs []string
 	if cfg.SourceID != nil {
 		if _, err := s.store.GetSource(*cfg.SourceID); err != nil {
-			if errors.Is(err, db.ErrNotFound) {
+			// ErrSourceNotFound, which is what GetSource returns. Testing
+			// db.ErrNotFound here never matched, so a dead programme fell
+			// through to writeStoreError and came back as a bare 404 "source
+			// not found" instead of this sentence.
+			if errors.Is(err, db.ErrSourceNotFound) {
 				return []string{fmt.Sprintf("programme %d does not exist", *cfg.SourceID)}, nil
 			}
 			return nil, err
@@ -525,4 +532,135 @@ func levelsOnly(cur, next routing.Profile, src routing.Source) bool {
 	}
 	return a.OutLabel == b.OutLabel && a.SecondOutLabel == b.SecondOutLabel &&
 		ffmpeg.MaskLiveVolumes(a.FilterComplex) == ffmpeg.MaskLiveVolumes(b.FilterComplex)
+}
+
+// pruneOBSReferences removes deleted destinations and a deleted programme from
+// the stored OBS bridge document.
+//
+// THE DOCUMENT IS OPAQUE TO THE STORE, so no foreign key or cascade reaches
+// into it. Before this a deleted destination stayed in it for ever, and
+// because handlePutOBS re-validates the whole document on every save, the next
+// save -- of anything on the page -- was refused with "destination N does not
+// exist". The console has no control for a dead id (its checkboxes list only
+// live destinations), so the only way out was the programme picker, which
+// clears every scene rule, and on a single-programme install that picker is
+// not even drawn.
+//
+// The rules, each chosen so the prune never widens what the bridge reaches:
+//
+//   - A dead destination leaves the bridge's list.
+//   - A scene rule that narrowed itself to some destinations loses the dead
+//     ones, and keeps the rest. A rule left naming NOTHING is removed whole:
+//     an empty list means "all of the bridge's destinations", so leaving it
+//     would silently turn a rule aimed at the deleted destination into one
+//     that drives every destination.
+//   - A dead programme clears the programme, the list and the rules, which is
+//     what the console's own programme switch does.
+//
+// Parameterless and idempotent, so it is safe from both delete handlers and
+// from boot, where it heals an install that is already stuck. It writes, and
+// reloads the bridge, only when something changed. Failures are logged and
+// never fail the delete that called it.
+func (s *Server) pruneOBSReferences() {
+	s.obsDocMu.Lock()
+	defer s.obsDocMu.Unlock()
+	cfg, err := loadOBSConfig(s.store)
+	if err != nil {
+		s.log.Warn("OBS bridge: cannot read the configuration to remove deleted destinations from it", "err", err)
+		return
+	}
+	dests, err := s.store.ListDestinations()
+	if err != nil {
+		s.log.Warn("OBS bridge: cannot list destinations to prune its configuration", "err", err)
+		return
+	}
+	sources, err := s.store.ListSources()
+	if err != nil {
+		s.log.Warn("OBS bridge: cannot list programmes to prune its configuration", "err", err)
+		return
+	}
+	liveDest := make(map[int64]bool, len(dests))
+	for _, d := range dests {
+		liveDest[d.ID] = true
+	}
+	liveSource := make(map[int64]bool, len(sources))
+	for _, src := range sources {
+		liveSource[src.ID] = true
+	}
+	pruned, report, changed := pruneOBSConfig(cfg, liveDest, liveSource)
+	if !changed {
+		return
+	}
+	doc, err := json.Marshal(pruned)
+	if err != nil {
+		s.log.Warn("OBS bridge: cannot encode the pruned configuration", "err", err)
+		return
+	}
+	if err := s.store.PutOBSConfig(doc); err != nil {
+		s.log.Warn("OBS bridge: cannot store the pruned configuration", "err", err)
+		return
+	}
+	if s.obs != nil {
+		if err := s.obs.Reload(); err != nil {
+			s.log.Warn("OBS bridge: pruned a configuration it then could not read back", "err", err)
+		}
+	}
+	s.log.Info("OBS bridge: removed deleted destinations from its configuration", "removed", report)
+}
+
+// PruneOBSReferences is pruneOBSReferences for the composition root, run once
+// at boot before the bridge starts so an install already holding dead ids is
+// healed without anyone opening the page.
+func (s *Server) PruneOBSReferences() { s.pruneOBSReferences() }
+
+// pruneOBSConfig is the pure half of pruneOBSReferences: what to keep, given
+// which destinations and programmes exist. report says what went, for the log.
+func pruneOBSConfig(cfg obsbridge.Config, liveDest, liveSource map[int64]bool) (obsbridge.Config, string, bool) {
+	var notes []string
+	if cfg.SourceID != nil && !liveSource[*cfg.SourceID] {
+		notes = append(notes, fmt.Sprintf("programme %d (and its %d destination(s) and %d scene rule(s))",
+			*cfg.SourceID, len(cfg.Destinations), len(cfg.Scenes)))
+		cfg.SourceID = nil
+		cfg.Destinations = nil
+		cfg.Scenes = nil
+		return cfg, strings.Join(notes, "; "), true
+	}
+	keep := func(ids []int64) ([]int64, []int64) {
+		var kept, gone []int64
+		for _, id := range ids {
+			if liveDest[id] {
+				kept = append(kept, id)
+			} else {
+				gone = append(gone, id)
+			}
+		}
+		return kept, gone
+	}
+	kept, gone := keep(cfg.Destinations)
+	for _, id := range gone {
+		notes = append(notes, fmt.Sprintf("destination %d", id))
+	}
+	if len(gone) > 0 {
+		cfg.Destinations = kept
+	}
+	var rules []obsbridge.SceneRule
+	for _, r := range cfg.Scenes {
+		rk, rg := keep(r.Destinations)
+		switch {
+		case len(rg) == 0:
+			// Nothing dead in it, including the empty "all of them" rule.
+		case len(rk) == 0:
+			notes = append(notes, fmt.Sprintf("scene rule %q, which named only deleted destinations", r.Scene))
+			continue
+		default:
+			notes = append(notes, fmt.Sprintf("%d deleted destination(s) from scene rule %q", len(rg), r.Scene))
+			r.Destinations = rk
+		}
+		rules = append(rules, r)
+	}
+	if len(notes) == 0 {
+		return cfg, "", false
+	}
+	cfg.Scenes = rules
+	return cfg, strings.Join(notes, "; "), true
 }

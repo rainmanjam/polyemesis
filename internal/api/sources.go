@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -653,13 +654,23 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 				"confirm the current number.", len(dests), *req.Destinations))
 		return
 	}
+	// The destinations' scheduled platform events first, while the rows,
+	// accounts and tokens that can cancel them still exist; the cascade below
+	// leaves nothing to cancel with. See delete_cascade.go.
+	leftovers := s.beforeDestinationsRemoved(r.Context(), dests, time.Now())
+	s.warnPlayoutVariantsOfSource(id)
 	// Deleting a source takes its destinations and renditions with it, which
 	// the schema does by CASCADE. Its recordings survive with a NULL source_id.
-	if err := s.store.DeleteSource(id); err != nil {
+	// The destinations' ids leave schedules and rollover in the same
+	// transaction (db.DeleteSourcePruned).
+	prune, err := s.store.DeleteSourcePruned(id)
+	if err != nil {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	writeMutationNoContent(w, s.reconcileNow("the programme delete"))
+	rw := s.reconcileNow("the programme delete")
+	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
+	writeMutationNoContentOrWarnings(w, rw, leftovers)
 }
 
 // handleRotateSourceToken issues a new publish secret.

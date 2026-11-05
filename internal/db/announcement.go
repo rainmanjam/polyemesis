@@ -173,6 +173,21 @@ func (s AnnouncementSet) AnnouncedFor(occurrence time.Time) bool {
 	return false
 }
 
+// Broadcasts lists every marker that names a created broadcast, the
+// single-pair marker of an older row included, soonest first. Intents (a
+// marker with no broadcast id) are left out: there is nothing on the platform
+// to act on for one.
+func (s AnnouncementSet) Broadcasts() []Announcement {
+	var out []Announcement
+	for _, a := range s.merged() {
+		if a.BroadcastID != "" {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Occurrence.Before(out[j].Occurrence) })
+	return out
+}
+
 // AnnouncementFor is what this schedule has already done, if anything.
 //
 // A marker with no schedule id is offered to the first schedule that asks, and

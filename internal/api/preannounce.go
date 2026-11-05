@@ -159,6 +159,9 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			s.announceOne(ctx, sb, sc, d, at, now)
 		}
 	}
+	// And the other direction: the events of shows no schedule will air any
+	// more. Last, so a schedule moved this sweep has already moved its own.
+	s.withdrawStaleAnnouncements(ctx, now, 0)
 }
 
 // scheduleTargets reports whether this schedule acts on this destination.

@@ -234,6 +234,14 @@ func (s *Server) handleDeleteRendition(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The public playout ladder names renditions too, inside the settings
+	// document where no foreign key reaches. Counted before the delete for the
+	// same reason the destinations are.
+	rungs, enabledRungs, err := s.playoutVariantsUsing(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if err := s.store.DeleteRendition(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -241,31 +249,102 @@ func (s *Server) handleDeleteRendition(w http.ResponseWriter, r *http.Request) {
 	rw := s.reconcileNow("the rendition delete")
 
 	resp := map[string]any{
-		"status":              "deleted",
-		"destinations":        total[id],
-		"enabledDestinations": enabled[id],
+		"status":                 "deleted",
+		"destinations":           total[id],
+		"enabledDestinations":    enabled[id],
+		"playoutVariants":        rungs,
+		"enabledPlayoutVariants": enabledRungs,
 	}
-	if n := total[id]; n > 0 {
-		resp["warning"] = renditionDeleteWarning(n, enabled[id])
+	if total[id] > 0 || rungs > 0 {
+		resp["warning"] = renditionDeleteWarning(total[id], enabled[id], rungs)
 	}
 	writeMutation(w, http.StatusOK, rw, resp)
 }
 
-func renditionDeleteWarning(total, enabled int) string {
-	subject := "destinations have"
-	if total == 1 {
-		subject = "destination has"
+// playoutVariantsUsing counts the public playout rungs that name this
+// rendition, and how many of them are switched on.
+//
+// From the STORED settings, not a running manager's copy: the question is what
+// the operator configured, and it has to be answerable with no engine up.
+//
+// A rung naming a deleted rendition is deliberately left as it is rather than
+// rewritten. Clearing it to passthrough would publish the source video at full
+// bitrate to the public ladder, switching it off can make the playout settings
+// invalid (playout enabled with no variant on), and either write bumps the
+// settings version under an open Settings tab. It stops starting instead --
+// the Playout page shows the rung's error -- and this says so at the delete.
+func (s *Server) playoutVariantsUsing(renditionID int64) (total, enabled int, err error) {
+	set, err := s.store.GetSettings()
+	if err != nil {
+		return 0, 0, err
 	}
-	msg := fmt.Sprintf("%d %s fallen back to passthrough and will be sent the source video "+
-		"unchanged. Check the source still fits what each platform accepts.", total, subject)
-	if enabled > 0 {
-		live := "are"
-		if enabled == 1 {
-			live = "is"
+	for _, v := range set.Playout.Variants {
+		if v.RenditionID != nil && *v.RenditionID == renditionID {
+			total++
+			if v.Enabled {
+				enabled++
+			}
 		}
-		msg += fmt.Sprintf(" %d of them %s enabled and restarting now.", enabled, live)
 	}
-	return msg
+	return total, enabled, nil
+}
+
+// warnPlayoutVariantsOfSource logs the playout rungs a programme delete is
+// about to strand: its renditions go with it by ON DELETE CASCADE, and a rung
+// naming one stops starting. A log line rather than a response, because the
+// programme delete answers 204 and the rung is the operator's to repoint.
+func (s *Server) warnPlayoutVariantsOfSource(sourceID int64) {
+	rends, err := s.store.ListRenditionsBySource(sourceID)
+	if err != nil || len(rends) == 0 {
+		return
+	}
+	set, err := s.store.GetSettings()
+	if err != nil {
+		return
+	}
+	gone := make(map[int64]string, len(rends))
+	for _, r := range rends {
+		gone[r.ID] = r.Name
+	}
+	for _, v := range set.Playout.Variants {
+		if v.RenditionID == nil {
+			continue
+		}
+		if name, ok := gone[*v.RenditionID]; ok {
+			s.log.Warn("programme delete: a playout rung names a rendition this delete removes, and will not "+
+				"start until another rendition is picked on the Playout page",
+				"variant", v.Name, "rendition", name)
+		}
+	}
+}
+
+// renditionDeleteWarning says what a rendition delete did to the things that
+// named it. The destinations sentence is unchanged from before playout rungs
+// were counted, so a delete that touches no rung reads exactly as it did.
+func renditionDeleteWarning(total, enabled, rungs int) string {
+	var parts []string
+	if total > 0 {
+		subject := "destinations have"
+		if total == 1 {
+			subject = "destination has"
+		}
+		msg := fmt.Sprintf("%d %s fallen back to passthrough and will be sent the source video "+
+			"unchanged. Check the source still fits what each platform accepts.", total, subject)
+		if enabled > 0 {
+			live := "are"
+			if enabled == 1 {
+				live = "is"
+			}
+			msg += fmt.Sprintf(" %d of them %s enabled and restarting now.", enabled, live)
+		}
+		parts = append(parts, msg)
+	}
+	if rungs > 0 {
+		parts = append(parts, fmt.Sprintf("%s still %s this rendition and will not start until you pick "+
+			"another one on the Playout page.", plural(rungs, "playout rung", "playout rungs"),
+			wordFor(rungs, "names", "name")))
+	}
+	return strings.Join(parts, " ")
 }
 
 // ---------------------------------------------------------------- presets

@@ -2990,6 +2990,9 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	// What the delete could not take with it, said in the response. Empty in
+	// the ordinary case, and then the body is exactly {"status":"deleted"}.
+	var leftovers []string
 	if dest, err := s.store.GetDestination(id); err == nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
@@ -3004,12 +3007,16 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		s.noteOrphanedIngestStream(dest)
+		// Its scheduled platform events, while the row, its account and its
+		// token still exist to cancel them with. See delete_cascade.go.
+		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
 	}
 	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
 	// airing what is buffered. Marked before the reconcile so no drain starts,
 	// and cut after it for one already playing from an earlier stop.
 	s.mgr.CutOnStop(id)
-	if err := s.store.DeleteDestination(id); err != nil {
+	prune, err := s.store.DeleteDestinationPruned(id)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -3019,7 +3026,12 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
 	s.mgr.CutDelay(id)
-	writeMutation(w, http.StatusOK, rw, map[string]string{"status": "deleted"})
+	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
+	resp := map[string]any{"status": "deleted"}
+	if len(leftovers) > 0 {
+		resp["warnings"] = leftovers
+	}
+	writeMutation(w, http.StatusOK, rw, resp)
 }
 
 // destEffect is what one press of start or stop actually did to one row: the

@@ -924,3 +924,58 @@ func TestAnUnknownPlatformIsAnEmptyAnswerAndNotAnError(t *testing.T) {
 			"to check for it before iterating")
 	}
 }
+
+// #11 of the 2026-11-04 lingering-state audit. A public playout rung naming the
+// rendition stops starting once it is deleted; the delete has to say so, and
+// the destinations sentence must read exactly as before when no rung is hit.
+func TestDeletingARenditionAPlayoutVariantNamesWarnsTheRungWillNotStart(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	rend := createRendition(t, h, sign, map[string]any{"name": "hd", "height": 1080, "videoBitrate": 6000})
+	other := createRendition(t, h, sign, map[string]any{"name": "sd", "height": 480, "videoBitrate": 1500})
+	createDestination(t, h, sign, destinationBody("twitch", false, &rend.ID))
+	if _, err := store.UpdateSettings(func(s *db.Settings) error {
+		s.Playout.Variants = []db.PlayoutVariant{
+			{Name: "hd", Enabled: true, RenditionID: &rend.ID},
+			{Name: "sd", Enabled: true, RenditionID: &other.ID},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp struct {
+		Destinations           int    `json:"destinations"`
+		PlayoutVariants        int    `json:"playoutVariants"`
+		EnabledPlayoutVariants int    `json:"enabledPlayoutVariants"`
+		Warning                string `json:"warning"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodDelete,
+		"/api/v1/renditions/"+strconv.FormatInt(rend.ID, 10), nil, http.StatusOK), &resp)
+	if resp.PlayoutVariants != 1 || resp.EnabledPlayoutVariants != 1 {
+		t.Errorf("playout counts %d/%d, want 1/1 (only the rung on this rendition)", resp.PlayoutVariants, resp.EnabledPlayoutVariants)
+	}
+	if !strings.Contains(resp.Warning, "playout rung") || !strings.Contains(resp.Warning, "Playout page") {
+		t.Errorf("warning %q does not say the playout rung will not start", resp.Warning)
+	}
+	if !strings.Contains(resp.Warning, "passthrough") {
+		t.Errorf("warning %q lost the destinations sentence", resp.Warning)
+	}
+
+	// A rendition only a rung names still warns, and one nothing names does not.
+	var only struct {
+		Warning string `json:"warning"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodDelete,
+		"/api/v1/renditions/"+strconv.FormatInt(other.ID, 10), nil, http.StatusOK), &only)
+	if !strings.Contains(only.Warning, "1 playout rung still names this rendition") || strings.Contains(only.Warning, "passthrough") {
+		t.Errorf("a rendition only a rung named warned %q", only.Warning)
+	}
+}
+
+func TestTheDestinationsSentenceIsUnchangedWhenNoRungIsHit(t *testing.T) {
+	if got, want := renditionDeleteWarning(2, 1, 0),
+		"2 destinations have fallen back to passthrough and will be sent the source video unchanged. "+
+			"Check the source still fits what each platform accepts. 1 of them is enabled and restarting now."; got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}

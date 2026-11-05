@@ -104,7 +104,7 @@ func TestAnOrphanedRowForAStartedShowLosesItsRowButNotItsPlatformEvent(t *testin
 	pastOccurrence(t, f, "yt-aired-1")
 
 	f.s.reconcileOccurrences(context.Background(), time.Now(), map[int64]scheduler.Schedule{},
-		map[int64]scheduler.BroadcastTemplate{})
+		map[int64]scheduler.BroadcastTemplate{}, nil)
 
 	if got := f.fake.cancelled(); len(got) != 0 {
 		t.Fatalf("reconcile deleted %v on the platform for a started show, want nothing", got)
@@ -130,7 +130,7 @@ func TestAnOrphanedRowForAFutureShowIsStillCancelledOnThePlatform(t *testing.T) 
 		t.Fatalf("resolve: %v", err)
 	}
 	f.s.reconcileOccurrences(context.Background(), time.Now(), map[int64]scheduler.Schedule{},
-		map[int64]scheduler.BroadcastTemplate{})
+		map[int64]scheduler.BroadcastTemplate{}, nil)
 	if got := f.fake.cancelled(); len(got) != 1 || got[0] != "yt-orphan-1" {
 		t.Fatalf("orphaned future event: cancelled %v, want yt-orphan-1", got)
 	}

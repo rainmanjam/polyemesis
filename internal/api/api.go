@@ -244,6 +244,18 @@ func writeMutationNoContent(w http.ResponseWriter, warning string) {
 	})
 }
 
+// writeMutationNoContentOrWarnings is writeMutationNoContent for a handler
+// that may also have something of its own to say: 204 when there is nothing,
+// otherwise 200 with its warnings, the reconcile's appended after them by
+// writeMutation exactly as for any other mutation.
+func writeMutationNoContentOrWarnings(w http.ResponseWriter, warning string, warnings []string) {
+	if len(warnings) == 0 {
+		writeMutationNoContent(w, warning)
+		return
+	}
+	writeMutation(w, http.StatusOK, warning, map[string]any{"warnings": warnings})
+}
+
 // tools is the FFmpeg this install detected.
 //
 // OFF THE MANAGER, NOT OFF AN ENGINE, and that is the whole point of it having
@@ -586,6 +598,11 @@ type Server struct {
 	// obs is the OBS bridge (#16). Optional: nil answers its routes with what
 	// is stored and refuses the script's POST with a 503.
 	obs *obsbridge.Bridge
+	// obsDocMu serialises the read-modify-write of the stored OBS bridge
+	// document: the PUT, and the prune a destination or programme delete runs
+	// (pruneOBSReferences). Without it a delete landing inside a save could
+	// put back an id the prune had just removed, or drop the save.
+	obsDocMu sync.Mutex
 	// polls is the chat poll counter (#14), or nil without chat. polls.go.
 	polls *polls.Engine
 

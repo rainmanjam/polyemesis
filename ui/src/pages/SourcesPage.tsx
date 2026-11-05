@@ -48,7 +48,7 @@ import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
-import { api } from "@/lib/api";
+import { api, mutationWarnings } from "@/lib/api";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
 import { SecretCode } from "@/components/SecretCode";
@@ -214,8 +214,10 @@ export function SourcesPage() {
       // The count the dialog showed, which the server checks is still the
       // count: a destination added since the dialog opened refuses the delete
       // (409) and the toast says so, rather than taking a row nobody saw.
-      await api.deleteSource(deleting.id, deleting.destinations);
+      const res = await api.deleteSource(deleting.id, deleting.destinations);
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
+      // What the cascade could not take with it, in the server's words.
+      for (const w of mutationWarnings(res)) toast.warning(w, { duration: 15000 });
       setDeleting(null);
       await load();
       // Deleting the programme the console is following leaves every other

@@ -59,7 +59,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
-import { api, isNoSource } from "@/lib/api";
+import { api, isNoSource, mutationWarnings } from "@/lib/api";
 import {
   pollVerdict,
   type BroadcastWindowRow,
@@ -1440,8 +1440,19 @@ export function Dashboard() {
   const deleteUsage = useDestinationUsage(confirmDelete.open ? (confirmDelete.target?.id ?? null) : null);
 
   const remove = async (id: DestinationId) => {
-    await act(id, () => api.deleteDestination(id), "delete the destination");
+    // What the delete could not take with it -- a scheduled event left on a
+    // platform, a schedule it switched off -- comes back as warnings, in the
+    // server's words, and is said after the success.
+    let warnings: string[] = [];
+    await act(
+      id,
+      async () => {
+        warnings = mutationWarnings(await api.deleteDestination(id));
+      },
+      "delete the destination",
+    );
     toast.success(t("dash.destDeleted"));
+    for (const w of warnings) toast.warning(w, { duration: 15000 });
     setRefreshKey((k) => k + 1);
   };
 

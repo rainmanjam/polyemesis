@@ -389,6 +389,17 @@ function reportReconcileFailure(body: unknown): void {
   void import("sonner").then(({ toast }) => toast.warning(msg, { duration: 15000 }));
 }
 
+/** The warnings a mutation's own handler attached -- what a delete could not
+ *  take with it, say -- WITHOUT the reconcile sentence, which
+ *  reportReconcileFailure has already raised. The server appends that one
+ *  last, so it is dropped from the end when the flag says it is there. */
+export function mutationWarnings(body: unknown): string[] {
+  if (!body || typeof body !== "object") return [];
+  const b = body as { reconcileFailed?: unknown; warnings?: unknown };
+  const list = Array.isArray(b.warnings) ? b.warnings.filter((w): w is string => typeof w === "string") : [];
+  return b.reconcileFailed === true ? list.slice(0, -1) : list;
+}
+
 const get = <T,>(p: string) => request<T>(p);
 const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
@@ -815,7 +826,9 @@ export const api = {
    *  broadcast in testing or live -- deleting that ends the broadcast, which on
    *  YouTube is terminal -- and ignores it otherwise. */
   deleteDestination: (id: DestinationId) =>
-    delWithBody<{ status: string }>(`/destinations/${id}`, { confirm: true }),
+    delWithBody<{ status: string; warnings?: string[]; reconcileFailed?: boolean }>(`/destinations/${id}`, {
+      confirm: true,
+    }),
   /** Display order only — the server does not restart anything for this. */
   reorderDestinations: (ids: DestinationId[]) =>
     put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
@@ -1010,8 +1023,13 @@ export const api = {
    *  (SourceView.destinations), and it is required: the server refuses the
    *  delete unless it still matches, so a destination added from another tab
    *  after the dialog opened is not swept away by a click that never saw it. */
+  /** 204 when there is nothing to say, otherwise 200 with `warnings`: a
+   *  scheduled event left on a platform, a schedule switched off. */
   deleteSource: (id: SourceId, destinations: number) =>
-    delWithBody<void>(`/sources/${id}`, { confirm: true, destinations }),
+    delWithBody<{ warnings?: string[]; reconcileFailed?: boolean } | undefined>(`/sources/${id}`, {
+      confirm: true,
+      destinations,
+    }),
   rotateSourceToken: (id: SourceId) =>
     post<SourceView>(`/sources/${id}/token`),
 
