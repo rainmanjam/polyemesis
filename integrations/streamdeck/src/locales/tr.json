@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Uygulamak için basılı tutun",
   "streamdeck.preset.applying": "Uygulanıyor",
   "streamdeck.preset.noIngest": "Giriş yok",
+  "streamdeck.preset.applied": "{count} hedefe uygulandı",
   "streamdeck.pi.presetLabel": "Yönlendirme ön ayarı",
   "streamdeck.pi.presetHint": "Bir ön ayarı uygulamak bu programın hedeflerini yeniden başlatabilir.",
   "streamdeck.pi.presetsFailed": "Ön ayar listesi yüklenemedi.",

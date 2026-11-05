@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Ingedrukt houden om toe te passen",
   "streamdeck.preset.applying": "Toepassen",
   "streamdeck.preset.noIngest": "Geen ingest",
+  "streamdeck.preset.applied": "Toegepast op {count}",
   "streamdeck.pi.presetLabel": "Routeringspreset",
   "streamdeck.pi.presetHint": "Een preset toepassen kan de bestemmingen van dit programma opnieuw starten.",
   "streamdeck.pi.presetsFailed": "De presetlijst kon niet worden geladen.",

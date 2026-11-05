@@ -278,13 +278,14 @@ tokens are for.
   Reads answer normally on an install with no source — an empty status, an empty
   process list and no levels, which is the truth.
 
-- **`?source=<id>` is how a request names the programme it acts on.** Fifteen
+- **`?source=<id>` is how a request names the programme it acts on.** Sixteen
   routes are scoped to one source, and on an install with more than one they
   refuse until the choice is made:
 
   `GET /status`, `GET /source`, `PUT /source/annotations`, `GET /levels`,
   `POST /failover/source`, `POST /routing/compile`,
-  `POST /routing/presets/{preset}`, `GET /processes`,
+  `POST /routing/presets/{preset}`, `POST /routing/presets/{preset}/apply`,
+  `GET /processes`,
   `GET /processes/{name}/logs`, `GET /clips`, `POST /clips`,
   `PUT /clips/buffer`, `GET /loudness`, `PUT /loudness` and `GET /ws`.
 
@@ -1219,7 +1220,7 @@ log, dump or stats. Anything else is refused rather than guessed at. `dry-run` t
 | Method | Path |
 |---|---|
 | `POST` | `/routing/compile` |
-| `GET` | `/routing/presets`, `POST` `/routing/presets/{preset}` |
+| `GET` | `/routing/presets`, `POST` `/routing/presets/{preset}`, `POST` `/routing/presets/{preset}/apply` |
 | `GET` `POST` | `/renditions` |
 | `GET` | `/renditions/presets` |
 | `GET` `PUT` `DELETE` | `/renditions/{id}` |
@@ -1265,10 +1266,91 @@ understood, so a caller can see which field it was read as.
 
 It and `POST /routing/presets/{preset}` are programme-scoped and need
 `?source=<id>` on a multi-source install — see [Conventions](#conventions).
+`POST /routing/presets/{preset}` **compiles** a preset against the programme's
+ingest and answers `{profile, routing}`. It saves nothing and restarts
+nothing. The routing editor puts that profile in a draft, and Save is a
+`PUT /destinations/{id}`.
 The routing editor is where the scoping was written: with programme 2 open, a
 debounced track-label edit rewrote programme 1's ingest and restarted its live
 destinations, and the compile preview beside it was reading the same default
 engine — so the page showed a plausible answer for the wrong saved state.
+
+#### Applying a routing preset
+
+`POST /routing/presets/{preset}/apply?source=<id>` applies a preset: it saves
+the preset on every destination of the programme and reconciles once. This is
+the route for a client with no routing editor of its own. The Stream Deck's
+Routing preset key and the MCP tool `apply_routing_preset` both use it. An
+admin API token can call it; a read token gets `403`.
+
+It follows the same rules as `PUT /destinations/{id}`. A destination whose mix
+changes only in levels gets the change live. A destination whose audio graph
+changes restarts. A destination the change does not touch keeps running.
+
+| Query | Default | |
+|---|---|---|
+| `source` | the only programme | Required on a multi-source install, as for every programme-scoped route. |
+| `mix` | `live` | `vod` replaces the second (VOD) mix instead, on destinations that have one. |
+| `destination` | every destination of the programme | One destination id, which must be on this programme. |
+| `dryRun` | `false` | `true` checks everything and answers the new mixes without saving them. |
+
+The body is optional, and when present it is a full-replacement `PresetOpts`,
+as for `POST /routing/presets/{preset}`. Without a body, the track pickers follow
+the programme's track roles: music on the track marked `music`, the mic on the
+track marked `mic` or else `commentary`, and the clean feed on the track marked
+`clean`. The routing editor's pickers follow the same rule, and the catalogue
+defaults apply only where no track has the role.
+
+What it keeps, and what it skips:
+
+- **Mutes and music guards.** A track the stored mix mutes stays muted. A role
+  the stored mix excludes (`excludeRoles`, the music guard) stays excluded.
+  This holds on either mix. The routing editor's preset review lets an operator
+  remove a guard and see it go. This route never removes one.
+- **Audio copy.** A destination that copies its audio has no mix to replace,
+  so it is skipped.
+- **No second mix.** With `mix=vod`, a destination with no second mix is
+  skipped. The route does not add a second audio track.
+- **A narrowed request.** With `destination=` set, a destination that would be
+  skipped is refused with `409` instead.
+
+Every destination is checked before any is written. The check is the row's own
+validation, which the store runs on save, plus a compile against the
+programme's tracks. If one destination cannot take the preset, the request is
+refused with `400`, the refused rows are listed, and nothing is saved. A common
+case is a kept music guard that would leave a destination silent:
+
+```json
+{"error": "the no-music preset was not applied: \"Archive\" cannot take it, so nothing was changed on any destination",
+ "results": [{"id": 4, "name": "Archive", "platform": "custom", "outcome": "refused",
+              "message": "no audio tracks would be included in the mix"}]}
+```
+
+On success the answer has one row per destination:
+
+```json
+{"preset": "everything", "mix": "live",
+ "results": [
+   {"id": 1, "name": "YouTube", "platform": "youtube", "outcome": "saved",
+    "applied": "restart",
+    "reason": "the change alters more than a level, so the destination was restarted with it",
+    "profile": {...}},
+   {"id": 2, "name": "Twitch", "platform": "twitch", "outcome": "saved",
+    "applied": "live", "reason": "nothing this destination sends changed, so it kept running",
+    "kept": {"muted": [1], "excluded": ["music"]}, "profile": {...}},
+   {"id": 3, "name": "Archive", "platform": "custom", "outcome": "skipped",
+    "message": "this destination passes its audio through unchanged (audio copy), so it has no mix for a preset to replace"}]}
+```
+
+| `outcome` | Meaning |
+|---|---|
+| `saved` | The preset is stored. `applied` and `reason` mean what they mean on `PUT /destinations/{id}`. Both are absent when nothing was running to apply it to, as for a stopped destination, which keeps the preset for its next start. |
+| `ready` | Only with `dryRun=true`: the preset passed the check, and `profile` is what would be stored. |
+| `skipped` | Not changed. `message` says why. |
+| `failed` | The preset passed the check, but the write failed. One cause is the destination being deleted in between. The destination is left as it was, the other rows stand, and `warnings` counts the destinations that saved and lists the ones that failed. |
+
+A reconcile that fails after the writes adds `warnings` and
+`reconcileFailed: true`, as on every mutation.
 
 ### Failover
 

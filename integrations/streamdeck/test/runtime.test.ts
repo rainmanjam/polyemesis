@@ -1224,11 +1224,25 @@ describe("routing preset key", () => {
     expect(key.titles.at(-1)).toBe("Hold to apply\nMusic");
   });
 
-  it("applies the preset to its own programme once the hold completes", async () => {
+  // One destination's row of the apply route's answer.
+  const row = (id: number, outcome: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: `dest ${id}`,
+    platform: "custom",
+    outcome,
+    ...extra,
+  });
+  const APPLIED = (...results: unknown[]) => json(200, { preset: "music", mix: "live", results });
+
+  it("applies the preset to its own programme once the hold completes, and says how many took it", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
       "GET /api/v1/routing/presets": PRESETS,
-      "POST /api/v1/routing/presets/music": json(200, {}),
+      "POST /api/v1/routing/presets/music/apply": APPLIED(
+        row(1, "saved", { applied: "restart", reason: "the graph changed" }),
+        row(2, "saved"),
+        row(3, "skipped", { message: "audio copy" }),
+      ),
     });
     rt.configure(PAIRED);
     await rt.verify();
@@ -1240,16 +1254,67 @@ describe("routing preset key", () => {
     sched.fireAll();
     await flush();
     const post = net.writes();
-    expect(post.map((r) => r.url.pathname)).toEqual(["/api/v1/routing/presets/music"]);
+    expect(post.map((r) => r.url.pathname)).toEqual(["/api/v1/routing/presets/music/apply"]);
     expect(post[0]!.url.searchParams.get("source")).toBe("7");
     expect(key.oks).toBe(1);
+    expect(key.alerts).toBe(0);
+    expect(key.titles.at(-1)).toBe("Applied to 2");
+  });
+
+  // The bug: the key showed OK for a request that changed nothing. Its result now follows the server's rows.
+  it("alerts, and claims nothing, when no destination took the preset", async () => {
+    for (const answer of [
+      APPLIED(),
+      APPLIED(row(3, "skipped", { message: "audio copy" })),
+      json(400, { error: "the music preset was not applied", results: [row(1, "refused", { message: "silent" })] }),
+      json(200, {}),
+    ]) {
+      const { rt, sched } = runtimeFor({
+        "GET /api/v1/auth/connection": ADMIN,
+        "GET /api/v1/routing/presets": PRESETS,
+        "POST /api/v1/routing/presets/music/apply": answer,
+      });
+      rt.configure(PAIRED);
+      await rt.verify();
+      const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+      rt.add(key);
+      await rt.pressPresetDown("p");
+      sched.fireAll();
+      await flush();
+      expect(key.oks).toBe(0);
+      expect(key.alerts).toBe(1);
+      expect(key.titles.some((t) => t.startsWith("Applied"))).toBe(false);
+    }
+  });
+
+  it("alerts as well as counting when the preset was saved on some destinations and not others", async () => {
+    for (const answer of [
+      APPLIED(row(1, "saved"), row(2, "failed", { message: "not found" })),
+      json(200, { preset: "music", mix: "live", results: [row(1, "saved")], reconcileFailed: true, warnings: ["x"] }),
+    ]) {
+      const { rt, sched } = runtimeFor({
+        "GET /api/v1/auth/connection": ADMIN,
+        "GET /api/v1/routing/presets": PRESETS,
+        "POST /api/v1/routing/presets/music/apply": answer,
+      });
+      rt.configure(PAIRED);
+      await rt.verify();
+      const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+      rt.add(key);
+      await rt.pressPresetDown("p");
+      sched.fireAll();
+      await flush();
+      expect(key.oks).toBe(0);
+      expect(key.alerts).toBe(1);
+      expect(key.titles.at(-1)).toBe("Applied to 1");
+    }
   });
 
   it("sends no apply when released before the hold completes", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
       "GET /api/v1/routing/presets": PRESETS,
-      "POST /api/v1/routing/presets/music": json(200, {}),
+      "POST /api/v1/routing/presets/music/apply": json(200, { preset: "music", mix: "live", results: [] }),
     });
     rt.configure(PAIRED);
     await rt.verify();
@@ -1266,7 +1331,7 @@ describe("routing preset key", () => {
     const { rt, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
       "GET /api/v1/routing/presets": PRESETS,
-      "POST /api/v1/routing/presets/music": json(503, { error: "no source yet", code: "no_source" }),
+      "POST /api/v1/routing/presets/music/apply": json(503, { error: "no source yet", code: "no_source" }),
     });
     rt.configure(PAIRED);
     await rt.verify();
@@ -1284,7 +1349,7 @@ describe("routing preset key", () => {
   it("sends no apply from a read token", async () => {
     const { rt, net } = runtimeFor({
       "GET /api/v1/auth/connection": READ,
-      "POST /api/v1/routing/presets/music": json(200, {}),
+      "POST /api/v1/routing/presets/music/apply": json(200, { preset: "music", mix: "live", results: [] }),
     });
     rt.configure(PAIRED);
     await rt.verify();

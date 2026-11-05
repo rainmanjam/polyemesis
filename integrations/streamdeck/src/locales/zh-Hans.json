@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "长按应用",
   "streamdeck.preset.applying": "应用中",
   "streamdeck.preset.noIngest": "无输入源",
+  "streamdeck.preset.applied": "已应用到 {count} 个",
   "streamdeck.pi.presetLabel": "路由预设",
   "streamdeck.pi.presetHint": "应用预设可能会重启此节目的输出目标。",
   "streamdeck.pi.presetsFailed": "无法加载预设列表。",

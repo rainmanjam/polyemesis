@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Hold to apply",
   "streamdeck.preset.applying": "Applying",
   "streamdeck.preset.noIngest": "No ingest",
+  "streamdeck.preset.applied": "Applied to {count}",
   "streamdeck.pi.presetLabel": "Routing preset",
   "streamdeck.pi.presetHint": "Applying a preset can restart this programme's destinations.",
   "streamdeck.pi.presetsFailed": "The preset list could not be loaded.",

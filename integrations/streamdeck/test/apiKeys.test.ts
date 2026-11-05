@@ -101,13 +101,46 @@ describe("routingPresets", () => {
 });
 
 describe("applyPreset", () => {
-  it("posts to the preset path, encoded, scoped to the programme, with no body", async () => {
+  // POST /routing/presets/{preset} only compiles a preset and stores nothing: the key that sent it showed OK
+  // and changed nothing. The apply route is the one that stores it.
+  it("posts to the preset's apply path, encoded, scoped to the programme, with no body", async () => {
     const { transport, sent } = fakeTransport([goldenResponse("preset-apply")]);
     await new PolyemesisClient(BASE, "t", transport).applyPreset("music/live", 3);
     expect(sent[0]!.method).toBe("POST");
-    expect(sent[0]!.url.pathname).toBe("/api/v1/routing/presets/music%2Flive");
+    expect(sent[0]!.url.pathname).toBe("/api/v1/routing/presets/music%2Flive/apply");
     expect(sent[0]!.url.searchParams.get("source")).toBe("3");
     expect(sent[0]!.body).toBeUndefined();
+  });
+
+  it("reads each destination's outcome, and an outcome it does not know as failed", async () => {
+    const { transport } = fakeTransport([
+      ok({
+        preset: "all",
+        mix: "live",
+        results: [
+          { id: 1, name: "YouTube", platform: "youtube", outcome: "saved", applied: "restart", reason: "the graph changed" },
+          { id: 2, name: "Twitch", platform: "twitch", outcome: "saved" },
+          { id: 3, name: "Archive", platform: "custom", outcome: "skipped", message: "audio copy" },
+          { id: 4, name: "Kick", platform: "kick", outcome: "exploded" },
+        ],
+        reconcileFailed: true,
+      }),
+    ]);
+    const out = await new PolyemesisClient(BASE, "t", transport).applyPreset("all", 3);
+    expect(out.reconcileFailed).toBe(true);
+    expect(out.results).toEqual([
+      { id: 1, name: "YouTube", outcome: "saved", applied: "restart" },
+      { id: 2, name: "Twitch", outcome: "saved" },
+      { id: 3, name: "Archive", outcome: "skipped", message: "audio copy" },
+      { id: 4, name: "Kick", outcome: "failed" },
+    ]);
+  });
+
+  it("refuses an answer with no results rather than reading it as applied", async () => {
+    const { transport } = fakeTransport([ok({ profile: {}, routing: {} })]);
+    await expect(new PolyemesisClient(BASE, "t", transport).applyPreset("all", 3)).rejects.toMatchObject({
+      kind: "malformed",
+    });
   });
 });
 

@@ -143,7 +143,7 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `dump_destination_delay` | Drop the newest part of one delayed destination's buffer and keep it on the air. `seconds` drops at least that much; without it, everything since the last dump. The delay stays shorter until the destination next starts | **yes** | `POST /destinations/{id}/delay/dump` |
 | `dump_all_delays` | The same for every delayed destination of a programme. With no `source` on an install with more than one programme it needs `allProgrammes: true` | **yes** | `POST /destinations/delay/dump-all` |
 | `set_track_level` | Mute, unmute or set the gain of one track in one destination's live mix | | `POST /destinations/{id}/tracks/{track}/gain` |
-| `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | **yes** | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
+| `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted and a music guard stays on | **yes** | `POST /routing/presets/{preset}/apply` |
 | `set_recording` | Recording on or off | **yes, to turn off** | `POST /recording` |
 | `switch_failover_source` | Force primary, backup, slate or playlist, or hand back to `auto` | | `POST /failover/source` |
 | `create_clip` | Cut the last N seconds (1–3600) into a clip | | `POST /clips` |
@@ -196,10 +196,17 @@ The other previews say what each call would do:
   it is `live` (delivering, so the restart interrupts it for a moment), and
   whether it is `held` (so the retry lifts the hold).
 - `apply_routing_preset` answers the `tracks` whose enabled, mute or gain
-  setting would change, before and after, and `wouldRestart`. A running
+  setting would change, before and after, and `wouldRestart`. It also answers
+  `kept`, the mutes and music guard the preset leaves in place. A running
   destination restarts when its live mix changes in anything but a level or a
-  mute. To work this out, the preview compiles the preset with
-  `POST /routing/presets/{preset}`, which stores nothing and is not audited.
+  mute. The preview gets the new mix from
+  `POST /routing/presets/{preset}/apply` with `dryRun=true`, which runs the same
+  checks as the apply, stores nothing and is not audited.
+- Confirmed, `apply_routing_preset` makes that same request without
+  `dryRun`, narrowed to the one destination. It answers `result`, which holds
+  `applied` (`live` or `restart`) and `reason` as the server reported them. A
+  destination that copies its audio, or (with `mix: vod`) one that has no
+  second mix, is refused: the preset has no mix there to replace.
 
 Every tool marked `destructiveHint` takes `confirm`. Two ask for it only on
 the call that ends something: turning recording **on** starts a new file and

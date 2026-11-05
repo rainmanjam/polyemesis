@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Tieni premuto per applicare",
   "streamdeck.preset.applying": "Applicazione",
   "streamdeck.preset.noIngest": "Nessun ingest",
+  "streamdeck.preset.applied": "Applicato a {count}",
   "streamdeck.pi.presetLabel": "Preset di instradamento",
   "streamdeck.pi.presetHint": "Applicare un preset può riavviare le destinazioni di questo programma.",
   "streamdeck.pi.presetsFailed": "Impossibile caricare l'elenco dei preset.",

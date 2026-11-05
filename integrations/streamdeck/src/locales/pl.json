@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Przytrzymaj, aby zastosować",
   "streamdeck.preset.applying": "Stosowanie",
   "streamdeck.preset.noIngest": "Brak wejścia",
+  "streamdeck.preset.applied": "Zastosowano: {count}",
   "streamdeck.pi.presetLabel": "Ustawienie routingu",
   "streamdeck.pi.presetHint": "Zastosowanie ustawienia może zrestartować miejsca docelowe tego programu.",
   "streamdeck.pi.presetsFailed": "Nie udało się wczytać listy ustawień.",

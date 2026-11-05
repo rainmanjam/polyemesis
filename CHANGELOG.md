@@ -41,6 +41,19 @@ its first tagged release.
   output, and a backup feed that was started, stopped or restarted is named in
   `reason`. Both are absent when nothing was running, including a delayed
   destination whose buffer is still filling. See [docs/API.md](docs/API.md).
+- **`POST /routing/presets/{preset}/apply` applies a routing preset to a
+  programme.** It saves the preset on every destination of the programme, or on
+  the one `?destination=` names, and follows the same rules as
+  `PUT /destinations/{id}`. A destination whose mix changes only in levels gets
+  the change live. A destination whose audio graph changes restarts. Each
+  destination's row answers `applied` and `reason`. Muted tracks stay muted and
+  a music guard (`excludeRoles`) stays on. A destination that copies its audio
+  is skipped. Every destination is checked before any is written, and if one
+  cannot take the preset, nothing is saved. `?mix=vod` replaces the second mix
+  where there is one, and `?dryRun=true` previews without saving. Without a
+  body, the track pickers follow the programme's track roles, as the routing
+  editor's do. It needs an admin token. `POST /routing/presets/{preset}` still
+  compiles a preset and saves nothing. See [docs/API.md](docs/API.md).
 
 ### Changed
 
@@ -140,6 +153,21 @@ These follow from the lingering-state fixes below and are visible on purpose.
     it; the disconnect dialog says the same in every language.
   - Home Assistant discovery is republished when the entity set changes, and a removed entity
     is removed from the device rather than left behind.
+- **The Stream Deck's Routing preset key applies the preset.** The key sent
+  `POST /routing/presets/{preset}`, which only compiles a preset, and showed OK
+  while nothing changed. It now sends the apply route above to every destination
+  on its programme. It shows **Applied to N** with the OK mark when the preset
+  was saved, and an alert when no destination took it. If some destinations took
+  it and others did not, the key shows both the count and the alert. See
+  [docs/STREAM-DECK.md](docs/STREAM-DECK.md#routing-preset).
+- **The MCP tool `apply_routing_preset` uses the same route.** It no longer has
+  its own compile-then-`PUT`, so its preview and its apply follow the server's
+  rules. The confirmed answer carries the server's `applied` and `reason`, and a
+  music guard now stays on, as muted tracks already did. One behaviour changed:
+  a destination with no second mix is refused with `mix: vod`. Before, the tool
+  created a second mix there. A destination that copies its audio is refused
+  too. See [docs/MCP.md](docs/MCP.md).
+
 - **Routing Overview shows music that is routed live.** The Music rights column
   used to say "No music routed" beside a filled Music cell. In the 2026-11-04
   demo, Twitch sent track 4 at 100% and Kick sent it at 25%, and both rows showed

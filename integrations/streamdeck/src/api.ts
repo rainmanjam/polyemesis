@@ -7,6 +7,8 @@ import type {
   LevelsReading,
   PollSpec,
   PollSummary,
+  PresetApplyResult,
+  PresetApplyRow,
   PresetSummary,
   RecordingState,
   StatusPayload,
@@ -286,9 +288,31 @@ export class PolyemesisClient {
     return presets.map((p) => ({ id: p.id, name: p.name }));
   }
 
-  /** Applies a routing preset to one programme with the server's default options. Can restart its destinations. */
-  applyPreset(presetId: string, sourceId?: number): Promise<unknown> {
-    return this.call("POST", `/routing/presets/${encodeURIComponent(presetId)}`, sourceId);
+  /**
+   * Applies a routing preset to every destination of one programme, with the pickers following the programme's
+   * track roles. The server stores it as a routing-editor save does and restarts only the destinations whose
+   * graph it changes. POST /routing/presets/{preset} (no /apply) only compiles a preset and stores nothing.
+   */
+  async applyPreset(presetId: string, sourceId?: number): Promise<PresetApplyResult> {
+    const out = await this.call<{ results?: unknown; reconcileFailed?: unknown }>(
+      "POST",
+      `/routing/presets/${encodeURIComponent(presetId)}/apply`,
+      sourceId,
+    );
+    if (!Array.isArray(out?.results)) throw new ApiError("malformed", 200, "the preset answer carries no results");
+    const results = (out.results as Record<string, unknown>[]).map((r) => {
+      // An outcome this build does not know is not counted as saved.
+      const outcome = r?.outcome === "saved" || r?.outcome === "skipped" ? r.outcome : "failed";
+      const row: PresetApplyRow = {
+        id: Number.isSafeInteger(r?.id) ? (r.id as number) : 0,
+        name: typeof r?.name === "string" ? r.name : "",
+        outcome,
+      };
+      if (r?.applied === "live" || r?.applied === "restart") row.applied = r.applied;
+      if (typeof r?.message === "string" && r.message !== "") row.message = r.message;
+      return row;
+    });
+    return { results, reconcileFailed: out.reconcileFailed === true };
   }
 
   startAll(sourceId?: number): Promise<unknown> {

@@ -1388,11 +1388,25 @@ export class Runtime {
     await this.paintFace(s, face);
   }
 
+  /**
+   * Sends the armed preset and shows what the server says it did, never the request going out: OK and "Applied
+   * to N" only when it was saved on at least one destination, none failed and the pipeline took it. A preset
+   * saved on some and failed on others flashes the count AND alerts; nothing saved (no destinations, all skipped,
+   * or the server refused it because one could not take it) alerts and leaves the face as it was.
+   */
   private async applyArmedPreset(s: Surface, presetId: string, sourceId: number | undefined): Promise<void> {
     try {
-      await this.client!.applyPreset(presetId, sourceId);
+      const out = await this.client!.applyPreset(presetId, sourceId);
       this.presetRefused.delete(s.id);
-      await s.showOk();
+      const saved = out.results.filter((r) => r.outcome === "saved").length;
+      const failed = out.results.some((r) => r.outcome === "failed");
+      if (saved === 0) {
+        await s.showAlert();
+        return;
+      }
+      if (failed || out.reconcileFailed) await s.showAlert();
+      else await s.showOk();
+      await this.flash(s, { tone: "live", label: "streamdeck.preset.applied", labelVars: { count: saved } });
     } catch (err) {
       if (err instanceof ApiError && err.kind === "noSource") {
         this.presetRefused.add(s.id);
