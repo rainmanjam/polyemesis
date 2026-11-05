@@ -1115,7 +1115,7 @@ func TestApplyRoutingPresetSaysAndAuditsAReconcileThatFailed(t *testing.T) {
 		t.Fatalf("a saved but unreconciled preset answered (isError=%v): %s", isErr, text)
 	}
 	evs := rig.mcpEvents()
-	if len(evs) != 1 || !strings.Contains(fieldOf(evs[0], fieldMCPOutcome), "reconcile failed") {
+	if len(evs) != 1 || fieldOf(evs[0], fieldMCPOutcome) != "saved, but the running pipeline was not updated (reconcile failed)" {
 		t.Fatalf("the audit does not say the reconcile failed: %+v", evs)
 	}
 }

@@ -206,6 +206,9 @@ type deckGolden struct {
 	Request deckGoldenReq `json:"request"`
 	Status  int           `json:"status"`
 	Body    any           `json:"body"`
+	// Raw is the answer as the handler wrote it, before normalising, for a
+	// case's Check. Never committed.
+	Raw []byte `json:"-"`
 }
 
 type deckGoldenReq struct {
@@ -260,18 +263,18 @@ const deckOffGain = 0.5
 // MUTATION: roll back instead of committing in db.UpdateDestinationMixes.
 // Observed: FAIL, "the off destination's track 0 is still at 0.5: the routing
 // did not change".
+// MUTATION: leave applied and reason unset on saved rows. Observed: FAIL, the
+// live destination's row has no applied.
 func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
 	t.Helper()
 	if g.Status != http.StatusOK {
 		t.Fatalf("the preset key's apply answered %d: %v", g.Status, g.Body)
 	}
-	raw, err := json.Marshal(g.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The answer as written, not the golden: applied and reason are normalised
+	// there, and here they are held to what they may be.
 	var ans deckPresetApply
-	if err := json.Unmarshal(raw, &ans); err != nil {
-		t.Fatalf("the preset key's apply answered %s: %v", raw, err)
+	if err := json.Unmarshal(g.Raw, &ans); err != nil {
+		t.Fatalf("the preset key's apply answered %s: %v", g.Raw, err)
 	}
 	outcome := map[int64]presetApplyRow{}
 	for _, r := range ans.Results {
@@ -280,8 +283,12 @@ func deckPresetApplied(t *testing.T, f *deckFixture, g deckGolden) {
 	if r := outcome[f.off]; r.Outcome != presetSaved {
 		t.Errorf("the off destination's row is %+v, want saved", r)
 	}
-	if r := outcome[f.live]; r.Outcome != presetSaved {
-		t.Errorf("the live destination's row is %+v, want saved", r)
+	// Running, so it took the preset one way or the other and says which: live
+	// or restart is the platform's, an empty answer is nobody's. A restart
+	// always says why (Engine.AppliedSince); a level sent live may not.
+	if r := outcome[f.live]; r.Outcome != presetSaved || (r.Applied != "live" && r.Applied != "restart") ||
+		(r.Applied == "restart" && r.Reason == "") {
+		t.Errorf("the live destination's row is %+v, want saved, and applied live or restart (with a reason)", r)
 	}
 	off, err := f.store.GetDestination(f.off)
 	if err != nil {
@@ -396,7 +403,7 @@ func (f *deckFixture) record(t *testing.T, c deckCase) deckGolden {
 				"to deckVolatileKeys or the case's Volatile.\nfirst  %d %s\nsecond %d %s", c.Name, code, raw, again, raw2)
 		}
 	}
-	g := deckGolden{Case: c.Name, Status: code, Body: body,
+	g := deckGolden{Case: c.Name, Status: code, Body: body, Raw: raw,
 		Request: deckGoldenReq{Method: c.Method, Route: c.Route, Path: path, Body: c.Body, Token: c.Token}}
 	if len(c.Query) > 0 {
 		g.Request.Query = map[string]string{}
