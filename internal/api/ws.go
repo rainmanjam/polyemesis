@@ -110,9 +110,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// console opens two of these per tab, and closing them for anything routine
 	// would read as a dashboard fault. So the comparison is against the epoch
 	// this socket's own cookie was signed with -- it moves only when somebody
-	// changes the password, never on ordinary session rotation, and never when
-	// an API token is revoked. TestRevokingATokenLeavesASessionSocketAlone pins
-	// that second property.
+	// changes the password or signs out (handleLogout ends every session of
+	// the user), never on ordinary session rotation, and never when an API
+	// token is revoked. TestRevokingATokenLeavesASessionSocketAlone pins that
+	// last property.
 	//
 	// The scope is NOT re-evaluated on the tick, only the existence of the
 	// token, and that is a deliberate narrowing rather than an oversight.

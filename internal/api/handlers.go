@@ -231,7 +231,35 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"username": user.Username})
 }
 
+// handleLogout ends the operator's sessions, not only this browser's cookie.
+//
+// A session is a stateless JWT valid for a week, so clearing the cookie used
+// to be all sign-out did: a copied cookie -- from a shared machine, a proxy
+// log, a browser profile someone else can open -- went on working for the
+// rest of the seven days, and the /ws and /events sockets it opened stayed
+// open. Moving the user's token epoch is the one revocation the session
+// already honours (checkEpoch, and the socket heartbeat in ws.go and
+// events.go), so it is what signing out now does.
+//
+// THAT ENDS EVERY SESSION OF THIS USER, every browser and phone, exactly as a
+// password change does. The other tabs get the 401 they already handle as
+// "session ended". API tokens, the Stream Deck, the OBS script and MCP
+// clients are not sessions and are untouched.
+//
+// A BEARER TOKEN DOES NOT SIGN ANYONE OUT. It reaches this route (the route
+// takes any admin principal), but a token's caller is a script, and a script
+// that "logs out" must not end the operator's browser sessions. For it this
+// stays what it always was: a cookie clear that clears nothing.
+//
+// A failed bump is a failed sign-out, and is not reported as a success.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if p, ok := principalFrom(r.Context()); ok && p.token == nil && p.userID != 0 {
+		if err := s.store.BumpTokenEpoch(p.userID); err != nil {
+			s.log.Error("sign-out could not end the session", "err", err)
+			writeError(w, http.StatusInternalServerError, "could not end the session; try again")
+			return
+		}
+	}
 	s.sessions.ClearSession(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }

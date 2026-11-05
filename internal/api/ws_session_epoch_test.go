@@ -173,7 +173,7 @@ func TestAnUnrelatedSettingsChangeLeavesASessionSocketAlone(t *testing.T) {
 		_, msg, err := c.ReadMessage()
 		if err != nil {
 			t.Fatalf("the session socket was closed by ordinary authenticated traffic (%v). "+
-				"Only a password change may end a session socket; anything looser turns the "+
+				"Only a password change or a sign-out may end a session socket; anything looser turns the "+
 				"console into a dashboard that drops out at random.", err)
 		}
 		var ev struct {
