@@ -50,10 +50,15 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"x key is pasted", "x", CapStreamKey, SupportManual,
 			"the destination still works; only the automation is absent"},
 
-		{"instagram cannot be streamed to", "instagram", CapStreamKey, SupportNo,
-			"RTMP was removed for most accounts, so there is not even a key to paste"},
-		{"instagram has no sign-in", "instagram", CapSSO, SupportNo,
-			"Instagram publishes no Live broadcast API"},
+		// Was SupportNo across the row. Instagram's desktop flow now hands out a
+		// stream URL and key (persistent keys included), and Restream documents
+		// a Meta Live API connection, so neither cell may claim "not possible".
+		{"instagram key is pasted", "instagram", CapStreamKey, SupportManual,
+			"instagram.com issues the RTMPS URL and a persistent or one-off key"},
+		{"instagram chat read is unbuilt, not impossible", "instagram", CapChatRead, SupportUnknown,
+			"live_media comments are readable while broadcasting; polyemesis has not built it"},
+		{"instagram has no public lifecycle", "instagram", CapBroadcastLifecycle, SupportNo,
+			"creating, starting and ending a live video have no public endpoint"},
 
 		// Was SupportUnknown on the sound argument that undocumented is not
 		// absent. Now refused on affirmative evidence rather than more looking:
@@ -135,7 +140,7 @@ func TestPlatformCapabilitiesAssignTheDocumentedTier(t *testing.T) {
 		{"x", TierManual},
 		{"rumble", TierManual},
 		{"dlive", TierManual},
-		{"instagram", TierUnsupported},
+		{"instagram", TierManual},
 	}
 
 	for _, tc := range tests {
@@ -148,17 +153,16 @@ func TestPlatformCapabilitiesAssignTheDocumentedTier(t *testing.T) {
 	}
 }
 
-func TestOnlyInstagramIsMarkedUnstreamable(t *testing.T) {
-	got := UnsupportedPresets()
-	if len(got) != 1 || got[0] != "instagram" {
-		t.Fatalf("unsupported presets = %v, want [instagram] — a platform marked unsupported "+
+// No preset is marked unstreamable today. Instagram was, until its desktop
+// flow started issuing RTMPS keys; a platform marked unsupported disappears
+// from the picker's happy path, so the list must stay evidence-backed and an
+// addition to it should be a deliberate edit to this test.
+func TestNoPresetIsMarkedUnstreamable(t *testing.T) {
+	if got := UnsupportedPresets(); len(got) != 0 {
+		t.Fatalf("unsupported presets = %v, want none — a platform marked unsupported "+
 			"disappears from the picker's happy path, so the list must stay evidence-backed", got)
 	}
-	row := CapabilityForPreset("instagram", "")
-	if row.Streamable() {
-		t.Fatal("instagram reports streamable; a destination that never connects looks like our bug")
-	}
-	for _, id := range []string{"kick", "x", "rumble", "dlive"} {
+	for _, id := range []string{"instagram", "kick", "x", "rumble", "dlive"} {
 		if !CapabilityForPreset(id, "").Streamable() {
 			t.Fatalf("%s reports unstreamable; a manual key is a supported destination", id)
 		}
@@ -332,9 +336,9 @@ func TestPlatformCapabilitiesCannotBeMutatedByCallers(t *testing.T) {
 // TikTok LIVE and LinkedIn Live shipped that way. Both had destination presets
 // -- you could stream to them -- and neither had a row, so the product could
 // tell an operator how to send pixels and nothing about whether chat, metadata
-// or moderation would follow. Instagram is in the matrix precisely so that the
-// answer "none of it" is visible; the two that were missing gave no answer at
-// all, which reads as "nobody thought about it" and is worse than a no.
+// or moderation would follow. A row whose answer is "not yet" still says so
+// out loud; the two that were missing gave no answer at all, which reads as
+// "nobody thought about it" and is worse than a no.
 //
 // Scoped to the consumer platforms. GroupSelfHosted, GroupCloud and
 // GroupGeneric are infrastructure -- an operator pointing polyemesis at their
@@ -363,7 +367,7 @@ func TestEveryConsumerPresetHasACapabilityRow(t *testing.T) {
 			t.Errorf("preset %q (%s) is offered in the destination picker and has no "+
 				"capability row.\nThe operator can stream there and cannot find out "+
 				"whether chat, metadata or moderation work. If the answer is \"none of "+
-				"it\", say so in a row -- that is what the Instagram row is for.", p.ID, p.Name)
+				"it\", say so in a row.", p.ID, p.Name)
 		}
 	}
 	if checked == 0 {

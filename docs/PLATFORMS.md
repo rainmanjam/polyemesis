@@ -41,7 +41,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
+| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — | — |
 
 | Term | Means |
@@ -271,24 +271,46 @@ Cloudflare is unreachable, contact your provider or use another host or network.
 See
 [Troubleshooting](TROUBLESHOOTING.md#x-destination-connection-timed-out-when-opening-output).
 
-**Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
-distinction matters and this page used to collapse it. Instagram's platform
-covers messaging, content publishing and comments: there is no Live broadcast
-API, so nothing here can create a broadcast, fetch a key, read chat or report
-viewers. That is what "unsupported" means, and it is why the preset exists.
+**Instagram Live streams with a pasted key.** On instagram.com choose
+**+ Create → Live video → Go live with streaming software**. Instagram shows a
+stream URL of the form `rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/`
+and a **Stream key** list. Add an **Instagram Live** destination, paste the URL
+exactly (the region differs per account, which is why the preset does not
+prefill it), and paste the key. The key looks like Facebook's, `<digits>?s_bl=1&…`,
+and is joined onto the URL as-is.
 
-What it does NOT mean is that the bytes are refused. `TierUnsupported` feeds
-`UnsupportedPresets()`, which only tells the destination picker to mark the row;
-nothing in the streaming path consults it. If your account is one of the few
-that still has Live Producer, take its server URL and key, create a **Generic
-RTMPS** destination, and it streams like any other — with its own per-destination
-audio mix. The key changes every broadcast, so it is manual each time. It is listed, and
-marked unsupported in the destination picker, rather than shipped as a preset
-that quietly never connects — a destination that fails silently looks exactly
-like a bug in polyemesis, and there is nothing to fix. If your account is one of
-the exceptions that still has Live Producer RTMP, add a **Generic RTMPS**
-destination and paste what Meta gives you. Check that you have it before you
-build a show around it.
+- **Use a persistent key** where your account offers one (marked *Ready*, under
+  **Manage Persistent Key**). It is pasted once and the destination stays ready
+  from one live video to the next. A one-off key works too; paste the new one
+  before each live video.
+- **Click Go live in Instagram.** Once polyemesis is sending, Instagram shows
+  the preview, and the live video starts when you click **Go live** there. You
+  have up to five hours to do it. Instagram records from the moment video
+  arrives, not from Go live.
+- **One hour per live video.** Instagram ends a live video after an hour. Plan a
+  longer show as one-hour segments.
+- **End in Instagram first**, then stop the destination. Stopping only the
+  encoder can leave the live video frozen for a few minutes.
+- **Encode vertical:** 9:16 at 720×1280 and 30 fps (60 at most), video 2,250–6,000
+  kbps, stereo audio at most 256 kbps. Restream recommends 44.1 kHz audio;
+  polyemesis sends AAC at 48 kHz to every destination, and whether Instagram
+  prefers 44.1 kHz in practice has not been verified.
+- **Account:** a public professional (Creator or Business) account with 1,000+
+  followers.
+
+What stays in Instagram for now is everything except the video. Meta's public
+API allows reading the comments on a live video while it is broadcasting
+(`GET /{ig-user-id}/live_media`, and the `live_comments` webhook), so chat read
+is *unverified*: allowed, planned, not built. Creating a broadcast, fetching the
+ingest URL or key, Go live and end, viewer counts, and hiding, deleting or
+posting live comments have no public endpoint, so those cells read *not
+possible*. Sources: [Meta: IG User live_media
+reference](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/live_media.md),
+[Restream: stream to Instagram with a stream
+key](https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key)
+and [Restream: stream to
+Instagram](https://support.restream.io/en/articles/6379108-stream-to-instagram),
+read 2026-11-05.
 
 **TikTok LIVE** and **LinkedIn Live** are *unverified* for a different reason
 than DLive: their APIs demonstrably exist and answer — a request to

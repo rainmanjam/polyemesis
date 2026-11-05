@@ -95,9 +95,8 @@ func TestPlatformsDocMatrixMatchesTheCapabilityMatrix(t *testing.T) {
 	for _, m := range docRowRe.FindAllStringSubmatch(string(raw), -1) {
 		cells := strings.Split(strings.TrimSuffix(m[2], "|"), "|")
 		for i := range cells {
-			// Bold is presentation, not data. The Instagram row emphasises its
-			// stream-key cell because it is the one platform where you cannot
-			// even paste a key by hand, and that emphasis is worth keeping.
+			// Bold is presentation, not data: a row may emphasise a cell, and
+			// the emphasis must not make it disagree with the matrix.
 			cells[i] = strings.TrimSpace(strings.ReplaceAll(cells[i], "**", ""))
 		}
 		// Only the capability table has exactly this many columns; other

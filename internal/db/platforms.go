@@ -742,14 +742,34 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "instagram", Name: "Instagram Live", Group: GroupMajor,
+		// Restream's figures, not Meta's: Instagram publishes no encoder page of
+		// its own, and Restream's help is where the numbers are written down.
+		// No keyframe interval is stated there, so none is offered.
+		Video: &VideoGuidance{
+			Width: 720, Height: 1280, FPS: 30, KbpsMin: 2250, KbpsMax: 6000,
+			Note:   "Vertical 9:16 (720×1280) is recommended rather than required. 30 fps recommended, 60 maximum — the preview shows 30 either way. Audio: 44.1 kHz stereo, at most 256 kbps. A live video ends after one hour. These are Restream's published figures; Meta does not publish its own.",
+			Source: "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key", Checked: "2026-11-05",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP,
+		// Empty on purpose, as with Kick. The ingest host Instagram shows
+		// carries a region (rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/),
+		// so a prefill would be somebody else's edge.
+		URL:         "",
 		SeparateKey: true,
-		HelpURL:     "https://developers.facebook.com/docs/instagram-platform",
-		Notes: "Not supported, and this preset exists to say so rather than to be used. Instagram publishes no Live " +
-			"broadcast API — its platform covers messaging, content publishing and comments — and Live Producer's " +
-			"RTMP option was withdrawn for most accounts. If your account is one of the few that still has it, the " +
-			"server URL and key come from Live Producer and change every broadcast; otherwise there is nothing to " +
-			"paste here and no amount of configuration will change that.",
+		HelpURL:     "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",
+		// KEEP THIS IN STEP WITH oauth.PlatformCapabilities()'s instagram row.
+		Notes: "Instagram Live works as an RTMPS destination: paste the stream URL and key Instagram gives you. " +
+			"On instagram.com choose + Create → Live video → Go live with streaming software. The stream URL " +
+			"looks like rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/ — copy yours exactly, because the " +
+			"region differs per account. Pick a PERSISTENT key from the Stream key list (Manage Persistent Key) " +
+			"where your account offers one, so this destination stays ready from one live video to the next; a " +
+			"one-off key works too but has to be pasted again every time. Once polyemesis is sending and " +
+			"Instagram shows the preview, click Go live in Instagram — you have up to five hours to do it, and " +
+			"Instagram records from the moment video arrives, not from Go live. A live video ends after one " +
+			"hour. To finish, end the live video in Instagram first and then stop the destination; stopping " +
+			"only the encoder can leave the video frozen for a few minutes. Instagram Live needs a public " +
+			"professional (Creator or Business) account with 1,000+ followers. polyemesis does not automate " +
+			"Instagram yet, so chat, title and the Go live click stay in Instagram.",
 		Aliases: []string{"meta", "ig"},
 	},
 	{

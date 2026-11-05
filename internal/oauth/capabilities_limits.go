@@ -83,6 +83,16 @@ func PlatformLimits() []PlatformLimit {
 			Kind: LimitKindBroadcastDuration, Hours: 0, Status: LimitUnverified,
 			Note: "No platform source was confirmed. Third-party guides disagree: some say Kick has no stream length limit, and one says only the first 48 hours of a stream are saved as a replay. Replay retention is also reported as 30 days for verified and 7 days for unverified channels, which conflicts with the 48-hour figure. Verify against Kick's help centre before adding a countdown.",
 		},
+		{
+			// No Platform: Instagram has no integration behind it, so its
+			// destinations save as custom and RolloverLimitFor never hands
+			// this row to one. It is listed so the cap is on record with its
+			// source, and so the limits route can show it.
+			PresetID: "instagram",
+			Kind:     LimitKindBroadcastDuration, Hours: 1, Status: LimitReported,
+			Source: "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",
+			Note:   "Restream's Instagram help (read 2026-11-05) says Instagram limits a live video to one hour and that a longer stream may end automatically. Reported rather than documented because the page is Restream's, not Meta's. polyemesis cannot start the next Instagram live video, so there is no automatic rollover: plan a broadcast as one-hour segments.",
+		},
 	}
 }
 
@@ -96,7 +106,10 @@ func RolloverLimitFor(p db.Platform) (PlatformLimit, bool) {
 	var found PlatformLimit
 	ok := false
 	for _, l := range PlatformLimits() {
-		if l.Platform != p {
+		// A row with no platform (Instagram's) is on record but drives no
+		// countdown: matching it against an empty platform would hand its cap
+		// to any destination whose platform was never set.
+		if l.Platform == "" || l.Platform != p {
 			continue
 		}
 		if l.Kind == LimitKindArchiveDuration {
