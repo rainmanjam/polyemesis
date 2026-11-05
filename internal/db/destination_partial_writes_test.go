@@ -67,7 +67,7 @@ func TestTheIngestWriteLeavesEveryOtherColumnAlone(t *testing.T) {
 
 	landOperatorEdits(t, d, created.ID)
 
-	got, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
+	got, err := d.UpdateDestinationIngest(created.ID, nil, func(cur *Destination) error {
 		cur.URL = "rtmps://new-ingest.example/rtmp"
 		cur.StreamKey = "key-from-the-platform"
 		cur.BackupURL, cur.BackupStreamKey = "rtmps://backup.example/rtmp", "backup-key"
@@ -148,7 +148,7 @@ func TestThePartialWritesApplyToTheRowAsItStandsNow(t *testing.T) {
 	d := testDB(t)
 	for name, write := range map[string]func(int64, func(*Destination) error) (*Destination, error){
 		"ingest": func(id int64, apply func(*Destination) error) (*Destination, error) {
-			return d.UpdateDestinationIngest(id, "", apply)
+			return d.UpdateDestinationIngest(id, nil, apply)
 		},
 		"expert": d.UpdateDestinationExpertArgs,
 	} {
@@ -181,7 +181,7 @@ func TestARefusedPartialWriteStoresNothing(t *testing.T) {
 	created := partialWriteDestination(t, d)
 	refusal := errors.New("not this row")
 	for _, want := range []error{ErrIngestSkipped, refusal} {
-		_, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
+		_, err := d.UpdateDestinationIngest(created.ID, nil, func(cur *Destination) error {
 			cur.StreamKey = "should-not-land"
 			return want
 		})
@@ -203,7 +203,7 @@ func TestARefusedPartialWriteStoresNothing(t *testing.T) {
 func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
 	d := testDB(t)
 	created := partialWriteDestination(t, d)
-	if _, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(created.ID, nil, func(cur *Destination) error {
 		cur.URL = "" // an RTMP destination with nowhere to send to
 		return nil
 	}); err == nil {
@@ -213,7 +213,7 @@ func TestThePartialWritesValidateTheRowTheyStore(t *testing.T) {
 	if got.URL != "rtmps://live.example/rtmp" {
 		t.Errorf("URL = %q after a refused write", got.URL)
 	}
-	if _, err := d.UpdateDestinationIngest(404, "", func(*Destination) error { return nil }); !errors.Is(err, ErrNotFound) {
+	if _, err := d.UpdateDestinationIngest(404, nil, func(*Destination) error { return nil }); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing row: err = %v, want ErrNotFound", err)
 	}
 }
@@ -241,7 +241,7 @@ func TestTheIngestWriteKeepsAnUnreadableBackupKeysCiphertext(t *testing.T) {
 	}
 	sealedBefore := rawCol(t, d, "backup_stream_key_enc", saved.ID)
 
-	if _, err := d.UpdateDestinationIngest(saved.ID, "", func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(saved.ID, nil, func(cur *Destination) error {
 		// The row as it reads back after a restore with no key file.
 		cur.KeyUnreadable = "the stored key could not be opened with this secret.key"
 		cur.StreamKey = "key-from-the-platform"
@@ -274,7 +274,7 @@ func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
 	if err := d.PutCaptionIngestURL(created.ID, "key-from-the-platform", "https://captions.example/x"); err != nil {
 		t.Fatalf("PutCaptionIngestURL: %v", err)
 	}
-	if _, err := d.UpdateDestinationIngest(created.ID, "", func(cur *Destination) error {
+	if _, err := d.UpdateDestinationIngest(created.ID, nil, func(cur *Destination) error {
 		cur.StreamKey = "key-from-the-platform"
 		return nil
 	}); err != nil {
@@ -314,7 +314,7 @@ func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
 
 	t.Run("stored with the key", func(t *testing.T) {
 		dst := newCaptioned("stored")
-		got, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+		got, err := d.UpdateDestinationIngest(dst.ID, &IngestCaption{URL: captionURL}, func(cur *Destination) error {
 			cur.StreamKey = "fresh-key"
 			return nil
 		})
@@ -331,7 +331,7 @@ func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
 
 	t.Run("a refused write stores neither", func(t *testing.T) {
 		dst := newCaptioned("refused")
-		if _, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+		if _, err := d.UpdateDestinationIngest(dst.ID, &IngestCaption{URL: captionURL}, func(cur *Destination) error {
 			cur.StreamKey = "fresh-key"
 			return ErrIngestSkipped
 		}); !errors.Is(err, ErrIngestSkipped) {
@@ -342,6 +342,32 @@ func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
 		}
 	})
 
+	t.Run("an install with no secret key keeps the key and says why", func(t *testing.T) {
+		plain := testDB(t) // no secret box: a caption URL cannot be stored sealed
+		dst, err := plain.CreateDestination(&Destination{
+			Name: "no box", Kind: DestRTMP, Platform: PlatformYouTube,
+			URL: "rtmp://a.example/live2", StreamKey: "held-key", AudioBitrate: 128,
+			DelaySeconds: 30, CaptionMode: "youtube_post",
+		})
+		if err != nil {
+			t.Fatalf("CreateDestination: %v", err)
+		}
+		caption := &IngestCaption{URL: captionURL}
+		got, err := plain.UpdateDestinationIngest(dst.ID, caption, func(cur *Destination) error {
+			cur.StreamKey = "fresh-key"
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("the key was refused because its caption URL could not be sealed: %v", err)
+		}
+		if got.StreamKey != "fresh-key" {
+			t.Errorf("StreamKey = %q, want the fetched key stored", got.StreamKey)
+		}
+		if !errors.Is(caption.NotStored, ErrCaptionIngestUnsealable) {
+			t.Errorf("NotStored = %v, want ErrCaptionIngestUnsealable so the handler can say why", caption.NotStored)
+		}
+	})
+
 	t.Run("captions switched off during the fetch", func(t *testing.T) {
 		dst := newCaptioned("switched off")
 		row, _ := d.GetDestination(dst.ID)
@@ -349,7 +375,7 @@ func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
 		if _, err := d.UpdateDestination(row); err != nil {
 			t.Fatalf("switch captions off: %v", err)
 		}
-		if _, err := d.UpdateDestinationIngest(dst.ID, captionURL, func(cur *Destination) error {
+		if _, err := d.UpdateDestinationIngest(dst.ID, &IngestCaption{URL: captionURL}, func(cur *Destination) error {
 			cur.StreamKey = "fresh-key"
 			return nil
 		}); err != nil {

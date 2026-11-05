@@ -75,32 +75,48 @@ const (
 // UpdateDestination seals them, per half, so a half whose stored key cannot be
 // read and that apply left empty keeps its ciphertext.
 //
-// captionURL is the YouTube caption ingestion URL the platform issued with the
-// new key, or "". It is stored IN THE SAME TRANSACTION, bound to the key just
-// written, when the current row posts captions by HTTP POST -- so no reader
-// ever sees the new key without its URL, or a URL stored for a write that was
-// refused, and the row handed back reports CaptionIngestReady truthfully. A
-// URL that cannot be sealed (ErrCaptionIngestUnsealable) is not stored and
-// does not refuse the key; the row handed back then says it is not ready.
-func (d *DB) UpdateDestinationIngest(id int64, captionURL string, apply func(*Destination) error) (*Destination, error) {
+// caption, when not nil, carries the YouTube caption ingestion URL the
+// platform issued with the new key. It is stored IN THE SAME TRANSACTION, bound
+// to the key just written, when the current row posts captions by HTTP POST --
+// so no reader ever sees the new key without its URL, or a URL stored for a
+// write that was refused, and the row handed back reports CaptionIngestReady
+// from the same transaction. On an install with no secret key the URL cannot
+// be stored at all; that does not refuse the key, and caption.NotStored says
+// so. Any other failure to store it refuses the whole write.
+func (d *DB) UpdateDestinationIngest(id int64, caption *IngestCaption, apply func(*Destination) error) (*Destination, error) {
+	if caption != nil {
+		caption.NotStored = nil
+	}
 	return d.writeDestinationPart(id, apply, func(tx *sql.Tx, cur *Destination, now int64) error {
 		if err := d.writeIngestColumns(tx, cur, now); err != nil {
 			return err
 		}
-		if captionURL == "" || !sendsYouTubeCaptionPOST(cur.Platform, cur.CaptionMode) {
+		if caption == nil || caption.URL == "" || !sendsYouTubeCaptionPOST(cur.Platform, cur.CaptionMode) {
 			// Nothing to store. A row that does not post captions has its URL
 			// forgotten by writeDestinationPart.
 			return nil
 		}
-		enc, hash, err := d.sealCaptionIngestURL(cur.StreamKey, captionURL)
-		if err != nil {
-			// Not a refusal: the key is what makes the destination publish,
-			// and the stored row reports that captions are not ready.
+		enc, hash, err := d.sealCaptionIngestURL(cur.StreamKey, caption.URL)
+		if errors.Is(err, ErrCaptionIngestUnsealable) {
+			// Not a refusal: the key is what makes the destination publish.
+			caption.NotStored = err
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		_, err = tx.Exec(captionIngestUpsertQuery, cur.ID, enc, hash, now)
 		return err
 	})
+}
+
+// IngestCaption carries a caption ingestion URL into UpdateDestinationIngest,
+// and back out why it was not stored.
+type IngestCaption struct {
+	URL string
+	// NotStored is ErrCaptionIngestUnsealable when the row posts captions and
+	// the URL could not be stored for want of a secret key; nil otherwise.
+	NotStored error
 }
 
 // writeIngestColumns is UpdateDestinationIngest's UPDATE.
