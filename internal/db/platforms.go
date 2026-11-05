@@ -194,10 +194,30 @@ func (d *DB) MigratePlatformCredsCheck() error {
 	return nil
 }
 
-// DeletePlatformCreds removes a developer app registration.
+// DeletePlatformCreds removes a developer app registration, and every
+// authorization started against it that has not come back yet.
+//
+// THE PENDING AUTHORIZATIONS GO TOO. An oauth_states row holds the PKCE
+// verifier of a sign-in begun with the app being removed. It is inert -- the
+// callback re-reads the credentials and fails without them -- but it would sit
+// in the database until the next sign-in swept it, carrying a secret for an
+// app the operator just deleted. MigrateRetiredPlatforms drops them by
+// platform for the same reason.
+//
+// Still idempotent: removing credentials that are not there is not an error.
 func (d *DB) DeletePlatformCreds(p Platform) error {
-	_, err := d.sql.Exec(`DELETE FROM platform_creds WHERE platform = ?`, p)
-	return err
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM platform_creds WHERE platform = ?`, p); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM oauth_states WHERE platform = ?`, p); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // PlatformAccount is a connected channel. Multiple per platform is supported
