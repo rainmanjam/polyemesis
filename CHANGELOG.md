@@ -178,7 +178,9 @@ These follow from the lingering-state fixes below and are visible on purpose.
   brings back a Twitch chat whose login was refused (its own message says to reconnect, and before
   this the chip went on reading Failed). The same rules apply as at startup: no chat without the
   platform's developer credentials, and X chat only with `POLYEMESIS_X_LIVESTREAM` set. A connect and
-  a disconnect that overlap leave the chat matching whether the account is still connected.
+  a disconnect that overlap leave the chat matching whether the account is still connected, and the
+  connect no longer fails with a bare "not found" when the disconnect lands in the middle of it: it
+  completes, and the disconnect takes effect before or after it.
 
 ## [0.13.0] — 2026-11-04
 
