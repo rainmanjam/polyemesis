@@ -497,3 +497,19 @@ func TestTheIngestWriteRefusesACaptionURLItCannotBindToTheKey(t *testing.T) {
 		t.Errorf("StreamKey = %q after a refused write, want it untouched", got.StreamKey)
 	}
 }
+
+// A store that cannot open the transaction says so and writes nothing; both
+// writers share the path.
+func TestThePartialWritesReportAStoreThatCannotBegin(t *testing.T) {
+	d := testDB(t)
+	created := partialWriteDestination(t, d)
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := d.UpdateDestinationExpertArgs(created.ID, func(*Destination) error {
+		t.Error("the callback ran on a store that could not begin a transaction")
+		return nil
+	}); err == nil {
+		t.Error("a write on a closed store reported success")
+	}
+}

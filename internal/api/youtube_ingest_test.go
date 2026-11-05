@@ -246,6 +246,9 @@ type ytRefreshStub struct {
 
 	mu      sync.Mutex
 	creates []map[string]any
+	// captionURL, when set, is the caption ingestion URL the create returns
+	// in contentDetails, as liveStreams.insert does for a caption stream.
+	captionURL string
 }
 
 func newYouTubeRefreshStub(t *testing.T) *ytRefreshStub {
@@ -273,10 +276,15 @@ func newYouTubeRefreshStub(t *testing.T) *ytRefreshStub {
 			}
 			stub.mu.Lock()
 			stub.creates = append(stub.creates, body)
+			captionURL := stub.captionURL
 			stub.mu.Unlock()
+			contentDetails := ""
+			if captionURL != "" {
+				contentDetails = `,"contentDetails":{"closedCaptionsIngestionUrl":"` + captionURL + `"}`
+			}
 			io.WriteString(w, `{"id":"stream-99","snippet":{"title":"polyemesis - Third show"},
 				"cdn":{"ingestionType":"rtmp","ingestionInfo":{
-					"streamName":"key-new","ingestionAddress":"rtmp://e.example/live2"}}}`)
+					"streamName":"key-new","ingestionAddress":"rtmp://e.example/live2"}}`+contentDetails+`}`)
 		default:
 			t.Errorf("unexpected %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
 			w.WriteHeader(http.StatusNotFound)

@@ -591,14 +591,16 @@ func TestARefreshWithNoBackupOfferedSaysSo(t *testing.T) {
 	}
 }
 
-// A destination that posts captions to YouTube, refreshed when YouTube answers
-// with no caption ingestion URL, is told it will not start with captions --
-// decided on the row as stored, after the key is written.
-//
-// Mutation: delete the `case b.CaptionIngestURL == ""` arm in handleRefreshKey.
-// Observed red: no warning.
-func TestARefreshedCaptionDestinationWithNoCaptionURLIsWarned(t *testing.T) {
+// refreshCaptionDestination refreshes a destination that posts captions to
+// YouTube, against the YouTube refresh stub answering with captionURL (or
+// none), and returns the answer's body and the stored row. engineServer's store
+// has no secret box, so a caption URL cannot be stored sealed there.
+func refreshCaptionDestination(t *testing.T, captionURL string) (string, *db.Destination) {
+	t.Helper()
 	stub := newYouTubeRefreshStub(t)
+	stub.mu.Lock()
+	stub.captionURL = captionURL
+	stub.mu.Unlock()
 	s, h, store, sign := engineServer(t, defaultTools(),
 		Options{Providers: oauth.NewSet(oauth.WithBaseURL(stub.URL))})
 	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "night-owl")
@@ -620,7 +622,42 @@ func TestARefreshedCaptionDestinationWithNoCaptionURLIsWarned(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("refresh-key: status %d, body %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "YouTube returned no caption ingestion URL") {
-		t.Errorf("body %s: want the missing caption URL warning", w.Body.String())
+	got, err := store.GetDestination(dest.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	return w.Body.String(), got
+}
+
+// A destination that posts captions to YouTube, refreshed when YouTube answers
+// with no caption ingestion URL, is told it will not start with captions --
+// decided on the row as stored, after the key is written.
+//
+// Mutation: delete the `case b.CaptionIngestURL == ""` arm in handleRefreshKey.
+// Observed red: no warning.
+func TestARefreshedCaptionDestinationWithNoCaptionURLIsWarned(t *testing.T) {
+	body, _ := refreshCaptionDestination(t, "")
+	if !strings.Contains(body, "YouTube returned no caption ingestion URL") {
+		t.Errorf("body %s: want the missing caption URL warning", body)
+	}
+}
+
+// On an install with no secret key, the caption URL YouTube returns cannot be
+// stored sealed. The fetched key is stored anyway -- it is what makes the
+// destination publish -- and the answer says why captions will not post.
+//
+// Mutation: delete the `case caption.NotStored != nil` arm in
+// handleRefreshKey. Observed red: no warning, so the operator sees a
+// successful refresh and a caption destination that will not start.
+func TestARefreshedCaptionURLThatCannotBeStoredIsWarnedAndTheKeyKept(t *testing.T) {
+	body, got := refreshCaptionDestination(t, "https://upload.youtube.com/closedcaption?cid=fake-refresh")
+	if !strings.Contains(body, "could not be stored") || !strings.Contains(body, "no secret key is configured") {
+		t.Errorf("body %s: want the caption URL warning with its reason", body)
+	}
+	if got.StreamKey != "key-new" {
+		t.Errorf("StreamKey = %q, want the fetched key stored although its caption URL was not", got.StreamKey)
+	}
+	if got.CaptionIngestReady {
+		t.Error("captionIngestReady is true for a caption URL that was never stored")
 	}
 }
