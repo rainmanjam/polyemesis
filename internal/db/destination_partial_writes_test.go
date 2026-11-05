@@ -289,8 +289,10 @@ func TestTheIngestWriteForgetsACaptionURLTheRowNoLongerUses(t *testing.T) {
 // the key it belongs to: the row handed back reports it ready, a refused write
 // stores neither, and a row that no longer posts captions is not given one.
 //
-// Mutation: delete the caption upsert from UpdateDestinationIngest. Observed
-// red: the returned row is not ready, and no URL is stored for the new key.
+// Mutations, each observed red: delete the caption upsert from
+// UpdateDestinationIngest (the returned row is not ready, and no URL is stored
+// for the new key); drop `caption.NotStored = err` (an install with no secret
+// key is not told why its captions will not post).
 // The refused case is the transaction's own guarantee: the handler used to
 // store the URL before its write, and that ordering is what it pins.
 func TestTheIngestWriteStoresTheCaptionURLWithItsKey(t *testing.T) {
