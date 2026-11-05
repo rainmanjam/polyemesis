@@ -37,7 +37,7 @@ The plugin's source, and the notes for working on it, are in
 
 ## Install
 
-Each release attaches the packaged plugin,
+Every release since 0.12.0 attaches the packaged plugin,
 `com.polyemesis.streamdeck.streamDeckPlugin`, to its
 [GitHub release](https://github.com/rainmanjam/polyemesis/releases). Download
 the one from the release your install runs and open it; the Stream Deck app
