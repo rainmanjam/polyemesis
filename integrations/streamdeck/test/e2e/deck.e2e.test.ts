@@ -250,6 +250,32 @@ describe("a Stream Deck paired with a real polyemesis", () => {
     await waitFace(/^Off$/, KEY_STATE.idle);
     await until("the sink to see the publisher leave", 15_000, () => sink.exited, () => sink.out.slice(-300));
   });
+
+  // The preset key used to send POST /routing/presets/{preset}, which compiles a preset and stores nothing, and
+  // showed OK. Held now, it sends the apply route, and the destination's stored routing is the preset's: a
+  // loudness target it did not have. Stopped, so the preset waits for its next start and nothing restarts. A
+  // platform preset on purpose: its id has a colon the plugin escapes, which the server used to refuse as unknown.
+  it("applies a routing preset from a held key, and the destination's stored routing carries it", async () => {
+    const list = (await api("/routing/presets")) as { presets: { id: string; platform?: string; loudness?: unknown }[] };
+    const preset = list.presets.find((p) => p.platform && p.loudness !== undefined);
+    if (!preset) throw new Error("the install offers no platform preset with a loudness target");
+    const stored = async () =>
+      ((await api(`/destinations/${DEST}`)) as { destination?: { profile?: { loudness?: unknown } } }).destination?.profile;
+    expect((await stored())?.loudness).toBeUndefined();
+
+    const presetKey = surface("preset", "preset", { presetId: preset.id, sourceId: SOURCE });
+    rt.add(presetKey);
+    await rt.tick();
+    const before = net.sent.length;
+    await rt.pressPresetDown("preset");
+    sched.fire(HOLD_MS);
+    await until("the preset key to say what it applied", 10_000, () => /^Applied to 1$/.test(presetKey.titles.at(-1) ?? ""),
+      () => `${JSON.stringify(presetKey.titles.at(-1))}, alerts ${presetKey.alerts}`);
+    const writes = net.sent.slice(before).filter((r) => r.method === "POST");
+    expect(writes.map((r) => r.url.pathname)).toEqual([`/api/v1/routing/presets/${encodeURIComponent(preset.id)}/apply`]);
+    expect([presetKey.oks, presetKey.alerts]).toEqual([1, 0]);
+    expect((await stored())?.loudness).toBeDefined();
+  });
 });
 
 describe("a Stream Deck paired with a read token", () => {

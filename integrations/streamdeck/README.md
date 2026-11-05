@@ -19,7 +19,7 @@ install the socket interleaves every programme's meters.
 - A polyemesis install with the connection-check, stop-impact, recording and
   routing-preset routes (`GET /api/v1/auth/connection`,
   `GET /api/v1/destinations/stop-impact`, `GET` and `POST /api/v1/recording`,
-  `GET /api/v1/routing/presets`, `POST /api/v1/routing/presets/{preset}`).
+  `GET /api/v1/routing/presets`, `POST /api/v1/routing/presets/{preset}/apply`).
 - For the Mute track key and the Track gain dial, an install with live track gain
   (`POST /api/v1/destinations/{id}/tracks/{track}/gain`). They also read
   `GET /api/v1/destinations` and `GET /api/v1/source`.
@@ -52,7 +52,7 @@ action settings, so it does not travel with a profile export.
 | Stop destination | Hold to stop one destination. Shows how many YouTube broadcasts that stop would end, read from the server for that destination, and refuses if the count cannot be loaded or the destination is unknown. With **Cut the delayed tail** ticked, the hold also cuts the destination's broadcast delay buffer (see below). Needs admin. |
 | Dump delay | Hold to drop the newest part of a delayed destination's buffer while it is on the air (see below). Leave the destination empty to dump every delayed destination of the key's programme; on an install with more than one programme the key must then name its programme. Needs admin. |
 | Record | Shows the install-wide recording switch: **Recording**, **Record off**, **Not running**, or **HALTED: DISK** with the reason when the free-space floor stopped it. Tap to switch. Recording is not per programme, so the key does not take a programme. Needs admin to switch. |
-| Routing preset | Hold to apply a routing preset to the key's programme. The preset list comes from the install. Applying can restart that programme's destinations. Shows **No ingest** when the install has no programme to apply to. Needs admin. |
+| Routing preset | Hold to apply a routing preset to every destination on the key's programme. The server saves it as the routing editor does: a level-only change goes out live, and only destinations whose audio graph changes restart. Muted tracks and music guards stay. The preset list comes from the install. Shows **Applied to N** after a hold, an alert when no destination took it, and **No ingest** when the install has no programme to apply to. Needs admin. |
 | Chat poll | Starts the chat poll set on the key (a question, two to six options, one per line, and a duration), announced in every connected chat. While a poll runs the key shows **Poll on** with the votes so far and the time left, then **Counting** while the last votes are judged; hold it to end the poll early. Counts only: the key never names a voter. Install-wide, so it takes no programme. Needs admin to start or end. |
 | Failover | Shows which source is on air. Tap to hand control back to automatic. Needs admin. |
 | Mute track | Shows whether one audio track is muted on one destination: **MUTED** (red, a crossed speaker) or **Unmuted**. Tap to switch. Shows **Not available** for a destination that passes its audio through unchanged (audio copy), and for any change the server refuses, with the server's reason. Needs admin to switch. |

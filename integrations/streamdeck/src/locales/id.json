@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Tahan untuk menerapkan",
   "streamdeck.preset.applying": "Menerapkan",
   "streamdeck.preset.noIngest": "Tanpa ingest",
+  "streamdeck.preset.applied": "Diterapkan ke {count}",
   "streamdeck.pi.presetLabel": "Preset routing",
   "streamdeck.pi.presetHint": "Menerapkan preset dapat memulai ulang destinasi program ini.",
   "streamdeck.pi.presetsFailed": "Daftar preset tidak dapat dimuat.",

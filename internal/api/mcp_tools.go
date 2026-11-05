@@ -436,7 +436,11 @@ func checkText(name, v string, min, max int) error {
 
 var platformName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
-var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+// presetName admits one "prefix:name" pair because every platform preset's id is
+// one ("platform:youtube", routing.PlatformPresetID): without it the tool
+// refused, as not "an id from list_routing_presets", ids that tool lists. A
+// colon is not a path separator, and the allowlist check still follows.
+var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,31})?$`)
 
 func mcpDestPath(id int64, suffix string) string {
 	return "/destinations/" + strconv.FormatInt(id, 10) + suffix
@@ -1178,7 +1182,7 @@ func mcpCatalogue() []mcpTool {
 		{
 			name: "apply_routing_preset", title: "Apply a routing preset", tier: mcpWrite, destructive: true,
 			confirms:    "every call: it replaces a mix and can restart the destination",
-			description: "Replace one destination's audio routing with a preset from list_routing_presets. Tracks that were muted stay muted. May restart the destination. Needs confirm:true; without it, answers with the tracks that would change and whether it would restart.",
+			description: "Replace one destination's audio routing with a preset from list_routing_presets. Tracks that were muted stay muted and a music guard stays on. May restart the destination. Needs confirm:true; without it, answers with the tracks that would change and whether it would restart.",
 			props: map[string]any{
 				"destinationId": schemaDestID,
 				"preset":        map[string]any{"type": "string", "pattern": presetName.String()},
@@ -1516,13 +1520,17 @@ func (c *mcpCtx) stopImpact(destID int64, src *int64) (any, error) {
 	return c.call(http.MethodGet, "/destinations/stop-impact", q, nil)
 }
 
-// runApplyPreset is the UI's preset button, as three REST calls: read the
-// destination (for its programme and its current mutes), ask the preset
-// route for a profile against that programme's tracks, and save it with a
-// partial PUT that touches only the one mix. A partial body is the point:
-// PUT decodes over the stored row, so the stream key and expert arguments are
-// never sent, never round-tripped and never at risk of being overwritten by a
-// masked value.
+// runApplyPreset is apply_routing_preset: POST /routing/presets/{preset}/apply
+// narrowed to one destination, the route every client without a routing
+// editor applies a preset through (routing_preset_apply.go). The server builds
+// the new mix, keeps the operator's mutes and music guard, checks it, stores it
+// and reconciles by a destination PUT's rules, so the tool has no second copy of
+// any of that to fall out of step with. It answers the server's own row:
+// whether the mix went out live or restarted the destination, and why.
+//
+// It used to be the compile route, its own copy of the console's mute carry,
+// and a partial PUT. The guard was not carried at all, and the Stream Deck key
+// that sent the compile alone showed OK for a preset it never stored.
 func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 	var a struct {
 		DestinationID int64  `json:"destinationId"`
@@ -1539,11 +1547,11 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	if !presetName.MatchString(a.Preset) {
 		return nil, argErr("preset must be an id from list_routing_presets")
 	}
-	field := "profile"
+	field, mix := "profile", presetMixLive
 	switch a.Mix {
 	case "", "live":
 	case "vod":
-		field = "vodProfile"
+		field, mix = "vodProfile", presetMixVOD
 	default:
 		return nil, argErr("mix must be live or vod")
 	}
@@ -1562,6 +1570,8 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	if !known {
 		return nil, argErr("unknown preset %q; list_routing_presets names them", a.Preset)
 	}
+	// The destination's own programme, which the route needs named on an
+	// install with more than one, and its current mix for the preview.
 	d, err := c.getDestination(a.DestinationID)
 	if err != nil {
 		return nil, err
@@ -1574,42 +1584,115 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.compilePreset(a.Preset, q)
-	if err != nil {
-		return nil, err
+	if q == nil {
+		q = url.Values{}
 	}
-	profile, _ := pick(res, "profile")["profile"].(map[string]any)
-	if profile == nil {
-		return nil, errors.New("the preset route returned no profile")
-	}
-	current := pick(d, field)[field]
-	carryMutes(profile, current)
+	q.Set(destinationParam, strconv.FormatInt(a.DestinationID, 10))
+	q.Set(presetMixParam, mix)
 	if !a.Confirm {
-		// The preview: what the PUT below would change, and whether it would
-		// cost the destination a restart. Nothing has been written -- the
-		// compile above is a computation (see compilePreset).
+		// The preview: the route's dry run, through the same checks as the
+		// apply, storing nothing. What would change, what is kept, and whether
+		// it would cost the destination a restart.
+		row, err := c.previewPreset(a.Preset, q)
+		if err != nil {
+			return nil, err
+		}
+		profile, _ := row["profile"].(map[string]any)
+		if profile == nil {
+			return nil, errors.New("the preset route returned no profile")
+		}
+		current := pick(d, field)[field]
 		health, err := c.destinationHealth(a.DestinationID, src)
 		if err != nil {
 			return nil, err
 		}
 		running := processRunning(health)
+		// Either mix: the second one is compiled into the same FFmpeg graph
+		// (routing.CompilePair), so a structural change to it restarts the
+		// destination as surely as one to the live mix.
 		structural := profileStructureChanged(current, profile)
 		return c.refusal("Not done: applying a preset replaces this destination's audio routing"+
-			restartClause(running && field == "profile" && structural)+
+			restartClause(running && structural)+
 			". Show the user these changes, then call apply_routing_preset again with confirm:true.",
 			map[string]any{
 				"destination":  destSummary(d),
 				"preset":       a.Preset,
 				"mix":          field,
 				"tracks":       trackChanges(current, profile),
+				"kept":         row["kept"],
 				"running":      running,
-				"wouldRestart": running && field == "profile" && structural,
+				"wouldRestart": running && structural,
 			})
 	}
-	if _, err := c.call(http.MethodPut, mcpDestPath(a.DestinationID, ""), q, map[string]any{field: profile}); err != nil {
+	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(a.Preset)+"/apply", q, nil)
+	if err != nil {
 		return nil, err
 	}
-	return c.result(map[string]any{"applied": a.Preset, "mix": field, "profile": profile, "routing": pick(res, "routing")["routing"]}, false)
+	row, err := presetRowFor(res, a.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	// A 200 is the request, not this destination: only a saved row is an
+	// apply. Anything else is said as a failure, and audited as one, with no
+	// "applied" for an agent to read as success.
+	if outcome, _ := row["outcome"].(string); outcome != string(presetSaved) {
+		msg, _ := row["message"].(string)
+		c.outcome = fmt.Sprintf("not applied (%s)", outcome)
+		return nil, fmt.Errorf("the preset was not applied to destination %d (%s): %s", a.DestinationID, outcome, msg)
+	}
+	out := map[string]any{"applied": a.Preset, "mix": field, "profile": row["profile"]}
+	result := map[string]any{"outcome": row["outcome"]}
+	for _, k := range []string{"applied", "reason", "message", "kept"} {
+		if v, ok := row[k]; ok {
+			result[k] = v
+		}
+	}
+	out["result"] = result
+	if w := pick(res, "warnings")["warnings"]; w != nil {
+		out["warnings"] = w
+	}
+	if failed, _ := pick(res, "reconcileFailed")["reconcileFailed"].(bool); failed {
+		// Stored, and the running pipeline was not updated to match it: the
+		// audit says so too, rather than call()'s "done (200)".
+		out["reconcileFailed"] = true
+		c.outcome = "saved, but the running pipeline was not updated (reconcile failed)"
+	}
+	return c.result(out, false)
+}
+
+// previewPreset is the apply route's dry run: it checks and builds the new mix
+// and stores nothing. It is a POST, so call() counts it as a write; it is not
+// one, and a preview must not be audited as an action. The flags are put back
+// as they were.
+func (c *mcpCtx) previewPreset(preset string, q url.Values) (map[string]any, error) {
+	dry := url.Values{}
+	for k, v := range q {
+		dry[k] = append([]string(nil), v...)
+	}
+	dry.Set(presetDryRunParam, "true")
+	wrote, outcome := c.wrote, c.outcome
+	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(preset)+"/apply", dry, nil)
+	c.wrote, c.outcome = wrote, outcome
+	if err != nil {
+		return nil, err
+	}
+	return presetRowFor(res, -1)
+}
+
+// presetRowFor is the one destination's row of a narrowed apply's answer. id
+// -1 takes the only row, whatever it is.
+func presetRowFor(res any, id int64) (map[string]any, error) {
+	rows := asList(res, "results")
+	for _, r := range rows {
+		row, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n, ok := jsonInt(row["id"]); id < 0 || (ok && n == id) {
+			return row, nil
+		}
+	}
+	return nil, errors.New("the preset route answered no row for this destination")
 }
 
 // runRetry is retry_destination: POST /destinations/{id}/restart, which
@@ -1702,18 +1785,6 @@ func processRunning(health map[string]any) bool {
 	return state == "running"
 }
 
-// compilePreset is POST /routing/presets/{id}: it COMPILES a preset against a
-// programme's ingest and stores nothing. It is a POST because the options
-// travel in a body, so call() counts it as a write; it is not one, and a
-// preview that only compiled must not be audited as an action. The flags are
-// put back as they were.
-func (c *mcpCtx) compilePreset(preset string, q url.Values) (any, error) {
-	wrote, outcome := c.wrote, c.outcome
-	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(preset), q, nil)
-	c.wrote, c.outcome = wrote, outcome
-	return res, err
-}
-
 // restartClause finishes the preset preview's sentence.
 func restartClause(restart bool) string {
 	if restart {
@@ -1798,33 +1869,6 @@ func profileStructureChanged(prev any, next map[string]any) bool {
 		return string(out)
 	}
 	return strip(prev) != strip(next)
-}
-
-// carryMutes keeps a mute the operator set across a preset, as the console
-// does (ui/src/lib/liveTrackLevel.ts carryMutes): a preset arrives unmuted, and
-// unmuting a track somebody silenced -- licensed music, a hot mic -- is not a
-// side effect an agent applying "a preset" should have.
-func carryMutes(next map[string]any, prev any) {
-	muted := map[int64]bool{}
-	for _, t := range asList(prev, "tracks") {
-		if m, _ := pick(t, "muted")["muted"].(bool); m {
-			if n, ok := jsonInt(pick(t, "track")["track"]); ok {
-				muted[n] = true
-			}
-		}
-	}
-	if len(muted) == 0 {
-		return
-	}
-	for _, t := range asList(next, "tracks") {
-		row, ok := t.(map[string]any)
-		if !ok {
-			continue
-		}
-		if n, ok := jsonInt(row["track"]); ok && muted[n] {
-			row["muted"] = true
-		}
-	}
 }
 
 func runSchedule(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {

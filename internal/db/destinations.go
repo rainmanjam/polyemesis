@@ -1862,6 +1862,106 @@ func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Desti
 	return d.GetDestination(id)
 }
 
+// ErrMixSkipped is what an UpdateDestinationMixes callback returns for a row it
+// leaves alone. Not a failure: the row is not this write's to change.
+var ErrMixSkipped = errors.New("mix update skipped")
+
+// UpdateDestinationMixes writes ONLY the two audio mix columns -- the live mix
+// (profile) and the second, VOD mix (vod_profile) -- of several destinations, in
+// ONE transaction: all of them or none.
+//
+// WHY NOT UpdateDestination, for UpdateAnnouncement's reason. That one writes
+// the whole row back with no version behind it, and a routing preset applied to
+// a programme reads every destination first and writes them afterwards. A stop,
+// a scheduled start, a key refresh or an expert save that landed in between
+// (none of which take the API's trackGainMu) would be silently reverted: the
+// destination the operator just stopped would be written back enabled and
+// started by the reconcile that follows.
+//
+// So each row is READ AGAIN HERE, inside the transaction, and apply is handed
+// the row as it stands now. apply edits Profile and VODProfile; anything else it
+// sets is discarded. It returns nil to write the row, ErrMixSkipped to leave it,
+// or any other error to refuse it. Every row is shown to apply before anything
+// is written, and one refusal rolls back the lot: the answer is every refusal,
+// joined, and nothing stored.
+//
+// The row is then checked as UpdateDestination checks it -- ApplyDefaults on the
+// live mix and Validate on the whole row -- so this path cannot store a mix that
+// one would refuse. The other refusals UpdateDestination makes (a retired
+// platform switched on, captions turned on, a rendition from another programme)
+// are about columns this write does not touch.
+//
+// A row that no longer exists is not an error: it is left out and its id
+// returned in missing. written is the rows as stored, from this transaction;
+// nothing is read back after the commit, so a commit that succeeded is never
+// reported as a failure.
+func (d *DB) UpdateDestinationMixes(ids []int64, apply func(*Destination) error) (written []*Destination, missing []int64, err error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	type change struct {
+		dst          *Destination
+		profile, vod string
+	}
+	var (
+		changes []change
+		refused []error
+	)
+	for _, id := range ids {
+		cur, err := d.scanDestination(tx.QueryRow(destByIDQuery, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			missing = append(missing, id)
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		switch err := apply(cur); {
+		case errors.Is(err, ErrMixSkipped):
+			continue
+		case err != nil:
+			refused = append(refused, err)
+			continue
+		}
+		cur.Profile.ApplyDefaults()
+		if err := cur.Validate(); err != nil {
+			refused = append(refused, fmt.Errorf("destination %d (%s): %w", cur.ID, cur.Name, err))
+			continue
+		}
+		profile, err := json.Marshal(cur.Profile)
+		if err != nil {
+			return nil, nil, err
+		}
+		vod, err := marshalVODProfile(cur.VODProfile)
+		if err != nil {
+			return nil, nil, err
+		}
+		changes = append(changes, change{dst: cur, profile: string(profile), vod: vod})
+	}
+	if len(refused) > 0 {
+		return nil, missing, errors.Join(refused...)
+	}
+	now := time.Now().Unix()
+	for _, c := range changes {
+		res, err := tx.Exec(`UPDATE destinations SET profile=?, vod_profile=?, updated_at=? WHERE id=?`,
+			c.profile, c.vod, now, c.dst.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil, nil, ErrNotFound
+		}
+		written = append(written, c.dst)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return written, missing, nil
+}
+
 // ErrLifecycleSkipped is what UpdateLifecycle returns when the callback declined
 // the row it was shown. The sibling of ErrAnnouncementSkipped and a sentinel for
 // the same reason: it is not an operational failure, it is the answer "the

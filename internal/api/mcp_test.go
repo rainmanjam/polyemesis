@@ -816,7 +816,8 @@ func TestAPatternInvalidPresetIsRefusedBeforeAnyRequestIsMade(t *testing.T) {
 	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
 	mux.Handle("/", rig.h)
 	cs := mcpClient(t, mux, rig.admin)
-	for _, preset := range []string{"x/../../destinations/1/expert", "-/option", "UPPER", "a b"} {
+	for _, preset := range []string{"x/../../destinations/1/expert", "-/option", "UPPER", "a b",
+		"platform:", "a:b:c", "platform:../x", ":youtube"} {
 		text, isErr := callText(t, cs, "apply_routing_preset", map[string]any{"destinationId": 1, "preset": preset})
 		if !isErr || !strings.Contains(text, "invalid arguments") {
 			t.Errorf("preset %q answered (isError=%v): %s", preset, isErr, text)
@@ -1004,6 +1005,183 @@ func TestApplyingAPresetOverMCPKeepsAMutedTrackMuted(t *testing.T) {
 	}
 	if after.StreamKey != key {
 		t.Fatalf("the preset's save changed the stored stream key")
+	}
+}
+
+// The tool applies through POST /routing/presets/{preset}/apply, the one
+// implementation every client shares, not a compile and a PUT of its own: the
+// preview is that route's dry run (and not audited), the apply keeps the music
+// guard as well as the mutes, and the answer is the server's row. A second mix
+// the destination does not have is refused rather than created.
+//
+// MUTATION: send the confirmed apply as the old PUT /destinations/{id} with the
+// dry run's profile. Observed: FAIL, PUT /api/v1/destinations/1 was dispatched
+// and no apply.
+// MUTATION: drop the destination narrowing (q.Set(destinationParam, ...)).
+// Observed: FAIL, the apply was not narrowed to destination 1.
+func TestApplyRoutingPresetGoesThroughTheApplyRouteAndKeepsTheGuard(t *testing.T) {
+	rig := newMCPRig(t)
+	d, err := rig.store.GetDestination(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Profile.Tracks = []routing.TrackSel{{Track: 0, Enabled: true, Gain: 1, Muted: true}}
+	d.Profile.ExcludeRoles = []routing.TrackRole{routing.RoleMusic}
+	d.VODProfile = nil
+	if _, err := rig.store.UpdateDestination(d); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		rig.h.ServeHTTP(w, r)
+	})
+	mux := http.NewServeMux()
+	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
+	mux.Handle("/", rig.h)
+	cs := mcpClient(t, mux, rig.admin)
+	args := map[string]any{"destinationId": 1, "preset": routing.PresetEverything}
+
+	text, isErr := callText(t, cs, "apply_routing_preset", args)
+	if !isErr || !strings.HasPrefix(text, "Not done:") || !strings.Contains(text, `"kept"`) || !strings.Contains(text, `"music"`) {
+		t.Fatalf("the preview does not say the guard is kept (isError=%v): %s", isErr, text)
+	}
+	if evs := rig.mcpEvents(); len(evs) != 0 {
+		t.Fatalf("the preview's dry run was audited as a write: %+v", evs)
+	}
+
+	seen = nil
+	args["confirm"] = true
+	text, isErr = callText(t, cs, "apply_routing_preset", args)
+	if isErr {
+		t.Fatalf("a confirmed preset failed: %s", text)
+	}
+	applies := 0
+	for _, p := range seen {
+		if strings.HasPrefix(p, "PUT /api/v1/destinations/") {
+			t.Errorf("the tool still saves with its own PUT: %s", p)
+		}
+		if strings.HasPrefix(p, "POST /api/v1/routing/presets/"+routing.PresetEverything+"/apply?") {
+			applies++
+			if !strings.Contains(p, "destination=1") || strings.Contains(p, "dryRun") {
+				t.Errorf("the apply was not narrowed to destination 1, or was a dry run: %s", p)
+			}
+		}
+	}
+	if applies != 1 {
+		t.Fatalf("%d applies dispatched, want 1: %v", applies, seen)
+	}
+	var got struct {
+		Applied string `json:"applied"`
+		Result  struct {
+			Outcome string `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(text), &got); err != nil || got.Applied != routing.PresetEverything || got.Result.Outcome != "saved" {
+		t.Fatalf("a confirmed preset answered %s", text)
+	}
+	after, err := rig.store.GetDestination(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Profile.ExcludeRoles) != 1 || after.Profile.ExcludeRoles[0] != routing.RoleMusic {
+		t.Fatalf("the music guard was dropped by the preset: %v", after.Profile.ExcludeRoles)
+	}
+
+	args["mix"] = "vod"
+	text, isErr = callText(t, cs, "apply_routing_preset", args)
+	if !isErr || !strings.Contains(text, "second (VOD) mix") {
+		t.Fatalf("a VOD preset on a destination with no second mix answered (isError=%v): %s", isErr, text)
+	}
+	if after, _ := rig.store.GetDestination(1); after.VODProfile != nil {
+		t.Fatal("the tool created a second mix the destination did not have")
+	}
+}
+
+// Saved but not reconciled: the answer says so with reconcileFailed and the
+// warning, and so does the audit, rather than the dispatch's "done (200)".
+//
+// MUTATION: drop the c.outcome line in runApplyPreset's reconcileFailed branch.
+// Observed: FAIL, the audit said "done (200)".
+func TestApplyRoutingPresetSaysAndAuditsAReconcileThatFailed(t *testing.T) {
+	rig := newMCPRig(t)
+	presetReconcile = func(*Server) string {
+		return "the routing preset was saved, but the running pipeline could not be updated"
+	}
+	t.Cleanup(func() { presetReconcile = func(s *Server) string { return s.reconcileNow("the routing preset") } })
+	text, isErr := callText(t, mcpClient(t, rig.h, rig.admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": routing.PresetEverything, "confirm": true})
+	if isErr || !strings.Contains(text, `"reconcileFailed":true`) || !strings.Contains(text, "could not be updated") {
+		t.Fatalf("a saved but unreconciled preset answered (isError=%v): %s", isErr, text)
+	}
+	evs := rig.mcpEvents()
+	if len(evs) != 1 || fieldOf(evs[0], fieldMCPOutcome) != "saved, but the running pipeline was not updated (reconcile failed)" {
+		t.Fatalf("the audit does not say the reconcile failed: %+v", evs)
+	}
+}
+
+// The preview's wouldRestart covers the second mix: it is compiled into the same
+// FFmpeg graph (routing.CompilePair), so a structural change to it restarts a
+// running destination as one to the live mix does. On a destination that is
+// really running.
+//
+// MUTATION: put back `field == "profile" &&` in wouldRestart. Observed: FAIL,
+// wouldRestart false for a VOD loudness stage on a running destination.
+func TestApplyRoutingPresetPreviewsAVODRestartOnARunningDestination(t *testing.T) {
+	h, store, sign := runningDestServer(t)
+	if _, err := store.PutMCPAccess(true, db.MCPLevels()); err != nil {
+		t.Fatal(err)
+	}
+	d, err := store.GetDestination(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vod := routing.Profile{Mode: routing.ModeSimple, Normalize: routing.NormOff, SampleRate: 48000,
+		Tracks: []routing.TrackSel{{Track: 0, Enabled: true, Gain: 1}}}
+	d.VODProfile = &vod
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatal(err)
+	}
+	admin := createScopedToken(t, h, sign, "assistant-admin", db.ScopeMCPAdmin)
+	text, isErr := callText(t, mcpClient(t, h, admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": loudnessPreset(t), "mix": "vod"})
+	if !isErr || !strings.HasPrefix(text, "Not done:") {
+		t.Fatalf("the preview answered (isError=%v): %s", isErr, text)
+	}
+	if !strings.Contains(text, `"running":true`) || !strings.Contains(text, `"wouldRestart":true`) || !strings.Contains(text, "restarts it") {
+		t.Fatalf("a structural VOD change on a running destination was not previewed as a restart: %s", text)
+	}
+}
+
+// A 200 from the apply route is the request; the destination's row is what was
+// done to it. A row that is not "saved" is a failed tool call, audited as not
+// applied, with no "applied" for an agent to read as success. The route answers
+// a narrowed request that changes nothing with 404 or 409 today, so the row is
+// served here by hand: this pins the tool's reading, not the route's.
+//
+// MUTATION: drop the outcome check in runApplyPreset. Observed: FAIL, the tool
+// answered {"applied": ...} and the audit said done (200).
+func TestApplyRoutingPresetReadsTheRowNotTheStatus(t *testing.T) {
+	rig := newMCPRig(t)
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/apply") && r.URL.Query().Get("dryRun") == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"preset": "everything", "mix": "live",
+				"results": []map[string]any{{"id": 1, "name": "x", "outcome": "skipped", "message": "not this preset's to change"}}})
+			return
+		}
+		rig.h.ServeHTTP(w, r)
+	})
+	mux := http.NewServeMux()
+	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
+	mux.Handle("/", rig.h)
+	text, isErr := callText(t, mcpClient(t, mux, rig.admin), "apply_routing_preset",
+		map[string]any{"destinationId": 1, "preset": routing.PresetEverything, "confirm": true})
+	if !isErr || strings.Contains(text, `"applied"`) || !strings.Contains(text, "not this preset's to change") {
+		t.Fatalf("a skipped row answered (isError=%v): %s", isErr, text)
+	}
+	evs := rig.mcpEvents()
+	if len(evs) != 1 || !strings.Contains(fieldOf(evs[0], fieldMCPOutcome), "not applied") {
+		t.Fatalf("the audit does not say the preset was not applied: %+v", evs)
 	}
 }
 

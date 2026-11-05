@@ -75,6 +75,7 @@
   "streamdeck.preset.hold": "Segure para aplicar",
   "streamdeck.preset.applying": "Aplicando",
   "streamdeck.preset.noIngest": "Sem ingestão",
+  "streamdeck.preset.applied": "Aplicado a {count}",
   "streamdeck.pi.presetLabel": "Predefinição de roteamento",
   "streamdeck.pi.presetHint": "Aplicar uma predefinição pode reiniciar os destinos deste programa.",
   "streamdeck.pi.presetsFailed": "Não foi possível carregar a lista de predefinições.",

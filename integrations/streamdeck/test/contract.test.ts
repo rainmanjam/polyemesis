@@ -85,7 +85,7 @@ function invoke(c: PolyemesisClient, g: Golden): Promise<unknown> {
       return c.endPoll(Number(seg[2]));
     case "GET /routing/presets":
       return c.routingPresets();
-    case "POST /routing/presets/{presetId}":
+    case "POST /routing/presets/{presetId}/apply":
       return c.applyPreset(decodeURIComponent(seg[3]!), source);
     case "POST /destinations/start-all":
       return c.startAll(source);
@@ -368,5 +368,28 @@ describe("every key kind, painted from the server's answers", () => {
     expect(keys.mute.titles.at(-1)).toBe("Unmuted\nHost mic");
     expect(keys.gain.feedback.at(-1)?.title).toBe("Main stage · Host mic");
     expect(keys.dump.titles.at(-1)).toMatch(/^Buffering delay\nDelayed feed/);
+  });
+
+  // The preset key used to send the compile route, which answered 200 and stored nothing, and showed OK. Held
+  // now, it sends the apply route and shows what the server's answer says was saved -- and the Go side of this
+  // case (deckPresetApplied) holds the server to having changed the stored routing.
+  it("shows how many destinations the recorded preset apply saved, and OK only because none failed", async () => {
+    const g = golden("preset-apply");
+    const rows = (g.body as { results: { outcome: string }[] }).results;
+    const saved = rows.filter((r) => r.outcome === "saved").length;
+    expect(saved).toBeGreaterThan(0);
+    expect(rows.some((r) => r.outcome === "failed")).toBe(false);
+    const presetId = decodeURIComponent(g.request.path.split("/")[3]!);
+    const { rt, net, sched } = runtimeFor({ ...install, [`POST /api/v1${g.request.path}`]: goldenRoute("preset-apply") });
+    rt.configure({ url: "https://studio.example", token: "t" });
+    await rt.verify();
+    const key = surface("pr", "preset", { presetId, sourceId: 1 });
+    rt.add(key);
+    await rt.pressPresetDown("pr");
+    sched.fireAll();
+    await settle();
+    expect(net.writes().map((r) => r.url.pathname)).toEqual([`/api/v1${g.request.path}`]);
+    expect(key.titles.at(-1)).toBe(`Applied to ${saved}`);
+    expect([key.oks, key.alerts]).toEqual([1, 0]);
   });
 });

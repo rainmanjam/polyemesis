@@ -23,7 +23,7 @@
     { "method": "POST", "path": "/polls", "scope": "admin" },
     { "method": "POST", "path": "/polls/{id}/end", "scope": "admin" },
     { "method": "GET", "path": "/routing/presets", "scope": "read" },
-    { "method": "POST", "path": "/routing/presets/{presetId}", "scope": "admin" },
+    { "method": "POST", "path": "/routing/presets/{presetId}/apply", "scope": "admin" },
     { "method": "POST", "path": "/destinations/start-all", "scope": "admin" },
     { "method": "POST", "path": "/destinations/stop-all", "scope": "admin" },
     { "method": "POST", "path": "/destinations/{id}/start", "scope": "admin" },

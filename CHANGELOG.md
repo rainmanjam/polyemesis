@@ -41,6 +41,20 @@ its first tagged release.
   output, and a backup feed that was started, stopped or restarted is named in
   `reason`. Both are absent when nothing was running, including a delayed
   destination whose buffer is still filling. See [docs/API.md](docs/API.md).
+- **`POST /routing/presets/{preset}/apply` applies a routing preset to a
+  programme.** It saves the preset on every destination of the programme, or on
+  the one `?destination=` names, and follows the same rules as
+  `PUT /destinations/{id}`. A destination whose mix changes only in levels gets
+  the change live. A destination whose audio graph changes restarts. Each
+  destination's row answers `applied` and `reason`. Muted tracks stay muted and
+  a music guard (`excludeRoles`) stays on. A destination that copies its audio
+  is skipped. Only the two mixes are written, in one transaction, so a stop or
+  a key refresh that lands meanwhile is kept, and if one destination cannot
+  take the preset, nothing is saved. `?mix=vod` replaces the second mix
+  where there is one, and `?dryRun=true` previews without saving. Without a
+  body, the track pickers follow the programme's track roles, as the routing
+  editor's do. It needs an admin token. `POST /routing/presets/{preset}` still
+  compiles a preset and saves nothing. See [docs/API.md](docs/API.md).
 
 ### Changed
 
@@ -140,6 +154,32 @@ These follow from the lingering-state fixes below and are visible on purpose.
     it; the disconnect dialog says the same in every language.
   - Home Assistant discovery is republished when the entity set changes, and a removed entity
     is removed from the device rather than left behind.
+- **The Stream Deck's Routing preset key applies the preset.** The key sent
+  `POST /routing/presets/{preset}`, which only compiles a preset, and showed OK
+  while nothing changed. It now sends the apply route above to every destination
+  on its programme. It shows **Applied to N** with the OK mark when the preset
+  was saved, and an alert when no destination took it. If the preset was saved
+  but the running pipeline could not be updated, the key shows both the count
+  and the alert. See
+  [docs/STREAM-DECK.md](docs/STREAM-DECK.md#routing-preset).
+- **Platform routing presets are no longer refused as unknown.** A platform
+  preset's id has a colon (`platform:youtube`). The Stream Deck plugin and the
+  console escape it in the path, and both preset routes read the escaped form,
+  so they refused the preset as unknown. Both routes now unescape the id. The
+  Stream Deck end-to-end run found this.
+- **The MCP tool `apply_routing_preset` uses the same route.** It no longer has
+  its own compile-then-`PUT`, so its preview and its apply follow the server's
+  rules. The confirmed answer carries the server's `applied` and `reason`, and a
+  music guard now stays on, as muted tracks already did. One behaviour changed:
+  a destination with no second mix is refused with `mix: vod`. Before, the tool
+  created a second mix there. A destination that copies its audio is refused
+  too. The preview's `wouldRestart` now covers a change to the second mix, which
+  restarts a running destination as a live-mix change does. A row the server
+  did not save is a failed call, and a reconcile that failed is audited as one.
+  The tool also accepts platform preset ids such as `platform:youtube`, which
+  its argument check used to refuse even though `list_routing_presets` lists
+  them. See [docs/MCP.md](docs/MCP.md).
+
 - **Routing Overview shows music that is routed live.** The Music rights column
   used to say "No music routed" beside a filled Music cell. In the 2026-11-04
   demo, Twitch sent track 4 at 100% and Kick sent it at 25%, and both rows showed

@@ -123,7 +123,7 @@ Every other key acts on a tap, except Routing preset, which is also a hold, and 
 | **Stop all** | Hold | Stops every destination on the key's programme. Shows how many YouTube broadcasts the stop would end. If that count cannot be loaded, it refuses. | Admin |
 | **Stop destination** | Hold | Stops one destination. Shows whether the stop would end a YouTube broadcast, read from the server for that destination. It refuses if the count cannot be loaded or the destination is not the key's own. | Admin |
 | **Record** | Tap | Shows the install-wide recording switch and toggles it. Recording is one switch for every programme, so this key takes no programme. Stopping a recording ends no broadcast, so it is a tap. | Read to show; admin to switch |
-| **Routing preset** | Hold | Applies a routing preset to the key's programme. Applying one can restart that programme's destinations. | Admin |
+| **Routing preset** | Hold | Applies a routing preset to every destination on the key's programme and saves it, as a save in the routing editor does. See [Routing preset](#routing-preset). | Admin |
 | **Failover** | Tap | Shows which source is on air: primary, backup, playlist or slate. Tapping hands control back to automatic. | Read to show; admin to switch |
 | **Mute track** | Tap | Mutes or unmutes one track on one destination. See [Track mute and the gain dial](#track-mute-and-the-gain-dial). | Read to show; admin to switch |
 | **Chat poll** | Tap to start; hold to end | Starts the [chat poll](POLLS.md) set on the key: a question, 2 to 6 options (one per line) and a duration. While it runs the key shows **Poll on** with the votes so far and the time left, then **Counting** while the last votes are judged. Hold it to end the poll early. Install-wide, so it takes no programme. | Admin |
@@ -210,6 +210,41 @@ Both need an admin token; a read token shows **Needs admin token**. A refused re
 the key's alert. A tap on the same destination while a retry is out, or within 4 seconds of one, is ignored,
 from this key or any other, so a double tap sends one retry instead of restarting the attempt
 the first tap began.
+
+### Routing preset
+
+Holding a Routing preset key applies its preset to every destination on the
+key's programme, through `POST /api/v1/routing/presets/{preset}/apply`. The
+server saves the preset on each destination, as a save in the routing editor
+does, and reports back what happened to each one:
+
+- **Live where it can be.** A destination whose mix changes only in levels gets
+  the change live. A destination whose audio graph changes restarts. A
+  destination the preset does not change keeps running. No other destination
+  restarts.
+- **Your mutes and music guards stay.** A muted track stays muted, and a role
+  kept out of the mix (the music guard) stays out. To lift either, use the
+  routing editor.
+- **Some destinations are skipped.** A destination that copies its audio has no
+  mix to replace, so it is left as it is. A stopped destination keeps the
+  preset for its next start.
+- **The pickers follow the track roles.** "No music", for example, drops the
+  track marked as music on the programme's source, the same as the routing
+  editor.
+- **Nothing is saved unless every destination can take it.** If one
+  destination cannot take the preset, for example because a music guard would
+  leave it silent, the server saves nothing.
+- **Only the mix changes.** A stop, a start or a key refresh that lands while
+  the preset is being applied is kept.
+
+The key shows **Applied to N** and the OK mark when the preset was saved on N
+destinations. It shows the alert instead if no destination took the preset. If
+the preset was saved but the running pipeline could not be updated to match, it
+shows both the count and the alert.
+
+Before this route existed, the key sent `POST /api/v1/routing/presets/{preset}`.
+That route only compiles a preset and saves nothing, so the key showed OK while
+nothing changed.
 
 ### What the faces mean
 
@@ -333,8 +368,9 @@ recorder is up, for example because no programme has started), or **HALTED:
 DISK** with the reason, when the free-space floor has stopped the recorder.
 HALTED: DISK has its own image, a drive on crimson.
 
-**Routing preset:** **Hold to apply**, **Applying**, or **No ingest** when the
-install has no programme to apply it to.
+**Routing preset:** **Hold to apply**, **Applying**, **Applied to N** for a
+moment after a hold, or **No ingest** when the install has no programme to apply
+it to.
 
 **Failover:** **Primary on air**, **Backup on air**, **Playlist on air**,
 **Slate on air**, **Primary degraded**, or **No feed info**. **Primary degraded**
