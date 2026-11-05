@@ -228,9 +228,11 @@ const PRESETS: DestPreset[] = [
     group: "major",
     transport: "rtmps",
     kind: "rtmp",
+    // Empty on purpose, as with Kick: the host Instagram shows carries a
+    // region (edgetee-upload-<region>), so a prefill is somebody else's edge.
     url: "",
     separateKey: true,
-    helpUrl: "https://developers.facebook.com/docs/instagram-platform",
+    helpUrl: "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",
     notes: "addDest.presetNote.instagram",
     aliases: ["meta", "ig"],
   },
@@ -1039,8 +1041,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     if (!p.kind) return;
     // Same for a platform polyemesis cannot stream to at all. The form is left
     // alone and the warning below does the talking; half-filling it would make
-    // an Instagram destination look one field away from working, which is
-    // precisely the impression that generates the support request.
+    // such a destination look one field away from working, which is precisely
+    // the impression that generates the support request.
     if (capabilityFor(p.id, p.name).tier === "unsupported") return;
     // Through changeKind, not setKind: picking an SRT or file preset is a
     // transport change like any other, and a key left over from the RTMP one

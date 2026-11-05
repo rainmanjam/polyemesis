@@ -45,6 +45,27 @@ its first tagged release.
   destination being refused on every connect showed a LIVE lamp at 0 kbps with uptime `--:--:--`
   beside its failure. They now show **Starting**, and the on-air bar counts it as trying, until
   the run has carried media. The API's `state` is unchanged.
+- **Instagram Live is a working RTMPS destination.** The Instagram preset used to be marked
+  unsupported, on the understanding that Instagram had no streaming-software path for most
+  accounts. Instagram's desktop flow (**+ Create → Live video → Go live with streaming software**)
+  now hands out a stream URL and key, including named persistent keys, so the preset is a
+  manual-key destination like DLive or LinkedIn Live:
+  - The stream URL is left for you to paste, because the host Instagram shows carries a region
+    (`rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/`). The preset's notes give that
+    shape, recommend a persistent key so the destination stays ready between live videos, and
+    say to click **Go live** in Instagram once the preview appears and to end the live video in
+    Instagram before stopping the destination.
+  - Video guidance is vertical 720×1280 at 30 fps, 2,250–6,000 kbps, from Restream's Instagram
+    help (Meta publishes no encoder page of its own).
+  - The capability matrix moves Instagram to **Manual key**. Reading live comments is allowed by
+    Meta's API and is not built yet, so it reads *Unverified*; creating a broadcast, fetching a
+    key, Go live / end, viewer counts and comment moderation have no public endpoint and read
+    *Not possible*.
+  - The rollover limit table records Instagram's one-hour cap, as *reported* (the source is
+    Restream's help, not Meta's). It drives no countdown: Instagram destinations save as custom,
+    and a limit row with no platform is now never matched to a destination.
+  - A test pins that a query-string key such as Instagram's or Facebook's
+    (`<digits>?s_bl=1&…`) reaches FFmpeg as one argument with its `?` and `&` intact.
 
 ## [0.14.0] — 2026-11-05
 

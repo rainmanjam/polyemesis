@@ -25,8 +25,9 @@ the summary is wrong.
 - Not a transcoder by default. `-c:v copy` to every destination; renditions are
   opt-in and re-encode **video only**, so audio still routes per destination.
 - Not multi-user. One operator, no roles.
-- Instagram Live is unsupported and marked as such — there is no Live broadcast
-  API for it.
+- Instagram Live streams with a pasted RTMPS key (a persistent key stays ready
+  between broadcasts); Instagram's Go live click, chat and its one-hour cap stay
+  on Instagram's side.
 
 ## Core
 

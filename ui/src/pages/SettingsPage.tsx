@@ -2646,8 +2646,8 @@ export function PlatformRow({
  *
  *  Every row of this table was a question somebody would otherwise only answer
  *  by spending an evening: Kick signs in but never hands over a key; Facebook
- *  works completely and needs Meta's App Review first; Instagram cannot be
- *  streamed to at all. Reading it takes thirty seconds and it is deliberately
+ *  works completely and needs Meta's App Review first; Instagram streams with a
+ *  pasted key and caps a live video at one hour. Reading it takes thirty seconds and it is deliberately
  *  the first thing on this tab. */
 function PlatformCapabilityMatrix() {
   const t = useT();

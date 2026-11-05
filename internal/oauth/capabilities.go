@@ -5,12 +5,12 @@ package oauth
 //
 // Every platform polyemesis can stream to sits somewhere on a spectrum. At one
 // end YouTube, Twitch and Facebook sign in and hand over a stream key. At the
-// other end Instagram, which has no live-video API at all and whose RTMP path
-// was removed for most accounts — a destination there would never connect, and
-// "never connects" is the single most expensive failure a self-hosted tool can
-// ship, because it looks exactly like a bug in the tool. In between sits Kick:
-// full OAuth, chat, moderation and viewer stats, and no stream-key endpoint
-// anywhere in its published API.
+// other end the paste-the-key platforms, Instagram among them: it streams over
+// RTMPS with a key copied from instagram.com, and nothing else is automated
+// yet. A destination that would never connect is the single most expensive
+// failure a self-hosted tool can ship, because it looks exactly like a bug in
+// the tool -- which is why TierUnsupported exists, and why it is only ever
+// set on evidence.
 //
 // The matrix exists because that spectrum was previously only legible to
 // someone who read internal/oauth. It is a description of reality, not a gate:
@@ -536,23 +536,7 @@ var platformCapabilities = []PlatformCapability{
 		"Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
 		"LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
 	),
-	{
-		PresetID: "instagram", Name: "Instagram Live", Tier: TierUnsupported,
-		Summary:   "polyemesis cannot automate Instagram: there is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination — copied by hand, and they change every broadcast.",
-		ReadFirst: "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
-		Caps: map[Capability]Support{
-			CapSSO: SupportNo,
-			// Not SupportManual: for most accounts there is no key to paste,
-			// so offering the paste field as the answer would be its own lie.
-			CapStreamKey:          SupportNo,
-			CapMetadata:           SupportNo,
-			CapChatRead:           SupportNo,
-			CapChatSend:           SupportNo,
-			CapModeration:         SupportNo,
-			CapViewerStats:        SupportNo,
-			CapBroadcastLifecycle: SupportNo,
-		},
-	},
+	instagramRow(),
 }
 
 // manualUnverified builds the row shared by every platform polyemesis can
@@ -580,6 +564,60 @@ func tikTokRow() PlatformCapability {
 	c.Tier = TierPartial
 	c.Caps[CapSSO] = SupportYes
 	return c
+}
+
+// instagramRow is Instagram Live: an RTMPS destination with a key pasted from
+// instagram.com, and nothing automated yet.
+//
+// IT WAS TierUnsupported, with every cell SupportNo, on the belief that
+// Instagram had no live-video API and that Live Producer's RTMP path had gone
+// for most accounts. Both were wrong by 2026-11. Instagram's own desktop flow
+// (+ Create → Live video → Go live with streaming software) hands out a stream
+// URL and a key, including named persistent keys, so the key is SupportManual.
+//
+// The other cells follow Meta's public Instagram Platform reference, as
+// summarised by the research task that checked it (2026-11-05):
+// https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/live_media.md
+//   - GET /{ig-user-id}/live_media returns the media being broadcast now, its
+//     comments are readable while it is live, and a live_comments webhook
+//     exists (instagram_basic / pages_read_engagement). So chat read -- and
+//     the sign-in it would need -- are SupportUnknown: allowed, not built.
+//   - The public reference exposes no endpoint for creating a broadcast (and
+//     so setting its title), fetching the ingest URL or key, Go live / end,
+//     viewer counts, or hiding, deleting or posting live comments. Those are
+//     SupportNo, traced to that reference as the sourcing rule requires.
+//
+// Restream also offers what it calls the official Instagram Live API
+// connection, for accounts linked to a Facebook Page. How that path is
+// reached is a separate research task; until it lands, these Nos describe
+// the public reference above and nothing more.
+func instagramRow() PlatformCapability {
+	return PlatformCapability{
+		PresetID: "instagram", Name: "Instagram Live", Tier: TierManual,
+		Summary:   "Paste the stream URL and key from instagram.com → + Create → Live video → Go live with streaming software, then click Go live in Instagram once the preview appears. Streaming works; chat, title and the Go live click stay in Instagram for now.",
+		ReadFirst: "A live video on Instagram ends after one hour, and Instagram needs a public professional (Creator or Business) account with 1,000+ followers. Use a persistent stream key where your account offers one, so the destination stays ready between broadcasts, and end the live video in Instagram before stopping the destination.",
+		HelpURL:   "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",
+		Caps: map[Capability]Support{
+			CapSSO:                SupportUnknown,
+			CapStreamKey:          SupportManual,
+			CapMetadata:           SupportNo,
+			CapChatRead:           SupportUnknown,
+			CapChatSend:           SupportNo,
+			CapModeration:         SupportNo,
+			CapViewerStats:        SupportNo,
+			CapBroadcastLifecycle: SupportNo,
+		},
+		Reasons: map[Capability]string{
+			CapStreamKey:          "Instagram shows the stream URL (rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/) and a Stream key list. A persistent key, marked Ready and managed under Manage Persistent Key, is pasted once and reused; a one-off key has to be pasted again for each live video. Meta publishes no endpoint that hands the key over.",
+			CapChatRead:           "Meta's API lets an app read the comments on a live video while it is broadcasting (live_media, and the live_comments webhook). polyemesis does not read Instagram chat yet; it is planned.",
+			CapSSO:                "Signing in would only be needed for reading live comments, which is planned and not built.",
+			CapMetadata:           "The title is set in Instagram when you create the live video; Meta publishes no endpoint for creating one.",
+			CapChatSend:           "Meta's API does not offer posting a comment on a live video.",
+			CapModeration:         "Hiding or deleting live comments is not offered by Meta's API; moderate in Instagram.",
+			CapViewerStats:        "Meta's API does not report a live viewer count for Instagram.",
+			CapBroadcastLifecycle: "Go live and End are clicks in Instagram; Meta publishes no endpoint for either.",
+		},
+	}
 }
 
 func manualUnverified(presetID, name, summary, readFirst string) PlatformCapability {

@@ -444,22 +444,28 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     "caps.linkedin.readFirst",
   ),
   {
+    // Was "unsupported" with every cell "no". Instagram's desktop flow now
+    // issues an RTMPS URL and key (persistent keys included), so the key is
+    // pasted; reading live comments is allowed by Meta's API and not built yet,
+    // and the rest has no public endpoint. See instagramRow in capabilities.go.
     presetId: "instagram",
     name: "Instagram Live",
-    tier: "unsupported",
+    tier: "manual",
     summary: "caps.instagram.summary",
     readFirst: "caps.instagram.readFirst",
     caps: {
-      sso: "no",
-      // Not "manual": for most accounts there is no key to paste, so offering
-      // the paste field as the answer would be its own lie.
-      streamKey: "no",
+      sso: "unknown",
+      streamKey: "manual",
       metadata: "no",
-      chatRead: "no",
+      chatRead: "unknown",
       chatSend: "no",
       moderation: "no",
       viewerStats: "no",
       broadcastLifecycle: "no",
+    },
+    reasons: {
+      streamKey: "caps.instagram.streamKey",
+      chatRead: "caps.instagram.chatRead",
     },
   },
 ];
