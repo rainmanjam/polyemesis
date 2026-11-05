@@ -148,6 +148,13 @@ type Reason struct {
 	// connected platform account reports a stream key that differs from the
 	// stored one, so the remedy is one click on "update the key".
 	KeyChanged bool `json:"keyChanged,omitempty"`
+	// URLFix is set by the engine, not the classifier, for the same reason
+	// KeyChanged is: stderr cannot see it. It is the server URL that works,
+	// when the destination's own URL is one polyemesis can prove cannot
+	// publish -- today an Amazon IVS ingest (Kick, Twitch) without /app, which
+	// IVS refuses by dropping the connection, so whatever cause FFmpeg's output
+	// suggests, the URL is the thing to change. Empty otherwise.
+	URLFix string `json:"urlFix,omitempty"`
 	// At is when the run ended.
 	At time.Time `json:"at"`
 }
@@ -268,6 +275,41 @@ func openRefused(lower string) bool {
 		(strings.HasSuffix(lower, ": i/o error") || strings.HasSuffix(lower, ": input/output error"))
 }
 
+// tlsSessionOpened reports whether a run that printed a [tls @] line had in
+// fact got its TLS session open -- so the line is the encrypted socket failing
+// LATER, not TLS failing.
+//
+// THE TELL IS WHAT FFMPEG DID NOT SAY. When the TLS connection cannot be
+// opened -- a ClientHello sent to a plain-RTMP port, a certificate that does
+// not verify -- rtmpproto gives up on ffurl_open and prints "Cannot open
+// connection tls://host:port"; every TLS fixture carries it. When the session
+// opens and the ingest then drops it, FFmpeg's only TLS-level line is the read
+// failing ("[tls @] IO error: Connection reset by peer") and that line is
+// absent, because the connection was opened. That second shape is exactly what
+// an Amazon IVS ingest produces for a URL with no /app: TLS and the RTMP
+// handshake both succeed, the stream key arrives as the application name in
+// the connect command, and IVS resets the connection. It was reported as
+// "Secure (TLS) connection failed" with advice about ports and certificates,
+// which sent the operator looking in exactly the wrong place
+// (ffmpeg9-rtmps-refused-after-connect-* fixtures).
+//
+// ONLY FOR RTMPS. "Cannot open connection" is rtmpproto's sentence; an
+// Icecast or HTTP output over TLS fails its handshake without it, so for those
+// its absence proves nothing and the [tls @] line keeps meaning TLS. A
+// certificate failure stays TLS regardless (see Classify).
+func tlsSessionOpened(lowers []string) bool {
+	rtmps := false
+	for _, l := range lowers {
+		if strings.Contains(l, "cannot open connection tls://") {
+			return false
+		}
+		if strings.Contains(l, "rtmps://") || strings.Contains(l, "[rtmps @") {
+			rtmps = true
+		}
+	}
+	return rtmps
+}
+
 var timeoutSubs = []string{
 	"operation timed out", "connection timed out", "timed out", "connection setup failure: connection time",
 }
@@ -282,11 +324,18 @@ func Classify(in Input) (r Reason, ok bool) {
 	for i, l := range in.Stderr {
 		lowers[i] = strings.ToLower(l)
 	}
+	opened := tlsSessionOpened(lowers)
 	for _, ru := range rules {
 		// The FIRST matching line, not the last: the lower layer speaks
 		// first and FFmpeg's generic summary follows it.
 		for i, l := range in.Stderr {
 			if ru.match(l, lowers[i]) {
+				if ru.cause == TLS && opened && !strings.Contains(lowers[i], "certificate") {
+					// A TLS-layer line from a session that DID open: the
+					// socket under it failed, and the cause is whatever
+					// made the far end close it. See tlsSessionOpened.
+					continue
+				}
 				r.Cause, r.Line = ru.cause, strings.TrimSpace(l)
 				return r, true
 			}
@@ -356,6 +405,9 @@ func (r Reason) Sentence() string {
 	}
 	if r.KeyChanged {
 		s += "; the connected platform account reports a different stream key, refresh it"
+	}
+	if r.URLFix != "" {
+		s += "; the server URL has no /app application path, so the stream key is sent as the application name: use " + r.URLFix
 	}
 	if r.Cause == Unknown && r.Line != "" {
 		s += ": " + r.Line

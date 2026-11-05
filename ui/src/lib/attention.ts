@@ -1,5 +1,6 @@
 import type { DestinationId, DestStatus, FailureCause, ProcessState, RenditionStatus, Status } from "./types";
 import type { SignalTone } from "./signal";
+import { destinationProcessState } from "./status";
 
 /* What the dashboard says FIRST, as plain functions.
  *
@@ -25,7 +26,7 @@ import type { SignalTone } from "./signal";
  *  operator learns to stop reading the number.
  */
 export interface OnAir {
-  /** Destinations whose process is running. */
+  /** Destinations whose process is running and has carried media. */
   live: number;
   /** Destinations the operator has asked for. The denominator. */
   enabled: number;
@@ -38,8 +39,14 @@ export interface OnAir {
 
 export function onAir(destinations: readonly DestStatus[] | null | undefined): OnAir {
   const rows = (destinations ?? []).filter((d) => d.enabled);
+  // Through destinationProcessState, as the card is: a process that is running
+  // and has not yet carried media is starting, so it counts as degraded and not
+  // live -- or the bar would say "1 live" over a card that says Starting.
   const count = (...states: ProcessState[]) =>
-    rows.filter((d) => d.process?.state && states.includes(d.process.state)).length;
+    rows.filter((d) => {
+      const state = destinationProcessState(d.process);
+      return !!state && states.includes(state);
+    }).length;
   return {
     live: count("running"),
     enabled: rows.length,

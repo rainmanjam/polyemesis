@@ -8,6 +8,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/services"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -164,6 +165,39 @@ func destinationReason(p *supervisor.Status, ingestConfigured bool, sourceLive t
 	}
 	r := *p.Reason
 	return &r
+}
+
+// urlFixFor is Reason.URLFix: the server URL that works, when this
+// destination's URL is an Amazon IVS ingest without /app and the failure is one
+// that URL explains. Empty for no reason, for a destination not publishing over
+// RTMP, and for causes the URL cannot produce.
+//
+// WHY THE ENGINE AND NOT THE CLASSIFIER. IVS refuses rtmps://<host>/<key> by
+// dropping the connection on the RTMP connect, and in FFmpeg's stderr that is
+// indistinguishable from a refused key -- and was, until failreason learned to
+// tell an opened TLS session from a failed one, a "TLS connection failed". The
+// URL is the only thing that says which, and only the engine holds it.
+//
+// A save that introduces this URL is refused (api.refuseIVSWithoutApp), so the
+// rows this fires for are the ones saved before that refusal existed -- the
+// field report this was written for among them.
+//
+// Not for the network causes, a codec refusal or a slow upload: none of them
+// can be the far end refusing the application, and naming the URL beside one
+// of them would send the operator to the wrong field.
+func urlFixFor(r *failreason.Reason, kind db.DestKind, url string) string {
+	if r == nil || !kind.CarriesStreamKey() || r.Cause.Network() {
+		return ""
+	}
+	switch r.Cause {
+	case failreason.CodecRejected, failreason.UploadTooSlow:
+		return ""
+	}
+	fix, wrong := services.IVSAppPathFix(url)
+	if !wrong {
+		return ""
+	}
+	return fix
 }
 
 // timelineEventOf is the one mapping from an alert to its timeline row. The

@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/services"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -2766,6 +2767,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
 		return
 	}
+	if refuseIVSWithoutApp(w, row.URL) {
+		return
+	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
@@ -2802,6 +2806,34 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		resp["warnings"] = warnings
 	}
 	writeMutation(w, http.StatusCreated, rw, resp)
+}
+
+// refuseIVSWithoutApp answers 400 for an Amazon IVS ingest URL (Kick, Twitch)
+// whose application path is not /app, naming the URL that works, and reports
+// whether it did.
+//
+// REFUSED, where every other registry finding is only a warning. AnalyseURL
+// stays advisory because 11 of OBS's 540 ingest URLs really have no application
+// path; an IVS host is not one of them, and services.IVSAppPathFix states why
+// this one shape is provably unpublishable. The warning it replaces was a
+// ten-second toast that appeared beside the success toast as the dialog closed
+// -- and a Kick destination saved past it reported a TLS failure for ever after.
+//
+// HERE AND NOT IN Destination.Validate, on the pattern the caption switch set:
+// checked on the save that introduces the URL. Validate also runs on every
+// track-gain write and on UpdateDestinationMixes, so refusing there would make
+// a row ALREADY holding this URL unsaveable -- no rename, no switch-off, and a
+// batch mix change that touches it refused whole. Such a row is still told
+// about it, by the warning on every save and by the reason on its card.
+func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
+	fix, wrong := services.IVSAppPathFix(raw)
+	if !wrong {
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "this is an Amazon IVS ingest URL (Kick and Twitch both use them) "+
+		"without the /app application path, so the stream key would be sent as the application name and "+
+		"IVS would drop every connection. Use "+fix+" as the server URL, with the stream key in its own field.")
+	return true
 }
 
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
@@ -2846,6 +2878,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The stored caption mode, read BEFORE the decode below writes over it, so
 	// a save that changes it can be told apart from one that leaves it alone.
 	storedCaptionMode := existing.CaptionMode
+	// The stored URL, so the IVS check below refuses only a save that CHANGES
+	// the URL into one that cannot publish -- see refuseIVSWithoutApp.
+	storedURL := existing.URL
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
@@ -2859,6 +2894,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	existing.ID = id
+	if existing.URL != storedURL && refuseIVSWithoutApp(w, existing.URL) {
+		return
+	}
 	// Captions are decided before a YouTube broadcast goes live: the delay and
 	// the caption route must be set while the broadcast is still in its first
 	// state. A change while the destination is delivering is refused, and a

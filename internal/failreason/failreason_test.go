@@ -299,6 +299,10 @@ func TestTheSentenceNamesHeldAndARotatedKey(t *testing.T) {
 			t.Errorf("%q does not say %q", s, want)
 		}
 	}
+	fix := "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app"
+	if s := (Reason{Cause: KeyRejected, URLFix: fix}).Sentence(); !strings.Contains(s, fix) || !strings.Contains(s, "/app") {
+		t.Errorf("%q does not name the URL that works", s)
+	}
 	if got := (Reason{Cause: Unknown, Line: "Broken pipe"}).Sentence(); got != "unknown failure: Broken pipe" {
 		t.Errorf("unknown sentence = %q", got)
 	}
@@ -327,5 +331,54 @@ func TestTheHostFFmpegsWordingClassifiesTheSame(t *testing.T) {
 				t.Fatalf("got %+v, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// An RTMPS ingest that opens TLS, completes the RTMP handshake and then drops
+// the connection on the connect command -- what Amazon IVS does to a Kick URL
+// with no /app, where the stream key arrives as the application name -- was
+// classified as a TLS failure, because FFmpeg's only TLS-level line is the
+// encrypted socket's read failing. The card said "Secure (TLS) connection
+// failed" and advised checking ports and certificates. It is a refusal, and
+// says so: the look-alike verdict rtmp-unknown-app already gets.
+//
+// The `[tls @` line must not be what the verdict rests on, and the real TLS
+// failures -- which print "Cannot open connection tls://" -- must stay TLS.
+//
+// Proven able to fail by making tlsSessionOpened return false unconditionally:
+// the reset and eof fixtures go back to "tls".
+func TestAnRTMPSIngestThatDropsTheConnectIsARefusalNotTLS(t *testing.T) {
+	for _, name := range []string{
+		"ffmpeg9-rtmps-refused-after-connect-reset",
+		"ffmpeg9-rtmps-refused-after-connect-eof",
+		"ffmpeg9-rtmps-refused-after-connect-close",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, ok := Classify(Input{Stderr: fixture(t, name), Failed: true, RanFor: manifestRanFor(t, name)})
+			if !ok || got.Cause != KeyRejected {
+				t.Fatalf("got %+v, want %s", got, KeyRejected)
+			}
+			if !strings.Contains(got.Line, "Error opening output rtmps://") {
+				t.Errorf("line = %q, want the refusal line, not the TLS socket's", got.Line)
+			}
+			if !got.Quick {
+				t.Errorf("a %s refusal is quick, so it counts toward the hold", manifestRanFor(t, name))
+			}
+		})
+	}
+	// The complement, in one place: what really is TLS stays TLS.
+	for _, name := range []string{"rtmps-to-plain-port", "ffmpeg9-rtmps-to-plain-port", "rtmps-untrusted-cert"} {
+		if got, _ := Classify(Input{Stderr: fixture(t, name), Failed: true, RanFor: time.Second}); got.Cause != TLS {
+			t.Errorf("%s: got %s, want tls", name, got.Cause)
+		}
+	}
+	// An Icecast or HTTP output over TLS has no rtmpproto to say "Cannot open
+	// connection", so for it a [tls @] line keeps meaning TLS.
+	icecast := []string{
+		"[tls @ 0x1] IO error: Connection reset by peer",
+		"[out#0/mp3 @ 0x2] Error opening output icecast://source:placeholder@example.invalid:8443/live.mp3: Input/output error",
+	}
+	if got, _ := Classify(Input{Stderr: icecast, Failed: true, RanFor: time.Second}); got.Cause != TLS {
+		t.Errorf("an Icecast TLS reset: got %s, want tls", got.Cause)
 	}
 }

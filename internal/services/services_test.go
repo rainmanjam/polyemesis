@@ -30,8 +30,9 @@ func TestAPathlessIngestURLIsReported(t *testing.T) {
 		t.Errorf("the warning does not say what is wrong.\ngot: %s", probs[0].Detail)
 	}
 	// The offered fix has to be the URL that actually works, because an
-	// operator will paste it back without checking.
-	want := "rtmps://fa723fc1b171.global-contribute.live-video.net/app"
+	// operator will paste it back without checking: the :443/app form that
+	// delivered media to Kick on a live run, and the one db/platforms.go gives.
+	want := "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app"
 	if probs[0].Fix != want {
 		t.Errorf("offered fix is not the working URL.\n got: %s\nwant: %s", probs[0].Fix, want)
 	}
@@ -71,6 +72,62 @@ func TestPastingServerAndKeyIntoOneBoxIsReported(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("a stream key pasted into the server box was not reported.\ngot: %+v", probs)
+	}
+}
+
+// An Amazon IVS ingest (Kick, Twitch) takes exactly one application, "app",
+// so for these hosts the finding is a certainty and names the corrected URL.
+//
+// Proven able to fail by making ivsAppPathProblem return false unconditionally:
+// the pathless case falls back to the generic advisory with a :443-less fix,
+// and the key-as-path and wrong-app cases produce no IVS finding at all.
+func TestAnIVSIngestWithoutTheAppPathIsCaughtWithTheCorrectedURL(t *testing.T) {
+	const host = "fa723fc1b171.global-contribute.live-video.net"
+	cases := []struct {
+		name, in, fix string
+	}{
+		{"Kick's dashboard, verbatim", "rtmps://" + host + "/", "rtmps://" + host + ":443/app"},
+		{"no trailing slash", "rtmps://" + host, "rtmps://" + host + ":443/app"},
+		{"port kept", "rtmps://" + host + ":443", "rtmps://" + host + ":443/app"},
+		{"upper-case host", "rtmps://FA723FC1B171.Global-Contribute.Live-Video.Net/", "rtmps://FA723FC1B171.Global-Contribute.Live-Video.Net:443/app"},
+		{"plain rtmp keeps its scheme", "rtmp://" + host + "/", "rtmp://" + host + "/app"},
+		{"key pasted as the path", "rtmps://" + host + ":443/sk_us-west-2_placeholder", "rtmps://" + host + ":443/app"},
+		{"another application", "rtmps://" + host + "/live", "rtmps://" + host + ":443/app"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fix, wrong := IVSAppPathFix(c.in)
+			if !wrong || fix != c.fix {
+				t.Fatalf("IVSAppPathFix(%q) = %q, %v; want %q, true", c.in, fix, wrong, c.fix)
+			}
+			probs := AnalyseURL(c.in)
+			if len(probs) != 1 {
+				t.Fatalf("AnalyseURL(%q) = %d findings, want exactly the IVS one: %+v", c.in, len(probs), probs)
+			}
+			if probs[0].Fix != c.fix || !strings.Contains(probs[0].Detail, c.fix) {
+				t.Errorf("the finding does not name the corrected URL %q:\n%+v", c.fix, probs[0])
+			}
+		})
+	}
+}
+
+// The complement: a correct IVS URL, and hosts that merely look like IVS, are
+// not caught. The leading dot in the suffix is what refuses the look-alikes.
+func TestTheIVSCheckLeavesCorrectAndLookAlikeURLsAlone(t *testing.T) {
+	for _, in := range []string{
+		"rtmps://fa723fc1b171.global-contribute.live-video.net:443/app",
+		"rtmps://fa723fc1b171.global-contribute.live-video.net/app/",
+		"rtmps://ingest.global-contribute.live-video.net/app/sk_placeholder",
+		"rtmp://ingest.global-contribute.live-video.net/app",
+		"rtmps://evilglobal-contribute.live-video.net/",
+		"rtmps://global-contribute.live-video.net/",
+		"rtmps://live.twitch.tv/",
+		"srt://fa723fc1b171.global-contribute.live-video.net:9000",
+		"",
+	} {
+		if fix, wrong := IVSAppPathFix(in); wrong {
+			t.Errorf("IVSAppPathFix(%q) caught it (fix %q); it must not", in, fix)
+		}
 	}
 }
 

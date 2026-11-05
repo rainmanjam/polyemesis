@@ -10,6 +10,41 @@ its first tagged release.
 
 ### Changed
 
+- **A Kick or Twitch ingest URL without `/app` is refused when it is saved.** Kick's dashboard
+  prints its Amazon IVS ingest as `rtmps://<host>.global-contribute.live-video.net/`, with no
+  application path, and pasted as it is the stream key becomes the RTMP application name, which
+  IVS answers by dropping every connection. Saving one only raised a ten-second toast beside the
+  success toast as the dialog closed. `POST /destinations` and a `PUT /destinations/{id}` that
+  changes the URL to one now answer `400`, naming the URL that works
+  (`rtmps://<host>:443/app`). A destination that already holds such a URL can still be renamed,
+  switched off and saved, and is warned about on every save. Every other URL without an
+  application path is still only a warning, because some services really have none. The
+  destination dialog says so under the URL field as it is typed, with a **Use the corrected URL**
+  button; it never rewrites the URL on its own. **Refresh stream key** stores the corrected URL
+  if a platform answers with an IVS URL without `/app`, and its response says so.
+
+### Fixed
+
+- **A Kick destination with no `/app` in its URL no longer reads as a TLS failure.** IVS opens TLS,
+  completes the RTMP handshake, then resets the connection when the stream key arrives as the
+  application name. FFmpeg's only TLS-level line is then the encrypted socket's read failing, and
+  any `[tls @` line was classified as **Secure (TLS) connection failed**, advising a look at ports
+  and certificates. An `rtmps://` failure is now TLS only when the TLS connection could not be
+  opened (FFmpeg prints `Cannot open connection tls://…` then) or a certificate failed. A connection
+  dropped after it opened is a refusal (`key_rejected`), the same verdict as an unknown RTMP
+  application, so repeated quick refusals now hold the destination instead of restarting it for
+  ever. For an IVS URL without `/app`, the failure reason also carries a new `urlFix` field with
+  the URL that works. The card then shows **Server URL is missing /app** with that URL, the alert
+  and webhook sentence names it, and both replace the stream-key advice. Three new FFmpeg 9
+  fixtures, captured against a local listener that drops the connection after the RTMP connect,
+  pin this (`internal/failreason/testdata`).
+- **A destination card no longer shows LIVE before anything is on air.** The server reports a
+  destination's process as `running` from the moment FFmpeg starts, before it has connected, and
+  `uptimeSec` stays 0 until media moves. The card, the YouTube vertical row and the Renditions
+  page drew any `running` destination as on air, and the on-air bar counted it as live, so a
+  destination being refused on every connect showed a LIVE lamp at 0 kbps with uptime `--:--:--`
+  beside its failure. They now show **Starting**, and the on-air bar counts it as trying, until
+  the run has carried media. The API's `state` is unchanged.
 - **Instagram Live is a working RTMPS destination.** The Instagram preset used to be marked
   unsupported, on the understanding that Instagram had no streaming-software path for most
   accounts. Instagram's desktop flow (**+ Create → Live video → Go live with streaming software**)

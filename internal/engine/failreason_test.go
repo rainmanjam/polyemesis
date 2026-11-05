@@ -196,3 +196,45 @@ func TestTheTimelineRecorderKeepsTheAlertsSubject(t *testing.T) {
 		t.Fatalf("got %+v", ev)
 	}
 }
+
+// A Kick destination saved with the URL Kick's dashboard prints -- an Amazon
+// IVS ingest with no /app -- fails because IVS takes the stream key as the
+// application name and drops the connection. FFmpeg reports that as a refusal
+// (or, before failreason learned the difference, as TLS), so the reason has to
+// carry the URL that works, or the card sends the operator to the key field.
+//
+// Proven able to fail by making urlFixFor return "" unconditionally.
+func TestAnIVSURLWithoutAppPutsTheWorkingURLOnTheReason(t *testing.T) {
+	const (
+		pathless = "rtmps://fa723fc1b171.global-contribute.live-video.net/"
+		working  = "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app"
+	)
+	cases := []struct {
+		name  string
+		cause failreason.Cause
+		kind  db.DestKind
+		url   string
+		want  string
+	}{
+		{"refusal on the pathless URL", failreason.KeyRejected, db.DestRTMP, pathless, working},
+		{"a TLS verdict on it", failreason.TLS, db.DestRTMP, pathless, working},
+		{"an unknown failure on it", failreason.Unknown, db.DestRTMP, pathless, working},
+		{"the working URL", failreason.KeyRejected, db.DestRTMP, working, ""},
+		{"a non-IVS pathless URL", failreason.KeyRejected, db.DestRTMP, "rtmps://ingest.example.com/", ""},
+		{"DNS cannot be the application", failreason.DNS, db.DestRTMP, pathless, ""},
+		{"nor a timeout", failreason.Timeout, db.DestRTMP, pathless, ""},
+		{"nor a codec refusal", failreason.CodecRejected, db.DestRTMP, pathless, ""},
+		{"nor a slow upload", failreason.UploadTooSlow, db.DestRTMP, pathless, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := urlFixFor(&failreason.Reason{Cause: c.cause}, c.kind, c.url)
+			if got != c.want {
+				t.Fatalf("urlFixFor(%s, %s) = %q, want %q", c.cause, c.url, got, c.want)
+			}
+		})
+	}
+	if got := urlFixFor(nil, db.DestRTMP, pathless); got != "" {
+		t.Errorf("no reason, no fix; got %q", got)
+	}
+}

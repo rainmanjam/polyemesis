@@ -144,7 +144,7 @@ fell behind`.
 | `cause` | string | the classified failure: `key_rejected`, `platform_not_ready`, `dns`, `connection_refused`, `timeout`, `tls`, `codec_rejected`, `upload_too_slow`, `unknown` |
 | `held` | bool | polyemesis stopped retrying; nothing happens until Retry |
 | `keyChanged` | bool | the connected account reports a different stream key from the stored one |
-| `failure` | object | the whole classified reason: `{cause, line?, quick?, held?, rejections?, keyChanged?, at}` |
+| `failure` | object | the whole classified reason: `{cause, line?, quick?, held?, rejections?, keyChanged?, urlFix?, at}`. `urlFix` is the server URL that works, set when the destination's URL is an Amazon IVS ingest (Kick, Twitch) without `/app` |
 | `data` | object | type-specific, below |
 
 `cause`, `held` and `keyChanged` sit flat beside `reason`, as they do in a

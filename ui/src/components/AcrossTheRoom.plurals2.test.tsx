@@ -28,7 +28,7 @@ const dest = (id: number, state: string): DestStatus =>
     filterComplex: "",
     normalization: "off",
     warnings: null,
-    process: { state },
+    process: { state, uptimeSec: state === "running" ? 60 : 0 },
   }) as unknown as DestStatus;
 
 const status = (destinations: DestStatus[]): Status =>

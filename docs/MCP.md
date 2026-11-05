@@ -111,7 +111,7 @@ than one programme it is required, as `?source=` is in the API.
 |---|---|---|
 | `get_status` | What is on air: ingest, recorder, failover, loudness, clip buffer, and each destination's state and failure reason | `GET /status` |
 | `list_destinations` | Every destination with its live health | `GET /destinations`, `GET /status` |
-| `get_destination` | One destination: routing, health, and **why it is failing**: `cause`, its label and explanation, `held`, `keyChanged` | `GET /destinations/{id}`, `GET /status` |
+| `get_destination` | One destination: routing, health, and **why it is failing**: `cause`, its label and explanation, `held`, `keyChanged`, `urlFix` | `GET /destinations/{id}`, `GET /status` |
 | `list_sources` | Programmes, ingest mode, whether anything is publishing, and SRT/RTMP link statistics | `GET /sources` |
 | `list_routing_presets` | The audio routing presets | `GET /routing/presets` |
 | `get_levels` | Track levels and each destination's gains and mutes | `GET /levels` |

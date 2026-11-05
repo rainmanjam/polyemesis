@@ -16,6 +16,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/services"
 )
 
 func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
@@ -927,6 +928,21 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// belongs to a broadcast that no longer exists.
 	backupURL, backupKey := firstBackup(b)
 
+	// A PLATFORM'S INGEST URL THAT PROVABLY CANNOT PUBLISH IS CORRECTED, NOT
+	// STORED. Kick answers stream.url with its Amazon IVS host, and if that
+	// value has the shape its dashboard prints -- no /app -- writing it would
+	// put back the exact URL a save now refuses, over one the operator may
+	// already have corrected. This is not the "offered, never applied" rule
+	// (db.Warning.Fix), which protects what an operator TYPED; this is a value
+	// from a platform API that IVS will refuse on every connect. Said out loud,
+	// so the stored URL never silently differs from what the platform sent.
+	ingestURL := b.Ingest.URL
+	if fix, wrong := services.IVSAppPathFix(ingestURL); wrong {
+		warnings = append(warnings, string(acct.Platform)+" returned an Amazon IVS ingest URL without the /app "+
+			"application path, which IVS refuses; "+fix+" was stored instead.")
+		ingestURL = fix
+	}
+
 	// ONLY WHAT THE PLATFORM ANSWERED IS WRITTEN, onto the row as it stands NOW.
 	//
 	// dest was read before the platform call above, which can take thirty
@@ -959,8 +975,8 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		if cur.AccountID == nil || *cur.AccountID != *dest.AccountID {
 			return errRefreshAccountChanged
 		}
-		if b.Ingest.URL != "" {
-			cur.URL = b.Ingest.URL
+		if ingestURL != "" {
+			cur.URL = ingestURL
 		}
 		cur.StreamKey = b.Ingest.Key
 		cur.Kind = db.DestRTMP

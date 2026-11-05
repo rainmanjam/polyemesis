@@ -23,7 +23,7 @@ const dest = (over: Omit<Partial<DestStatus>, "id"> & { id: number }): DestStatu
   }) as unknown as DestStatus;
 
 const proc = (state: ProcessState, over: Record<string, unknown> = {}) =>
-  ({ state, ...over }) as DestStatus["process"];
+  ({ state, uptimeSec: state === "running" ? 60 : 0, ...over }) as DestStatus["process"];
 
 const status = (over: Partial<Status> = {}): Status =>
   ({ destinations: [], renditions: [], ...over }) as unknown as Status;
@@ -39,6 +39,18 @@ describe("onAir", () => {
       dest({ id: 3, enabled: false, process: null }),
     ];
     expect(onAir(rows)).toEqual({ live: 2, enabled: 2, degraded: 0, failed: 0 });
+  });
+
+  // A process is "running" from the moment FFmpeg is spawned. Until this run
+  // has carried media it is not on air -- the card says Starting -- so the
+  // count must not call it live either.
+  // Mutation: count d.process.state instead of destinationProcessState. Observed: FAIL.
+  it("counts a running process that has carried no media as degraded, not live", () => {
+    const rows = [
+      dest({ id: 1, process: proc("running") }),
+      dest({ id: 2, process: proc("running", { uptimeSec: 0 }) }),
+    ];
+    expect(onAir(rows)).toEqual({ live: 1, enabled: 2, degraded: 1, failed: 0 });
   });
 
   it("separates trying from failed, because they need different actions", () => {

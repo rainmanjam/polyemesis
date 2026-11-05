@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useYouTubeVerticalHealth } from "@/hooks/useYouTubeVerticalHealth";
-import { destinationStatus } from "@/lib/status";
+import { destinationProcessState, destinationStatus } from "@/lib/status";
 import { toneForState } from "@/lib/signal";
 import { useT } from "@/lib/i18n";
 import type { DestStatus } from "@/lib/types";
@@ -34,7 +34,7 @@ export function YouTubeVerticalSubRow({
   // a stopped pair makes no YouTube call at all.
   const live = running || horizontal.process?.state === "running";
   const health = useYouTubeVerticalHealth(horizontal.id, live);
-  const status = destinationStatus(vertical.enabled, state, vertical.delay?.phase);
+  const status = destinationStatus(vertical.enabled, destinationProcessState(vertical.process), vertical.delay?.phase);
 
   return (
     <div
@@ -49,7 +49,7 @@ export function YouTubeVerticalSubRow({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <StatusDot tone={toneForState(state)} size="sm" />
+          <StatusDot tone={toneForState(destinationProcessState(vertical.process))} size="sm" />
           <span className="text-xs font-medium">{t("wave3.vertical.subRow")}</span>
           <span className="truncate text-xs text-muted-foreground">{vertical.name}</span>
           <span className="text-xs">{t(status.labelKey)}</span>

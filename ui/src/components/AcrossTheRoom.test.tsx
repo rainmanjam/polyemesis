@@ -56,7 +56,7 @@ describe("AcrossTheRoom", () => {
         open
         onClose={() => {}}
         status={status({
-          destinations: [dest({ process: { state: "running" } } as Partial<DestStatus>)],
+          destinations: [dest({ process: { state: "running", uptimeSec: 60 } } as Partial<DestStatus>)],
         })}
       />,
     );
@@ -89,8 +89,8 @@ describe("AcrossTheRoom", () => {
         onClose={() => {}}
         status={status({
           destinations: [
-            dest({ id: did(1), name: "Twitch", process: { state: "running" } } as Partial<DestStatus>),
-            dest({ id: did(2), name: "YouTube", process: { state: "running" } } as Partial<DestStatus>),
+            dest({ id: did(1), name: "Twitch", process: { state: "running", uptimeSec: 60 } } as Partial<DestStatus>),
+            dest({ id: did(2), name: "YouTube", process: { state: "running", uptimeSec: 60 } } as Partial<DestStatus>),
             dest({ id: did(3), name: "Kick", enabled: false }),
           ],
         })}
@@ -126,7 +126,7 @@ describe("AcrossTheRoom", () => {
         open
         onClose={() => {}}
         status={status({
-          destinations: [dest({ process: { state: "running" } } as Partial<DestStatus>)],
+          destinations: [dest({ process: { state: "running", uptimeSec: 60 } } as Partial<DestStatus>)],
         })}
       />,
     );

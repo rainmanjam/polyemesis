@@ -495,7 +495,7 @@ func destHealth(d any) map[string]any {
 		h["process"] = pick(p, "state", "restarts", "uptimeSec", "lastError", "nextRetryIn", "stalled", "stalledSec")
 	}
 	if r, ok := d.(map[string]any)["reason"].(map[string]any); ok {
-		reason := pick(r, "cause", "line", "quick", "held", "rejections", "keyChanged", "at")
+		reason := pick(r, "cause", "line", "quick", "held", "rejections", "keyChanged", "urlFix", "at")
 		if cause, ok := r["cause"].(string); ok {
 			fr := failreason.Reason{Cause: failreason.Cause(cause)}
 			if line, ok := r["line"].(string); ok {
@@ -503,6 +503,7 @@ func destHealth(d any) map[string]any {
 			}
 			fr.Held, _ = r["held"].(bool)
 			fr.KeyChanged, _ = r["keyChanged"].(bool)
+			fr.URLFix, _ = r["urlFix"].(string)
 			reason["causeLabel"] = fr.Cause.Label()
 			reason["explanation"] = fr.Sentence()
 			if fr.Held {

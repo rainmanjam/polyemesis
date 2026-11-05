@@ -2155,6 +2155,11 @@
                       "types": [
                         "number"
                       ]
+                    },
+                    "urlFix": {
+                      "types": [
+                        "string"
+                      ]
                     }
                   }
                 },
@@ -2514,6 +2519,11 @@
                       "types": [
                         "number"
                       ]
+                    },
+                    "urlFix": {
+                      "types": [
+                        "string"
+                      ]
                     }
                   }
                 },
@@ -2589,6 +2599,11 @@
                 "rejections": {
                   "types": [
                     "number"
+                  ]
+                },
+                "urlFix": {
+                  "types": [
+                    "string"
                   ]
                 }
               }
@@ -2828,6 +2843,11 @@
                     "types": [
                       "number"
                     ]
+                  },
+                  "urlFix": {
+                    "types": [
+                      "string"
+                    ]
                   }
                 }
               },
@@ -3006,6 +3026,11 @@
                   "rejections": {
                     "types": [
                       "number"
+                    ]
+                  },
+                  "urlFix": {
+                    "types": [
+                      "string"
                     ]
                   }
                 }
