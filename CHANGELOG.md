@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **`PUT /destinations/{id}` reports how a save took effect.** The response
+  carries `applied` (`live` or `restart`) and `reason`, the same fields as
+  `POST /destinations/{id}/tracks/{track}/gain`. The server reads them back from
+  the reconcile; they are not a prediction. `applied` describes the primary
+  output, and a backup feed that was started, stopped or restarted is named in
+  `reason`. Both are absent when nothing was running, including a delayed
+  destination whose buffer is still filling. See [docs/API.md](docs/API.md).
+
 ### Changed
 
 These follow from the lingering-state fixes below and are visible on purpose.
@@ -106,19 +116,6 @@ These follow from the lingering-state fixes below and are visible on purpose.
     it; the disconnect dialog says the same in every language.
   - Home Assistant discovery is republished when the entity set changes, and a removed entity
     is removed from the device rather than left behind.
-
-### Added
-
-- **`PUT /destinations/{id}` reports how a save took effect.** The response
-  carries `applied` (`live` or `restart`) and `reason`, the same fields as
-  `POST /destinations/{id}/tracks/{track}/gain`. The server reads them back from
-  the reconcile; they are not a prediction. `applied` describes the primary
-  output, and a backup feed that was started, stopped or restarted is named in
-  `reason`. Both are absent when nothing was running, including a delayed
-  destination whose buffer is still filling. See [docs/API.md](docs/API.md).
-
-### Fixed
-
 - **Routing Overview shows music that is routed live.** The Music rights column
   used to say "No music routed" beside a filled Music cell. In the 2026-11-04
   demo, Twitch sent track 4 at 100% and Kick sent it at 25%, and both rows showed
