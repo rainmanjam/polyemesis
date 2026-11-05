@@ -655,6 +655,7 @@ export function RoutingPage() {
     draftSampleRate: profile?.sampleRate,
     secondMixChanged:
       JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
+    copyAudio: !!storedRow && destinationLiveBlock(storedRow) !== null,
   });
 
   // What the pending save moves, for the save bar's scope line and live diff.

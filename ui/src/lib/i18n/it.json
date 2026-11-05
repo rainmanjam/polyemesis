@@ -1964,7 +1964,7 @@
   "route.saved": "Routing salvato.",
   "route.savedRestarting": "Routing salvato. «{name}» si sta riavviando con il nuovo mix.",
   "route.savedLive": "Routing salvato. La modifica di livello raggiunge «{name}» in diretta dove supportato.",
-  "route.savedKeptRunning": "Routing salvato. «{name}» resta attivo: ciò che invia non è cambiato.",
+  "route.savedKeptRunning": "Routing salvato. «{name}» resta attivo, senza riavvio.",
   "monitor.errorsCount": "Errori {count}",
   "monitor.warningsCount": "Avvisi {count}",
   "monitor.filterErrors": "Errori",

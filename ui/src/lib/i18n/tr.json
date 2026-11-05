@@ -1964,7 +1964,7 @@
   "route.saved": "Yönlendirme kaydedildi.",
   "route.savedRestarting": "Yönlendirme kaydedildi. “{name}” yeni miksle yeniden başlatılıyor.",
   "route.savedLive": "Yönlendirme kaydedildi. Seviye değişikliği desteklenen yerde “{name}” hedefine canlı ulaşır.",
-  "route.savedKeptRunning": "Yönlendirme kaydedildi. “{name}” çalışmaya devam ediyor: gönderdiği şey değişmedi.",
+  "route.savedKeptRunning": "Yönlendirme kaydedildi. “{name}” yeniden başlatılmadan çalışmaya devam ediyor.",
   "monitor.errorsCount": "Hata {count}",
   "monitor.warningsCount": "Uyarı {count}",
   "monitor.filterErrors": "Hatalar",

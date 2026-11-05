@@ -1964,7 +1964,7 @@
   "route.saved": "Enrutamiento guardado.",
   "route.savedRestarting": "Enrutamiento guardado. «{name}» se está reiniciando con la nueva mezcla.",
   "route.savedLive": "Enrutamiento guardado. El cambio de nivel llega a «{name}» en directo donde se admite.",
-  "route.savedKeptRunning": "Enrutamiento guardado. «{name}» sigue en marcha: lo que envía no ha cambiado.",
+  "route.savedKeptRunning": "Enrutamiento guardado. «{name}» sigue en marcha, sin reinicio.",
   "monitor.errorsCount": "Errores {count}",
   "monitor.warningsCount": "Advertencias {count}",
   "monitor.filterErrors": "Errores",

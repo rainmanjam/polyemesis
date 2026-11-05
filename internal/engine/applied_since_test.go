@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // AppliedSince answers a saved change by what the reconcile did to the process,
@@ -23,6 +24,8 @@ import (
 // answered "live" for a destination running on a new process.
 // MUTATION: drop the backup-replaced arm. Observed: FAIL, a replaced backup
 // read as "nothing ... changed".
+// MUTATION: compare backups by pointer alone (the first fix). Observed: FAIL,
+// a backup started or stopped alone read as "restarted".
 func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 	t.Run("a change that compiles to the same command line keeps the process", func(t *testing.T) {
 		e, store := storeEngine(t)
@@ -89,33 +92,74 @@ func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 		}
 	})
 
-	t.Run("a backup replaced alone is a restart that says the primary kept running", func(t *testing.T) {
+	// The redundant feed moving is not the destination restarting: the output
+	// the audience watches kept running, and the reason says what the backup did.
+	backupCase := func(t *testing.T, hadBackup, hasBackup bool) (applied, reason string) {
+		t.Helper()
 		e, store := storeEngine(t)
 		row := liveRow(t, store, false)
 		plan := planFor(t, e, row)
 		proc := replyChild(t, "Command reply for stream 0: ret:0 res:")
 		t.Cleanup(func() { _ = proc.Stop(t.Context()) })
-		oldBackup := replyChild(t, "Command reply for stream 0: ret:0 res:")
-		t.Cleanup(func() { _ = oldBackup.Stop(t.Context()) })
 		d := liveRunningDest(e, row, plan, proc)
-		e.mu.Lock()
-		d.backup = oldBackup
-		e.mu.Unlock()
+		var oldBackup *supervisor.Process
+		if hadBackup {
+			oldBackup = replyChild(t, "Command reply for stream 0: ret:0 res:")
+			t.Cleanup(func() { _ = oldBackup.Stop(t.Context()) })
+			e.mu.Lock()
+			d.backup = oldBackup
+			e.mu.Unlock()
+		}
 		before := e.DestinationRunOf(row.ID)
 
-		// What reconcileBackup does for a backup whose spec moved: the primary
-		// entry is republished with a new backup process beside the same one.
-		newBackup := replyChild(t, "Command reply for stream 0: ret:0 res:")
-		t.Cleanup(func() { _ = newBackup.Stop(t.Context()) })
-		e.mu.Lock()
+		// What reconcileBackup does: the primary entry is republished, same
+		// primary process, with the backup it now has.
 		next := *d
-		next.backup = newBackup
+		next.backup = nil
+		if hasBackup {
+			fresh := replyChild(t, "Command reply for stream 0: ret:0 res:")
+			t.Cleanup(func() { _ = fresh.Stop(t.Context()) })
+			next.backup = fresh
+		}
+		e.mu.Lock()
 		e.dests[row.ID] = &next
 		e.mu.Unlock()
+		return e.AppliedSince(row.ID, before)
+	}
+	for _, c := range []struct {
+		name                 string
+		hadBackup, hasBackup bool
+		want                 string
+	}{
+		{"a backup replaced alone", true, true, backupRestarted},
+		{"a backup started alone", false, true, backupStarted},
+		{"a backup stopped alone", true, false, backupStopped},
+	} {
+		t.Run(c.name+" is live, and says what the backup did", func(t *testing.T) {
+			applied, reason := backupCase(t, c.hadBackup, c.hasBackup)
+			if applied != liveApplied || reason != c.want {
+				t.Fatalf("applied = %q reason = %q, want live, %q", applied, reason, c.want)
+			}
+		})
+	}
 
-		applied, reason := e.AppliedSince(row.ID, before)
-		if applied != liveRestart || reason != backupOnlyRestart {
-			t.Fatalf("applied = %q reason = %q, want restart, %q", applied, reason, backupOnlyRestart)
+	// A delayed destination's process exists while its buffer fills and is
+	// started only when the first delayed packet is due. Until then nothing
+	// is running, and a save neither kept nor restarted anything.
+	// MUTATION: DestinationRunOf counts an unstarted process. Observed: FAIL,
+	// applied = "live" for a destination whose FFmpeg never started.
+	t.Run("a process not yet started is not running", func(t *testing.T) {
+		e, store := storeEngine(t)
+		row := liveRow(t, store, false)
+		plan := planFor(t, e, row)
+		idle := supervisor.New(testLogger(), supervisor.Spec{Name: "dest-delayed", Kind: "destination", Bin: "/nonexistent"})
+		liveRunningDest(e, row, plan, idle)
+		before := e.DestinationRunOf(row.ID)
+		if before.Running() {
+			t.Fatal("a process that was never started reads as running")
+		}
+		if applied, reason := e.AppliedSince(row.ID, before); applied != "" {
+			t.Fatalf("applied = %q (%s) for a destination whose process never started", applied, reason)
 		}
 	})
 

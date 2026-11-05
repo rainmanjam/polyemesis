@@ -1964,7 +1964,7 @@
   "route.saved": "ルーティングを保存しました。",
   "route.savedRestarting": "ルーティングを保存しました。「{name}」は新しいミックスで再起動しています。",
   "route.savedLive": "ルーティングを保存しました。レベルの変更は対応環境では「{name}」にライブで反映されます。",
-  "route.savedKeptRunning": "ルーティングを保存しました。「{name}」は動作を続けています。送信内容は変わっていません。",
+  "route.savedKeptRunning": "ルーティングを保存しました。「{name}」は再起動せずに動作を続けています。",
   "monitor.errorsCount": "エラー {count}",
   "monitor.warningsCount": "警告 {count}",
   "monitor.filterErrors": "エラー",

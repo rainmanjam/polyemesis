@@ -1964,7 +1964,7 @@
   "route.saved": "Routing opgeslagen.",
   "route.savedRestarting": "Routing opgeslagen. ‘{name}’ herstart met de nieuwe mix.",
   "route.savedLive": "Routing opgeslagen. De niveauwijziging bereikt ‘{name}’ live waar ondersteund.",
-  "route.savedKeptRunning": "Routing opgeslagen. ‘{name}’ blijft draaien: wat het verstuurt, is niet veranderd.",
+  "route.savedKeptRunning": "Routing opgeslagen. ‘{name}’ blijft draaien, zonder herstart.",
   "monitor.errorsCount": "Fouten {count}",
   "monitor.warningsCount": "Waarschuwingen {count}",
   "monitor.filterErrors": "Fouten",

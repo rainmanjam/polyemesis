@@ -924,6 +924,17 @@ func (p *Process) Retired() bool {
 	return p.retired
 }
 
+// Started reports whether Start has been called on this process and it has not
+// been stopped since: its supervise loop is running, or is about to. A process
+// that exists but was never started -- a delayed destination whose buffer is
+// still filling -- reads false, which is how a caller tells "built" from
+// "running" without reading a state the supervise goroutine sets later.
+func (p *Process) Started() bool {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	return p.running || p.startPending
+}
+
 func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.runMu.Lock()
 	if retire {

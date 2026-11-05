@@ -1964,7 +1964,7 @@
   "route.saved": "Маршрутизацію збережено.",
   "route.savedRestarting": "Маршрутизацію збережено. «{name}» перезапускається з новим міксом.",
   "route.savedLive": "Маршрутизацію збережено. Зміна рівня доходить до «{name}» наживо, де це підтримується.",
-  "route.savedKeptRunning": "Маршрутизацію збережено. «{name}» працює далі: те, що він надсилає, не змінилося.",
+  "route.savedKeptRunning": "Маршрутизацію збережено. «{name}» працює далі без перезапуску.",
   "monitor.errorsCount": "Помилки {count}",
   "monitor.warningsCount": "Попередження {count}",
   "monitor.filterErrors": "Помилки",

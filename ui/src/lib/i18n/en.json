@@ -1964,7 +1964,7 @@
   "route.saved": "Routing saved.",
   "route.savedRestarting": "Routing saved. “{name}” is restarting with the new mix.",
   "route.savedLive": "Routing saved. The level change reaches “{name}” live where supported.",
-  "route.savedKeptRunning": "Routing saved. “{name}” kept running: nothing it sends changed.",
+  "route.savedKeptRunning": "Routing saved. “{name}” kept running, without a restart.",
   "monitor.errorsCount": "Errors {count}",
   "monitor.warningsCount": "Warnings {count}",
   "monitor.filterErrors": "Errors",

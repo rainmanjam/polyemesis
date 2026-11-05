@@ -1,13 +1,24 @@
 /* What a routing Save will do to a running destination, before it is saved.
  *
- * THE SERVER'S RULE, NOT AN APPROXIMATION OF IT. The engine restarts a
+ * THE ENGINE'S RULE, over what this page can see. The engine restarts a
  * destination when its argv signature moves (engine destSpec over
  * destArgvSig), and that signature masks the level of every named volume stage
  * (ffmpeg.MaskLiveVolumes): a change of level alone goes to the running FFmpeg
  * on its command channel. Of what a routing save can change, the argv reads
  * exactly these (engine destSpecFor): the compile's filterComplex, outLabel,
- * secondOutLabel, tracks and videoDelayMs, and the profile's sampleRate. So the
- * same comparison, over the stored compile and the draft's, is the answer.
+ * secondOutLabel, tracks and videoDelayMs, and the profile's sampleRate -- and
+ * on an audio-copy destination only the tracks, since its argv forwards them
+ * untouched and never takes the graph (ffmpeg copyAudioArgs). So the same
+ * comparison, over the stored compile and the draft's, is the answer for a
+ * destination's live mix.
+ *
+ * Where the page cannot see the engine's inputs it answers "restart", the
+ * cautious direction for a warning shown before an on-air save, and the toast
+ * after the save reports what really happened (PUT's `applied`). Two such
+ * places: a change to the second (VOD) mix, whose stored compile the page does
+ * not have (the engine compiles the pair; a VOD gain alone is in fact live),
+ * and a programme not yet probed, which the engine plans with a provisional
+ * compile this page's compiles do not use.
  *
  * It used to compare whole profiles as well, as a safety net. That net said
  * "restart" for a change the engine never restarts for: switching music rights
@@ -76,6 +87,10 @@ export function saveImpact(input: {
   /** A changed second (VOD) mix is a second graph this page does not compare,
    *  so it counts as a restart. */
   secondMixChanged: boolean;
+  /** An audio-copy destination (audio.copy on any kind but "audio"): its argv
+   *  takes the track list and nothing else of the routing, and has no volume
+   *  stage for a level to reach. */
+  copyAudio?: boolean;
 }): SaveImpact {
   if (input.secondMixChanged) return "restart";
   if (input.draft === undefined) return "pending";
@@ -83,6 +98,9 @@ export function saveImpact(input: {
   // A compile that failed, or a stored one the list did not carry: the
   // conservative answer. A failed draft compile blocks Save anyway.
   if (!stored || !draft) return "restart";
+  if (input.copyAudio) {
+    return JSON.stringify(stored.tracks ?? []) === JSON.stringify(draft.tracks ?? []) ? "none" : "restart";
+  }
   if (argvKey(stored, input.storedSampleRate) !== argvKey(draft, input.draftSampleRate)) return "restart";
   return stored.filterComplex === draft.filterComplex ? "none" : "levels";
 }
@@ -99,7 +117,8 @@ export type SaveApplied = "live" | "restart";
  *
  *  A "live" answer with no `reason` is a level the running process took on its
  *  command channel; any reason means it kept running without one (nothing it
- *  sends changed, or a copy destination stored a level that reaches nothing).
+ *  sends changed, a copy destination stored a level that reaches nothing, or
+ *  only the backup feed moved).
  *  The profile cannot tell these apart: a gain moved on a muted track changes
  *  the profile and nothing the process plays. With no answer the toast claims
  *  nothing about a restart: "Routing saved." is true either way. */

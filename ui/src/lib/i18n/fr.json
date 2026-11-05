@@ -1964,7 +1964,7 @@
   "route.saved": "Routage enregistré.",
   "route.savedRestarting": "Routage enregistré. « {name} » redémarre avec le nouveau mixage.",
   "route.savedLive": "Routage enregistré. Le changement de niveau atteint « {name} » en direct là où c’est pris en charge.",
-  "route.savedKeptRunning": "Routage enregistré. « {name} » continue de tourner : ce qu’il envoie n’a pas changé.",
+  "route.savedKeptRunning": "Routage enregistré. « {name} » continue de tourner, sans redémarrage.",
   "monitor.errorsCount": "Erreurs {count}",
   "monitor.warningsCount": "Avertissements {count}",
   "monitor.filterErrors": "Erreurs",

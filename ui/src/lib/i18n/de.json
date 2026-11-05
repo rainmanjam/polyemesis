@@ -1964,7 +1964,7 @@
   "route.saved": "Routing gespeichert.",
   "route.savedRestarting": "Routing gespeichert. „{name}“ startet mit dem neuen Mix neu.",
   "route.savedLive": "Routing gespeichert. Die Pegeländerung erreicht „{name}“ live, wo unterstützt.",
-  "route.savedKeptRunning": "Routing gespeichert. „{name}“ läuft weiter: Was gesendet wird, hat sich nicht geändert.",
+  "route.savedKeptRunning": "Routing gespeichert. „{name}“ läuft weiter, ohne Neustart.",
   "monitor.errorsCount": "Fehler {count}",
   "monitor.warningsCount": "Warnungen {count}",
   "monitor.filterErrors": "Fehler",

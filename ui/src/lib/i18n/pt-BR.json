@@ -1964,7 +1964,7 @@
   "route.saved": "Roteamento salvo.",
   "route.savedRestarting": "Roteamento salvo. “{name}” está reiniciando com a nova mixagem.",
   "route.savedLive": "Roteamento salvo. A mudança de nível chega a “{name}” ao vivo onde há suporte.",
-  "route.savedKeptRunning": "Roteamento salvo. “{name}” continua rodando: o que ele envia não mudou.",
+  "route.savedKeptRunning": "Roteamento salvo. “{name}” continua rodando, sem reinício.",
   "monitor.errorsCount": "Erros {count}",
   "monitor.warningsCount": "Avisos {count}",
   "monitor.filterErrors": "Erros",

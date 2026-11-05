@@ -55,7 +55,9 @@ export type CellState = "off" | "routed" | "musicVod";
  *  - reachesVod: a music track is in its VOD mix, which does not keep music out.
  *  - blocked: a guard keeps music out of what it sends.
  *  - routed: a music track is in its live mix, unguarded, so music goes out.
- *  - none: no music track is in any of its mixes. */
+ *  - none: no music track is in any of its mixes, and no guard is set. A guard
+ *    with no music selected still reads blocked: it is the setting that keeps
+ *    music off this destination, and it is what the operator turned on. */
 export type MusicRights = "blocked" | "reachesVod" | "routed" | "none";
 
 export function cellState(dest: OverviewDest, track: number, music: number[]): CellState {

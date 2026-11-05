@@ -1964,7 +1964,7 @@
   "route.saved": "路由已保存。",
   "route.savedRestarting": "路由已保存。“{name}”正在以新混音重启。",
   "route.savedLive": "路由已保存。在支持的环境中，电平更改会实时到达“{name}”。",
-  "route.savedKeptRunning": "路由已保存。“{name}”继续运行：它发送的内容没有变化。",
+  "route.savedKeptRunning": "路由已保存。“{name}”继续运行，无需重启。",
   "monitor.errorsCount": "错误 {count}",
   "monitor.warningsCount": "警告 {count}",
   "monitor.filterErrors": "错误",

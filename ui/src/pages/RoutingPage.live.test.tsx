@@ -563,7 +563,7 @@ describe("the toast after Save says what the server did, not what the page guess
     await save();
     await waitFor(() => expect(success).toHaveBeenCalled());
     const said = String(success.mock.calls.at(-1)?.[0]);
-    expect(said).toBe("Routing saved. “Twitch” kept running: nothing it sends changed.");
+    expect(said).toBe("Routing saved. “Twitch” kept running, without a restart.");
     expect(said).not.toMatch(/restarting/);
   });
 
@@ -609,7 +609,7 @@ describe("the toast after Save says what the server did, not what the page guess
     await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
     await save();
     await waitFor(() => expect(success).toHaveBeenCalled());
-    expect(String(success.mock.calls.at(-1)?.[0])).toBe("Routing saved. “Twitch” kept running: nothing it sends changed.");
+    expect(String(success.mock.calls.at(-1)?.[0])).toBe("Routing saved. “Twitch” kept running, without a restart.");
   });
 
   it("with no answer about how it applied, claims no restart", async () => {

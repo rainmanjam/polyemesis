@@ -78,6 +78,16 @@ describe("saveImpact", () => {
     expect(impact(compiled({ secondOutLabel: "avod" }))).toBe("restart");
   });
 
+  // An audio-copy destination forwards the tracks untouched: its argv never
+  // takes the graph, so a limiter or a level reaches nothing it sends.
+  it("an audio-copy destination restarts only when its track list moves", () => {
+    expect(impact(compiled({ filterComplex: graph("1", "1", ",alimiter=limit=0.97") }), { copyAudio: true })).toBe(
+      "none",
+    );
+    expect(impact(compiled({ filterComplex: graph("0.5", "1") }), { copyAudio: true })).toBe("none");
+    expect(impact(compiled({ tracks: [0] }), { copyAudio: true })).toBe("restart");
+  });
+
   it("absent, null and zero read alike", () => {
     expect(
       saveImpact({
