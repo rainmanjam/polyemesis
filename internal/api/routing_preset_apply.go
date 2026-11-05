@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -179,7 +180,7 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	preset := chi.URLParam(r, "preset")
+	preset := presetParam(r)
 	// The preset itself first. An unknown id, or one that cannot build against
 	// this ingest at all, is the request's fault rather than any destination's.
 	built, err := routing.ApplyPreset(preset, src, opts)
@@ -263,6 +264,23 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 		resp["warnings"] = warnings
 	}
 	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// presetParam is the {preset} segment, unescaped.
+//
+// chi routes on RawPath whenever it differs from Path, so URLParam hands back
+// the segment as it was sent (handleProcessLogs has the same note). Every
+// platform preset's id carries a colon -- "platform:youtube" -- and a client
+// that escapes it, as encodeURIComponent does in the Stream Deck plugin and the
+// console, arrived as "platform%3Ayoutube" and was refused as an unknown preset.
+// A segment that will not unescape is used as it arrived, and is refused by the
+// catalogue as unknown.
+func presetParam(r *http.Request) string {
+	id := chi.URLParam(r, "preset")
+	if decoded, err := url.PathUnescape(id); err == nil {
+		return decoded
+	}
+	return id
 }
 
 // presetTargets reads the destinations a preset applies to, under the caller's

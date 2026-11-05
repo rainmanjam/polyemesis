@@ -5,7 +5,7 @@ import { Runtime, authKeyFor, type Surface, type SurfaceKind } from "../src/runt
 import { KEY_STATE } from "../src/render.js";
 import type { StatusPayload } from "../src/model.js";
 
-import { ADMIN, PAIRED, READ, install, json, type Route } from "./fakeInstall.js";
+import { ADMIN, PAIRED, READ, install, json, malformedJson, type Route } from "./fakeInstall.js";
 
 function surface(id: string, kind: SurfaceKind, settings: Surface["settings"] = {}) {
   const rec = {
@@ -1266,8 +1266,10 @@ describe("routing preset key", () => {
     for (const answer of [
       APPLIED(),
       APPLIED(row(3, "skipped", { message: "audio copy" })),
-      json(400, { error: "the music preset was not applied", results: [row(1, "refused", { message: "silent" })] }),
-      json(200, {}),
+      // One destination could not take it, so the server stored nothing anywhere.
+      json(400, { error: "the music preset was not applied: \"dest 1\" cannot take it, so nothing was changed on any destination" }),
+      // The compile route's answer, which the key used to read as success.
+      malformedJson(200, { profile: {}, routing: {} }),
     ]) {
       const { rt, sched } = runtimeFor({
         "GET /api/v1/auth/connection": ADMIN,

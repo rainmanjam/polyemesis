@@ -1321,9 +1321,9 @@ refused with `400`, the refused rows are listed, and nothing is saved. A common
 case is a kept music guard that would leave a destination silent:
 
 ```json
-{"error": "the no-music preset was not applied: \"Archive\" cannot take it, so nothing was changed on any destination",
+{"error": "the mic-only preset was not applied: \"Archive\" cannot take it, so nothing was changed on any destination",
  "results": [{"id": 4, "name": "Archive", "platform": "custom", "outcome": "refused",
-              "message": "no audio tracks would be included in the mix"}]}
+              "message": "routing profile selects no audio: every selected track is excluded by this destination's role policy"}]}
 ```
 
 On success the answer has one row per destination:

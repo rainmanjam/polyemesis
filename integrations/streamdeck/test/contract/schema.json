@@ -4107,105 +4107,301 @@
       }
     }
   },
-  "POST /routing/presets/{presetId}": {
+  "POST /routing/presets/{presetId}/apply": {
     "types": [
       "object"
     ],
     "fields": {
-      "profile": {
+      "dryRun": {
         "types": [
-          "object"
+          "boolean"
+        ]
+      },
+      "mix": {
+        "types": [
+          "string"
+        ]
+      },
+      "preset": {
+        "types": [
+          "string"
+        ]
+      },
+      "reconcileFailed": {
+        "types": [
+          "boolean"
+        ]
+      },
+      "results": {
+        "types": [
+          "array",
+          "null"
         ],
-        "fields": {
-          "matrix": {
-            "types": [
-              "null"
-            ]
-          },
-          "mode": {
-            "types": [
-              "string"
-            ]
-          },
-          "normalize": {
-            "types": [
-              "string"
-            ]
-          },
-          "sampleRate": {
-            "types": [
-              "number"
-            ]
-          },
-          "tracks": {
-            "types": [
-              "array"
-            ],
-            "items": {
+        "items": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "applied": {
               "types": [
+                "string"
+              ]
+            },
+            "id": {
+              "types": [
+                "number"
+              ]
+            },
+            "kept": {
+              "types": [
+                "null",
                 "object"
               ],
               "fields": {
-                "enabled": {
+                "excluded": {
                   "types": [
-                    "boolean"
-                  ]
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "string"
+                    ]
+                  }
                 },
-                "gain": {
+                "muted": {
                   "types": [
-                    "number"
-                  ]
-                },
-                "track": {
-                  "types": [
-                    "number"
-                  ]
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "number"
+                    ]
+                  }
                 }
               }
+            },
+            "message": {
+              "types": [
+                "string"
+              ]
+            },
+            "name": {
+              "types": [
+                "string"
+              ]
+            },
+            "outcome": {
+              "types": [
+                "string"
+              ]
+            },
+            "platform": {
+              "types": [
+                "string"
+              ]
+            },
+            "profile": {
+              "types": [
+                "null",
+                "object"
+              ],
+              "fields": {
+                "delayMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "ducking": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "attackMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "ratio": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "releaseMs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "target": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    },
+                    "thresholdDb": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "trigger": {
+                      "types": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "excludeRoles": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "string"
+                    ]
+                  }
+                },
+                "loudness": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "rangeLu": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "targetLufs": {
+                      "types": [
+                        "number"
+                      ]
+                    },
+                    "truePeakDb": {
+                      "types": [
+                        "number"
+                      ]
+                    }
+                  }
+                },
+                "matrix": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "channel": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "invert": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "out": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "mode": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "normalize": {
+                  "types": [
+                    "string"
+                  ]
+                },
+                "sampleRate": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "tracks": {
+                  "types": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "types": [
+                      "object"
+                    ],
+                    "fields": {
+                      "enabled": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "gain": {
+                        "types": [
+                          "number"
+                        ]
+                      },
+                      "muted": {
+                        "types": [
+                          "boolean"
+                        ]
+                      },
+                      "track": {
+                        "types": [
+                          "number"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "reason": {
+              "types": [
+                "string"
+              ]
             }
           }
         }
       },
-      "routing": {
+      "warnings": {
         "types": [
-          "object"
+          "array",
+          "null"
         ],
-        "fields": {
-          "filterComplex": {
-            "types": [
-              "string"
-            ]
-          },
-          "normalization": {
-            "types": [
-              "string"
-            ]
-          },
-          "outLabel": {
-            "types": [
-              "string"
-            ]
-          },
-          "summary": {
-            "types": [
-              "string"
-            ]
-          },
-          "tracks": {
-            "types": [
-              "array"
-            ],
-            "items": {
-              "types": [
-                "number"
-              ]
-            }
-          },
-          "warnings": {
-            "types": [
-              "null"
-            ]
-          }
+        "items": {
+          "types": [
+            "string"
+          ]
         }
       }
     }

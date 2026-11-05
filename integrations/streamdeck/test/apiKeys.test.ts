@@ -6,7 +6,7 @@ import {
   type TransportRequest,
   type TransportResponse,
 } from "../src/api.js";
-import { goldenResponse } from "./support/contract.js";
+import { goldenResponse, malformed } from "./support/contract.js";
 
 // The routes the new keys call: per-destination stop preview, the Record switch,
 // and the routing preset list and apply. The fake transport answers from a queue.
@@ -137,7 +137,8 @@ describe("applyPreset", () => {
   });
 
   it("refuses an answer with no results rather than reading it as applied", async () => {
-    const { transport } = fakeTransport([ok({ profile: {}, routing: {} })]);
+    // The compile route's answer, which is what the key used to read as success.
+    const { transport } = fakeTransport([malformed({ status: 200, body: JSON.stringify({ profile: {}, routing: {} }) })]);
     await expect(new PolyemesisClient(BASE, "t", transport).applyPreset("all", 3)).rejects.toMatchObject({
       kind: "malformed",
     });

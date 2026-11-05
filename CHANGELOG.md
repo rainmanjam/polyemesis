@@ -160,6 +160,11 @@ These follow from the lingering-state fixes below and are visible on purpose.
   was saved, and an alert when no destination took it. If some destinations took
   it and others did not, the key shows both the count and the alert. See
   [docs/STREAM-DECK.md](docs/STREAM-DECK.md#routing-preset).
+- **Platform routing presets are no longer refused as unknown.** A platform
+  preset's id has a colon (`platform:youtube`). The Stream Deck plugin and the
+  console escape it in the path, and both preset routes read the escaped form,
+  so they refused the preset as unknown. Both routes now unescape the id. The
+  Stream Deck end-to-end run found this.
 - **The MCP tool `apply_routing_preset` uses the same route.** It no longer has
   its own compile-then-`PUT`, so its preview and its apply follow the server's
   rules. The confirmed answer carries the server's `applied` and `reason`, and a

@@ -3345,7 +3345,7 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), eng.Source(), opts)
+	profile, err := routing.ApplyPreset(presetParam(r), eng.Source(), opts)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

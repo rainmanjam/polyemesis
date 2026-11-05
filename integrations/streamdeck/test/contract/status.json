@@ -49,7 +49,7 @@
       },
       {
         "enabled": false,
-        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];[a_t0]aresample=48000:async=1[aout]",
+        "filterComplex": "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=0.5[a_t0];[a_t0]aresample=48000:async=1[aout]",
         "id": 2,
         "kind": "rtmp",
         "name": "Backup encoder",

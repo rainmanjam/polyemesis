@@ -281,7 +281,7 @@ func TestTheStreamDeckCallParserRefusesWhatItCannotRead(t *testing.T) {
 	good := "  // call() in a comment is prose\n" +
 		"  private async call<T>(\n" +
 		"    const out = await this.call<Record<string, unknown>>(\n      \"POST\",\n      `/destinations/${id}/tracks/${track}/gain`,\n      sourceId,\n      body,\n    );\n" +
-		"    return this.call(\"POST\", `/routing/presets/${encodeURIComponent(presetId)}`, sourceId);\n" +
+		"    return this.call(\"POST\", `/routing/presets/${encodeURIComponent(presetId)}/apply`, sourceId);\n" +
 		"    return this.call(\"GET\", \"/recording\");\n"
 	got, err := parseDeckCalls(good)
 	if err != nil {
@@ -289,7 +289,7 @@ func TestTheStreamDeckCallParserRefusesWhatItCannotRead(t *testing.T) {
 	}
 	want := []deckCall{
 		{Method: "POST", Path: "/destinations/{id}/tracks/{track}/gain", Source: true, Line: 3},
-		{Method: "POST", Path: "/routing/presets/{presetId}", Source: true, Line: 9},
+		{Method: "POST", Path: "/routing/presets/{presetId}/apply", Source: true, Line: 9},
 		{Method: "GET", Path: "/recording", Line: 10},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -337,6 +337,10 @@ func deckDestinations(source int64) map[string]*db.Destination {
 	}
 	live := row("Main stage", db.PlatformTwitch, "rtmp://live.faketool.invalid/app", true)
 	off := row("Backup encoder", db.PlatformCustom, "rtmp://off.faketool.invalid/app", false)
+	// A level the routing preset key's case puts back to unity, so that case
+	// shows the apply changing stored routing (deckPresetApplied). The others
+	// already hold what the preset builds, and keep running untouched.
+	off.Profile.Tracks = []routing.TrackSel{{Track: 0, Enabled: true, Gain: deckOffGain}}
 	failed := row("Studio relay", db.PlatformCustom, "rtmp://faketool-refused.invalid/app", true)
 	failed.Resilience = db.DestResilience{GiveUpAfter: 1}
 	held := row("YouTube main", db.PlatformYouTube, "rtmp://faketool-rejected.invalid/app", true)

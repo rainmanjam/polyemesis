@@ -551,6 +551,28 @@ func TestABodylessPresetFollowsTheProgrammesTrackRoles(t *testing.T) {
 	}
 }
 
+// A platform preset's id has a colon, and the Stream Deck plugin and the console
+// escape the segment (encodeURIComponent): "platform%3Ayoutube". chi hands the
+// route the segment as sent, so both preset routes refused every platform preset
+// from those clients as unknown. Found by the Stream Deck e2e.
+//
+// MUTATION: return chi.URLParam(r, "preset") unescaped from presetParam.
+// Observed: FAIL, 400 unknown routing preset "platform%3Ayoutube" on both.
+func TestAnEscapedPlatformPresetIdIsUnderstoodByBothPresetRoutes(t *testing.T) {
+	f := newPresetFixture(t)
+	id := loudnessPreset(t)
+	escaped := strings.ReplaceAll(url.PathEscape(id), ":", "%3A")
+	if escaped == id {
+		t.Fatalf("preset %q has nothing to escape; this test would assert nothing", id)
+	}
+	q := f.q("destination", strconv.FormatInt(f.plain, 10))
+	send(t, f.h, f.sign, http.MethodPost, "/api/v1/routing/presets/"+escaped+"/apply?"+q.Encode(), nil, http.StatusOK)
+	if f.get(t, f.plain).Profile.Loudness == nil {
+		t.Fatal("the escaped platform preset was answered and not applied")
+	}
+	send(t, f.h, f.sign, http.MethodPost, "/api/v1/routing/presets/"+escaped+"?"+f.q().Encode(), nil, http.StatusOK)
+}
+
 // Reachable with an API token, and only an admin one: the plugin and the MCP
 // server send bearer tokens and never hold a session. A read token is refused
 // before anything is stored.
