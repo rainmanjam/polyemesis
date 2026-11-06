@@ -16,8 +16,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // fakeLiveStats stands in for Twitch Helix and the YouTube Data API: the
@@ -854,5 +856,22 @@ func TestDeletingYouTubeCredentialsUnbindsTheAllowance(t *testing.T) {
 	call(http.MethodPut, map[string]string{"clientId": "project-two", "clientSecret": "client-pass"})
 	if q.ClientID() != "project-two" || q.Status().Used != 0 {
 		t.Fatalf("after a new client: %q used %d, want a fresh tally", q.ClientID(), q.Status().Used)
+	}
+}
+
+// The production predicate behind runningDestinationIDs, which every other test
+// replaces through analyticsRunning: a destination that carries an error is not
+// running whatever its process says. Reverting upDestinationIDs to a raw
+// process-state check makes this fail.
+func TestUpDestinationIDsExcludesErroredDestinations(t *testing.T) {
+	running := &supervisor.Status{State: supervisor.StateRunning}
+	got := upDestinationIDs([]engine.DestStatus{
+		{ID: 1, Process: running},
+		{ID: 2, Error: "graph", Process: running},
+		{ID: 3, Process: &supervisor.Status{State: supervisor.StateStopped}},
+		{ID: 4},
+	})
+	if len(got) != 1 || !got[1] {
+		t.Fatalf("up ids = %v, want only 1", got)
 	}
 }

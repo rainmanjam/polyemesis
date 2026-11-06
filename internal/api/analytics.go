@@ -15,6 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -125,11 +126,16 @@ func (s *Server) runningDestinationIDs() map[int64]bool {
 	if s.analyticsRunning != nil {
 		return s.analyticsRunning()
 	}
-	out := map[int64]bool{}
 	if s.mgr == nil {
-		return out
+		return map[int64]bool{}
 	}
-	for _, ds := range s.mgr.DestinationStatuses() {
+	return upDestinationIDs(s.mgr.DestinationStatuses())
+}
+
+// upDestinationIDs is the ids of the destinations the engine judges up.
+func upDestinationIDs(statuses []engine.DestStatus) map[int64]bool {
+	out := map[int64]bool{}
+	for _, ds := range statuses {
 		if ds.IsUp() {
 			out[ds.ID] = true
 		}

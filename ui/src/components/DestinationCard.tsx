@@ -47,7 +47,7 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationInPlay, destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -182,7 +182,8 @@ export function DestinationCard({
   // the server's word, because it gates the live readings, and a starting
   // process's 0 kbps and blank uptime are true.
   const shownState = destinationShownState(dest.process);
-  const tone = dest.enabled ? toneForState(shownState) : "idle";
+  const inPlay = destinationInPlay(dest);
+  const tone = inPlay ? toneForState(shownState) : "idle";
   const running = processRunning(dest.process);
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
@@ -296,16 +297,16 @@ export function DestinationCard({
                 own label, not the green that also means running and healthy. */}
             <Badge
               data-testid="card-state-badge"
-              variant={dest.enabled ? toneBadge[tone] : "outline"}
+              variant={inPlay ? toneBadge[tone] : "outline"}
               className={cn(
-                destinationStatus(dest.enabled, shownState, dest.delay?.phase).lamp &&
+                destinationStatus(inPlay, shownState, dest.delay?.phase).lamp &&
                   "border-transparent bg-tally text-tally-foreground",
               )}
             >
-              {destinationOnAir({ enabled: dest.enabled, process: dest.process }) && (
+              {destinationOnAir(dest) && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {t(destinationStatus(dest.enabled, shownState, dest.delay?.phase).labelKey)}
+              {t(destinationStatus(inPlay, shownState, dest.delay?.phase).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

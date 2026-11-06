@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { attention, onAir } from "@/lib/attention";
-import { destinationShownState, ingestProcessUp } from "@/lib/liveness";
+import { destinationInPlay, destinationShownState, ingestProcessUp } from "@/lib/liveness";
 import { toneForState } from "@/lib/signal";
 import { kbps } from "@/lib/format";
 import { useMotionTransition } from "@/lib/motion";
@@ -113,7 +113,7 @@ function RoomPanel({
   // across a room would be a false reading, not a missing one.
   const known = status?.destinations != null;
   const ingest = status?.ingest;
-  const enabled = (status?.destinations ?? []).filter((d) => d.enabled);
+  const enabled = (status?.destinations ?? []).filter(destinationInPlay);
 
   return (
     // Fixed to the viewport rather than to <main>: this is the whole screen by

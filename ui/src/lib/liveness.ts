@@ -59,6 +59,17 @@ export function destinationShownState(process?: Proc | null): ProcessState | und
   return state ?? undefined;
 }
 
+/** Whether the destination counts in the on-air total: enabled, or stopped but
+ *  still playing its delay tail out. The denominator destinationOnAir counts
+ *  against, so a draining destination is never live in a total it is not in. */
+export function destinationInPlay(d: {
+  enabled?: boolean;
+  process?: Pick<ProcessStatus, "state"> | null;
+  delay?: { phase?: string } | null;
+}): boolean {
+  return !!d.enabled || (d.delay?.phase === "draining" && processRunning(d.process));
+}
+
 /** Whether the destination is on air: enabled, running and carrying media.
  *
  *  A stopped destination playing its broadcast-delay tail out (enabled false,

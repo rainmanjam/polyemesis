@@ -85,7 +85,8 @@ export function destinationStatus(
   state?: ProcessState | null,
   delayPhase?: DelayStatus["phase"] | null,
 ): StatusReading {
-  if (!enabled) return reading("state.off", "idle");
+  // A stopped destination still playing its delay tail out is on the air.
+  if (!enabled && delayPhase !== "draining") return reading("state.off", "idle");
   // A broadcast delay fills before any process exists, by design (#11). With no
   // process yet, that is a filling state, not a stopped one.
   if (!state && delayPhase === "buffering") return reading("wave3.bugs.delayFilling", "warn");

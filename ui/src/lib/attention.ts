@@ -1,6 +1,6 @@
 import type { DestinationId, DestStatus, FailureCause, ProcessState, RenditionStatus, Status } from "./types";
 import type { SignalTone } from "./signal";
-import { destinationOnAir, destinationShownState, ingestProcessUp } from "./liveness";
+import { destinationInPlay, destinationOnAir, destinationShownState, ingestProcessUp } from "./liveness";
 
 /* What the dashboard says FIRST, as plain functions.
  *
@@ -38,7 +38,7 @@ export interface OnAir {
 }
 
 export function onAir(destinations: readonly DestStatus[] | null | undefined): OnAir {
-  const rows = (destinations ?? []).filter((d) => d.enabled);
+  const rows = (destinations ?? []).filter(destinationInPlay);
   // Through destinationShownState, as the card and the header are: a process
   // that is running and has not yet carried media is starting, so it counts as
   // degraded and not live -- or the bar would say "1 live" over a card that
