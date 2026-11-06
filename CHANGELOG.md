@@ -8,7 +8,19 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Deleting the last recorded segment works once no recorder is running, as 0.11.0 said it did.**
+  The exemption that lets `DELETE /recordings/{id}` take the stopped recorder's own segment
+  recognised only the name earlier releases wrote (`rec-YYYYMMDD-HHMMSS.mkv`). Since 0.11.0 the
+  recorder names each segment after its programme (`rec-s<id>-YYYYMMDD-HHMMSS.mkv`), so every
+  segment it had just written was still refused with `409` for up to one segment length plus two
+  minutes after recording was turned off or the free-space floor stopped it, telling the operator
+  to stop a recording that was no longer running. Both names are recognised now. A file
+  destination's output keeps the guard, including one whose rolled-over name looks like a recorder
+  segment, and so does a segment whose recorder is still finalising it: a recorder that is
+  stopping, or whose source is being deleted, now counts as running until its FFmpeg has exited,
+  so `GET /recording` can answer `"state": "recording"` for those few seconds.
 
 ## [0.15.0] — 2026-11-06
 

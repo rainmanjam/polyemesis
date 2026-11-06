@@ -322,7 +322,11 @@ type Engine struct {
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
-	preview  *supervisor.Process
+	// recorderStopping counts recorder children taken out of the slot whose
+	// Stop has not returned yet: still alive, still holding a segment open.
+	// Under mu. See RecorderRunning.
+	recorderStopping int
+	preview          *supervisor.Process
 	// previewHub is the hub the running preview subscribed to, kept so the stop
 	// path unsubscribes from the one it actually joined and so a swap underneath
 	// it can be noticed. Nil while no preview is running.
@@ -1081,11 +1085,24 @@ func (e *Engine) IngestLive() bool {
 // setting still on, which is the case the setting cannot see. It is what the
 // shared recording manager's delete guard asks through Manager.RecorderRunning
 // -- see recording.WithRecorderProbe.
+//
+// A child that has left the slot but not yet exited still counts. The slot is
+// emptied before Stop is called, and the child goes on writing its segment
+// until it has finalised the file -- seconds normally, up to stopTimeout. A
+// delete guard told "no recorder" in that window unlinks a file being written.
 func (e *Engine) RecorderRunning() bool {
 	e.requireEngine("RecorderRunning")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.recorder != nil
+	return e.recorder != nil || e.recorderStopping > 0
+}
+
+// recorderStopped is the end of a recorder child's stop: the counterpart of
+// the recorderStopping increment made where it left the slot.
+func (e *Engine) recorderStopped() {
+	e.mu.Lock()
+	e.recorderStopping--
+	e.mu.Unlock()
 }
 
 // ingestLive is the decision on its own, so every boundary of it is a table
@@ -1266,6 +1283,9 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	silence := e.silence
 	sel, backup, playlist := e.sel, e.backup, e.playlist
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
+	if recorder != nil {
+		e.recorderStopping++
+	}
 	// THEIR PORTS AND HUBS TOO. #707. These three used to be collected as bare
 	// processes and stopped with a helper that only calls Stop, so their relay
 	// ports and hub subscriptions were never given back -- unlike every other
@@ -1329,8 +1349,13 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
 	e.closeCaptionPosters()
-	stop(recorder)
 	if recorder != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer e.recorderStopped()
+			_ = recorder.Stop(ctx)
+		}()
 		e.streamRecording(false, "the programme was stopped")
 	}
 	stop(preview)
@@ -3731,6 +3756,10 @@ func (e *Engine) stopAux(a auxSlot) {
 	slot := a.proc(e)
 	proc := *slot
 	*slot = nil
+	recorder := proc != nil && slot == &e.recorder
+	if recorder {
+		e.recorderStopping++
+	}
 	var port int
 	// The ingest hub unless this consumer says otherwise. The meters sidecar and
 	// the preview both read whichever tier is on air, so both unsubscribe from
@@ -3750,9 +3779,14 @@ func (e *Engine) stopAux(a auxSlot) {
 	e.mu.Unlock()
 
 	if proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		_ = proc.Stop(ctx)
-		cancel()
+		func() {
+			if recorder {
+				defer e.recorderStopped()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+			defer cancel()
+			_ = proc.Stop(ctx)
+		}()
 	}
 	hub.Unsubscribe(a.name)
 	if port != 0 {

@@ -25,8 +25,10 @@ func newManagerIn(t *testing.T, dir string) (*Manager, string, *db.DB) {
 	return New(log, store, dir, nil), dir, store
 }
 
-// segmentName mirrors the strftime pattern the recorder writes, so the tests
-// exercise the same start-time recovery path production uses.
+// segmentName is the name an earlier release's recorder wrote,
+// rec-YYYYMMDD-HHMMSS.mkv, which is still on disk and still read the same way
+// for its start. It names no programme, so tests that index it need no source
+// row. For the name this build's recorder writes, see recorderSegmentName.
 func segmentName(at time.Time) string {
 	return "rec-" + at.Format("20060102-150405") + ".mkv"
 }
