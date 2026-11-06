@@ -386,6 +386,12 @@ export interface Destination {
    *  app is whitelisted. "" is the default too, and is what a save sends for
    *  a destination that is not X. */
   xGoLiveTweet?: XGoLiveTweet | "";
+  /** The catalogue preset this destination was created from (a DestinationPreset
+   *  id), absent for one typed in by hand. Platform is "custom" for every preset
+   *  that is only a URL and a note, so this is what lets the platform's own
+   *  encoder guidance be found for Instagram, LinkedIn, Dailymotion, Owncast and
+   *  Rumble. Optional on a save: left out, the stored value is kept. */
+  presetId?: string;
   /** Read-only. True when a YouTube caption ingestion URL is stored for this
    *  destination's current stream key, which "youtube_post" needs before the
    *  destination may start. The URL itself is a credential and never leaves

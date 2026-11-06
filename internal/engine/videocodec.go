@@ -149,7 +149,7 @@ func (e *Engine) warnRenditionAgainstPlatform(row *db.Destination) {
 	if r == nil || r.row == nil {
 		return
 	}
-	for _, c := range db.RenditionConcerns(r.row, row.Platform) {
+	for _, c := range db.RenditionConcerns(r.row, row.Platform, row.PresetID) {
 		e.log.Warn("this rendition is outside what the platform publishes",
 			"dest", row.Name, "platform", string(row.Platform), "rendition", r.row.Name,
 			"field", c.Field, "detail", c.Detail, "source", c.Source, "checked", c.Checked)

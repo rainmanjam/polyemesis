@@ -540,6 +540,11 @@
                 "number"
               ]
             },
+            "presetId": {
+              "types": [
+                "string"
+              ]
+            },
             "profile": {
               "types": [
                 "object"

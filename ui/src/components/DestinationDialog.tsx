@@ -827,7 +827,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     if (destination) {
       setName(destination.name);
       setPlatform(destination.platform);
-      setPresetId(presetIdFor(destination));
+      setPresetId(destination.presetId || presetIdFor(destination));
       setKind(destination.kind);
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
@@ -975,7 +975,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     }
     let live = true;
     api
-      .renditionConcerns(concernRenditionId, platform)
+      .renditionConcerns(concernRenditionId, platform, presetId)
       .then((c) => {
         if (live) setConcerns(c ?? []);
       })
@@ -985,7 +985,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     return () => {
       live = false;
     };
-  }, [concernRenditionId, platform]);
+  }, [concernRenditionId, platform, presetId]);
 
   /** What the encode this destination is LEAVING will do once it has gone.
    *
@@ -1132,6 +1132,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // Only X reads the announcement setting; any other platform clears it,
         // as the server would.
         xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
+        // The preset this was made from, so platforms that save as "custom" can
+        // still be found for their own encoder guidance. Omitted when none was
+        // picked: the server decodes over the stored row and keeps what it has.
+        presetId: presetId || undefined,
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //

@@ -210,6 +210,14 @@ type Destination struct {
 	// published with should_not_tweet under "first". Only X reads it, so
 	// Validate refuses a value on every other platform. See XGoLiveTweetMode.
 	XGoLiveTweet string `json:"xGoLiveTweet,omitempty"`
+	// PresetID is the catalogue preset this destination was created from, or ""
+	// for one made by hand or before the column existed (and not matched by
+	// MigrateDestinationPresetID). A destination's Platform is "custom" for
+	// every preset that is only a URL and a note, so without this the platform's
+	// own figures (Instagram, LinkedIn, Dailymotion, Owncast, Rumble) could never
+	// be found from a stored destination. Advisory: it selects guidance and gates
+	// nothing. Validate refuses an id the catalogue does not have.
+	PresetID string `json:"presetId,omitempty"`
 	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
 	// for this destination's CURRENT stream key, which the "youtube_post" mode
 	// needs before the destination may start. It is set by scanDestination and
@@ -770,6 +778,12 @@ func (d Destination) Validate() error {
 		}
 	}
 
+	if d.PresetID != "" {
+		if _, ok := DestinationPresetByID(d.PresetID); !ok {
+			add("unknown preset %q", d.PresetID)
+		}
+	}
+
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
 	}
@@ -1171,8 +1185,10 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// The fingerprint of the key the stored caption URL was issued with, NULL
 		// when no URL is stored. Never the URL itself: see caption_ingest.go.
 		captionKeyHash sql.NullString
-		created        int64
-		updated        int64
+		// NULL for a destination with no known preset, "" in the struct.
+		presetID sql.NullString
+		created  int64
+		updated  int64
 	)
 	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
 		&dst.StreamKey, &streamEnc,
@@ -1185,11 +1201,12 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds, &dst.DelayDumpSeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &captionKeyHash,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &presetID, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
+	dst.PresetID = presetID.String
 	// THE FAIL-CLOSED POINT, and it is here rather than in the four methods
 	// above it because here is the only place every read passes through.
 	//
@@ -1292,7 +1309,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
+	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet, preset_id,
 	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
@@ -1332,7 +1349,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?, delay_dump_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?,
+		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?, preset_id=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1629,9 +1646,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
+		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet, preset_id,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1642,7 +1659,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1743,7 +1760,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.
@@ -2795,4 +2812,14 @@ func captionModeStored(mode string) string {
 		return string(captions.ModeOff)
 	}
 	return mode
+}
+
+// presetIDStored is the column value for a preset id: NULL for none, so a
+// destination with no known preset is distinguishable from nothing at all in
+// the stored data and the column stays nullable.
+func presetIDStored(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
 }

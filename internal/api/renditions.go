@@ -806,7 +806,9 @@ func (s *Server) handleRenditionConcerns(w http.ResponseWriter, r *http.Request)
 	// asks BEFORE the destination is saved: the operator is choosing a platform
 	// and a rendition together, and neither exists in the database yet.
 	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
-	concerns := db.RenditionConcerns(row, platform)
+	// The preset the destination was made from, when the caller knows it: it is
+	// what finds the guidance for a platform that saves as "custom".
+	concerns := db.RenditionConcerns(row, platform, strings.TrimSpace(r.URL.Query().Get("preset")))
 	if concerns == nil {
 		// A JSON null here would make the browser check for one; an empty list
 		// says "compared, nothing to say" in the same shape as "compared, here

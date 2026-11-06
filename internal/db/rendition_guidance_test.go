@@ -31,7 +31,7 @@ func guidedPreset(t *testing.T) (DestinationPreset, VideoGuidance) {
 func TestARenditionInsideTheGuidanceRaisesNothing(t *testing.T) {
 	p, g := guidedPreset(t)
 	r := &Rendition{Height: g.Height, FPS: g.FPS, VideoBitrate: g.KbpsMax}
-	if got := RenditionConcerns(r, Platform(p.ID)); len(got) != 0 {
+	if got := RenditionConcerns(r, Platform(p.ID), ""); len(got) != 0 {
 		t.Fatalf("a rendition exactly at %s's published figures raised %d concerns: %+v\n\n"+
 			"Warning at the published limit trains the operator to ignore the warning.",
 			p.Name, len(got), got)
@@ -41,7 +41,7 @@ func TestARenditionInsideTheGuidanceRaisesNothing(t *testing.T) {
 func TestAnOverBitrateRenditionIsFlaggedWithItsEvidence(t *testing.T) {
 	p, g := guidedPreset(t)
 	r := &Rendition{Height: g.Height, VideoBitrate: g.KbpsMax * 3}
-	got := RenditionConcerns(r, Platform(p.ID))
+	got := RenditionConcerns(r, Platform(p.ID), "")
 	if len(got) == 0 {
 		t.Fatalf("a rendition at 3x %s's published ceiling raised nothing.\n\n"+
 			"This is not refused at configure time -- it is accepted, encoded, "+
@@ -61,7 +61,7 @@ func TestAnOverBitrateRenditionIsFlaggedWithItsEvidence(t *testing.T) {
 func TestTheMaxrateIsWhatIsComparedWhenItIsHigher(t *testing.T) {
 	p, g := guidedPreset(t)
 	r := &Rendition{VideoBitrate: g.KbpsMax, MaxrateKbps: g.KbpsMax * 2}
-	if got := RenditionConcerns(r, Platform(p.ID)); len(got) == 0 {
+	if got := RenditionConcerns(r, Platform(p.ID), ""); len(got) == 0 {
 		t.Fatalf("a rendition whose maxrate is twice %s's ceiling raised nothing; "+
 			"the peak is what the platform actually receives", p.Name)
 	}
@@ -72,7 +72,7 @@ func TestTheMaxrateIsWhatIsComparedWhenItIsHigher(t *testing.T) {
 func TestUnsetRenditionFieldsAreNotJudged(t *testing.T) {
 	p, _ := guidedPreset(t)
 	r := &Rendition{VideoBitrate: 1} // width, height, fps, gop all unset
-	for _, c := range RenditionConcerns(r, Platform(p.ID)) {
+	for _, c := range RenditionConcerns(r, Platform(p.ID), "") {
 		if c.Field == "width" || c.Field == "height" || c.Field == "fps" || c.Field == "gop" {
 			t.Errorf("judged %q on a rendition that leaves it to the source: %s", c.Field, c.Detail)
 		}
@@ -98,13 +98,13 @@ func TestAPlatformWithNoPublishedGuidanceSaysNothing(t *testing.T) {
 			"unreachable. Delete this test deliberately rather than letting it skip.")
 	}
 	r := &Rendition{Width: 7680, Height: 4320, FPS: 120, VideoBitrate: 99000}
-	if got := RenditionConcerns(r, Platform(bare)); len(got) != 0 {
+	if got := RenditionConcerns(r, Platform(bare), ""); len(got) != 0 {
 		t.Fatalf("preset %q publishes no guidance yet produced %d concerns: %+v", bare, len(got), got)
 	}
-	if got := RenditionConcerns(r, Platform("no-such-platform")); len(got) != 0 {
+	if got := RenditionConcerns(r, Platform("no-such-platform"), ""); len(got) != 0 {
 		t.Fatalf("an unknown platform produced %d concerns", len(got))
 	}
-	if got := RenditionConcerns(nil, Platform(bare)); got != nil {
+	if got := RenditionConcerns(nil, Platform(bare), ""); got != nil {
 		t.Fatal("a nil rendition produced concerns")
 	}
 }
@@ -116,7 +116,7 @@ func TestASinglePublishedFigureIsNotDescribedAsARange(t *testing.T) {
 			continue
 		}
 		r := &Rendition{VideoBitrate: p.Video.KbpsMax * 2}
-		got := RenditionConcerns(r, Platform(p.ID))
+		got := RenditionConcerns(r, Platform(p.ID), "")
 		if len(got) == 0 {
 			t.Fatalf("%s publishes a single figure and an over-rate rendition raised nothing", p.Name)
 		}
@@ -140,7 +140,7 @@ func TestALongerKeyframeIntervalThanThePlatformAsksForIsFlagged(t *testing.T) {
 			continue
 		}
 		r := &Rendition{GOPSeconds: p.Video.GOPSeconds * 3}
-		got := RenditionConcerns(r, Platform(p.ID))
+		got := RenditionConcerns(r, Platform(p.ID), "")
 		var found bool
 		for _, c := range got {
 			if c.Field == "gop" {
@@ -152,7 +152,7 @@ func TestALongerKeyframeIntervalThanThePlatformAsksForIsFlagged(t *testing.T) {
 				"gop concern: %+v", p.Name, p.Video.GOPSeconds, r.GOPSeconds, got)
 		}
 		// And an interval inside the ask must stay silent.
-		if got := RenditionConcerns(&Rendition{GOPSeconds: p.Video.GOPSeconds}, Platform(p.ID)); len(got) != 0 {
+		if got := RenditionConcerns(&Rendition{GOPSeconds: p.Video.GOPSeconds}, Platform(p.ID), ""); len(got) != 0 {
 			t.Fatalf("%s raised a concern for a rendition exactly at its published "+
 				"keyframe interval: %+v", p.Name, got)
 		}
@@ -171,7 +171,7 @@ func TestABitrateBelowThePublishedFloorIsFlagged(t *testing.T) {
 			continue
 		}
 		r := &Rendition{VideoBitrate: p.Video.KbpsMin / 2}
-		got := RenditionConcerns(r, Platform(p.ID))
+		got := RenditionConcerns(r, Platform(p.ID), "")
 		if len(got) == 0 {
 			t.Fatalf("%s publishes at least %d kbps and half that raised nothing",
 				p.Name, p.Video.KbpsMin)
@@ -192,7 +192,7 @@ func TestABitrateBelowThePublishedFloorIsFlagged(t *testing.T) {
 // preset's name, so it is pinned literally.
 func TestAPresetIdQueryKeepsItsOwnNameAndFigures(t *testing.T) {
 	r := &Rendition{Width: 3840, Height: 2160, FPS: 60, VideoBitrate: 40000}
-	got := RenditionConcerns(r, Platform("youtube-rtmps"))
+	got := RenditionConcerns(r, Platform("youtube-rtmps"), "")
 	want := []string{
 		"YouTube Live (RTMPS) publishes 1920 wide; this rendition is 3840",
 		"YouTube Live (RTMPS) publishes 1080p; this rendition is 2160p",
@@ -209,7 +209,41 @@ func TestAPresetIdQueryKeepsItsOwnNameAndFigures(t *testing.T) {
 			t.Errorf("concern %d evidence = %q %q", i, c.Source, c.Checked)
 		}
 	}
-	if got := RenditionConcerns(r, Platform("twitch-rtmps")); len(got) != 0 {
+	if got := RenditionConcerns(r, Platform("twitch-rtmps"), ""); len(got) != 0 {
 		t.Errorf("twitch-rtmps publishes no guidance and must raise nothing, got %+v", got)
+	}
+}
+
+// The five presets that save as "custom" have dated guidance and, until a
+// destination carried its preset id, no way to be reached. The id finds them;
+// without it a "custom" destination has no opinion, as before.
+func TestAStoredPresetIdFindsGuidanceForAPlatformThatSavesAsCustom(t *testing.T) {
+	r := &Rendition{Width: 1920, Height: 1080, FPS: 60, VideoBitrate: 20000}
+	for _, id := range []string{"instagram", "linkedin", "dailymotion", "owncast", "rumble"} {
+		p, ok := DestinationPresetByID(id)
+		if !ok || p.Video == nil || p.Platform != "" {
+			t.Fatalf("%s is expected to publish guidance and save as custom: %+v", id, p)
+		}
+		if got := RenditionConcerns(r, PlatformCustom, ""); len(got) != 0 {
+			t.Fatalf("a custom destination with no preset must have no opinion, got %+v", got)
+		}
+		got := RenditionConcerns(r, PlatformCustom, id)
+		if len(got) == 0 {
+			t.Errorf("%s: a 20000 kbps 1080p60 rendition raised nothing against its own guidance", id)
+			continue
+		}
+		for _, c := range got {
+			if !strings.Contains(c.Detail, p.Name) || c.Source != p.Video.Source || c.Checked != p.Video.Checked {
+				t.Errorf("%s concern %+v does not name %q with its evidence", id, c, p.Name)
+			}
+		}
+	}
+	// A preset that publishes none falls through to the platform's own figures.
+	if got := RenditionConcerns(r, Platform("twitch"), "twitch-rtmps"); len(got) == 0 {
+		t.Error("twitch-rtmps publishes no guidance and should fall through to twitch's")
+	}
+	// An unknown preset id is ignored, not an error.
+	if got := RenditionConcerns(r, PlatformCustom, "no-such-preset"); len(got) != 0 {
+		t.Errorf("unknown preset raised %+v", got)
 	}
 }

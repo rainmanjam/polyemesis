@@ -1065,8 +1065,11 @@ export const api = {
   /** #661: what this rendition would be doing wrong on that platform.
    *  An unknown platform answers [], because a custom RTMP destination has
    *  nothing published to be outside of. */
-  renditionConcerns: (id: number, platform: string) =>
-    get<RenditionConcern[]>(`/renditions/${id}/concerns?platform=${encodeURIComponent(platform)}`),
+  renditionConcerns: (id: number, platform: string, preset = "") =>
+    get<RenditionConcern[]>(
+      `/renditions/${id}/concerns?platform=${encodeURIComponent(platform)}` +
+        (preset ? `&preset=${encodeURIComponent(preset)}` : ""),
+    ),
   createRendition: (r: Partial<Rendition>) =>
     post<{ rendition: Rendition }>("/renditions", r),
   updateRendition: (id: number, r: Partial<Rendition>) =>
