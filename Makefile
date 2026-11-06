@@ -55,6 +55,35 @@ ui-dev: $(UI_DIR)/node_modules ## Run the Vite dev server against a local backen
 ui-test: $(UI_DIR)/node_modules ## Run the frontend unit tests (vitest)
 	cd $(UI_DIR) && npm test
 
+# THE STREAM DECK PLUGIN AND THE SITE, which CI gates and `check` once did not
+# run: each is its own npm package, so the UI's tsc, vitest and build never see
+# them. Same commands as ci.yml's `streamdeck` job and pages.yml's `deploy` job,
+# held to them by scripts/check_parity_test.go. The site's Playwright layout
+# check and the Cloudflare publish stay in CI: they need Chromium and a credential.
+STREAMDECK_DIR := integrations/streamdeck
+WEB_DIR        := web
+
+$(STREAMDECK_DIR)/node_modules: $(STREAMDECK_DIR)/package-lock.json
+	cd $(STREAMDECK_DIR) && npm ci --ignore-scripts
+
+$(WEB_DIR)/node_modules: $(WEB_DIR)/package-lock.json
+	cd $(WEB_DIR) && npm ci --ignore-scripts
+
+.PHONY: streamdeck
+streamdeck: $(STREAMDECK_DIR)/node_modules ## Stream Deck plugin: typecheck, vitest, bundle, Elgato validate, pack
+	cd $(STREAMDECK_DIR) && npm run typecheck
+	cd $(STREAMDECK_DIR) && npm test
+	cd $(STREAMDECK_DIR) && npm run build
+	cd $(STREAMDECK_DIR) && npm run validate
+	@m=$(STREAMDECK_DIR)/com.polyemesis.streamdeck.sdPlugin/manifest.json; before=$$(cksum < $$m); \
+	  (cd $(STREAMDECK_DIR) && npm run pack) || exit 1; \
+	  [ "$$before" = "$$(cksum < $$m)" ] || { echo "streamdeck: npm run pack changed $$m; scripts/pack.mjs must put it back"; exit 1; }
+
+.PHONY: web
+web: $(WEB_DIR)/node_modules ## Site: vitest, then astro check + build + check-build
+	cd $(WEB_DIR) && npm test
+	cd $(WEB_DIR) && npm run build
+
 # ------------------------------------------------------------------- build
 
 .PHONY: build
@@ -328,9 +357,9 @@ endif
 # internal/testenv/checkparity_invocation_test.go compares CHECK-CI against
 # ci.yml. Neither target claims to be the other. `check`'s help line says
 # "fast", so nobody reads it as a promise about CI.
-check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build
+check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui streamdeck web ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build, Stream Deck plugin, site
 
-check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
+check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax typecheck lint ui-test ui streamdeck web ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
 
 # NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
 # and Node and nothing else, and that property is worth keeping: the moment the

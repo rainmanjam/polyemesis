@@ -1937,7 +1937,8 @@ jobs:
   # The Stream Deck plugin, integrations/streamdeck. Typecheck, unit tests and
   # the bundle. Gated like `ui`: the job always reports, and every STEP reads the
   # `changes` output. A job-level `if:` here would be the outage the `changes`
-  # comment describes. Not a required check; add it to the ruleset deliberately.
+  # comment describes. Listed in .github/required-checks.txt, which only MIRRORS branch protection; the
+  # setting itself is changed by hand on GitHub.
   streamdeck:
     name: streamdeck typecheck, test, build
     permissions:
