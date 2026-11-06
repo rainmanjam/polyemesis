@@ -48,7 +48,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { DisabledReason } from "@/components/DisabledReason";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { platformSetupStatus } from "@/lib/status";
-import { SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
+import { SETTINGS_ANCHORS, SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
 import {
   ADVANCED_CARDS,
   advancedCardShown,
@@ -1587,7 +1587,7 @@ function PipelineSettings({
               selected by ?tab=pipeline; this scrolls to the card within it, so
               a link from the dashboard lands on the switch rather than at the
               top of a long page. */}
-          <CardTitle id="failover">{t("set.failover")}</CardTitle>
+          <CardTitle id={SETTINGS_ANCHORS.failover}>{t("set.failover")}</CardTitle>
           <CardDescription>{t("settingsUx.failoverShort")}</CardDescription>
           <MoreAbout>{t("set.failoverDesc")}</MoreAbout>
         </CardHeader>

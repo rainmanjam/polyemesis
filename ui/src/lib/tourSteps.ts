@@ -1,3 +1,4 @@
+import { settingsHref } from "./settingsSearch";
 import type { TranslationKey } from "./i18n";
 
 /* ==========================================================================
@@ -189,7 +190,7 @@ const STEP_ROWS: StepRow[] = [
   // data-directory row inside it is not behind any condition — `system` may be
   // null, in which case the path shows an em dash and the sentence underneath,
   // which is the half this step is actually about, still renders.
-  ["dataDirectory", "/settings?tab=security", "data-directory", "pages/SettingsPage.tsx", "top", "always"],
+  ["dataDirectory", settingsHref("security"), "data-directory", "pages/SettingsPage.tsx", "top", "always"],
 ];
 
 export const TOUR_STEPS: TourStep[] = STEP_ROWS.map(

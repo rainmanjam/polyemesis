@@ -18,6 +18,20 @@ export const SETTINGS_TABS = [
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
+/** Element ids on the settings page that a link can land on, by the tab that
+ *  holds them. SettingsPage renders each as the id of the element it scrolls
+ *  to, so the link and the page cannot name different things. */
+export const SETTINGS_ANCHORS = { failover: "failover" } as const;
+
+export type SettingsAnchor = keyof typeof SETTINGS_ANCHORS;
+
+/** The URL of a settings panel, and optionally a card inside it. The one place
+ *  a settings link is spelled, so a typo is a compile error rather than a link
+ *  that silently opens the Overview (settingsTabFor). */
+export function settingsHref(tab: Exclude<SettingsTab, "debug">, anchor?: SettingsAnchor): `/settings?${string}` {
+  return `/settings?tab=${tab}${anchor ? `#${SETTINGS_ANCHORS[anchor]}` : ""}`;
+}
+
 /** The rail's groups, in rail order (settings-council R6). Overview sits above
  *  them and Danger zone below them, each on its own. The tab VALUES are the
  *  ones the page has always read, so grouping moved no link: every old

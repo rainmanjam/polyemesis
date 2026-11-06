@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { settingsHref } from "@/lib/settingsSearch";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { AlertTriangle, Bot, Loader2 } from "lucide-react";
@@ -128,7 +129,7 @@ export function McpAccessCard() {
 
             <div className="flex flex-col gap-1">
               <Link
-                to="/settings?tab=security"
+                to={settingsHref("security")}
                 className="self-start text-tiny underline underline-offset-2 hover:text-foreground"
               >
                 {t("mcp.createToken")}

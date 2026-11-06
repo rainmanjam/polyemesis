@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { settingsHref } from "@/lib/settingsSearch";
 import { Link } from "react-router";
 import { CheckCircle2, ExternalLink, Lock, RotateCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -279,7 +280,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
                 {platform.accounts.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {t("publish.noAccount", { platform: t(PLATFORM_LABEL[platform.id]) })}{" "}
-                    <Link className="underline" to="/settings?tab=platforms">
+                    <Link className="underline" to={settingsHref("platforms")}>
                       {t("publish.connectInSettings")}
                     </Link>
                   </p>

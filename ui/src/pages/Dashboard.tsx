@@ -1,4 +1,5 @@
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { settingsHref } from "@/lib/settingsSearch";
 import { useCopy } from "@/hooks/useCopy";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
@@ -947,7 +948,7 @@ export function FailoverExposure({ notice }: { notice: FailoverNotice }) {
       <div className="min-w-0 text-muted-foreground">
         <p>
           <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
-          <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+          <Link to={settingsHref("pipeline", "failover")} className="underline underline-offset-2">
             {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
           </Link>
         </p>

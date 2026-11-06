@@ -1,4 +1,5 @@
 import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
+import { settingsHref } from "@/lib/settingsSearch";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -2849,7 +2850,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
           {t("addDest.unlink")}
         </Button>
         <Button type="button" variant="ghost" size="sm" asChild>
-          <Link to="/settings?tab=platforms">{t("addDest.manageAccounts")}</Link>
+          <Link to={settingsHref("platforms")}>{t("addDest.manageAccounts")}</Link>
         </Button>
       </span>
     </div>
