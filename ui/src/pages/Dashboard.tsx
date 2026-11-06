@@ -1190,7 +1190,7 @@ export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
   const narrow = useIsNarrow();
-  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, programmeKnown, refreshSources } =
+  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, sourceCountKnown, refreshSources } =
     useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
@@ -1267,7 +1267,7 @@ export function Dashboard() {
   // than falsiness so that unknown renders the ordinary dashboard. An operator
   // mid-broadcast must never see their dashboard replaced because a request
   // was slow.
-  const sourceCount = programmeKnown ? liveSourceCount : null;
+  const sourceCount = sourceCountKnown ? liveSourceCount : null;
   /* The selected programme's status frame, its relay throughput and whether it
    * is live, held the same way and for the same reason as failoverState: the
    * socket alternates between every engine's frames and the `stats` bitrate

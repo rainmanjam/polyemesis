@@ -43,3 +43,14 @@ describe("autoApi error handling matches lib/api.ts", () => {
     await vi.waitFor(() => expect(toast.warning).toHaveBeenCalledWith("pipeline not updated", { duration: 15000 }));
   });
 });
+
+describe("requestRaw does not label a non-JSON body as JSON", () => {
+  it("leaves a FormData body's content type to the browser", async () => {
+    const { requestRaw } = await import("./api");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await requestRaw("/media", { method: "POST", body: new FormData() });
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false);
+  });
+});

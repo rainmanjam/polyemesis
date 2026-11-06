@@ -11,14 +11,12 @@ import type { PlatformAccount, SetupGuide } from "@/lib/types";
  * the cost, so it sends the confirmed request -- and a failure is a toast, not
  * an unhandled rejection out of ConfirmDestructive (which has no catch). */
 
-const deleteCreds = vi.fn();
 const confirmDeleteCreds = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
     ...actual,
     api: {
-      deleteCreds: (...a: unknown[]) => deleteCreds(...a),
       confirmDeleteCreds: (...a: unknown[]) => confirmDeleteCreds(...a),
       deleteAccount: vi.fn(),
       confirmDeleteAccount: vi.fn(),
@@ -80,7 +78,6 @@ async function removeThroughTheDialog() {
 }
 
 beforeEach(() => {
-  deleteCreds.mockReset();
   confirmDeleteCreds.mockReset();
   toastSuccess.mockReset();
   toastError.mockReset();
@@ -93,7 +90,6 @@ describe("removing a platform's credentials from its card", () => {
     confirmDeleteCreds.mockResolvedValue({ status: "deleted" });
     await removeThroughTheDialog();
     await waitFor(() => expect(confirmDeleteCreds).toHaveBeenCalledWith("twitch"));
-    expect(deleteCreds).not.toHaveBeenCalled();
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 

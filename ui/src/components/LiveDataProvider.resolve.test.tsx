@@ -25,12 +25,13 @@ const list = vi.spyOn(api, "listSources");
 const srcOf = vi.spyOn(api, "source");
 
 function Probe() {
-  const { programme, sourceCount, refreshSources, programmeKnown } = useLiveData();
+  const { programme, sourceCount, sourceCountKnown, refreshSources, programmeKnown } = useLiveData();
   return (
     <div>
       <span data-testid="programme">{String(programme)}</span>
       <span data-testid="count">{sourceCount}</span>
       <span data-testid="known">{String(programmeKnown)}</span>
+      <span data-testid="countKnown">{String(sourceCountKnown)}</span>
       <button onClick={() => void refreshSources()}>refresh</button>
     </div>
   );
@@ -198,5 +199,56 @@ describe("LiveDataProvider: a poll that fails or answers late", () => {
     await act(async () => older(rows(7, 8)));
     expect(screen.getByTestId("count").textContent).toBe("1");
     expect(screen.getByTestId("programme").textContent).toBe("8");
+  });
+});
+
+describe("LiveDataProvider: the count is unknown until /sources answers", () => {
+  it("does not report a failed first read as zero programmes", async () => {
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("known").textContent).toBe("true"));
+    expect(screen.getByTestId("countKnown").textContent).toBe("false");
+  });
+
+  it("never turns a known count back into unknown when a later read fails", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("countKnown").textContent).toBe("true"));
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    await act(async () => {
+      screen.getByText("refresh").click();
+    });
+    expect(screen.getByTestId("countKnown").textContent).toBe("true");
+    expect(screen.getByTestId("count").textContent).toBe("2");
+  });
+});
+
+describe("LiveDataProvider: the poll pauses in a hidden tab", () => {
+  const setHidden = (hidden: boolean) =>
+    Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
+  afterEach(() => setHidden(false));
+
+  it("does not poll while hidden, and reads at once on coming back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      list.mockResolvedValue(rows(1));
+      draw();
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+      const before = list.mock.calls.length;
+
+      setHidden(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(list.mock.calls.length).toBe(before);
+
+      setHidden(false);
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(list.mock.calls.length).toBe(before + 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

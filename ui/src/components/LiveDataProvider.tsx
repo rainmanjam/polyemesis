@@ -85,6 +85,11 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   /* Set from the same /sources response that resolves the programme, so the
      count and the choice can never describe different lists. */
   const [sourceCount, setSourceCount] = useState(0);
+  /* Whether sourceCount came from a successful /sources answer. The 0 above is
+     only a placeholder: a slow or failed first read must not look like an
+     install with no programme (the Dashboard would draw its empty state). Never
+     reset once true: a failed later poll keeps the last good count. */
+  const [sourceCountKnown, setSourceCountKnown] = useState(false);
   /* #638: the list, not just the count. A switcher needs names, and fetching
      them separately would mean a second copy of the resolution rule. */
   const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
@@ -293,6 +298,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       const ids = rows.map((r) => r.id);
       if (gen !== resolveGen.current) return ids.length;
       resolvedOnce.current = true;
+      setSourceCountKnown(true);
       knownIds.current = ids;
       setSourceCount(ids.length);
       // Unchanged lists keep their identity: this runs on a timer, and a new
@@ -370,8 +376,20 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      Dashboard's ingest card cannot scope by different counts. */
   useEffect(() => {
     if (!programmeKnown) return;
-    const poll = window.setInterval(() => void resolveSources(), 10_000);
-    return () => window.clearInterval(poll);
+    // Not while the tab is hidden: nobody is looking at the count, and a
+    // background tab would otherwise poll for as long as it is open. Coming
+    // back reads it at once.
+    const poll = window.setInterval(() => {
+      if (!document.hidden) void resolveSources();
+    }, 10_000);
+    const onVisible = () => {
+      if (!document.hidden) void resolveSources();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [programmeKnown, resolveSources]);
 
   /* SELF-HEALING, for the changes this tab did not make.
@@ -415,6 +433,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      sourceCountKnown,
       programmes,
       selectProgramme,
       refreshSources: resolveSources,
@@ -434,6 +453,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      sourceCountKnown,
       programmes,
       selectProgramme,
       resolveSources,

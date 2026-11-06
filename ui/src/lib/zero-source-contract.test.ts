@@ -167,7 +167,7 @@ describe("the screens that meet an install with no source", () => {
     expect(src, "the provider reads the source count once and never again, so a tab " +
       "left open while the last source went away goes on drawing a publish URL and a " +
       "track count for a programme that no longer exists")
-      .toMatch(/setInterval\(\(\) => void resolveSources\(\)/);
+      .toMatch(/setInterval\(\(\) => \{\s*if \(!document\.hidden\) void resolveSources\(\)/);
   });
 
   it("the dashboard treats the refusal as an empty state rather than a fault", () => {

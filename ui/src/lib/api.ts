@@ -290,7 +290,8 @@ function csrfToken(): string {
 export async function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // Only a string body is JSON; a FormData or Blob body brings its own type.
+  if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (method !== "GET" && method !== "HEAD") headers.set(CSRF_HEADER, csrfToken());
 
   const resp = await fetch(BASE + path, { ...init, headers, credentials: "same-origin" });
@@ -494,27 +495,27 @@ export function uploadMedia(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", BASE + "/media");
     xhr.withCredentials = true;
-    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.setRequestHeader(CSRF_HEADER, csrfToken());
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
-      let body: unknown = null;
+      // The same session-ended check and error shape as requestRaw: an expired
+      // session mid-upload returns the console to sign-in, and the server's
+      // `code` survives.
+      noteResponseStatus("/media", xhr.status);
+      let body: unknown = xhr.responseText;
       try {
         body = JSON.parse(xhr.responseText);
       } catch {
-        body = xhr.responseText;
+        /* a non-JSON body is read as text */
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(body as MediaFile);
         return;
       }
-      const msg =
-        body && typeof body === "object" && "error" in body
-          ? String((body as { error: unknown }).error)
-          : `upload failed (${xhr.status})`;
-      reject(new ApiError(xhr.status, msg));
+      reject(apiErrorFrom(xhr.status, body, `upload failed (${xhr.status})`));
     };
     // A network failure and an abort are different things to a user: one is
     // "try again", the other is "you did that on purpose".

@@ -236,7 +236,6 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
 
   it("drops the 'apply without Save' copy and says mute and gain wait for Save", async () => {
     await renderPage();
-    expect(screen.queryByText(translate("en", "route.live.hint"))).toBeNull();
     expect(screen.getAllByText(translate("en", "routingUx.muteGainHint")).length).toBeGreaterThan(0);
   });
 

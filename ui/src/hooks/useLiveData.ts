@@ -71,6 +71,10 @@ export interface LiveData {
    *  the label carries information — on the single-source install that is the
    *  overwhelming majority, a name that never varies is furniture. */
   sourceCount: number;
+  /** Whether `sourceCount` was read from a successful /sources answer. Until
+   *  then it is a placeholder 0, and a page must not draw "no programme yet"
+   *  from it. */
+  sourceCountKnown: boolean;
   /** Every programme the server lists, id and name, in the server's display
    *  order — which is the order resolveProgramme's fallback picks from.
    *
