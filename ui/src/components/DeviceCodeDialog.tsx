@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { Check, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -261,7 +262,7 @@ export function DeviceCodeDialog({
  *  whole feature and deserves an assertion of its own. */
 export function UserCode({ code }: { code: string }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  const { copy, copied } = useCopy();
   return (
     <div className="flex items-center justify-center gap-2 rounded border border-border bg-background px-3 py-4">
       <code
@@ -277,19 +278,11 @@ export function UserCode({ code }: { code: string }) {
         type="button"
         aria-label={t("common.copy")}
         className="shrink-0 rounded p-1 hover:bg-muted"
-        onClick={() => {
-          // Allowed to fail without comment, exactly as UpdateBanner's copy
-          // does: the clipboard is blocked on an insecure origin, which a
-          // self-hosted box on plain HTTP is — and which is the same population
-          // this whole feature exists for. The code stays selectable.
-          navigator.clipboard
-            ?.writeText(code)
-            .then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            })
-            .catch(() => {});
-        }}
+        // Allowed to fail without comment, exactly as UpdateBanner's copy
+        // does: the clipboard is blocked on an insecure origin, which a
+        // self-hosted box on plain HTTP is — and which is the same population
+        // this whole feature exists for. The code stays selectable.
+        onClick={() => void copy(code)}
       >
         {copied ? (
           <Check className="size-4" aria-hidden />

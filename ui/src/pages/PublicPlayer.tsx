@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import Hls from "hls.js";
 import { api, ApiError } from "@/lib/api";
 import type { BeaconKind, PlayoutPublicView } from "@/lib/types";
@@ -210,7 +211,9 @@ function LivePlayer({
   const [fellBack, setFellBack] = useState(false);
   const [range, setRange] = useState<PlayRange | null>(null);
   const [shareLink, setShareLink] = useState("");
-  const [shareCopied, setShareCopied] = useState(false);
+  // A blocked clipboard (cross-origin iframe, plain HTTP) is not reported: the link is
+  // shown in a field below for copying by hand.
+  const { copy: copyShare, copied: shareCopied } = useCopy(2000);
   const [momentGone, setMomentGone] = useState(false);
   const pendingSeek = useRef<number | undefined>(atMs);
 
@@ -431,14 +434,7 @@ function LivePlayer({
     if (!v || !anchor) return;
     const link = shareLinkAt(window.location.origin, token, wallTimeAt(v.currentTime, anchor));
     setShareLink(link);
-    try {
-      await navigator.clipboard.writeText(link);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 2000);
-    } catch {
-      // Clipboard access is denied in a cross-origin iframe and on plain HTTP;
-      // the link is shown in a field below for copying by hand.
-    }
+    await copyShare(link);
   };
 
   const chooseLevel = (idx: number) => {
@@ -700,22 +696,16 @@ function formatWhen(iso: string): string {
 
 function About({ view, live }: { view: PlayoutPublicView; live: boolean }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  // The textarea below is always present, so a blocked clipboard (cross-origin iframe,
+  // plain HTTP) is not reported: the snippet is still selectable by hand.
+  const { copy, copied } = useCopy(2000);
   const embedSnippet =
     `<iframe src="${window.location.origin}${window.location.pathname}" ` +
     `width="854" height="480" frameborder="0" ` +
     `allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
 
   const copyEmbed = async () => {
-    try {
-      await navigator.clipboard.writeText(embedSnippet);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard access is denied in a cross-origin iframe and on plain HTTP.
-      // The textarea below is always present, so the snippet is still
-      // selectable by hand; failing silently is better than an alert.
-    }
+    await copy(embedSnippet);
   };
 
   return (

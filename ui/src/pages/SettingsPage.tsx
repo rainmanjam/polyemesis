@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useId, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
@@ -726,10 +727,10 @@ function IngestSettings({
   // nothing on screen having said so.
   const live = useIngestLive();
 
+  const { copy: copyText } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyUrl = async () => {
     if (!system?.ingestUrl) return;
-    await navigator.clipboard.writeText(system.ingestUrl);
-    toast.success(t("set.ingestUrlCopied"));
+    if (await copyText(system.ingestUrl)) toast.success(t("set.ingestUrlCopied"));
   };
 
   const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
@@ -2799,7 +2800,7 @@ export function PlatformCredCard({
   const [clientId, setClientId] = useState(creds?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   // SEEDED FROM THE STORED VERDICT (settings-council R10). It used to start
   // null on every load, so a reload turned "the platform refused this pair"
   // back into a plain "configured". `checkedAt` is absent only for a verdict
@@ -2966,9 +2967,7 @@ export function PlatformCredCard({
   };
 
   const copyRedirect = async () => {
-    await navigator.clipboard.writeText(guide.redirectPath);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(guide.redirectPath);
   };
 
   const verdictBadge = check && (
@@ -3564,7 +3563,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<AcmePreflight | null>(null);
   const [checkError, setCheckError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   const snippet = result ? `${acmeYaml(result.hostname, email)}\n\n# ${RESTART_COMMAND}` : "";
 
@@ -3582,9 +3581,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
   };
 
   const copySnippet = async () => {
-    await navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(snippet);
   };
 
   return (
@@ -3678,7 +3675,7 @@ function TransportSecurity() {
   const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   useEffect(() => {
     api
@@ -3691,9 +3688,7 @@ function TransportSecurity() {
 
   const copyYaml = async () => {
     if (!tls) return;
-    await navigator.clipboard.writeText(tlsYaml(tls));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(tlsYaml(tls));
   };
 
   const cert = tls?.certificate ?? null;
@@ -3877,10 +3872,10 @@ function SecretKeyCard({ system }: { system: SystemInfo | null }) {
       // Not remembered; the box still shows what was ticked for this visit.
     }
   };
+  const { copy: copyText } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyDir = async () => {
     if (!dir) return;
-    await navigator.clipboard.writeText(dir);
-    toast.success(t("settingsUx.pathCopied"));
+    if (await copyText(dir)) toast.success(t("settingsUx.pathCopied"));
   };
   return (
     <Card className="lg:col-span-2">
@@ -3951,7 +3946,7 @@ function ApiTokens() {
   // Held in state and nowhere else: the server keeps only a hash, so this is
   // the one and only time the plaintext exists.
   const [minted, setMinted] = useState<{ token: ApiToken; plaintext: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   const load = () => {
     api
@@ -3970,7 +3965,6 @@ function ApiTokens() {
     setBusy(true);
     try {
       setMinted(await api.createToken(name.trim(), scope));
-      setCopied(false);
       setName("");
       setScope("read");
       load();
@@ -3994,8 +3988,7 @@ function ApiTokens() {
 
   const copy = async () => {
     if (!minted) return;
-    await navigator.clipboard.writeText(minted.plaintext);
-    setCopied(true);
+    await copyText(minted.plaintext);
   };
 
   return (

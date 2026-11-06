@@ -1,4 +1,5 @@
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -1728,14 +1729,10 @@ export function Dashboard() {
     ? publishRows(checklistSource.publishUrls, window.location.hostname)
     : [];
 
+  const { copy } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyIngest = async () => {
     if (!system?.ingestUrl) return;
-    try {
-      await navigator.clipboard.writeText(system.ingestUrl);
-      toast.success(t("dash.ingestUrlCopied"));
-    } catch {
-      toast.error(t("dash.clipboardUnavailable"));
-    }
+    if (await copy(system.ingestUrl)) toast.success(t("dash.ingestUrlCopied"));
   };
 
   // NO PROGRAMME YET. The whole page, not a strip above it.

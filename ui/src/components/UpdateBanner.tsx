@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, ExternalLink, X } from "lucide-react";
 
@@ -345,7 +346,7 @@ export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) 
  *  and the text stays selectable either way. */
 function CopyableCommand({ value }: { value: string }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  const { copy, copied } = useCopy();
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <code className="truncate rounded bg-background px-1 py-0.5 font-mono text-xs">{value}</code>
@@ -353,15 +354,7 @@ function CopyableCommand({ value }: { value: string }) {
         type="button"
         aria-label={t("common.copy")}
         className="shrink-0 rounded p-0.5 hover:bg-muted"
-        onClick={() => {
-          navigator.clipboard
-            ?.writeText(value)
-            .then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            })
-            .catch(() => {});
-        }}
+        onClick={() => void copy(value)}
       >
         {copied ? <Check className="size-3.5" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
       </button>

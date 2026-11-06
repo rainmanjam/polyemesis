@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -589,7 +590,7 @@ function CopyField({
   describedBy?: string;
 }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  const { copy, copied } = useCopy(1500, () => toast.error(t("play.clipboardUnavailable")));
   return (
     <div className="grid gap-1.5">
       <Label>{label}</Label>
@@ -609,15 +610,7 @@ function CopyField({
           disabled={disabled}
           aria-describedby={describedBy}
           aria-label={t("play.copyAria", { label })}
-          onClick={() => {
-            navigator.clipboard
-              .writeText(value)
-              .then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              })
-              .catch(() => toast.error(t("play.clipboardUnavailable")));
-          }}
+          onClick={() => void copy(value)}
         >
           {copied ? <Check /> : <Copy />}
         </Button>

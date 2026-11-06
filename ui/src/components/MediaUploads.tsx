@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { useCopy } from "@/hooks/useCopy";
 import {
   Copy,
   RefreshCw,
@@ -67,7 +69,7 @@ export function MediaUploads() {
    * shown one filename while believing the other two had landed. */
   const [errors, setErrors] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [copied, setCopied] = useState("");
+  const { copy, copiedKey } = useCopy(2000, () => toast.error(t("dash.clipboardUnavailable")));
   const [pendingDelete, setPendingDelete] = useState<MediaFile | null>(null);
   // The name currently being submitted, so the button cannot be pressed twice
   // while the request is open. The SERVER folds duplicates too — the job is
@@ -155,12 +157,6 @@ export function MediaUploads() {
     },
     [upload],
   );
-
-  async function copyPullUrl(f: MediaFile) {
-    await navigator.clipboard.writeText(f.pullUrl);
-    setCopied(f.name);
-    window.setTimeout(() => setCopied(""), 2000);
-  }
 
   /* Ask the server to read a file it already has (#202).
    *
@@ -444,11 +440,11 @@ export function MediaUploads() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => void copyPullUrl(f)}
+                    onClick={() => void copy(f.pullUrl, f.name)}
                     aria-label={t("media.copyPullUrl", { name: f.name })}
                   >
                     <Copy className="size-3.5" />
-                    {copied === f.name ? t("common.copied") : t("media.pullUrl")}
+                    {copiedKey === f.name ? t("common.copied") : t("media.pullUrl")}
                   </Button>
                   <Button
                     size="icon"
