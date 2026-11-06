@@ -8,6 +8,19 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **A light theme for the operator console, and a Light / Dark / System control in the header.** The
+  console follows the operating system's `prefers-color-scheme` until the operator picks, then
+  remembers the pick in that browser (no server setting; it still works when storage is blocked).
+  "System" tracks the OS live, with no reload. The light palette is a counterpart rather than an
+  inversion: the same roles, with the broadcast tally lamp unchanged, `--down` moved deeper so it
+  still cannot be mistaken for it, and every contrast rule the dark palette holds (4.5:1 ink, 3:1
+  shapes and focus ring) enforced for both by `palette-contrast.test.ts`. The theme is set before
+  first paint by an external `/theme-init.js`, so neither theme flashes the other and the
+  Content-Security-Policy is not loosened. The meters and the clip timeline repaint when the theme
+  changes. The public player (`/watch`) and the OBS overlay pages are never themed.
+
 ### Fixed
 
 - **Re-detecting hardware reaches the next VAAPI rendition start of a running programme.** A VAAPI
