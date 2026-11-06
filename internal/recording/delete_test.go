@@ -331,7 +331,8 @@ func setRecording(t *testing.T, store *db.DB, enabled bool) {
 // (exploratory run, row 35: DELETE after disable -> 409, twice).
 //
 // With recording off the engine has stopped the recorder, so none of the
-// rec-YYYYMMDD-HHMMSS files it names are open. What stays guarded, recording
+// rec-s<id>-YYYYMMDD-HHMMSS files it names (rec-YYYYMMDD-HHMMSS before
+// segments carried their programme) are open. What stays guarded, recording
 // on or off, is everything else a live process can be writing into the same
 // directory: a file destination's output, whose name derives from its URL.
 //

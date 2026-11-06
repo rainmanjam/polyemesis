@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
 // Subdir is where clips live under the recordings directory. A subdirectory
@@ -27,13 +29,12 @@ import (
 const Subdir = "clips"
 
 // Prefix and Ext are the clip filename shape, and the only names this package
-// will list or delete.
+// will list or delete. The timestamp between them is the recorder's
+// (segname.StampLayout), so a human sorting the two directories sees the same
+// shape in both.
 const (
 	Prefix = "clip-"
 	Ext    = ".ts"
-	// stamp is the filename timestamp layout, matching the recorder's so a
-	// human sorting the two directories sees the same shape in both.
-	stamp = "20060102-150405"
 )
 
 // Buffer and retention defaults.
@@ -330,7 +331,7 @@ func (c *Capturer) Capture(d time.Duration) (Clip, error) {
 
 // reserve picks a free filename for a clip starting at t.
 func (c *Capturer) reserve(t time.Time) (name, path string, err error) {
-	base := Prefix + t.Local().Format(stamp)
+	base := Prefix + segname.FormatStamp(t.Local())
 	for i := 0; i < 100; i++ {
 		n := base + Ext
 		if i > 0 {
@@ -428,7 +429,7 @@ func startTimeFromName(name string, fallback time.Time) time.Time {
 	base = strings.TrimPrefix(base, Prefix)
 	parts := strings.Split(base, "-")
 	if len(parts) >= 2 {
-		if t, err := time.ParseInLocation(stamp, parts[0]+"-"+parts[1], time.Local); err == nil {
+		if t, ok := segname.ParseStamp(parts[0] + "-" + parts[1]); ok {
 			return t
 		}
 	}

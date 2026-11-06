@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -44,12 +44,6 @@ const maxStemNameLen = 32
 // that has already lost its master, which costs disk; the other direction
 // deletes audio somebody still has the video for.
 const stemSweepSlack = time.Minute
-
-// stemFilenameRE splits a stem filename into the master timestamp it shares and
-// the track name appended to it. The prefix is non-greedy so the FIRST
-// date-time pair is taken as the stamp, leaving anything after it — including a
-// name that itself contains digits or dashes — as the stem name.
-var stemFilenameRE = regexp.MustCompile(`^(.+?)-(\d{8}-\d{6})-([a-z0-9][a-z0-9-]*)$`)
 
 // Stem is one ingest audio track destined for its own file.
 type Stem struct {
@@ -192,7 +186,7 @@ func (m *Manager) StemsDir() string { return StemsDir(m.dir) }
 // StemPattern turns the recorder's master output pattern into this stem's.
 //
 // The stem keeps the master's whole strftime prefix and appends its own name,
-// so rec-%Y%m%d-%H%M%S.mkv becomes stems/rec-%Y%m%d-%H%M%S-mic.flac and a
+// so rec-s3-%Y%m%d-%H%M%S.mkv becomes stems/rec-s3-%Y%m%d-%H%M%S-mic.flac and a
 // human sorting the directory sees which session a stem came from without
 // consulting anything.
 func StemPattern(recordingsDir, masterPattern string, s Stem) string {
@@ -230,15 +224,11 @@ func ParseStemFilename(name string) (time.Time, string, bool) {
 	if ext != ffmpeg.StemFLAC.Ext() && ext != ffmpeg.StemWAV.Ext() {
 		return time.Time{}, "", false
 	}
-	mm := stemFilenameRE.FindStringSubmatch(strings.TrimSuffix(name, filepath.Ext(name)))
-	if mm == nil {
+	sn, ok := segname.SplitStem(strings.TrimSuffix(name, filepath.Ext(name)))
+	if !ok {
 		return time.Time{}, "", false
 	}
-	t, err := time.ParseInLocation("20060102-150405", mm[2], time.Local)
-	if err != nil {
-		return time.Time{}, "", false
-	}
-	return t, mm[3], true
+	return sn.Start, sn.Track, true
 }
 
 // StemMasterBase is the extension-less name of the master segment a stem was
@@ -248,8 +238,8 @@ func StemMasterBase(name string) (string, bool) {
 	if _, _, ok := ParseStemFilename(name); !ok {
 		return "", false
 	}
-	mm := stemFilenameRE.FindStringSubmatch(strings.TrimSuffix(name, filepath.Ext(name)))
-	return mm[1] + "-" + mm[2], true
+	sn, _ := segname.SplitStem(strings.TrimSuffix(name, filepath.Ext(name)))
+	return sn.MasterBase(), true
 }
 
 // SweepStems deletes stems whose master segment retention has already removed.

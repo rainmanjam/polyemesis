@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
 // Manager scans and prunes the recordings directory.
@@ -772,10 +772,6 @@ func (m *Manager) segmentSeconds() (int, bool) {
 	return s.Recording.SegmentSeconds, s.Recording.Enabled
 }
 
-// recorderSegment matches the names the recorder writes and nothing else: the
-// strftime pattern rec-%Y%m%d-%H%M%S.mkv the engine hands ffmpeg.
-var recorderSegment = regexp.MustCompile(`^rec-[0-9]{8}-[0-9]{6}\.mkv$`)
-
 // destinationOutput names the file destination, if any, that can be writing
 // name: its own URL, or the stem-TIMESTAMP rollover ResolveForWrite picks when
 // that path is taken. Every destination is considered, enabled or not, running
@@ -1027,7 +1023,7 @@ func (m *Manager) Delete(id int64) error {
 		if dest != "" {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, liveSegmentError{dest: dest})
 		}
-		if recorderLive || !recorderSegment.MatchString(r.Filename) {
+		if recorderLive || !segname.IsRecorderSegment(r.Filename) {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
 		}
 	}
@@ -1130,7 +1126,7 @@ func (m *Manager) ResolveForWrite(name string) (string, error) {
 	}
 	ext := filepath.Ext(full)
 	stem := strings.TrimSuffix(full, ext)
-	stamp := time.Now().Format("20060102-150405")
+	stamp := segname.FormatStamp(time.Now())
 	for n := 0; n < 1000; n++ {
 		cand := fmt.Sprintf("%s-%s%s", stem, stamp, ext)
 		if n > 0 {
@@ -1220,13 +1216,6 @@ func (m *Manager) Usage() (DiskUsage, error) {
 	return u, nil
 }
 
-// segmentPrefix starts every master segment's name; sourceTag follows it for
-// segments written since the name began carrying the programme.
-const (
-	segmentPrefix = "rec-"
-	sourceTag     = "s"
-)
-
 // SegmentPattern is the strftime output pattern one programme's recorder
 // writes master segments to: rec-s<sourceID>-%Y%m%d-%H%M%S.mkv.
 //
@@ -1237,33 +1226,15 @@ const (
 //
 // The timestamp stays the last two hyphen-separated fields, which is what
 // startTimeFromName, the stem pattern and ParseStemFilename already key on.
+// The format itself is package segname's.
 func SegmentPattern(dir string, sourceID int64) string {
-	return filepath.Join(dir, segmentPrefix+sourceTag+strconv.FormatInt(sourceID, 10)+"-%Y%m%d-%H%M%S.mkv")
+	return filepath.Join(dir, segname.Pattern(sourceID))
 }
 
 // SourceFromName reads the programme out of a master segment's filename, and
 // reports false for a name that does not carry one -- a segment written before
 // names did, or anything the recorder did not write. It never guesses.
-func SourceFromName(name string) (int64, bool) {
-	rest, ok := strings.CutPrefix(filepath.Base(name), segmentPrefix+sourceTag)
-	if !ok {
-		return 0, false
-	}
-	digits, _, ok := strings.Cut(rest, "-")
-	if !ok || digits == "" {
-		return 0, false
-	}
-	for _, c := range digits {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-	}
-	id, err := strconv.ParseInt(digits, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, false
-	}
-	return id, true
-}
+func SourceFromName(name string) (int64, bool) { return segname.Source(name) }
 
 func isRecording(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
@@ -1271,16 +1242,12 @@ func isRecording(name string) bool {
 }
 
 // startTimeFromName recovers the segment start from the strftime-formatted
-// filename the recorder writes (rec-20240115-143000.mkv), falling back to the
-// file's mtime. The name is more accurate: mtime moves as the file is written.
+// filename the recorder writes (rec-s3-20240115-143000.mkv), falling back to
+// the file's mtime. The name is more accurate: mtime moves as the file is
+// written.
 func startTimeFromName(name string, fallback time.Time) time.Time {
-	base := strings.TrimSuffix(name, filepath.Ext(name))
-	parts := strings.Split(base, "-")
-	if len(parts) >= 3 {
-		stamp := parts[len(parts)-2] + "-" + parts[len(parts)-1]
-		if t, err := time.ParseInLocation("20060102-150405", stamp, time.Local); err == nil {
-			return t
-		}
+	if t, ok := segname.TrailingStamp(name); ok {
+		return t
 	}
 	return fallback
 }
