@@ -1,6 +1,6 @@
 import { capabilityFor, supportOf } from "@/lib/capabilities";
 import { translate, type Translator } from "@/lib/i18n";
-import { platformNoun } from "@/lib/platformLinks";
+import { platformName } from "@/lib/platforms";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /* ===========================================================================
@@ -101,12 +101,12 @@ const ADAPTERS: Record<
 
 /** The platform's name as an operator would write it.
  *
- *  platformNoun covers the four with adapters and returns its argument
+ *  platformName covers the four with adapters and returns its argument
  *  unchanged for everything else, which is how the menu came to print the
  *  lowercase "rumble publishes no moderation API". The capability matrix knows
  *  the proper name, so fall through to it before giving up. */
 function noun(platform: string): string {
-  const known = platformNoun(platform as ChatPlatform);
+  const known = platformName(platform as ChatPlatform);
   if (known !== platform) return known;
   return capabilityFor(platform).name;
 }

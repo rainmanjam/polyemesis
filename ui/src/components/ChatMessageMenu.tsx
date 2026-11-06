@@ -10,10 +10,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
+import { platformName } from "@/lib/platforms";
 import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
 import { useT } from "@/lib/i18n";
-import { openPlatformLink, platformLinkFor, platformNoun } from "@/lib/platformLinks";
+import { openPlatformLink, platformLinkFor } from "@/lib/platformLinks";
 import type { Asks } from "@/hooks/useConfirm";
 import type { ChatMessage } from "@/lib/types";
 
@@ -167,7 +168,7 @@ export function ChatMessageMenu({
         <DropdownMenuLabel className="truncate">
           {message.author.name}
           <span className="ml-1 font-normal text-muted-foreground">
-            {t("chatMenu.onPlatform", { platform: platformNoun(message.platform) })}
+            {t("chatMenu.onPlatform", { platform: platformName(message.platform) })}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

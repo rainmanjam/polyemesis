@@ -26,7 +26,6 @@ vi.mock("@/lib/autoApi", () => ({
     listClips: () => clipsResponse(),
     captureClip: () => Promise.resolve({}),
     setClipBuffer: () => Promise.resolve({}),
-    del: () => Promise.resolve({}),
   },
 }));
 

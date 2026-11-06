@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { orderReadings, platformLabel, PLAYER, readingCount, sparkPath } from "@/lib/audience";
+import { platformName } from "@/lib/platforms";
+import { orderReadings, PLAYER, readingCount, sparkPath } from "@/lib/audience";
 import { clockTime } from "@/lib/format";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import type { AnalyticsLive, AnalyticsReading } from "@/lib/types";
@@ -160,7 +161,7 @@ function OnAir({ live }: { live: AnalyticsLive }) {
 function ReadingRow({ r }: { r: AnalyticsReading }) {
   const t = useT();
   const count = readingCount(r);
-  const label = r.platform === PLAYER ? t("aud.player") : platformLabel(r.platform);
+  const label = r.platform === PLAYER ? t("aud.player") : platformName(r.platform);
   const reason = r.reason ? REASON[r.reason] : undefined;
   return (
     <li className="flex items-center justify-between gap-2 text-sm" data-testid={`audience-row-${r.platform}`}>

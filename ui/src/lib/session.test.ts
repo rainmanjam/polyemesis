@@ -2,8 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
-import { autoApi } from "./autoApi";
+import { api, http } from "./api";
 import { onSessionEnded } from "./session";
 
 /* A session that expires mid-use has to put the operator back on the login
@@ -50,7 +49,7 @@ describe("a 401 in the middle of a session", () => {
   it("ends the session from lib/autoApi.ts", async () => {
     respond(401, { error: "not signed in" });
     const { heard, stop } = listen();
-    await expect(autoApi.get("/alerts")).rejects.toThrow();
+    await expect(http.get("/alerts")).rejects.toThrow();
     expect(heard).toHaveBeenCalledTimes(1);
     stop();
   });

@@ -1,4 +1,3 @@
-import { platformName } from "@/lib/platforms";
 import type { TranslationKey } from "@/lib/i18n";
 import type { ChatMessage } from "@/lib/types";
 
@@ -128,6 +127,3 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
 export function openPlatformLink(link: PlatformLink): void {
   window.open(link.url, `polyemesis-${link.kind}`, "noopener,noreferrer,width=420,height=720");
 }
-
-/** Human label for a platform, for menu copy. */
-export const platformNoun = platformName;

@@ -8,7 +8,10 @@ const api = vi.hoisted(() => ({
   post: vi.fn((..._a: unknown[]) => Promise.resolve({})),
   del: vi.fn((..._a: unknown[]) => Promise.resolve({})),
 }));
-vi.mock("@/lib/autoApi", () => ({ autoApi: api }));
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  http: api,
+}));
 
 import { VerticalExportPanel } from "./VerticalExportPanel";
 import { defaultVerticalSpec, type ClipTemplatesView, type VerticalSpec } from "@/lib/vertical";

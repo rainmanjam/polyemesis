@@ -31,11 +31,6 @@ export type {
   TokenScope,
 };
 
-/** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
- *  its capabilities response — prefer that where it is to hand, and treat this
- *  as the fallback for code that renders before capabilities have loaded. */
-export const MAX_TRACKS: number = WIRE.routing.maxTracks;
-
 // ------------------------------------------------------------------ ids
 //
 // A Source and a Destination are two independent per-programme entities,
@@ -908,20 +903,6 @@ export interface DelayDumpResult {
   restoresOnNextStart: true;
 }
 
-/** One row of POST /destinations/delay/dump-all. A skipped or failed row
- *  carries a `message` and may lack the dump figures. */
-export interface DelayDumpAllResult extends Partial<Omit<DelayDumpResult, "id" | "name">> {
-  id: DestinationId;
-  name: string;
-  outcome: "dumped" | "skipped" | "failed";
-  message?: string;
-}
-
-export interface DelayDumpAllReport {
-  action: "dump";
-  results: DelayDumpAllResult[];
-}
-
 export interface DestStatus {
   id: DestinationId;
   name: string;
@@ -1166,13 +1147,6 @@ export interface StreamHealthView {
  *  A published floor may be encoded; an unpublished one may not. Mirrors
  *  oauth.FacebookStreamHealthInterval, which carries the same quote. */
 export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS: number = WIRE.limits.facebookStreamHealthIntervalMs;
-
-/** How long Facebook itself waits before reporting a stream as timed out —
- *  the second sentence of the quote above. It is here so that a pane deciding
- *  "how long may this stay empty before the encoder is gone" reads Facebook's
- *  four seconds instead of inventing a number. Mirrors
- *  oauth.FacebookStreamTimeout. */
-export const FACEBOOK_STREAM_TIMEOUT_MS: number = WIRE.limits.facebookStreamTimeoutMs;
 
 /** One shared video encode's live state.
  *
@@ -2303,10 +2277,6 @@ export interface MusicDecision {
   reason: string;
   summary: string;
 }
-
-/** The `platform:` prefix routing.PlatformPresetID() puts on the presets
- *  generated from the music-rights table. */
-export const PLATFORM_PRESET_PREFIX = "platform:";
 
 export interface Preset {
   id: string;

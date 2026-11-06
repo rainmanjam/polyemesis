@@ -1,21 +1,15 @@
 /* ===========================================================================
-   The automation, clip, loudness and recording routes that have no named
-   wrapper in lib/api.ts, called through its one transport (request).
+   The five programme-scoped clip and loudness routes, called through
+   lib/api.ts's one transport (request). Every other automation, clip and
+   recording route goes through `http` in api.ts.
 
-   It lives apart from api.ts so the pages that only need these verbs do not
-   pull in the whole `api` object; it holds no transport of its own, so it
-   cannot drift from it. Errors are api.ts's ApiError, with `code`, the
-   settings-conflict `storedVersion` and the reconcile-failure toast.
+   Errors are api.ts's ApiError, with `code`, the settings-conflict
+   `storedVersion` and the reconcile-failure toast.
    =========================================================================== */
 
-import { http, request, sourceQuery } from "./api";
+import { request, sourceQuery } from "./api";
 
 export const autoApi = {
-  get: <T,>(p: string) => http.get<T>(p),
-  post: <T,>(p: string, body?: unknown) => http.post<T>(p, body),
-  put: <T,>(p: string, body: unknown) => http.put<T>(p, body),
-  del: <T,>(p: string) => http.del<T>(p),
-
   /* THE PROGRAMME-SCOPED ROUTES, and `sourceId` is REQUIRED on every one.
 
      handleListClips and handleLoudness call scopedEngine INSIDE the handler

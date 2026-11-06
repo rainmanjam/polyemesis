@@ -35,6 +35,7 @@ const SETTINGS = {
 };
 
 vi.mock("@/lib/api", () => ({
+  http: { get: () => Promise.resolve([]) },
   api: {
     listRecordings: () => Promise.resolve([]),
     recordingUsage: () => Promise.resolve({ bytes: 0, files: 0, storage: { halted: false, reason: null } }),
@@ -43,10 +44,6 @@ vi.mock("@/lib/api", () => ({
     deleteRecording: () => Promise.resolve({}),
     downloadUrl: (id: number) => `/dl/${id}`,
   },
-}));
-
-vi.mock("@/lib/autoApi", () => ({
-  autoApi: { get: () => Promise.resolve([]) },
 }));
 
 vi.mock("@/hooks/useLiveData", () => ({

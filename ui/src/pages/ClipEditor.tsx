@@ -37,7 +37,7 @@ import {
   timecode,
   type SpriteCue,
 } from "@/lib/timeline";
-import { autoApi } from "@/lib/autoApi";
+import { http } from "@/lib/api";
 import { HighlightsPanel } from "@/components/HighlightsPanel";
 import { PublishClipDialog } from "@/components/PublishClipDialog";
 import { VerticalExportPanel } from "@/components/VerticalExportPanel";
@@ -226,7 +226,7 @@ export function ClipEditor() {
   const [verticalSpec, setVerticalSpec] = useState<VerticalSpec>(defaultVerticalSpec);
   const [verticalOptions, setVerticalOptions] = useState<ClipTemplatesView | null>(null);
   const loadVerticalOptions = useCallback(() => {
-    autoApi
+    http
       .get<ClipTemplatesView>("/clipper/templates")
       .then(setVerticalOptions)
       .catch(() => undefined);
@@ -256,7 +256,7 @@ export function ClipEditor() {
       return;
     }
     let cancelled = false;
-    autoApi
+    http
       .get<ClipSource>(`/clipper/recordings/${recordingId}`)
       .then((s) => {
         if (cancelled) return;
@@ -281,7 +281,7 @@ export function ClipEditor() {
   useEffect(() => {
     if (!source?.hasTranscript) return;
     let cancelled = false;
-    autoApi
+    http
       .get<ClipTranscript>(`/clipper/recordings/${recordingId}/transcript`)
       .then((t) => {
         if (!cancelled) setTranscript(t.segments ?? []);
@@ -329,7 +329,7 @@ export function ClipEditor() {
       return;
     }
     const handle = window.setTimeout(() => {
-      autoApi
+      http
         .get<ClipKeyframes>(
           `/clipper/recordings/${recordingId}/keyframes?fromMs=${Math.floor(
             viewStartMs,
@@ -357,7 +357,7 @@ export function ClipEditor() {
     }
     const handle = window.setTimeout(() => {
       setPlanning(true);
-      autoApi
+      http
         .post<ClipPlan>(`/clipper/recordings/${recordingId}/plan`, {
           inMs: Math.round(inMs),
           outMs: Math.round(outMs),
@@ -383,7 +383,7 @@ export function ClipEditor() {
   }, [recordingId, source, inMs, outMs, mode, audioMode, audioAll, tracks, title, container, JSON.stringify(vertical), t]);
 
   const loadJobs = useCallback(() => {
-    autoApi
+    http
       .get<{ jobs: ClipJob[] | null }>(
         `/jobs?kind=clip.export&recordingId=${recordingId}&limit=20`,
       )
@@ -631,7 +631,7 @@ export function ClipEditor() {
   const runExport = async () => {
     setExporting(true);
     try {
-      await autoApi.post<ClipJob>(`/clipper/recordings/${recordingId}/export`, {
+      await http.post<ClipJob>(`/clipper/recordings/${recordingId}/export`, {
         inMs: Math.round(inMs),
         outMs: Math.round(outMs),
         ...exportSettings(),
