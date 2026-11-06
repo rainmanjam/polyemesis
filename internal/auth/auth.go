@@ -52,8 +52,10 @@ type Manager struct {
 	key []byte
 	// secure marks cookies Secure. Set when serving TLS directly, or when a
 	// trusted proxy reports X-Forwarded-Proto: https.
-	secure     bool
-	trustProxy bool
+	secure bool
+	// proxies decides whether X-Forwarded-Proto is believed, by the same
+	// rule ClientIP uses for X-Forwarded-For. nil believes nobody.
+	proxies *Proxies
 	// epoch is required, not optional. See New.
 	epoch EpochFunc
 }
@@ -70,8 +72,8 @@ type Manager struct {
 // its one construction site, and so ran with signature checking silently
 // switched off. An optional security control is an absent one; this constructor
 // refuses to repeat the mistake.
-func New(key []byte, secure, trustProxy bool, epoch EpochFunc) *Manager {
-	return &Manager{key: key, secure: secure, trustProxy: trustProxy, epoch: epoch}
+func New(key []byte, secure bool, proxies *Proxies, epoch EpochFunc) *Manager {
+	return &Manager{key: key, secure: secure, proxies: proxies, epoch: epoch}
 }
 
 // Claims is the session payload.
@@ -172,9 +174,10 @@ func (m *Manager) isSecure(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	// Only honoured behind a proxy we were told to trust; otherwise a client
+	// Only honoured from a listed proxy, the rule ClientIP applies to
+	// X-Forwarded-For; otherwise a client that reaches the listener directly
 	// could set the header itself and influence our cookie flags.
-	if m.trustProxy && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if m.proxies.trusts(socketHost(r)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		return true
 	}
 	return false

@@ -14,7 +14,7 @@ import (
 
 func testManager(t *testing.T, fill byte) *Manager {
 	t.Helper()
-	return New(bytes.Repeat([]byte{fill}, 32), false, false, staticEpoch(0))
+	return New(bytes.Repeat([]byte{fill}, 32), false, nil, staticEpoch(0))
 }
 
 // staticEpoch is an EpochFunc for a store whose epoch never moves, which is the

@@ -19,7 +19,7 @@ import (
 
 func epochManager(t *testing.T, epoch EpochFunc) *Manager {
 	t.Helper()
-	return New(bytes.Repeat([]byte{0x2a}, 32), false, false, epoch)
+	return New(bytes.Repeat([]byte{0x2a}, 32), false, nil, epoch)
 }
 
 func TestTokenIssuedBeforeTheEpochBumpIsRefused(t *testing.T) {
@@ -90,7 +90,7 @@ func TestAnUnwiredManagerCannotIssueOrVerify(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	unwired := New(bytes.Repeat([]byte{0x2a}, 32), false, false, nil)
+	unwired := New(bytes.Repeat([]byte{0x2a}, 32), false, nil, nil)
 
 	if _, err := unwired.Issue(7, "admin"); !errors.Is(err, ErrUnauthorized) {
 		t.Errorf("Issue on an unwired manager = %v, want ErrUnauthorized", err)
