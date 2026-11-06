@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -126,7 +127,7 @@ type StatusError struct {
 	Status int
 	// RetryAfter is the platform's Retry-After, zero when it sent none.
 	RetryAfter time.Duration
-	// QuotaExceeded is YouTube's quotaExceeded (or dailyLimitExceeded): the
+	// QuotaExceeded is any of the reasons IsSpentQuotaReason names: the
 	// project's allowance is spent until the reset.
 	QuotaExceeded bool
 	msg           string
@@ -143,7 +144,27 @@ func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
 			e.RetryAfter = max(0, time.Until(at))
 		}
 	}
-	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden &&
-		(bytes.Contains(body, []byte(`"quotaExceeded"`)) || bytes.Contains(body, []byte(`"dailyLimitExceeded"`)))
+	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
+}
+
+// spentQuotaReasons are the reasons YouTube gives for a spent daily API
+// allowance. It spells the same condition more than one way, and chat, publish
+// and the meter must all recognise the same set.
+var spentQuotaReasons = []string{"quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg"}
+
+// IsSpentQuotaReason reports whether a YouTube error reason means the daily
+// allowance is used up. rateLimitExceeded and userRateLimitExceeded are not
+// that: they are short windows a retry clears.
+func IsSpentQuotaReason(reason string) bool {
+	return slices.Contains(spentQuotaReasons, reason)
+}
+
+func bodyNamesSpentQuota(body []byte) bool {
+	for _, r := range spentQuotaReasons {
+		if bytes.Contains(body, []byte(`"`+r+`"`)) {
+			return true
+		}
+	}
+	return false
 }

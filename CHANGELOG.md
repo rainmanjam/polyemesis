@@ -29,6 +29,18 @@ Nothing yet.
 
 ### Fixed
 
+- **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
+  Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
+  adapter, which stamped its own account on it. Each delivery now goes to the adapter for the
+  broadcaster it names; one for a channel that is not connected here is acknowledged and dropped.
+- **A spent YouTube quota is read the same way everywhere.** Deleting or banning in YouTube chat
+  recognised only `quotaExceeded`, so `dailyLimitExceeded` (and `dailyLimitExceededUnreg`) read as
+  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons.
+- **The broadcast a destination is on is resolved one way.** Facebook stream health and end-broadcast
+  read only the announcement mirror, and the connected-account list and rollover read it for X too,
+  where it is stale by construction. All of them now take the lifecycle's recorded id first, and
+  never fall back to the mirror for X.
+
 - **A Kick destination with no `/app` in its URL no longer reads as a TLS failure.** IVS opens TLS,
   completes the RTMP handshake, then resets the connection when the stream key arrives as the
   application name. FFmpeg's only TLS-level line is then the encrypted socket's read failing, and
