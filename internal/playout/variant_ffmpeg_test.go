@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestAHLSVariantWithTheSharedRelayInputOptionsStartsAndWritesAPlaylist(t *te
 	args := VariantArgs(VariantSpec{
 		Name: "main", RelayURL: "udp://127.0.0.1:" + strconv.Itoa(port), Dir: dir, SegmentSeconds: 1,
 	})
-	var consumerErr strings.Builder
+	var consumerErr lockedBuffer
 	consumer := exec.Command(ffmpegBin, args...)
 	consumer.Stderr = &consumerErr
 	if err := consumer.Start(); err != nil {
@@ -59,4 +60,22 @@ func TestAHLSVariantWithTheSharedRelayInputOptionsStartsAndWritesAPlaylist(t *te
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// lockedBuffer is a stderr sink the test may read while FFmpeg is still writing.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }

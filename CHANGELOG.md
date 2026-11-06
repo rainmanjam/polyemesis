@@ -24,6 +24,16 @@ its first tagged release.
   options, so they stop spending the whole probe window as dead air on start and no longer swap track
   offsets after a long outage. Visible as: those children start faster, and their command lines (on
   the Monitoring page) carry the extra input options.
+- **Every relay reader starts faster and tolerates a late track.** With the shared input options a
+  reader joins in well under a second instead of paying the whole probe window, and a track that is
+  declared but arrives late no longer holds it up. A declared track that never carries data can hold a
+  reader for up to 15 s (it used to be about 5 s), so the playout page waits 16 s before calling a
+  restarting rung ended.
+- **A relay writer's output timestamps now start near 0 instead of 1.4 s.** The silence synthesiser,
+  slate, renditions and failover feeds publish with `-muxdelay 0`, as the ingest always has. Audio/video
+  spacing is unchanged; only the shared starting offset moved, and every writer into a hub moved with it.
+- **A backup destination now restarts when FFmpeg cannot characterise its audio,** at most 3 times with a
+  30 s cooldown between attempts, as the primary already did.
 - **Every writer into the relay carries the interleave-stall fix the ingest has.** The silence
   synthesiser, the slate, the rendition encoder and the selector's copy hops (the failover and playlist
   feeds) muxed with FFmpeg's default 10 s interleave buffer, so a multitrack stream whose later audio

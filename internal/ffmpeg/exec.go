@@ -238,8 +238,9 @@ func Publish(partial, final string) error {
 func Output(ctx context.Context, cmd Command) ([]byte, string, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.WaitDelay = KillGrace
-	var stdout, stderr bytes.Buffer
-	c.Stdout, c.Stderr = &stdout, &stderr
+	var stdout bytes.Buffer
+	stderr := &tailBuffer{max: probeStderrCap}
+	c.Stdout, c.Stderr = &stdout, stderr
 	err := RunEnrolled(c, probeKind)
 	return stdout.Bytes(), stderr.String(), err
 }
@@ -264,3 +265,22 @@ func RunEnrolled(c *exec.Cmd, kind string) error {
 	defer childcensus.Discharge(c.Process.Pid)
 	return c.Wait()
 }
+
+// tailBuffer keeps the last max bytes written to it. A probe's stderr is quoted
+// back in an error, and the reason a probe failed is at the end of it, so it is
+// the tail that is kept; it never errors, so the child is never killed by a
+// short write.
+type tailBuffer struct {
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-t.max:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string { return string(t.buf) }

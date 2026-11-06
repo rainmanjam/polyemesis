@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func TestRelayReadersWithTheSharedOptionsRunAgainstARealUDPInput(t *testing.T) {
 			in, out := testenv.FreeUDPPort(t), testenv.FreeUDPPort(t)
 			args := build("udp://127.0.0.1:"+strconv.Itoa(in), "udp://127.0.0.1:"+strconv.Itoa(out))[name]
 
-			var stderr strings.Builder
+			var stderr lockedBuffer
 			consumer := exec.Command(ffmpegBin, args...)
 			consumer.Stderr = &stderr
 			if err := consumer.Start(); err != nil {
@@ -82,4 +83,22 @@ func TestRelayReadersWithTheSharedOptionsRunAgainstARealUDPInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+// lockedBuffer is a stderr sink the test may read while FFmpeg is still writing.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }

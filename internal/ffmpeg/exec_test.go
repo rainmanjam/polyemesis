@@ -290,3 +290,15 @@ func TestRunEnrolledReportsAStartFailure(t *testing.T) {
 		t.Fatal("a command that cannot start reported success")
 	}
 }
+
+func TestTailBufferKeepsTheEndOfWhatWasWritten(t *testing.T) {
+	b := &tailBuffer{max: 8}
+	for _, s := range []string{"0123", "4567", "89ab", "cd"} {
+		if n, err := b.Write([]byte(s)); n != len(s) || err != nil {
+			t.Fatalf("Write(%q) = %d, %v", s, n, err)
+		}
+	}
+	if got := b.String(); got != "6789abcd" {
+		t.Errorf("tail = %q, want the last 8 bytes", got)
+	}
+}
