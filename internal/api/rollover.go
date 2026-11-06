@@ -140,13 +140,10 @@ func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rollover
 		log = slog.Default()
 	}
 	if host.youtube == nil {
-		host.youtube = func() (youtubeRollover, bool) {
-			br, ok := oauth.RolloverFor(db.PlatformYouTube)
-			if !ok {
-				return nil, false
-			}
-			return br, true
-		}
+		// No provider set was handed in: there is no rollover to run, rather
+		// than one built from the package-level providers, which carry no quota
+		// meter.
+		host.youtube = func() (youtubeRollover, bool) { return nil, false }
 	}
 	return &rolloverCoordinator{log: log, store: store, host: host, now: time.Now, scenes: map[string]time.Time{},
 		rollSem: make(chan struct{}, 1)}
@@ -665,4 +662,16 @@ func clipDetail(s string) string {
 		cut--
 	}
 	return s[:cut] + "…"
+}
+
+// youtubeRolloverFrom resolves the YouTube rollover capability from the
+// server's own provider set, the metered one.
+func youtubeRolloverFrom(set oauth.Set) func() (youtubeRollover, bool) {
+	return func() (youtubeRollover, bool) {
+		br, ok := oauth.As[oauth.BroadcastRollover](set, db.PlatformYouTube)
+		if !ok {
+			return nil, false
+		}
+		return br, true
+	}
 }

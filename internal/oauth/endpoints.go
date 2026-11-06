@@ -50,7 +50,9 @@ type endpoints struct {
 	xLivestream bool
 	// meter charges YouTube Data API calls to the install's allowance. Nil
 	// means unmetered. See quota_meter.go.
-	meter *meterBinding
+	meter YouTubeMeter
+	// meterHosts are extra hosts metered on every path (tests only).
+	meterHosts map[string]bool
 }
 
 // WithXLivestream sets X's Livestream gate for a provider set. Production hands

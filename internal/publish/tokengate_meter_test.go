@@ -6,7 +6,7 @@ func TestTheGatesMeterIsANoOpUntilSetThenCharges(t *testing.T) {
 	var g TokenGate
 	g.Charge(1600) // no meter yet: must not panic
 	spent := 0
-	g.SetMeter(func(u int) { spent += u })
+	g.Set(nil, func(u int) { spent += u })
 	g.Charge(1600)
 	g.Charge(0)
 	if spent != 1600 {

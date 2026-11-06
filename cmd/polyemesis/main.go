@@ -479,8 +479,7 @@ func run(h *hooks) error {
 		Env: env,
 	})
 	// The publish worker refreshes tokens through the server's own path.
-	pp.publishTokens.Set(srv.PublishTokens())
-	pp.publishTokens.SetMeter(srv.YouTubeMeter())
+	pp.publishTokens.Set(srv.PublishTokens(), srv.YouTubeMeter())
 	// The stored settings, applied the way a save applies them: the log's zone,
 	// chat retention, the YouTube allowance, automod and alert delivery. A
 	// boot that skipped one would revert an operator's choice at the first

@@ -28,30 +28,22 @@ import (
 // YouTubeMeter is told the unit cost of each YouTube Data API call made.
 type YouTubeMeter func(cost int)
 
-// meterBinding is the meter a provider set was built with.
-type meterBinding struct {
-	m YouTubeMeter
-	// hosts are extra API hosts metered on every path, for a test that aims
-	// the providers at a stub. Production installs none.
-	hosts map[string]bool
-}
-
 // WithYouTubeMeter hands a provider set the meter every YouTube Data API call
 // is charged to. It is a construction option rather than a package global, so
 // a provider can only be built metered or deliberately unmetered; there is no
-// moment after construction at which a call could go uncounted. hosts are
-// extra hosts to meter besides Google's (tests only).
-func WithYouTubeMeter(m YouTubeMeter, hosts ...string) ProviderOption {
+// moment after construction at which a call could go uncounted.
+func WithYouTubeMeter(m YouTubeMeter) ProviderOption {
+	return func(e *endpoints) { e.meter = m }
+}
+
+// WithMeteredHosts meters every request to the given extra hosts, on every
+// path, besides Google's. For a test that aims the providers at a stub.
+func WithMeteredHosts(hosts ...string) ProviderOption {
 	return func(e *endpoints) {
-		if m == nil {
-			e.meter = nil
-			return
-		}
-		b := &meterBinding{m: m, hosts: map[string]bool{}}
+		e.meterHosts = map[string]bool{}
 		for _, h := range hosts {
-			b.hosts[h] = true
+			e.meterHosts[h] = true
 		}
-		e.meter = b
 	}
 }
 
@@ -107,9 +99,9 @@ func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
 	if m := e.meter; m != nil {
 		if charged, _ := r.Context().Value(quotaChargedKey{}).(bool); !charged {
 			if cost, ok := youTubeCost(r); ok {
-				m.m(cost)
-			} else if m.hosts[r.URL.Host] {
-				m.m(costByMethod(r.Method))
+				m(cost)
+			} else if e.meterHosts[r.URL.Host] {
+				m(costByMethod(r.Method))
 			}
 		}
 	}

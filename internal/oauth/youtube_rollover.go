@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // YouTube's planned rollover (#19): replace a live broadcast with a fresh one on the same ingest, before the
@@ -386,17 +384,6 @@ type BroadcastRollover interface {
 }
 
 var _ BroadcastRollover = (*YouTube)(nil)
-
-// RolloverFor reports whether a platform has a broadcast rollover, and the bool is the whole answer the caller
-// branches on, as with As[BroadcastLifecycler].
-func RolloverFor(p db.Platform) (BroadcastRollover, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	br, ok := prov.(BroadcastRollover)
-	return br, ok
-}
 
 // RolloverSessionStart reads the platform's own live start for a broadcast: snippet.actualStartTime. It is zero
 // when YouTube has not recorded one yet, and the caller then waits rather than counting from a guess.

@@ -275,10 +275,10 @@ var ErrReconnectRequired = errors.New("the platform no longer accepts this accou
 // path lives on the server; until Set is called the source answers with a
 // retryable "starting up".
 //
-// It carries the YouTube quota meter for the same reason: the clip upload is
-// charged to the server's shared allowance, and it can only be reached through
-// a token the gate hands out, so a meter installed beside Set is in place
-// before any upload can start.
+// It carries the YouTube quota meter too: the clip upload is charged to the
+// server's shared allowance. The two are installed by ONE call, and the source
+// refuses until both are in, so a recovered job can never be handed a
+// credential and then upload uncounted.
 type TokenGate struct {
 	mu    sync.RWMutex
 	fn    TokenSource
@@ -289,20 +289,13 @@ type TokenGate struct {
 func (g *TokenGate) Source() TokenSource {
 	return func(ctx context.Context, accountID int64) (Credential, error) {
 		g.mu.RLock()
-		fn := g.fn
+		fn, meter := g.fn, g.meter
 		g.mu.RUnlock()
-		if fn == nil {
+		if fn == nil || meter == nil {
 			return Credential{}, errors.New("the server is still starting; this will be retried")
 		}
 		return fn(ctx, accountID)
 	}
-}
-
-// SetMeter installs the meter YouTube uploads are charged to.
-func (g *TokenGate) SetMeter(fn func(units int)) {
-	g.mu.Lock()
-	g.meter = fn
-	g.mu.Unlock()
 }
 
 // Charge spends units from the installed meter; a no-op until one is set.
@@ -315,9 +308,10 @@ func (g *TokenGate) Charge(units int) {
 	}
 }
 
-// Set installs the real source.
-func (g *TokenGate) Set(fn TokenSource) {
+// Set installs the real source and the meter together. A nil of either leaves
+// the gate closed.
+func (g *TokenGate) Set(fn TokenSource, meter func(units int)) {
 	g.mu.Lock()
-	g.fn = fn
+	g.fn, g.meter = fn, meter
 	g.mu.Unlock()
 }
