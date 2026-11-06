@@ -6,6 +6,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -229,11 +230,10 @@ func (e *Engine) startSilence(spec string) {
 		OutRelayURL: hub.InputURL(),
 	})
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: silenceSubName, Kind: "silence", Bin: e.tools.FFmpeg, Args: args,
-		// SilenceArgs passes -shortest, so this process exits with the ingest
-		// and the supervisor's normal respawn is the reconnect path.
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	// SilenceArgs passes -shortest, so this process exits with the ingest and the
+	// supervisor's normal respawn is the reconnect path.
+	proc := e.newRelayConsumer(relayConsumer{
+		name: silenceSubName, sub: silenceSubName, kind: procname.KindSilence, hub: e.hub, args: args,
 	})
 
 	e.mu.Lock()

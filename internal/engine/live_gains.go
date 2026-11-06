@@ -10,6 +10,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -35,6 +36,12 @@ import (
 type graphHolder struct {
 	mu  sync.Mutex
 	res routing.Result
+	// built is the graph the most recent command line was built from, which is
+	// the graph the child it started is running: a spawn reads its argv from
+	// argv, and the argv is the only thing a spawn reads. Kept here, beside the
+	// graph, so "is the running child stale" is a comparison of two things this
+	// type owns and not a search through the child's argv for the graph.
+	built string
 }
 
 func newGraphHolder(r routing.Result) *graphHolder {
@@ -45,6 +52,25 @@ func (g *graphHolder) get() routing.Result {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.res
+}
+
+// argv builds a command line from the graph as it stands and records which graph
+// that was. Every spawn goes through here, the first one included.
+func (g *graphHolder) argv(build func(routing.Result) []string) []string {
+	g.mu.Lock()
+	res := g.res
+	g.built = res.FilterComplex
+	g.mu.Unlock()
+	return build(res)
+}
+
+// stale reports whether the graph a child was last built from carries a level
+// other than the one the holder would build it with now: exactly the level a
+// filter-graph reinit would bring back.
+func (g *graphHolder) stale() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.built != "" && levelsDiffer(g.built, g.res.FilterComplex)
 }
 
 func (g *graphHolder) set(r routing.Result) {
@@ -69,8 +95,8 @@ func liveGainsSupported() bool {
 // volume stage. Callers have already established that the graphs are equal
 // once levels are masked; this only answers "did a level move".
 func levelsDiffer(running, want string) bool {
-	a := ffmpeg.LiveVolumeLevels(running)
-	b := ffmpeg.LiveVolumeLevels(want)
+	a := livevolume.Levels(running)
+	b := livevolume.Levels(want)
 	if len(a) != len(b) {
 		return true
 	}
@@ -87,8 +113,8 @@ func levelsDiffer(running, want string) bool {
 // running process, in a stable order. It stops at the first refusal and returns
 // it, and the caller then restarts the process.
 func applyLiveLevels(proc liveSetter, before, after string) error {
-	a := ffmpeg.LiveVolumeLevels(before)
-	b := ffmpeg.LiveVolumeLevels(after)
+	a := livevolume.Levels(before)
+	b := livevolume.Levels(after)
 	names := make([]string, 0, len(b))
 	for name := range b {
 		names = append(names, name)
@@ -98,8 +124,8 @@ func applyLiveLevels(proc liveSetter, before, after string) error {
 		if av, ok := a[name]; ok && av == b[name] {
 			continue
 		}
-		if err := proc.SetVolume("volume@"+name, b[name]); err != nil {
-			return fmt.Errorf("volume@%s: %w", name, err)
+		if err := proc.SetVolume(livevolume.Instance(name), b[name]); err != nil {
+			return fmt.Errorf("%s: %w", livevolume.Instance(name), err)
 		}
 	}
 	return nil
@@ -181,37 +207,6 @@ func liveApplyTo(proc liveSetter, holder *graphHolder, want routing.Result) erro
 // once the argv matches, every later reinit rebuilds the right level. A
 // destination nobody has changed live is never touched.
 
-// argvGraph returns the -filter_complex an argv was spawned with, or "" when it
-// has none (a copy destination, which has no volume stage to revert).
-func argvGraph(argv []string) string {
-	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] == "-filter_complex" {
-			return argv[i+1]
-		}
-	}
-	return ""
-}
-
-// spawnedArgs is what the stale check needs of a process: the argv its running
-// child was actually spawned with. *supervisor.Process satisfies it.
-type spawnedArgs interface {
-	Args() []string
-}
-
-// levelsStale reports whether a running child's argv carries a level other than
-// the one its holder would spawn it with, which is exactly the level a reinit
-// would bring back.
-func levelsStale(proc spawnedArgs, holder *graphHolder) bool {
-	if proc == nil || holder == nil {
-		return false
-	}
-	spawned := argvGraph(proc.Args())
-	if spawned == "" {
-		return false
-	}
-	return levelsDiffer(spawned, holder.get().FilterComplex)
-}
-
 // staleLevelProc is one process respawnStaleLevels will cycle.
 type staleLevelProc struct {
 	name string
@@ -245,7 +240,7 @@ func (e *Engine) staleLevelProcs() []staleLevelProc {
 
 	var out []staleLevelProc
 	for _, c := range cands {
-		if c.proc.Retired() || !levelsStale(c.proc, c.holder) {
+		if c.proc.Retired() || !c.holder.stale() {
 			continue
 		}
 		out = append(out, staleLevelProc{name: c.name, proc: c.proc})

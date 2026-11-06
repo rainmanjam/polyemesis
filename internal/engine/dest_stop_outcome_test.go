@@ -68,7 +68,24 @@ const (
 	engineFakeChildLiveReply = "live-reply"
 )
 
+// engineFakeChildReprobeRuns makes the fake child stand in for an FFmpeg whose
+// audio it cannot characterise: it appends a line to the named file for every
+// time it is started, prints the demuxer's complaint on stderr and stays up.
+// Environment, because the engine builds the argv. See
+// TestABackupRestartsToReprobeWhenItsAudioCannotBeCharacterised.
+const engineFakeChildReprobeRuns = "POLYEMESIS_ENGINE_FAKE_CHILD_REPROBE_RUNS"
+
 func TestMain(m *testing.M) {
+	if runs := os.Getenv(engineFakeChildReprobeRuns); runs != "" {
+		if f, err := os.OpenFile(runs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString("run\n")
+			_ = f.Close()
+		}
+		fmt.Fprintln(os.Stderr, "[in#0/mpegts @ 0x1] Could not find codec parameters for stream 1 "+
+			"(Audio: aac ([15][0][0][0] / 0x000F), 0 channels): unspecified sample format")
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
+	}
 	// KEYED ON THE ENVIRONMENT, NOT ON argv[1], and that is what makes it
 	// usable as a stand-in FFmpeg. The branch below needs the flag first on the
 	// command line, which is fine for a child this file spawns itself — but a

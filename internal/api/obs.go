@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -392,7 +392,7 @@ var liveLevelsSupported = func() bool { return runtime.GOOS != "windows" }
 // And then it is CHECKED rather than trusted: the edited profile is compiled
 // beside the stored one, and if the two graphs differ in anything but their
 // volume levels the change is refused. That is the engine's own test for
-// "live" (destArgvSig over ffmpeg.MaskLiveVolumes), asked before the write
+// "live" (destArgvSig over livevolume.Mask), asked before the write
 // instead of discovered after it.
 func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.Outcome {
 	s.trackGainMu.Lock()
@@ -531,7 +531,7 @@ func levelsOnly(cur, next routing.Profile, src routing.Source) bool {
 		return false
 	}
 	return a.OutLabel == b.OutLabel && a.SecondOutLabel == b.SecondOutLabel &&
-		ffmpeg.MaskLiveVolumes(a.FilterComplex) == ffmpeg.MaskLiveVolumes(b.FilterComplex)
+		livevolume.Mask(a.FilterComplex) == livevolume.Mask(b.FilterComplex)
 }
 
 // pruneOBSReferences removes deleted destinations and a deleted programme from

@@ -57,18 +57,18 @@ func (r *fakeReporter) last() float64 {
 // was told to, so the rename-into-place and cleanup paths are real.
 type fakeExec struct {
 	mu   sync.Mutex
-	runs []Command
+	runs []ffmpeg.Command
 	// creates maps a substring of an output path to the bytes to write there.
 	// The path itself is taken from the command's own arguments, so a worker
 	// that writes to the wrong place cannot pass.
-	create func(cmd Command) error
+	create func(cmd ffmpeg.Command) error
 	err    error
 	// progress is emitted to the sink before returning.
 	progress []ffmpeg.Progress
 	lines    []string
 }
 
-func (f *fakeExec) run(_ context.Context, cmd Command, sink Sink) error {
+func (f *fakeExec) run(_ context.Context, cmd ffmpeg.Command, sink ffmpeg.Sink) error {
 	f.mu.Lock()
 	f.runs = append(f.runs, cmd)
 	f.mu.Unlock()
@@ -101,8 +101,8 @@ func (f *fakeExec) count() int {
 // writeOutputs creates every argument that looks like a path under root with n
 // bytes in it. Crude on purpose: it means the fake writes exactly where the
 // real FFmpeg would have.
-func writeOutputs(root string, n int) func(Command) error {
-	return func(cmd Command) error {
+func writeOutputs(root string, n int) func(ffmpeg.Command) error {
+	return func(cmd ffmpeg.Command) error {
 		for i, a := range cmd.Args {
 			if !strings.HasPrefix(a, root) || i == 0 {
 				continue
@@ -1026,7 +1026,7 @@ func TestRunArchiveTreatsAnUnrunnableDecodeCheckAsAFailedOne(t *testing.T) {
 	rig := archiveRig(t, Config{ArchiveAllowReplace: true}, src, out, nil)
 	calls := 0
 	inner := rig.exec.run
-	rig.proc.exec = func(ctx context.Context, cmd Command, sink Sink) error {
+	rig.proc.exec = func(ctx context.Context, cmd ffmpeg.Command, sink ffmpeg.Sink) error {
 		calls++
 		if calls == 2 {
 			return errors.New("the decoder itself would not start")

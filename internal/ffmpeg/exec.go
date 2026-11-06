@@ -1,19 +1,28 @@
-package media
+package ffmpeg
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
-
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
+
+// Everything that runs a short-lived FFmpeg or ffprobe child to completion --
+// the derived-media jobs, the playlist transcodes, the upload and recording
+// probes -- goes through Exec or Output, and so owns the same four decisions:
+// the child dies with its context, WaitDelay bounds a grandchild holding the
+// pipes, the child is enrolled in the process census for as long as it runs,
+// and it stays in this process's group (not a supervisor's own group), so an
+// abrupt death of polyemesis takes it too. The argument preamble comes from
+// CommonArgs and ProgressArgs.
 
 // Command is one child process to run.
 type Command struct {
@@ -30,8 +39,8 @@ func (c Command) String() string {
 // Sink is where a running child's output goes. Both fields may be nil.
 type Sink struct {
 	// Progress receives one snapshot per -progress block, for commands built
-	// with progressArgs. Commands without it never call this.
-	Progress func(ffmpeg.Progress)
+	// with ProgressArgs. Commands without it never call this.
+	Progress func(Progress)
 	// Line receives each stderr line as FFmpeg writes it.
 	Line func(string)
 }
@@ -42,7 +51,7 @@ type Sink struct {
 // a machine that has no media on it.
 type Execer func(ctx context.Context, cmd Command, sink Sink) error
 
-// killGrace is how long a child gets between the kill signal and giving up on
+// KillGrace is how long a child gets between the kill signal and giving up on
 // its pipes.
 //
 // exec.CommandContext already kills the process when ctx ends, but Wait blocks
@@ -50,7 +59,7 @@ type Execer func(ctx context.Context, cmd Command, sink Sink) error
 // which x265 and SVT-AV1 both do — can leave those pipes open after the parent
 // is gone. Without WaitDelay the worker would sit in Wait forever and the
 // queue's cancellation would be a lie.
-const killGrace = 5 * time.Second
+const KillGrace = 5 * time.Second
 
 // maxStderrTail is how much of a failed command's output is quoted back in the
 // error. Enough for the reason, bounded so a chatty encoder cannot make one
@@ -64,7 +73,7 @@ const maxStderrTail = 20
 // to exit. A cancellation that leaks an FFmpeg is a cancellation that still
 // competes with the live stream.
 func Exec(ctx context.Context, cmd Command, sink Sink) error {
-	return execWithGrace(ctx, cmd, sink, killGrace)
+	return execWithGrace(ctx, cmd, sink, KillGrace)
 }
 
 // execWithGrace is Exec with the grace passed in rather than read from a
@@ -92,7 +101,7 @@ func execWithGrace(ctx context.Context, cmd Command, sink Sink, grace time.Durat
 	//
 	// Discharged where Wait returns, which is the only moment the pid is
 	// genuinely gone; a child that ignores the kill is still very much a child.
-	childcensus.Enrol(c.Process.Pid, cmd.Name, "media")
+	childcensus.Enrol(c.Process.Pid, cmd.Name, mediaKind)
 	defer childcensus.Discharge(c.Process.Pid)
 
 	var (
@@ -107,11 +116,11 @@ func execWithGrace(ctx context.Context, cmd Command, sink Sink, grace time.Durat
 			_, _ = io.Copy(io.Discard, stdout)
 			return
 		}
-		_ = ffmpeg.ParseProgress(stdout, sink.Progress)
+		_ = ParseProgress(stdout, sink.Progress)
 	}()
 	go func() {
 		defer wg.Done()
-		scanLines(stderr, func(line string) {
+		_ = scanLines(stderr, func(line string) {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				return
@@ -131,7 +140,7 @@ func execWithGrace(ctx context.Context, cmd Command, sink Sink, grace time.Durat
 	// been wrong, in opposite directions, and the bound is what reconciles them.
 	//
 	// wg.Wait() unconditionally first -- the original -- hangs forever when a
-	// grandchild holds the pipes open, which killGrace's own comment says x265
+	// grandchild holds the pipes open, which KillGrace's own comment says x265
 	// and SVT-AV1 both do: the readers never see EOF, so c.Wait is never reached
 	// and WaitDelay, which only has effect INSIDE Wait, never applies. The
 	// worker sits there and the queue's cancellation is a lie.
@@ -144,7 +153,7 @@ func execWithGrace(ctx context.Context, cmd Command, sink Sink, grace time.Durat
 	// 100 lines and exits was seen delivering 83, and the assertion that every
 	// line reaches the job log failed on the 17 that did not.
 	//
-	// So: wait for the readers, but no longer than killGrace. The normal case
+	// So: wait for the readers, but no longer than KillGrace. The normal case
 	// drains completely, because the child has exited and closed its ends. The
 	// grandchild case gives up on the tail after the same grace the kill gets,
 	// falls through to Wait, and WaitDelay closes the pipes from under the
@@ -206,25 +215,72 @@ func awaitReaders(drained <-chan struct{}, grace time.Duration) bool {
 	}
 }
 
-// output runs a command and returns its stdout, for ffprobe. Separate from Exec
-// because a probe's answer IS its stdout, where an encode's stdout is a
-// progress stream nobody keeps.
-func output(ctx context.Context, cmd Command) ([]byte, string, error) {
-	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	c.WaitDelay = killGrace
-	var stderr strings.Builder
-	c.Stderr = &stderr
-	out, err := c.Output()
-	return out, stderr.String(), err
+// Publish renames a finished .partial file into place.
+//
+// Nothing that runs through Exec writes to a final path directly, so a
+// half-written derivative can never be served, measured by a verifier or read
+// as a finished one. That is also why CommonArgs(..., true) passes -y: the
+// partial a killed process left behind must not make the retry hang on FFmpeg's
+// overwrite prompt. Same convention as clips.Capture.
+func Publish(partial, final string) error {
+	if err := os.Rename(partial, final); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("publish %s: %w", filepath.Base(final), err)
+	}
+	return nil
 }
 
-// scanLines reads r line by line with a buffer large enough for FFmpeg's
-// longest diagnostics, which run well past bufio's default 64 KiB when a filter
-// graph is quoted back at you.
-func scanLines(r io.Reader, fn func(string)) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		fn(sc.Text())
-	}
+// Output runs a command to completion and returns its stdout and its stderr,
+// for ffprobe: a probe's answer IS its stdout, where an encode's stdout is a
+// progress stream nobody keeps. Enrolled in the census like Exec's children, and
+// bounded by KillGrace the same way, so a probe that spawned something holding
+// its pipes cannot make a cancelled caller wait for ever.
+func Output(ctx context.Context, cmd Command) ([]byte, string, error) {
+	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	c.WaitDelay = KillGrace
+	var stdout bytes.Buffer
+	stderr := &tailBuffer{max: probeStderrCap}
+	c.Stdout, c.Stderr = &stdout, stderr
+	err := RunEnrolled(c, probeKind)
+	return stdout.Bytes(), stderr.String(), err
 }
+
+// probeKind is the census kind of an ffprobe run, mediaKind of an Exec child.
+const (
+	probeKind = "probe"
+	mediaKind = "media"
+)
+
+// RunEnrolled starts c, enrols it in the process census for as long as it runs
+// and waits for it. For the callers that need their own pipes (capped buffers,
+// say) and so cannot use Output, which is every other way a probe is run.
+//
+// Discharged where Wait returns, which is the only moment the pid is genuinely
+// gone; a child that ignores the kill is still very much a child.
+func RunEnrolled(c *exec.Cmd, kind string) error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	childcensus.Enrol(c.Process.Pid, c.Args[0], kind)
+	defer childcensus.Discharge(c.Process.Pid)
+	return c.Wait()
+}
+
+// tailBuffer keeps the last max bytes written to it. A probe's stderr is quoted
+// back in an error, and the reason a probe failed is at the end of it, so it is
+// the tail that is kept; it never errors, so the child is never killed by a
+// short write.
+type tailBuffer struct {
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-t.max:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string { return string(t.buf) }

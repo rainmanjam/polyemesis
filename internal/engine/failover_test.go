@@ -392,7 +392,7 @@ func TestFailoverOffLeavesEveryRestartHashExactlyAsItWas(t *testing.T) {
 // The offset is the only thing standing between a switch and a timestamp that
 // jumps into the past, which platforms answer by dropping the connection.
 func TestRelayFeedArgsCopyEverythingAndCarryTheTimelineForward(t *testing.T) {
-	args := relayFeedArgs("udp://127.0.0.1:21001", "udp://127.0.0.1:21002", 12.5)
+	args := ffmpeg.RelayFeedArgs("udp://127.0.0.1:21001", "udp://127.0.0.1:21002", 12.5)
 
 	joined := args
 	want := [][2]string{

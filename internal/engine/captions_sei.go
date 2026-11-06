@@ -8,6 +8,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
@@ -93,7 +94,7 @@ func (e *Engine) startCaptionStage(row *db.Destination, upstream *relay.Hub) (*d
 		port:     port,
 		hub:      outHub,
 		upstream: upstream,
-		inSub:    destSubName(row.ID, "caption"),
+		inSub:    procname.DestProcessName(row.ID, procname.RoleCaption),
 		done:     make(chan struct{}),
 	}
 	if _, err := upstream.Subscribe(capt.inSub, port); err != nil {

@@ -37,6 +37,55 @@ its first tagged release.
 - **Deleting a programme names the YouTube ingest streams it leaves on the channel**, as deleting a
   destination does. A request that deletes the last source can no longer reach a handler that finds
   no programme.
+- **`POLYEMESIS_FFMPEG_LOGLEVEL` reaches every FFmpeg child, as the documentation says.** Eight
+  children ignored it and ran at a level written into their command line: the selector's copy
+  hops, the playlist feed, the HLS/DASH playout variants, the loudness monitor, the proxy, thumbnail
+  and archive jobs, the clip exporter, the playlist transcode and the transcription audio extract. With the variable
+  unset, nothing changes: each keeps its own default (`warning` for the live ones, `error` for the
+  one-shot passes). The variable, `POLYEMESIS_INGEST_CAPTURE` and `POLYEMESIS_FFMPEG_ASSUME_MAJOR` are
+  now read once at startup with the rest of the environment.
+- **Every relay reader opens the relay the same way.** The rendition encoder, the silence
+  synthesiser, the HLS/DASH playout variants, the loudness monitor and the selector's copy hops read the relay
+  without the probe limits, `-scan_all_pmts 0` and the forward-jump `-dts_delta_threshold` that the
+  destinations, recorder, preview and ingest meter already used. They now carry the same input
+  options, so they stop spending the whole probe window as dead air on start and no longer swap track
+  offsets after a long outage. Visible as: those children start faster, and their command lines (on
+  the Monitoring page) carry the extra input options.
+- **Every relay reader starts faster and tolerates a late track.** With the shared input options a
+  reader joins in well under a second instead of paying the whole probe window, and a track that is
+  declared but arrives late no longer holds it up. A declared track that never carries data can hold a
+  reader for up to 15 s (it used to be about 5 s), so the playout page waits 16 s before calling a
+  restarting rung ended.
+- **A relay writer's output timestamps now start near 0 instead of 1.4 s.** The silence synthesiser,
+  slate, renditions and failover feeds publish with `-muxdelay 0`, as the ingest always has. Audio/video
+  spacing is unchanged; only the shared starting offset moved, and every writer into a hub moved with it.
+- **A backup destination now restarts when FFmpeg cannot characterise its audio,** at most 3 times with a
+  30 s cooldown between attempts, as the primary already did.
+- **Every writer into the relay carries the interleave-stall fix the ingest has.** The silence
+  synthesiser, the slate, the rendition encoder and the selector's copy hops (the failover and playlist
+  feeds) muxed with FFmpeg's default 10 s interleave buffer, so a multitrack stream whose later audio
+  tracks resolved late could write nothing, video included, for up to ten seconds. They now carry
+  `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, which also drops the muxer's default 1.4 s
+  of start delay from the timestamps they publish.
+
+- **Stopping the preview, a rendition, a playout variant, the meters or a failover feed on a quiet feed no
+  longer waits out the grace to be killed.** Only the recorder and the destinations were woken when
+  stopped after their publisher left; every other relay reader blocked in its read, ignored the
+  stop signal and was killed at the end of the 8 s grace. They are all built one way now, and a
+  stopped preview returns in under a second instead of eight.
+- **A redundant (backup) output now re-probes like its primary.** It lacked the publishing signal and
+  the re-probe handler, so a backup that started before the stream's audio existed sat at running and
+  published nothing for ever, where the primary restarts to probe again. It restarts on the demuxer's
+  own complaint, and again when the ingest layout is first measured if it has never published.
+- **The expert-mode command preview of a stopped destination shows the command that would run.** It
+  omitted the muxer and socket tuning (`-flvflags`, `-rw_timeout`, the mux queue sizes), so a
+  destination using them was previewed without them. A running destination's preview is built by the
+  engine from the pieces it was started with instead of by peeling the saved arguments off its live
+  command line.
+- **Burning a recorded caption file in no longer loses whitespace at the edge of its path.** FFmpeg trims
+  unescaped leading and trailing spaces, so a path ending in one named a different file; the burn-in
+  now uses the same filter escaper as every other filter argument, which also converts Windows
+  separators.
 - **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
   said 0 and the card said Starting, because a running process that had carried no media counted as
   live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and

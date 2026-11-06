@@ -358,6 +358,19 @@ func Permanent(err error) error {
 	return permanentError{err: err}
 }
 
+// DecodeParams reads a job's parameters into into. A job with none, or with
+// parameters that do not parse, is Permanent: they will not parse on the next
+// attempt either. Every processor that carries parameters decodes them here.
+func DecodeParams(job Job, into any) error {
+	if len(job.Params) == 0 {
+		return Permanent(fmt.Errorf("%s job %d has no parameters", job.Kind, job.ID))
+	}
+	if err := json.Unmarshal(job.Params, into); err != nil {
+		return Permanent(fmt.Errorf("%s job %d has unreadable parameters: %w", job.Kind, job.ID, err))
+	}
+	return nil
+}
+
 // IsPermanent reports whether err was marked by Permanent.
 //
 // Note the direction of the default: an error nobody classified is treated as

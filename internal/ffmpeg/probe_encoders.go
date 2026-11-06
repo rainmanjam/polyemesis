@@ -285,7 +285,7 @@ func probeVAAPIDevice(ctx context.Context, names []string) string {
 func probeArgs(name, vaapiDevice string) []string {
 	prof := encoderProfiles[name]
 
-	args := []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
+	args := []string{"-hide_banner", "-nostdin", "-loglevel", LogLevel(LogWarning)}
 	if prof.vaapi {
 		if vaapiDevice == "" {
 			vaapiDevice = defaultVAAPIDevice

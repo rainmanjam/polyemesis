@@ -21,9 +21,10 @@ import (
 // ---------------------------------------------------------------- test doubles
 
 type fakeHub struct {
-	mu   sync.Mutex
-	name string
-	subs map[string]int
+	mu    sync.Mutex
+	name  string
+	subs  map[string]int
+	woken []string
 }
 
 func newHub(name string) *fakeHub { return &fakeHub{name: name, subs: map[string]int{}} }
@@ -44,6 +45,16 @@ func (h *fakeHub) Unsubscribe(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.subs, name)
+}
+
+// Wake reports whether the name is subscribed, as the real hub reports whether
+// it had anything to wake, and records who was woken.
+func (h *fakeHub) Wake(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.woken = append(h.woken, name)
+	_, ok := h.subs[name]
+	return ok
 }
 
 func (h *fakeHub) count() int {
@@ -87,6 +98,7 @@ func (p *fakePorts) leaked() int {
 type fakeProc struct {
 	name string
 	args []string
+	wake func()
 	mu   sync.Mutex
 	runs int
 	dead bool
@@ -119,8 +131,8 @@ type spawnLog struct {
 }
 
 func (s *spawnLog) spawner() Spawner {
-	return func(name string, args []string) Runner {
-		p := &fakeProc{name: name, args: args}
+	return func(name string, args []string, wake func()) Runner {
+		p := &fakeProc{name: name, args: args, wake: wake}
 		s.mu.Lock()
 		s.procs = append(s.procs, p)
 		s.mu.Unlock()
@@ -243,6 +255,33 @@ func TestReconcileStartsOneMuxerPerEnabledVariant(t *testing.T) {
 				t.Fatalf("spawned %v, want exactly %v", names(h.spawns.all()), tc.want)
 			}
 		})
+	}
+}
+
+// A variant stopped after its feed has gone quiet ignores SIGTERM unless the hub
+// it reads wakes it, and only the manager knows which hub that is and under what
+// name -- so the wake it hands the spawner must reach THAT hub, by THAT name.
+func TestAVariantsStopWakeReachesTheHubItSubscribedTo(t *testing.T) {
+	h := newHarness(t)
+	err := h.Reconcile(baseSettings(
+		db.PlayoutVariant{Name: "source", Enabled: true},
+		db.PlayoutVariant{Name: "hd", Enabled: true, RenditionID: rid(7)},
+	), h.resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for variant, want := range map[string]*fakeHub{"playout:source": h.hub, "playout:hd": h.rend} {
+		p := h.spawns.named(variant)
+		if p == nil || p.wake == nil {
+			t.Fatalf("%s was spawned with no wake", variant)
+		}
+		p.wake()
+		if got := want.woken; len(got) != 1 || got[0] != variant {
+			t.Errorf("%s: its wake reached %v on the %s hub, want [%s]", variant, got, want.name, variant)
+		}
+	}
+	if len(h.hub.woken) != 1 || len(h.rend.woken) != 1 {
+		t.Errorf("a wake leaked to the other hub: ingest %v, rendition %v", h.hub.woken, h.rend.woken)
 	}
 }
 

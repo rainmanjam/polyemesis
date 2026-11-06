@@ -33,6 +33,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // Kind is which detector a Signal came from. Stored and sent to the UI, so the
@@ -142,13 +144,12 @@ const maxPTSSeconds = 30 * 24 * 3600
 // audio track's EBU R128 momentary loudness, printed every 100ms to stdout.
 // Audio only, so hours of recording measure in a minute.
 func LoudnessArgs(path string) []string {
-	return []string{
-		"-hide_banner", "-nostdin", "-loglevel", "error",
+	return append(ffmpeg.CommonArgs(ffmpeg.LogError, false),
 		"-i", path,
 		"-map", "0:a:0?", "-vn", "-sn", "-dn",
 		"-af", "ebur128=metadata=1,ametadata=mode=print:key=lavfi.r128.M:file=-",
 		"-f", "null", "-",
-	}
+	)
 }
 
 // ParseMomentary reads LoudnessArgs' output: alternating

@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // ---------------------------------------------------------------- thumbnails
@@ -139,7 +141,7 @@ func PosterArgs(s PosterSpec) []string {
 	if s.Width <= 0 && s.Height <= 0 {
 		s.Height = DefaultPosterHeight
 	}
-	args := commonArgs()
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
 	args = append(args, "-ss", formatSeconds(s.PosterSeconds()), "-i", s.Input)
 	args = append(args, "-map", "0:v:0", "-an", "-sn", "-dn")
 	if vf := posterFilter(s); vf != "" {
@@ -256,7 +258,7 @@ func ContactSheetArgs(s ContactSheetSpec) []string {
 	s = s.Normalized()
 	iv := s.Interval()
 
-	args := commonArgs()
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
 	// Half an interval in, so each tile is the middle of the slice it stands
 	// for rather than its first frame — and so tile one is not the black frame
 	// every broadcast opens with.
@@ -373,7 +375,7 @@ func SpriteArgs(s SpriteSpec) []string {
 	s = s.Normalized()
 	color := filterColor(s.Color)
 
-	args := commonArgs()
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
 	args = append(args, "-i", s.Input)
 	args = append(args, "-map", "0:v:0", "-an", "-sn", "-dn")
 	// margin and padding are pinned to zero rather than left at their
@@ -585,8 +587,8 @@ func ThumbnailArgs(s ThumbnailSpec) []string {
 	}
 	g.WriteString(strings.Join(chains, ";"))
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
+	args = append(args, ffmpeg.ProgressArgs()...)
 	args = append(args, "-i", s.Input, "-filter_complex", g.String())
 
 	if wantPoster {

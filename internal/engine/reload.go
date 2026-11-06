@@ -32,7 +32,7 @@ import (
 // reported reason, as the fallback for a refusal, a timeout, a process that
 // is not running, or Windows, where the path is unverified. They are profile
 // fields, not db.Settings fields, so they have no row in the table below; the
-// restart signature masks the levels instead (ffmpeg.MaskLiveVolumes), and the
+// restart signature masks the levels instead (livevolume.Mask), and the
 // reconcile's stop phase decides live or restart. zmq and sendcmd remain
 // unused. See docs/HOT-RELOAD.md.
 

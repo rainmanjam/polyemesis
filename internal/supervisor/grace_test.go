@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/procname"
 )
 
 // The only property that must never break: forgetting is safe.
@@ -18,7 +20,7 @@ func TestAnUnknownKindGetsTheFullGrace(t *testing.T) {
 	// The load-bearing case. Someone adds a process in six months, does not
 	// read grace.go, and their teardown is merely slower than it could be --
 	// never lossier than it should be.
-	for _, kind := range []string{"", "some-future-kind", "recorder-v2", "unknown"} {
+	for _, kind := range []procname.Kind{"", "some-future-kind", "recorder-v2", "unknown"} {
 		if got := graceFor(kind); got != shutdownGrace {
 			t.Errorf("graceFor(%q) = %v, want the full %v: an unclassified kind must default to safe",
 				kind, got, shutdownGrace)
@@ -30,7 +32,7 @@ func TestEveryKindThatWritesSomethingKeepsTheFullGrace(t *testing.T) {
 	// Each of these has an output a reader may later look at: a recording, a
 	// file destination, HLS segments on disk, or the feed everything else is
 	// built from. None may be shortened without reading its argv again.
-	for _, kind := range []string{"recorder", "destination", "preview", "ingest", "source", "rendition", "playout"} {
+	for _, kind := range []procname.Kind{procname.KindRecorder, procname.KindDestination, procname.KindPreview, procname.KindIngest, procname.KindSource, procname.KindRendition, procname.KindPlayout} {
 		if got := graceFor(kind); got != shutdownGrace {
 			t.Errorf("graceFor(%q) = %v, want %v -- this kind writes something", kind, got, shutdownGrace)
 		}
@@ -40,7 +42,7 @@ func TestEveryKindThatWritesSomethingKeepsTheFullGrace(t *testing.T) {
 func TestKindsWithNoOutputExitFast(t *testing.T) {
 	// Verified against the argv each one builds: meters and loudness are
 	// -f null, silence muxes mpegts to a udp:// relay. Nothing on disk.
-	for _, kind := range []string{"meters", "loudness", "silence"} {
+	for _, kind := range []procname.Kind{procname.KindMeters, procname.KindLoudness, procname.KindSilence} {
 		got := graceFor(kind)
 		if got != fastGrace {
 			t.Errorf("graceFor(%q) = %v, want %v", kind, got, fastGrace)

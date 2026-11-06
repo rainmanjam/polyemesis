@@ -25,6 +25,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
@@ -101,9 +102,9 @@ type Spec struct {
 	// Name is the stable identifier used in the API and logs,
 	// e.g. "ingest", "dest:3", "recorder".
 	Name string
-	// Kind groups processes in the UI: ingest | destination | recorder |
-	// preview | meters.
-	Kind string
+	// Kind groups processes in the UI, the census and the teardown tallies, and
+	// picks the kill grace (graceFor). The kinds are procname's.
+	Kind procname.Kind
 	Bin  string
 	Args []string
 
@@ -1305,7 +1306,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 		// entry keyed on a pid survives its Process being dropped on the floor,
 		// and an entry keyed on the Process would not. This line and the
 		// discharge after cmd.Wait() are the census's only two writers.
-		childcensus.Enrol(cmd.Process.Pid, p.spec.Name, p.spec.Kind)
+		childcensus.Enrol(cmd.Process.Pid, p.spec.Name, string(p.spec.Kind))
 	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
@@ -1814,7 +1815,7 @@ func (p *Process) terminate() {
 				// Reaped inside the grace period. There is nothing to escalate to,
 				// and killGroup on a reaped pid is a signal to whoever holds that
 				// number now.
-				noteTeardown(p.spec.Kind, false)
+				noteTeardown(string(p.spec.Kind), false)
 				return
 			case <-wake:
 				wakeFn()
@@ -1825,7 +1826,7 @@ func (p *Process) terminate() {
 				// compile time -- rewording it silently disarms that check.
 				// grace_string_test.go pins it.
 				p.log.Warn("process did not exit after grace period; killing group")
-				noteTeardown(p.spec.Kind, true)
+				noteTeardown(string(p.spec.Kind), true)
 				killGroup(cmd)
 				return
 			}
@@ -2033,7 +2034,7 @@ func (p *Process) Status() Status {
 	// the broker, with no session behind it.
 	st := Status{
 		Name:      p.spec.Name,
-		Kind:      p.spec.Kind,
+		Kind:      string(p.spec.Kind),
 		State:     p.state,
 		PID:       p.pid,
 		Restarts:  p.restarts,

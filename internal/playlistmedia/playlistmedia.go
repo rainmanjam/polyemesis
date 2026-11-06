@@ -47,7 +47,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
-	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -166,22 +165,6 @@ const (
 	NormaliseChannels     = 2
 )
 
-// commonArgs are the flags every child process here gets. It mirrors
-// internal/ffmpeg's unexported commonArgs rather than importing it, because
-// that one is not exported; the -y is the addition. Every output is written to
-// a .partial path, and a .partial left behind by a killed process must not make
-// the retry hang on FFmpeg's interactive overwrite prompt.
-func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-y"}
-}
-
-// progressArgs routes machine-readable stats to stdout, leaving stderr as a
-// pure human log — the same split internal/ffmpeg uses, so ffmpeg.ParseProgress
-// reads our children too.
-func progressArgs() []string {
-	return []string{"-nostats", "-progress", "pipe:1"}
-}
-
 // normaliseArgs builds the transcode of one upload to the fixed profile.
 //
 // The hardware probe is deliberately NOT consulted, the same call internal/media
@@ -227,8 +210,8 @@ const PadSlackSecs = 0.05
 // below; every encoding flag shared between them lives in one place, so the
 // two outputs cannot drift apart into two profiles.
 func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64, maxBytes int64) []string {
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
+	args = append(args, ffmpeg.ProgressArgs()...)
 	args = append(args, "-i", in)
 	if silent {
 		args = append(args, "-f", "lavfi", "-i",
@@ -639,7 +622,7 @@ type SourceVerifier func(ctx context.Context, path string) (durationSecs float64
 type Processor struct {
 	log    *slog.Logger
 	cfg    Config
-	exec   media.Execer
+	exec   ffmpeg.Execer
 	stream StreamProber
 	dur    DurationProber
 	verify SourceVerifier
@@ -654,7 +637,7 @@ type Option func(*Processor)
 
 // WithExecer replaces the subprocess runner, so the worker can be exercised
 // without FFmpeg on the machine.
-func WithExecer(e media.Execer) Option { return func(p *Processor) { p.exec = e } }
+func WithExecer(e ffmpeg.Execer) Option { return func(p *Processor) { p.exec = e } }
 
 // WithStreamProber replaces the stream-presence check.
 func WithStreamProber(s StreamProber) Option { return func(p *Processor) { p.stream = s } }
@@ -674,13 +657,12 @@ func WithFreeSpace(fn func(path string) (uint64, error)) Option {
 
 // New builds a Processor.
 //
-// media.Exec is imported rather than copied. It is the only piece of
-// internal/media used here — nothing recording-shaped comes with it — and it
-// carries the cancellation behaviour that keeps a killed job from leaving an
-// FFmpeg behind competing with the live stream. A second copy of that would be
-// a second place for it to be subtly wrong.
+// ffmpeg.Exec runs every child here. It carries the cancellation behaviour that
+// keeps a killed job from leaving an FFmpeg behind competing with the live
+// stream, and a second copy of that would be a second place for it to be subtly
+// wrong.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
-	p := &Processor{log: log, cfg: cfg.Normalized(), exec: media.Exec, free: uploads.FreeBytes}
+	p := &Processor{log: log, cfg: cfg.Normalized(), exec: ffmpeg.Exec, free: uploads.FreeBytes}
 	p.stream = p.probeStream
 	p.dur = p.probeDuration
 	p.verify = p.verifySource
@@ -784,7 +766,7 @@ func NewNormaliseJob(p NormaliseParams) (jobs.Job, error) {
 // RunNormalise transcodes one upload to the fixed profile.
 func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 	var params NormaliseParams
-	if err := decodeParams(job, &params); err != nil {
+	if err := jobs.DecodeParams(job, &params); err != nil {
 		return err
 	}
 	if err := params.Validate(); err != nil {
@@ -891,7 +873,7 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 
 	rep.Logf("normalising %s to %dx%d %d fps", params.Upload,
 		NormaliseWidth, NormaliseHeight, NormaliseFPS)
-	if err := p.run(ctx, rep, media.Command{Name: p.cfg.FFmpeg, Args: args}, durationMS); err != nil {
+	if err := p.run(ctx, rep, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: args}, durationMS); err != nil {
 		// A failed encode has already lost; a leftover .partial is then a
 		// disk-space problem the next attempt inherits.
 		p.discard(partial)
@@ -939,7 +921,7 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 			"normalised; nothing was published", params.Upload))
 	}
 
-	if err := publish(partial, final); err != nil {
+	if err := ffmpeg.Publish(partial, final); err != nil {
 		return err
 	}
 	// 0600, matching uploads.Save. Nothing outside this process reads a
@@ -1149,7 +1131,7 @@ func (p *Processor) verifySource(ctx context.Context, path string) (float64, err
 // untrue on the next attempt. FFprobe's own words are preserved, because "this
 // upload is broken" is only actionable if the operator can see how.
 func (p *Processor) probeStream(ctx context.Context, path, kind string) (bool, error) {
-	out, stderr, err := output(ctx, media.Command{Name: p.cfg.FFprobe, Args: streamArgs(path, kind)})
+	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: p.cfg.FFprobe, Args: streamArgs(path, kind)})
 	if err != nil {
 		if s := strings.TrimSpace(stderr); s != "" {
 			return false, jobs.Permanent(fmt.Errorf("ffprobe could not read %s: %s",
@@ -1200,7 +1182,7 @@ func (p *Processor) probeDuration(ctx context.Context, path string) (videoSecs, 
 // one duration -- which is why that path reads the simpler, container-level
 // field instead.
 func probeStreamDurationsSecs(ctx context.Context, ffprobe, path string) (videoSecs, audioSecs float64, err error) {
-	out, stderr, err := output(ctx, media.Command{Name: ffprobe, Args: []string{
+	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffprobe, Args: []string{
 		"-hide_banner", "-v", "error",
 		"-show_entries", "stream=codec_type,duration",
 		"-of", "csv=p=0",
@@ -1263,7 +1245,7 @@ func ProbeOutputDurationMS(ctx context.Context, ffprobe, path string) (int64, er
 // above for why the source-side probe reads a different, per-stream field
 // instead.
 func probeFormatDurationSecs(ctx context.Context, ffprobe, path string) (float64, error) {
-	out, stderr, err := output(ctx, media.Command{Name: ffprobe, Args: []string{
+	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffprobe, Args: []string{
 		"-hide_banner", "-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=nw=1:nk=1",
@@ -1284,20 +1266,9 @@ func probeFormatDurationSecs(ctx context.Context, ffprobe, path string) (float64
 
 // ------------------------------------------------------------------- plumbing
 
-func decodeParams(job jobs.Job, into any) error {
-	if len(job.Params) == 0 {
-		return jobs.Permanent(fmt.Errorf("%s job %d has no parameters", job.Kind, job.ID))
-	}
-	if err := json.Unmarshal(job.Params, into); err != nil {
-		// Params that will not parse will not parse on the next attempt either.
-		return jobs.Permanent(fmt.Errorf("%s job %d has unreadable parameters: %w", job.Kind, job.ID, err))
-	}
-	return nil
-}
-
 // run executes the transcode, mapping FFmpeg's progress onto the job's bar.
-func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd media.Command, durationMS int64) error {
-	sink := media.Sink{Line: func(l string) { rep.Logf("%s", l) }}
+func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd ffmpeg.Command, durationMS int64) error {
+	sink := ffmpeg.Sink{Line: func(l string) { rep.Logf("%s", l) }}
 	if durationMS > 0 {
 		sink.Progress = func(pr ffmpeg.Progress) {
 			rep.Progress(float64(pr.OutTimeMS) / float64(durationMS))
@@ -1313,31 +1284,9 @@ func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd media.Comman
 	return nil
 }
 
-// output runs a command and returns its stdout, for ffprobe. Separate from
-// media.Exec because a probe's answer IS its stdout, where a transcode's stdout
-// is a progress stream nobody keeps.
-func output(ctx context.Context, cmd media.Command) ([]byte, string, error) {
-	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	var stderr strings.Builder
-	c.Stderr = &stderr
-	out, err := c.Output()
-	return out, stderr.String(), err
-}
-
 // discard removes a partial output, best effort.
 func (p *Processor) discard(path string) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) && p.log != nil {
 		p.log.Warn("could not remove a partial derivative", "path", path, "err", err)
 	}
-}
-
-// publish renames a finished .partial into place. Nothing here writes to a
-// final path directly, so a half-written derivative can never be read as a
-// finished one. Same convention as media.publish and clips.Capture.
-func publish(partial, final string) error {
-	if err := os.Rename(partial, final); err != nil {
-		_ = os.Remove(partial)
-		return fmt.Errorf("publish %s: %w", filepath.Base(final), err)
-	}
-	return nil
 }

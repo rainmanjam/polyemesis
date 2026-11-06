@@ -58,7 +58,7 @@ describe("saveImpact", () => {
     expect(impact(undefined, { secondMixChanged: true })).toBe("restart");
   });
 
-  // Each of these reaches the argv outside the graph (engine destSpecFor), so
+  // Each of these reaches the argv outside the graph (engine.DestSpecFor), so
   // each restarts though the masked graph is unchanged.
   it("a negative delay restarts though the audio graph is unchanged", () => {
     // It holds the VIDEO back in the output arguments.

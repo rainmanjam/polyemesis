@@ -1,4 +1,4 @@
-package media
+package ffmpeg
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 /* CANCELLATION HUNG FOR EVER ON A GRANDCHILD THAT OUTLIVED ITS PARENT.
  *
- * killGrace exists for exactly one scenario, and says so: "a child that has
+ * KillGrace exists for exactly one scenario, and says so: "a child that has
  * spawned its own children -- which x265 and SVT-AV1 both do -- can leave those
  * pipes open after the parent is gone. Without WaitDelay the worker would sit in
  * Wait forever and the queue's cancellation would be a lie."
@@ -39,7 +39,7 @@ func TestCancellingACommandDoesNotHangOnASurvivingGrandchild(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	cancel()
 
-	// Generous against killGrace (5s) and against a loaded CI runner, while
+	// Generous against KillGrace (5s) and against a loaded CI runner, while
 	// still far below the unbounded wait this pins.
 	select {
 	case err := <-done:
@@ -53,7 +53,7 @@ func TestCancellingACommandDoesNotHangOnASurvivingGrandchild(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("Exec did not return 20s after cancellation. The reader " +
 			"goroutines are being waited on before Cmd.Wait, so WaitDelay — the " +
-			"whole reason killGrace exists — never gets the chance to close the " +
+			"whole reason KillGrace exists — never gets the chance to close the " +
 			"pipes a surviving grandchild is holding open.")
 	}
 }
@@ -72,7 +72,7 @@ func execGoroutines() int {
 	}
 	count := 0
 	for _, g := range strings.Split(string(buf), "\n\n") {
-		if strings.Contains(g, "internal/media.execWithGrace.func") {
+		if strings.Contains(g, "internal/ffmpeg.execWithGrace.func") {
 			count++
 		}
 	}
@@ -82,7 +82,7 @@ func execGoroutines() int {
 // EXEC MUST NOT LEAVE ITS READERS BEHIND WHEN THE DRAIN TIMES OUT.
 //
 // A surviving grandchild holds the output pipes open, so the readers never see
-// EOF and the drain gives up after killGrace. Wait then closes the pipes, which
+// EOF and the drain gives up after KillGrace. Wait then closes the pipes, which
 // wakes the readers -- but nothing joined them, so Exec returned while up to
 // three goroutines were still unwinding. The check is made the instant Exec
 // returns, with no polling, because "they will be gone in a moment" is the
@@ -142,7 +142,7 @@ func TestExecJoinAddsNoWaitToAChildThatExitsCleanly(t *testing.T) {
 	if err := Exec(context.Background(), helper("progress"), Sink{}); err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
-	if d := time.Since(start); d > killGrace {
+	if d := time.Since(start); d > KillGrace {
 		t.Fatalf("a clean child took %v, longer than the grace", d)
 	}
 	if n := goroutinesGone(); n != 0 {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // The unit tests prove the argument builders produce the strings we meant. This
@@ -343,8 +345,8 @@ func TestRealArchiveKeepsEveryAudioTrackAndVerifiesAgainstTheOriginal(t *testing
 func decodeCheck(t *testing.T, ffmpegBin, path string) []string {
 	t.Helper()
 	var lines []string
-	err := Exec(context.Background(), Command{Name: ffmpegBin, Args: DecodeCheckArgs(path)},
-		Sink{Line: func(l string) { lines = append(lines, l) }})
+	err := ffmpeg.Exec(context.Background(), ffmpeg.Command{Name: ffmpegBin, Args: DecodeCheckArgs(path)},
+		ffmpeg.Sink{Line: func(l string) { lines = append(lines, l) }})
 	got := DecodeErrors(strings.Join(lines, "\n"))
 	if err != nil && len(got) == 0 {
 		got = []string{err.Error()}

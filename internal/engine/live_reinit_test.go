@@ -97,14 +97,15 @@ func reinitDest(t *testing.T, ffmpegBin, input string, holder *graphHolder) (*su
 	outPath := func(n int32) string { return filepath.Join(dir, fmt.Sprintf("out-%d.wav", n)) }
 	argv := func() []string {
 		n := spawn.Add(1)
-		g := holder.get()
-		// -progress so the test can tell when media is flowing through a built
-		// graph (muteLive); the supervisor parses it off stdout as it does for
-		// every destination.
-		return []string{"-hide_banner", "-loglevel", "warning", "-nostats",
-			"-progress", "pipe:1", "-stats_period", "0.1", "-re", "-i", input,
-			"-filter_complex", g.FilterComplex, "-map", "[" + g.OutLabel + "]",
-			"-c:a", "pcm_s16le", "-y", outPath(n)}
+		return holder.argv(func(g routing.Result) []string {
+			// -progress so the test can tell when media is flowing through a built
+			// graph (muteLive); the supervisor parses it off stdout as it does for
+			// every destination.
+			return []string{"-hide_banner", "-loglevel", "warning", "-nostats",
+				"-progress", "pipe:1", "-stats_period", "0.1", "-re", "-i", input,
+				"-filter_complex", g.FilterComplex, "-map", "[" + g.OutLabel + "]",
+				"-c:a", "pcm_s16le", "-y", outPath(n)}
+		})
 	}
 	p := supervisor.New(testLogger(), supervisor.Spec{
 		Name: "dest-reinit", Kind: "destination", Bin: ffmpegBin, Args: nil, NextArgs: argv,

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -45,8 +46,8 @@ func TestAnUnconfiguredDestinationIsNotReportedAsRetuned(t *testing.T) {
 
 	d := &destination{
 		row:    row,
-		proc:   supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, "")}),
-		backup: supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, destRoleBackup)}),
+		proc:   supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, "")}),
+		backup: supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, procname.RoleBackup)}),
 	}
 	e.applyDestPolicy(d, row)
 
@@ -72,8 +73,8 @@ func TestARealPolicyEditIsStillReported(t *testing.T) {
 
 	d := &destination{
 		row:    row,
-		proc:   supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, "")}),
-		backup: supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, destRoleBackup)}),
+		proc:   supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, "")}),
+		backup: supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, procname.RoleBackup)}),
 	}
 	e.applyDestPolicy(d, row)
 

@@ -2,6 +2,8 @@ package media
 
 import (
 	"strconv"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // ------------------------------------------------------------------- proxies
@@ -127,8 +129,8 @@ func ProxyArgs(s ProxySpec) []string {
 		s.AudioKbps = DefaultProxyAudioKbps
 	}
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
+	args = append(args, ffmpeg.ProgressArgs()...)
 	args = append(args, "-i", s.Input)
 
 	// Explicit maps. Default stream selection on a multitrack Matroska picks

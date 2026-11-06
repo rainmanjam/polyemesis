@@ -6,6 +6,9 @@ import (
 )
 
 // The live argument lists for ORDINARY paths and text, pinned byte for byte.
+// (The relay input options and the relay output epilogue were added to these by
+// RelayConsumerInput and RelayProducerOutput; the data file was updated for
+// exactly those and nothing else.)
 //
 // The filter escaper moved from one replacer that doubled the escape on every
 // metacharacter to the two-level form FFmpeg's documentation gives (option
@@ -19,8 +22,8 @@ import (
 // Literal forward-slash paths rather than t.TempDir or filepath.Join, so the
 // strings are the same on every platform and every run.
 func TestLiveArgsForOrdinaryPathsAreUnchanged(t *testing.T) {
-	// logLevelArgs honours this, and the literals were captured without it.
-	t.Setenv("POLYEMESIS_FFMPEG_LOGLEVEL", "")
+	// The literals were captured without a log level override.
+	SetLogLevel("")
 	const fonts = "/var/lib/polyemesis/fonts/Inter-Regular.ttf"
 	const winFonts = "C:/ProgramData/Poly Emesis/fonts/Inter-Regular.ttf"
 

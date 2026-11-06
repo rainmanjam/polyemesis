@@ -87,18 +87,6 @@ func (s VariantSpec) playlistLength() int {
 	return s.PlaylistSegments
 }
 
-// commonArgs and progressArgs mirror internal/ffmpeg's unexported helpers of
-// the same name. Duplicated rather than reached for because playout must not
-// widen that package's API for the sake of four flags; the values are the ones
-// every polyemesis child has always been given.
-func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
-}
-
-func progressArgs() []string {
-	return []string{"-nostats", "-progress", "pipe:1"}
-}
-
 // VariantArgs builds the packaging command for one variant.
 //
 // Audio is encoded, video is not. That asymmetry is deliberate: a viewer's
@@ -110,13 +98,9 @@ func progressArgs() []string {
 func VariantArgs(s VariantSpec) []string {
 	s.applyDefaults()
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
-	args = append(args,
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-		"-i", ffmpeg.RelayInputURL(s.RelayURL),
-	)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, false)
+	args = append(args, ffmpeg.ProgressArgs()...)
+	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL, ffmpeg.RelayQueue)...)
 	args = append(args, hlsOutput(s)...)
 	if s.DASH {
 		args = append(args, dashOutput(s)...)

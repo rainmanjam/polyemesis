@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // A level applied live lives only in the running graph, and FFmpeg rebuilds that
-// graph from its argv whenever the decoded format changes (see the note above
-// argvGraph, and TestALiveMuteSurvivesAFormatChange for the real FFmpeg). These
+// graph from its argv whenever the decoded format changes (see graphHolder.stale, and TestALiveMuteSurvivesAFormatChange for the real
+// FFmpeg). These
 // tests pin the repair: at a format event, a process whose argv levels a live
 // change has left stale is respawned, and the respawn's argv carries the stored
 // level.
@@ -32,7 +33,9 @@ func levelChild(t *testing.T, holder *graphHolder) *supervisor.Process {
 		t.Fatalf("locate the test binary to re-execute as a child: %v", err)
 	}
 	argv := func() []string {
-		return []string{engineFakeChildFlag, "-filter_complex", holder.get().FilterComplex}
+		return holder.argv(func(r routing.Result) []string {
+			return []string{engineFakeChildFlag, "-filter_complex", r.FilterComplex}
+		})
 	}
 	p := supervisor.New(testLogger(), supervisor.Spec{
 		Name: "dest-level", Kind: "destination", Bin: self, Args: argv(), NextArgs: argv,
@@ -75,7 +78,7 @@ func stagedLiveMute(t *testing.T, e *Engine, store *db.DB) (*supervisor.Process,
 	if argvMutedTrk0.MatchString(strings.Join(proc.Args(), " ")) {
 		t.Fatal("the running argv already carries the mute; the test is not staging a stale level")
 	}
-	if !levelsStale(proc, holder) {
+	if !holder.stale() {
 		t.Fatal("a live mute did not read as stale against the spawned argv")
 	}
 	return proc, holder
@@ -101,7 +104,7 @@ func TestAStaleLiveLevelIsRespawnedFromTheHolder(t *testing.T) {
 
 	e.respawnStaleLevels("test: the source feed changed")
 	waitArgvMuted(t, proc, "a format event")
-	if levelsStale(proc, holder) {
+	if holder.stale() {
 		t.Error("after the respawn the argv still disagrees with the holder")
 	}
 }
@@ -123,7 +126,7 @@ func TestANewIngestSessionRespawnsAStaleLevel(t *testing.T) {
 // nobody changed is never cycled by a failover, which would cost every output
 // a reconnect at exactly the moment the tier exists to hide.
 //
-// MUTATION: make levelsStale return true. Observed: FAIL, "a destination with
+// MUTATION: make graphHolder.stale return true. Observed: FAIL, "a destination with
 // no live change was restarted".
 func TestAFormatEventLeavesAnUnchangedDestinationAlone(t *testing.T) {
 	e, store := storeEngine(t)
