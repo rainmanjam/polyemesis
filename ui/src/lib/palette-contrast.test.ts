@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,7 +52,26 @@ function declarations(block: string): Map<string, string> {
   return out;
 }
 
-const APP = declarations(rootBlock(APP_CSS));
+/** The light theme's block: `:root[data-theme="light"] {` ... `}`. It states ONLY
+ *  what differs from the dark :root (colours and shadows); type, motion and
+ *  radius are shared and read from :root. */
+function lightBlock(css: string): string {
+  const start = css.search(/^:root\[data-theme="light"\]\s*\{$/m);
+  if (start < 0) throw new Error('no :root[data-theme="light"] block in ui/src/index.css');
+  return css.slice(start, css.indexOf("\n}\n", start));
+}
+
+const DARK = declarations(rootBlock(APP_CSS));
+const LIGHT_OWN = declarations(lightBlock(APP_CSS));
+/** What the cascade gives the light theme: the light block over the shared :root. */
+const LIGHT = new Map([...DARK, ...LIGHT_OWN]);
+const THEMES = { dark: DARK, light: LIGHT } as const;
+type ThemeName = keyof typeof THEMES;
+const THEME_NAMES: ThemeName[] = ["dark", "light"];
+
+/** The palette under test. Reassigned by each theme's beforeEach, so every
+ *  helper below (tok, ratio, ...) measures the theme currently being run. */
+let APP: Map<string, string> = DARK;
 const SITE = declarations(SITE_CSS.slice(SITE_CSS.indexOf("@theme {")));
 
 /** A token's colour, following var() references through either block. */
@@ -118,8 +137,37 @@ const SURFACES = ["background", "surface", "card", "card-raised", "popover"];
 
 describe("the contrast converter", () => {
   it("finds the palette at all", () => {
-    expect(APP.size).toBeGreaterThan(40);
+    expect(DARK.size).toBeGreaterThan(40);
+    expect(LIGHT.size).toBeGreaterThanOrEqual(DARK.size);
     expect(SITE.size).toBeGreaterThan(10);
+  });
+
+  beforeEach(() => {
+    APP = DARK;
+  });
+
+  it("the light block restates every colour token the dark :root declares, and invents none", () => {
+    /* LIGHT is DARK with the light block laid over it, so a colour the light
+     * block forgot silently stays dark and every contrast check below would
+     * still pass on a half-themed palette. Completeness is its own assertion. */
+    const colours = (m: Map<string, string>) => [...m].filter(([, v]) => v.startsWith("oklch(")).map(([k]) => k).sort();
+    expect(colours(LIGHT_OWN)).toEqual(colours(DARK));
+    expect(LIGHT_OWN.has("--shadow-raised") && LIGHT_OWN.has("--shadow-overlay")).toBe(true);
+  });
+
+  it("the light surfaces run lightest to darker where the dark ones run darkest to lighter", () => {
+    const L = (name: string) => THEMES.light.get(`--${name}`)!.match(/oklch\(([\d.]+)%/)![1];
+    expect(Number(L("card"))).toBeGreaterThan(Number(L("surface")));
+    expect(Number(L("surface"))).toBeGreaterThan(Number(L("background")));
+    expect(Number(L("foreground"))).toBeLessThan(Number(L("muted-foreground")));
+    // On light the page text is the DARKEST ink, as on dark it is the lightest.
+    expect(Number(L("foreground"))).toBeLessThan(30);
+  });
+
+  it("keeps the tally one lamp in both themes: the same red under the same white label", () => {
+    for (const name of ["tally", "tally-foreground"]) {
+      expect(THEMES.light.get(`--${name}`), name).toBe(THEMES.dark.get(`--${name}`));
+    }
   });
 
   it.each([
@@ -133,7 +181,11 @@ describe("the contrast converter", () => {
   });
 });
 
-describe("text tokens read at AA on every surface", () => {
+describe.each(THEME_NAMES)("[%s] text tokens read at AA on every surface", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   const INKS = [
     "foreground",
     "muted-foreground",
@@ -154,7 +206,11 @@ describe("text tokens read at AA on every surface", () => {
   }
 });
 
-describe("ink on fills reads at AA", () => {
+describe.each(THEME_NAMES)("[%s] ink on fills reads at AA", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   it.each([
     // Status pills: the state's ink on its own dim fill, and the identity chip.
     ["ok", "ok-dim"],
@@ -185,7 +241,11 @@ describe("ink on fills reads at AA", () => {
   });
 });
 
-describe("every Button variant reads at AA, at rest and on hover", () => {
+describe.each(THEME_NAMES)("[%s] every Button variant reads at AA, at rest and on hover", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   /* Read from button.tsx rather than restated, so a variant whose hover is
    * edited is measured as edited. A translucent hover (`hover:bg-primary/85`)
    * is composited over each surface a button can sit on: at 85% the old
@@ -235,7 +295,11 @@ describe("every Button variant reads at AA, at rest and on hover", () => {
   }
 });
 
-describe("non-text indicators clear 3:1", () => {
+describe.each(THEME_NAMES)("[%s] non-text indicators clear 3:1", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   it.each([
     // The focus ring against every ground a focusable control sits on.
     ["ring", "background"],
@@ -264,12 +328,16 @@ describe("non-text indicators clear 3:1", () => {
     ["color-meter", "card"],
     ["color-cohost", "card"],
     ["color-game", "card"],
-  ])("--%s against --%s", (fg, bg) => {
+  ].filter(([fg]) => theme === "dark" || !fg.startsWith("color-")))("--%s against --%s", (fg, bg) => {
     expect(ratio(fg, bg)).toBeGreaterThanOrEqual(NON_TEXT);
   });
 });
 
-describe("the 2026-11 decisions hold", () => {
+describe.each(THEME_NAMES)("[%s] the 2026-11 decisions hold", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   /* Each of these is a revert guard: the threshold tests above would let
    * several of the old values back in (the old --ring clears 3:1, the old
    * --down-dim still gives the new --down 4.5:1), so the intent is asserted
@@ -293,11 +361,14 @@ describe("the 2026-11 decisions hold", () => {
     expect(Math.abs(tok("down-dim")[2] - tok("down")[2])).toBeLessThanOrEqual(5);
   });
 
-  it("puts dark ink on the destructive fill", () => {
-    expect(luminanceOf(srgb("destructive-foreground"))).toBeLessThan(luminanceOf(srgb("destructive")));
+  it("puts contrasting ink on the destructive fill: dark ink on the light coral, light ink on the deep red", () => {
+    const ink = luminanceOf(srgb("destructive-foreground"));
+    const fill = luminanceOf(srgb("destructive"));
+    if (theme === "dark") expect(ink).toBeLessThan(fill);
+    else expect(ink).toBeGreaterThan(fill);
   });
 
-  it("lights the website's crosspoint in the interaction colour", () => {
+  it.runIf(theme === "dark")("lights the website's crosspoint in the interaction colour", () => {
     expect(SITE.get("--color-cross")).toBe("var(--primary)");
     expect(SITE.get("--color-cross-dim")).toBe("var(--primary-dim)");
   });
@@ -307,7 +378,11 @@ describe("the 2026-11 decisions hold", () => {
   });
 });
 
-describe("the signal colours stay apart", () => {
+describe.each(THEME_NAMES)("[%s] the signal colours stay apart", (theme) => {
+  beforeEach(() => {
+    APP = THEMES[theme];
+  });
+
   /* ON AIR and FAILED were one red: the old --down sat 0.074 from the tally,
    * which at 8px is the same lamp. The floor is half the distance between the
    * old --down and --warn, which nobody ever confused. */
@@ -324,8 +399,43 @@ describe("the signal colours stay apart", () => {
     ["cat-cyan", "warn"],
     ["cat-cyan", "down"],
     ["cat-cyan", "tally"],
-  ])("--%s and --%s are told apart (ΔEOK ≥ 0.1)", (a, b) => {
+  ].filter(([a]) => theme === "dark" || !a.startsWith("color-")))("--%s and --%s are told apart (ΔEOK ≥ 0.1)", (a, b) => {
     expect(deltaE(a, b)).toBeGreaterThanOrEqual(0.1);
+  });
+});
+
+describe("the pre-paint colours are the tokens", () => {
+  /* Three places hold --surface as a hex because none of them can read a CSS
+   * variable: index.html's canvas rule (before the stylesheet), the theme-color
+   * meta (the browser's own chrome) and theme-init.js. A palette retune that
+   * forgets them leaves a flash of the OLD page colour on every load. */
+  const hexOf = (theme: ThemeName) => {
+    APP = THEMES[theme];
+    const hex = srgb("surface")
+      .map((v) => Math.round(v * 255).toString(16).padStart(2, "0"))
+      .join("");
+    APP = DARK;
+    return `#${hex}`;
+  };
+  const INDEX = readFileSync(join(SRC, "..", "index.html"), "utf8");
+  const INIT = readFileSync(join(SRC, "..", "public", "theme-init.js"), "utf8");
+  const THEME_TS = readFileSync(join(SRC, "lib", "theme.ts"), "utf8");
+
+  it("authorColor.ts darkens author names against --card-raised of the light theme", () => {
+    APP = LIGHT;
+    const hex = srgb("card-raised")
+      .map((v) => Math.round(v * 255).toString(16).padStart(2, "0"))
+      .join("");
+    APP = DARK;
+    expect(readFileSync(join(SRC, "lib", "authorColor.ts"), "utf8")).toContain(`LIGHT_CHAT_GROUND = "#${hex}"`);
+  });
+
+  it.each(THEME_NAMES)("%s: index.html, theme.ts and theme-init.js carry --surface's hex", (theme) => {
+    const hex = hexOf(theme);
+    const canvas = theme === "dark" ? /html \{ background-color: (#[0-9a-f]{6})/ : /html\[data-theme="light"\] \{ background-color: (#[0-9a-f]{6})/;
+    expect(INDEX.match(canvas)?.[1], "index.html canvas rule").toBe(hex);
+    expect(THEME_TS, "lib/theme.ts THEME_COLOR").toContain(`${theme}: "${hex}"`);
+    expect(INIT, "public/theme-init.js").toContain(`"${hex}"`);
   });
 });
 
@@ -352,6 +462,10 @@ function scan(list: string[], re: RegExp): string[] {
 }
 
 describe("token roles hold in the sources", () => {
+  beforeEach(() => {
+    APP = DARK;
+  });
+
   it("scans the app and the website", () => {
     expect(APP_SOURCES.length).toBeGreaterThan(100);
     expect(SOURCES.length).toBeGreaterThan(APP_SOURCES.length);
@@ -386,11 +500,17 @@ describe("token roles hold in the sources", () => {
           failures.push(`${f.slice(ROOT.length)}: text-${token}/${pct} names no colour token`);
           continue;
         }
-        measured++;
-        for (const ground of SURFACES) {
-          const r = contrast(srgb(token, pct / 100, ground), srgb(ground));
-          if (r < TEXT) failures.push(`${f.slice(ROOT.length)}: text-${token}/${pct} on --${ground} is ${r.toFixed(2)}:1`);
+        for (const theme of THEME_NAMES) {
+          if (!THEMES[theme].has(`--${token}`)) continue;
+          APP = THEMES[theme];
+          measured++;
+          for (const ground of SURFACES) {
+            const r = contrast(srgb(token, pct / 100, ground), srgb(ground));
+            if (r < TEXT)
+              failures.push(`${f.slice(ROOT.length)}: text-${token}/${pct} on --${ground} [${theme}] is ${r.toFixed(2)}:1`);
+          }
         }
+        APP = DARK;
       }
     }
     expect(failures, "use a full-opacity token that passes (text-muted-foreground for secondary)").toEqual([]);

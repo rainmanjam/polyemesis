@@ -365,6 +365,106 @@
   --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.6);
 }
 
+/* ===========================================================================
+   THE LIGHT THEME. Same roles as the :root above, restated in colour only.
+
+   HOW THE THEMES ARE SELECTED. The :root block above IS the dark theme and is
+   the default: it is what a page with no data-theme gets, which is deliberate,
+   because the public player and the OBS overlay pages never set one and must
+   keep this exact look. The console sets data-theme="light" or "dark" on <html>
+   before first paint (public/theme-init.js) and keeps it current (lib/theme.ts);
+   "system" is resolved to one of the two by prefers-color-scheme, so there are
+   only ever two palettes. This block states ONLY colour and shadow. Type,
+   motion and radius are shared and stay in :root.
+
+   A COUNTERPART, NOT AN INVERSION. Dark builds depth from lightness: the shell
+   is the darkest surface and a card lifts toward the light. Light reads depth
+   the other way up -- the shell is the greyest step, the page a little paler,
+   and a card the brightest thing on screen -- so surfaces still run in the same
+   ORDER (--background, --surface, --card) and a card still reads as the top
+   of the stack. Ink flips with it: the blues, greens and ambers that were
+   LIGHT-on-dark are the same hues taken DARK-on-light, each moved only as far
+   as AA needs (palette-contrast.test.ts runs every pair, in both themes, at the
+   dark theme's own thresholds: 4.5:1 for ink, 3:1 for shapes).
+
+   THE SIGNAL COLOURS KEEP THEIR JOBS. --tally is the same lamp, value for
+   value: a saturated red at L 56.5% under the same white-hot label (4.97:1),
+   which reads 5.0:1 against a white card -- ON AIR is the one thing that must
+   look identical in a lit room and a dark one. --down moves DEEPER (L 48%, the
+   dark theme moved it lighter to get clear of the lamp), staying ΔEOK 0.1
+   from --tally and from --warn. The meter trough goes pale and its zones go
+   deeper; the zones are separated by lightness and hue exactly as before.
+   =========================================================================== */
+:root[data-theme="light"] {
+  /* --- SURFACES, shell to card: greyest to brightest --- */
+  --background: oklch(93.6% 0.0075 264.3);
+  --surface: oklch(96.4% 0.0060 264.3);
+  --card: oklch(99.2% 0.0030 265.0);
+  --card-raised: oklch(95.6% 0.0090 265.0);
+  --popover: oklch(99.6% 0.0025 262.0);
+  --muted: oklch(93.2% 0.0110 264.0);
+
+  /* --- TEXT. Darkest ink on the page, secondary steps lighter. --- */
+  --foreground: oklch(21.0% 0.0200 265.0);
+  --muted-foreground: oklch(44.0% 0.0300 265.0);
+  /* 5.7:1 on --muted, the worst ground. */
+  --subtle-foreground: oklch(46.5% 0.0290 264.0);
+
+  /* --- THE ONE ACCENT. --primary is a FILL (white ink on it, 5.7:1);
+     --primary-bright is the only blue that may be text, and on light it is the
+     DEEPER one. --ring is --primary-bright's value, as in dark. --- */
+  --primary: oklch(51.0% 0.1450 263.0);
+  --primary-foreground: oklch(99.0% 0.0040 264.0);
+  --primary-dim: oklch(91.0% 0.0400 262.0);
+  --primary-bright: oklch(46.0% 0.1500 262.0);
+  --secondary: oklch(93.2% 0.0110 264.0);
+  --secondary-foreground: oklch(30.0% 0.0250 264.0);
+  --accent: oklch(92.0% 0.0150 265.0);
+  --accent-foreground: oklch(21.0% 0.0200 265.0);
+
+  /* --- BORDERS & FOCUS. --input is a field's edge at 3:1 on every ground. --- */
+  --border: oklch(88.0% 0.0120 264.0);
+  --border-strong: oklch(80.0% 0.0160 263.0);
+  --input: oklch(56.0% 0.0300 263.0);
+  --ring: oklch(46.0% 0.1500 262.0);
+
+  /* --- SIGNAL. Ink is the deep step, the dim is a pale tint to sit it on. --- */
+  --ok: oklch(41.0% 0.1150 150.0);
+  --ok-dim: oklch(92.5% 0.0500 150.0);
+  --warn: oklch(48.0% 0.1050 68.0);
+  --warn-dim: oklch(93.0% 0.0600 85.0);
+  --down: oklch(46.0% 0.1700 33.0);
+  --down-dim: oklch(93.0% 0.0400 33.0);
+  --idle: oklch(44.0% 0.0300 265.0);
+  --idle-dim: oklch(93.2% 0.0110 264.0);
+
+  /* ON AIR: the dark theme's lamp, unchanged. Only the unlit housing is pale. */
+  --tally: oklch(56.5% 0.2300 28.5);
+  --tally-foreground: oklch(99.0% 0.0040 28.0);
+  --tally-dim: oklch(92.0% 0.0500 28.5);
+
+  /* --- IDENTITY, NEVER STATUS. --- */
+  --cat-cyan: oklch(45.0% 0.0900 217.0);
+  --cat-cyan-dim: oklch(92.0% 0.0300 217.0);
+
+  /* --- BROADCAST METER. A pale trough, deeper zones. --- */
+  --meter-low: oklch(52.0% 0.1500 150.0);
+  --meter-mid: oklch(57.5% 0.1250 105.0);
+  --meter-peak: oklch(46.0% 0.1700 33.0);
+  --meter-bg: oklch(90.0% 0.0100 264.0);
+  --meter-grid: oklch(80.0% 0.0160 264.0);
+  --meter-hold: oklch(21.0% 0.0200 265.0);
+
+  /* = --down, as in dark; light ink on the deep red. */
+  --destructive: oklch(46.0% 0.1700 33.0);
+  --destructive-foreground: oklch(99.0% 0.0040 264.0);
+
+  /* A dark UI reads depth from lightness and keeps its shadows faint; a light
+     one has to draw them, in the page's own cool ink rather than black. */
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.12);
+  --shadow-overlay: 0 8px 24px -4px rgb(15 23 42 / 0.22);
+}
+
 @theme inline {
   /* MOTION, wired. The three durations and the easing below were declared in
      :root from the start and read by nothing: they were never registered here,
@@ -482,8 +582,14 @@
     border-color: var(--border);
   }
 
+  /* Native controls, scrollbars and the canvas follow the active theme. Dark
+     is the default, which is also what the public player and the OBS overlay
+     pages (which set no data-theme) have always had. */
   html {
     color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
   }
 
   body {
