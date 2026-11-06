@@ -10,6 +10,19 @@ its first tagged release.
 
 ### Fixed
 
+- **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
+  Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
+  adapter, which stamped its own account on it. Each delivery now goes to the adapter for the
+  broadcaster it names; one for a channel that is not connected here is acknowledged and dropped.
+- **A spent YouTube quota is read the same way everywhere.** Deleting or banning in YouTube chat
+  recognised only `quotaExceeded`, so `dailyLimitExceeded` (and `dailyLimitExceededUnreg`) read as
+  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons,
+  and clip publishing tells `dailyLimitExceededUnreg` (unauthenticated use) apart, advising a reconnect
+  rather than waiting for midnight.
+- **X no longer shows a stale broadcast id.** The connected-account list and planned rollover fell
+  back to the announcement mirror for X, which X never writes from a schedule, so an ended
+  broadcast could reappear as the one on air. They now use the lifecycle's recorded id only.
+
 - **Deleting the last recorded segment works once no recorder is running, as 0.11.0 said it did.**
   The exemption that lets `DELETE /recordings/{id}` take the stopped recorder's own segment
   recognised only the name earlier releases wrote (`rec-YYYYMMDD-HHMMSS.mkv`). Since 0.11.0 the
@@ -59,19 +72,6 @@ its first tagged release.
   if a platform answers with an IVS URL without `/app`, and its response says so.
 
 ### Fixed
-
-- **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
-  Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
-  adapter, which stamped its own account on it. Each delivery now goes to the adapter for the
-  broadcaster it names; one for a channel that is not connected here is acknowledged and dropped.
-- **A spent YouTube quota is read the same way everywhere.** Deleting or banning in YouTube chat
-  recognised only `quotaExceeded`, so `dailyLimitExceeded` (and `dailyLimitExceededUnreg`) read as
-  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons,
-  and clip publishing tells `dailyLimitExceededUnreg` (unauthenticated use) apart, advising a reconnect
-  rather than waiting for midnight.
-- **X no longer shows a stale broadcast id.** The connected-account list and planned rollover fell
-  back to the announcement mirror for X, which X never writes from a schedule, so an ended
-  broadcast could reappear as the one on air. They now use the lifecycle's recorded id only.
 
 - **A Kick destination with no `/app` in its URL no longer reads as a TLS failure.** IVS opens TLS,
   completes the RTMP handshake, then resets the connection when the stream key arrives as the
