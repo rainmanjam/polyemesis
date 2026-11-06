@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 const (
@@ -49,9 +50,10 @@ const (
 	// than the classic 512 bytes; Twitch caps tags at 4096 and the message at
 	// 500, and this leaves room for both plus the prefix.
 	twitchMaxLine = 16 << 10
-	// TwitchMaxMessage is Twitch's published chat message limit.
-	TwitchMaxMessage = 500
 )
+
+// TwitchMaxMessage is Twitch's published chat message limit.
+var TwitchMaxMessage = platform.Must(platform.Twitch).Chat.SendMax
 
 // TwitchConfig configures the IRC adapter.
 type TwitchConfig struct {

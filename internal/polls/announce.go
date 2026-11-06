@@ -4,16 +4,22 @@ import (
 	"fmt"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 // MaxAnnouncement is the longest message the poll sends into chat, in
-// characters: YouTube's live chat limit, the strictest of the platforms that
-// can send. Twitch and Kick allow 500, so one text fits everywhere and every
-// platform's viewers read the same words.
-const MaxAnnouncement = 200
+// characters: YouTube's live chat limit (200), which was the strictest of the
+// platforms that can send when this was written. Twitch and Kick allow 500, so
+// one text fits everywhere and every platform's viewers read the same words.
+//
+// X now sends too and stops at 140, so a start or end text of 141 to 200
+// characters is refused there. It reads YouTube's row, not the minimum over the
+// senders, because the minimum would change what operators see today; moving
+// to it is a product decision.
+var MaxAnnouncement = platform.Must(platform.YouTube).Chat.SendMax
 
 // truncate cuts s to n characters, marking the cut.
 func truncate(s string, n int) string {

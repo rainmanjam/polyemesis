@@ -1,7 +1,7 @@
 // Package automod decides what to do about a chat message.
 //
 // Only the deciding half. The acting half already exists: internal/chat's Hub
-// exposes Delete, Hide, HideLocally, Ban and Unban across four platforms, and
+// exposes Delete, Hide, HideLocally, Ban and Unban across the platforms, and
 // upstream retraction works. Nothing here performs an action itself — it
 // returns a Verdict and the caller acts, which is what keeps the audit trail
 // in one place and this package testable without a network.
@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // Action is something that can be done about a message or its author.
@@ -70,10 +71,17 @@ const (
 // Checkers is every checker, cheapest first.
 var Checkers = []Checker{CheckerRules, CheckerHistory, CheckerModel}
 
-// Platforms is every platform automod can act on.
-var Platforms = []db.Platform{
-	db.PlatformYouTube, db.PlatformTwitch, db.PlatformKick, db.PlatformFacebook,
-	db.PlatformX,
+// Platforms is every platform automod can act on: the registry rows that carry
+// a Moderation profile. Rumble is absent because its row has none: the hub
+// carries Rumble chat, but nothing was ever declared for moderating it.
+var Platforms = platformsOf(platform.Moderated())
+
+func platformsOf(rows []platform.Row) []db.Platform {
+	out := make([]db.Platform, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, db.Platform(r.Enum))
+	}
+	return out
 }
 
 // Cell is one switch: may THIS checker take THIS action on THIS platform.

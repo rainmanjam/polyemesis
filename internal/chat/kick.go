@@ -33,11 +33,13 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// KickMaxMessage is Kick's published limit on chat content.
+var KickMaxMessage = platform.Must(platform.Kick).Chat.SendMax
+
 const (
-	// KickMaxMessage is Kick's published limit on chat content.
-	KickMaxMessage = 500
 	// kickSilenceAfter is how long a connected-and-reachable adapter waits
 	// before it starts telling the operator that nothing has arrived. Long
 	// enough that a genuinely quiet ten minutes is not called an error, short

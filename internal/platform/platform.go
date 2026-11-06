@@ -23,6 +23,8 @@
 // a product decision and is listed in the refactor report, not made here.
 package platform
 
+import "sort"
+
 // Count says how a limit is counted. The same limit is counted differently by
 // different callers (YouTube's title is checked in runes at the metadata API
 // and in UTF-16 units by the clip publisher), so a row names the unit rather
@@ -72,6 +74,9 @@ type Moderation struct {
 	// Delete removes a message; TimeoutBan covers timeout and ban, which route
 	// through the same adapter method.
 	Delete, TimeoutBan bool
+	// Order is the platform's position in automod's platform list, whose order
+	// is part of the API response.
+	Order int
 }
 
 // Chat is the platform's chat-send side.
@@ -80,6 +85,9 @@ type Chat struct {
 	// means polyemesis cannot send to this platform's chat.
 	SendMax  int
 	SendUnit Count
+	// Order is the platform's position in the chat send-limits list, whose
+	// order is part of the API response.
+	Order int
 }
 
 // Text is the title and description limits at go-live.
@@ -263,3 +271,37 @@ func (r Row) APIRoot() string { return r.APIHost + r.APIPath }
 // LUFSStreaming is the programme loudness YouTube, Twitch, Spotify and the
 // other streaming normalizers target. routing re-exports it for the mixer.
 const LUFSStreaming = -14.0
+
+// Moderated returns the rows chat moderation can act on, in automod's list
+// order.
+func Moderated() []Row {
+	return ordered(func(r Row) (int, bool) {
+		if r.Moderation == nil {
+			return 0, false
+		}
+		return r.Moderation.Order, true
+	})
+}
+
+// ChatSenders returns the rows polyemesis can send chat to, in the send-limits
+// list order.
+func ChatSenders() []Row {
+	return ordered(func(r Row) (int, bool) {
+		return r.Chat.Order, r.Chat.SendMax > 0
+	})
+}
+
+func ordered(key func(Row) (int, bool)) []Row {
+	var out []Row
+	for _, r := range rows {
+		if _, ok := key(r); ok {
+			out = append(out, r)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, _ := key(out[i])
+		b, _ := key(out[j])
+		return a < b
+	})
+	return out
+}

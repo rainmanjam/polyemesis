@@ -248,3 +248,20 @@ func TestUnknownPartsAreRecognisableAsUnknown(t *testing.T) {
 		}
 	}
 }
+
+// The platform list and its order are served to the console, so they are a
+// contract; the registry is where they now come from.
+func TestPlatformsAreTheRegistrysModeratedRowsInOrder(t *testing.T) {
+	want := []db.Platform{db.PlatformYouTube, db.PlatformTwitch, db.PlatformKick, db.PlatformFacebook, db.PlatformX}
+	if len(Platforms) != len(want) {
+		t.Fatalf("Platforms = %v, want %v", Platforms, want)
+	}
+	for i := range want {
+		if Platforms[i] != want[i] {
+			t.Fatalf("Platforms = %v, want %v", Platforms, want)
+		}
+	}
+	if KnownPlatform(db.PlatformRumble) {
+		t.Error("rumble has no moderation profile, so automod does not act on it")
+	}
+}

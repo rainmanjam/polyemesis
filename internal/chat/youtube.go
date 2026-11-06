@@ -20,11 +20,13 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// YouTubeMaxMessage is the published limit on a live chat message.
+var YouTubeMaxMessage = platform.Must(platform.YouTube).Chat.SendMax
+
 const (
-	// YouTubeMaxMessage is the published limit on a live chat message.
-	YouTubeMaxMessage = 200
 	// ytBroadcastPoll is how often we look for a broadcast to attach to when
 	// there is none, and ytBroadcastPollMax is where that backs off to. Each
 	// look costs a unit, so a machine left connected overnight must not spend
