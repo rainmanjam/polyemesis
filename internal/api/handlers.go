@@ -599,15 +599,22 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	principalVaryingResponse(w)
+	// The FFmpeg document and the GPU beside it are one generation of
+	// detection, so a re-detect cannot serve a new node with the old verdicts.
+	snap := s.tools().Probed(r.Context(), true)
+	var ffmpegDoc any = s.tools()
+	if s.tools() != nil {
+		ffmpegDoc = snap.ToolsJSON()
+	}
 	out := map[string]any{
 		"version": s.version,
-		"ffmpeg":  s.tools(),
+		"ffmpeg":  ffmpegDoc,
 		// What the machine has, as opposed to what the FFmpeg build lists. It
 		// rides on /system because the two are only meaningful together: an
 		// encoder list without the hardware behind it is what made the rendition
 		// editor offer NVENC on an AMD box in the first place. Cached after the
 		// first scan, so this stays a cheap endpoint.
-		"gpu":        s.tools().GPUs(r.Context()),
+		"gpu":        snap.GPU,
 		"ingestUrl":  ingestURL,
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,

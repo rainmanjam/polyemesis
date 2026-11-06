@@ -619,7 +619,12 @@ func runDryRun(ctx context.Context, bin string, argv []string) dryRunResult {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dryRunTimeout)
 	defer cancel()
 
-	output, err := ffmpeg.CombinedOutput(runCtx, ffmpeg.Command{Name: bin, Args: res.Argv})
+	// Killing FFmpeg is not the same as getting its output pipe back -- a child
+	// inherits it -- so the wait after the kill is bounded at one second, not
+	// the shared KillGrace: the timeout above must stay close to a promise for
+	// the person waiting on this answer.
+	output, err := ffmpeg.CombinedOutput(runCtx, ffmpeg.Command{Name: bin, Args: res.Argv},
+		ffmpeg.WithWaitDelay(time.Second))
 	res.Output = truncateOutput(string(output), 4000)
 
 	switch {

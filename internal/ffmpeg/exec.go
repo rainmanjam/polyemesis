@@ -235,9 +235,9 @@ func Publish(partial, final string) error {
 // progress stream nobody keeps. Enrolled in the census like Exec's children, and
 // bounded by KillGrace the same way, so a probe that spawned something holding
 // its pipes cannot make a cancelled caller wait for ever.
-func Output(ctx context.Context, cmd Command) ([]byte, string, error) {
+func Output(ctx context.Context, cmd Command, opts ...RunOption) ([]byte, string, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	c.WaitDelay = KillGrace
+	c.WaitDelay = waitDelayOf(opts)
 	var stdout bytes.Buffer
 	stderr := &tailBuffer{max: probeStderrCap}
 	c.Stdout, c.Stderr = &stdout, stderr
@@ -245,12 +245,30 @@ func Output(ctx context.Context, cmd Command) ([]byte, string, error) {
 	return stdout.Bytes(), stderr.String(), err
 }
 
+// RunOption tunes Output and CombinedOutput.
+type RunOption func(*runOptions)
+
+type runOptions struct{ waitDelay time.Duration }
+
+// WithWaitDelay bounds how long the call waits for the output pipes after the
+// child is killed, in place of KillGrace. For a caller that answers a person
+// and cannot afford KillGrace of silence behind a pipe something else holds.
+func WithWaitDelay(d time.Duration) RunOption { return func(o *runOptions) { o.waitDelay = d } }
+
+func waitDelayOf(opts []RunOption) time.Duration {
+	o := runOptions{waitDelay: KillGrace}
+	for _, f := range opts {
+		f(&o)
+	}
+	return o.waitDelay
+}
+
 // CombinedOutput runs a command to completion and returns stdout and stderr
 // interleaved as one stream, for a caller that quotes what FFmpeg said (the
 // expert dry-run). Enrolled and bounded by KillGrace exactly like Output.
-func CombinedOutput(ctx context.Context, cmd Command) ([]byte, error) {
+func CombinedOutput(ctx context.Context, cmd Command, opts ...RunOption) ([]byte, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	c.WaitDelay = KillGrace
+	c.WaitDelay = waitDelayOf(opts)
 	var buf bytes.Buffer
 	c.Stdout, c.Stderr = &buf, &buf
 	err := RunEnrolled(c, probeKind)

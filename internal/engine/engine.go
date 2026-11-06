@@ -3406,13 +3406,16 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 // and an unprobed encoder both mean "we do not know", and detection that could
 // not answer must never be the thing that stops a stream.
 func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error {
-	if tools == nil {
-		return nil
-	}
-	if len(tools.VideoEncoders) > 0 && !tools.HasEncoder(string(encoder)) {
+	return renditionEncoderProblemIn(tools.Probed(context.Background(), false), encoder)
+}
+
+// renditionEncoderProblemIn is renditionEncoderProblem against one generation
+// of detection, so a caller that also needs the GPU from it reads both at once.
+func renditionEncoderProblemIn(snap ffmpeg.Probed, encoder db.VideoEncoder) error {
+	if snap.Listed() && !snap.HasEncoder(string(encoder)) {
 		return fmt.Errorf("this FFmpeg build has no %s encoder", encoder)
 	}
-	works, reason := tools.EncoderWorks(string(encoder))
+	works, reason := snap.EncoderWorks(string(encoder))
 	if works || ffmpeg.IsNotProbed(reason) {
 		return nil
 	}
@@ -3442,7 +3445,11 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		e.log.Error("start rendition", "rendition", row.Name, "err", err)
 	}
 
-	if err := renditionEncoderProblem(e.tools, row.Encoder); err != nil {
+	// ONE GENERATION of detection for the whole start: the verdict that lets
+	// this encoder run and the render node it is told to use must come from the
+	// same probe, or a re-detect in between starts it on a node nobody proved.
+	snap := e.tools.Probed(context.Background(), isVAAPIEncoder(row.Encoder))
+	if err := renditionEncoderProblemIn(snap, row.Encoder); err != nil {
 		fail(err)
 		return
 	}
@@ -3490,7 +3497,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		fail(err)
 		return
 	}
-	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row, snap), e.cfg.DataDir)
 	// An FFmpeg with no drawtext filter must not be handed one.
 	//
 	// This is not a cosmetic guard. Found by running the renditions acceptance
@@ -6122,8 +6129,9 @@ func clearDir(dir string) {
 	}
 }
 
-// vaapiDevice resolves the render node a VAAPI rendition should use, asking
-// Tools at every start so a hardware re-detect reaches a running engine.
+// vaapiDevice is the render node a VAAPI rendition should use, from the
+// detection generation the start already read (Tools.Probed at every start, so
+// a hardware re-detect reaches a running engine).
 // Anything other than a VAAPI encoder returns empty without asking.
 //
 // An empty result is the safe answer, not a failure: FFmpeg then uses its own
@@ -6131,11 +6139,11 @@ func clearDir(dir string) {
 // existed. Being wrong in the restrictive direction here -- refusing to start a
 // rendition because a device string could not be resolved -- would be worse
 // than the software fallback it is meant to avoid.
-func (e *Engine) vaapiDevice(r *db.Rendition) string {
-	if !strings.HasSuffix(string(r.Encoder), "_vaapi") {
+func (e *Engine) vaapiDevice(r *db.Rendition, snap ffmpeg.Probed) string {
+	if !isVAAPIEncoder(r.Encoder) {
 		return ""
 	}
-	dev := e.tools.GPUs(context.Background()).VAAPIDevice
+	dev := snap.GPU.VAAPIDevice
 	if dev == "" {
 		e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
 	} else {
@@ -6143,6 +6151,8 @@ func (e *Engine) vaapiDevice(r *db.Rendition) string {
 	}
 	return dev
 }
+
+func isVAAPIEncoder(e db.VideoEncoder) bool { return strings.HasSuffix(string(e), "_vaapi") }
 
 // reconcileCount is how many times Reconcile has been entered. Test-only; see
 // the field's comment for why it is a field.

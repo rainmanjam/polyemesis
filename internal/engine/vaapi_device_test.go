@@ -21,17 +21,25 @@ func TestVAAPIDeviceFollowsAHardwareRedetect(t *testing.T) {
 	e := &Engine{tools: tools, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	r := &db.Rendition{Encoder: db.EncoderVAAPIH264}
 
-	if got := e.vaapiDevice(r); got != node {
+	first := tools.Probed(context.Background(), true)
+	if got := e.vaapiDevice(r, first); got != node {
 		t.Fatalf("first vaapiDevice = %q, want %q", got, node)
 	}
 
+	// A re-detect between taking the generation and using it: the start keeps
+	// the node its verdict was read with. Two separate reads would have
+	// returned the new, unproved node here.
+	old := node
 	node = "/dev/dri/renderD129"
 	tools.RefreshEncoderCapabilities(context.Background())
-	if got := e.vaapiDevice(r); got != node {
+	if got := e.vaapiDevice(r, first); got != old {
+		t.Errorf("a start straddling a re-detect used %q, want the proved node %q", got, old)
+	}
+	if got := e.vaapiDevice(r, tools.Probed(context.Background(), true)); got != node {
 		t.Errorf("after a re-detect vaapiDevice = %q, want %q", got, node)
 	}
 
-	if got := e.vaapiDevice(&db.Rendition{Encoder: db.EncoderX264}); got != "" {
+	if got := e.vaapiDevice(&db.Rendition{Encoder: db.EncoderX264}, first); got != "" {
 		t.Errorf("software rendition got render node %q", got)
 	}
 }

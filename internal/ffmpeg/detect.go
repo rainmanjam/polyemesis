@@ -166,10 +166,14 @@ type Tools struct {
 // MarshalJSON serialises Tools under the read lock, so the /api/v1/system
 // handler cannot race a refresh that is rewriting the probe results.
 func (t *Tools) MarshalJSON() ([]byte, error) {
-	// The local type sheds the method set; without it this recurses forever.
-	type alias Tools
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	return t.marshalLocked()
+}
+
+func (t *Tools) marshalLocked() ([]byte, error) {
+	// The local type sheds the method set; without it this recurses forever.
+	type alias Tools
 	return json.Marshal((*alias)(t))
 }
 
