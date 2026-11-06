@@ -33,7 +33,7 @@ const tokenDisplayLength = len(TokenPrefix) + 8
 // ScopeAdmin is everything the signed-in operator can do. ScopeOBS and the two
 // MCP scopes are the narrow exceptions, and they are narrow in the only
 // direction that keeps the rule restatable: each reaches ONE route and nothing
-// else, not even a read (see requireScope's obsScopePatterns, and
+// else, not even a read (see requireScope's the obsScope flag, and
 // internal/api's authenticate for /mcp). A model with a permission per route
 // needs every one of the API's routes classified, and every route added
 // afterwards classified correctly by whoever adds it -- which is the same

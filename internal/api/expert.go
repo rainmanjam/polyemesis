@@ -402,7 +402,7 @@ func quoteArgv(bin string, args []string) string {
 // is now a lower-privileged principal inside the same requireAuth boundary, and
 // it is refused both streamKey on /destinations and these routes outright --
 // GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
-// in readScopeDeniedPatterns. Since the poka-yoke audit of 2026-11-04 no
+// in the readDenied flag. Since the poka-yoke audit of 2026-11-04 no
 // token of either scope reaches these routes at all (they are session-only);
 // the signed-in operator, who can rotate the key anyway, gets the exact
 // command.
@@ -790,7 +790,7 @@ func parseExpertRequest(req expertRequest, row *db.Destination) (in, out []strin
 func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
 	// THIS RESPONSE CONTAINS THE STREAM KEY, AND IT DIVERGES BY PRINCIPAL.
 	//
-	// readScopeDeniedPatterns lists this route precisely because, in redact.go's
+	// the readDenied flag lists this route precisely because, in redact.go's
 	// words, "its response is the resolved FFmpeg argv, and the argv contains the
 	// destination's stream key". So the same URL answers 200-with-the-key for a
 	// session or admin token and 403 for a read-scoped one — the exact shape

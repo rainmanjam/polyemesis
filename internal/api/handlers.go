@@ -675,7 +675,7 @@ func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int6
 
 // updateFeedURL is the release feed consulted. A var so a test can point it at
 // a local server; nothing reads it until an operator asks for a check.
-var updateFeedURL = "https://api.github.com/repos/rainmanjam/polyemesis/releases/latest"
+var updateFeedURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
 
 const (
 	// updateCheckTTL keeps a bored operator clicking Check from spending the 60

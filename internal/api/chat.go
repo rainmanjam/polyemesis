@@ -669,7 +669,7 @@ const chatFlagsNote = "Messages automod flagged since this server started, newes
 // Automod's findings used to go to the log and nowhere else, so the Chat page
 // could not show a moderator what it had found. This reads the Hub's bounded
 // review list. It carries each flagged message's text, which is why it is in
-// readScopeDeniedPatterns with the rest of the chat reads.
+// the readDenied flag with the rest of the chat reads.
 func (s *Server) handleChatFlags(w http.ResponseWriter, r *http.Request) {
 	limit := chatLimitParam(r)
 	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))

@@ -777,7 +777,7 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/library/search": denied(),
 	// Staging-readiness row 32: what viewers wrote is content, and a read
 	// token is metadata. These four were swept -- a read token reached them
-	// and got the scrollback -- until readScopeDeniedPatterns listed them.
+	// and got the scrollback -- until the readDenied flag listed them.
 	"GET /api/v1/chat":          denied(),
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
@@ -2529,7 +2529,7 @@ func inspectProcessLog(t *testing.T, _ shapeRig) shapeObservation {
 	}
 }
 
-// readScopeWriteSweep is the non-GET value sweep: the routes readScopeWritePatterns
+// readScopeWriteSweep is the non-GET value sweep: the routes the readWrite flag
 // admits a read-scoped token to, which therefore build a real body for it.
 func readScopeWriteSweep() []struct {
 	method, pattern, path string
@@ -2566,7 +2566,7 @@ func readScopeWriteSweep() []struct {
 // TestReadScopeWriteRoutesCarryNoCredential is the value half for the non-GET
 // routes a read token can actually reach.
 //
-// readScopeWritePatterns is a hand-built allowlist of POSTs "that answer a
+// the readWrite flag is a hand-built allowlist of POSTs "that answer a
 // question rather than change anything" -- and its own comment records that the
 // last audit found a route on it whose ANSWER was the destination's stream key.
 // A list reasoned about in prose is exactly the thing that needs its bytes read.
@@ -2584,7 +2584,7 @@ func TestReadScopeWriteRoutesCarryNoCredential(t *testing.T) {
 		bearer(read)(r)
 		w := do(t, h, r)
 		if w.Code == http.StatusForbidden {
-			t.Errorf("%s %s returned 403 to a read token, but readScopeWritePatterns "+
+			t.Errorf("%s %s returned 403 to a read token, but the readWrite flag "+
 				"lists it. Either the list or this sweep is out of date.", c.method, c.path)
 			continue
 		}
@@ -2661,7 +2661,7 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 		swept["GET "+patternOf(t, s, path)] = true
 	}
 	// The NON-GET routes a read scope may still reach. They are swept for
-	// values, not excused: readScopeWritePatterns lets a read token POST to them
+	// values, not excused: the readWrite flag lets a read token POST to them
 	// and they return a body, so the method rule that covers every other non-GET
 	// does not cover these.
 	for _, c := range readScopeWriteSweep() {
@@ -2694,7 +2694,7 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 			readScopeIsRefused(t, h, method, pattern):
 			// DENIED BY METHOD, and PROVEN by driving it rather than asserted
 			// from the middleware's source. requireScope refuses every non-GET
-			// to a read scope unless the pattern is in readScopeWritePatterns,
+			// to a read scope unless the pattern is in the readWrite flag,
 			// so the handler never runs and no body is ever built -- but "the
 			// middleware says so" is exactly the kind of claim that was true of
 			// three other things in this PR and wrong about the fourth. The

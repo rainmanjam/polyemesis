@@ -244,9 +244,9 @@ func TestApplyingAPresetWithNoBodyUsesTheDefaultsTheListingAdvertises(t *testing
 }
 
 // TestAReadTokenCompilesARealRoutingGraph pins the unusual half of the scope
-// rules: POST /routing/compile is on readScopeWritePatterns, so a read-scoped
+// rules: POST /routing/compile is on the readWrite flag, so a read-scoped
 // token really can drive it. It is one of TWO -- POST /version/check is the
-// other (api.go's readScopeWritePatterns) -- and this comment said "every other
+// other (api.go's the readWrite flag) -- and this comment said "every other
 // POST is 403" until a reviewer checked. Nearly-true is the shape that gets
 // quoted; the list is two entries long and is worth naming rather than
 // summarising.
@@ -274,7 +274,7 @@ func TestAReadTokenCompilesARealRoutingGraph(t *testing.T) {
 	apitailReached(t, w, "a read-scoped token", "POST /routing/compile")
 	if w.Code != http.StatusOK {
 		t.Fatalf("a read token got %d from POST /routing/compile; it is on "+
-			"readScopeWritePatterns and must reach the handler: %s",
+			"the readWrite flag and must reach the handler: %s",
 			w.Code, w.Body.String())
 	}
 

@@ -26,7 +26,7 @@ import (
 // and the scrape's audience block. The math is internal/analytics; the
 // storage is internal/db/analytics.go.
 //
-// EVERY ROUTE HERE IS ON readScopeDeniedPatterns. The live picture is cheap
+// EVERY ROUTE HERE IS ON the readDenied flag. The live picture is cheap
 // and makes no outbound call -- it is the sampler's last tick -- but the
 // feature is admin-only by decision: the report names the stream's top
 // chatters, which is who said things in chat, and the per-account rows name
@@ -463,13 +463,8 @@ func (s *Server) AnalyticsLoop(ctx context.Context) {
 }
 
 func (s *Server) newAudienceSampler() *analytics.Sampler {
-	// Late-bound, so a test can set the clock seam after New.
-	now := func() time.Time {
-		if s.analyticsNow != nil {
-			return s.analyticsNow()
-		}
-		return time.Now()
-	}
+	// Late-bound, so a test can set the clock after New.
+	now := s.clock
 	var log *slog.Logger
 	if s.log != nil {
 		log = s.log.With("component", "analytics")

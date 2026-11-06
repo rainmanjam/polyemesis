@@ -86,7 +86,7 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 	// asks it. Chat is content a viewer wrote and the other two name the viewer
 	// an action was taken against, so a read token gets none of them on either
 	// surface (staging-readiness row 32); the REST half is
-	// readScopeDeniedPatterns.
+	// the readDenied flag.
 	// Text authored elsewhere and passed through. A caption can contain
 	// anything that was said, including a key read out loud.
 	events.TypeCaption: wsRedactText,
