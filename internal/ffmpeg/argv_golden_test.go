@@ -119,6 +119,7 @@ func TestOneShotProbesHonourTheLogLevelOverride(t *testing.T) {
 // destination keeps -nostdin and runs the command it always did, and the preview
 // child, which never takes commands, keeps it everywhere.
 func TestWindowsDestinationKeepsNostdin(t *testing.T) {
+	PinLiveCommandsGOOS(t, "linux")
 	kids := ffmpegChildren()
 	if slices.Contains(kids["destination_rtmp"], "-nostdin") {
 		t.Fatal("the pinned Linux destination carries -nostdin")
