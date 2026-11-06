@@ -30,9 +30,11 @@ package api
 // be testing with.
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -763,7 +765,7 @@ func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	h, ok := s.kickChatHandler()
+	h, ok := s.kickChatHandler(r)
 	if !ok {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -771,8 +773,16 @@ func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTP(w, r)
 }
 
-// kickChatHandler finds the attached Kick adapter's receiver.
-func (s *Server) kickChatHandler() (http.Handler, bool) {
+// kickChatHandler finds the receiver of the Kick adapter a delivery belongs to.
+//
+// Kick posts every connected channel to one callback URL and the adapter stamps
+// its own account on what it ingests, so a delivery has to reach the adapter for
+// the broadcaster it names. A delivery for a channel with no adapter here is
+// dropped (the caller answers 200); one that names no channel at all goes to the
+// first adapter, which counts it as unreadable. GET probes carry no body and go
+// to the first adapter, as before.
+func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
+	var kicks []*chat.KickAdapter
 	for _, st := range s.chat.Statuses() {
 		if st.Platform != db.PlatformKick {
 			continue
@@ -782,6 +792,26 @@ func (s *Server) kickChatHandler() (http.Handler, bool) {
 			continue
 		}
 		if k, ok := a.(*chat.KickAdapter); ok {
+			kicks = append(kicks, k)
+		}
+	}
+	if len(kicks) == 0 {
+		return nil, false
+	}
+	if r.Method != http.MethodPost || len(kicks) == 1 {
+		return kicks[0].Handler(), true
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return kicks[0].Handler(), true
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	id := chat.KickDeliveryBroadcaster(body)
+	if id == 0 {
+		return kicks[0].Handler(), true
+	}
+	for _, k := range kicks {
+		if k.BroadcasterUserID() == id {
 			return k.Handler(), true
 		}
 	}
