@@ -55,6 +55,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // RumbleAPIBase is Rumble's live-stream API. Overridden in tests.
@@ -73,7 +74,7 @@ const RumbleAPIBase = "https://rumble.com/-livestream-api"
 // Named here rather than in internal/api because the adapter's own "not
 // configured" message has to name it, and internal/chat cannot import the
 // package that wires it up.
-const RumbleChatKeyEnv = "RUMBLE_CHAT_API_KEY"
+const RumbleChatKeyEnv = startupenv.RumbleChatKeyVar
 
 const (
 	// rumbleDefaultPoll is how often a live chat is read. Rumble publishes no

@@ -48,6 +48,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -556,7 +557,9 @@ type Server struct {
 	gov     *jobs.Governor
 	whisper *transcribe.Tools
 
-	// publishGates and publishConfirm belong to clip publishing (publish.go).
+	// env is the startup environment, read once by main. publishGates is its
+	// clip-publishing slice; publishConfirm belongs to clip publishing too.
+	env            startupenv.Env
 	publishGates   publish.Gates
 	publishConfirm *confirmBook
 
@@ -805,9 +808,9 @@ type Options struct {
 	// is nil-receiver safe for exactly this reason.
 	Whisper *transcribe.Tools
 
-	// PublishGates are the operator switches for clip publishing; the zero
-	// value leaves X off.
-	PublishGates publish.Gates
+	// Env is the process environment switches, read once at startup (see
+	// startupenv). The zero value leaves every switch off and every key empty.
+	Env startupenv.Env
 	// Chat is the chat Hub. Optional: without it the chat page reports that no
 	// platform is connected and still shows the stored history.
 	Chat *chat.Hub
@@ -864,6 +867,11 @@ type Options struct {
 // New creates the server.
 func New(o Options) *Server {
 	var s *Server
+	// One provider set for the server's life, carrying X's Livestream gate from
+	// the startup environment. A test that wants other hosts hands its own.
+	if !o.Providers.Configured() {
+		o.Providers = oauth.NewSet(oauth.WithXLivestream(o.Env.XLivestream))
+	}
 	// Config.Validate has already refused a malformed trustedProxies, so an
 	// error here means a caller skipped it; loopback-only is the safe reading.
 	extra, _ := o.Config.TrustedProxyPrefixes()
@@ -928,7 +936,8 @@ func New(o Options) *Server {
 		),
 
 		// Clip publishing (publish.go).
-		publishGates:   o.PublishGates,
+		env:            o.Env,
+		publishGates:   publish.Gates{XPublish: o.Env.XPublish},
 		publishConfirm: newConfirmBook(time.Now),
 	}
 	// nil for both probes means "ask the real environment and the real

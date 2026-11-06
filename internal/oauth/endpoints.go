@@ -46,6 +46,14 @@ type ProviderOption func(*endpoints)
 type endpoints struct {
 	api  string
 	auth string
+	// xLivestream is the operator's Livestream gate, read only by X.
+	xLivestream bool
+}
+
+// WithXLivestream sets X's Livestream gate for a provider set. Production hands
+// it the switch startupenv read at startup; false is the default.
+func WithXLivestream(open bool) ProviderOption {
+	return func(e *endpoints) { e.xLivestream = open }
 }
 
 // WithBaseURL points every HTTP call the provider makes, on both the
@@ -139,6 +147,10 @@ type Set struct {
 func NewSet(opts ...ProviderOption) Set {
 	return Set{byPlatform: ProvidersWith(opts...)}
 }
+
+// Configured reports whether the set was built by NewSet. The zero Set is not:
+// it stands for production and builds its providers on demand.
+func (s Set) Configured() bool { return s.byPlatform != nil }
 
 // All returns the providers keyed by platform.
 func (s Set) All() map[db.Platform]Provider {

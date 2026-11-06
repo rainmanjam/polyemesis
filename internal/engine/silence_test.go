@@ -123,7 +123,7 @@ func TestSilenceRestartsEveryConsumer(t *testing.T) {
 	row := testDestination(1, nil)
 	compiled := routing.Result{FilterComplex: "[0:a:0]anull[out]", OutLabel: "[out]"}
 
-	if destSpec(row, compiled, "") == destSpec(row, compiled, "silence-sig") {
+	if destSpec(row, compiled, "", false) == destSpec(row, compiled, "silence-sig", false) {
 		t.Error("a passthrough destination does not restart when the silence tier appears")
 	}
 

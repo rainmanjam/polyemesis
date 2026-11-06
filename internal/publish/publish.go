@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"unicode/utf16"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // JobKind is what a publish is registered as on the queue.
@@ -49,7 +49,7 @@ const (
 // XPublishEnv is the operator's switch for publishing to X. It is separate from
 // POLYEMESIS_X_LIVESTREAM on purpose: that one says X has whitelisted the app
 // for Livestream, and nothing about it says posting is wanted.
-const XPublishEnv = "POLYEMESIS_X_PUBLISH"
+const XPublishEnv = startupenv.XPublishVar
 
 // XGateCopy is the sentence shown while X publishing is off.
 const XGateCopy = "X publishing is switched off. It stays off until an operator turns it on in the server's environment."
@@ -57,15 +57,6 @@ const XGateCopy = "X publishing is switched off. It stays off until an operator 
 // Gates are the operator switches. The zero value has everything gated off.
 type Gates struct {
 	XPublish bool
-}
-
-// GatesFromEnv reads the switches. Anything other than 1 or true leaves X off.
-func GatesFromEnv() Gates {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(XPublishEnv))) {
-	case "1", "true":
-		return Gates{XPublish: true}
-	}
-	return Gates{}
 }
 
 // Meta is what the human reviews and confirms.

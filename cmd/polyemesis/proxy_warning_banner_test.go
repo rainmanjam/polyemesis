@@ -22,7 +22,7 @@ func TestTheBannerWarnsWhenProxyHeadersAreTrustedOnAPublicListener(t *testing.T)
 	cfg.AddrFromFlag = true
 
 	out := captureStdout(t, func() {
-		if err := reportStartup(newLogger("error"), cfg, provider, store, tools); err != nil {
+		if err := reportStartup(newLogger("error"), cfg, provider, store, settingsOf(t, store), tools); err != nil {
 			t.Errorf("reportStartup: %v", err)
 		}
 	})
@@ -32,7 +32,7 @@ func TestTheBannerWarnsWhenProxyHeadersAreTrustedOnAPublicListener(t *testing.T)
 
 	cfg.Addr = "127.0.0.1:8080"
 	out = captureStdout(t, func() {
-		if err := reportStartup(newLogger("error"), cfg, provider, store, tools); err != nil {
+		if err := reportStartup(newLogger("error"), cfg, provider, store, settingsOf(t, store), tools); err != nil {
 			t.Errorf("reportStartup: %v", err)
 		}
 	})

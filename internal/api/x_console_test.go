@@ -19,6 +19,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // TestTellingTheXBroadcastReachesTheAccountsRunningAdapter: setXBroadcast is the coordinator's pointChat. It finds
@@ -170,10 +171,12 @@ func TestTheGoLiveTitleCannotChangeWhileTheXBroadcastIsLive(t *testing.T) {
 //
 // MUTATION: the gate fill removed from handlePlatformGuides. Observed: FAIL, the X guide had no livestreamGate.
 func TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen(t *testing.T) {
-	for _, tc := range []struct{ env, want string }{{"", "closed"}, {"1", "open"}} {
+	for _, tc := range []struct {
+		open bool
+		want string
+	}{{false, "closed"}, {true, "open"}} {
 		t.Run(tc.want, func(t *testing.T) {
-			t.Setenv("POLYEMESIS_X_LIVESTREAM", tc.env)
-			_, h, _ := testServerWith(t, Options{Providers: oauth.NewSet()})
+			_, h, _ := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithXLivestream(tc.open))})
 			sign := login(t, h)
 			r := jsonRequest(t, http.MethodGet, "/api/v1/platforms/guides", nil)
 			sign(r)
@@ -202,6 +205,21 @@ func TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen(t *testing.T) {
 			}
 			if !seen {
 				t.Fatal("no X guide")
+			}
+		})
+	}
+}
+
+// The gate reaches X the way main hands it over: through Options.Env alone, with
+// no provider set of the test's own. The server builds the production set
+// itself and carries the switch into it.
+func TestTheStartupEnvironmentOpensTheXGateInTheServersOwnProviderSet(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		want := map[bool]string{false: "closed", true: "open"}[open]
+		t.Run(want, func(t *testing.T) {
+			s, _, _ := testServerWith(t, Options{Env: startupenv.Env{XLivestream: open}})
+			if got := s.livestreamGate(db.PlatformX); got != want {
+				t.Errorf("livestreamGate(X) = %q, want %q", got, want)
 			}
 		})
 	}

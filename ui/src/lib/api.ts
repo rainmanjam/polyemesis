@@ -524,6 +524,12 @@ export function uploadMedia(
  *  else moves the stored version past the one recorded, and still conflicts. */
 const settingsVersionsReplacedHere = new Map<string, SettingsVersion>();
 
+/** The one place settings set the console's display zone. */
+function noteDisplayZone(s: Settings): Settings {
+  setDisplayTimeZone(s.display?.timeZone);
+  return s;
+}
+
 export const api = {
   // --- automod ---
   automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
@@ -692,20 +698,13 @@ export const api = {
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
   // --- settings ---
-  /* THE CLOCKS FOLLOW THE SETTINGS, and this is the only place they can.
-   *
-   * Five pages fetch settings independently. Wiring the display zone into any
-   * one of them would leave the console reading in a different zone depending
-   * on which page you happened to land on first -- which is a more confusing
-   * version of the problem the setting exists to solve. Doing it in the client
-   * means no caller can forget, including one written later.
-   *
-   * On the write path too, so a save takes effect on the screen that made it
-   * rather than at the next reload. */
+  /* THE CLOCKS FOLLOW THE SETTINGS: every settings read and every save sets the
+   * display zone, through the one function below, so a zone changed from
+   * another browser or an API client shows up as soon as this console fetches
+   * settings again. App also reads it once at start, before any page draws, so
+   * the first paint does not depend on which page happens to read settings. */
   getSettings: async (): Promise<Settings> => {
-    const s = await get<Settings>("/settings");
-    setDisplayTimeZone(s.display?.timeZone);
-    return s;
+    return noteDisplayZone(await get<Settings>("/settings"));
   },
   /** Saves the settings and returns THE SETTINGS, not the whole response.
    *
@@ -744,10 +743,7 @@ export const api = {
       throw err;
     }
     const { reload: _reload, ...saved } = result;
-    // The screen that made the change reads in the new zone immediately,
-    // rather than at the next reload -- see getSettings above.
-    setDisplayTimeZone((saved as Settings).display?.timeZone);
-    return saved as Settings;
+    return noteDisplayZone(saved as Settings);
   },
   /** The MQTT broker password, on its own route.
    *

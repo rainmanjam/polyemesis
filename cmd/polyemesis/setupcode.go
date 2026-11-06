@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -17,12 +16,12 @@ import (
 //
 // Before the listener opens, not after: a server that could answer setup for
 // even a moment without a code would reopen the race the code closes.
-func prepareSetupCode(cfg config.Config, store *db.DB) (*auth.SetupCode, error) {
+func prepareSetupCode(cfg config.Config, store *db.DB, preset string) (*auth.SetupCode, error) {
 	has, err := store.HasUser()
 	if err != nil {
 		return nil, err
 	}
-	return auth.PrepareSetupCode(cfg.DataDir, has, os.Getenv(auth.SetupCodeEnv))
+	return auth.PrepareSetupCode(cfg.DataDir, has, preset)
 }
 
 // reportSetupCode prints the code, once, under the startup banner.

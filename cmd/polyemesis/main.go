@@ -33,11 +33,11 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
-	"github.com/rainmanjam/polyemesis/internal/publish"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
 
@@ -314,7 +314,17 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
-	setupCode, err := prepareSetupCode(cfg, store)
+	// The one read of the process environment's switches, keys and presets.
+	// Handed to the setup code, the job tier, the engines and the API, so they
+	// agree and none calls Getenv.
+	env := startupenv.FromEnv()
+	setupCode, err := prepareSetupCode(cfg, store, env.SetupCode)
+	if err != nil {
+		return err
+	}
+	// The one read of the stored settings at boot, before anything is built from
+	// them. Every consumer below is handed this value.
+	settings, err := bootSettings(store, cfg.DBPath())
 	if err != nil {
 		return err
 	}
@@ -331,6 +341,7 @@ func run(h *hooks) error {
 	// up and serves the Sources page, which is the only screen that can get
 	// the operator out of this state.
 	eng := engine.NewManager(log, cfg, store, tools, bus)
+	eng.SetFacebookCaptions(env.FacebookCaptions)
 	h.progress("starting the streaming engine")
 	if err := eng.Start(ctx); err != nil {
 		return fmt.Errorf("starting the streaming engine: %w", err)
@@ -339,7 +350,7 @@ func run(h *hooks) error {
 	// After the engine, because the governor's sensors read from it, and before
 	// the API, which cannot be given a queue after its handlers are built.
 	h.progress("starting the background job queue")
-	pp := startPostProd(ctx, log, cfg, store, box, eng, tools)
+	pp := startPostProd(ctx, log, cfg, settings, env, store, box, eng, tools)
 	guard.attach(cancel, pp.waitWithin)
 
 	// Retained MQTT telemetry. Started unconditionally and inert until an
@@ -368,14 +379,6 @@ func run(h *hooks) error {
 		chat.WithLogger(log),
 	)
 	defer hub.Close()
-	// Retention is an operator setting, and the stored value has to be applied
-	// at startup as well as on save. Without this a longer window would work
-	// until the first restart and then quietly revert to the built-in two
-	// hours, taking the moderator's user-card history with it.
-	//
-	// A failed read leaves the Hub on its own defaults rather than stopping the
-	// server: chat history is the most expendable data here, and refusing to
-	// boot over it would be a wildly disproportionate response.
 	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could
 	// rebuild a model connector. ApplyAutomod runs here at boot and again on
 	// every settings save; the connector is rebuilt each time and the hourly
@@ -384,21 +387,6 @@ func run(h *hooks) error {
 	// And the secondary model checker's, for the same reason and kept apart:
 	// each checker spends against the ceiling the operator set for it.
 	automodSecondaryBudget := automod.NewBudget()
-
-	if s, err := store.GetSettings(); err == nil {
-		api.ApplyChatRetention(hub, s.Chat)
-		// Automod, for the same reason: a matrix armed in the UI that quietly
-		// reverts on restart is worse than one that never worked, because the
-		// operator has already stopped checking it.
-		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget, automodSecondaryBudget)
-		// Alert delivery, for the third time and the same reason. Safe to call
-		// before the engines exist: the Manager remembers the budget and hands
-		// it to each engine as it is created, so this does not depend on
-		// running after Start.
-		api.ApplyAlertSettings(eng, s.Alerts)
-	} else {
-		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
-	}
 
 	// Lifecycle webhooks. One dispatcher for the whole process, handed to every
 	// engine: a sequence number and a delivery log belong to the endpoint, and
@@ -484,8 +472,8 @@ func run(h *hooks) error {
 		// The post-production tier. Optional in the API's eyes; wired here so
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
-		// The same switches the publish worker was registered with.
-		PublishGates: publish.GatesFromEnv(),
+		// The very value the publish worker and the engines were given.
+		Env: env,
 	})
 	// The publish worker refreshes tokens through the server's own path.
 	pp.publishTokens.Set(srv.PublishTokens())
@@ -497,6 +485,11 @@ func run(h *hooks) error {
 	// would spend quota nobody counted. TestTheQuotaMeterIsInstalledBefore-
 	// AnyLoopCanCallYouTube holds the order.
 	api.InstallYouTubeMeter(srv)
+	// The stored settings, applied the way a save applies them: the log's zone,
+	// chat retention, the YouTube allowance, automod and alert delivery. A
+	// boot that skipped one would revert an operator's choice at the first
+	// restart. Before any loop and before chat attaches.
+	srv.ApplySettings(settings)
 	// A stuck offload item is raised on the alert, webhook and events-stream
 	// paths the server owns, which exist only now.
 	offloader.SetStuckHook(srv.OffloadStuck)
@@ -589,7 +582,7 @@ func run(h *hooks) error {
 		}
 	}
 
-	if err := reportStartup(log, cfg, provider, store, tools); err != nil {
+	if err := reportStartup(log, cfg, provider, store, settings, tools); err != nil {
 		return err
 	}
 	reportSetupCode(os.Stdout, log, setupCode)
@@ -923,7 +916,33 @@ func redirectHost(cfg config.Config, requestHost string) string {
 // and the warning would then describe a port the redirect does not use.
 func listenPort(addr string) string { return config.ListenPort(addr) }
 
-func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider, store *db.DB, tools *ffmpeg.Tools) error {
+// bootSettings is the one read of the stored settings at startup. A row that
+// cannot be read stops the boot: the alternative, built-in defaults, would
+// shorten chat retention, drop the operator's automod and alert choices and
+// loosen the job tier's policy, all before anything says so.
+//
+// The error says how to get out, because the operator reading it has a server
+// that will not start: docs/CONFIGURATION.md, "The data directory".
+// shellQuote single-quotes a path so a data directory with a space in it can be
+// pasted into the recovery command as written.
+func shellQuote(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
+func bootSettings(store *db.DB, dbPath string) (db.Settings, error) {
+	s, err := store.GetSettings()
+	if err != nil {
+		quoted := shellQuote(dbPath)
+		return db.Settings{}, fmt.Errorf("the stored settings cannot be read, so polyemesis will not start on guessed ones: %w. "+
+			"To recover, stop the server and either restore %s from a backup (check the copy with `polyemesis -verify-backup <dir>`), "+
+			"or reset only the settings to their defaults, keeping sources and destinations, with "+
+			"`sqlite3 %s \"DELETE FROM settings WHERE id = 1\"` and start again. See docs/CONFIGURATION.md, \"The data directory\"",
+			err, quoted, quoted)
+	}
+	return s, nil
+}
+
+func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider, store *db.DB, settings db.Settings, tools *ffmpeg.Tools) error {
 	hasUser, err := store.HasUser()
 	if err != nil {
 		return err
@@ -968,21 +987,6 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 			"action", "if one of them was meant for RTMP or pull, change its ingest on the Sources page")
 	}
 
-	settings, err := store.GetSettings()
-	if err != nil {
-		return err
-	}
-	// The log's zone, as early as the store can answer for it. Lines written
-	// before this -- the ones about opening the database -- are UTC, which is
-	// what every line was before this setting existed.
-	if tz := strings.TrimSpace(settings.Display.TimeZone); tz != "" {
-		if loc, lerr := time.LoadLocation(tz); lerr == nil {
-			logtz.Set(loc)
-		} else {
-			log.Warn("display time zone does not resolve; logging in UTC",
-				"zone", tz, "err", lerr)
-		}
-	}
 	// How many programmes this install has, which is a different question from
 	// what settings.ingest says. Nothing reads settings.ingest any more -- the
 	// engine takes its ingest from the source row -- so on an install with no

@@ -99,7 +99,7 @@ import {
 } from "@/lib/acme-guidance";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { mqttPlainScheme } from "@/lib/mqtt";
-import { timestamp } from "@/lib/format";
+import { dateOnly, timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
   platformConnectControls,
@@ -4082,7 +4082,7 @@ function ApiTokens() {
                     </Badge>
                   </div>
                   <div className="font-mono text-sm text-muted-foreground">
-                    {tok.prefix}… · {t("set.tokenCreated", { date: new Date(tok.createdAt).toLocaleDateString() })} ·{" "}
+                    {tok.prefix}… · {t("set.tokenCreated", { date: dateOnly(tok.createdAt) })} ·{" "}
                     {tokenLastUsed(tok, t)}
                   </div>
                 </div>
@@ -4132,5 +4132,5 @@ function ApiTokens() {
 function tokenLastUsed(t: ApiToken, tr: Translator): string {
   const used = new Date(t.lastUsedAt);
   if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return tr("set.tokenNeverUsed");
-  return tr("set.tokenLastUsed", { at: used.toLocaleString() });
+  return tr("set.tokenLastUsed", { at: timestamp(t.lastUsedAt) });
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // A newly connected account reading no chat until a restart.
@@ -296,7 +297,15 @@ func (f *fakeTwitchIRC) sayTo(t *testing.T, token, text string) {
 // Twitch chat pointed at the fake IRC server.
 func chatConnectServer(t *testing.T, fake *fakeConnectPlatform, irc *fakeTwitchIRC, creds ...db.Platform) (*Server, http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
-	s, h, store := testServerWith(t, Options{Config: config.Config{}, Providers: oauth.NewSet(oauth.WithBaseURL(fake.URL))})
+	return chatConnectServerEnv(t, startupenv.Env{}, fake, irc, creds...)
+}
+
+// chatConnectServerEnv is chatConnectServer under a given startup environment:
+// the X Livestream gate rides the provider set, the rest rides Options.
+func chatConnectServerEnv(t *testing.T, env startupenv.Env, fake *fakeConnectPlatform, irc *fakeTwitchIRC, creds ...db.Platform) (*Server, http.Handler, *db.DB, func(*http.Request)) {
+	t.Helper()
+	s, h, store := testServerWith(t, Options{Config: config.Config{}, Env: env,
+		Providers: oauth.NewSet(oauth.WithBaseURL(fake.URL), oauth.WithXLivestream(env.XLivestream))})
 	s.chat = chat.New()
 	t.Cleanup(s.chat.Close)
 	if irc != nil {
@@ -704,17 +713,15 @@ func TestAFailedReadLeavesAConnectsChatAsItWasAndStillEndsADisconnects(t *testin
 func TestConnectingXRespectsTheLivestreamGate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		gate string
+		gate bool
 		want int
 	}{
-		{"gate closed", "", 0},
-		{"gate open", "1", 1},
+		{"gate closed", false, 0},
+		{"gate open", true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("POLYEMESIS_X_LIVESTREAM", tc.gate)
-			t.Setenv("POLYEMESIS_X_APP_BEARER", "")
 			fake := newFakeConnectPlatform(t)
-			s, h, store, sign := chatConnectServer(t, fake, nil, db.PlatformX)
+			s, h, store, sign := chatConnectServerEnv(t, startupenv.Env{XLivestream: tc.gate}, fake, nil, db.PlatformX)
 			startChat(t, s)
 
 			if _, err := oauthCallback(h, sign, store, db.PlatformX, "state-x-1"); err != nil {
@@ -751,8 +758,7 @@ func TestConnectingXRespectsTheLivestreamGate(t *testing.T) {
 func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *testing.T) {
 	// The X Livestream gate open and no app bearer, so X chat is attached and
 	// then refuses at once, without a request, with its own explanation.
-	t.Setenv("POLYEMESIS_X_LIVESTREAM", "1")
-	t.Setenv("POLYEMESIS_X_APP_BEARER", "")
+	env := startupenv.Env{XLivestream: true}
 
 	for _, acct := range []struct {
 		platform db.Platform
@@ -787,7 +793,7 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 		// connected is a server whose account is connected and attached.
 		connected := func(t *testing.T) (*Server, http.Handler, *db.DB, func(*http.Request)) {
 			t.Helper()
-			s, h, store, sign := chatConnectServer(t, newFakeConnectPlatform(t), newFakeTwitchIRC(t), p)
+			s, h, store, sign := chatConnectServerEnv(t, env, newFakeConnectPlatform(t), newFakeTwitchIRC(t), p)
 			startChat(t, s)
 			connect(t, h, sign, store, "state-first")
 			agrees(t, s, store, "after the first connect")
@@ -938,7 +944,7 @@ func TestAConnectAndADisconnectThatRaceLeaveTheHubAgreeingWithTheDatabase(t *tes
 			//     adapters").
 			t.Run("racing for real", func(t *testing.T) {
 				fake := newFakeConnectPlatform(t)
-				s, h, store, sign := chatConnectServer(t, fake, newFakeTwitchIRC(t), p)
+				s, h, store, sign := chatConnectServerEnv(t, env, fake, newFakeTwitchIRC(t), p)
 				name := map[db.Platform]string{db.PlatformTwitch: "Dallas", db.PlatformX: "jev"}[p]
 				if _, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
 					Platform: p, AccountName: name, AccountRef: ref,

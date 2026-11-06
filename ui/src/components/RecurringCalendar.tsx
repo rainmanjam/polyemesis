@@ -24,6 +24,7 @@ import { useT, type TranslationKey } from "@/lib/i18n";
 import { classifySkip } from "@/lib/recurringOutcome";
 import { listOccurrences, retitleOccurrence, skipOccurrence } from "@/lib/recurringApi";
 import type { OccurrenceView } from "@/lib/types";
+import { timestamp } from "@/lib/format";
 
 /** Two weeks, the same default window the server uses when no bounds are sent. */
 const WINDOW_MS = 14 * 24 * 3_600_000;
@@ -118,7 +119,7 @@ export function RecurringCalendar() {
           return (
             <li key={o.id} className="grid gap-1 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="tabular-nums text-muted-foreground">{new Date(o.at).toLocaleString()}</span>
+                <span className="tabular-nums text-muted-foreground">{timestamp(o.at)}</span>
                 <span className="font-medium">{o.title || t("wave3.recurring.noEventYet")}</span>
                 <span className="text-xs text-muted-foreground">{t(STATE_KEY[o.state])}</span>
               </div>

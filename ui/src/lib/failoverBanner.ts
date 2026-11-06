@@ -1,4 +1,5 @@
 import type { FailoverSource } from "@/lib/types";
+import { clockMinutes } from "@/lib/format";
 
 /** Whole seconds a failover has held the air, from the server's `switchedAt`.
  *
@@ -29,5 +30,5 @@ export function failoverBannerTone(active: FailoverSource): "warn" | "down" | nu
  *  sits outside the live region. */
 export function failoverSinceClock(switchedAt: string): string | null {
   if (failoverElapsedSeconds(switchedAt, Date.now()) === null) return null;
-  return new Date(switchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return clockMinutes(switchedAt);
 }

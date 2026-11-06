@@ -89,6 +89,7 @@ import type {
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
 import { useDismissGuard } from "@/hooks/useDismissGuard";
+import { timestamp } from "@/lib/format";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -2837,7 +2838,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
       )}
       {health?.state !== "ok" && expires && (
         <span className="tnum font-mono text-sm text-muted-foreground">
-          {t("addDest.expiresAt", { date: expires.toLocaleString() })}
+          {t("addDest.expiresAt", { date: timestamp(expires.toISOString()) })}
         </span>
       )}
       {health?.state === "refreshFailing" && health.lastError && (

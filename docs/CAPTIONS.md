@@ -14,7 +14,7 @@ under *Live captions*. The choices depend on the platform:
 |---|---|---|
 | Twitch | In-stream CEA-608 (SEI) | Built. Twitch documents the route; display on your channel is checked live. |
 | YouTube | Caption ingestion (HTTP POST), or in-stream CEA-608 | Both are built. The POST route is provisional (YouTube does not publish its body format), needs a 30 s or 60 s delay, and needs one Refresh stream key to fetch its caption URL. See *Routes in detail*. |
-| Facebook | In-stream CEA-608 | Provisional. Off until the server is started with `POLYEMESIS_CAPTIONS_FACEBOOK=1`. |
+| Facebook | In-stream CEA-608 | Provisional. Off until the server is started with `POLYEMESIS_CAPTIONS_FACEBOOK=1` (or `true`). |
 | Kick | None | Kick documents no caption support for live streams, so captions are not offered. |
 
 Every destination starts with captions **off**. An upgrade never turns them on.
@@ -61,7 +61,7 @@ A YouTube route on *caption ingestion (HTTP POST)* posts each caption to the
 caption ingestion URL of the destination's own YouTube stream. The video path is
 not touched, so saving or changing this route never restarts the destination.
 Facebook's in-stream route goes through the same SEI stage as Twitch's, but only while the
-server runs with `POLYEMESIS_CAPTIONS_FACEBOOK=1`; without it the route cannot be saved.
+server runs with `POLYEMESIS_CAPTIONS_FACEBOOK=1` (or `true`); without it the route cannot be saved.
 
 The save is refused, with a reason, in three cases:
 

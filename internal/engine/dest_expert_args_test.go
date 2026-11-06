@@ -53,7 +53,7 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 					!sameArgv, tc.before, tc.after, tc.wantSig)
 			}
 
-			sameSpec := destSpec(before, compiled, "up") == destSpec(after, compiled, "up")
+			sameSpec := destSpec(before, compiled, "up", false) == destSpec(after, compiled, "up", false)
 			sameBackup := backupSpecOf(before, compiled, "up") == backupSpecOf(after, compiled, "up")
 			if sameSpec != sameArgv {
 				t.Errorf("destSpec same=%v for command lines that are same=%v: the hash "+
@@ -96,7 +96,7 @@ func TestUnparseableExpertArgumentsDoNotMoveTheHash(t *testing.T) {
 		t.Error("text the parser refuses reached the command line")
 	}
 
-	if destSpec(clean, compiled, "up") != destSpec(broken, compiled, "up") {
+	if destSpec(clean, compiled, "up", false) != destSpec(broken, compiled, "up", false) {
 		t.Error("storing unparseable expert arguments restarted the primary to deliver " +
 			"a command line that does not contain them")
 	}

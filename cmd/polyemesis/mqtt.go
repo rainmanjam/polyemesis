@@ -215,10 +215,19 @@ func (r *mqttRunner) reconcile(ctx context.Context) {
 
 	sig := mqttSig(cfg, password)
 
+	every := time.Duration(cfg.IntervalSecond) * time.Second
+
 	r.mu.Lock()
 	unchanged := r.client != nil && r.sig == sig
+	tel := r.tel
 	r.mu.Unlock()
 	if unchanged {
+		// The interval is not part of the signature -- a new one is no reason
+		// to cycle a healthy link -- so it is handed to the running loop here.
+		if tel != nil && tel.Every() != every {
+			tel.SetEvery(every)
+			r.log.Info("mqtt publish interval changed", "everySeconds", int(every.Seconds()))
+		}
 		return
 	}
 
@@ -311,10 +320,7 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 	}
 
 	tel := mqtt.NewTelemetry(client, client.Topics(), r.log)
-	every := time.Duration(cfg.IntervalSecond) * time.Second
-	if every <= 0 {
-		every = 10 * time.Second
-	}
+	tel.SetEvery(time.Duration(cfg.IntervalSecond) * time.Second)
 
 	done := make(chan struct{})
 	r.mu.Lock()
@@ -322,7 +328,7 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 	r.mu.Unlock()
 
 	var wg sync.WaitGroup
-	wg.Go(func() { tel.Loop(loopCtx, every, r.snapshot) })
+	wg.Go(func() { tel.Loop(loopCtx, r.snapshot) })
 	if cfg.Discovery {
 		wg.Go(func() { r.announceDiscovery(loopCtx, client, tel) })
 	}
@@ -331,7 +337,7 @@ func (r *mqttRunner) connect(ctx context.Context, cfg db.MQTTSettings, password,
 		close(done)
 	}()
 	r.log.Info("mqtt telemetry started",
-		"instance", client.Topics().Instance(), "everySeconds", int(every.Seconds()))
+		"instance", client.Topics().Instance(), "everySeconds", int(tel.Every().Seconds()))
 }
 
 // announceDiscovery publishes the Home Assistant device payload once the link

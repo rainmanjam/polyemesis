@@ -87,7 +87,7 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 		if mode == captions.ModeOff || mode == "" {
 			continue
 		}
-		if !captions.Allowed(string(d.Platform), mode, captions.FacebookSEIEnabled()) {
+		if !captions.Allowed(string(d.Platform), mode, e.facebookCaptions.Load()) {
 			continue
 		}
 		if mode == captions.ModeYouTubePOST {

@@ -169,7 +169,7 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			p.err = cerr.Error()
 		} else {
 			p.compiled = compiled
-			p.spec = destSpec(row, compiled, upstream)
+			p.spec = destSpec(row, compiled, upstream, wantsSEIStage(row, e.facebookCaptions.Load()))
 			p.upstream = upstream
 		}
 		plans[row.ID] = p
@@ -561,7 +561,10 @@ func (e *Engine) upstreamHub(row *db.Destination) (*relay.Hub, error) {
 // upstream is its rendition's signature, empty for passthrough. Folding both it
 // and the rendition id in is what makes moving a destination between tiers, or
 // editing the tier it sits on, restart that destination and no other.
-func destSpec(row *db.Destination, compiled routing.Result, upstream string) string {
+//
+// seiStage is wantsSEIStage for this row: whether the destination runs through
+// an SEI caption stage, which changes what its FFmpeg reads.
+func destSpec(row *db.Destination, compiled routing.Result, upstream string, seiStage bool) string {
 	source := "passthrough"
 	if row.RenditionID != nil {
 		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
@@ -584,7 +587,7 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// sits on, restart that destination and no other.
 		source, upstream,
 	}
-	if wantsSEIStage(row) {
+	if seiStage {
 		// Adding or removing the SEI stage changes what the FFmpeg reads, so an
 		// operator save of the caption mode restarts the destination (#8).
 		parts = append(parts, "sei=stage")

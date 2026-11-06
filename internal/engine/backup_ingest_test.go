@@ -105,7 +105,7 @@ func TestTheBackupsHashMovesIndependentlyOfThePrimarys(t *testing.T) {
 	after := backupRow()
 	after.BackupStreamKey = "rotated"
 
-	if destSpec(before, compiled, "up") != destSpec(after, compiled, "up") {
+	if destSpec(before, compiled, "up", false) != destSpec(after, compiled, "up", false) {
 		t.Error("rotating the BACKUP key changed the PRIMARY's hash, so the " +
 			"primary would restart to deliver redundancy it already had")
 	}
@@ -124,7 +124,7 @@ func TestTogglingBackupDoesNotMoveThePrimarysHash(t *testing.T) {
 	off := backupRow()
 	off.BackupIngestWanted = false
 
-	if destSpec(on, compiled, "up") != destSpec(off, compiled, "up") {
+	if destSpec(on, compiled, "up", false) != destSpec(off, compiled, "up", false) {
 		t.Error("toggling backup changed the primary's hash; enabling redundancy " +
 			"would interrupt the very stream it protects")
 	}

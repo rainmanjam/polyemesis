@@ -519,6 +519,13 @@ overlays, and turns a restore into a re-download of every speech model. Check
 what you have with `-verify-backup`, which reads `polyemesis.db` and
 `secret.key` and says nothing about the rest.
 
+**If the server refuses to start because the stored settings cannot be read**,
+stop it and restore `polyemesis.db` from a backup (check the copy with
+`-verify-backup`), or reset only the settings to their defaults, which keeps
+sources, destinations and credentials:
+`sqlite3 <dataDir>/polyemesis.db "DELETE FROM settings WHERE id = 1"`. The next
+start writes the defaults; re-enter the settings you had changed.
+
 Nothing outside this directory is written at runtime, which is also what makes
 the container's single volume mount sufficient.
 
@@ -541,10 +548,10 @@ standing at a terminal reading an error.
 
 | Variable | What it does |
 |---|---|
-| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read by `internal/chat/rumble.go`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
+| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read once at startup by `internal/startupenv`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
 | `RUMBLE_CHAT_CHANNEL` | Which channel to read, when the key alone does not say |
 
-Both are read at startup by `internal/api/chat_wiring.go`. See
+Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and `Env.RumbleChatChannel`) and handed to the chat wiring in `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
 ### FFmpeg

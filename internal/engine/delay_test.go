@@ -36,7 +36,7 @@ func delayedRow(t *testing.T, e *Engine) *db.Destination {
 
 func delayPlan(row *db.Destination) destPlan {
 	compiled := routing.Result{FilterComplex: "[0:a:0]anull[out]", OutLabel: "[out]"}
-	return destPlan{row: row, compiled: compiled, spec: destSpec(row, compiled, "")}
+	return destPlan{row: row, compiled: compiled, spec: destSpec(row, compiled, "", false)}
 }
 
 // feed delivers n 1316-byte datagrams into a hub, paced like a relay.

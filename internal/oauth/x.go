@@ -34,7 +34,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 
@@ -57,10 +56,6 @@ const (
 	xAuthorizeBase = "https://api.x.com"
 	xAuthorizePath = "/2/oauth2/authorize"
 )
-
-// xLivestreamEnv is the operator's switch for the Livestream family. Set it to
-// 1 or true once X has whitelisted the app.
-const xLivestreamEnv = "POLYEMESIS_X_LIVESTREAM"
 
 // xGateCopy is the copy shown when the Livestream family is switched off. It is
 // the owner's agreed wording and the tests pin it.
@@ -94,24 +89,16 @@ var (
 	_ StreamKeyReader     = (*X)(nil)
 )
 
-// NewX builds the provider. The Livestream gate is read from the environment
-// here, so every call to ProvidersWith sees the same switch.
+// NewX builds the provider. The Livestream gate is closed unless
+// WithXLivestream(true) says the operator opened it (startupenv reads
+// POLYEMESIS_X_LIVESTREAM once at startup; nothing here reads the environment).
 func NewX(opts ...ProviderOption) *X {
-	return &X{endpoints: newEndpoints(opts), livestream: xLivestreamFromEnv()}
+	e := newEndpoints(opts)
+	return &X{endpoints: e, livestream: e.xLivestream}
 }
 
-// xLivestreamFromEnv reads the operator's switch. Anything other than 1 or
-// true (case-insensitive) leaves the gate closed.
-func xLivestreamFromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(xLivestreamEnv))) {
-	case "1", "true":
-		return true
-	}
-	return false
-}
-
-// WithLivestreamAccess opens the gate on this instance. Tests and the environment
-// switch use it; production sets the environment variable instead.
+// WithLivestreamAccess opens the gate on this instance. Tests use it;
+// production passes WithXLivestream when it builds the provider set.
 func (x *X) WithLivestreamAccess() *X {
 	x.livestream = true
 	return x

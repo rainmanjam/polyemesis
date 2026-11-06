@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // The #8 caption mode over the wire. The store and Validate are tested in
@@ -57,7 +57,6 @@ func TestCaptionModeGateRefusesFacebookOnlyWhileItsSwitchIsClosed(t *testing.T) 
 // MUTATION: the captionModeAllowedNow call removed from handleUpdateDestination.
 // Observed: the Facebook PUT returns 200 where the test wants 400.
 func TestCaptionModeSurvivesTheRoundTripAndRefusesAFacebookSwitchOff(t *testing.T) {
-	t.Setenv(captions.FacebookSEIEnv, "")
 	_, h, store, sign := engineServer(t, defaultTools(), Options{})
 
 	tw, err := store.CreateDestination(&db.Destination{
@@ -106,6 +105,26 @@ func TestCaptionModeSurvivesTheRoundTripAndRefusesAFacebookSwitchOff(t *testing.
 	}
 }
 
+// With the startup environment's Facebook switch open, the same PUT is accepted:
+// the handler follows Options.Env, not the process environment.
+func TestAFacebookCaptionTurnOnIsAcceptedOnceTheSwitchIsOpen(t *testing.T) {
+	_, h, store, sign := engineServer(t, defaultTools(), Options{Env: startupenv.Env{FacebookCaptions: true}})
+	fb, err := store.CreateDestination(&db.Destination{
+		Name: "facebook", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp/", StreamKey: "fb-caption-fake",
+		AudioBitrate: 160,
+	})
+	if err != nil {
+		t.Fatalf("create facebook destination: %v", err)
+	}
+	r := jsonRequest(t, http.MethodPut, "/api/v1/destinations/"+strconv.FormatInt(fb.ID, 10),
+		map[string]any{"captionMode": "facebook_sei"})
+	sign(r)
+	if code := do(t, h, r).Code; code != http.StatusOK {
+		t.Fatalf("facebook_sei with the switch open: status %d, want 200", code)
+	}
+}
+
 // TestCaptionModeRefusesAChangeWhileTheDestinationIsDelivering is the live
 // guard. A caption route or delay that moved under a running feed would reach
 // the platform as a different stream from the one the operator watched start.
@@ -113,7 +132,6 @@ func TestCaptionModeSurvivesTheRoundTripAndRefusesAFacebookSwitchOff(t *testing.
 // MUTATION: the destinationLive check removed from handleUpdateDestination.
 // Observed: the PUT returns 200 where the test wants 409.
 func TestCaptionModeRefusesAChangeWhileTheDestinationIsDelivering(t *testing.T) {
-	t.Setenv(captions.FacebookSEIEnv, "")
 	s, h, store, sign := engineServer(t, defaultTools(), Options{})
 	s.deliveringFn = func(int64) bool { return true }
 

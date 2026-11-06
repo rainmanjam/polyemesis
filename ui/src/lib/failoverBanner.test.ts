@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { failoverElapsedSeconds, failoverBannerTone, failoverSinceClock } from "./failoverBanner";
+import { setDisplayTimeZone } from "./format";
 
 describe("failoverElapsedSeconds", () => {
   const now = Date.parse("2026-10-29T20:33:14Z");
@@ -35,10 +36,14 @@ describe("failoverBannerTone", () => {
 });
 
 describe("failoverSinceClock", () => {
-  it("renders the switch as a local clock time", () => {
-    const at = new Date(2026, 9, 29, 20, 31, 0); // local time, so the test is zone-independent
-    const got = failoverSinceClock(at.toISOString());
-    expect(got).toMatch(/20:31|8:31/);
+  it("renders the switch as a clock time in the console's display zone", () => {
+    setDisplayTimeZone("Australia/Sydney");
+    try {
+      // 09:31Z is 20:31 in Sydney (AEDT) on 29 October.
+      expect(failoverSinceClock("2026-10-29T09:31:00Z")).toBe("20:31");
+    } finally {
+      setDisplayTimeZone("UTC");
+    }
   });
 
   it("is null for the zero time, so no 'since' is claimed", () => {

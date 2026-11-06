@@ -33,7 +33,7 @@ func TestTheBannerAndTheLogNameAnFFmpegReleaseWithTheRevertedSchedulerChange(t *
 		var buf bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 		banner = captureStdout(t, func() {
-			if err := reportStartup(log, cfg, provider, store, tools); err != nil {
+			if err := reportStartup(log, cfg, provider, store, settingsOf(t, store), tools); err != nil {
 				t.Errorf("reportStartup: %v", err)
 			}
 		})
