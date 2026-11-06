@@ -14,8 +14,6 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -174,23 +172,4 @@ func dest(name, kind, url string, tracks []int) map[string]any {
 func die(f string, a ...any) {
 	fmt.Printf("FATAL: "+f+"\n", a...)
 	os.Exit(1)
-}
-
-// resolveRelayPort: the shell's lsof is a hint, not a precondition. Without a
-// seeded source no relay socket exists until this driver creates one, so an
-// empty value means "ask the server", not "fail". The full account of the cycle
-// is in driverlib.ResolveRelayPort; this file cannot import it, because `go run`
-// resolves module imports against the cwd and these suites run from /tmp.
-func resolveRelayPort(fromShell string) int {
-	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
-		return p
-	}
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
-		relay, _ := get("/stats")["relay"].(map[string]any)
-		if pf, ok := relay["port"].(float64); ok && pf > 0 {
-			return int(pf)
-		}
-	}
-	die("no relay port after 30s; the source was probably never created")
-	return 0
 }

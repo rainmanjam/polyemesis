@@ -659,12 +659,8 @@ FFMPEG_PINNED_PROBE=""
 # internal/testenv/installer_ffmpeg_pin_test.go refuses `latest`, an undated
 # tag, a tag that is not the last day of its month, or a missing hash.
 #
-# The same release carries the 9.0 line, verified the same two ways, for when
-# the image moves to it (Dockerfile: no stable Alpine packages 9.x yet):
-#   ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
-#     68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269
-#   ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz
-#     91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46
+# The same release carries the 9.0 line (hashes in .github/ffmpeg-pin.env, the one
+# place they are written down; this script restates only the 8.1 Linux values).
 # Never 9.0.0 or 9.0.1: see FFmpeg commit 9d4ca2122 (a scheduler change that
 # misorders output and ends streams early, reverted in 9.0.2).
 FFMPEG_BTBN_TAG=autobuild-2026-09-30-13-08

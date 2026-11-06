@@ -186,7 +186,7 @@ run_driver() {
 # read "--" as its first argument and dial http://127.0.0.1:--. It is not
 # needed either -- only LEADING consecutive .go arguments are compiled, and
 # the first argument here is always a port number.
-  go run "$SCRIPTS/acceptance_encoders_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$(relay_port)" "$1" "$2" 2>&1 | sed 's/^/  /'
+  go run "$SCRIPTS/acceptance_encoders_driver.go" "$SCRIPTS/driverhelpers.go" "$SCRIPTS/driverrelayport.go" "$PORT" "$(relay_port)" "$1" "$2" 2>&1 | sed 's/^/  /'
 }
 
 # fact <file> <key>

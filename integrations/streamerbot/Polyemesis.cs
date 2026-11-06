@@ -76,16 +76,27 @@ public class CPHInline
     public bool RecordingOff() { return Send("POST", "/api/v1/recording", "{\"enabled\":false}"); }
 
     // Status sets %polyemesisLive% and %polyemesisSummary% for a following
-    // Send Message sub-action.
+    // Send Message sub-action. It reads GET /status, whose destinations carry
+    // the supervised process's state ("running" is what the console and the
+    // Stream Deck count). The server answers 400 source_required on a
+    // multi-programme install without ?source=, and returns every programme's
+    // destinations whatever ?source= says, so the programme is also filtered
+    // here, by each destination's sourceId.
     public bool Status()
     {
         string body;
-        if (!Request("GET", "/api/v1/destinations" + SourceQuery(), null, out body)) return false;
+        if (!Request("GET", "/api/v1/status" + SourceQuery(), null, out body)) return false;
+        long? only = SourceId();
         int live = 0, total = 0;
-        foreach (JToken d in JArray.Parse(body))
+        JArray dests = JObject.Parse(body)["destinations"] as JArray;
+        if (dests != null)
         {
-            total++;
-            if (d.Value<bool?>("enabled") == true) live++;
+            foreach (JToken d in dests)
+            {
+                if (only != null && d.Value<long?>("sourceId") != only) continue;
+                total++;
+                if ((string)d.SelectToken("process.state") == "running") live++;
+            }
         }
         CPH.SetArgument("polyemesisLive", live);
         CPH.SetArgument("polyemesisSummary", live + " of " + total + " destinations running");
@@ -121,11 +132,17 @@ public class CPHInline
         return n.ToString();
     }
 
-    private string SourceQuery()
+    private long? SourceId()
     {
         string src = CPH.GetGlobalVar<string>("polyemesisSource", true);
         long n;
-        return (!string.IsNullOrWhiteSpace(src) && long.TryParse(src, out n)) ? "?source=" + n : "";
+        return (!string.IsNullOrWhiteSpace(src) && long.TryParse(src, out n)) ? (long?)n : null;
+    }
+
+    private string SourceQuery()
+    {
+        long? n = SourceId();
+        return n != null ? "?source=" + n : "";
     }
 
     private bool Send(string method, string path, string json)

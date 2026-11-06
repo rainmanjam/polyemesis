@@ -41,33 +41,28 @@ its first tagged release.
   children ignored it and ran at a level written into their command line: the selector's copy
   hops, the playlist feed, the HLS/DASH playout variants, the loudness monitor, the proxy, thumbnail
   and archive jobs, the clip exporter, the playlist transcode and the transcription audio extract. With the variable
-  unset, nothing changes: each keeps its own default (`warning` for the live ones, `error` for the
-  one-shot passes). The variable, `POLYEMESIS_INGEST_CAPTURE` and `POLYEMESIS_FFMPEG_ASSUME_MAJOR` are
+  unset, nothing changes: each keeps its own default (`warning` for the live ones and for the proxy,
+  thumbnail, archive, clip and playlist-transcode jobs; `error` for the transcription extract and the other
+  short probes, as docs/CONFIGURATION.md lists). The variable, `POLYEMESIS_INGEST_CAPTURE` and `POLYEMESIS_FFMPEG_ASSUME_MAJOR` are
   now read once at startup with the rest of the environment.
-- **Every relay reader opens the relay the same way.** The rendition encoder, the silence
-  synthesiser, the HLS/DASH playout variants, the loudness monitor and the selector's copy hops read the relay
-  without the probe limits, `-scan_all_pmts 0` and the forward-jump `-dts_delta_threshold` that the
-  destinations, recorder, preview and ingest meter already used. They now carry the same input
-  options, so they stop spending the whole probe window as dead air on start and no longer swap track
-  offsets after a long outage. Visible as: those children start faster, and their command lines (on
-  the Monitoring page) carry the extra input options.
-- **Every relay reader starts faster and tolerates a late track.** With the shared input options a
-  reader joins in well under a second instead of paying the whole probe window, and a track that is
-  declared but arrives late no longer holds it up. A declared track that never carries data can hold a
-  reader for up to 15 s (it used to be about 5 s), so the playout page waits 16 s before calling a
-  restarting rung ended.
-- **A relay writer's output timestamps now start near 0 instead of 1.4 s.** The silence synthesiser,
-  slate, renditions and failover feeds publish with `-muxdelay 0`, as the ingest always has. Audio/video
-  spacing is unchanged; only the shared starting offset moved, and every writer into a hub moved with it.
-- **A backup destination now restarts when FFmpeg cannot characterise its audio,** at most 3 times with a
-  30 s cooldown between attempts, as the primary already did.
+- **Every relay reader opens the relay the same way, and starts faster.** The rendition encoder, the
+  silence synthesiser, the HLS/DASH playout variants, the loudness monitor and the selector's copy hops
+  read the relay without the probe limits, `-scan_all_pmts 0` and the forward-jump
+  `-dts_delta_threshold` that the destinations, recorder, preview and ingest meter already used. They now
+  carry the same input options, so they stop spending the whole probe window as dead air on start, join
+  in well under a second, tolerate a late track, and no longer swap track offsets after a long outage.
+  A declared track that never carries data can hold a reader for up to 15 s (it used to be about 5 s),
+  so the playout page waits 16 s before calling a restarting rung ended. Visible as: those children
+  start faster, and their command lines (on the Monitoring page) carry the extra input options.
 - **Every writer into the relay carries the interleave-stall fix the ingest has.** The silence
   synthesiser, the slate, the rendition encoder and the selector's copy hops (the failover and playlist
   feeds) muxed with FFmpeg's default 10 s interleave buffer, so a multitrack stream whose later audio
   tracks resolved late could write nothing, video included, for up to ten seconds. They now carry
-  `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, which also drops the muxer's default 1.4 s
-  of start delay from the timestamps they publish.
-
+  `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, as the ingest always has, so their output
+  timestamps start near 0 instead of 1.4 s. Audio/video spacing is unchanged; only the shared starting
+  offset moved, and every writer into a hub moved with it.
+- **A backup destination now restarts when FFmpeg cannot characterise its audio,** at most 3 times with a
+  30 s cooldown between attempts, as the primary already did.
 - **Stopping the preview, a rendition, a playout variant, the meters or a failover feed on a quiet feed no
   longer waits out the grace to be killed.** Only the recorder and the destinations were woken when
   stopped after their publisher left; every other relay reader blocked in its read, ignored the
@@ -160,8 +155,14 @@ its first tagged release.
   It now applies the rule the Stream Deck plugin and the OBS script already had: `https://` to
   any host, `http://` only to this machine, anything else refused with a warning in the
   Streamer.bot log and no request made. A pack pointed at a plain-`http://` remote host stops
-  working until its URL is changed to `https://`. The pack's manifest also listed Status without
-  the `?source=` it sends; it now matches the code.
+  working until its URL is changed to `https://`.
+- **The Streamer.bot Status action counts running destinations.** It read `enabled` off each item of
+  `GET /destinations`, whose items nest the destination, so `%polyemesisLive%` was always 0 and the
+  summary read "0 of N destinations running"; and `enabled` is configuration, not state. It now reads
+  `GET /status?source=<polyemesisSource>` (which a multi-programme install requires) and counts
+  destinations whose process is `running`, the field the console and the Stream Deck use. The server
+  lists every programme's destinations whatever `?source=` says, so the action also filters them by
+  each destination's programme itself; the manifest lists the path the code calls.
 
 - **Poll announcements reach X.** The poll's start and end texts were sent unchanged to every chat, and
   X, which stops a chat message at 140 characters, refused any of 141 to 200. X's chat now gets a

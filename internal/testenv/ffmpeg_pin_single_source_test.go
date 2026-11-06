@@ -58,7 +58,7 @@ func ffmpegPin(t *testing.T) map[string]string {
 // The build every CI job and the images install: the 8.1 line.
 var ffmpegPinned = []string{
 	"FFMPEG_8_1_LINUX_AMD64", "FFMPEG_8_1_LINUX_ARM64", "FFMPEG_8_1_WINDOWS_AMD64",
-	"FFMPEG_9_0_LINUX_AMD64",
+	"FFMPEG_9_0_LINUX_AMD64", "FFMPEG_9_0_LINUX_ARM64",
 }
 
 func TestFFmpegPinFileIsWellFormed(t *testing.T) {
@@ -166,5 +166,69 @@ func TestNoWorkflowCarriesItsOwnFFmpegPin(t *testing.T) {
 	}
 	if users < 7 {
 		t.Errorf("only %d files use ./.github/actions/install-ffmpeg; the pin is not single-sourced", users)
+	}
+}
+
+// A pinned hash restated anywhere else is a copy the next bump leaves behind:
+// docs/INSTALL.md and install.sh's comments once carried the 9.0 hashes, one of
+// them absent from the pin file. Any 64-hex string in docs/ or install.sh must
+// be one the pin file holds, and in docs/ none at all is wanted, since the pin
+// file is where an operator is sent for them.
+func TestNoDocRestatesAFFmpegHash(t *testing.T) {
+	root := repoRootFromTest(t)
+	hexRe := regexp.MustCompile(`\b[0-9a-f]{64}\b`)
+	pinned := map[string]bool{}
+	for _, v := range ffmpegPin(t) {
+		pinned[v] = true
+	}
+	var files []string
+	err := filepath.WalkDir(filepath.Join(root, "docs"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".md") {
+			files = append(files, p)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, filepath.Join(root, "scripts", "install.sh"))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(root, f)
+		for i, line := range strings.Split(string(b), "\n") {
+			for _, h := range hexRe.FindAllString(line, -1) {
+				switch {
+				case !pinned[h]:
+					continue // some other digest: not the pin's business
+				case strings.HasSuffix(rel, "install.sh") && !strings.HasPrefix(strings.TrimSpace(line), "#"):
+					continue // the 8.1 values the script installs; TestInstallerAgrees checks them
+				default:
+					t.Errorf("%s:%d restates a hash from ffmpeg-pin.env; point at the file instead", filepath.ToSlash(rel), i+1)
+				}
+			}
+		}
+	}
+}
+
+// The INSTALL.md snippet loads the pin file and uses its variables by name; a
+// name the pin file does not define expands to nothing and downloads
+// ".../download//" with an empty sum. Every $FFMPEG_* it uses must exist.
+func TestInstallDocSnippetUsesRealPinVariables(t *testing.T) {
+	pin := ffmpegPin(t)
+	doc := ffmpegRepoFile(t, "docs", "INSTALL.md")
+	if !strings.Contains(doc, ". ./ffmpeg-pin.env") {
+		t.Fatal("docs/INSTALL.md's FFmpeg snippet does not load ffmpeg-pin.env")
+	}
+	used := regexp.MustCompile(`\$(FFMPEG_[A-Z0-9_]+)`).FindAllStringSubmatch(doc, -1)
+	if len(used) == 0 {
+		t.Fatal("docs/INSTALL.md's FFmpeg snippet uses no $FFMPEG_* variable")
+	}
+	for _, m := range used {
+		if _, ok := pin[m[1]]; !ok {
+			t.Errorf("docs/INSTALL.md uses $%s, which ffmpeg-pin.env does not define", m[1])
+		}
 	}
 }

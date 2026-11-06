@@ -458,7 +458,7 @@ step "7. An endpoint that quotes credentials back does not get them stored"
 E="$(drive echo)"
 
 # Proven able to fail against the committed tree by changing attempt's
-# `snippet = redact.Redact(string(raw))` to read `raw[:0]`: len=0, keptText=false.
+# `snippet = string(raw)` to `snippet = string(raw[:0])`: len=0, keptText=false.
 # The two checks below stay GREEN through it, which is exactly what makes this
 # one necessary rather than decorative.
 if is "$E" recs 1 && is "$E" respKeptText true \
@@ -469,7 +469,8 @@ else
 fi
 
 # Both proven able to fail against the committed tree by changing deliver's
-# `rec.Status, rec.Response = status, secrets.Scrub(snippet)` to drop the Scrub.
+# `rec.Status, rec.Response = status, redact.Redact(secrets.Scrub(snippet))` to
+# `redact.Redact(snippet)`.
 # redact.Redact alone -- which still runs -- does not catch either of them: the
 # body is JSON, and "signing" is not a name in its bareSecret table.
 if is "$E" respHasPathSecret false; then
@@ -577,7 +578,7 @@ else
   # is a shape this suite cannot stage for itself.
   #
   # Proven able to fail against the committed tree by changing Test's
-  # `Response: secrets.Scrub(snippet)` to `Response: snippet`, against a local
+  # `Response: redact.Redact(secrets.Scrub(snippet))` to `Response: redact.Redact(snippet)`, against a local
   # listener echoing its own request path.
   if is "$M" discloses false; then
     ok "nothing the remote said or failed with quoted its own URL back"

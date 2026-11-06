@@ -717,22 +717,24 @@ need a distro upgrade. [BtbN's builds](https://github.com/BtbN/FFmpeg-Builds/rel
 include libsrt:
 
 ```bash
+# The pinned tag, asset names and hashes live in one file of plain KEY=value
+# lines; load it. For arm64 use FFMPEG_9_0_LINUX_ARM64_* in place of ..._AMD64_*.
+curl -fsSL -o ffmpeg-pin.env \
+  https://raw.githubusercontent.com/rainmanjam/polyemesis/main/.github/ffmpeg-pin.env
+. ./ffmpeg-pin.env
 curl -fsSL -o ffmpeg.tar.xz \
-  https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
-echo "68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  ffmpeg.tar.xz" | sha256sum -c -
+  "https://github.com/BtbN/FFmpeg-Builds/releases/download/$FFMPEG_BTBN_TAG/$FFMPEG_9_0_LINUX_AMD64_ASSET"
+echo "$FFMPEG_9_0_LINUX_AMD64_SHA256  ffmpeg.tar.xz" | sha256sum -c -
 tar xf ffmpeg.tar.xz
 sudo install -m755 ffmpeg-*/bin/ffmpeg ffmpeg-*/bin/ffprobe /usr/local/bin/
 
 /usr/local/bin/ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 ```
 
-That is a **month-end** release, which BtbN keeps for about two years. The
+The tag is a **month-end** release, which BtbN keeps for about two years. The
 dailies in between are deleted after about two weeks, and the `latest` release
-serves a different build every day. For arm64 use
-`ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz` (sha256
-`91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46`). The same
-release has the 8.1 line as `ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz`,
-which is what `install.sh` installs. These are glibc builds — they will not run
+serves a different build every day. The pin file also names the 8.1 line, which
+is what `install.sh` installs. These are glibc builds — they will not run
 on Alpine or musl.
 
 If you would rather not put them on `PATH`, point the config at them instead:

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"regexp"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // THE STREAMER.BOT PACK, REPLAYED. integrations/streamerbot/actions.json lists
@@ -369,5 +372,136 @@ func TestPolyemesisCsRefusesToSendTheTokenInTheClear(t *testing.T) {
 	guard, build := strings.Index(req, "Refusal(url)"), strings.Index(req, "new HttpRequestMessage")
 	if guard < 0 || build < 0 || guard > build {
 		t.Error("Request must refuse a cleartext address before it builds the request that carries the token")
+	}
+}
+
+// THE STATUS ACTION READS A REAL BODY. Status() counts destinations whose
+// process is running, out of GET /api/v1/status. It once read `enabled` off
+// GET /destinations, whose items are {"destination": {...}}, so it counted 0
+// forever and nothing noticed: the replay above never parsed a response. This
+// marshals the server's own Status type -- the shape handleStatus writes --
+// and walks it the way the C# does, then holds the C# to the same keys.
+func statusLive(t *testing.T, body []byte, only *int64) (live, total int) {
+	t.Helper()
+	var st struct {
+		Destinations []struct {
+			SourceID *int64 `json:"sourceId"`
+			Process  *struct {
+				State string `json:"state"`
+			} `json:"process"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("status body: %v", err)
+	}
+	for _, d := range st.Destinations {
+		if only != nil && (d.SourceID == nil || *d.SourceID != *only) {
+			continue
+		}
+		total++
+		if d.Process != nil && d.Process.State == "running" {
+			live++
+		}
+	}
+	return live, total
+}
+
+func TestStreamerbotStatusCountsRunningProcessesPerProgramme(t *testing.T) {
+	one, two := int64(1), int64(2)
+	running := &supervisor.Status{State: supervisor.StateRunning}
+	golden, err := json.Marshal(engine.Status{Destinations: []engine.DestStatus{
+		{ID: 1, SourceID: &one, Enabled: true, Process: running},
+		{ID: 2, SourceID: &one, Enabled: true, Process: &supervisor.Status{State: supervisor.StateFailed}},
+		{ID: 3, SourceID: &one, Enabled: true}, // no process: stopped
+		{ID: 4, SourceID: &two, Enabled: true, Process: running},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live, total := statusLive(t, golden, nil); live != 2 || total != 4 {
+		t.Errorf("install-wide: %d of %d running, want 2 of 4", live, total)
+	}
+	if live, total := statusLive(t, golden, &one); live != 1 || total != 3 {
+		t.Errorf("programme 1: %d of %d running, want 1 of 3", live, total)
+	}
+	if live, total := statusLive(t, golden, &two); live != 1 || total != 1 {
+		t.Errorf("programme 2: %d of %d running, want 1 of 1", live, total)
+	}
+
+	// The same walk over the live router, with the read token the manifest
+	// declares: the body is the route's own and every destination has a sourceId.
+	o := obsServer(t)
+	o.createDest(t, "youtube")
+	tok := createScopedToken(t, o.h, o.sign, "streamer.bot status", db.ScopeRead)
+	w := do(t, o.h, withBearer(jsonRequest(t, "GET", "/api/v1/status", nil), tok))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /status with a read token answered %d %s", w.Code, w.Body.String())
+	}
+	if live, total := statusLive(t, w.Body.Bytes(), nil); total != 1 || live != 0 {
+		t.Errorf("live router: %d of %d running, want 0 of 1", live, total)
+	}
+	only := onlySourceID(t, o.h, o.sign)
+	if _, total := statusLive(t, w.Body.Bytes(), &only); total != 1 {
+		t.Errorf("the destination carries no sourceId of programme %d", only)
+	}
+
+	raw, err := os.ReadFile("../../integrations/streamerbot/Polyemesis.cs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := csMethods(string(raw))["Status"]
+	// The counting itself, in order and in exact form: skip a destination of
+	// another programme, count it, then count it as running. Flipping the
+	// filter's != to ==, counting before the filter, or reading another field
+	// changes one of these lines.
+	norm := regexp.MustCompile(`\s+`).ReplaceAllString(status, " ")
+	for _, want := range []string{
+		`Request("GET", "/api/v1/status" + SourceQuery(), null, out body)`,
+		`JArray dests = JObject.Parse(body)["destinations"] as JArray;`,
+		`foreach (JToken d in dests) { ` +
+			`if (only != null && d.Value<long?>("sourceId") != only) continue; ` +
+			`total++; ` +
+			`if ((string)d.SelectToken("process.state") == "running") live++; }`,
+	} {
+		if !strings.Contains(norm, want) {
+			t.Errorf("Status() no longer contains %q", want)
+		}
+	}
+	if strings.Contains(status, `"enabled"`) {
+		t.Error("Status() counts `enabled`, which is configuration, not whether the destination is running")
+	}
+}
+
+// On an install with several programmes GET /status without ?source= is a 400
+// (scopedEngine), which is where the per-programme filter has to work: the call
+// Status() makes names the programme, answers 200, and lists every programme's
+// destinations, so the sourceId filter is what scopes the count.
+func TestStreamerbotStatusOnAnInstallWithTwoProgrammes(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	first := onlySourceID(t, h, sign)
+	second := addSource(t, h, sign, "Vertical").ID
+	for _, src := range []int64{first, second, second} {
+		send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+			"sourceId": src, "name": "d", "kind": "rtmp", "url": "rtmp://example.invalid/live", "streamKey": "k",
+		}, http.StatusCreated)
+	}
+	tok := createScopedToken(t, h, sign, "streamer.bot status", db.ScopeRead)
+	get := func(path string) *httptest.ResponseRecorder {
+		return do(t, h, withBearer(jsonRequest(t, "GET", path, nil), tok))
+	}
+	if w := get("/api/v1/status"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "source_required") {
+		t.Fatalf("GET /status with no ?source= on two programmes answered %d %s, want 400 source_required", w.Code, w.Body.String())
+	}
+	for src, want := range map[int64]int{first: 1, second: 2} {
+		w := get("/api/v1/status?source=" + strconv.FormatInt(src, 10))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /status?source=%d answered %d %s", src, w.Code, w.Body.String())
+		}
+		if _, all := statusLive(t, w.Body.Bytes(), nil); all != 3 {
+			t.Errorf("the status lists %d destinations, want every programme's 3: the client-side filter is what scopes the count", all)
+		}
+		if _, total := statusLive(t, w.Body.Bytes(), &src); total != want {
+			t.Errorf("programme %d: %d destinations after the sourceId filter, want %d", src, total, want)
+		}
 	}
 }
