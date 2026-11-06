@@ -80,7 +80,7 @@ func (s *Server) origin(r *http.Request) string {
 }
 
 func (s *Server) redirectURI(r *http.Request, platform db.Platform) string {
-	return fmt.Sprintf("%s/api/v1/oauth/%s/callback", s.origin(r), platform)
+	return s.origin(r) + oauth.CallbackPath(platform)
 }
 
 func (s *Server) handleListCreds(w http.ResponseWriter, r *http.Request) {
@@ -710,7 +710,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 //
 // Returns "" for every platform without a gate, which is all of them but one.
 func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, clientID, accessToken string) string {
-	gated, ok := s.providers.EntitlementFor(platform)
+	gated, ok := oauth.As[oauth.EntitlementGated](s.providers, platform)
 	if !ok {
 		return ""
 	}
@@ -815,7 +815,7 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 	// Through the Set twin rather than a type assertion on a provider this
 	// handler resolved itself: a Server built with a stubbed Set must not fall
 	// through to a production provider for viewer numbers alone.
-	st, ok := s.providers.StatsFor(acct.Platform)
+	st, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"supported": false,
@@ -1407,7 +1407,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination, going map[in
 //
 // Provider.Ingest always targets whatever the token's own identity is, which for
 // Facebook means a Page connection would silently stream to the operator's
-// personal profile. TargetsFor is the capability that knows better; it also
+// personal profile. As[TargetedProvider] is the capability that knows better; it also
 // returns the broadcast id, which is the handle the chat adapter needs and which
 // Provider.Ingest discards. Every other platform has no targets and falls
 // through to Ingest unchanged.
@@ -1417,7 +1417,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination, going map[in
 // which was being parsed by internal/oauth and discarded right here. A platform
 // with no broadcast object gets a synthetic one so every caller reads one shape.
 func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
-	if tp, ok := s.providers.TargetsFor(acct.Platform); ok {
+	if tp, ok := oauth.As[oauth.TargetedProvider](s.providers, acct.Platform); ok {
 		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
 	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)

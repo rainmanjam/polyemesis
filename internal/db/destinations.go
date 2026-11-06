@@ -1060,8 +1060,8 @@ type Warning struct {
 //
 // WHAT IT DOES NOT CHECK, stated so the gap is not mistaken for a pass: video
 // bitrate, resolution and frame rate belong to the rendition, not to the
-// destination, so the ceilings services.CheckEncoder can compare against them
-// are not reachable from here. Only the audio bitrate and the URL are.
+// destination, so their platform ceilings are not reachable from here. Only
+// the audio bitrate (services.CheckEncoder) and the URL are.
 func (d Destination) Warnings() []Warning {
 	var out []Warning
 	for _, p := range services.AnalyseURL(d.URL) {
@@ -1070,7 +1070,7 @@ func (d Destination) Warnings() []Warning {
 	// A destination with no registry entry -- "custom", or a platform we do
 	// not carry -- gets no encoder opinion rather than a default one.
 	if svc, ok := services.Lookup(string(d.Platform)); ok {
-		for _, p := range services.CheckEncoder(svc, d.AudioBitrate, 0, 0) {
+		for _, p := range services.CheckEncoder(svc, d.AudioBitrate) {
 			out = append(out, Warning{Field: p.Field, Detail: p.Detail})
 		}
 		if svc.PerChannelIngest && svc.Note != "" && len(out) > 0 {

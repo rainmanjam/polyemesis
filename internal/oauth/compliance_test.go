@@ -185,12 +185,12 @@ func TestComplianceForFindsOnlyThePlatformsThatHaveOne(t *testing.T) {
 	// and refusing, so the caller handles "this platform does not do this"
 	// once instead of at every call site.
 	for _, p := range []db.Platform{db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook} {
-		if _, ok := ComplianceFor(p); !ok {
-			t.Errorf("ComplianceFor(%s) found nothing; its stored compliance can never be sent", p)
+		if _, ok := As[CompliancePusher](Set{}, p); !ok {
+			t.Errorf("As[CompliancePusher](Set{}, %s) found nothing; its stored compliance can never be sent", p)
 		}
 	}
-	if _, ok := ComplianceFor(db.PlatformKick); ok {
-		t.Error("ComplianceFor(kick) claims a capability Kick does not have")
+	if _, ok := As[CompliancePusher](Set{}, db.PlatformKick); ok {
+		t.Error("As[CompliancePusher](Set{}, kick) claims a capability Kick does not have")
 	}
 }
 
@@ -219,10 +219,10 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 			}
 		})
 		// Resolved from a Set aimed at the stub, not the package-level
-		// ComplianceFor: that one resolves against the production providers, so
+		// As[CompliancePusher]: that one resolves against the production providers, so
 		// this test used to depend on fbServer having rewritten a package var.
 		// It now proves the lookup and the redirection together.
-		cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
+		cp, ok := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")
 		}
@@ -264,10 +264,10 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 			}
 		})
 		// Resolved from a Set aimed at the stub, not the package-level
-		// ComplianceFor: that one resolves against the production providers, so
+		// As[CompliancePusher]: that one resolves against the production providers, so
 		// this test used to depend on fbServer having rewritten a package var.
 		// It now proves the lookup and the redirection together.
-		cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
+		cp, ok := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")
 		}
@@ -304,7 +304,7 @@ func TestAnEmptyComplianceSendsNothingAtAll(t *testing.T) {
 	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
-	cp, _ := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
+	cp, _ := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 	if _, err := cp.PushCompliance(context.Background(), "cid", "user-token",
 		ComplianceTarget{AccountRef: "user:1000", StreamKey: facebookKeyForLiveVideo("9")},
 		db.Compliance{}); err != nil {
@@ -326,7 +326,7 @@ func TestFacebookComplianceSkipsWhenNoBroadcastIdIsRecorded(t *testing.T) {
 	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
-	cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
+	cp, ok := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 	if !ok {
 		t.Fatal("Facebook has no compliance capability")
 	}

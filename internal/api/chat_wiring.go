@@ -501,6 +501,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:             s.chatToken(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
+			CallbackPath:      kickWebhookPath,
 			// The signature check. Without this line the adapter refuses every
 			// delivery — which is the point: the previous version of this
 			// construction site simply omitted it, and the handler's nil guard
@@ -823,16 +824,4 @@ func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}), true
-}
-
-// KickChatCallbackURL is what the operator pastes into their Kick app. Empty
-// when this server does not know its own public URL, which the setup page says
-// in words rather than showing a URL that would not work.
-func (s *Server) KickChatCallbackURL() string {
-	base := publicBaseURL(s.cfg)
-	secret := s.kickCallbackSecret()
-	if base == "" || secret == "" {
-		return ""
-	}
-	return base + kickWebhookPath(secret)
 }

@@ -179,7 +179,7 @@ func TestEveryServiceButKickPublishesAnAudioCeiling(t *testing.T) {
 			if s.Recommended.MaxAudioKbps != 0 {
 				t.Errorf("kick audio ceiling = %d, want none", s.Recommended.MaxAudioKbps)
 			}
-			if got := CheckEncoder(s, 512, 0, 0); len(got) != 0 {
+			if got := CheckEncoder(s, 512); len(got) != 0 {
 				t.Errorf("kick has no audio ceiling but was reported: %+v", got)
 			}
 			continue
@@ -212,13 +212,13 @@ func TestCheckEncoderComparesAgainstThePlatformNotAConstant(t *testing.T) {
 		t.Errorf("audio caps twitch/youtube/facebook = %d/%d/%d, want 160/160/128",
 			tw.Recommended.MaxAudioKbps, yt.Recommended.MaxAudioKbps, fb.Recommended.MaxAudioKbps)
 	}
-	if got := CheckEncoder(tw, 192, 0, 0); len(got) == 0 {
+	if got := CheckEncoder(tw, 192); len(got) == 0 {
 		t.Error("192 kbps audio is over Twitch's 160 and should be reported")
 	}
-	if got := CheckEncoder(tw, 160, 0, 0); len(got) != 0 {
+	if got := CheckEncoder(tw, 160); len(got) != 0 {
 		t.Errorf("160 kbps audio is at Twitch's cap but was reported: %+v", got)
 	}
-	if got := CheckEncoder(fb, 160, 0, 0); len(got) == 0 {
+	if got := CheckEncoder(fb, 160); len(got) == 0 {
 		t.Error("160 kbps audio is over Facebook's 128 and should be reported")
 	}
 	// Twitch's 6000 kbps video is advice, not a ceiling.
@@ -236,7 +236,7 @@ func TestAnUnknownPlatformGetsNoOpinion(t *testing.T) {
 	if _, ok := Lookup("custom"); ok {
 		t.Error("custom should have no registry entry")
 	}
-	if got := CheckEncoder(Service{}, 999, 999999, 999); len(got) != 0 {
+	if got := CheckEncoder(Service{}, 999); len(got) != 0 {
 		t.Errorf("a service with no published ceilings must produce no warnings, got %+v", got)
 	}
 }

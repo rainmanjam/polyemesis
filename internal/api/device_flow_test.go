@@ -765,7 +765,7 @@ func TestSecondsUntilRoundsUpSoAClientIsNeverToldToWaitNoTime(t *testing.T) {
 // between the capability and the button.
 //
 // The UI decides whether to offer "connect without a browser" from this field,
-// and reading it off DeviceFor rather than a hard-coded platform name is what
+// and reading it off As[DeviceFlower] rather than a hard-coded platform name is what
 // makes the answer follow the code: a build that added YouTube's device flow
 // would start offering the button with no UI change, and one that dropped
 // Twitch's would stop.
@@ -781,9 +781,9 @@ func TestTheGuideAdvertisesDeviceFlowForExactlyThePlatformsThatHaveIt(t *testing
 		t.Fatal("no guides, so the loop below asserts nothing")
 	}
 	for _, g := range guides {
-		_, want := oauth.DeviceFor(g.Platform)
+		_, want := oauth.As[oauth.DeviceFlower](oauth.Set{}, g.Platform)
 		if g.DeviceFlow != want {
-			t.Errorf("the %s guide reports deviceFlow=%v and DeviceFor says %v. The UI offers "+
+			t.Errorf("the %s guide reports deviceFlow=%v and As[DeviceFlower] says %v. The UI offers "+
 				"the device-code button off this field, so a disagreement is a button that "+
 				"cannot work or a capability nobody can reach", g.Platform, g.DeviceFlow, want)
 		}

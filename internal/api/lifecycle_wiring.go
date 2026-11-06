@@ -60,26 +60,18 @@ func (s *Server) LifecycleLoop(ctx context.Context) {
 	s.lifecycle.lifecycleLoop(ctx)
 }
 
-// DrainLifecycle ends what the operator has already asked to end, before the
-// process goes away.
+// DrainLifecycleWithin ends what the operator has already asked to end, before
+// the process goes away.
 //
 // It takes its own context because the caller's has usually just been cancelled:
 // shutdown cancels the loops first, and a drain that inherited that context
-// would do nothing at all while looking like it had run.
-// DrainLifecycle drains within lifecycleDrainBudget.
+// would do nothing at all while looking like it had run. Process shutdown draws
+// this phase from the same budget as the rest -- see
+// internal/engine/shutdown_budget.go. #645.
 //
-// Kept for callers with no deadline of their own. Process shutdown must use
-// DrainLifecycleWithin so this phase draws from the same budget as the rest --
-// see internal/engine/shutdown_budget.go. #645.
-func (s *Server) DrainLifecycle() {
-	ctx, cancel := context.WithTimeout(context.Background(), lifecycleDrainBudget)
-	defer cancel()
-	s.DrainLifecycleWithin(ctx)
-}
-
-// DrainLifecycleWithin drains inside the caller's deadline, or
-// lifecycleDrainBudget, whichever expires first: a drain that outlived its own
-// budget would eat the engines' share of the shutdown.
+// It drains inside the caller's deadline, or lifecycleDrainBudget, whichever
+// expires first: a drain that outlived its own budget would eat the engines'
+// share of the shutdown.
 func (s *Server) DrainLifecycleWithin(parent context.Context) {
 	if s.lifecycle == nil {
 		return
@@ -87,7 +79,7 @@ func (s *Server) DrainLifecycleWithin(parent context.Context) {
 
 	// AN EXPIRED PARENT IS ANNOUNCED RATHER THAN OBEYED IN SILENCE.
 	//
-	// The comment above DrainLifecycle names this hazard and has since it was
+	// The comment above DrainLifecycleWithin names this hazard and has since it was
 	// written: "a drain that inherited that context would do nothing at all
 	// while looking like it had run". A comment is not a device. Shutdown holds
 	// both contexts in scope at once, they are the same type, and the correct

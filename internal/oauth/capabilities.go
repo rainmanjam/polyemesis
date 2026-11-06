@@ -437,10 +437,14 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// because the operator must still do the access request by hand.
 			CapStreamKey: SupportManual,
 			// Built behind the gate, not yet exercised against a whitelisted app.
-			CapMetadata:           SupportUnknown,
-			CapChatRead:           SupportUnknown,
-			CapChatSend:           SupportUnknown,
-			CapModeration:         SupportUnknown,
+			CapMetadata: SupportUnknown,
+			CapChatRead: SupportUnknown,
+			// Send and moderation are what XAdapter implements (Sender, Deleter
+			// and Banner), so the cells say so; chat's
+			// TestTheCapabilityMatrixAgreesWithTheChatProfiles holds them to it.
+			// The Livestream gate still applies to both.
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportUnknown,
 		},

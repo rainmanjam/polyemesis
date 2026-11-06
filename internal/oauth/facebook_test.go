@@ -694,8 +694,8 @@ func TestTheTargetedProviderCapabilityIsFoundOnlyWhereItExists(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := TargetsFor(tc.platform); ok != tc.want {
-				t.Errorf("TargetsFor(%s) = %v, want %v", tc.platform, ok, tc.want)
+			if _, ok := As[TargetedProvider](Set{}, tc.platform); ok != tc.want {
+				t.Errorf("As[TargetedProvider](Set{}, %s) = %v, want %v", tc.platform, ok, tc.want)
 			}
 		})
 	}
@@ -1575,7 +1575,7 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 // when it grew ScheduleHorizon and RescheduleBroadcast.
 //
 // MUTATION M1 (absent branch), internal/oauth/facebook.go, in
-// ScheduledBroadcastsFor: `return sb, ok` -> `return sb, true`.
+// As[ScheduledBroadcaster]: `return sb, ok` -> `return sb, true`.
 // Observed: FAIL -- youtube, twitch and kick all reported the capability.
 //
 // MUTATION M2 (found branch), same function: `pr, ok := Providers()[p]` ->
@@ -1601,19 +1601,19 @@ func TestTheScheduledBroadcastCapabilityIsFoundOnlyWhereItExists(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sb, ok := ScheduledBroadcastsFor(tc.platform)
+			sb, ok := As[ScheduledBroadcaster](Set{}, tc.platform)
 			if ok != tc.want {
-				t.Fatalf("ScheduledBroadcastsFor(%s) = %v, want %v", tc.platform, ok, tc.want)
+				t.Fatalf("As[ScheduledBroadcaster](Set{}, %s) = %v, want %v", tc.platform, ok, tc.want)
 			}
 			// A false that still hands back a non-nil interface is the same
 			// trap from the other side: the caller's `if !ok` is the only
 			// thing standing between it and a call on a provider that cannot
 			// take it.
 			if !ok && sb != nil {
-				t.Errorf("ScheduledBroadcastsFor(%s) reported absent but returned %T", tc.platform, sb)
+				t.Errorf("As[ScheduledBroadcaster](Set{}, %s) reported absent but returned %T", tc.platform, sb)
 			}
 			if ok && sb == nil {
-				t.Errorf("ScheduledBroadcastsFor(%s) reported present and returned nil", tc.platform)
+				t.Errorf("As[ScheduledBroadcaster](Set{}, %s) reported present and returned nil", tc.platform)
 			}
 		})
 	}
@@ -1629,7 +1629,7 @@ func TestTheScheduledBroadcastCapabilityIsFoundOnlyWhereItExists(t *testing.T) {
 // -> `... { return 30 * 24 * time.Hour }`.
 // Observed: FAIL -- horizon = 720h0m0s, want 168h0m0s.
 func TestTheScheduledBroadcastCapabilityCarriesFacebooksOwnSevenDayBound(t *testing.T) {
-	sb, ok := ScheduledBroadcastsFor(db.PlatformFacebook)
+	sb, ok := As[ScheduledBroadcaster](Set{}, db.PlatformFacebook)
 	if !ok {
 		t.Fatal("Facebook has no scheduled-broadcast capability")
 	}
@@ -1646,7 +1646,7 @@ func TestTheScheduledBroadcastCapabilityCarriesFacebooksOwnSevenDayBound(t *test
 // graph.facebook.com while the rest of its test is stubbed. This proves the Set
 // twin exists AND that it redirects.
 //
-// MUTATION M4, internal/oauth/endpoints.go, in Set.ScheduledBroadcastsFor:
+// MUTATION M4, internal/oauth/endpoints.go, in As[ScheduledBroadcaster]:
 // `pr, ok := s.All()[p]` -> `pr, ok := Providers()[p]`.
 // Observed: FAIL, and the failure names the bug out loud -- the reschedule went
 // to the real graph.facebook.com and came back "Invalid OAuth access token -
@@ -1656,7 +1656,7 @@ func TestASetsScheduledBroadcasterIsTheOneItWasAimedAt(t *testing.T) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
 
-	sb, ok := NewSet(WithBaseURL(fb.api)).ScheduledBroadcastsFor(db.PlatformFacebook)
+	sb, ok := As[ScheduledBroadcaster](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 	if !ok {
 		t.Fatal("a Set has no scheduled-broadcast capability for Facebook")
 	}

@@ -288,14 +288,6 @@ func (p *platformStub) first(method, path string) *stubCall {
 	return &m[0]
 }
 
-// reset drops the log. Used where a test drives two sweeps and only the second
-// one's calls are the subject.
-func (p *platformStub) reset() {
-	p.mu.Lock()
-	p.seen = nil
-	p.mu.Unlock()
-}
-
 // set replaces the mutable knobs under the lock, because a sweep running in
 // another goroutine reads them.
 func (p *platformStub) setCreateErr(msg string) {

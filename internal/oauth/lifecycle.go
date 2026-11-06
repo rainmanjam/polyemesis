@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // Commanding a broadcast's lifecycle: the optional capability for a platform
@@ -257,20 +255,4 @@ type BroadcastCreator interface {
 	// is sourceKey, and returns its id. The platform may return a broadcast that
 	// is already running on that source instead of making a second one.
 	OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error)
-}
-
-// LifecycleFor reports whether a platform's broadcast lifecycle can be
-// commanded.
-//
-// The bool is the whole point and callers must branch on it rather than on a
-// platform name, for the reason StatsFor states: "this platform has no such
-// thing" and "there is no provider for this platform" are both false here, and
-// no caller does anything different about them.
-func LifecycleFor(p db.Platform) (BroadcastLifecycler, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	bl, ok := prov.(BroadcastLifecycler)
-	return bl, ok
 }

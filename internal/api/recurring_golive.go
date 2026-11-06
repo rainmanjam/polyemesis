@@ -130,7 +130,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 		s.log.Warn("recurring: the title pattern cannot be rendered for go-live", "schedule", sc.Name, "err", redactErr(err))
 		return
 	}
-	mp, ok := s.providers.MetadataFor(d.Platform)
+	mp, ok := oauth.As[oauth.MetadataPusher](s.providers, d.Platform)
 	if !ok {
 		return
 	}

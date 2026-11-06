@@ -829,20 +829,6 @@ func TestMetersArgsSingleTrackSkipsAmerge(t *testing.T) {
 	}
 }
 
-func TestMetersChannelOffsets(t *testing.T) {
-	s := MetersSpec{TrackChannels: []int{2, 6, 1}}
-	if got := s.TotalChannels(); got != 9 {
-		t.Errorf("total = %d, want 9", got)
-	}
-	// astats numbers the merged channels 1..9; these offsets are what maps
-	// them back onto tracks.
-	for track, want := range map[int]int{0: 0, 1: 2, 2: 8} {
-		if got := s.ChannelOffset(track); got != want {
-			t.Errorf("ChannelOffset(%d) = %d, want %d", track, got, want)
-		}
-	}
-}
-
 // ---------------------------------------------------------------- probe
 
 func TestParseProbe(t *testing.T) {

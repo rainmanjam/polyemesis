@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -63,17 +62,6 @@ type CompliancePusher interface {
 	Provider
 	PushCompliance(ctx context.Context, clientID, accessToken string,
 		tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error)
-}
-
-// ComplianceFor returns the capability, or false when a platform has none.
-// Discover it here; never type-assert at a call site.
-func ComplianceFor(p db.Platform) (CompliancePusher, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	cp, ok := pr.(CompliancePusher)
-	return cp, ok
 }
 
 // PushCompliance writes YouTube's privacy status and COPPA declaration.
@@ -159,20 +147,4 @@ func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken strin
 		return nil, scopeAdvice(err, db.PlatformTwitch, t.MetadataCaps().Scope)
 	}
 	return &MetadataResult{Applied: []MetadataField{FieldLabels}}, nil
-}
-
-// firstNonEmptyLabel is a small helper for rendering, kept here so the UI and
-// the log describe a label set the same way.
-func LabelSummary(labels map[string]bool) string {
-	on := make([]string, 0, len(labels))
-	for id, enabled := range labels {
-		if enabled && db.ValidTwitchLabel(id) {
-			on = append(on, id)
-		}
-	}
-	sort.Strings(on)
-	if len(on) == 0 {
-		return "none"
-	}
-	return strings.Join(on, ", ")
 }

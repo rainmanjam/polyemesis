@@ -122,7 +122,7 @@ func (k *platformHealthCheck) StreamHealth(ctx context.Context, destID int64) (e
 	if d.AccountID == nil || d.StreamKey == "" {
 		return engine.PlatformHealth{}, false, nil
 	}
-	reader, can := k.providers.StreamHealthFor(d.Platform)
+	reader, can := oauth.As[oauth.StreamHealthReader](k.providers, d.Platform)
 	if !can {
 		return engine.PlatformHealth{}, false, nil
 	}

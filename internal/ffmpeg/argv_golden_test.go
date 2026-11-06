@@ -7,13 +7,6 @@ import (
 	. "github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
-// withLogLevel runs the argv builders under POLYEMESIS_FFMPEG_LOGLEVEL=lvl
-// ("" means unset). See argvgold for how the goldens are regenerated.
-func withLogLevel(t *testing.T, lvl string) {
-	t.Helper()
-	argvgold.LogLevel(t, lvl)
-}
-
 // ffmpegChildren is one argv per kind of FFmpeg child this package builds.
 func ffmpegChildren() map[string][]string {
 	dest := DestSpec{

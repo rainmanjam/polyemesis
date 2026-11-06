@@ -106,16 +106,6 @@ func enginePort(t *testing.T, e *Engine, why string) int {
 	return p
 }
 
-func mustAllocate(t *testing.T, a *relay.PortAllocator, why string) int {
-	t.Helper()
-	p, err := a.Allocate()
-	if err != nil {
-		t.Fatalf("%s: the allocator has no free port left (%v), so the one taken "+
-			"by the path under test was never released", why, err)
-	}
-	return p
-}
-
 func lifeRendition(id int64, enc db.VideoEncoder) *db.Rendition {
 	return &db.Rendition{
 		ID: id, Name: "tier", Width: 1280, Height: 720, FPS: 30,

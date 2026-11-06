@@ -39,7 +39,7 @@ type Guidance struct {
 }
 
 // Ceilings are the encoder MAXIMUMS the platform enforces seeded from OBS's rtmp-services data, which
-// CheckEncoder and the codec checks read. A different source from Guidance, and
+// CheckEncoder (audio only) and the codec checks read. A different source from Guidance, and
 // not always the same number; see the package comment.
 type Ceilings struct {
 	KeyintSeconds int

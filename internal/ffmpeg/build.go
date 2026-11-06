@@ -1702,26 +1702,6 @@ type MetersSpec struct {
 	SampleRate    int
 }
 
-// TotalChannels is the width of the merged metering stream.
-func (s MetersSpec) TotalChannels() int {
-	n := 0
-	for _, c := range s.TrackChannels {
-		n += c
-	}
-	return n
-}
-
-// ChannelOffset returns the merged-stream index of track t's channel 0.
-// astats numbers channels from 1, so the metadata key for track t channel c is
-// lavfi.astats.<ChannelOffset(t)+c+1>.<metric>.
-func (s MetersSpec) ChannelOffset(track int) int {
-	n := 0
-	for i := 0; i < track && i < len(s.TrackChannels); i++ {
-		n += s.TrackChannels[i]
-	}
-	return n
-}
-
 // MetersArgs builds the metering sidecar command.
 //
 // MeterChannelLimit is amerge's ceiling. Beyond 64 channels it refuses outright

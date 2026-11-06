@@ -257,9 +257,6 @@ func TestCheckArchiveAgeRefusesAnythingItCannotProveIsOldEnough(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("CheckArchiveAge: %v", err)
 			}
-			if got := ArchiveEligible(tc.recordedAt, now, tc.minAge); got == tc.wantErr {
-				t.Fatalf("ArchiveEligible = %v, contradicts CheckArchiveAge", got)
-			}
 		})
 	}
 }

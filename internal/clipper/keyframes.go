@@ -391,13 +391,6 @@ func runChild(ctx context.Context, name string, args []string, lower bool) ([]by
 	return out.Bytes(), nil
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 // indexFor probes for the keyframes near an in-point and returns them in
 // timeline coordinates.
 //

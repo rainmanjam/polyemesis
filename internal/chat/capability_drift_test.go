@@ -5,6 +5,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
@@ -119,6 +120,28 @@ func TestRegistryAgreesWithTheChatAdapters(t *testing.T) {
 		if m.Delete != pr.Delete || m.TimeoutBan != pr.Ban || m.Hide != pr.Hide {
 			t.Errorf("%s: registry delete/ban/hide = %v/%v/%v, adapter = %v/%v/%v",
 				row.Key, m.Delete, m.TimeoutBan, m.Hide, pr.Delete, pr.Ban, pr.Hide)
+		}
+	}
+}
+
+// The oauth capability matrix is what the console and docs/PLATFORMS.md show an
+// operator; the profile is what the adapter's type can actually do. oauth
+// cannot import chat, so this is the join: a platform whose adapter sends must
+// not read as unable to (or unverified), and the reverse.
+func TestTheCapabilityMatrixAgreesWithTheChatProfiles(t *testing.T) {
+	for p := range adapterTypes {
+		row, ok := oauth.CapabilityForPlatform(p)
+		if !ok {
+			t.Errorf("%s has a chat adapter and no capability row", p)
+			continue
+		}
+		pr, _ := ProfileOf(p)
+		if got, want := row.Get(oauth.CapChatSend) == oauth.SupportYes, pr.Send; got != want {
+			t.Errorf("%s: matrix chat send yes=%v, adapter sends=%v", p, got, want)
+		}
+		moderates := pr.Delete || pr.Ban || pr.Hide
+		if got := row.Get(oauth.CapModeration) == oauth.SupportYes; got != moderates {
+			t.Errorf("%s: matrix moderation yes=%v, adapter moderates=%v", p, got, moderates)
 		}
 	}
 }

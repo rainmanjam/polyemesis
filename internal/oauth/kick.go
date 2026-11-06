@@ -36,7 +36,7 @@ import (
 var ErrNoStreamKeyAPI = errors.New("this platform publishes no stream-key endpoint, so the key must be pasted by hand")
 
 // ManualKey is the negative capability that goes with ErrNoStreamKeyAPI.
-// Discover it with ManualKeyFor; like MetadataPusher it is a second interface
+// Discover it with As[ManualKey]; like MetadataPusher it is a second interface
 // rather than a method on Provider, so the three platforms that can fetch a key
 // stay unaware of it and the UI has exactly one place to ask.
 type ManualKey interface {
@@ -44,18 +44,6 @@ type ManualKey interface {
 	// ManualKeyReason is shown next to the stream-key field. It says where the
 	// key lives and what still works without it, in the operator's words.
 	ManualKeyReason() string
-}
-
-// ManualKeyFor reports whether a platform authenticates but cannot supply an
-// ingest. False covers both "fetches its key fine" and "has no provider at
-// all", because neither needs the paste-it-yourself hint.
-func ManualKeyFor(p db.Platform) (ManualKey, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	mk, ok := pr.(ManualKey)
-	return mk, ok
 }
 
 // Kick implements Kick's OAuth 2.1 flow plus the parts of its public API that

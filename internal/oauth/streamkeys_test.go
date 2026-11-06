@@ -70,13 +70,13 @@ func TestOnlyPlatformsWithAReadOnlyKeyEndpointOfferStreamKeys(t *testing.T) {
 	// is closed StreamKeys refuses without a request.
 	want := map[db.Platform]bool{db.PlatformYouTube: true, db.PlatformTwitch: true, db.PlatformX: true}
 	for p := range NewSet().All() {
-		_, ok := NewSet().StreamKeysFor(p)
+		_, ok := As[StreamKeyReader](NewSet(), p)
 		if ok != want[p] {
-			t.Errorf("%s: StreamKeysFor ok = %v, want %v", p, ok, want[p])
+			t.Errorf("%s: StreamKeyReader ok = %v, want %v", p, ok, want[p])
 		}
-		_, pkgOK := StreamKeysFor(p)
+		_, pkgOK := As[StreamKeyReader](Set{}, p)
 		if pkgOK != ok {
-			t.Errorf("%s: package StreamKeysFor = %v, Set twin = %v", p, pkgOK, ok)
+			t.Errorf("%s: the zero Set says StreamKeyReader = %v, NewSet() says %v", p, pkgOK, ok)
 		}
 	}
 }

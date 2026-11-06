@@ -138,7 +138,7 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 //
 // THE ZERO ScheduledFor PATH CREATES NOTHING, and that is deliberate to the
 // point of being the reason this method can exist at all. internal/api routes
-// EVERY go-live through TargetsFor/IngestFor when a platform has the capability,
+// EVERY go-live through As[TargetedProvider]/IngestFor when a platform has the capability,
 // so making YouTube a TargetedProvider re-points the existing go-live path at
 // this function. Live-now therefore does exactly what Provider.Ingest did: it
 // returns the channel's reusable stream with no broadcast id, which is the same

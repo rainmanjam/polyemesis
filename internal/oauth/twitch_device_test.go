@@ -444,26 +444,26 @@ func TestDeviceFlowIsTwitchOnlyAndSaysWhyForEachPlatformThatLacksIt(t *testing.T
 	}
 
 	for p := range Providers() {
-		df, ok := DeviceFor(p)
+		df, ok := As[DeviceFlower](Set{}, p)
 		if withFlow[p] {
 			if !ok {
-				t.Errorf("DeviceFor(%s) did not resolve; #442 built device flow for exactly this platform", p)
+				t.Errorf("As[DeviceFlower](Set{}, %s) did not resolve; #442 built device flow for exactly this platform", p)
 				continue
 			}
 			if df == nil {
-				t.Errorf("DeviceFor(%s) answered true with a nil provider, which panics on use", p)
+				t.Errorf("As[DeviceFlower](Set{}, %s) answered true with a nil provider, which panics on use", p)
 			}
 			continue
 		}
 		if ok {
-			t.Errorf("DeviceFor(%s) resolved, and #442 concluded it should not: %s", p, why[p])
+			t.Errorf("As[DeviceFlower](Set{}, %s) resolved, and #442 concluded it should not: %s", p, why[p])
 		}
 	}
 
 	// Neither half may quietly cover nothing: if Providers() ever stopped
 	// registering Twitch, the positive branch above would assert on an empty
 	// set and pass for the wrong reason.
-	if _, ok := DeviceFor(db.PlatformTwitch); !ok {
+	if _, ok := As[DeviceFlower](Set{}, db.PlatformTwitch); !ok {
 		t.Fatal("Twitch is the only device flow there is, and it did not resolve")
 	}
 
@@ -473,8 +473,8 @@ func TestDeviceFlowIsTwitchOnlyAndSaysWhyForEachPlatformThatLacksIt(t *testing.T
 	// internal/api reads the platform out of the path -- so it is a value an
 	// operator can type, and a nil interface returned alongside true would panic
 	// on the first method call rather than being refused by name.
-	if df, ok := DeviceFor(db.Platform("peertube")); ok || df != nil {
-		t.Errorf("DeviceFor(peertube) answered (%#v, %v) for a platform that has no provider "+
+	if df, ok := As[DeviceFlower](Set{}, db.Platform("peertube")); ok || df != nil {
+		t.Errorf("As[DeviceFlower](Set{}, peertube) answered (%#v, %v) for a platform that has no provider "+
 			"at all", df, ok)
 	}
 }
@@ -487,9 +487,9 @@ func TestSetDeviceForResolvesAgainstTheSetAndNotTheRealTwitch(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 
-	df, ok := set.DeviceFor(db.PlatformTwitch)
+	df, ok := As[DeviceFlower](set, db.PlatformTwitch)
 	if !ok {
-		t.Fatal("Set.DeviceFor(twitch) did not resolve; the twin is not wired")
+		t.Fatal("As[DeviceFlower](Set, twitch) did not resolve; the twin is not wired")
 	}
 	// Driven, so a provider that resolves but is aimed at production still
 	// trips the escape guard. Errors are ignored: the generic stub body does
@@ -504,15 +504,15 @@ func TestSetDeviceForResolvesAgainstTheSetAndNotTheRealTwitch(t *testing.T) {
 
 	// A platform without the capability must answer false rather than a nil
 	// interface that panics on use.
-	if _, ok := set.DeviceFor(db.PlatformKick); ok {
-		t.Error("Set.DeviceFor(kick) resolved; Kick has no device authorization endpoint")
+	if _, ok := As[DeviceFlower](set, db.PlatformKick); ok {
+		t.Error("As[DeviceFlower](Set, kick) resolved; Kick has no device authorization endpoint")
 	}
 	// And a platform the set does not contain at all, which is the other way in:
 	// the platform arrives as a URL parameter, so "there is no such provider" is
 	// as ordinary an answer as "that provider has no device flow", and both have
 	// to leave the caller with a nil it was told about rather than one it wasn't.
-	if df, ok := set.DeviceFor(db.Platform("peertube")); ok || df != nil {
-		t.Errorf("Set.DeviceFor(peertube) answered (%#v, %v) for a platform the set does not "+
+	if df, ok := As[DeviceFlower](set, db.Platform("peertube")); ok || df != nil {
+		t.Errorf("As[DeviceFlower](Set, peertube) answered (%#v, %v) for a platform the set does not "+
 			"hold", df, ok)
 	}
 }

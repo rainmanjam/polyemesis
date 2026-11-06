@@ -10,6 +10,10 @@ its first tagged release.
 
 ### Fixed
 
+- **The platform capability table no longer calls X's chat send and moderation "Unverified".** The X adapter
+  has sent, deleted and muted since it landed, but the table (and docs/PLATFORMS.md) still said "Not built
+  yet". Both cells now read "Works", and a chat test holds every platform's cells to what its adapter
+  implements, so they cannot drift again.
 - **Copy buttons say so when the clipboard is unavailable.** On a plain-http install the browser has no
   clipboard, and the ingest URL copy in Settings, the API token, ACME, TLS and redirect-path copies,
   and Pull URL on a media file did nothing and said nothing. They now show "Clipboard is unavailable on this origin".

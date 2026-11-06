@@ -21,7 +21,7 @@ import (
 // disconnect and reconnect every YouTube account, and nothing in this file
 // earns that.
 //
-// The capability is resolved by type assertion in LifecycleFor, so a drifting
+// The capability is resolved by type assertion in As[BroadcastLifecycler], so a drifting
 // signature would make YouTube silently stop being a lifecycle platform rather
 // than fail to build. Same guard as the one above Stats in youtube.go.
 var _ BroadcastLifecycler = (*YouTube)(nil)

@@ -32,7 +32,7 @@ import (
  *   destination no longer publishes to.
  *
  * The tests below drive considerRow, not forgetPlatformSwitch directly: the
- * decision to call it lives in considerRow's `LifecycleFor` miss, and a test
+ * decision to call it lives in considerRow's `As[BroadcastLifecycler]` miss, and a test
  * that called the helper directly would pass even if nothing ever reached it.
  */
 
@@ -45,7 +45,7 @@ func capturingLog() (*slog.Logger, *bytes.Buffer) {
 }
 
 // switchFixture builds a coordinator over one row, with no live platform
-// provider registered: LifecycleFor misses for every platform, which is the
+// provider registered: As[BroadcastLifecycler] misses for every platform, which is the
 // state a switched destination is in.
 func switchFixture(t *testing.T, row *db.Destination) (*lifecycleCoordinator, *fakeLifecycleStore, *bytes.Buffer) {
 	t.Helper()
@@ -138,10 +138,10 @@ func TestARowStillOnALifecyclePlatformKeepsItsBroadcast(t *testing.T) {
 	row := lifecycleTestRow(true, "live")
 	c, store, _ := lifecycleFixture(t, yt, row)
 
-	// The premise: LifecycleFor resolves for YouTube here, so considerRow takes
+	// The premise: As[BroadcastLifecycler] resolves for YouTube here, so considerRow takes
 	// the branch that does NOT abandon. Without this the test would pass by
 	// reaching the same clear it is trying to prove does not happen.
-	if _, ok := c.providers.LifecycleFor(db.PlatformYouTube); !ok {
+	if _, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, db.PlatformYouTube); !ok {
 		t.Fatal("fixture: YouTube has no lifecycle provider, so this would pass for " +
 			"the wrong reason")
 	}

@@ -2,7 +2,6 @@ package routing
 
 import (
 	"fmt"
-	"strings"
 )
 
 // SecondaryPrefix is the label namespace of the second mix in a paired graph.
@@ -115,26 +114,4 @@ func CompilePair(primary Profile, secondary *Profile, src Source) (Pair, error) 
 	p.SecondOutLabel = second.OutLabel
 	p.Second = &second
 	return p, nil
-}
-
-// SecondaryLabels reports every label the secondary namespace claims in g, in
-// the order they are defined. It exists for the collision test and for anyone
-// debugging a graph by eye; nothing in the compile path calls it.
-func SecondaryLabels(g string) []string {
-	var out []string
-	for _, f := range strings.Split(g, ";") {
-		for {
-			i := strings.Index(f, "["+SecondaryPrefix)
-			if i < 0 {
-				break
-			}
-			j := strings.Index(f[i:], "]")
-			if j < 0 {
-				break
-			}
-			out = append(out, f[i+1:i+j])
-			f = f[i+j:]
-		}
-	}
-	return dedupe(out)
 }

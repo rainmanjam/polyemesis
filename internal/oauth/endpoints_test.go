@@ -406,11 +406,11 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 	// here cannot drift away from what the providers do.
 	var claimed, denied int
 	for _, row := range PlatformCapabilities() {
-		ls, ok := set.StatsFor(row.Platform)
+		ls, ok := As[LiveStatter](set, row.Platform)
 		if row.Caps[CapViewerStats] == SupportYes {
 			claimed++
 			if !ok {
-				t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired",
+				t.Errorf("As[LiveStatter](Set, %s) did not resolve; it implements Stats, so the twin is not wired",
 					row.Platform)
 				continue
 			}
@@ -424,7 +424,7 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 		// answer supported:false, and a nil-with-true would crash the handler.
 		denied++
 		if ok {
-			t.Errorf("Set.StatsFor(%s) resolved, but its viewerStats cell is %q — "+
+			t.Errorf("As[LiveStatter](Set, %s) resolved, but its viewerStats cell is %q — "+
 				"the assertion is matching something it should not",
 				row.Platform, row.Caps[CapViewerStats])
 		}

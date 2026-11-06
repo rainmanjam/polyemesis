@@ -124,8 +124,6 @@ type RumbleConfig struct {
 	Key string
 	// Poll overrides the base interval. Clamped to [rumbleMinPoll, rumbleMaxPoll].
 	Poll time.Duration
-	// Backfill bounds the first poll's history.
-	Backfill time.Duration
 
 	APIBase string
 	HTTP    *http.Client
@@ -166,9 +164,6 @@ func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 	}
 	if cfg.Sleep == nil {
 		cfg.Sleep = sleepCtx
-	}
-	if cfg.Backfill <= 0 {
-		cfg.Backfill = rumbleDefaultBackfill
 	}
 	return &RumbleAdapter{
 		cfg:    cfg,
@@ -347,7 +342,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 
 		cutoff := time.Time{}
 		if first {
-			cutoff = r.cfg.Now().Add(-r.cfg.Backfill)
+			cutoff = r.cfg.Now().Add(-rumbleDefaultBackfill)
 			first = false
 		}
 

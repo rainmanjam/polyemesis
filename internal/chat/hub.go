@@ -382,7 +382,7 @@ func (h *Hub) Attach(ctx context.Context, a Adapter) error {
 // built for a test or a demo) would have been offered for a platform the
 // rest of the product says cannot take one.
 //
-// Only an explicit No refuses. Unknown (X, gated behind Livestream access)
+// Only an explicit No refuses. Unknown (a platform nobody has checked)
 // keeps working, because the matrix's own rule is that a No must trace to
 // something checked.
 func canPost(a Adapter) bool {

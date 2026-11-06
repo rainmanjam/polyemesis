@@ -388,7 +388,7 @@ type BroadcastRollover interface {
 var _ BroadcastRollover = (*YouTube)(nil)
 
 // RolloverFor reports whether a platform has a broadcast rollover, and the bool is the whole answer the caller
-// branches on, as with LifecycleFor.
+// branches on, as with As[BroadcastLifecycler].
 func RolloverFor(p db.Platform) (BroadcastRollover, bool) {
 	prov, err := Get(p)
 	if err != nil {

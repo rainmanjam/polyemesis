@@ -2528,7 +2528,7 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, sourceID *int64, profile 
 // no control in the dialog to clear a field it does not show.
 //
 // The reason this matters beyond tidiness is REACTIVATION. Compliance stored
-// against a Kick destination is inert, because ComplianceFor(kick) is absent
+// against a Kick destination is inert, because As[CompliancePusher](kick) is absent
 // and the push skips it. Point that same destination back at YouTube and the
 // declaration is live again -- a legal statement about who a programme is for,
 // sent on behalf of an operator who last saw it in a form they abandoned.
@@ -2562,7 +2562,7 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.PlatformAccount) []string {
 	var warnings []string
 
-	// Discovered through ComplianceFor, never a list of platform names: the
+	// Discovered through As[CompliancePusher], never a list of platform names: the
 	// capability is what decides whether a value can be sent, and a second copy
 	// of that knowledge here would be the copy that goes stale.
 	//
@@ -2570,7 +2570,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// capability has to be resolved through the SAME provider set the push
 	// resolves it through, or a test can aim the push at a stub and leave this
 	// answering for production.
-	if _, ok := s.providers.ComplianceFor(row.Platform); !ok && !row.Compliance.Empty() {
+	if _, ok := oauth.As[oauth.CompliancePusher](s.providers, row.Platform); !ok && !row.Compliance.Empty() {
 		row.Compliance = db.Compliance{}
 		warnings = append(warnings, fmt.Sprintf(
 			"Compliance settings were removed: %s has no compliance surface, so a "+
@@ -2611,7 +2611,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// account_id and platform are two independent columns and nothing compared
 	// them. The pairing is not decorative: the consumers pick the API off the
 	// DESTINATION's platform and the credential off the destination's account.
-	// preannounce.go resolves ScheduledBroadcastsFor(d.Platform) and then calls
+	// preannounce.go resolves As[ScheduledBroadcaster](d.Platform) and then calls
 	// it with tokenFor(*d.AccountID).AccessToken; lifecycle.go tracks the same
 	// two fields side by side and does the same thing. So a row saying
 	// "platform: facebook, account: <a YouTube account>" sends a Google OAuth
@@ -2693,7 +2693,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 			//
 			// Nothing resolves a platform API off a custom destination. Every
 			// capability lookup in oauth.Set keys on the platform and there is
-			// no custom entry -- ScheduledBroadcastsFor, LifecycleFor and Get
+			// no custom entry -- As[ScheduledBroadcaster], As[BroadcastLifecycler] and Get
 			// all answer false -- so the pre-announce and lifecycle sweeps
 			// skip the row entirely and no token is ever sent anywhere on its
 			// behalf. The leak this clause exists to stop cannot happen here.

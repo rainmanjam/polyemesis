@@ -185,7 +185,7 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 // metadataTargets lists connected accounts on platforms that implement the
 // capability, each carrying the compliance resolved from its destinations. A
 // platform that cannot do this is absent rather than present and failing — see
-// Set.MetadataFor.
+// As[MetadataPusher].
 //
 // The conflicts return is not advisory. Destinations on one account asking for
 // different compliance have no answer, so complianceByTarget withholds that
@@ -209,7 +209,7 @@ func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error)
 
 	out := []metadataTarget{}
 	for _, a := range accts {
-		mp, ok := s.providers.MetadataFor(a.Platform)
+		mp, ok := oauth.As[oauth.MetadataPusher](s.providers, a.Platform)
 		if !ok {
 			continue
 		}
@@ -430,7 +430,7 @@ func (s *Server) handleBroadcastWindow(w http.ResponseWriter, r *http.Request) {
 			Platform:    t.Platform,
 			AccountName: t.AccountName,
 		}
-		pusher, ok := s.providers.MetadataFor(t.Platform)
+		pusher, ok := oauth.As[oauth.MetadataPusher](s.providers, t.Platform)
 		if !ok {
 			rows = append(rows, row)
 			continue
@@ -765,7 +765,7 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		out.Message = fmt.Sprintf("developer credentials for %s are missing; add them in Settings → Platform credentials.", t.Platform)
 		return out
 	}
-	pusher, ok := s.providers.MetadataFor(t.Platform)
+	pusher, ok := oauth.As[oauth.MetadataPusher](s.providers, t.Platform)
 	if !ok {
 		out.State = metaError
 		out.Message = fmt.Sprintf("%s cannot receive stream metadata", t.Platform)
@@ -831,12 +831,12 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	// capability existed and was tested for a full release while nothing
 	// invoked it, so the settings were editable and unsendable at the same time.
 	//
-	// ComplianceFor rather than a type assertion, and absence rather than an
+	// As[CompliancePusher] rather than a type assertion, and absence rather than an
 	// error: Kick has no compliance API, and a red row for a field the platform
 	// does not have teaches the operator to ignore red rows. Absent is still
 	// SAID, though -- see the else below.
 	if !t.Compliance.Empty() {
-		if cp, ok := s.providers.ComplianceFor(t.Platform); ok {
+		if cp, ok := oauth.As[oauth.CompliancePusher](s.providers, t.Platform); ok {
 			cres, err := cp.PushCompliance(ctx, creds.ClientID, acct.AccessToken,
 				oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
 				t.Compliance)

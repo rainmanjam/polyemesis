@@ -340,7 +340,7 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 		if !a.Model.Enabled && !a.Secondary.Enabled {
 			return false, "the model checker is switched off"
 		}
-		// modelConfigFrom copies an empty endpoint over the default, so the
+		// modelConfigFor copies an empty endpoint over the default, so the
 		// checker is built and every call is a POST to "" that fails open.
 		for _, m := range []db.AutomodModel{a.Model, a.Secondary} {
 			if m.Enabled && strings.TrimSpace(m.Endpoint) != "" {
@@ -481,7 +481,11 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // one rule pattern must still serve chat, still flag, and still run the history
 // detectors — refusing to moderate at all because one regex is malformed is the
 // wrong trade in both directions.
-// modelConfigFrom turns the stored model settings into the engine's config.
+// modelConfigFor turns one checker's stored model settings into the engine's
+// config. conn is the checker's own block -- endpoint, model, budget, timeout,
+// floor, preset -- and shared is the primary's, which carries the policy both
+// checkers apply: the Instruction, the legacy Action, TimeoutForBan and the
+// category table.
 //
 // EXTRACTED SO IT CAN BE TESTED WITHOUT A STORE, because two fields here were
 // silently not wired and nothing could see it. The stored shape and the
@@ -496,14 +500,6 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // while the reload table in internal/engine/reload.go classified timeoutForBan as ClassLive
 // through this function, which is a written promise that saving it takes
 // effect.
-func modelConfigFrom(a db.AutomodSettings) (automod.ModelConfig, error) {
-	return modelConfigFor(a.Model, a.Model)
-}
-
-// modelConfigFor is modelConfigFrom for either checker. conn is the checker's
-// own block -- endpoint, model, budget, timeout, floor, preset -- and shared is
-// the primary's, which carries the policy both checkers apply: the
-// Instruction, the legacy Action, TimeoutForBan and the category table.
 func modelConfigFor(conn, shared db.AutomodModel) (automod.ModelConfig, error) {
 	var confidenceProblem error
 	cfg := automod.DefaultModelConfig()

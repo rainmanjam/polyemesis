@@ -99,12 +99,6 @@ func buildPolicies() []PlatformPolicy {
 	return append(out, custom)
 }
 
-// PlatformPolicies returns the whole table, for the settings UI to render and
-// for the operator to see exactly what polyemesis is assuming on their behalf.
-func PlatformPolicies() []PlatformPolicy {
-	return append([]PlatformPolicy(nil), platformPolicies...)
-}
-
 // PolicyFor returns the policy for a platform.
 //
 // An empty or unrecognised platform gets the custom-destination row, which

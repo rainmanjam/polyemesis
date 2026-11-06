@@ -258,7 +258,7 @@ func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ing
 // ingest. See docs/evidence/platform-lifecycle-apis-2026-08-16.md.
 const twitchStreamsPath = "/streams"
 
-// The capability is resolved by type assertion in StatsFor, so a signature that
+// The capability is resolved by type assertion in As[LiveStatter], so a signature that
 // drifts would make Twitch silently stop reporting viewers rather than fail to
 // build. This turns that into a compile error, next to the method it constrains
 // -- TestTheViewerStatsCellAgreesWithWhichProvidersActuallyImplementStats then

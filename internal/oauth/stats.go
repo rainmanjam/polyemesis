@@ -3,8 +3,6 @@ package oauth
 import (
 	"context"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // LiveStats is a point-in-time read of a connected channel's broadcast.
@@ -78,19 +76,4 @@ type LiveStats struct {
 type LiveStatter interface {
 	Provider
 	Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error)
-}
-
-// StatsFor reports whether a platform can be asked for viewer numbers.
-//
-// The bool is the whole point and callers must branch on it rather than on a
-// platform name: internal/api answers 200 with supported:false when it is
-// false, because "we cannot ask" and "the account is gone" are different
-// problems with different fixes.
-func StatsFor(p db.Platform) (LiveStatter, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	s, ok := prov.(LiveStatter)
-	return s, ok
 }

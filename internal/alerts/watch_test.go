@@ -134,14 +134,6 @@ func drive(w *Watcher, until int, ids []int64, plan func(id int64, sec int) dest
 	return got
 }
 
-func typesOf(evs []timedEvent) []Type {
-	out := make([]Type, len(evs))
-	for i, e := range evs {
-		out[i] = e.typ
-	}
-	return out
-}
-
 func wantTypes(t *testing.T, got []timedEvent, want ...Type) {
 	t.Helper()
 	if len(got) != len(want) {

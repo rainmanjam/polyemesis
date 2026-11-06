@@ -474,16 +474,6 @@ func (f *deckFixture) waitSettled(t *testing.T) {
 	t.Fatalf("the install never settled into the states the contract records: %s", last)
 }
 
-// get performs a GET with a bearer token and fails unless the status matches.
-func (f *deckFixture) get(t *testing.T, token, path string, want int) []byte {
-	t.Helper()
-	code, body := f.do(t, token, http.MethodGet, path, nil)
-	if code != want {
-		t.Fatalf("GET %s = %d, want %d: %s", path, code, want, body)
-	}
-	return body
-}
-
 // do performs one request with a bearer token, the way the plugin's transport
 // does: no cookie, no CSRF header.
 func (f *deckFixture) do(t *testing.T, token, method, path string, body any) (int, []byte) {

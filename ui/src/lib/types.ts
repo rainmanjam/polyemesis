@@ -2486,7 +2486,7 @@ export interface LiveStats {
  *  different fields: "polyemesis cannot ask this platform" is a capability
  *  answer with a reason to show, not an error and not an absent count. The union
  *  makes reaching for `stats` without checking `supported` a type error, which
- *  is the branch oauth.StatsFor's doc comment asks every caller to take. */
+ *  is the branch oauth.As[LiveStatter]'s doc comment asks every caller to take. */
 export type AccountStats =
   | {
       supported: false;
@@ -2515,7 +2515,7 @@ export interface SetupGuide {
    *  the token.
    *
    *  READ THIS RATHER THAN CHECKING FOR "twitch". The server derives it from
-   *  oauth.DeviceFor, so a build that gains or loses the capability changes what
+   *  oauth.As[DeviceFlower], so a build that gains or loses the capability changes what
    *  this UI offers with no edit here — which is the whole reason it is a field
    *  and not a constant. */
   deviceFlow?: boolean;

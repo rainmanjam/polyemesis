@@ -312,7 +312,7 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read this occurrence's destination")
 		return
 	}
-	sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 	if !ok || d.AccountID == nil {
 		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
 		return

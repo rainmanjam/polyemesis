@@ -43,6 +43,7 @@ func TestKickWebhookReachesTheAdapterForItsBroadcaster(t *testing.T) {
 			Channel:           c.slug,
 			Token:             chat.StaticToken("t"),
 			CallbackSecret:    s.kickCallbackSecret(),
+			CallbackPath:      kickWebhookPath,
 			Verify:            permissive,
 		})
 		if err != nil {
@@ -110,6 +111,7 @@ func TestKickWebhookForAForeignChannelIsDroppedEvenWithOneAdapter(t *testing.T) 
 	a, err := chat.NewKick(chat.KickConfig{
 		BroadcasterUserID: 111, Channel: "only", Token: chat.StaticToken("t"),
 		CallbackSecret: s.kickCallbackSecret(),
+		CallbackPath:   kickWebhookPath,
 		Verify:         func(*http.Request, []byte) error { return nil },
 	})
 	if err != nil {
@@ -164,6 +166,7 @@ func TestKickWebhookForAnUnconnectedChannelStillRejectsABadSignature(t *testing.
 		a, err := chat.NewKick(chat.KickConfig{
 			BroadcasterUserID: id, Token: chat.StaticToken("t"),
 			CallbackSecret: s.kickCallbackSecret(),
+			CallbackPath:   kickWebhookPath,
 			Verify:         func(*http.Request, []byte) error { return errors.New("bad signature") },
 		})
 		if err != nil {

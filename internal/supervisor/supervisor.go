@@ -1805,17 +1805,12 @@ func (p *Process) terminate() {
 			defer wt.Stop()
 			wake = wt.C
 		}
-		// BOTH OUTCOMES ARE COUNTED HERE, in the one select that decides which
-		// happened. Counting them at separate call sites is how a denominator
-		// quietly stops matching its numerator -- and an absent denominator is
-		// why this escalation ran unnoticed for weeks. See teardown_stats.go.
 		for {
 			select {
 			case <-exited:
 				// Reaped inside the grace period. There is nothing to escalate to,
 				// and killGroup on a reaped pid is a signal to whoever holds that
 				// number now.
-				noteTeardown(string(p.spec.Kind), false)
 				return
 			case <-wake:
 				wakeFn()
@@ -1826,7 +1821,6 @@ func (p *Process) terminate() {
 				// compile time -- rewording it silently disarms that check.
 				// grace_string_test.go pins it.
 				p.log.Warn("process did not exit after grace period; killing group")
-				noteTeardown(string(p.spec.Kind), true)
 				killGroup(cmd)
 				return
 			}

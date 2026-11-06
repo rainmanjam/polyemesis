@@ -187,10 +187,10 @@ func (s *Server) handleStartDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Through the Set twin rather than oauth.DeviceFor, on endpoints.go's own
+	// Through the Set twin rather than oauth.As[DeviceFlower], on endpoints.go's own
 	// terms: the package function would hand a stubbed server the PRODUCTION
 	// Twitch provider and then poll id.twitch.tv every five seconds.
-	df, ok := s.providers.DeviceFor(platform)
+	df, ok := oauth.As[oauth.DeviceFlower](s.providers, platform)
 	if !ok {
 		// A refusal rather than a 200 with supported:false, and the difference
 		// from handleAccountStats is the verb. That route is a READ a dashboard
@@ -326,7 +326,7 @@ func (s *Server) handlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	df, ok := s.providers.DeviceFor(flow.platform)
+	df, ok := oauth.As[oauth.DeviceFlower](s.providers, flow.platform)
 	if !ok {
 		// Only reachable if the build changed under a live flow, which is a
 		// restart, which drops the registry. Answered rather than left to

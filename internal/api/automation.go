@@ -18,6 +18,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -422,7 +423,7 @@ func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string
 		if !scheduleTargets(sc, d.ID) {
 			continue
 		}
-		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 		if !ok || at.Sub(now) <= sb.ScheduleHorizon() {
 			continue
 		}

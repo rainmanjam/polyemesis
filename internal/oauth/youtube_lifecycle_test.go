@@ -451,19 +451,19 @@ func assertBoolPtr(t *testing.T, name string, got, want *bool) {
 func TestOnlyYouTubeAndXOfferBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t *testing.T) {
 	var claimed, denied int
 	for platform := range Providers() {
-		_, ok := LifecycleFor(platform)
+		_, ok := As[BroadcastLifecycler](Set{}, platform)
 		// X joined with the publish and end calls (PUT .../state). Both sit behind
 		// the Livestream gate and refuse without a request while it is closed.
 		if platform == db.PlatformYouTube || platform == db.PlatformX {
 			claimed++
 			if !ok {
-				t.Errorf("LifecycleFor(%s) did not resolve, but it implements the transition calls", platform)
+				t.Errorf("As[BroadcastLifecycler](Set{}, %s) did not resolve, but it implements the transition calls", platform)
 			}
 			continue
 		}
 		denied++
 		if ok {
-			t.Errorf("LifecycleFor(%s) resolved; that platform has no documented transition call, "+
+			t.Errorf("As[BroadcastLifecycler](Set{}, %s) resolved; that platform has no documented transition call, "+
 				"and a caller branching on this bool would offer a control that cannot work", platform)
 		}
 	}
@@ -486,9 +486,9 @@ func TestOnlyYouTubeAndXOfferBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t 
 	t.Cleanup(srv.Close)
 
 	set := NewSet(WithBaseURL(srv.URL))
-	bl, ok := set.LifecycleFor(db.PlatformYouTube)
+	bl, ok := As[BroadcastLifecycler](set, db.PlatformYouTube)
 	if !ok {
-		t.Fatal("Set.LifecycleFor(youtube) did not resolve; the twin is not wired")
+		t.Fatal("As[BroadcastLifecycler](Set, youtube) did not resolve; the twin is not wired")
 	}
 	if _, err := bl.TransitionBroadcast(context.Background(), "tok", "bcast-1", PhaseTesting); err != nil {
 		t.Fatalf("transition through the Set: %v", err)
@@ -496,7 +496,7 @@ func TestOnlyYouTubeAndXOfferBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t 
 	if !reached {
 		t.Error("the transition did not reach the stub, so the twin resolved a production provider")
 	}
-	if _, ok := set.LifecycleFor(db.PlatformTwitch); ok {
-		t.Error("Set.LifecycleFor(twitch) resolved; Twitch has no broadcast to transition")
+	if _, ok := As[BroadcastLifecycler](set, db.PlatformTwitch); ok {
+		t.Error("As[BroadcastLifecycler](Set, twitch) resolved; Twitch has no broadcast to transition")
 	}
 }

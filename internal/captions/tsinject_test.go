@@ -64,13 +64,6 @@ func tsPkt(pid uint16, pusi bool, cc uint8, af []byte, payload []byte) []byte {
 	return p
 }
 
-func btoi(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // psiPacket wraps a PSI section in a packet with a zero pointer field.
 func psiPacket(pid uint16, cc uint8, section []byte) []byte {
 	return tsPkt(pid, true, cc, nil, append([]byte{0x00}, section...))
