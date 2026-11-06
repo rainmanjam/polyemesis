@@ -170,16 +170,29 @@ func (c *rolloverCoordinator) sceneSwitchedAt(scene string) time.Time {
 	return c.scenes[scene]
 }
 
-// actsOn reports whether a platform has an action behind a rollover. Every other platform is countdown only.
-func (c *rolloverCoordinator) actsOn(p db.Platform) bool {
+// rolloverAction is the action behind a rollover on a platform: replace the
+// broadcast on YouTube, reconnect the output on Twitch. ok is false for every
+// other platform, which is countdown only, and for YouTube in a build without
+// the broadcast client. actsOn and the dispatch below both read it, so the
+// platforms that may be gated and the platforms that act are one list.
+func (c *rolloverCoordinator) rolloverAction(p db.Platform) (act func(ctx context.Context, d *db.Destination, bid string, now time.Time) (result, reason string, err error), ok bool) {
 	switch p {
 	case db.PlatformTwitch:
-		return true
+		return func(_ context.Context, d *db.Destination, _ string, now time.Time) (string, string, error) {
+			return c.reconnectTwitch(d, now)
+		}, true
 	case db.PlatformYouTube:
-		_, ok := c.host.youtube()
-		return ok
+		if _, ok := c.host.youtube(); ok {
+			return c.rollYouTube, true
+		}
 	}
-	return false
+	return nil, false
+}
+
+// actsOn reports whether a platform has an action behind a rollover. Every other platform is countdown only.
+func (c *rolloverCoordinator) actsOn(p db.Platform) bool {
+	_, ok := c.rolloverAction(p)
+	return ok
 }
 
 // sweepOnce looks at every enabled rollover once. A failure on one destination is logged and does not stop the rest.
@@ -365,12 +378,9 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 	if cfg.ChatNotice && c.host.chatNotice != nil {
 		c.sendChatNotice(ctx, d)
 	}
-	switch d.Platform {
-	case db.PlatformYouTube:
-		result, reason, err = c.rollYouTube(ctx, d, bid, now)
-	case db.PlatformTwitch:
-		result, reason, err = c.reconnectTwitch(d, now)
-	default:
+	if act, ok := c.rolloverAction(d.Platform); ok {
+		result, reason, err = act(ctx, d, bid, now)
+	} else {
 		err = fmt.Errorf("%s has no rollover action", d.Platform)
 	}
 

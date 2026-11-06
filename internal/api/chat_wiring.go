@@ -162,6 +162,11 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 	return true
 }
 
+// chatFromEnv reports whether a platform's chat hangs off an environment
+// variable rather than a connected account, so no account route attaches or
+// detaches it.
+func chatFromEnv(p db.Platform) bool { return p == db.PlatformRumble }
+
 // attachAccountChat starts the chat of an account that has just been
 // connected, or restarts it for one connected again. The OAuth callback and the
 // device-code poll call it once the row is stored. Nothing here fails the
@@ -188,7 +193,7 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
 	// Rumble's chat hangs off an environment variable, not an account (see
 	// attachRumble), and no connect has any claim on it.
-	if s.chat == nil || s.store == nil || p == db.PlatformRumble {
+	if s.chat == nil || s.store == nil || chatFromEnv(p) {
 		return
 	}
 	if s.beforeChatAttach != nil {
@@ -345,7 +350,7 @@ func (s *Server) detachChat(p db.Platform, account string) {
 // app or an account (see attachRumble), so no credentials route has any claim
 // on it, and a DELETE that names it -- which deletes nothing -- must not end it.
 func (s *Server) detachPlatformChat(p db.Platform) {
-	if s.chat == nil || p == db.PlatformRumble {
+	if s.chat == nil || chatFromEnv(p) {
 		return
 	}
 	// Under chatWire, so a connect that read the credentials just before they
