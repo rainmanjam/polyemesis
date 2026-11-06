@@ -128,7 +128,6 @@ export const WIRE = {
     "maxThumbnailBytes": 2097152,
     "deviceMinPollMs": 5000,
     "facebookStreamHealthIntervalMs": 2000,
-    "facebookStreamTimeoutMs": 4000,
     "youTubeVerticalPollMs": 60000,
     "maxDumpSeconds": 900,
     "bulkStartPacingMs": 2000

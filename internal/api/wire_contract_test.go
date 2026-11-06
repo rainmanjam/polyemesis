@@ -136,7 +136,6 @@ type wireLimits struct {
 	MaxThumbnailBytes              int `json:"maxThumbnailBytes"`
 	DeviceMinPollMs                int `json:"deviceMinPollMs"`
 	FacebookStreamHealthIntervalMs int `json:"facebookStreamHealthIntervalMs"`
-	FacebookStreamTimeoutMs        int `json:"facebookStreamTimeoutMs"`
 	YouTubeVerticalPollMs          int `json:"youTubeVerticalPollMs"`
 	MaxDumpSeconds                 int `json:"maxDumpSeconds"`
 	BulkStartPacingMs              int `json:"bulkStartPacingMs"`
@@ -317,13 +316,15 @@ func mapKeys(t *testing.T, dir, name string) []string {
 					if !ok {
 						continue
 					}
-					if lit, ok := kv.Key.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-						k, err := strconv.Unquote(lit.Value)
-						if err != nil {
-							t.Fatalf("%s: %v", name, err)
-						}
-						keys = append(keys, k)
+					lit, ok := kv.Key.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						t.Fatalf("%s in %s has a key that is not a string literal: the contract would silently omit it", name, dir)
 					}
+					k, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatalf("%s: %v", name, err)
+					}
+					keys = append(keys, k)
 				}
 				if len(keys) == 0 {
 					t.Fatalf("%s in %s has no string keys", name, dir)
@@ -471,7 +472,6 @@ func buildWireContract(t *testing.T) wireContract {
 			MaxThumbnailBytes:              scheduler.MaxThumbnailBytes,
 			DeviceMinPollMs:                ms(oauth.DeviceMinPollInterval),
 			FacebookStreamHealthIntervalMs: ms(oauth.FacebookStreamHealthInterval),
-			FacebookStreamTimeoutMs:        ms(oauth.FacebookStreamTimeout),
 			YouTubeVerticalPollMs:          ms(verticalHealthMinInterval),
 			MaxDumpSeconds:                 int(engine.MaxDumpRequest.Seconds()),
 			BulkStartPacingMs:              ms(bulkStartPacing),

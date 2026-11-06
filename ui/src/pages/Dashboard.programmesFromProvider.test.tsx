@@ -57,6 +57,13 @@ beforeEach(() => {
     const routes: Record<string, unknown> = {
       "/api/v1/settings": { preview: { enabled: false }, recording: { enabled: false }, meters: { enabled: false }, failover: { enabled: true } },
       "/api/v1/system": { ingestUrl: "srt://box:6000", ffmpeg: { hasLibsrt: true } },
+      // What the page's old one-time read would have answered: a list that is
+      // never the provider's current one. A page still reading it draws these.
+      "/api/v1/sources": [
+        { id: 1, name: "Stale one", publishUrls: { srt: "srt://<server>:1111" } },
+        { id: 2, name: "Stale two", publishUrls: {} },
+        { id: 3, name: "Stale three", publishUrls: {} },
+      ],
       "/api/v1/metadata": { targets: [] },
       "/api/v1/metadata/broadcast-window": { accounts: [] },
     };
