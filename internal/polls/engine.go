@@ -794,4 +794,4 @@ func (e *Engine) RetractAuthor(p db.Platform, _ string, authorID string) {
 
 // ClearRoom implements chat.Tap. A cleared room is housekeeping, not a verdict
 // on any message in it: every vote stands.
-func (e *Engine) ClearRoom(db.Platform, string) {}
+func (e *Engine) ClearRoom(db.Platform, string) { /* no-op: votes stand */ }

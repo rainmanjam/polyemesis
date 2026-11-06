@@ -259,14 +259,14 @@ const (
 )
 
 // NewQoE creates an aggregator. Zero arguments take the defaults.
-func NewQoE(idle time.Duration, max int) *QoE {
+func NewQoE(idle time.Duration, limit int) *QoE {
 	if idle <= 0 {
 		idle = DefaultQoEIdle
 	}
-	if max <= 0 {
-		max = DefaultQoEMaxSessions
+	if limit <= 0 {
+		limit = DefaultQoEMaxSessions
 	}
-	return &QoE{idle: idle, max: max, sessions: map[string]*qoeSession{}, totals: emptyTotals()}
+	return &QoE{idle: idle, max: limit, sessions: map[string]*qoeSession{}, totals: emptyTotals()}
 }
 
 func emptyTotals() QoETotals {

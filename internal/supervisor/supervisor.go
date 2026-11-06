@@ -689,8 +689,8 @@ func (p *Process) waitBackoff(ctx context.Context, d time.Duration) bool {
 			return true
 		case <-p.retune:
 			timer.Stop()
-			if max := p.Policy().MaxBackoff; time.Until(deadline) > max {
-				deadline = time.Now().Add(max)
+			if ceiling := p.Policy().MaxBackoff; time.Until(deadline) > ceiling {
+				deadline = time.Now().Add(ceiling)
 				// Status.NextRetryIn is what the dashboard counts down, so it
 				// has to move with the deadline or the card lies for the rest
 				// of the wait.
@@ -1224,8 +1224,8 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		}
 
 		backoff *= 2
-		if max := p.Policy().MaxBackoff; backoff > max {
-			backoff = max
+		if ceiling := p.Policy().MaxBackoff; backoff > ceiling {
+			backoff = ceiling
 		}
 	}
 }

@@ -71,7 +71,7 @@ func splitsGrapheme(r []rune, i int) bool {
 
 func isRegionalIndicator(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
 
-func fits(s string, max int) bool { return utf8.RuneCountInString(s) <= max }
+func fits(s string, limit int) bool { return utf8.RuneCountInString(s) <= limit }
 
 // AnnounceMax is the longest announcement one platform's chat takes: the poll's
 // own cap, or the platform's send limit from the registry when that is shorter.
@@ -97,14 +97,14 @@ func humanDuration(d time.Duration) string {
 // question gives way first, down to a readable floor, so the options stay legible;
 // only then are the labels shortened, and only after them is the question cut
 // further.
-func shorten(max int, question string, labels []string, build func(q string, labels []string) string) string {
+func shorten(limit int, question string, labels []string, build func(q string, labels []string) string) string {
 	full := utf8.RuneCountInString(question)
 	floor := minQuestion
 	if full < floor {
 		floor = full
 	}
 	for q := full; q >= floor; q-- {
-		if s := build(truncate(question, q), labels); fits(s, max) {
+		if s := build(truncate(question, q), labels); fits(s, limit) {
 			return s
 		}
 	}
@@ -114,7 +114,7 @@ func shorten(max int, question string, labels []string, build func(q string, lab
 		for i, l := range labels {
 			short[i] = truncate(l, ml)
 		}
-		if s := build(q, short); fits(s, max) {
+		if s := build(q, short); fits(s, limit) {
 			return s
 		}
 	}
@@ -123,11 +123,11 @@ func shorten(max int, question string, labels []string, build func(q string, lab
 		short[i] = truncate(l, 4)
 	}
 	for q := floor - 1; q >= 1; q-- {
-		if s := build(truncate(question, q), short); fits(s, max) {
+		if s := build(truncate(question, q), short); fits(s, limit) {
 			return s
 		}
 	}
-	return truncate(build("", short), max)
+	return truncate(build("", short), limit)
 }
 
 // minQuestion is how much of the question is kept before any option label is
@@ -141,8 +141,8 @@ func StartText(s Spec) string { return StartTextMax(s, MaxAnnouncement) }
 // StartTextMax is StartText shortened to at most max characters, with an
 // ellipsis wherever a label or the question was cut. The voting instructions
 // are kept whole; the question and labels give way.
-func StartTextMax(s Spec, max int) string {
-	return shorten(max, s.Question, s.Options, func(q string, labels []string) string {
+func StartTextMax(s Spec, limit int) string {
+	return shorten(limit, s.Question, s.Options, func(q string, labels []string) string {
 		var b strings.Builder
 		b.WriteString("POLL: ")
 		b.WriteString(q)
@@ -159,7 +159,7 @@ func StartTextMax(s Spec, max int) string {
 // poll is running: vote THERE. It names only the platform it is posted on,
 // which is the one platform its viewers are already watching.
 func NativeStartText(s Spec, p db.Platform) string {
-	max := AnnounceMax(p)
+	limit := AnnounceMax(p)
 	where := "the poll in this chat"
 	switch p {
 	case db.PlatformTwitch:
@@ -170,24 +170,24 @@ func NativeStartText(s Spec, p db.Platform) string {
 	q := s.Question
 	for n := utf8.RuneCountInString(q); n >= 1; n-- {
 		text := fmt.Sprintf("POLL: %s — vote in %s. %s to vote.", truncate(q, n), where, humanDuration(s.Duration()))
-		if fits(text, max) {
+		if fits(text, limit) {
 			return text
 		}
 	}
-	return truncate("POLL — vote in "+where+".", max)
+	return truncate("POLL — vote in "+where+".", limit)
 }
 
 // EndText is what the poll says in every chat when it closes.
 func EndText(r Result) string { return EndTextMax(r, MaxAnnouncement) }
 
 // EndTextMax is EndText shortened to at most max characters.
-func EndTextMax(r Result, max int) string {
+func EndTextMax(r Result, limit int) string {
 	labels := make([]string, len(r.Options))
 	for i, o := range r.Options {
 		labels[i] = o.Label
 	}
 	w := r.Winners()
-	return shorten(max, r.Question, labels, func(q string, labels []string) string {
+	return shorten(limit, r.Question, labels, func(q string, labels []string) string {
 		switch {
 		case len(w) == 0:
 			return fmt.Sprintf("POLL CLOSED: %s — no votes.", q)

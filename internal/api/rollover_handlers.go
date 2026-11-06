@@ -339,7 +339,7 @@ func runRolloverLoop(ctx context.Context, subscribe func() (<-chan eventstream.E
 			if !ok {
 				// A nil channel is never ready, so the select waits on the tick until the resubscribe below.
 				closeSub()
-				events, closeSub = nil, func() {}
+				events, closeSub = nil, func() { /* nothing left to close */ }
 				continue
 			}
 			onEvent(env)

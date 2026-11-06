@@ -29,7 +29,7 @@
 package testenv
 
 import (
-	_ "embed"
+	_ "embed" // go:embed directives in this file
 	"encoding/json"
 	"fmt"
 	"sort"

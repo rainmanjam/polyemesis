@@ -257,8 +257,8 @@ func (h *History) sweepIdleLocked(now time.Time) {
 // sacrifice -- their window has nearly expired anyway, while the authors
 // actively flooding are the ones whose history the detectors need.
 func (h *History) capAuthorsLocked() {
-	max := h.limits.MaxAuthors
-	if max <= 0 || len(h.authors) <= max {
+	limit := h.limits.MaxAuthors
+	if limit <= 0 || len(h.authors) <= limit {
 		return
 	}
 	type aged struct {
@@ -270,7 +270,7 @@ func (h *History) capAuthorsLocked() {
 		all = append(all, aged{k, log.last})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
-	for i := 0; i < len(all)-max; i++ {
+	for i := 0; i < len(all)-limit; i++ {
 		delete(h.authors, all[i].key)
 	}
 }

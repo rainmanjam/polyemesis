@@ -80,8 +80,8 @@ func NewThrottle() *Throttle {
 	return newThrottle(throttleMaxEntries, time.Now)
 }
 
-func newThrottle(max int, now func() time.Time) *Throttle {
-	return &Throttle{attempts: make(map[string]*attempt), max: max, now: now,
+func newThrottle(limit int, now func() time.Time) *Throttle {
+	return &Throttle{attempts: make(map[string]*attempt), max: limit, now: now,
 		tokens: throttleGlobalBurst, tokensAt: now()}
 }
 

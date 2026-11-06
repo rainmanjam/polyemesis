@@ -396,7 +396,7 @@ func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 			continue
 		}
 		h := held[at[i+3]]
-		if t := (h >> 1) & 0x3F; t <= 31 {
+		if (h>>1)&0x3F <= 31 {
 			held[at[i+3]] = f(h)
 			return true
 		}

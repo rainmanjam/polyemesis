@@ -1424,7 +1424,7 @@ func keepsSealedKey(dst *Destination) bool {
 // sourceID nil means the destination names no programme, so there is no
 // pairing to check; that is the pre-sources row shape CreateDestination fills
 // in before it gets here.
-func (d *DB) checkRendition(id *int64, sourceID *int64) error {
+func (d *DB) checkRendition(id, sourceID *int64) error {
 	if id == nil {
 		return nil
 	}

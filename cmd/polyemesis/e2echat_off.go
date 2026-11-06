@@ -12,4 +12,4 @@ import (
 // startE2EChat is a no-op in every release build. The e2echat build tag swaps
 // in e2echat_on.go, which attaches fake chat adapters for the Docker end-to-end
 // test of the chat overlay; nothing of it is compiled into a shipped binary.
-func startE2EChat(context.Context, *chat.Hub, *slog.Logger) {}
+func startE2EChat(context.Context, *chat.Hub, *slog.Logger) { /* no-op in release builds */ }

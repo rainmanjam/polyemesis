@@ -429,9 +429,9 @@ func sourceQuery(src *int64) (url.Values, error) {
 
 // checkText bounds a free-text argument and refuses control characters, which
 // no search term, name or platform user id needs.
-func checkText(name, v string, min, max int) error {
-	if n := len([]rune(v)); n < min || n > max {
-		return argErr("%s must be %d to %d characters", name, min, max)
+func checkText(name, v string, lo, hi int) error {
+	if n := len([]rune(v)); n < lo || n > hi {
+		return argErr("%s must be %d to %d characters", name, lo, hi)
 	}
 	for _, r := range v {
 		if unicode.IsControl(r) {

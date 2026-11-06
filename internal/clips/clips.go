@@ -273,11 +273,11 @@ func (c *Capturer) Capture(d time.Duration) (Clip, error) {
 	if d <= 0 {
 		d = c.cfg.Window()
 	}
-	if max := c.cfg.Window(); d > max {
+	if window := c.cfg.Window(); d > window {
 		// Clamped rather than refused: asking for more than is held is a
 		// perfectly reasonable thing for a person in a hurry to do, and the
 		// honest answer is "here is everything there was".
-		d = max
+		d = window
 	}
 
 	cut, err := c.buf.Cut(d, c.now())

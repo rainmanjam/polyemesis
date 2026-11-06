@@ -154,7 +154,7 @@ func (m *Manager) HoldForMissing(missing, total int) bool {
 			return false
 		}
 		if _, err := os.Stat(marker); errors.Is(err, os.ErrNotExist) {
-			if werr := os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644); werr != nil {
+			if os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644) != nil {
 				m.markerUnwritable.Store(true)
 			} else {
 				m.markerUnwritable.Store(false)

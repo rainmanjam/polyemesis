@@ -130,7 +130,7 @@ type presetApplyRow struct {
 // presetApplyBetweenPhases runs after the destinations are listed and before
 // the transaction that writes them. A seam for what can land in between -- a
 // stop, a rename, a delete -- and nothing else. Never written outside a test.
-var presetApplyBetweenPhases = func() {}
+var presetApplyBetweenPhases = func() { /* no-op outside tests */ }
 
 // presetReconcile is the one reconcile an apply makes. A var so a test can stand
 // in a reconcile that fails, which nothing in a test fixture does for real.

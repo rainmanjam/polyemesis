@@ -96,7 +96,7 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// out, so a live change to the music bed cannot put it back into the archive.
 	// In a matrix VOD mix the gain is per cell and structural, so only mute mirrors.
 	if row.VODProfile != nil {
-		if mirrored := mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain); mirrored {
+		if mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain) {
 			changed = true
 		}
 	}

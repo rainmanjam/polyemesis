@@ -237,18 +237,18 @@ func scrubProbePaths(msg, staged, name, dataDir string) string {
 	if display == "" {
 		display = probePathPlaceholder
 	}
-	replace := func(old, new string) {
+	replace := func(old, replacement string) {
 		if strings.TrimSpace(old) == "" {
 			return
 		}
-		msg = strings.ReplaceAll(msg, old, new)
+		msg = strings.ReplaceAll(msg, old, replacement)
 		// The absolute spelling as well as the one we were handed. uploadStore
 		// resolves the data directory with filepath.Abs before building the
 		// store, so these are normally the same string -- but a relative
 		// s.cfg.DataDir makes them differ, and the one ffprobe was handed is the
 		// absolute one.
 		if abs, err := filepath.Abs(old); err == nil && abs != old {
-			msg = strings.ReplaceAll(msg, abs, new)
+			msg = strings.ReplaceAll(msg, abs, replacement)
 		}
 	}
 	replace(staged, display)

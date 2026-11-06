@@ -691,7 +691,7 @@ func (p Profile) Validate() error {
 	switch p.Mode {
 	case ModeSimple:
 		seen := map[int]bool{}
-		any := false
+		matched := false
 		for _, t := range p.Tracks {
 			if t.Track < 0 || t.Track >= MaxTracks {
 				probs = append(probs, fmt.Sprintf("track %d out of range (0..%d)", t.Track, MaxTracks-1))
@@ -705,17 +705,17 @@ func (p Profile) Validate() error {
 				probs = append(probs, fmt.Sprintf("track %d gain %.3f out of range (0..%.1f)", t.Track, t.Gain, MaxGain))
 			}
 			if t.Enabled && t.Gain > 0 {
-				any = true
+				matched = true
 			}
 		}
-		if !any {
+		if !matched {
 			probs = append(probs, "no track is enabled with non-zero gain")
 		}
 
 	case ModeMatrix:
 		type key struct{ t, c, o int }
 		seen := map[key]bool{}
-		any := false
+		matched := false
 		for _, c := range p.Matrix {
 			if c.Track < 0 || c.Track >= MaxTracks {
 				probs = append(probs, fmt.Sprintf("matrix cell track %d out of range (0..%d)", c.Track, MaxTracks-1))
@@ -738,10 +738,10 @@ func (p Profile) Validate() error {
 				probs = append(probs, fmt.Sprintf("matrix cell track %d channel %d gain %.3f out of range (0..%.1f)", c.Track, c.Channel, c.Gain, MaxGain))
 			}
 			if c.Gain > 0 {
-				any = true
+				matched = true
 			}
 		}
-		if !any {
+		if !matched {
 			probs = append(probs, "matrix has no cell with non-zero gain")
 		}
 	}

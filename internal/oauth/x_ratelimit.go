@@ -158,7 +158,7 @@ func (s *xCallState) rateHoldFrom(resp *http.Response) (until time.Time, ok bool
 	now := s.clock()
 	limited := resp.StatusCode == http.StatusTooManyRequests
 	if !limited {
-		if rem := strings.TrimSpace(resp.Header.Get("x-rate-limit-remaining")); rem == "0" {
+		if strings.TrimSpace(resp.Header.Get("x-rate-limit-remaining")) == "0" {
 			limited = true
 		}
 	}

@@ -210,7 +210,7 @@ type downState struct {
 }
 
 // observe folds one bad/good observation and reports which edge was crossed.
-func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire, recover bool) {
+func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire, recovered bool) {
 	if !bad {
 		if d.fired {
 			d.since, d.fired = time.Time{}, false

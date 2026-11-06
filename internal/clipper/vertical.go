@@ -516,10 +516,10 @@ type chunk struct {
 // wordChunks groups timed words max at a time. Each chunk is shown from its
 // first word's start to its last word's end: the timing is the transcriber's,
 // not an estimate.
-func wordChunks(words []Word, max int) []chunk {
+func wordChunks(words []Word, perChunk int) []chunk {
 	var out []chunk
-	for i := 0; i < len(words); i += max {
-		end := min(i+max, len(words))
+	for i := 0; i < len(words); i += perChunk {
+		end := min(i+perChunk, len(words))
 		var parts []string
 		for _, w := range words[i:end] {
 			if t := strings.TrimSpace(w.Text); t != "" {

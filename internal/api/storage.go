@@ -60,12 +60,12 @@ type storageTargetRequest struct {
 }
 
 func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
-	str := func(dst *string, v *string) {
+	str := func(dst, v *string) {
 		if v != nil {
 			*dst = strings.TrimSpace(*v)
 		}
 	}
-	bl := func(dst *bool, v *bool) {
+	bl := func(dst, v *bool) {
 		if v != nil {
 			*dst = *v
 		}

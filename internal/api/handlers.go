@@ -821,7 +821,7 @@ func fetchLatestRelease(ctx context.Context) (tag, url string, err error) {
 // the two could be compared at all. Both answers are needed: an unparseable
 // version must not be reported as up to date, and it must not be reported as
 // out of date either.
-func newerThan(latest, current string) (newer, comparable bool) {
+func newerThan(latest, current string) (newer, canCompare bool) {
 	l, ok := parseSemver(latest)
 	if !ok {
 		return false, false

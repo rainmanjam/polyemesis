@@ -17,15 +17,15 @@ import (
 
 // Exponential is base doubled retries times, capped at max. retries 0 (or
 // less) is base.
-func Exponential(retries int, base, max time.Duration) time.Duration {
+func Exponential(retries int, base, ceiling time.Duration) time.Duration {
 	d := base
 	for range retries {
-		if d >= max {
+		if d >= ceiling {
 			break
 		}
 		d *= 2
 	}
-	return min(d, max)
+	return min(d, ceiling)
 }
 
 // SleepCtx waits d, or until ctx is done, and reports whether the full wait
