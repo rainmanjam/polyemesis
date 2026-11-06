@@ -3387,18 +3387,28 @@ func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
 	}
 	// Never a refusal: this route has always ignored ?source=, so a malformed
 	// or unknown one only leaves the derived field out.
+	var id int64
 	if raw := strings.TrimSpace(r.URL.Query().Get(sourceParam)); raw != "" {
-		if id, err := strconv.ParseInt(raw, 10, 64); err == nil && id > 0 {
-			if _, err := s.store.GetSource(id); err == nil {
-				src, _ := s.sourceForDestination(&id)
-				out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
-			}
-		}
+		id, _ = strconv.ParseInt(raw, 10, 64)
 	} else if n, err := s.store.CountSources(); err == nil && n == 1 {
-		src, _ := s.sourceForDestination(nil)
-		out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
+		id, _ = s.defaultSourceID()
+	}
+	if id > 0 {
+		if row, err := s.store.GetSource(id); err == nil {
+			out["roleDefaults"] = routing.DefaultPresetOptsFor(s.sourceOfRow(row))
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceOfRow is the track layout and annotations a programme's presets are
+// derived from: the running engine's when there is one, otherwise the
+// placeholder layout carrying the annotations stored on the source row.
+func (s *Server) sourceOfRow(row *db.Source) routing.Source {
+	if e := s.engineForSource(&row.ID); e != nil {
+		return e.Source()
+	}
+	return routing.DefaultSource().WithAnnotations(row.Ingest.Annotations)
 }
 
 // handleApplyPreset compiles one of the catalogue's mixes against this
@@ -3420,7 +3430,7 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	// under "roleDefaults".
 	//
 	// Raw OBS-convention defaults used to apply here, and before that nothing.
-	// The old code started from `var opts routing.PresetOpts` The old code started from `var opts routing.PresetOpts`,
+	// The old code started from `var opts routing.PresetOpts`,
 	// so a bodyless apply ran with every track index at Go's zero value, and
 	// "mic only" compiled [0:a:0] -- the full mix -- while the catalogue two
 	// routes away advertised micTrack 2. The advertised value and the applied

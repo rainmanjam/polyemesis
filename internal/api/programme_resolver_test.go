@@ -94,3 +94,59 @@ func TestSettingsAndSystemAgreeOnTheDefaultProgramme(t *testing.T) {
 			"whose mode is %q", ingest["mode"], db.IngestSRT)
 	}
 }
+
+// With the first row engineless, the settings save writes its ingest through to
+// the running programme, the same one GET /settings showed, and the Sources
+// list marks that programme as the default.
+func TestSettingsWriteThroughAndSourcesListFollowTheRunningProgramme(t *testing.T) {
+	s, h, _, auth := managerServer(t, defaultTools())
+	onAir := s.mgr.Default().SourceID()
+	ghost := engineless(t, s)
+	ghost.Position = -1
+	if err := s.store.UpdateSource(ghost); err != nil {
+		t.Fatal(err)
+	}
+
+	do := func(method, path string, body any) []byte {
+		req := jsonRequest(t, method, path, body)
+		auth(req)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
+		}
+		return rec.Body.Bytes()
+	}
+	var list []struct {
+		ID        int64 `json:"id"`
+		IsDefault bool  `json:"isDefault"`
+	}
+	if err := json.Unmarshal(do(http.MethodGet, "/api/v1/sources", nil), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range list {
+		if v.IsDefault != (v.ID == onAir) {
+			t.Errorf("source %d isDefault = %v; the default is the running programme %d", v.ID, v.IsDefault, onAir)
+		}
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(do(http.MethodGet, "/api/v1/settings", nil), &doc); err != nil {
+		t.Fatal(err)
+	}
+	srt := doc["ingest"].(map[string]any)["srt"].(map[string]any)
+	srt["latencyMs"] = 777
+	do(http.MethodPut, "/api/v1/settings", doc)
+
+	row, err := s.store.GetSource(onAir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Ingest.SRT.LatencyMS != 777 {
+		t.Errorf("the running programme's ingest latency = %d, want the saved 777", row.Ingest.SRT.LatencyMS)
+	}
+	if g, _ := s.store.GetSource(ghost.ID); g.Ingest.SRT.LatencyMS == 777 {
+		t.Error("the save was written through to the engineless first row")
+	}
+
+}

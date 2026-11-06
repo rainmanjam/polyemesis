@@ -96,3 +96,60 @@ func TestDeletingAProgrammeNamesTheYouTubeStreamsItStrands(t *testing.T) {
 		t.Fatalf("deleting the programme stranded Second show's stream without saying so: %s", logs.String())
 	}
 }
+
+// The silence check runs on what a PUT CHANGES. A destination already holding a
+// silent profile (the programme's roles moved under it) must stay renameable
+// and switch-off-able, or the operator cannot even turn it off.
+//
+// Mutation: make the gate in refuseBadDestinationWrite unconditional.
+func TestRenamingAndDisablingAnAlreadySilentDestinationStillWork(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	second := secondProgramme(t, s)
+	silent := map[string]any{
+		"mode": "simple", "normalize": "auto", "sampleRate": 48000,
+		"excludeRoles": []string{"music"},
+		"tracks":       []map[string]any{{"track": 0, "enabled": true, "gain": 1.0}},
+	}
+	var created struct {
+		Destination struct {
+			ID int64 `json:"id"`
+		} `json:"destination"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+		"name": "studio b", "kind": "rtmp", "platform": "custom", "enabled": true,
+		"url": "rtmp://example.invalid/live", "streamKey": "k", "sourceId": second.ID,
+		"profile": silent,
+	}, http.StatusCreated), &created)
+	// The roles move afterwards: the stored profile now selects only music.
+	send(t, h, sign, http.MethodPut, "/api/v1/source/annotations?source="+itoa(second.ID),
+		map[string]any{"annotations": []map[string]any{{"track": 0, "label": "music bus", "role": "music"}}}, http.StatusOK)
+
+	path := "/api/v1/destinations/" + itoa(created.Destination.ID)
+	send(t, h, sign, http.MethodPut, path, map[string]any{"name": "renamed"}, http.StatusOK)
+	send(t, h, sign, http.MethodPut, path, map[string]any{"enabled": false}, http.StatusOK)
+}
+
+// Several YouTube destinations that share one non-default stream key are all
+// stranded by a programme delete: each used to see another still using the key
+// and stay silent, though every one of them was being deleted.
+func TestDeletingAProgrammeNamesStreamsSharedOnlyByTheDestinationsBeingDeleted(t *testing.T) {
+	s, h, logs, sign := managerServer(t, defaultTools())
+	acct := connectAccount(t, s.store, s.box, db.PlatformYouTube, "night-owl")
+	ytDest(t, s.store, acct, "First show", "key-abc")
+	ytDest(t, s.store, acct, "Second show", "key-shared")
+	ytDest(t, s.store, acct, "Third show", "key-shared")
+	src, err := s.store.DefaultSourceID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs.Reset()
+	del := jsonRequest(t, http.MethodDelete, "/api/v1/sources/"+itoa(src),
+		map[string]any{"confirm": true, "destinations": 3})
+	sign(del)
+	if w := do(t, h, del); w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("delete source: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(logs.String(), "YouTube ingest stream on the channel") {
+		t.Fatalf("a stream only the deleted destinations used was left unmentioned: %s", logs.String())
+	}
+}

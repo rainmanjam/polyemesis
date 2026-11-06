@@ -24,6 +24,12 @@ func startChatCommands(ctx context.Context, log *slog.Logger, store *db.DB, mgr 
 			return e
 		}
 		return nil
+	}, func() int64 {
+		// The first running engine: the API's default programme.
+		if es := mgr.Engines(); len(es) > 0 {
+			return es[0].SourceID()
+		}
+		return 0
 	}, hub))
 	go h.Run(ctx, bus)
 }
@@ -43,7 +49,7 @@ type chatEngine interface {
 	FixSource() error
 }
 
-func chatCommandOptions(log *slog.Logger, store chatSettingsStore, engineFor func(int64) chatEngine, sender chatcmd.Sender) chatcmd.Options {
+func chatCommandOptions(log *slog.Logger, store chatSettingsStore, engineFor func(int64) chatEngine, runningDefault func() int64, sender chatcmd.Sender) chatcmd.Options {
 	return chatcmd.Options{
 		Log:    log,
 		Sender: sender,
@@ -59,11 +65,15 @@ func chatCommandOptions(log *slog.Logger, store chatSettingsStore, engineFor fun
 		},
 		Resolve: func(id int64) (chatcmd.Programme, bool) {
 			if id == 0 {
-				def, err := store.DefaultSourceID()
-				if err != nil {
-					return nil, false
+				// The API's default programme: the one a running engine
+				// serves, the first row only when none runs.
+				if id = runningDefault(); id == 0 {
+					def, err := store.DefaultSourceID()
+					if err != nil {
+						return nil, false
+					}
+					id = def
 				}
-				id = def
 			}
 			e := engineFor(id)
 			if e == nil {

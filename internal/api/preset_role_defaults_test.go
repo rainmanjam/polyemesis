@@ -75,3 +75,22 @@ func TestPresetCatalogueServesRoleDerivedDefaults(t *testing.T) {
 		t.Fatalf("unnamed single-source GET lost roleDefaults: %v %s", err, raw)
 	}
 }
+
+// A known source with no running engine derives its defaults from the
+// annotations stored on its row, not from the bare placeholder layout; and an
+// unnamed request on a single-source install does the same.
+func TestRoleDefaultsComeFromTheRowWhenNoEngineRuns(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	ghost := engineless(t, s)
+	ghost.Ingest.Annotations = []routing.TrackAnnotation{{Track: 2, Role: routing.RoleMusic}}
+	if err := s.store.UpdateSource(ghost); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		RoleDefaults *routing.PresetOpts `json:"roleDefaults"`
+	}
+	raw := send(t, h, sign, http.MethodGet, "/api/v1/routing/presets?source="+itoa(ghost.ID), nil, http.StatusOK)
+	if err := json.Unmarshal(raw, &out); err != nil || out.RoleDefaults == nil || out.RoleDefaults.MusicTrack != 2 {
+		t.Fatalf("engineless source roleDefaults = %+v (%v), want musicTrack 2 from its stored annotations", out.RoleDefaults, err)
+	}
+}

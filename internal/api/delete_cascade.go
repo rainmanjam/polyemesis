@@ -43,8 +43,14 @@ const destinationEventsTimeout = 30 * time.Second
 
 // beforeDestinationsRemoved runs while the destinations still exist.
 func (s *Server) beforeDestinationsRemoved(ctx context.Context, ds []*db.Destination, now time.Time) []string {
+	// What goes in this request: a sibling that is also being deleted is not
+	// still using a shared key.
+	going := make(map[int64]bool, len(ds))
 	for _, d := range ds {
-		s.noteOrphanedIngestStream(d)
+		going[d.ID] = true
+	}
+	for _, d := range ds {
+		s.noteOrphanedIngestStream(d, going)
 	}
 	return s.cancelDestinationEvents(ctx, ds, now)
 }

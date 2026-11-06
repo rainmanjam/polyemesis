@@ -95,6 +95,9 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 	events.TypeChatState: wsPassthrough,
 }
 
+// busReadAccess is the catalogue lookup; a variable so a test can stub a type.
+var busReadAccess = eventstream.BusReadAccess
+
 // eventView renders one event for one principal, returning ok=false when
 // nothing may be sent.
 //
@@ -109,15 +112,11 @@ func eventView(ev events.Event, readOnly bool) (events.Event, bool) {
 		return ev, true
 	}
 	// One classification for the types both surfaces carry: the catalogue's.
-	if access, bridged := eventstream.BusReadAccess(ev.Type); bridged {
-		if access != eventstream.Granted {
-			return events.Event{}, false
-		}
-		// Granted by the catalogue and sent whole, unless this table adds a
-		// residual pass of its own.
-		if _, listed := wsEventPolicy[ev.Type]; !listed {
-			return ev, true
-		}
+	// A bridged type the catalogue does not Grant is withheld. One it Grants
+	// still needs an entry in wsEventPolicy: unlisted means withheld, so a type
+	// is never sent to a read token by the absence of a rule.
+	if access, bridged := busReadAccess(ev.Type); bridged && access != eventstream.Granted {
+		return events.Event{}, false
 	}
 	policy, classified := wsEventPolicy[ev.Type]
 	if !classified {

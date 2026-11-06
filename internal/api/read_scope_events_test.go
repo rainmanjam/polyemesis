@@ -45,3 +45,20 @@ func TestWebSocketAgreesWithTheCatalogueOnBridgedTypes(t *testing.T) {
 		t.Fatalf("only %d bridged types found; the walk went blind", bridged)
 	}
 }
+
+// A bridged type the catalogue Grants but wsEventPolicy does not list is
+// withheld from a read-scoped socket: no rule is not a licence to send.
+func TestGrantedButUnlistedBridgedTypeIsWithheld(t *testing.T) {
+	const stub events.Type = "stub-granted-bridged"
+	prev := busReadAccess
+	busReadAccess = func(typ events.Type) (eventstream.Access, bool) {
+		if typ == stub {
+			return eventstream.Granted, true
+		}
+		return prev(typ)
+	}
+	t.Cleanup(func() { busReadAccess = prev })
+	if _, send := eventView(events.Event{Type: stub}, true); send {
+		t.Fatal("an unlisted type was sent to a read token because the catalogue Granted it")
+	}
+}
