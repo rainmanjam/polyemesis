@@ -356,6 +356,25 @@ const (
 // internal/delayline, which is provisioned for exactly this.
 const MaxDestDelaySeconds = 15 * 60
 
+// ActiveBroadcastID is the broadcast this destination is publishing to: the
+// lifecycle's own record first, the announcement mirror second. The mirror is
+// rewritten whenever a schedule moves, so it can name a broadcast that is not the
+// one on air; it is only a fallback. X never announces ahead, so its mirror is
+// never written by a schedule, and seeding from it would bring back an ended
+// broadcast after a second show: X has no fallback.
+func (d *Destination) ActiveBroadcastID() string {
+	if d == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(d.Lifecycle.BroadcastID); id != "" {
+		return id
+	}
+	if d.Platform == PlatformX {
+		return ""
+	}
+	return strings.TrimSpace(d.Facebook.BroadcastID)
+}
+
 // OutputDelaySeconds is how long polyemesis itself holds this destination's
 // output back: the delay line the engine builds, and the delay its caption cues
 // wait for.

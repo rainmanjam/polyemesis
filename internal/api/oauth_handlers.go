@@ -484,13 +484,7 @@ func (s *Server) accountDestinations(accountID int64) ([]accountDestination, err
 		if d == nil || d.AccountID == nil || *d.AccountID != accountID {
 			continue
 		}
-		// The recorded id wins over the announcement mirror, exactly as the
-		// lifecycle coordinator resolves it: the mirror is rewritten whenever a
-		// schedule moves, so it can name a broadcast that is not the one on air.
-		broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
-		if broadcastID == "" {
-			broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
-		}
+		broadcastID := d.ActiveBroadcastID()
 		out = append(out, accountDestination{
 			ID:          d.ID,
 			Name:        d.Name,
