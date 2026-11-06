@@ -244,8 +244,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         // sound. A CONTROL: there is no stale frame left to render as current.
         setLevels(null);
         wsRef.current = null;
-        // Back off the same way the server's supervisor does, so a restarting
-        // server does not get hammered by every open tab.
+        // Exponential backoff so a restarting server is not hammered by every
+        // open tab. Capped at 15 s, tighter than the supervisor's 30 s for
+        // FFmpeg children: a tab wants to be back as soon as the server is.
         const delay = Math.min(1000 * 2 ** retryRef.current, 15000);
         retryRef.current += 1;
         reconnectTimer = window.setTimeout(connect, delay);

@@ -137,6 +137,15 @@ export const WIRE = {
     "srtPort": 6000,
     "rtmpPort": 1935
   },
+  "renditionBounds": {
+    "minDimension": 128,
+    "maxDimension": 7680,
+    "maxFps": 240,
+    "minBitrate": 100,
+    "maxBitrate": 100000,
+    "minGopSeconds": 1,
+    "maxGopSeconds": 10
+  },
   "platforms": {
     "platforms": [
       {

@@ -30,6 +30,13 @@ export type OffloadState = Member<typeof WIRE.offloadStates>;
 /** internal/events.Type: every event the WebSocket and /events carry. */
 export type EventType = Member<typeof WIRE.eventTypes>;
 
+/** The ports every install publishes (db.DefaultSettings). Read this where a
+ *  settings response lacks `listeners`: a server older than the field. */
+export const DEFAULT_LISTENERS = {
+  srtPort: WIRE.defaults.srtPort as number,
+  rtmpPort: WIRE.defaults.rtmpPort as number,
+};
+
 type PlatformRow = (typeof WIRE.platforms.platforms)[number];
 
 /** The value a destination's `platform` column carries (internal/platform

@@ -44,7 +44,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { GoLiveSheet } from "@/components/GoLiveSheet";
-import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLive";
+import { goLiveRows, type GoLiveRow } from "@/lib/goLive";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
@@ -720,8 +720,12 @@ function BulkDestinationControl({
   const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
   const stopCountSeq = useRef(0);
   const count = destinations.length;
-  // The Go live sheet still counts YouTube broadcasts locally for its own warning.
-  const youtube = youtubeBroadcastsAtRisk(destinations);
+  // The Go live sheet's warning is the server's stop-impact count too (the rule
+  // the Stop dialog uses), fetched when the sheet opens. Until it answers, or if
+  // it cannot, the sheet shows no warning; the Stop dialog asks again before any
+  // stop, so nothing is ended on a number nobody saw.
+  const [goLiveYouTube, setGoLiveYouTube] = useState(0);
+  const goLiveSeq = useRef(0);
 
   const openStopAll = () => {
     const seq = ++stopCountSeq.current;
@@ -810,6 +814,14 @@ function BulkDestinationControl({
           disabled={busy}
           onClick={() => {
             setSheetRows(goLiveRows(destinations, sources));
+            const seq = ++goLiveSeq.current;
+            setGoLiveYouTube(0);
+            api.stopImpact().then(
+              (impact) => {
+                if (seq === goLiveSeq.current) setGoLiveYouTube(impact.youtubeBroadcasts);
+              },
+              () => {},
+            );
           }}
         >
           <Play /> {t("golive.trigger")}
@@ -870,7 +882,7 @@ function BulkDestinationControl({
         }}
         rows={sheetRows ?? []}
         live={destinations}
-        youtubeAtRisk={youtube}
+        youtubeAtRisk={goLiveYouTube}
         onStart={(id) => api.startDestination(id).then(() => undefined)}
         onRetry={(id) => api.restartDestination(id).then(() => undefined)}
         onFinished={onFinished}

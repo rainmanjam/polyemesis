@@ -210,6 +210,15 @@ const (
 	fbKindAuto
 )
 
+// IsPageRef reports whether an account or target ref names a Facebook Page, i.e.
+// is spelled "page:<id>". A legacy ref with no prefix resolves as "auto" at
+// request time, so it is not a Page here: the answer is only given where the ref
+// says so.
+func IsPageRef(ref string) bool {
+	kind, _ := parseTargetRef(ref)
+	return kind == fbKindPage
+}
+
 func parseTargetRef(ref string) (fbKind, string) {
 	ref = strings.TrimSpace(ref)
 	switch {

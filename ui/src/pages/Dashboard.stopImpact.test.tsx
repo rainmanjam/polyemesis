@@ -184,3 +184,36 @@ describe("Dashboard: the Stop all dialog reads one as one", () => {
     await within(dialog).findByText("Stop all 2 destinations?");
   });
 });
+
+/* THE GO LIVE SHEET'S WARNING USES THE SAME RULE (code review R2).
+ *
+ * It counted every enabled YouTube row locally, so it said "1 YouTube broadcast
+ * will end if stopped" for a row whose recorded phase the stop would not end,
+ * while the Stop all dialog, asking the server, said none. One rule, the
+ * server's. */
+describe("Dashboard: the Go live sheet warns with the server's count", () => {
+  async function openGoLive() {
+    render(
+      <MemoryRouter>
+        <LiveDataContext.Provider value={live()}>
+          <Dashboard />
+        </LiveDataContext.Provider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(translate("en", "golive.trigger")) }));
+    return screen.findByRole("dialog");
+  }
+
+  it("does not warn when the server says no broadcast would end", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 0 } });
+    const dialog = await openGoLive();
+    await vi.waitFor(() => expect(stopImpactCalls).toBe(1));
+    expect(dialog.textContent ?? "").not.toMatch(/YouTube broadcast/);
+  });
+
+  it("warns with the server's number when a broadcast would end", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 1 } });
+    const dialog = await openGoLive();
+    await within(dialog).findByText(translate("en", "golive.youtubeWarnOne", { count: 1 }));
+  });
+});

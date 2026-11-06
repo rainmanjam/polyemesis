@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
@@ -81,17 +82,9 @@ import { destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
- *  have bounds. The server's copy is authoritative; these only have to be
- *  wide enough not to reject something the server would accept. */
-const FALLBACK_BOUNDS: RenditionBounds = {
-  minDimension: 128,
-  maxDimension: 7680,
-  maxFps: 240,
-  minBitrate: 100,
-  maxBitrate: 100_000,
-  minGopSeconds: 1,
-  maxGopSeconds: 10,
-};
+ *  have bounds. They are the same db bounds the server serves, read from the
+ *  generated contract rather than restated. */
+const FALLBACK_BOUNDS: RenditionBounds = WIRE.renditionBounds;
 
 /** Shown beside the presets if the server's own wording has not loaded. It is
  *  the same sentence db.PresetDisclaimer carries: the numbers are a place to

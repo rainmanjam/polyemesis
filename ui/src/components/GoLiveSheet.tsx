@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import { causeLabel } from "@/lib/failureRemedy";
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -87,7 +88,7 @@ export function GoLiveSheet({
   onStart,
   onRetry,
   onFinished,
-  paceMs = 2000,
+  paceMs = WIRE.limits.bulkStartPacingMs,
 }: Readonly<{
   open: boolean;
   onOpenChange: (open: boolean) => void;

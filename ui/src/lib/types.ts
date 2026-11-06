@@ -2377,6 +2377,8 @@ export interface PlatformAccount {
    *  per request; see internal/api/account_health.go. Absent on an older
    *  server, which the UI reads as "no news" rather than as healthy. */
   health?: AccountHealth;
+  /** A Facebook account that is a Page, whose broadcasts are always public. */
+  isPage?: boolean;
 }
 
 /** internal/api/account_health.go's AccountHealth. */

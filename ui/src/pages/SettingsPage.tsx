@@ -1,3 +1,4 @@
+import { DEFAULT_LISTENERS } from "@/lib/contract/wire";
 import { createContext, useContext, useEffect, useId, useState } from "react";
 import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
@@ -733,7 +734,7 @@ function IngestSettings({
     if (await copyText(system.ingestUrl)) toast.success(t("set.ingestUrlCopied"));
   };
 
-  const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
+  const listeners = draft.listeners ?? DEFAULT_LISTENERS;
   const setListeners = (patch: Partial<typeof listeners>) =>
     setDraft({ ...draft, listeners: { ...listeners, ...patch } });
 
@@ -1017,7 +1018,7 @@ function ListenerPortsOnly({
 }) {
   const t = useT();
   const model = useSaveModel<ListenerSettings>({
-    stored: settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 },
+    stored: settings.listeners ?? DEFAULT_LISTENERS,
     onSave: (listeners) => onSave({ ...settings, listeners }),
     equal: sameSettings,
   });
