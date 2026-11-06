@@ -35,24 +35,24 @@ func TestPlatformPolicyTable(t *testing.T) {
 		wantPlatform Platform
 	}{
 		{
-			name: "youtube excludes music for Content ID", platform: PlatformYouTube,
+			name: "youtube excludes music for Content ID", platform: Platform(platform.YouTube),
 			wantExclude: true, wantReason: "YouTube Content ID", wantLUFS: LUFSStreaming,
-			wantSummary: "music excluded (YouTube Content ID)", wantPlatform: PlatformYouTube,
+			wantSummary: "music excluded (YouTube Content ID)", wantPlatform: Platform(platform.YouTube),
 		},
 		{
-			name: "twitch excludes music for DMCA", platform: PlatformTwitch,
+			name: "twitch excludes music for DMCA", platform: Platform(platform.Twitch),
 			wantExclude: true, wantReason: "Twitch DMCA policy", wantLUFS: LUFSStreaming,
-			wantSummary: "music excluded (Twitch DMCA policy)", wantPlatform: PlatformTwitch,
+			wantSummary: "music excluded (Twitch DMCA policy)", wantPlatform: Platform(platform.Twitch),
 		},
 		{
-			name: "kick excludes music for DMCA", platform: PlatformKick,
+			name: "kick excludes music for DMCA", platform: Platform(platform.Kick),
 			wantExclude: true, wantReason: "Kick DMCA policy", wantLUFS: LUFSStreaming,
-			wantSummary: "music excluded (Kick DMCA policy)", wantPlatform: PlatformKick,
+			wantSummary: "music excluded (Kick DMCA policy)", wantPlatform: Platform(platform.Kick),
 		},
 		{
-			name: "facebook excludes music for Rights Manager", platform: PlatformFacebook,
+			name: "facebook excludes music for Rights Manager", platform: Platform(platform.Facebook),
 			wantExclude: true, wantReason: "Facebook Rights Manager", wantLUFS: LUFSStreaming,
-			wantSummary: "music excluded (Facebook Rights Manager)", wantPlatform: PlatformFacebook,
+			wantSummary: "music excluded (Facebook Rights Manager)", wantPlatform: Platform(platform.Facebook),
 		},
 		{
 			name: "a local recording keeps everything", platform: PlatformFile,
@@ -114,8 +114,8 @@ func TestPlatformPolicyTableIsComplete(t *testing.T) {
 
 	t.Run("every platform constant has a row", func(t *testing.T) {
 		want := []Platform{
-			PlatformYouTube, PlatformTwitch, PlatformKick,
-			PlatformFacebook, PlatformFile, PlatformCustom,
+			Platform(platform.YouTube), Platform(platform.Twitch), Platform(platform.Kick),
+			Platform(platform.Facebook), PlatformFile, PlatformCustom,
 		}
 		for _, p := range want {
 			found := false
@@ -148,14 +148,14 @@ func TestPlatformFor(t *testing.T) {
 		platform, kind string
 		want           Platform
 	}{
-		{"a stored platform maps straight through", "twitch", "rtmp", PlatformTwitch},
-		{"case and padding do not matter", "  YouTube ", "rtmp", PlatformYouTube},
+		{"a stored platform maps straight through", "twitch", "rtmp", Platform(platform.Twitch)},
+		{"case and padding do not matter", "  YouTube ", "rtmp", Platform(platform.YouTube)},
 		{"a file destination is a local recording whatever its branding", "youtube", "file", PlatformFile},
 		{"kind wins even for an unknown platform", "somewhere", "FILE", PlatformFile},
-		{"an SRT destination keeps its platform", "kick", "srt", PlatformKick},
+		{"an SRT destination keeps its platform", "kick", "srt", Platform(platform.Kick)},
 		{"an unknown platform falls open to custom", "mixer", "rtmp", PlatformCustom},
 		{"an empty platform falls open to custom", "", "rtmp", PlatformCustom},
-		{"an empty kind is not a file", "twitch", "", PlatformTwitch},
+		{"an empty kind is not a file", "twitch", "", Platform(platform.Twitch)},
 	}
 
 	for _, tc := range tests {
@@ -244,9 +244,9 @@ func TestMusicDecisionArmedAndWarning(t *testing.T) {
 		wantArmed   bool
 		wantWarning bool
 	}{
-		{"an exclusion with a music track to bite on is armed", PlatformTwitch, withMusic, true, false},
-		{"an exclusion with nothing marked as music warns", PlatformTwitch, withoutMusic, false, true},
-		{"an exclusion on an un-annotated ingest warns", PlatformTwitch, stereoSource(3), false, true},
+		{"an exclusion with a music track to bite on is armed", Platform(platform.Twitch), withMusic, true, false},
+		{"an exclusion with nothing marked as music warns", Platform(platform.Twitch), withoutMusic, false, true},
+		{"an exclusion on an un-annotated ingest warns", Platform(platform.Twitch), stereoSource(3), false, true},
 		{"keeping music is never armed and never warns", PlatformFile, withMusic, false, false},
 	}
 
@@ -278,19 +278,19 @@ func TestApplyMusicPolicy(t *testing.T) {
 		wantExcluded []TrackRole
 	}{
 		{
-			name: "twitch drops the annotated music track", platform: PlatformTwitch, src: src,
+			name: "twitch drops the annotated music track", platform: Platform(platform.Twitch), src: src,
 			wantSelected: []int{0, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
-			name: "youtube drops the annotated music track", platform: PlatformYouTube, src: src,
+			name: "youtube drops the annotated music track", platform: Platform(platform.YouTube), src: src,
 			wantSelected: []int{0, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
-			name: "kick drops the annotated music track", platform: PlatformKick, src: src,
+			name: "kick drops the annotated music track", platform: Platform(platform.Kick), src: src,
 			wantSelected: []int{0, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
-			name: "facebook drops the annotated music track", platform: PlatformFacebook, src: src,
+			name: "facebook drops the annotated music track", platform: Platform(platform.Facebook), src: src,
 			wantSelected: []int{0, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
@@ -307,7 +307,7 @@ func TestApplyMusicPolicy(t *testing.T) {
 		},
 		{
 			name:     "an explicit keep sends music to Twitch anyway",
-			platform: PlatformTwitch, choice: MusicPolicyKeep, src: src,
+			platform: Platform(platform.Twitch), choice: MusicPolicyKeep, src: src,
 			wantSelected: []int{0, 1, 2, 3}, wantExcluded: nil,
 		},
 		{
@@ -319,17 +319,17 @@ func TestApplyMusicPolicy(t *testing.T) {
 			name: "an un-annotated ingest loses nothing but still gets the standing rule",
 			// This is the fail-open case that matters most: nobody said which
 			// track is music, so nothing may be dropped.
-			platform: PlatformTwitch, src: stereoSource(4),
+			platform: Platform(platform.Twitch), src: stereoSource(4),
 			wantSelected: []int{0, 1, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
 			name:     "an ingest annotated with no music at all loses nothing",
-			platform: PlatformTwitch, src: annotated(4, roled(0, RoleGame), roled(2, RoleMic)),
+			platform: Platform(platform.Twitch), src: annotated(4, roled(0, RoleGame), roled(2, RoleMic)),
 			wantSelected: []int{0, 1, 2, 3}, wantExcluded: []TrackRole{RoleMusic},
 		},
 		{
 			name:         "every music track goes, not just the first",
-			platform:     PlatformTwitch,
+			platform:     Platform(platform.Twitch),
 			src:          annotated(4, roled(1, RoleMusic), roled(3, RoleMusic)),
 			wantSelected: []int{0, 2}, wantExcluded: []TrackRole{RoleMusic},
 		},
@@ -367,7 +367,7 @@ func TestApplyMusicPolicyNeverMutatesTheCallersProfile(t *testing.T) {
 	}
 	before := append([]TrackSel(nil), in.Tracks...)
 
-	out, _ := ApplyMusicPolicy(in, src, PlatformTwitch, MusicPolicyDefault)
+	out, _ := ApplyMusicPolicy(in, src, Platform(platform.Twitch), MusicPolicyDefault)
 
 	if !reflect.DeepEqual(in.Tracks, before) {
 		t.Errorf("caller's tracks were mutated: %v", in.Tracks)
@@ -389,7 +389,7 @@ func TestApplyMusicPolicyOnAMatrixProfile(t *testing.T) {
 		{Track: 1, Channel: 1, Out: OutR, Gain: 1},
 	}}
 
-	out, _ := ApplyMusicPolicy(in, src, PlatformTwitch, MusicPolicyDefault)
+	out, _ := ApplyMusicPolicy(in, src, Platform(platform.Twitch), MusicPolicyDefault)
 	if got := out.SelectedTracks(); !reflect.DeepEqual(got, []int{0}) {
 		t.Errorf("selected = %v, want [0]", got)
 	}
@@ -406,7 +406,7 @@ func TestPolicyOnlyEverAddsAnExclusionUnlessOverruled(t *testing.T) {
 	// the operator's music exclusion; only an explicit keep does that.
 	src := annotated(3, roled(1, RoleMusic))
 	protected, _ := ApplyMusicPolicy(
-		mustPreset(t, PresetEverything, src), src, PlatformTwitch, MusicPolicyDefault)
+		mustPreset(t, PresetEverything, src), src, Platform(platform.Twitch), MusicPolicyDefault)
 
 	t.Run("a permissive platform leaves an existing exclusion alone", func(t *testing.T) {
 		out, _ := ApplyMusicPolicy(protected, src, PlatformFile, MusicPolicyDefault)
@@ -438,8 +438,8 @@ func TestPolicyOnlyEverAddsAnExclusionUnlessOverruled(t *testing.T) {
 	})
 
 	t.Run("applying the same policy twice is idempotent", func(t *testing.T) {
-		once, _ := ApplyMusicPolicy(protected, src, PlatformTwitch, MusicPolicyDefault)
-		twice, _ := ApplyMusicPolicy(once, src, PlatformTwitch, MusicPolicyDefault)
+		once, _ := ApplyMusicPolicy(protected, src, Platform(platform.Twitch), MusicPolicyDefault)
+		twice, _ := ApplyMusicPolicy(once, src, Platform(platform.Twitch), MusicPolicyDefault)
 		if !reflect.DeepEqual(once.ExcludeRoles, twice.ExcludeRoles) {
 			t.Errorf("excludeRoles drifted: %v then %v", once.ExcludeRoles, twice.ExcludeRoles)
 		}
@@ -454,7 +454,7 @@ func TestApplyMusicPolicyCanLeaveNothingSelected(t *testing.T) {
 	// destination may carry. The profile says so rather than pretending, and
 	// builders check for it — see the preset test below.
 	src := annotated(1, roled(0, RoleMusic))
-	out, _ := ApplyMusicPolicy(mustPreset(t, PresetEverything, src), src, PlatformTwitch, MusicPolicyDefault)
+	out, _ := ApplyMusicPolicy(mustPreset(t, PresetEverything, src), src, Platform(platform.Twitch), MusicPolicyDefault)
 	if got := out.SelectedTracks(); len(got) != 0 {
 		t.Errorf("selected = %v, want nothing", got)
 	}
@@ -647,16 +647,16 @@ func TestPlatformPresets(t *testing.T) {
 		wantLUFS     float64 // 0 means "no loudness target at all"
 		wantExcluded bool
 	}{
-		{"youtube", PlatformYouTube, "", []int{0, 2, 3}, LUFSStreaming, true},
-		{"twitch", PlatformTwitch, "", []int{0, 2, 3}, LUFSStreaming, true},
-		{"kick", PlatformKick, "", []int{0, 2, 3}, LUFSStreaming, true},
-		{"facebook", PlatformFacebook, "", []int{0, 2, 3}, LUFSStreaming, true},
+		{"youtube", Platform(platform.YouTube), "", []int{0, 2, 3}, LUFSStreaming, true},
+		{"twitch", Platform(platform.Twitch), "", []int{0, 2, 3}, LUFSStreaming, true},
+		{"kick", Platform(platform.Kick), "", []int{0, 2, 3}, LUFSStreaming, true},
+		{"facebook", Platform(platform.Facebook), "", []int{0, 2, 3}, LUFSStreaming, true},
 		{"local recording keeps music and sets no loudness target",
 			PlatformFile, "", []int{0, 1, 2, 3}, 0, false},
 		{"custom keeps music and sets no loudness target",
 			PlatformCustom, "", []int{0, 1, 2, 3}, 0, false},
 		{"an override sends music to Twitch",
-			PlatformTwitch, MusicPolicyKeep, []int{0, 1, 2, 3}, LUFSStreaming, false},
+			Platform(platform.Twitch), MusicPolicyKeep, []int{0, 1, 2, 3}, LUFSStreaming, false},
 		{"an override keeps music out of the archive",
 			PlatformFile, MusicPolicyExclude, []int{0, 2, 3}, 0, true},
 	}
@@ -700,7 +700,7 @@ func TestPlatformPresets(t *testing.T) {
 
 func TestPlatformPresetRefusesToProduceSilence(t *testing.T) {
 	only := annotated(1, roled(0, RoleMusic))
-	_, err := ApplyPreset(PlatformPresetID(PlatformTwitch), only, DefaultPresetOpts())
+	_, err := ApplyPreset(PlatformPresetID(Platform(platform.Twitch)), only, DefaultPresetOpts())
 	if err == nil {
 		t.Fatal("want an error when every track the ingest carries is music")
 	}
@@ -713,7 +713,7 @@ func TestPlatformPresetOnAnUnAnnotatedIngestKeepsEveryTrack(t *testing.T) {
 	// Fail open. Twitch's policy is real, but nobody has said which track is
 	// music, so there is nothing polyemesis may drop.
 	bare := stereoSource(4)
-	p := mustPreset(t, PlatformPresetID(PlatformTwitch), bare)
+	p := mustPreset(t, PlatformPresetID(Platform(platform.Twitch)), bare)
 	if got := p.SelectedTracks(); !reflect.DeepEqual(got, []int{0, 1, 2, 3}) {
 		t.Errorf("selected = %v, want every track", got)
 	}

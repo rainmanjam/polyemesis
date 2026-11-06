@@ -414,11 +414,16 @@ func (d *DB) DeletePlatformAccount(id int64) error {
 
 // --- OAuth state (CSRF protection for the authorization-code flow) ---
 
+// oauthStateTTL is how long an authorization round trip may take. The sweep in
+// PutOAuthState and the expiry check in TakeOAuthState must agree on it.
+const oauthStateTTL = 10 * time.Minute
+
 // PutOAuthState records a pending authorization request.
 func (d *DB) PutOAuthState(state string, p Platform, verifier string) error {
-	// Opportunistically drop states older than 10 minutes; an authorization
-	// round trip that takes longer than that has been abandoned.
-	_, _ = d.sql.Exec(`DELETE FROM oauth_states WHERE created_at < ?`, time.Now().Add(-10*time.Minute).Unix())
+	// Opportunistically drop abandoned states. This package has no logger by
+	// design, and a failed sweep costs only a few stale rows: a storage fault
+	// that stopped it stops the insert below too, and that error is returned.
+	_, _ = d.sql.Exec(`DELETE FROM oauth_states WHERE created_at < ?`, time.Now().Add(-oauthStateTTL).Unix())
 	_, err := d.sql.Exec(`INSERT INTO oauth_states (state, platform, verifier, created_at) VALUES (?,?,?,?)`,
 		state, p, verifier, time.Now().Unix())
 	return err
@@ -448,7 +453,7 @@ func (d *DB) TakeOAuthState(state string) (Platform, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if time.Since(time.Unix(created, 0)) > 10*time.Minute {
+	if time.Since(time.Unix(created, 0)) > oauthStateTTL {
 		return "", "", errors.New("OAuth state expired; please retry the connection")
 	}
 	return p, verifier, nil

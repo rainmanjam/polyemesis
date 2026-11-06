@@ -30,11 +30,7 @@ import (
 type Platform string
 
 const (
-	PlatformCustom   Platform = platform.Custom
-	PlatformYouTube  Platform = platform.YouTube
-	PlatformTwitch   Platform = platform.Twitch
-	PlatformKick     Platform = platform.Kick
-	PlatformFacebook Platform = platform.Facebook
+	PlatformCustom Platform = platform.Custom
 	// PlatformFile is a local recording. In db's model that is a destination
 	// *kind* rather than a platform, but where the bytes land is the only thing
 	// a rights policy cares about, so PlatformFor folds the two together.

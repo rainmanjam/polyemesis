@@ -47,8 +47,8 @@ const (
 	// PlatformFacebook is a real platform rather than a preset because Facebook
 	// issues its ingest per broadcast over the Graph API: there is nothing for
 	// an operator to paste, so the integration has to exist for the destination
-	// to work at all. The string matches routing.PlatformFacebook, which is what
-	// makes the Rights Manager music policy apply to these destinations.
+	// to work at all. The string is platform.Facebook, which is what makes the
+	// registry's Rights Manager music policy apply to these destinations.
 	PlatformFacebook Platform = platform.Facebook
 	// PlatformRumble exists for CHAT and for nothing else, which makes it the
 	// first entry here that is not about a destination.

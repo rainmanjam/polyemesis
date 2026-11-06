@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -19,7 +20,7 @@ func TestTargetForPrefersTheProfileOverThePlatformTable(t *testing.T) {
 		{
 			name:       "an explicit target wins over what the platform assumes",
 			loudness:   &routing.Loudness{TargetLUFS: -16, TruePeakDB: -2},
-			platform:   routing.PlatformYouTube,
+			platform:   routing.Platform(platform.YouTube),
 			wantSource: TargetProfile, wantLUFS: -16, wantPeak: -2,
 		},
 		{
@@ -30,7 +31,7 @@ func TestTargetForPrefersTheProfileOverThePlatformTable(t *testing.T) {
 		},
 		{
 			name:       "no profile target falls back to what the platform normalizes to",
-			platform:   routing.PlatformTwitch,
+			platform:   routing.Platform(platform.Twitch),
 			wantSource: TargetPlatform, wantLUFS: routing.LUFSStreaming, wantPeak: routing.DefaultTruePeakDB,
 		},
 		{
@@ -61,9 +62,9 @@ func TestTargetForPrefersTheProfileOverThePlatformTable(t *testing.T) {
 }
 
 func TestTargetSigMovesOnlyWhenTheTargetDoes(t *testing.T) {
-	a := TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.PlatformYouTube)
-	b := TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.PlatformTwitch)
-	c := TargetFor(&routing.Loudness{TargetLUFS: -16}, routing.PlatformYouTube)
+	a := TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.Platform(platform.YouTube))
+	b := TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.Platform(platform.Twitch))
+	c := TargetFor(&routing.Loudness{TargetLUFS: -16}, routing.Platform(platform.YouTube))
 
 	if a.Sig() != b.Sig() {
 		t.Fatalf("the same explicit target must hash the same on any platform: %q vs %q", a.Sig(), b.Sig())
