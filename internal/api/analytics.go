@@ -18,7 +18,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // Cross-platform analytics (Wave 4 #4), the API half: the Source the sampler
@@ -131,7 +130,7 @@ func (s *Server) runningDestinationIDs() map[int64]bool {
 		return out
 	}
 	for _, ds := range s.mgr.DestinationStatuses() {
-		if ds.Process != nil && ds.Process.State == supervisor.StateRunning {
+		if ds.IsUp() {
 			out[ds.ID] = true
 		}
 	}
