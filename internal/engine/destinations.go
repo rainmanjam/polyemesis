@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -767,7 +768,7 @@ func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
 	}
 	want := destPolicy(row)
 	e.retunePolicy(d.proc, row, want, "")
-	e.retunePolicy(d.backup, row, want, destRoleBackup)
+	e.retunePolicy(d.backup, row, want, procname.RoleBackup)
 }
 
 // retunePolicy pushes a changed reconnect policy into one running process, and
@@ -938,27 +939,6 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
-// destSubName is the relay subscription for one of a destination's outputs.
-//
-// THE ROLE IS PART OF THE NAME, ALWAYS, and that is not tidiness.
-// Hub.Subscribe is a map assignment keyed by this string:
-//
-//	h.subs[name] = &subscriber{...}
-//
-// so registering two outputs under one name REPLACES the first. The replaced
-// process keeps running, keeps a correct command line, and keeps a healthy
-// card -- and receives no packets at all. Nothing about the process, its
-// target URL, or the destination's status reveals it.
-//
-// The primary's name is unchanged (`dest:<id>`), so no existing subscription
-// moves; only new roles get a suffix.
-func destSubName(id int64, role string) string {
-	if role == "" {
-		return fmt.Sprintf("dest:%d", id)
-	}
-	return fmt.Sprintf("dest:%d:%s", id, role)
-}
-
 // destArgs is one output's FFmpeg command line.
 //
 // Shared by the primary and the backup so the two cannot drift: a redundant
@@ -970,9 +950,6 @@ func destSubName(id int64, role string) string {
 func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
 	return ffmpeg.DestinationArgs(destSpecFor(e.log, row, compiled, relayURL, target))
 }
-
-// destRoleBackup names the redundant output's subscription.
-const destRoleBackup = "backup"
 
 // wantsBackup reports whether this destination should be publishing a
 // redundant feed right now.
@@ -1119,7 +1096,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		e.closeDelay(dd)
 		return err
 	}
-	subName := destSubName(row.ID, "")
+	subName := procname.DestProcessName(row.ID, "")
 	url, err := readHub.Subscribe(subName, port)
 	if err != nil {
 		// #711. An occupied name means another consumer is reading under it;
@@ -1207,7 +1184,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	var proc *supervisor.Process
 	proc = supervisor.New(e.log, supervisor.Spec{
 		Name:     subName,
-		Kind:     "destination",
+		Kind:     procname.KindDestination,
 		Bin:      e.tools.FFmpeg,
 		Args:     buildArgs(target),
 		NextArgs: nextArgs,
@@ -1630,7 +1607,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 			"dest", d.row.Name, "err", err)
 		return
 	}
-	sub := destSubName(d.row.ID, destRoleBackup)
+	sub := procname.DestProcessName(d.row.ID, procname.RoleBackup)
 	url, err := hub.Subscribe(sub, port)
 	if err != nil {
 		// #711. Quietly, with a reason, exactly as the port refusal above does:
@@ -1645,7 +1622,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	graph := newGraphHolder(compiled)
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: sub,
-		Kind: "destination",
+		Kind: procname.KindDestination,
 		Bin:  e.tools.FFmpeg,
 		Args: e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
 		// Respawns of the backup read the same holder, so a live level survives them.

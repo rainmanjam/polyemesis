@@ -5,6 +5,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -172,7 +173,7 @@ func TestADestinationRefusedItsRelayNameFailsAndReturnsThePort(t *testing.T) {
 	row := backupRow()
 
 	held := enginePort(t, e, "the incumbent consumer")
-	if _, err := e.hub.Subscribe(destSubName(row.ID, ""), held); err != nil {
+	if _, err := e.hub.Subscribe(procname.DestProcessName(row.ID, ""), held); err != nil {
 		t.Fatalf("the incumbent could not subscribe: %v", err)
 	}
 	before := e.heldPortCount()
@@ -194,7 +195,7 @@ func TestABackupRefusedItsRelayNameIsRecordedAndLeavesThePrimaryAlone(t *testing
 	row := backupRow()
 
 	held := enginePort(t, e, "the incumbent consumer")
-	backupSub := destSubName(row.ID, destRoleBackup)
+	backupSub := procname.DestProcessName(row.ID, procname.RoleBackup)
 	if _, err := e.hub.Subscribe(backupSub, held); err != nil {
 		t.Fatalf("the incumbent could not subscribe: %v", err)
 	}

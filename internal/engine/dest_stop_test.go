@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
@@ -38,7 +39,7 @@ func TestStopTakesTheBackupDownWithTheDestination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("allocate backup: %v", err)
 	}
-	primarySub, backupSub := destSubName(row.ID, ""), destSubName(row.ID, destRoleBackup)
+	primarySub, backupSub := procname.DestProcessName(row.ID, ""), procname.DestProcessName(row.ID, procname.RoleBackup)
 	mustSubscribe(t, e.hub, primarySub, primaryPort)
 	mustSubscribe(t, e.hub, backupSub, backupPort)
 	e.dests[row.ID] = &destination{

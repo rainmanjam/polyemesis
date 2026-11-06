@@ -14,6 +14,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
@@ -92,7 +93,7 @@ type destDelay struct {
 // delayDestSubName is the line's subscription on the upstream hub. A name of
 // its own, so the FFmpeg's own name stays free for the private hub and the #711
 // guard still refuses a second reader of the same destination upstream.
-func delayDestSubName(id int64) string { return destSubName(id, "delay") }
+func delayDestSubName(id int64) string { return procname.DestProcessName(id, procname.RoleDelay) }
 
 // delayRoot is where every delayed destination of every programme spills.
 func delayRoot(dataDir string) string { return filepath.Join(dataDir, "delay") }

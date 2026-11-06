@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/procname"
 )
 
 // timelineDefaultLimit is what the page asks for when it does not say. The
@@ -53,7 +55,7 @@ func (s *Server) processForSubject(subject string) (string, *int64) {
 		if err != nil {
 			return "", nil
 		}
-		return "dest:" + idText, d.SourceID
+		return procname.DestProcessName(id, procname.RolePrimary), d.SourceID
 	case "ingest":
 		if src, err := strconv.ParseInt(rest, 10, 64); err == nil {
 			return "ingest", &src

@@ -13,6 +13,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/eventstream/streamtest"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -112,10 +113,10 @@ func TestADelayedDestinationReadsItsPrivateHubAndItsFFmpegWaitsForTheDelayedData
 	if !slices.Contains(up, delayDestSubName(row.ID)) {
 		t.Fatalf("the delay line is not reading the upstream hub: %v", up)
 	}
-	if slices.Contains(up, destSubName(row.ID, "")) {
+	if slices.Contains(up, procname.DestProcessName(row.ID, "")) {
 		t.Fatalf("the FFmpeg is reading the UNDELAYED upstream hub: %v", up)
 	}
-	if !slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, "")) {
+	if !slices.Contains(d.delay.hub.Subscribers(), procname.DestProcessName(row.ID, "")) {
 		t.Fatal("the FFmpeg is not subscribed to the private delay hub")
 	}
 	if st := d.proc.Status().State; st != supervisor.StateStopped {
@@ -191,7 +192,7 @@ func TestStoppingADelayedDestinationPlaysTheTailOutBeforeItIsTornDown(t *testing
 		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
 			retiringOf(e, row.ID) == nil
 	})
-	if slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, "")) {
+	if slices.Contains(d.delay.hub.Subscribers(), procname.DestProcessName(row.ID, "")) {
 		t.Fatal("the teardown finished without releasing the private hub")
 	}
 	if got := d.delay.hub.Stats().RxPackets; got < 200 {

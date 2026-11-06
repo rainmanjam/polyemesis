@@ -1,6 +1,10 @@
 package supervisor
 
-import "time"
+import (
+	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/procname"
+)
 
 // How long each kind of child gets to exit before it is killed.
 //
@@ -45,10 +49,10 @@ import "time"
 //
 // Adding a kind here requires reading its argv and saying what it writes. A
 // guess belongs in the default.
-var shortGraceKinds = map[string]time.Duration{
-	"meters":   fastGrace,
-	"loudness": fastGrace,
-	"silence":  fastGrace,
+var shortGraceKinds = map[procname.Kind]time.Duration{
+	procname.KindMeters:   fastGrace,
+	procname.KindLoudness: fastGrace,
+	procname.KindSilence:  fastGrace,
 }
 
 // fastGrace is what a child gets when it has nothing to flush.
@@ -96,7 +100,7 @@ const (
 
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and
 // the empty string -- get shutdownGrace, which is the point.
-func graceFor(kind string) time.Duration {
+func graceFor(kind procname.Kind) time.Duration {
 	if g, ok := shortGraceKinds[kind]; ok {
 		return g
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -433,7 +434,7 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		return bin, nil, false, "", errNoSource
 	}
 
-	want := fmt.Sprintf("dest:%d", row.ID)
+	want := procname.DestProcessName(row.ID, procname.RolePrimary)
 	for _, p := range e.Processes() {
 		if p.Name() != want {
 			continue

@@ -42,6 +42,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
 	"github.com/rainmanjam/polyemesis/internal/playout"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -893,7 +894,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		// every other process in the pipeline.
 		Spawn: func(name string, args []string) playout.Runner {
 			proc := supervisor.New(e.log, supervisor.Spec{
-				Name: name, Kind: "playout", Bin: e.tools.FFmpeg, Args: args,
+				Name: name, Kind: procname.KindPlayout, Bin: e.tools.FFmpeg, Args: args,
 				AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 			})
 			return &playoutProc{e: e, name: name, Process: proc}
@@ -1827,7 +1828,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:        "ingest",
-		Kind:        "ingest",
+		Kind:        procname.KindIngest,
 		Bin:         e.tools.FFmpeg,
 		Args:        spec,
 		Secrets:     ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, e.ingestToken()),
@@ -2167,7 +2168,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "recorder", Kind: "recorder", Bin: e.tools.FFmpeg, Args: args,
+		Name: "recorder", Kind: procname.KindRecorder, Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 		// The recorder is the consumer this exists for: stopped after the
 		// publisher has gone -- the ingest ending, recording.enabled=false,
@@ -2527,7 +2528,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	})
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "preview", Kind: "preview", Bin: e.tools.FFmpeg, Args: args,
+		Name: "preview", Kind: procname.KindPreview, Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
@@ -2681,7 +2682,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	// NoteMedia call below.
 	var proc *supervisor.Process
 	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "meters", Kind: "meters", Bin: e.tools.FFmpeg, Args: args,
+		Name: "meters", Kind: procname.KindMeters, Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		// astats prints far faster than any UI can draw; throttle here rather
 		// than flooding every WebSocket client with 50 frames a second. The
@@ -3550,7 +3551,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	args := ffmpeg.RenditionArgs(rspec)
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,
+		Name: subName, Kind: procname.KindRendition, Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
@@ -4567,7 +4568,7 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
 	var proc *supervisor.Process
 	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: "loudness", Bin: e.tools.FFmpeg, Args: args,
+		Name: subName, Kind: procname.KindLoudness, Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		StdoutHandler: func(r io.Reader) error {
 			var last time.Time

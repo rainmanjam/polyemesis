@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -1757,7 +1758,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	}
 
 	feed.proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "source:" + string(kind), Kind: "source", Bin: e.tools.FFmpeg, Args: args,
+		Name: "source:" + string(kind), Kind: procname.KindSource, Bin: e.tools.FFmpeg, Args: args,
 		// Deliberately not AutoRestart: a respawn has to be rebuilt with a
 		// current timestamp offset, so the sweep owns it.
 		AutoRestart: false, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
@@ -2189,7 +2190,7 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "backup-ingest", Kind: "ingest", Bin: e.tools.FFmpeg,
+		Name: "backup-ingest", Kind: procname.KindIngest, Bin: e.tools.FFmpeg,
 		Args:        ffmpeg.IngestArgs(spec),
 		Secrets:     ingestSecrets(b.SRT, b.RTMP, b.Pull, token+backupTokenSuffix),
 		AutoRestart: true,
@@ -2574,7 +2575,7 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
+		Name: "playlist", Kind: procname.KindSource, Bin: e.tools.FFmpeg,
 		Args: ffmpeg.PlaylistFeedArgs(listPath, hub.InputURL()),
 		// AutoRestart, unlike a selector feed: this process publishes into its
 		// OWN hub and carries no timestamp offset, so there is nothing for a

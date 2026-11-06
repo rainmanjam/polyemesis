@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -61,7 +62,7 @@ func TestAYouTubePOSTCaptionDestinationIsSentUndelayedBecauseYouTubeHoldsTheDela
 	if slices.Contains(up, delayDestSubName(row.ID)) {
 		t.Fatalf("a delay line is reading the upstream hub: %v", up)
 	}
-	if !slices.Contains(up, destSubName(row.ID, "")) {
+	if !slices.Contains(up, procname.DestProcessName(row.ID, "")) {
 		t.Fatalf("the FFmpeg is not reading the upstream hub directly: %v", up)
 	}
 	// The card still says how far behind viewers are: the delay is real, it is
