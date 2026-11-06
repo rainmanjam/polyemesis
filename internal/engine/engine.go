@@ -56,27 +56,6 @@ import (
 const (
 	relayPortBase = 21000
 	relayPortSpan = 500
-	// stopTimeout bounds how long we wait for one child to exit.
-	//
-	// It must stay above supervisor.shutdownGrace (8s), which is the only thing
-	// that ends a child that does not heed the signal: a teardown that gives up
-	// first turns every unheeded stop into ErrStopDeadline and abandons a child
-	// the grace escalation would have reaped a moment later.
-	//
-	// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
-	// and with one exception. The teardowns below are all "this tier is going
-	// away": the port and the subscription are released whatever the answer, and
-	// there is no second thing to try, so ErrStopDeadline changes nothing they
-	// do. The exception is teardownDest, whose caller -- POST
-	// /destinations/{id}/stop -- reports the outcome to a human and therefore
-	// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
-	// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
-	// that a discard nobody thought about looks different from these (#196).
-	//
-	// It is a package var rather than a const for one reason: a test that needs
-	// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
-	// is not the property such a test is about. Nothing outside a test writes it.
-
 	// previewIdleDefault is how long the preview encoder outlives the last
 	// playlist request when settings do not say.
 	previewIdleDefault = 30 * time.Second
@@ -94,9 +73,30 @@ const (
 	previewStartDebounce = 2 * time.Second
 )
 
-// stopTimeout bounds how long we wait for one child to exit. See the comment in
-// the const block above for why it is 12s and why it is a var.
-var stopTimeout = 12 * time.Second
+// stopTimeout bounds how long we wait for one child to exit.
+//
+// It is supervisor.ShutdownGrace plus a margin, because ShutdownGrace is the
+// only thing that ends a child that does not heed the signal: a teardown that
+// gives up first turns every unheeded stop into ErrStopDeadline and abandons
+// a child the grace escalation would have reaped a moment later.
+//
+// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
+// and with one exception. The teardowns below are all "this tier is going
+// away": the port and the subscription are released whatever the answer, and
+// there is no second thing to try, so ErrStopDeadline changes nothing they
+// do. The exception is teardownDest, whose caller -- POST
+// /destinations/{id}/stop -- reports the outcome to a human and therefore
+// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
+// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
+// that a discard nobody thought about looks different from these (#196).
+//
+// It is a package var rather than a const for one reason: a test that needs
+// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
+// is not the property such a test is about. Nothing outside a test writes it.
+var stopTimeout = supervisor.ShutdownGrace + stopMargin
+
+// stopMargin is what stopTimeout allows beyond supervisor.ShutdownGrace.
+const stopMargin = 4 * time.Second
 
 // Engine owns the whole streaming pipeline.
 //

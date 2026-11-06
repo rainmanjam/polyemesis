@@ -21,9 +21,9 @@ func TestAnUnknownKindGetsTheFullGrace(t *testing.T) {
 	// read grace.go, and their teardown is merely slower than it could be --
 	// never lossier than it should be.
 	for _, kind := range []procname.Kind{"", "some-future-kind", "recorder-v2", "unknown"} {
-		if got := graceFor(kind); got != shutdownGrace {
+		if got := graceFor(kind); got != ShutdownGrace {
 			t.Errorf("graceFor(%q) = %v, want the full %v: an unclassified kind must default to safe",
-				kind, got, shutdownGrace)
+				kind, got, ShutdownGrace)
 		}
 	}
 }
@@ -33,8 +33,8 @@ func TestEveryKindThatWritesSomethingKeepsTheFullGrace(t *testing.T) {
 	// file destination, HLS segments on disk, or the feed everything else is
 	// built from. None may be shortened without reading its argv again.
 	for _, kind := range []procname.Kind{procname.KindRecorder, procname.KindDestination, procname.KindPreview, procname.KindIngest, procname.KindSource, procname.KindRendition, procname.KindPlayout} {
-		if got := graceFor(kind); got != shutdownGrace {
-			t.Errorf("graceFor(%q) = %v, want %v -- this kind writes something", kind, got, shutdownGrace)
+		if got := graceFor(kind); got != ShutdownGrace {
+			t.Errorf("graceFor(%q) = %v, want %v -- this kind writes something", kind, got, ShutdownGrace)
 		}
 	}
 }
@@ -48,7 +48,7 @@ func TestKindsWithNoOutputExitFast(t *testing.T) {
 		if got != fastGrace {
 			t.Errorf("graceFor(%q) = %v, want %v", kind, got, fastGrace)
 		}
-		if got >= shutdownGrace {
+		if got >= ShutdownGrace {
 			t.Errorf("graceFor(%q) is not actually shorter than the default", kind)
 		}
 	}
@@ -86,7 +86,7 @@ func TestASpecGetsTheGraceItsKindDeserves(t *testing.T) {
 		t.Errorf("meters Process got grace %v, want %v", fast.grace, fastGrace)
 	}
 	slow := New(quiet, Spec{Name: "recorder", Kind: "recorder", Bin: "/bin/true"})
-	if slow.grace != shutdownGrace {
-		t.Errorf("recorder Process got grace %v, want %v", slow.grace, shutdownGrace)
+	if slow.grace != ShutdownGrace {
+		t.Errorf("recorder Process got grace %v, want %v", slow.grace, ShutdownGrace)
 	}
 }

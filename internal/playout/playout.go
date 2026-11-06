@@ -37,11 +37,14 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 const (
-	// stopTimeout bounds how long one muxer gets to exit.
-	stopTimeout = 12 * time.Second
+	// stopTimeout bounds how long one muxer gets to exit: the supervisor's own
+	// grace plus a margin, so a Stop that needs the kill escalation is waited
+	// for rather than abandoned.
+	stopTimeout = supervisor.ShutdownGrace + 4*time.Second
 	// sweepInterval is how often the disk cap is enforced. Well under the time
 	// it takes any realistic bitrate to overshoot a cap measured in gigabytes.
 	sweepInterval = 15 * time.Second

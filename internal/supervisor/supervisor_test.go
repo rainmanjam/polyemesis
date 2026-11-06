@@ -157,11 +157,11 @@ func TestBackoffDoublesUpToTheCeiling(t *testing.T) {
 // reapDeadline is the context deadline given to Stop by the test below, and it
 // is load-bearing at a value nobody would guess.
 //
-// IT MUST EXCEED shutdownGrace (8s, supervisor.go:48). stop() signals the group
+// IT MUST EXCEED ShutdownGrace (8s, supervisor.go:48). stop() signals the group
 // and then selects on {child reaped, deadline}. When the signal does not land --
 // a child that ignores SIGTERM, a Git-Bash `kill` that cannot deliver a real
 // SIGTERM to a native .exe at all -- the ONLY thing that still ends the child is
-// terminate()'s grace goroutine, which sleeps shutdownGrace and then kills the
+// terminate()'s grace goroutine, which sleeps ShutdownGrace and then kills the
 // group. A deadline below 8s therefore expires BEFORE the rescue can fire, and
 // the deadline arm is not merely possible but guaranteed: the test would be
 // asserting the wrong arm every time, on every platform, whenever a signal is
@@ -200,7 +200,7 @@ const reapDeadline = 20 * time.Second
 // is the property a bounded liveness poll never had.
 //
 // reapObserveBound is how long the test will wait, after Stop has returned, for
-// the child's pipes to close at all. IT MUST STAY BELOW shutdownGrace (8s,
+// the child's pipes to close at all. IT MUST STAY BELOW ShutdownGrace (8s,
 // supervisor.go:48) for the same reason the 2s bound in
 // TestStopReportsWhenItHadToKillTheChild must: terminate()'s grace goroutine
 // reaps an unheeded child at 8s on stop's behalf, so any bound at or past 8s is
@@ -319,7 +319,7 @@ func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
 			"reap path (case <-done), and a deadline here is a regression in the stop "+
 			"path or an undersized deadline, not a slow runner. The deadline is %s and "+
 			"the grace escalation that rescues an unheeded signal is %s.",
-			err, reapDeadline, shutdownGrace)
+			err, reapDeadline, ShutdownGrace)
 	}
 
 	// ASSERTION TWO: THE CHILD IS ACTUALLY GONE, AND STOP WAITED FOR IT.
@@ -362,7 +362,7 @@ func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
 			"goroutine reaps within Stop's own deadline). That gap is inherent, because "+
 			"the deadline must exceed the grace for the deadline arm to be reachable at "+
 			"all; TestStopReportsWhenItHadToKillTheChild is what covers it.",
-			reapObserveBound, shutdownGrace)
+			reapObserveBound, ShutdownGrace)
 	}
 	// Drain any later EOF (a restart would produce one) and keep the last, so
 	// the lead below is measured against the child Stop actually reaped.
@@ -773,7 +773,7 @@ func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	// is not present. (Grep the package for the constructor's name and the only
 	// hit was that comment.) The true mechanism is narrower: signalGroup asks, and
 	// the ONLY thing that follows up on a child that does not listen is
-	// terminate()'s grace goroutine, which sleeps shutdownGrace (8s) and then
+	// terminate()'s grace goroutine, which sleeps ShutdownGrace (8s) and then
 	// kills the group. Any deadline shorter than that reaches the select first.
 	//
 	// So an already-expired context forces the deadline arm deterministically,
@@ -803,10 +803,10 @@ func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	// 15s ceiling made this test pass for the wrong reason, measured: with
 	// p.kill() deleted from the deadline arm, the poll still went green at
 	// ~17s of wall clock, because terminate()'s grace goroutine reaps the child
-	// at shutdownGrace (8s) on stop's behalf. A leak check that any 8s backstop
+	// at ShutdownGrace (8s) on stop's behalf. A leak check that any 8s backstop
 	// satisfies is not checking the kill this arm is documented to issue.
 	//
-	// 2s is below shutdownGrace by enough that only stop()'s own p.kill() can
+	// 2s is below ShutdownGrace by enough that only stop()'s own p.kill() can
 	// satisfy it, and far above the ~1ms a SIGKILL'd fake child actually takes.
 	// If this ever needs raising, it may not go to or past 8: it would stop
 	// distinguishing the kill from the grace period and become the ninth test
@@ -839,7 +839,7 @@ func TestStopReportsNoErrorWhenTheChildExitsOnItsOwn(t *testing.T) {
 	//
 	// 5s did not. `done` closes after the child is reaped AND the drain finishes,
 	// and this package's own constants put the permitted worst case at
-	// shutdownGrace + drainGrace = 8s + 2s = 10s. So a loaded runner that merely
+	// ShutdownGrace + drainGrace = 8s + 2s = 10s. So a loaded runner that merely
 	// delayed the child could produce ErrStopDeadline with nothing wrong at all,
 	// which is what CI reported on macOS and Linux: the test failed at exactly
 	// 5.01s, its whole budget, having asserted nothing about the code.

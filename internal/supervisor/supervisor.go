@@ -48,14 +48,19 @@ const (
 	// every few minutes would eventually crawl to the 30s ceiling and stay
 	// there for the rest of the session.
 	stableAfter = 60 * time.Second
-	// shutdownGrace is how long a child gets to exit after SIGTERM before it
+	// ShutdownGrace is how long a child gets to exit after SIGTERM before it
 	// is killed. FFmpeg uses this window to flush and finalise its output,
 	// which is what keeps a recording playable.
 	//
 	// It is contracted from OUTSIDE this package: acceptance-recording-stop.sh
 	// measures elapsed wall-clock across a stop and asserts it is under 8s. The
 	// number may not be changed without changing that assertion.
-	shutdownGrace = 8 * time.Second
+	//
+	// Exported because the callers that wait for a Stop derive their own
+	// deadline from it (engine stopTimeout, playout stopTimeout): a wait that is
+	// shorter than this gives up on a child the escalation would have reaped a
+	// moment later.
+	ShutdownGrace = 8 * time.Second
 	// drainGrace is how long the stdout/stderr drain gets to finish AFTER the
 	// child has been reaped, before the supervisor closes the read ends out from
 	// under it.
@@ -481,7 +486,7 @@ type Process struct {
 	// that they have finished; without this the only proof was wall-clock.
 	escalators sync.WaitGroup
 
-	// grace and drain are shutdownGrace and drainGrace as this Process will
+	// grace and drain are ShutdownGrace and drainGrace as this Process will
 	// actually use them. Fields rather than the constants directly so a test can
 	// separate "the escalation fired" from "the escalation fired at 8 seconds"
 	// without the suite paying 8 seconds per case, and without mutating package
