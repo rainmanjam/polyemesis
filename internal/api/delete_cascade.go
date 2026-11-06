@@ -19,10 +19,13 @@ import (
 // is added in one place and reaches both:
 //
 //	beforeDestinationsRemoved  while the rows, their accounts and tokens exist:
-//	                           the platform events created for them.
+//	                           the note about a stranded YouTube stream, the
+//	                           platform events created for them, and the mark that
+//	                           stops a broadcast delay draining (#11).
 //	(the store's delete)       schedules.destination_ids and the rollover row,
 //	                           in the delete's own transaction (db.SchedulePrune).
-//	afterDestinationsRemoved   once they are gone: the OBS bridge document.
+//	afterDestinationsRemoved   once they are gone: a delay already draining is
+//	                           cut, and the OBS bridge document is pruned.
 //
 // Every step is best-effort and none of them can refuse the delete: the
 // operator asked for the row to go, and a platform that is down or a token
@@ -35,14 +38,29 @@ import (
 // then is named in a warning and left for the operator.
 const destinationEventsTimeout = 30 * time.Second
 
-// beforeDestinationsRemoved runs while the destinations still exist.
-func (s *Server) beforeDestinationsRemoved(ctx context.Context, ds []*db.Destination, now time.Time) []string {
-	return s.cancelDestinationEvents(ctx, ds, now)
+// beforeDestinationsRemoved runs while the destinations still exist. ids names
+// every row being removed; ds is the rows that could be read, which may be
+// fewer -- a failed read must not stop the delay being cut.
+func (s *Server) beforeDestinationsRemoved(ctx context.Context, ids []int64, ds []*db.Destination, now time.Time) []string {
+	for _, d := range ds {
+		s.noteOrphanedIngestStream(d)
+	}
+	warnings := s.cancelDestinationEvents(ctx, ds, now)
+	// Deleting is not a request to keep airing what is buffered. Marked before
+	// the reconcile so no drain starts; afterDestinationsRemoved cuts one
+	// already playing from an earlier stop.
+	for _, id := range ids {
+		s.mgr.CutOnStop(id)
+	}
+	return warnings
 }
 
-// afterDestinationsRemoved runs once the rows are gone. prune is what the
-// store's delete did to schedules.
-func (s *Server) afterDestinationsRemoved(prune db.SchedulePrune) []string {
+// afterDestinationsRemoved runs once the rows are gone and the pipeline has
+// been reconciled. prune is what the store's delete did to schedules.
+func (s *Server) afterDestinationsRemoved(ids []int64, prune db.SchedulePrune) []string {
+	for _, id := range ids {
+		s.mgr.CutDelay(id)
+	}
 	s.pruneOBSReferences()
 	return schedulePruneWarnings(prune)
 }

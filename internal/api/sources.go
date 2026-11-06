@@ -664,7 +664,7 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	// The destinations' scheduled platform events first, while the rows,
 	// accounts and tokens that can cancel them still exist; the cascade below
 	// leaves nothing to cancel with. See delete_cascade.go.
-	leftovers := s.beforeDestinationsRemoved(r.Context(), dests, time.Now())
+	leftovers := s.beforeDestinationsRemoved(r.Context(), confirmed, dests, time.Now())
 	// What public playout loses, read while the programme and its renditions
 	// still exist to be asked about, and said only once the delete has
 	// happened.
@@ -691,7 +691,7 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	}
 	rw := s.reconcileNow("the programme delete")
 	leftovers = append(leftovers, playoutLeft...)
-	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
+	leftovers = append(leftovers, s.afterDestinationsRemoved(confirmed, prune)...)
 	writeMutationNoContentOrWarnings(w, rw, leftovers)
 }
 

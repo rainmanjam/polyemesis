@@ -2724,6 +2724,92 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	return warnings
 }
 
+// destinationWrite is the stored state of a destination that a save is checked
+// against, taken before a PUT's body is decoded over the row.
+type destinationWrite struct {
+	id          int64
+	url         string
+	captionMode string
+	sourceID    *int64
+	profileJSON []byte
+}
+
+func destinationBeforeWrite(d *db.Destination) destinationWrite {
+	// Serialised rather than copied: decoding over a row reuses its slices'
+	// backing arrays, so a shallow copy would change under the decode.
+	p, _ := json.Marshal(d.Profile)
+	var src *int64
+	if d.SourceID != nil {
+		v := *d.SourceID
+		src = &v
+	}
+	return destinationWrite{id: d.ID, url: d.URL, captionMode: d.CaptionMode, sourceID: src, profileJSON: p}
+}
+
+// refuseBadDestinationWrite is the refusal list every save of a destination row
+// goes through -- POST (prev nil) and PUT -- in one order, and it answers the
+// refusal itself. A PUT is refused only for what it CHANGES: a row already
+// holding a URL or profile these reject must stay renameable and switch-off-able.
+//
+//	captions   Facebook captions need the switch open; and are decided before a
+//	           broadcast goes live, so a change while delivering is refused.
+//	IVS        an Amazon IVS URL without /app cannot publish (refuseIVSWithoutApp).
+//	silence    a profile that would carry no audio against its own programme's
+//	           tracks (refuseIfSilent), which PUT did not run before.
+func (s *Server) refuseBadDestinationWrite(w http.ResponseWriter, next *db.Destination, prev *destinationWrite) bool {
+	stored := ""
+	if prev != nil {
+		stored = prev.captionMode
+	}
+	if prev == nil || next.CaptionMode != stored {
+		if prev != nil && s.destinationLive(prev.id) {
+			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
+			return true
+		}
+		if !captionModeAllowedNow(next.CaptionMode, stored, s.env.FacebookCaptions) {
+			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
+			return true
+		}
+	}
+	if (prev == nil || next.URL != prev.url) && refuseIVSWithoutApp(w, next.URL) {
+		return true
+	}
+	if prev == nil || prev.silenceInputsChanged(next) {
+		return s.refuseIfSilent(w, next.SourceID, next.Profile)
+	}
+	return false
+}
+
+// silenceInputsChanged reports whether the profile, or the programme it is
+// compiled against, differs from what was stored.
+func (p destinationWrite) silenceInputsChanged(next *db.Destination) bool {
+	now, _ := json.Marshal(next.Profile)
+	if !bytes.Equal(now, p.profileJSON) {
+		return true
+	}
+	if (p.sourceID == nil) != (next.SourceID == nil) {
+		return true
+	}
+	return p.sourceID != nil && *p.sourceID != *next.SourceID
+}
+
+// destinationWriteWarnings repairs what the platform cannot send
+// (dropUnsendableSettings) and adds what its registry knows the destination
+// contradicts -- most often an RTMP URL with no application path, which the far
+// end refuses by dropping the connection rather than by saying anything. Advice
+// only: Validate owns refusal. An edit is the likelier place for a URL to
+// acquire the problem, since editing is where somebody pastes a fresh address.
+func (s *Server) destinationWriteWarnings(row *db.Destination) ([]string, error) {
+	warnings, err := s.dropUnsendableSettings(row)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range row.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
+	return warnings, nil
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
@@ -2733,35 +2819,17 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if !s.requireNamedSource(w, row.SourceID) {
 		return
 	}
-	// Facebook captions stay behind their switch. The switch is checked here,
-	// on the save that turns the mode on, and never by Validate (see there).
-	if !captionModeAllowedNow(row.CaptionMode, "", s.env.FacebookCaptions) {
-		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-		return
-	}
-	if refuseIVSWithoutApp(w, row.URL) {
-		return
-	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
-	// row.SourceID, which requireNamedSource has just proved is present. The
-	// owner is known here and used to be thrown away one line later.
-	if s.refuseIfSilent(w, row.SourceID, row.Profile) {
+	if s.refuseBadDestinationWrite(w, &row, nil) {
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
-	warnings, err := s.dropUnsendableSettings(&row)
+	warnings, err := s.destinationWriteWarnings(&row)
 	if err != nil {
 		writeStoreError(w, err)
 		return
-	}
-	// What the platform registry knows and this destination contradicts --
-	// most often an RTMP URL with no application path, which the far end
-	// refuses by dropping the connection rather than by saying anything. The
-	// destination is still created: this is advice, and Validate owns refusal.
-	for _, w := range row.Warnings() {
-		warnings = append(warnings, w.Detail)
 	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
@@ -2847,12 +2915,10 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
-	// The stored caption mode, read BEFORE the decode below writes over it, so
-	// a save that changes it can be told apart from one that leaves it alone.
-	storedCaptionMode := existing.CaptionMode
-	// The stored URL, so the IVS check below refuses only a save that CHANGES
-	// the URL into one that cannot publish -- see refuseIVSWithoutApp.
-	storedURL := existing.URL
+	// The stored values the write checks compare against, read BEFORE the decode
+	// below writes over them, so a save that changes one can be told apart from
+	// one that leaves it alone. See refuseBadDestinationWrite.
+	before := destinationBeforeWrite(existing)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
@@ -2866,22 +2932,8 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	existing.ID = id
-	if existing.URL != storedURL && refuseIVSWithoutApp(w, existing.URL) {
+	if s.refuseBadDestinationWrite(w, existing, &before) {
 		return
-	}
-	// Captions are decided before a YouTube broadcast goes live: the delay and
-	// the caption route must be set while the broadcast is still in its first
-	// state. A change while the destination is delivering is refused, and a
-	// change to Facebook captions needs the switch open.
-	if existing.CaptionMode != storedCaptionMode {
-		if s.destinationLive(id) {
-			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
-			return
-		}
-		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, s.env.FacebookCaptions) {
-			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-			return
-		}
 	}
 	// X takes a title only when the broadcast is published, and has no write
 	// that changes a running one, so a change saved now would never reach X.
@@ -2904,21 +2956,15 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// ends up on a platform that cannot send what it is holding without the
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
-	warnings, err := s.dropUnsendableSettings(existing)
+	warnings, err := s.destinationWriteWarnings(existing)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	// Same registry check create does. An edit is the more likely place for a
-	// URL to acquire this problem, not the less: creation usually starts from
-	// a preset, and editing is where somebody pastes a fresh address in.
-	for _, w := range existing.Warnings() {
-		warnings = append(warnings, w.Detail)
-	}
 
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
-	before := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
+	runBefore := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
@@ -2951,7 +2997,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	rw := s.reconcileNow("the destination")
 
 	resp := map[string]any{"destination": updated}
-	if applied, reason := s.destinationApplied(id, updated.SourceID, before, rw); applied != "" {
+	if applied, reason := s.destinationApplied(id, updated.SourceID, runBefore, rw); applied != "" {
 		resp["applied"] = applied
 		if reason != "" {
 			resp["reason"] = reason
@@ -3040,6 +3086,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// What the delete could not take with it, said in the response. Empty in
 	// the ordinary case, and then the body is exactly {"status":"deleted"}.
 	var leftovers []string
+	var read []*db.Destination
 	if dest, err := s.store.GetDestination(id); err == nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
@@ -3053,15 +3100,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 				dest.Name, dest.Lifecycle.Phase))
 			return
 		}
-		s.noteOrphanedIngestStream(dest)
-		// Its scheduled platform events, while the row, its account and its
-		// token still exist to cancel them with. See delete_cascade.go.
-		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
+		read = []*db.Destination{dest}
 	}
-	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
-	// airing what is buffered. Marked before the reconcile so no drain starts,
-	// and cut after it for one already playing from an earlier stop.
-	s.mgr.CutOnStop(id)
+	// The teardown shared with a programme delete: see delete_cascade.go.
+	leftovers = s.beforeDestinationsRemoved(r.Context(), []int64{id}, read, time.Now())
 	prune, err := s.store.DeleteDestinationPruned(id)
 	if err != nil {
 		writeStoreError(w, err)
@@ -3072,8 +3114,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// FFmpeg child keeps publishing to a destination the console no longer
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
-	s.mgr.CutDelay(id)
-	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
+	leftovers = append(leftovers, s.afterDestinationsRemoved([]int64{id}, prune)...)
 	resp := map[string]any{"status": "deleted"}
 	if len(leftovers) > 0 {
 		resp["warnings"] = leftovers
