@@ -1,6 +1,5 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
-import type { LevelChange, TrackLevelResult } from "@/lib/liveTrackLevel";
 import type { SaveApplied } from "@/lib/saveImpact";
 import type {
   BroadcastWindowRow,
@@ -32,9 +31,7 @@ import type {
   BroadcastEnd,
   YouTubeVerticalView,
   BulkDestReport,
-  DelayDumpAllReport,
   DelayDumpResult,
-  ChatMessage,
   ChatModerationResult,
   ChatOverview,
   ChatPlatform,
@@ -879,39 +876,6 @@ export const api = {
     // 0 travels: it is "everything since the last dump point" and overrides
     // the destination's own default, which an absent body would apply.
     post<DelayDumpResult>(`/destinations/${id}/delay/dump`, seconds === undefined ? undefined : { seconds }),
-  /** Live per-track mute or gain (I4). Writes the STORED live mix and
-   *  reconciles, so a level-only change reaches the running FFmpeg without a
-   *  restart. `applied` says which happened and `reason` why. 409 for an
-   *  audio-copy destination, 404 for a track outside the stored selection. Named
-   *  by programme like every other scoped write (#497). */
-  setTrackLevel: (
-    id: DestinationId,
-    track: number,
-    change: LevelChange,
-    sourceId?: number | null,
-  ) =>
-    post<TrackLevelResult>(
-      `/destinations/${id}/tracks/${track}/gain${sourceQuery(sourceId)}`,
-      change,
-    ),
-
-  /* --- every destination at once ----------------------------------------
-   *
-   *  These are startDestination/stopDestination run over every row on the
-   *  server, not a new capability: same handler code, same reconcile, same
-   *  read-back. There is no id list because there is no selection — the
-   *  routes act on the whole install.
-   *
-   *  SLOW ON PURPOSE. Starts are paced server-side, so this resolves after
-   *  the last destination has been dealt with rather than on acknowledgement.
-   *  A caller that aborts leaves the untouched tail reported as `skipped`.
-   *
-   *  STOPPING ENDS EVERY YOUTUBE BROADCAST ON THE INSTALL, PERMANENTLY: stop
-   *  and disable are one thing on the server, and the broadcast lifecycle
-   *  coordinator ends the broadcast of a disabled destination. Starting again
-   *  puts video back on the wire; it does not bring the broadcasts back. See
-   *  internal/api/destinations_bulk.go. */
-  startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
   /** Stop every destination. Carries `confirm` because the server refuses this
    *  route without it: it ends every live broadcast on the install, and a
    *  broadcast that has ended cannot be resumed. The dialog in front of this
@@ -919,14 +883,6 @@ export const api = {
    *  a caller that never showed one is exactly who the refusal is for. */
   stopAllDestinations: () =>
     post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
-  /** Dump the delay of every enabled, delayed destination of one programme.
-   *  Carries `confirm` for the reason stop-all does: the server refuses it
-   *  without one. Undelayed destinations are not listed in the answer. */
-  dumpAllDelays: (sourceId?: number | null, seconds?: number) =>
-    post<DelayDumpAllReport>(`/destinations/delay/dump-all${sourceQuery(sourceId)}`, {
-      confirm: true,
-      ...(seconds ? { seconds } : {}),
-    }),
   /** What a stop-all would end right now: the server's count, from each row's recorded phase.
    *  The Stop dialog shows this and nothing local, so the dialog and the stop agree. Read-only. */
   stopImpact: () =>
@@ -1065,7 +1021,6 @@ export const api = {
   listServices: () =>
     get<{ provenance: string; services: ServiceInfo[] }>("/services"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
-  getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   /** #661: what this rendition would be doing wrong on that platform.
    *  An unknown platform answers [], because a custom RTMP destination has
    *  nothing published to be outside of. */
@@ -1237,10 +1192,6 @@ export const api = {
       return false;
     }
   },
-  /** The HLS ladder. Relative, so it works under whatever host or proxy prefix
-   *  the viewer reached the page through. */
-  playoutMasterUrl: (token?: string) =>
-    "/playout/master.m3u8" + tokenQuery(token),
 
   // --- monitoring ---
   /** Every process is called `ingest`, `recorder`, `preview` or `meters` in
@@ -1298,7 +1249,6 @@ export const api = {
       "/jobs" + (qs ? `?${qs}` : ""),
     );
   },
-  getJob: (id: number) => get<JobView>(`/jobs/${id}`),
   cancelJob: (id: number) => post<JobView>(`/jobs/${id}/cancel`),
   retryJob: (id: number) => post<JobView>(`/jobs/${id}/retry`),
   /** Releases ONE job from the governor's gates. Deliberately not per-kind:
@@ -1311,10 +1261,6 @@ export const api = {
   purgeJobs: (body: { days?: number; keep?: number }) =>
     post<{ purged: number }>("/jobs/purge", body),
 
-  jobPolicy: () =>
-    get<{ policy: PostProdSettings; kinds: JobKindInfo[]; modes: string[] }>(
-      "/jobs/policy",
-    ),
   /** `restartRequired` is true when concurrency changed: the queue fixes that
    *  when it is constructed, so the new value is saved but not yet live. */
   putJobPolicy: (policy: PostProdSettings) =>
@@ -1330,15 +1276,10 @@ export const api = {
     get<{ session: LibrarySession; recordings: LibraryRecording[] }>(
       `/library/sessions/${id}`,
     ),
-  createLibrarySession: (m: Metadata & { recordings?: number[] }) =>
-    post<LibrarySession>("/library/sessions", m),
   /** Omitting `recordings` leaves the membership alone, so renaming a session
    *  cannot silently empty it. */
   updateLibrarySession: (id: number, m: Metadata & { recordings?: number[] }) =>
     put<LibrarySession>(`/library/sessions/${id}`, m),
-  /** Ungroups the segments; it never deletes media. */
-  deleteLibrarySession: (id: number) =>
-    del<{ status: string; note: string }>(`/library/sessions/${id}`),
   /** Re-runs the grouping backfill: additive, idempotent, and it never merges
    *  a grouping a human has already split. */
   regroupSessions: () =>
@@ -1354,9 +1295,6 @@ export const api = {
     get<{ recording: LibraryRecording; transcriptTracks: TranscriptTrack[] | null }>(
       `/library/recordings/${id}`,
     ),
-  updateLibraryRecording: (id: number, m: Metadata) =>
-    put<Metadata & { recordingId: number }>(`/library/recordings/${id}`, m),
-
   transcript: (id: number) =>
     get<TranscriptView>(`/library/recordings/${id}/transcript`),
   /** A caption file for one recording (#8): the stored transcript, or with
@@ -1424,16 +1362,6 @@ export const api = {
   // page that refuses to render teaches the operator nothing.
   chatOverview: (limit?: number) =>
     get<ChatOverview>("/chat" + (limit ? `?limit=${limit}` : "")),
-  /** Older scrollback, out of the database rather than the live ring. */
-  chatMessages: (opts: { platform?: ChatPlatform; limit?: number } = {}) => {
-    const q = new URLSearchParams();
-    if (opts.platform) q.set("platform", opts.platform);
-    if (opts.limit) q.set("limit", String(opts.limit));
-    const qs = q.toString();
-    return get<{ messages: ChatMessage[]; stored: boolean }>(
-      "/chat/messages" + (qs ? `?${qs}` : ""),
-    );
-  },
   /** Find a message again, by its text or by who said it.
    *
    *  Server-side and against the database, not the pane: the timeline holds one
@@ -1559,12 +1487,6 @@ export const api = {
    *  rate-limits the operator's whole app, not this feature. */
   pollDeviceAuth: (platform: string, handle: string) =>
     post<DevicePoll>(`/platforms/credentials/${platform}/device/poll`, { handle }),
-  /** Removes the app's credentials, UNCONFIRMED: refused with a 409
-   *  (`creds_in_use`) naming the accounts while any are connected through the
-   *  app, because removing the app does not disconnect them. Nothing is
-   *  deleted when it rejects. */
-  deleteCreds: (platform: string) =>
-    del<{ status: string }>(`/platforms/credentials/${platform}`),
   /** Removes the app's credentials ANYWAY. For a caller whose own dialog has
    *  already said what removing them costs; the accounts stay connected until
    *  their tokens expire. */

@@ -11,7 +11,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import { api, type DestinationWithRouting } from "@/lib/api";
 import { autoApi } from "@/lib/autoApi";
-import type { TrackLevelResult } from "@/lib/liveTrackLevel";
 import type { Destination, RoutingProfile, RoutingResult } from "@/lib/types";
 
 /* The routing page, rendered whole so the wiring is what is tested.
@@ -92,7 +91,6 @@ function live(): LiveData {
 }
 
 let stored: Destination;
-let setTrackLevel: ReturnType<typeof vi.fn>;
 let updateDestination: ReturnType<typeof vi.fn>;
 
 /** A stand-in compiler: one named volume stage per enabled track, so a level
@@ -136,14 +134,6 @@ beforeEach(() => {
   } as never);
   updateDestination = vi.fn(async () => ({ destination: stored, routing: compiled }));
   vi.spyOn(api, "updateDestination").mockImplementation(updateDestination as never);
-  setTrackLevel = vi.fn(
-    async (_id: number, track: number, change: { muted?: boolean; gain?: number }) => {
-      const tr = stored.profile.tracks.find((s) => s.track === track)!;
-      Object.assign(tr, change);
-      return { applied: "live", destination: structuredClone(stored) } as TrackLevelResult;
-    },
-  );
-  vi.spyOn(api, "setTrackLevel").mockImplementation(setTrackLevel as never);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -198,12 +188,10 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
     // Pending, not applied: the draft is dirty and nothing went to the server.
     expect(saveState()).toBe("dirty");
     expect(screen.getByRole("button", { name: "Unmute track 1" })).toBeTruthy();
-    expect(setTrackLevel).not.toHaveBeenCalled();
     expect(updateDestination).not.toHaveBeenCalled();
     await save();
     expect(updateDestination).toHaveBeenCalledTimes(1);
     expect(savedTracks().find((s) => s.track === 0)?.muted).toBe(true);
-    expect(setTrackLevel).not.toHaveBeenCalled();
   });
 
   it("a gain is a pending edit, and Save sends it in the same single PUT", async () => {
@@ -218,7 +206,6 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
     expect(savedTracks().find((s) => s.track === 0)?.gain).toBe(0.95);
     // The stored mute on track 2 rides along untouched.
     expect(savedTracks().find((s) => s.track === 1)?.muted).toBe(true);
-    expect(setTrackLevel).not.toHaveBeenCalled();
   });
 
   it("Discard puts the stored mute and gain back and writes nothing", async () => {
@@ -234,7 +221,6 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
     expect(screen.queryAllByText("95%")).toHaveLength(0);
     expect(saveState()).toBe("clean");
     expect(updateDestination).not.toHaveBeenCalled();
-    expect(setTrackLevel).not.toHaveBeenCalled();
   });
 
   it("a mute and an unsaved track go out together in one Save", async () => {
@@ -276,7 +262,6 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
     const body = updateDestination.mock.calls[0][1] as { profile: RoutingProfile; vodProfile: RoutingProfile };
     expect(body.vodProfile.tracks.find((s) => s.track === 0)?.muted).toBe(true);
     expect(body.profile.tracks.find((s) => s.track === 0)?.muted).toBeFalsy();
-    expect(setTrackLevel).not.toHaveBeenCalled();
   });
 });
 
@@ -409,7 +394,6 @@ describe("a stored mute survives every routing-page save path", () => {
     await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
     const thumb = screen.getAllByRole("slider")[2];
     await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
-    expect(setTrackLevel).not.toHaveBeenCalled();
     await save();
     const sent = savedTracks();
     expect(sent.find((s) => s.track === 2)?.gain).toBe(0.95);

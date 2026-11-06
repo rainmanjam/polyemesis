@@ -11,7 +11,10 @@
 import { http, request, sourceQuery } from "./api";
 
 export const autoApi = {
-  ...http,
+  get: <T,>(p: string) => http.get<T>(p),
+  post: <T,>(p: string, body?: unknown) => http.post<T>(p, body),
+  put: <T,>(p: string, body: unknown) => http.put<T>(p, body),
+  del: <T,>(p: string) => http.del<T>(p),
 
   /* THE PROGRAMME-SCOPED ROUTES, and `sourceId` is REQUIRED on every one.
 
