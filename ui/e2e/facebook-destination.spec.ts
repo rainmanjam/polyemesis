@@ -290,6 +290,9 @@ test.describe("a Page account is not offered a personal audience", () => {
             accountRef,
             accountName: "E2E stub account",
             scopes: [],
+            // What GET /platforms/accounts sends: the server decides a Page from
+            // the ref and says so (handleListAccounts), and the dialog reads that.
+            ...(accountRef.startsWith("page:") ? { isPage: true } : {}),
           },
         ],
       }),
