@@ -420,12 +420,15 @@ func TestPlayoutPublishDefaultsProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read seeded config: %v", err)
 	}
-	var onDisk playoutPublish
+	if strings.Contains(string(b), cfg.Token) {
+		t.Fatalf("the seeded config holds the token in the clear: %s", b)
+	}
+	var onDisk playoutOnDisk
 	if err := json.Unmarshal(b, &onDisk); err != nil {
 		t.Fatalf("unmarshal seeded config: %v", err)
 	}
-	if onDisk.Token != cfg.Token {
-		t.Fatalf("token on disk = %q, want the one in memory", onDisk.Token)
+	if got := s.playoutStore().openToken(onDisk.TokenEnc); got != cfg.Token {
+		t.Fatalf("token on disk opens to %q, want the one in memory", got)
 	}
 }
 
