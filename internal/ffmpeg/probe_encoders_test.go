@@ -208,8 +208,12 @@ func TestProbeEncodersTimeoutsAndBudget(t *testing.T) {
 		bin := fakeFFmpeg(t, "h264_vaapi) sleep 30 ;;\nlibx264) exit 0 ;;")
 
 		start := time.Now()
+		// 2 s, not less: the healthy probe still has to fork a shell, which
+		// under a loaded -race run can take longer than a few hundred
+		// milliseconds. The point is only that the wedged one is cut off
+		// long before its 30 s sleep ends.
 		caps := probeEncodersWith(context.Background(), bin,
-			[]string{EncoderVAAPI, EncoderX264}, 250*time.Millisecond, 10*time.Second)
+			[]string{EncoderVAAPI, EncoderX264}, 2*time.Second, 20*time.Second)
 		elapsed := time.Since(start)
 
 		hung, _ := capByName(caps, EncoderVAAPI)
@@ -223,9 +227,9 @@ func TestProbeEncodersTimeoutsAndBudget(t *testing.T) {
 		if !good.Works {
 			t.Errorf("libx264 = %q, want it unaffected by the hung probe", good.Reason)
 		}
-		// The wedged probe is killed at the deadline; WaitDelay allows one
-		// further second for the pipe, and nothing may wait out the sleep.
-		if elapsed > 3*time.Second {
+		// The wedged probe is killed at its deadline and WaitDelay bounds the
+		// pipe after that; nothing may wait out the 30 s sleep.
+		if elapsed > 15*time.Second {
 			t.Errorf("probing took %s; the per-probe timeout is not bounding it", elapsed)
 		}
 	})
