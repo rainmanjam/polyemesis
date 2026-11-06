@@ -165,7 +165,7 @@ export function PreviewPlayer({
       )}
       style={ratio ? { aspectRatio: ratio } : undefined}
     >
-      <video // NOSONAR S4084: a live programme preview is muted by default and its encoder carries no caption file
+      <video // NOSONAR S4084: this plays the ingest preview under /hls/, a different tree from the playout output; the live captions.vtt sidecar is written beside the playout (viewers') stream, so there is none next to this one
         ref={videoRef}
         className="h-full w-full object-contain"
         muted={muted}

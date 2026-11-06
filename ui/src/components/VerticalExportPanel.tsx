@@ -239,6 +239,9 @@ export function VerticalExportPanel({
                     }} />}
                   <button
                     type="button"
+                    // Safari and Firefox on macOS do not focus a clicked button, so
+                    // arrow nudging right after a drag would need a Tab first.
+                    onPointerDown={(e) => e.currentTarget.focus()}
                     aria-label={t("clipedit.vertical.faceBox")}
                     data-testid="face-box"
                     className="absolute cursor-move border-2 border-primary bg-primary-dim"

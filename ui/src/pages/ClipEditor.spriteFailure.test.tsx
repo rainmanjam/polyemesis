@@ -24,7 +24,7 @@ const source = {
   recording: "rec-5.mkv",
   startedAt: "2026-01-01T00:00:00Z",
   durationMs: 60_000,
-  segments: [{ recordingId: 5, spriteVtt: "/sprites/a.vtt", mediaBase: "/m/", startMs: 0, endMs: 60000 }],
+  segments: [{ recordingId: 5, spriteVtt: "/sprites/a.vtt", mediaBase: "/m/", startMs: 0, endMs: 60000, proxy: "/m/proxy.mp4" }],
   tracks: [],
   hasTranscript: true,
   maxClipSeconds: 600,
@@ -86,5 +86,21 @@ describe("ClipEditor sprite load", () => {
     process.off("unhandledRejection", onUnhandled);
     vi.unstubAllGlobals();
     expect(unhandled).toEqual([]);
+  });
+
+  it("attaches the recording's caption file to a single-segment proxy", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    const { container } = render(
+      <MemoryRouter initialEntries={["/clips/5"]}>
+        <Routes>
+          <Route path="/clips/:id" element={<ClipEditor />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(container.querySelector("video track")).not.toBeNull());
+    expect(container.querySelector("video track")?.getAttribute("src")).toBe(
+      "/api/v1/library/recordings/5/transcript/export?format=vtt",
+    );
+    vi.unstubAllGlobals();
   });
 });

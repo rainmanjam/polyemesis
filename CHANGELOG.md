@@ -242,10 +242,13 @@ its first tagged release.
 
 ### Changed
 
-- **Connecting a Twitch account now stores the RTMPS ingest.** Fetching the stream key hands back
-  `rtmps://live.twitch.tv:443/app` instead of `rtmp://live.twitch.tv/app`: the same ingest and key over TLS,
-  which also passes networks that block port 1935. Existing destinations keep the URL they stored until
-  their key is refreshed. The "Twitch (RTMPS)" preset now spells out `:443`.
+- **New Twitch destinations connected through an account default to the RTMPS ingest.** Fetching the
+  stream key hands back `rtmps://live.twitch.tv:443/app` (the same ingest and key over TLS, which also
+  passes networks that block port 1935) for a destination with no URL yet. Refreshing a key keeps the
+  transport an existing destination already uses: the "Twitch" preset stays on plain RTMP, "Twitch (RTMPS)"
+  on RTMPS, and an unlabelled one keeps its stored scheme, so the plain-RTMP fallback for networks that
+  refuse TLS survives a refresh. The "Twitch (RTMPS)" preset now spells out `:443`, and the destination
+  dialog recognises an RTMPS Twitch URL with or without the port.
 - **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
   failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
   available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).

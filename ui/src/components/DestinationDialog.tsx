@@ -523,10 +523,29 @@ const PRESETS: DestPreset[] = [
  *  match wins; failing that the OAuth platform is enough to name it. Returning
  *  "" is fine — a destination predates the catalogue, and nothing about it
  *  changes just because we could not label it. */
-function presetIdFor(d: Destination): string {
+/** Scheme and host, lower-cased, the way the server's presetForIngest names an
+ *  ingest: a port or path difference (rtmps://host vs rtmps://host:443) is the
+ *  same preset. Exported for the test. */
+function ingestKey(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    return u.hostname ? `${u.protocol.toLowerCase()}//${u.hostname.toLowerCase()}` : "";
+  } catch {
+    return "";
+  }
+}
+
+export function presetIdFor(d: Destination): string {
   const platform = d.platform || "custom";
   const exact = PRESETS.find((p) => p.url !== "" && p.url === d.url);
   if (exact) return exact.id;
+  const key = ingestKey(d.url ?? "");
+  if (key) {
+    const sameIngest = PRESETS.filter(
+      (p) => p.url !== "" && !p.url.includes("{") && ingestKey(p.url) === key && (!p.platform || p.platform === platform),
+    );
+    if (sameIngest.length === 1) return sameIngest[0].id;
+  }
   if (platform !== "custom") {
     const byPlatform = PRESETS.find((p) => p.platform === platform);
     if (byPlatform) return byPlatform.id;

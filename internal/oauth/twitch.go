@@ -224,10 +224,13 @@ func (t *Twitch) Account(ctx context.Context, clientID, accessToken string) (*Ac
 // server that is nearest to the *polyemesis host* rather than to them.
 //
 // RTMPS on 443 rather than plain RTMP on 1935: the same ingest and the same
-// key, over TLS, and it gets through networks that block 1935. live.twitch.tv
+// key, over TLS, and it gets through networks that block 1935. This is the
+// default for a destination created from a connected account. A key refresh
+// does NOT impose it on an existing destination: api.ingestURLKeepingTransport
+// keeps the transport the destination chose, so the plain "twitch" preset stays
+// on RTMP and the twitch-rtmps TLS fallback advice still works. live.twitch.tv
 // is not an Amazon IVS host, so services.IVSAppPathFix does not apply, and the
-// path is already /app. Destinations connected before this change keep the URL
-// they stored until their key is refreshed.
+// path is already /app.
 const twitchIngestURL = "rtmps://live.twitch.tv:443/app"
 
 func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
