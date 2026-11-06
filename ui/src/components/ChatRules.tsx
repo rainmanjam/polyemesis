@@ -52,6 +52,11 @@ const MOD_DELAYS = [2, 4, 6];
 /** Twitch's ceiling on follower_mode_duration: three months, in minutes. */
 const MAX_FOLLOWER_MINUTES = 129600;
 
+function roomStateNote(t: ReturnType<typeof useT>, roomState: "reading" | "known" | "unknown"): string {
+  if (roomState === "reading") return t("chatRules.reading");
+  return roomState === "known" ? t("chatRules.readFromTwitch") : t("chatRules.limitation");
+}
+
 export function ChatRules({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
   // ONE CARD PER ACCOUNT. Keyed on the account, so switching the connected
   // Twitch account remounts the card: it starts "reading" again with default
@@ -346,11 +351,7 @@ function ChatRulesForAccount({ statuses }: Readonly<{ statuses: ChatStatus[] }>)
         </Button>
         {/* What the switches mean, said out loud. See the note at the top. */}
         <span className="text-sm text-muted-foreground">
-          {roomState === "reading"
-            ? t("chatRules.reading")
-            : roomState === "known"
-              ? t("chatRules.readFromTwitch")
-              : t("chatRules.limitation")}
+          {roomStateNote(t, roomState)}
         </span>
       </div>
     </div>

@@ -64,18 +64,21 @@ export function overviewTiles(
   const pending = (r: ReadState<unknown>) => (readFailed(r) ? couldNot : reading);
 
   // Ingest: a count the page already has, and the programme the tab edits.
+  let ingestLines: string[];
+  if (sourceCount === null) {
+    ingestLines = [couldNot];
+  } else if (sourceCount === 0) {
+    ingestLines = [t("settingsUx.tileNoSource")];
+  } else {
+    ingestLines = [
+      t("settingsUx.tileProgrammes", { n: sourceCount }),
+      ...(defaultSourceName ? [t("settingsUx.scopeProgramme", { name: defaultSourceName })] : []),
+    ];
+  }
   const ingest: OverviewTile = {
     tab: "ingest",
     title: "set.ingest",
-    lines:
-      sourceCount === null
-        ? [couldNot]
-        : sourceCount === 0
-          ? [t("settingsUx.tileNoSource")]
-          : [
-              t("settingsUx.tileProgrammes", { n: sourceCount }),
-              ...(defaultSourceName ? [t("settingsUx.scopeProgramme", { name: defaultSourceName })] : []),
-            ],
+    lines: ingestLines,
     attention: sourceCount === 0,
   };
 
@@ -114,11 +117,10 @@ export function overviewTiles(
   if (mayClaim(reads.obs)) {
     const { config, status } = reads.obs.value;
     const state = status.connection.state;
-    const line = !config.enabled
-      ? t("settingsUx.tileObsOff")
-      : state === "connected"
-        ? t("settingsUx.tileObsConnected")
-        : t("settingsUx.tileObsNotConnected");
+    let line: string;
+    if (!config.enabled) line = t("settingsUx.tileObsOff");
+    else if (state === "connected") line = t("settingsUx.tileObsConnected");
+    else line = t("settingsUx.tileObsNotConnected");
     obs = { tab: "obs", title: "obs.tab", lines: [line], attention: config.enabled && state !== "connected" };
   } else {
     obs = { tab: "obs", title: "obs.tab", lines: [pending(reads.obs)], attention: false };
@@ -144,11 +146,10 @@ export function overviewTiles(
       // The transport card's own words for the time left, so the two never
       // disagree and "1 days" never appears.
       const n = Math.abs(cert.daysRemaining);
-      const left = cert.expired
-        ? n === 0
-          ? t("set.certExpiredToday")
-          : t(n === 1 ? "set.certExpiredAgoOne" : "set.certExpiredAgoMany", { n })
-        : t(n === 1 ? "set.certDaysLeftOne" : "set.certDaysLeftMany", { n });
+      let left: string;
+      if (!cert.expired) left = t(n === 1 ? "set.certDaysLeftOne" : "set.certDaysLeftMany", { n });
+      else if (n === 0) left = t("set.certExpiredToday");
+      else left = t(n === 1 ? "set.certExpiredAgoOne" : "set.certExpiredAgoMany", { n });
       securityLines.push(t("settingsUx.tileCertExpiring", { left }));
       securityAttention = true;
     }

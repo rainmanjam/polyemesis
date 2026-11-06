@@ -273,18 +273,16 @@ export function GoLiveSheet({
     return () => clearTimeout(timer);
   }, [phase]);
 
-  const failedPart =
-    tally.failed > 0
-      ? t(tally.failed === 1 ? "i18nSweep.failedCountOne" : "i18nSweep.failedCount", { count: tally.failed })
-      : null;
+  const failedKey = tally.failed === 1 ? "i18nSweep.failedCountOne" : "i18nSweep.failedCount";
+  const failedPart = tally.failed > 0 ? t(failedKey, { count: tally.failed }) : null;
   const still = tally.total - tally.settled;
-  const stillPart =
-    run?.timedOut && still > 0
-      ? t(still === 1 ? "golive.stillStartingOne" : "golive.stillStarting", { count: still })
-      : null;
+  const stillKey = still === 1 ? "golive.stillStartingOne" : "golive.stillStarting";
+  const stillPart = run?.timedOut && still > 0 ? t(stillKey, { count: still }) : null;
+  const progressKey = phase === "done" ? "golive.progressDone" : "golive.progressStarting";
+  const goKey = readyNow.length === 1 ? "golive.goCountOne" : "golive.goCount";
   const progressLabel = run
     ? [
-        t(phase === "done" ? "golive.progressDone" : "golive.progressStarting", {
+        t(progressKey, {
           live: tally.live,
           total: tally.total,
         }),
@@ -427,11 +425,12 @@ export function GoLiveSheet({
                     for anything, and it is not counted in the start button. Its
                     LIVE mark is the progress column's chip, so this cell is left
                     empty rather than saying it twice (A8). */}
-                {p === "live" ? null : row.ready ? (
-                  <Badge variant="armed">{t("golive.ready")}</Badge>
-                ) : (
-                  <Badge variant="warn">{t("golive.blockedNoSource")}</Badge>
-                )}
+                {p !== "live" &&
+                  (row.ready ? (
+                    <Badge variant="armed">{t("golive.ready")}</Badge>
+                  ) : (
+                    <Badge variant="warn">{t("golive.blockedNoSource")}</Badge>
+                  ))}
               </span>
               {/* What this platform will hear, from the live list: the snapshot
                   carries no tracks, and routing can change while the sheet is
@@ -498,7 +497,7 @@ export function GoLiveSheet({
             >
               {run
                 ? progressLabel
-                : t(readyNow.length === 1 ? "golive.goCountOne" : "golive.goCount", { count: readyNow.length })}
+                : t(goKey, { count: readyNow.length })}
             </Button>
           </div>
           {/* Always mounted, empty when idle: a live region that appears with

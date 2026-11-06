@@ -148,11 +148,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
         .catch((e: unknown) => {
           if (!live) return;
           setPrepared(null);
-          setProblem(
-            e instanceof ApiError
-              ? { code: e.code, message: e.message }
-              : { code: "", message: e instanceof Error ? e.message : String(e) },
-          );
+          setProblem(problemFrom(e));
         })
         .finally(() => live && setChecking(false));
     }, DEBOUNCE_MS);
@@ -205,11 +201,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
       setPublication(p);
       setPrepared(null);
     } catch (e) {
-      setProblem(
-        e instanceof ApiError
-          ? { code: e.code, message: e.message }
-          : { code: "", message: e instanceof Error ? e.message : String(e) },
-      );
+      setProblem(problemFrom(e));
       setPrepared(null);
       setEpoch((e) => e + 1);
     } finally {
@@ -360,11 +352,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
                           size="sm"
                           onClick={() => setPrivacy(o)}
                         >
-                          {o === "private"
-                            ? t("publish.privacy.private")
-                            : o === "unlisted"
-                              ? t("publish.privacy.unlisted")
-                              : t("publish.privacy.public")}
+                          {privacyOptionLabel(t, o)}
                         </Button>
                       ))}
                     </div>
@@ -398,14 +386,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
             )}
             {usable && (
               <p className="text-sm text-muted-foreground" aria-live="polite">
-                {confirmation
-                  ? t("publish.readyTo", {
-                      account: confirmation.accountName,
-                      privacy: privacyWord(t, confirmation.meta.privacy),
-                    })
-                  : checking
-                    ? t("publish.checking")
-                    : ""}
+                {statusLine(t, confirmation, checking)}
               </p>
             )}
           </div>
@@ -445,6 +426,31 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
 
 type Tr = ReturnType<typeof useT>;
 
+function problemFrom(e: unknown): { code: string; message: string } {
+  if (e instanceof ApiError) return { code: e.code, message: e.message };
+  return { code: "", message: e instanceof Error ? e.message : String(e) };
+}
+
+function privacyOptionLabel(t: Tr, option: string): string {
+  if (option === "private") return t("publish.privacy.private");
+  return option === "unlisted" ? t("publish.privacy.unlisted") : t("publish.privacy.public");
+}
+
+function statusLine(t: Tr, confirmation: PublishPrepared | null, checking: boolean): string {
+  if (confirmation) {
+    return t("publish.readyTo", {
+      account: confirmation.accountName,
+      privacy: privacyWord(t, confirmation.meta.privacy),
+    });
+  }
+  return checking ? t("publish.checking") : "";
+}
+
+function previousBadgeVariant(state: Publication["state"]): "live" | "warn" | "outline" {
+  if (state === "posted") return "live";
+  return state === "failed" ? "warn" : "outline";
+}
+
 function privacyWord(t: Tr, level: string): string {
   switch (level) {
     case "SELF_ONLY":
@@ -461,7 +467,7 @@ function privacyWord(t: Tr, level: string): string {
 function PreviousRow({ pub, t }: Readonly<{ pub: Publication; t: Tr }>) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <Badge variant={pub.state === "posted" ? "live" : pub.state === "failed" ? "warn" : "outline"}>
+      <Badge variant={previousBadgeVariant(pub.state)}>
         {t(`publish.state.${pub.state}`)}
       </Badge>
       <span>

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import type { ApiToken, PlatformAccount, PlatformCreds } from "@/lib/types";
 
 /* THE DANGER ZONE (A17). The last section of Settings, and the one place that
@@ -22,6 +22,12 @@ import type { ApiToken, PlatformAccount, PlatformCreds } from "@/lib/types";
 type Pending =
   | { kind: "tokens"; count: number }
   | { kind: "creds"; platform: string; accounts: number };
+
+function consequencesFor(pending: Pending | null, t: Translator): { label: string; count: number }[] | undefined {
+  if (!pending) return undefined;
+  if (pending.kind === "creds") return [{ label: t("danger.accountsUsing"), count: pending.accounts }];
+  return [{ label: t("danger.tokensLabel"), count: pending.count }];
+}
 
 export function DangerZone() {
   const t = useT();
@@ -112,13 +118,7 @@ export function DangerZone() {
         requireTyping
         title={pending?.kind === "creds" ? t("set.removeCredsTitle") : t("danger.tokensTitle")}
         description={pending?.kind === "creds" ? t("set.removeCredsDesc") : t("danger.tokensConfirmBody")}
-        consequences={
-          pending?.kind === "creds"
-            ? [{ label: t("danger.accountsUsing"), count: pending.accounts }]
-            : pending
-              ? [{ label: t("danger.tokensLabel"), count: pending.count }]
-              : undefined
-        }
+        consequences={consequencesFor(pending, t)}
         consequencesLabel={pending?.kind === "creds" ? t("danger.stopsWorking") : undefined}
         confirmLabel={pending?.kind === "creds" ? t("set.removeCreds") : t("danger.tokensAction")}
         onConfirm={async () => {

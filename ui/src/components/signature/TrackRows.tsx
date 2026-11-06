@@ -308,17 +308,16 @@ export function TrackRows({
         const rowBusy = busy[t.index] === true;
         const shownGain = drag[t.index] ?? sel.gain;
         const muteColumn = !!live || !!draftMute;
+        let rowTone = "border-border bg-card opacity-55 hover:opacity-80";
+        if (excluded) rowTone = "border-warn/35 bg-warn-dim/25";
+        else if (sending) rowTone = "border-primary/35 bg-primary-dim/30";
 
         return (
           <div
             key={t.index}
             className={cn(
               "@container flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors",
-              excluded
-                ? "border-warn/35 bg-warn-dim/25"
-                : sending
-                  ? "border-primary/35 bg-primary-dim/30"
-                  : "border-border bg-card opacity-55 hover:opacity-80",
+              rowTone,
             )}
           >
             {/* TWO LAYOUTS, BY THE ROW'S OWN WIDTH (a container query, so the

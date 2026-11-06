@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useId, useState } from "react";
+import { lazy, useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Activity,
@@ -240,6 +240,46 @@ export function SourcesPage() {
     }
   };
 
+  const renderSources = (): ReactNode =>
+    sources.length === 0 ? (
+      // THE END OF THE TRAIL. Every refusal on every other screen sends the
+      // operator here, so a blank page under a heading is the worst possible
+      // thing for this one to be -- it reads as "the thing you were sent to
+      // do has already been done, or is broken".
+      //
+      // Its own button rather than the shared link, because this page IS the
+      // Sources page: a link back to itself would be a loop, and the control
+      // that ends the state is the create dialog three lines below.
+      <NoProgrammeYet
+        title={t("empty.sourcesTitle")}
+        body={t("empty.sourcesBody")}
+        action={{ label: t("sources.addSource"), onClick: () => setCreating(true) }}
+      />
+    ) : (
+      <div className="flex flex-col gap-3">
+        {sources.map((s) => (
+          <SourceCard
+            key={s.id}
+            source={s}
+            busy={busyId === s.id}
+            onPatch={(c) => patch(s, c)}
+            onRotate={() => setRotating(s)}
+            onDelete={() => setDeleting(s)}
+            onAddDestination={() => setAddingTo(s.id)}
+            previewOn={previewOn}
+          />
+        ))}
+      </div>
+    );
+
+  const sourcesBody: ReactNode = loading ? (
+    <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
+    </div>
+  ) : (
+    renderSources()
+  );
+
   return (
     <div className="p-3">
       <PageHeader
@@ -262,40 +302,7 @@ export function SourcesPage() {
         }
       />
 
-      {loading ? (
-        <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
-        </div>
-      ) : sources.length === 0 ? (
-        // THE END OF THE TRAIL. Every refusal on every other screen sends the
-        // operator here, so a blank page under a heading is the worst possible
-        // thing for this one to be -- it reads as "the thing you were sent to
-        // do has already been done, or is broken".
-        //
-        // Its own button rather than the shared link, because this page IS the
-        // Sources page: a link back to itself would be a loop, and the control
-        // that ends the state is the create dialog three lines below.
-        <NoProgrammeYet
-          title={t("empty.sourcesTitle")}
-          body={t("empty.sourcesBody")}
-          action={{ label: t("sources.addSource"), onClick: () => setCreating(true) }}
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {sources.map((s) => (
-            <SourceCard
-              key={s.id}
-              source={s}
-              busy={busyId === s.id}
-              onPatch={(c) => patch(s, c)}
-              onRotate={() => setRotating(s)}
-              onDelete={() => setDeleting(s)}
-              onAddDestination={() => setAddingTo(s.id)}
-              previewOn={previewOn}
-            />
-          ))}
-        </div>
-      )}
+      {sourcesBody}
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>

@@ -239,6 +239,127 @@ export function HooksCard() {
     );
   }
 
+  const renderHooks = () => {
+    if (loadFailed) {
+      return (
+        <div className="px-3 py-8 text-center text-[12px] text-warn">
+          {t("hooks.listUnread")}
+        </div>
+      );
+    }
+    if (hooks.length === 0) {
+      return (
+        <EmptyState
+          className="m-3"
+          icon={Webhook}
+          title={t("hooks.emptyTitle")}
+          body={t("hooks.emptyBody")}
+          action={{ label: t("hooks.new"), onClick: () => setDraft({ enabled: true, triggers: [] }) }}
+        />
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("hooks.colWebhook")}</TableHead>
+            <TableHead>{t("hooks.colEndpoint")}</TableHead>
+            <TableHead>{t("hooks.colTriggers")}</TableHead>
+            <TableHead className="text-center">{t("hooks.colEnabled")}</TableHead>
+            <TableHead className="w-36" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {hooks.map((h) => (
+            <TableRow key={h.id}>
+              <TableCell>
+                <div className="text-[12px]">{h.name}</div>
+                {/* One key per FORM rather than a stem plus an "s",
+                    which is the rule lib/i18n.ts states: substitution
+                    is {name} and nothing else, and a language whose
+                    plural does not work by suffixing cannot be served
+                    by concatenation. */}
+                <div className="text-sm text-muted-foreground">
+                  {t(h.hasSecret ? "hooks.signed" : "hooks.unsigned")} ·{" "}
+                  {t(h.maxAttempts === 1 ? "hooks.attemptsOne" : "hooks.attempts", {
+                    count: h.maxAttempts,
+                  })}{" "}
+                  · {t("hooks.timeout", { seconds: h.timeoutSeconds })}
+                </div>
+              </TableCell>
+              {/* The stored URL is never sent back; this is the mask,
+                  and editing it is how you replace the endpoint. */}
+              <TableCell className="max-w-56 truncate font-mono text-sm text-muted-foreground">
+                {h.url}
+              </TableCell>
+              <TableCell>
+                {(h.triggers ?? []).length === 0 ? (
+                  <Badge variant="outline">{t("hooks.allTriggers")}</Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    {t(
+                      (h.triggers ?? []).length === 1
+                        ? "hooks.triggerCountOne"
+                        : "hooks.triggerCount",
+                      { count: (h.triggers ?? []).length },
+                    )}
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-center">
+                <Switch
+                  checked={h.enabled}
+                  onCheckedChange={(v) => toggle(h, v)}
+                  aria-label={t("hooks.enableAria", { name: h.name })}
+                />
+              </TableCell>
+              <TableCell>
+                <div className="flex justify-end gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => showDeliveries(h)}
+                    aria-label={t("hooks.deliveries")}
+                    title={t("hooks.deliveries")}
+                  >
+                    <Webhook />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => test(h)}
+                    disabled={testing === h.id}
+                    aria-label={t("hooks.sendTest")}
+                    title={t("hooks.sendTestTitle")}
+                  >
+                    {testing === h.id ? <Loader2 className="animate-spin" /> : <Send />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setDraft(h)}
+                    aria-label={t("common.edit")}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => confirmDelete.ask(h)}
+                    aria-label={t("common.delete")}
+                    className="text-muted-foreground hover:text-down"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
       <div className="space-y-3">
@@ -250,118 +371,7 @@ export function HooksCard() {
             </Button>
           </CardHeader>
           <CardContent className="px-0 pb-0">
-            {loadFailed ? (
-              <div className="px-3 py-8 text-center text-[12px] text-warn">
-                {t("hooks.listUnread")}
-              </div>
-            ) : hooks.length === 0 ? (
-              <EmptyState
-                className="m-3"
-                icon={Webhook}
-                title={t("hooks.emptyTitle")}
-                body={t("hooks.emptyBody")}
-                action={{ label: t("hooks.new"), onClick: () => setDraft({ enabled: true, triggers: [] }) }}
-              />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("hooks.colWebhook")}</TableHead>
-                    <TableHead>{t("hooks.colEndpoint")}</TableHead>
-                    <TableHead>{t("hooks.colTriggers")}</TableHead>
-                    <TableHead className="text-center">{t("hooks.colEnabled")}</TableHead>
-                    <TableHead className="w-36" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {hooks.map((h) => (
-                    <TableRow key={h.id}>
-                      <TableCell>
-                        <div className="text-[12px]">{h.name}</div>
-                        {/* One key per FORM rather than a stem plus an "s",
-                            which is the rule lib/i18n.ts states: substitution
-                            is {name} and nothing else, and a language whose
-                            plural does not work by suffixing cannot be served
-                            by concatenation. */}
-                        <div className="text-sm text-muted-foreground">
-                          {t(h.hasSecret ? "hooks.signed" : "hooks.unsigned")} ·{" "}
-                          {t(h.maxAttempts === 1 ? "hooks.attemptsOne" : "hooks.attempts", {
-                            count: h.maxAttempts,
-                          })}{" "}
-                          · {t("hooks.timeout", { seconds: h.timeoutSeconds })}
-                        </div>
-                      </TableCell>
-                      {/* The stored URL is never sent back; this is the mask,
-                          and editing it is how you replace the endpoint. */}
-                      <TableCell className="max-w-56 truncate font-mono text-sm text-muted-foreground">
-                        {h.url}
-                      </TableCell>
-                      <TableCell>
-                        {(h.triggers ?? []).length === 0 ? (
-                          <Badge variant="outline">{t("hooks.allTriggers")}</Badge>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">
-                            {t(
-                              (h.triggers ?? []).length === 1
-                                ? "hooks.triggerCountOne"
-                                : "hooks.triggerCount",
-                              { count: (h.triggers ?? []).length },
-                            )}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Switch
-                          checked={h.enabled}
-                          onCheckedChange={(v) => toggle(h, v)}
-                          aria-label={t("hooks.enableAria", { name: h.name })}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => showDeliveries(h)}
-                            aria-label={t("hooks.deliveries")}
-                            title={t("hooks.deliveries")}
-                          >
-                            <Webhook />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => test(h)}
-                            disabled={testing === h.id}
-                            aria-label={t("hooks.sendTest")}
-                            title={t("hooks.sendTestTitle")}
-                          >
-                            {testing === h.id ? <Loader2 className="animate-spin" /> : <Send />}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => setDraft(h)}
-                            aria-label={t("common.edit")}
-                          >
-                            <Pencil />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => confirmDelete.ask(h)}
-                            aria-label={t("common.delete")}
-                            className="text-muted-foreground hover:text-down"
-                          >
-                            <Trash2 />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+            {renderHooks()}
           </CardContent>
         </Card>
 

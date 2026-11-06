@@ -88,6 +88,15 @@ export function RoutingSaveBar({
   // Four lines is what fits above the buttons without the bar becoming a page.
   const shown = changes.slice(0, 4);
 
+  let summary: string;
+  if (!dirty) summary = t("routingUx.unsavedNone");
+  else if (warnRestart) summary = t("routing.saveBar.restarts", { name: destinationName });
+  else if (restarts && impact === "levels") summary = t("routing.saveBar.appliesLive", { name: destinationName });
+  else if (restarts && impact === "none") summary = t("routing.saveBar.noRestart", { name: destinationName });
+  // A disabled destination, or a draft whose compile is still out: nothing is
+  // claimed about a restart.
+  else summary = t("routing.saveBar.changed", { name: destinationName });
+
   return (
     <div
       className={cn(
@@ -101,17 +110,7 @@ export function RoutingSaveBar({
     >
       <div role="status" className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="text-sm">
-          {!dirty
-            ? t("routingUx.unsavedNone")
-            : warnRestart
-              ? t("routing.saveBar.restarts", { name: destinationName })
-              : restarts && impact === "levels"
-                ? t("routing.saveBar.appliesLive", { name: destinationName })
-                : restarts && impact === "none"
-                  ? t("routing.saveBar.noRestart", { name: destinationName })
-                  : // A disabled destination, or a draft whose compile is
-                    // still out: nothing is claimed about a restart.
-                    t("routing.saveBar.changed", { name: destinationName })}
+          {summary}
         </p>
         {dirty && changes.length > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="save-bar-scope">

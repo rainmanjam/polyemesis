@@ -47,8 +47,8 @@ import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import { reportingStreamCount } from "@/lib/stream-health";
-import type { DelayDumpResult, DestStatus } from "@/lib/types";
-import { useT, useTN, useStateLabel } from "@/lib/i18n";
+import type { DelayDumpResult, DestStatus, FailureReason } from "@/lib/types";
+import { useT, useTN, useStateLabel, type Translator } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { destinationInPlay, destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
@@ -64,6 +64,19 @@ import { destinationStatus } from "@/lib/status";
 const RETIRED_PLATFORM = {
   trovo: "dash.platformRetired.trovo",
 } as const;
+
+function speedTone(running: boolean, speed: number): "muted" | "warn" | "default" {
+  if (!running || speed === 0) return "muted";
+  return speed < 0.95 ? "warn" : "default";
+}
+
+function failureReasonText(t: Translator, reason: FailureReason): string {
+  if (reason.urlFix) return t("reason.urlFix.cause");
+  if (reason.cause === "unknown" && reason.line) {
+    return `${causeLabel(t, reason.cause)} — ${t("reason.ffmpegSaid", { line: reason.line })}`;
+  }
+  return causeLabel(t, reason.cause);
+}
 
 /** One destination, as shown on the dashboard.
  *
@@ -243,6 +256,60 @@ export function DestinationCard({
     // for a single thing.
     : "source, copied";
 
+  const renderStartStop = () => {
+    if (held.pending) {
+      return (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="flex-1"
+          onClick={held.cancel}
+          aria-label={t("i18nSweep.undoStopping", { name: dest.name })}
+        >
+          <Undo2 /> {t("i18nSweep.undoCountdown", { seconds: undoSecondsLeft(held.remaining) })}
+        </Button>
+      );
+    }
+    if (dest.enabled) {
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={held.hold}
+          disabled={busy || unsettled}
+          // Says WHY it is refusing. A control that greys out for under a
+          // second with no explanation reads as a glitch, and the operator
+          // clicks again rather than pausing -- which is the behaviour the
+          // guard exists to interrupt.
+          title={
+            unsettled
+              ? t("i18nSweep.justChangedToStop")
+              : t("i18nSweep.stopNamed", { name: dest.name })
+          }
+        >
+          <Square /> {t("common.stop")}
+        </Button>
+      );
+    }
+    let startTitle: string;
+    if (retiredKey) startTitle = t(retiredKey);
+    else if (unsettled) startTitle = t("i18nSweep.justChangedToStart");
+    else startTitle = t("i18nSweep.startNamed", { name: dest.name });
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className="flex-1"
+        onClick={onStart}
+        disabled={busy || unsettled || !!retiredKey}
+        title={startTitle}
+      >
+        <Play /> {t("common.start")}
+      </Button>
+    );
+  };
+
   return (
     <Card
       id={domId}
@@ -418,13 +485,7 @@ export function DestinationCard({
           <Stat
             labelKey="dest.speed"
             value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
-            tone={
-              !running || (progress?.speed ?? 0) === 0
-                ? "muted"
-                : (progress?.speed ?? 0) < 0.95
-                  ? "warn"
-                  : "default"
-            }
+            tone={speedTone(running, progress?.speed ?? 0)}
           />
         </div>
 
@@ -463,11 +524,7 @@ export function DestinationCard({
                   // The URL the server can prove wrong outranks whatever FFmpeg's
                   // output looked like: an IVS ingest refusing a missing /app
                   // reads as a refused key, and used to read as TLS.
-                  reason.urlFix
-                    ? t("reason.urlFix.cause")
-                    : reason.cause === "unknown" && reason.line
-                    ? `${causeLabel(t, reason.cause)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
-                    : causeLabel(t, reason.cause)
+                  failureReasonText(t, reason)
                 }
                 step={t("foundation.status.step.destination", { platform: platformLabel })}
                 asOf={reason.at}
@@ -691,53 +748,7 @@ export function DestinationCard({
               already requires a server-side {"confirm": true}, and delete goes
               through ConfirmDestructive with a typed subject. The dangerous
               SPECIFIC action was the least protected one on the page. */}
-          {held.pending ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="flex-1"
-              onClick={held.cancel}
-              aria-label={t("i18nSweep.undoStopping", { name: dest.name })}
-            >
-              <Undo2 /> {t("i18nSweep.undoCountdown", { seconds: undoSecondsLeft(held.remaining) })}
-            </Button>
-          ) : dest.enabled ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={held.hold}
-              disabled={busy || unsettled}
-              // Says WHY it is refusing. A control that greys out for under a
-              // second with no explanation reads as a glitch, and the operator
-              // clicks again rather than pausing -- which is the behaviour the
-              // guard exists to interrupt.
-              title={
-                unsettled
-                  ? t("i18nSweep.justChangedToStop")
-                  : t("i18nSweep.stopNamed", { name: dest.name })
-              }
-            >
-              <Square /> {t("common.stop")}
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={onStart}
-              disabled={busy || unsettled || !!retiredKey}
-              title={
-                retiredKey
-                  ? t(retiredKey)
-                  : unsettled
-                    ? t("i18nSweep.justChangedToStart")
-                    : t("i18nSweep.startNamed", { name: dest.name })
-              }
-            >
-              <Play /> {t("common.start")}
-            </Button>
-          )}
+          {renderStartStop()}
           {/* STOP NOW, for a delayed destination that is still on (#11). The
               plain Stop above plays the buffered tail out; this one discards
               it, so nothing more of this programme airs. No undo countdown:

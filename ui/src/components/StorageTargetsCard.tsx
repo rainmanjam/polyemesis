@@ -157,6 +157,11 @@ function bodyOf(d: Draft): StorageTargetBody {
   return body;
 }
 
+function stepDetail(t: ReturnType<typeof useT>, s: { ok: boolean; skipped?: boolean; error?: string }): string | undefined {
+  if (s.ok) return t("storage.stepOk");
+  return s.skipped ? t("storage.stepSkipped") : s.error;
+}
+
 export function StorageTargetsCard() {
   const t = useT();
   const [targets, setTargets] = useState<StorageTarget[]>([]);
@@ -527,7 +532,7 @@ export function StorageTargetsCard() {
                       {s.ok ? <Check className="h-3 w-3 text-ok" /> : <X className="h-3 w-3 text-muted-foreground" />}
                       <span className="font-medium">{t(STEP_KEY[s.step])}</span>
                       <span className="text-muted-foreground">
-                        {s.ok ? t("storage.stepOk") : s.skipped ? t("storage.stepSkipped") : s.error}
+                        {stepDetail(t, s)}
                       </span>
                     </p>
                   ))}

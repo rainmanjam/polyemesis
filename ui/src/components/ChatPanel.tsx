@@ -30,6 +30,7 @@ import {
   chatStateTone,
   platformsIn,
   splitMessage,
+  type Piece,
 } from "@/lib/chat";
 import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
 import { useConfirm, type Asks } from "@/hooks/useConfirm";
@@ -85,31 +86,73 @@ function nameTone(name: string): string {
   return NAME_TONES[h % NAME_TONES.length];
 }
 
+function MessagePiece({ p }: Readonly<{ p: Piece }>) {
+  if (p.kind === "text") return <span>{p.text}</span>;
+  if (p.url) {
+    return (
+      <img
+        src={p.url}
+        alt={p.name}
+        title={p.name}
+        className="mx-0.5 inline-block h-4 align-text-bottom"
+      />
+    );
+  }
+  // No image URL from the platform: the name is what the sender typed
+  // and reads correctly on its own.
+  return <span className="text-muted-foreground">{p.name}</span>;
+}
+
 function MessageBody({ m }: Readonly<{ m: ChatMessage }>) {
   const pieces = useMemo(() => splitMessage(m), [m]);
   return (
     <>
-      {pieces.map((p, i) =>
-        p.kind === "text" ? (
-          <span key={i}>{p.text}</span>
-        ) : p.url ? (
-          <img
-            key={i}
-            src={p.url}
-            alt={p.name}
-            title={p.name}
-            className="mx-0.5 inline-block h-4 align-text-bottom"
-          />
-        ) : (
-          // No image URL from the platform: the name is what the sender typed
-          // and reads correctly on its own.
-          <span key={i} className="text-muted-foreground">
-            {p.name}
-          </span>
-        ),
-      )}
+      {pieces.map((p, i) => (
+        <MessagePiece key={i} p={p} />
+      ))}
     </>
   );
+}
+
+function newCountLabel(t: ReturnType<typeof useT>, behind: number): string {
+  if (behind <= 0) return "";
+  return t(behind === 1 ? "chatpage.newCountOne" : "chatpage.newCount", { count: behind });
+}
+
+function verdictLabel(t: ReturnType<typeof useT>, r: ChatSendResult): string {
+  if (r.ok) return t("chatpage.verdictSent");
+  if (r.skipped) return t("chatpage.verdictCannotSend");
+  return t("chatpage.verdictFailed");
+}
+
+function verdictTone(r: ChatSendResult): SignalTone {
+  if (r.ok) return "live";
+  if (r.skipped) return "idle";
+  return "down";
+}
+
+function limitHint(
+  t: ReturnType<typeof useT>,
+  over: boolean,
+  strictestPlatform: ChatPlatform | undefined,
+  strictest: number,
+): string {
+  if (over) {
+    return strictestPlatform
+      ? t("chatpage.overLimit", {
+          platform: accentFor(strictestPlatform).label,
+          limit: strictest,
+        })
+      : t("chatpage.overLimitUnknown", { limit: strictest });
+  }
+  return strictestPlatform
+    ? t("chatpage.strictestLimitOf", { platform: accentFor(strictestPlatform).label })
+    : t("chatpage.strictestLimit");
+}
+
+function matchLabel(t: ReturnType<typeof useT>, loading: boolean, count: number): string {
+  if (loading) return t("chatpage.searching");
+  return t(count === 1 ? "chatpage.matchOne" : "chatpage.matchMany", { count });
 }
 
 // ------------------------------------------------------------------ the rows
@@ -354,7 +397,7 @@ export function ChatTimeline({
       </div>
 
       <div role="status" aria-live="polite" className="sr-only">
-        {behind > 0 ? t(behind === 1 ? "chatpage.newCountOne" : "chatpage.newCount", { count: behind }) : ""}
+        {newCountLabel(t, behind)}
       </div>
 
       {behind > 0 && (
@@ -432,17 +475,13 @@ function SendVerdict({ results }: Readonly<{ results: ChatSendResult[] }>) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
       {results.map((r) => {
         const accent = accentFor(r.platform);
-        const tone: SignalTone = r.ok ? "live" : r.skipped ? "idle" : "down";
+        const tone = verdictTone(r);
         return (
           <span key={`${r.platform}:${r.account ?? ""}`} className="inline-flex items-center gap-1">
             <StatusDot tone={tone} size="sm" />
             <span className={accent.text}>{accent.label}</span>
             <span className="text-muted-foreground">
-              {r.ok
-                ? t("chatpage.verdictSent")
-                : r.skipped
-                  ? t("chatpage.verdictCannotSend")
-                  : t("chatpage.verdictFailed")}
+              {verdictLabel(t, r)}
               {r.detail ? ` — ${r.detail}` : ""}
             </span>
           </span>
@@ -608,16 +647,7 @@ export function ChatComposer({
           <span className="tnum font-mono">
             {[...text].length}/{strictest}
           </span>{" "}
-          {over
-            ? strictestPlatform
-              ? t("chatpage.overLimit", {
-                  platform: accentFor(strictestPlatform).label,
-                  limit: strictest,
-                })
-              : t("chatpage.overLimitUnknown", { limit: strictest })
-            : strictestPlatform
-              ? t("chatpage.strictestLimitOf", { platform: accentFor(strictestPlatform).label })
-              : t("chatpage.strictestLimit")}
+          {limitHint(t, over, strictestPlatform, strictest)}
         </p>
       )}
     </div>
@@ -786,20 +816,17 @@ export function ChatSearchResults({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-sm text-muted-foreground">
         <span>
-          {search.loading
-            ? t("chatpage.searching")
-            : t(search.results.length === 1 ? "chatpage.matchOne" : "chatpage.matchMany", {
-                count: search.results.length,
-              })}
+          {matchLabel(t, search.loading, search.results.length)}
           {search.truncated && ` ${t("chatpage.showingNewest")}`}
         </span>
         <span className="ml-auto">{t("chatpage.newestFirst")}</span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-1" role="log">
-        {search.error ? (
+        {Boolean(search.error) && (
           <p className="px-2 py-4 text-[12px] text-down">{search.error}</p>
-        ) : search.results.length === 0 && !search.loading ? (
+        )}
+        {!search.error && search.results.length === 0 && !search.loading && (
           // The caveat matters most exactly here. An empty result is the one
           // outcome an operator can misread as evidence, and "no matches" on
           // its own invites "then they never said it" — which is a conclusion
@@ -810,7 +837,9 @@ export function ChatSearchResults({
               <p className="mt-1 text-[11px] text-muted-foreground">{search.note}</p>
             )}
           </div>
-        ) : (
+        )}
+        {!search.error &&
+          !(search.results.length === 0 && !search.loading) &&
           search.results.map((m) => (
             <MessageRow
               key={messageKey(m)}
@@ -819,8 +848,7 @@ export function ChatSearchResults({
               onOpenUser={onOpenUser}
               onMenu={onMenu}
             />
-          ))
-        )}
+          ))}
       </div>
 
       {search.results.length > 0 && search.note && (

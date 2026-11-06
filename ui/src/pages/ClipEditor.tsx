@@ -1214,8 +1214,14 @@ function PlanPanel({
   const drift = plan?.inDriftMs ?? 0;
   const moved = Boolean(plan?.driftKnown) && drift !== 0;
   // The server's mode identifiers, said in the words the Mode buttons use.
-  const modeLabel = (m: string) =>
-    m === "fast" ? t("clipedit.fast") : m === "precise" ? t("clipedit.precise") : m;
+  const modeLabel = (m: string) => {
+    if (m === "fast") return t("clipedit.fast");
+    return m === "precise" ? t("clipedit.precise") : m;
+  };
+  const startMovedValue = (driftKnown: boolean) => {
+    if (!driftKnown) return t("clipedit.driftUnknown");
+    return drift === 0 ? t("clipedit.notAtAll") : driftText(drift);
+  };
 
   return (
     <Card>
@@ -1248,14 +1254,8 @@ function PlanPanel({
               />
               <Stat
                 labelKey="clipedit.startMoved"
-                value={
-                  !plan.driftKnown
-                    ? t("clipedit.driftUnknown")
-                    : drift === 0
-                      ? t("clipedit.notAtAll")
-                      : driftText(drift)
-                }
-                tone={!plan.driftKnown ? "warn" : moved ? "warn" : "default"}
+                value={startMovedValue(plan.driftKnown)}
+                tone={!plan.driftKnown || moved ? "warn" : "default"}
               />
               <Stat
                 labelKey="clipedit.copied"
@@ -1370,6 +1370,11 @@ function TranscriptRow({
   );
 }
 
+function jobBadgeVariant(done: boolean, failed: boolean): "live" | "warn" | "outline" {
+  if (done) return "live";
+  return failed ? "warn" : "outline";
+}
+
 function JobRow({ job }: Readonly<{ job: ClipJob }>) {
   const t = useT();
   const [publishing, setPublishing] = useState(false);
@@ -1379,7 +1384,7 @@ function JobRow({ job }: Readonly<{ job: ClipJob }>) {
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border p-2">
       <div className="flex items-center gap-2">
-        <Badge variant={done ? "live" : failed ? "warn" : "outline"}>{job.state}</Badge>
+        <Badge variant={jobBadgeVariant(done, failed)}>{job.state}</Badge>
         <span className="tnum font-mono text-tiny text-muted-foreground">
           {done && res?.bytes ? bytes(res.bytes) : `${Math.round((job.progress ?? 0) * 100)}%`}
         </span>

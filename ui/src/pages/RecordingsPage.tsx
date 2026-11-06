@@ -263,6 +263,190 @@ export function RecordingsPage() {
   const confirmRecordingOff = useConfirm<boolean>();
   const problems = draft ? retentionProblems(draft) : [];
 
+  const durationCell = (durationMs: number) => {
+    if (durationMs > 0) return shortDuration(durationMs);
+    // A24: the segment being written is named, not dashes.
+    if (processRunning(status?.recorder)) return <Badge variant="live">{t("rec.recordingNow")}</Badge>;
+    return "—";
+  };
+
+  const stemsCell = (count: number) => {
+    if (count > 0) {
+      return (
+        <Badge
+          variant="armed"
+          title={t(count === 1 ? "rec.stemsTitleOne" : "rec.stemsTitle", { count })}
+        >
+          <AudioLines className="h-2.5 w-2.5" />
+          {count}
+        </Badge>
+      );
+    }
+    if (stemsKnown) return <span className="text-tiny text-muted-foreground">—</span>;
+    // NOT a dash. The stems read did not come back,
+    // so "this segment has no per-track files" is a
+    // claim nobody is entitled to make here.
+    return (
+      <span className="text-tiny text-warn" title={t("rec.stemsUnread")}>
+        ?
+      </span>
+    );
+  };
+
+  const renderSegments = () => {
+    if (readFailed(recRead)) {
+      return (
+        <div className="px-3 py-8 text-center text-sm text-warn">
+          {t("rec.listUnread")}
+        </div>
+      );
+    }
+    if (!mayClaim(recRead)) {
+      return (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+    if (recordings.length === 0) {
+      return (
+        <EmptyState
+          icon={Video}
+          title={t("rec.emptyTitle")}
+          body={t("rec.empty")}
+          className="mx-3 mb-3 border-0"
+        />
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("rec.file")}</TableHead>
+            <TableHead>{t("rec.started")}</TableHead>
+            <TableHead className="text-right">{t("rec.duration")}</TableHead>
+            <TableHead className="text-center">{t("rec.tracks")}</TableHead>
+            <TableHead className="text-center">{t("rec.stems")}</TableHead>
+            <TableHead className="text-right">{t("rec.size")}</TableHead>
+            <TableHead className="w-20" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {recordings.map((r) => {
+            const mine = stemsByMaster.get(masterKey(r.filename)) ?? [];
+            const open = expanded === r.id;
+            return (
+              <Fragment key={r.id}>
+                <TableRow>
+                  <TableCell className="font-mono text-tiny">
+                    <div className="flex items-center gap-1">
+                      {/* The disclosure only exists when there is
+                          something behind it; a chevron that opens an
+                          empty drawer is worse than no chevron. */}
+                      {mine.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(open ? null : r.id)}
+                          aria-expanded={open}
+                          aria-label={open ? t("rec.hideStems") : t("rec.showStems")}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {open ? (
+                            <ChevronDown className="h-3 w-3" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="w-3" />
+                      )}
+                      {r.filename}
+                    </div>
+                  </TableCell>
+                  <TableCell className="tnum font-mono text-tiny text-muted-foreground">
+                    {timestamp(r.startedAt)}
+                  </TableCell>
+                  {/* Both are measured only once the recorder has moved on
+                      to the next segment, so the live one reads as dashes. */}
+                  <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
+                    {durationCell(r.durationMs)}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {r.tracks > 0 ? (
+                      <Badge variant="outline" title={t(r.tracks === 1 ? "rec.tracksTitleOne" : "rec.tracksTitle", { count: r.tracks })}>
+                        {r.tracks}
+                      </Badge>
+                    ) : (
+                      <span className="text-tiny text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {stemsCell(mine.length)}
+                  </TableCell>
+                  <TableCell className="tnum text-right font-mono text-tiny">
+                    {bytes(r.bytes)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-0.5">
+                      <Button variant="ghost" size="icon-sm" asChild aria-label={t("rec.download")}>
+                        <a href={api.downloadUrl(r.id)} download>
+                          <Download />
+                        </a>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => confirmDelete.ask(r)}
+                        aria-label={t("rec.delete")}
+                        className="text-muted-foreground hover:text-down"
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+
+                {open && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="bg-card-raised/40">
+                      <div className="flex flex-col gap-1 py-1 pl-4">
+                        {mine.map((s) => (
+                          <div
+                            key={s.name}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="truncate font-mono text-micro text-muted-foreground">
+                              <span className="text-foreground">{s.track}</span> · {s.name}
+                            </span>
+                            <span className="flex shrink-0 items-center gap-1.5">
+                              <span className="tnum font-mono text-micro text-muted-foreground">
+                                {bytes(s.bytes)}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                asChild
+                                aria-label={t("rec.downloadNamed", { name: s.name })}
+                              >
+                                <a href={stemDownloadUrl(s.name)} download>
+                                  <Download />
+                                </a>
+                              </Button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    );
+  };
+
   return (
     <div className="p-3">
       <PageHeader title={t("rec.title")} subtitle={t("rec.subtitle")} />
@@ -298,175 +482,7 @@ export function RecordingsPage() {
             <CardTitle>{t("rec.segments")}</CardTitle>
           </CardHeader>
           <CardContent className="px-0 pb-0">
-            {readFailed(recRead) ? (
-              <div className="px-3 py-8 text-center text-sm text-warn">
-                {t("rec.listUnread")}
-              </div>
-            ) : !mayClaim(recRead) ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-            ) : recordings.length === 0 ? (
-              <EmptyState
-                icon={Video}
-                title={t("rec.emptyTitle")}
-                body={t("rec.empty")}
-                className="mx-3 mb-3 border-0"
-              />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("rec.file")}</TableHead>
-                    <TableHead>{t("rec.started")}</TableHead>
-                    <TableHead className="text-right">{t("rec.duration")}</TableHead>
-                    <TableHead className="text-center">{t("rec.tracks")}</TableHead>
-                    <TableHead className="text-center">{t("rec.stems")}</TableHead>
-                    <TableHead className="text-right">{t("rec.size")}</TableHead>
-                    <TableHead className="w-20" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recordings.map((r) => {
-                    const mine = stemsByMaster.get(masterKey(r.filename)) ?? [];
-                    const open = expanded === r.id;
-                    return (
-                      <Fragment key={r.id}>
-                        <TableRow>
-                          <TableCell className="font-mono text-tiny">
-                            <div className="flex items-center gap-1">
-                              {/* The disclosure only exists when there is
-                                  something behind it; a chevron that opens an
-                                  empty drawer is worse than no chevron. */}
-                              {mine.length > 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setExpanded(open ? null : r.id)}
-                                  aria-expanded={open}
-                                  aria-label={open ? t("rec.hideStems") : t("rec.showStems")}
-                                  className="text-muted-foreground hover:text-foreground"
-                                >
-                                  {open ? (
-                                    <ChevronDown className="h-3 w-3" />
-                                  ) : (
-                                    <ChevronRight className="h-3 w-3" />
-                                  )}
-                                </button>
-                              ) : (
-                                <span className="w-3" />
-                              )}
-                              {r.filename}
-                            </div>
-                          </TableCell>
-                          <TableCell className="tnum font-mono text-tiny text-muted-foreground">
-                            {timestamp(r.startedAt)}
-                          </TableCell>
-                          {/* Both are measured only once the recorder has moved on
-                              to the next segment, so the live one reads as dashes. */}
-                          <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
-                            {r.durationMs > 0 ? (
-                              shortDuration(r.durationMs)
-                            ) : processRunning(status?.recorder) ? (
-                              // A24: the segment being written is named, not dashes.
-                              <Badge variant="live">{t("rec.recordingNow")}</Badge>
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {r.tracks > 0 ? (
-                              <Badge variant="outline" title={t(r.tracks === 1 ? "rec.tracksTitleOne" : "rec.tracksTitle", { count: r.tracks })}>
-                                {r.tracks}
-                              </Badge>
-                            ) : (
-                              <span className="text-tiny text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {mine.length > 0 ? (
-                              <Badge
-                                variant="armed"
-                                title={t(mine.length === 1 ? "rec.stemsTitleOne" : "rec.stemsTitle", { count: mine.length })}
-                              >
-                                <AudioLines className="h-2.5 w-2.5" />
-                                {mine.length}
-                              </Badge>
-                            ) : stemsKnown ? (
-                              <span className="text-tiny text-muted-foreground">—</span>
-                            ) : (
-                              // NOT a dash. The stems read did not come back,
-                              // so "this segment has no per-track files" is a
-                              // claim nobody is entitled to make here.
-                              <span
-                                className="text-tiny text-warn"
-                                title={t("rec.stemsUnread")}
-                              >
-                                ?
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="tnum text-right font-mono text-tiny">
-                            {bytes(r.bytes)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-0.5">
-                              <Button variant="ghost" size="icon-sm" asChild aria-label={t("rec.download")}>
-                                <a href={api.downloadUrl(r.id)} download>
-                                  <Download />
-                                </a>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => confirmDelete.ask(r)}
-                                aria-label={t("rec.delete")}
-                                className="text-muted-foreground hover:text-down"
-                              >
-                                <Trash2 />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-
-                        {open && (
-                          <TableRow>
-                            <TableCell colSpan={7} className="bg-card-raised/40">
-                              <div className="flex flex-col gap-1 py-1 pl-4">
-                                {mine.map((s) => (
-                                  <div
-                                    key={s.name}
-                                    className="flex items-center justify-between gap-2"
-                                  >
-                                    <span className="truncate font-mono text-micro text-muted-foreground">
-                                      <span className="text-foreground">{s.track}</span> · {s.name}
-                                    </span>
-                                    <span className="flex shrink-0 items-center gap-1.5">
-                                      <span className="tnum font-mono text-micro text-muted-foreground">
-                                        {bytes(s.bytes)}
-                                      </span>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        asChild
-                                        aria-label={t("rec.downloadNamed", { name: s.name })}
-                                      >
-                                        <a href={stemDownloadUrl(s.name)} download>
-                                          <Download />
-                                        </a>
-                                      </Button>
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
+            {renderSegments()}
           </CardContent>
         </Card>
 

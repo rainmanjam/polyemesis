@@ -43,8 +43,15 @@ export function setupChecklist(input: ChecklistInput): Checklist | null {
 
   const step1: ChecklistStepState = hasSource ? "done" : "next";
   // Step 2 has no reading of its own. It ticks with the signal it leads to.
-  const step2: ChecklistStepState = signal ? "done" : hasSource ? "next" : "todo";
-  const step3: ChecklistStepState = signal ? "done" : hasSource ? "waiting" : "todo";
+  let step2: ChecklistStepState = "todo";
+  let step3: ChecklistStepState = "todo";
+  if (signal) {
+    step2 = "done";
+    step3 = "done";
+  } else if (hasSource) {
+    step2 = "next";
+    step3 = "waiting";
+  }
   const step4: ChecklistStepState = hasDestination ? "done" : "todo";
 
   const ready = hasSource && hasDestination;

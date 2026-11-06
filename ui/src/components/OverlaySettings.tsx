@@ -131,13 +131,14 @@ export function OverlaySettings() {
           </Button>
         </form>
 
-        {readFailed(data) ? (
-          <span className="text-tiny text-warn">{t("overlay.unread")}</span>
-        ) : !mayClaim(data) ? (
+        {readFailed(data) && <span className="text-tiny text-warn">{t("overlay.unread")}</span>}
+        {!readFailed(data) && !mayClaim(data) && (
           <span className="text-tiny text-muted-foreground">{t("overlay.loading")}</span>
-        ) : data.value.overlays.length === 0 ? (
+        )}
+        {mayClaim(data) && data.value.overlays.length === 0 && (
           <span className="text-tiny text-muted-foreground">{t("overlay.none")}</span>
-        ) : (
+        )}
+        {mayClaim(data) && data.value.overlays.length > 0 && (
           <>
             <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("overlay.title")}>
               {data.value.overlays.map((o) => (
@@ -194,15 +195,15 @@ export function OverlayConnection({ overlay, onCheck }: Readonly<{ overlay: Chat
   const t = useT();
   if (overlay.connected === undefined) return null;
   const connected = overlay.connected > 0;
+  let status: string;
+  if (connected) status = t("overlay.connectedNow", { count: overlay.connected });
+  else if (overlay.lastSeen) status = t("overlay.lastConnected", { time: timestamp(overlay.lastSeen) });
+  else status = t("overlay.neverConnected");
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm" data-overlay-connected={connected}>
       <StatusDot tone={connected ? "live" : "idle"} />
       <span className={connected ? "text-foreground" : "text-muted-foreground"}>
-        {connected
-          ? t("overlay.connectedNow", { count: overlay.connected })
-          : overlay.lastSeen
-            ? t("overlay.lastConnected", { time: timestamp(overlay.lastSeen) })
-            : t("overlay.neverConnected")}
+        {status}
       </span>
       <Button variant="ghost" size="sm" onClick={onCheck}>
         <RefreshCw />

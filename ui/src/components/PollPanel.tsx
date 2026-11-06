@@ -17,6 +17,8 @@ import {
   secondsLeft,
   sharePercents,
   type Poll,
+  type PollAnnouncement,
+  type PollNative,
   type PollsResponse,
 } from "@/lib/polls";
 import type { ChatPlatform } from "@/lib/types";
@@ -332,6 +334,22 @@ function LivePoll({ poll, now, onChanged }: Readonly<{ poll: Poll; now: number; 
   );
 }
 
+function announcedText(t: Translator, a: PollAnnouncement): string {
+  if (a.ok) return t("polls.announcedOk", { platform: platformName(a.platform) });
+  if (a.skipped) return t("polls.announcedSkipped", { platform: platformName(a.platform) });
+  return t("polls.announcedFailed", { platform: platformName(a.platform || "?"), detail: a.detail ?? "" });
+}
+
+function nativeText(t: Translator, n: PollNative): string {
+  if (n.status === "mirrored") {
+    return n.reason
+      ? t("polls.nativeMirroredWhy", { platform: platformName(n.platform), reason: n.reason })
+      : t("polls.nativeMirrored", { platform: platformName(n.platform) });
+  }
+  if (n.status === "stopped") return t("polls.nativeStopped", { platform: platformName(n.platform) });
+  return t("polls.nativeNot", { platform: platformName(n.platform), reason: n.reason ?? "" });
+}
+
 /** Where the poll was announced, and what became of the native mirror. */
 function Delivery({ poll }: Readonly<{ poll: Poll }>) {
   const t = useT();
@@ -342,22 +360,12 @@ function Delivery({ poll }: Readonly<{ poll: Poll }>) {
     <ul className="flex flex-col gap-0.5 text-[11px] text-muted-foreground" data-testid="poll-delivery">
       {announced.map((a, i) => (
         <li key={`a-${i}`} className={a.ok ? undefined : "text-warn"}>
-          {a.ok
-            ? t("polls.announcedOk", { platform: platformName(a.platform) })
-            : a.skipped
-              ? t("polls.announcedSkipped", { platform: platformName(a.platform) })
-              : t("polls.announcedFailed", { platform: platformName(a.platform || "?"), detail: a.detail ?? "" })}
+          {announcedText(t, a)}
         </li>
       ))}
       {native.map((n, i) => (
         <li key={`n-${i}`} className={n.status === "failed" ? "text-warn" : undefined}>
-          {n.status === "mirrored"
-            ? n.reason
-              ? t("polls.nativeMirroredWhy", { platform: platformName(n.platform), reason: n.reason })
-              : t("polls.nativeMirrored", { platform: platformName(n.platform) })
-            : n.status === "stopped"
-              ? t("polls.nativeStopped", { platform: platformName(n.platform) })
-              : t("polls.nativeNot", { platform: platformName(n.platform), reason: n.reason ?? "" })}
+          {nativeText(t, n)}
         </li>
       ))}
     </ul>

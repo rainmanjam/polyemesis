@@ -689,6 +689,30 @@ const bulkTone: Record<BulkDestOutcome, SignalTone> = {
   skipped: "armed",
 };
 
+type StopCountState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; youtube: number; destinations: number }
+  | { status: "failed"; message: string };
+
+function stopDescriptionFor(
+  t: ReturnType<typeof useT>,
+  stopCount: StopCountState,
+  consequence: string,
+): string {
+  if (stopCount.status === "loading" || stopCount.status === "idle") return t("dash.stopCountLoading");
+  if (stopCount.status === "failed") return `${t("dash.stopCountFailed")} ${stopCount.message}`;
+  if (stopCount.youtube > 0) {
+    return `${consequence} ${t(stopCount.youtube === 1 ? "golive.stopYoutubeOne" : "golive.stopYoutube", { count: stopCount.youtube })}`;
+  }
+  return consequence;
+}
+
+function failoverHint(t: ReturnType<typeof useT>, onPrimary: boolean, manualReturn: boolean): string {
+  if (onPrimary) return t("dash.failoverPinnedHere");
+  return manualReturn ? t("dash.failoverManualHint") : t("dash.failoverAutoHint");
+}
+
 function BulkDestinationControl({
   destinations,
   sources,
@@ -712,11 +736,6 @@ function BulkDestinationControl({
   // The Stop dialog's count comes from the server, the same answer the stop is judged by. It is
   // fetched fresh each time the dialog opens, and until it arrives the dialog cannot be confirmed:
   // a stop whose count is unknown is a stop the operator did not see.
-  type StopCountState =
-    | { status: "idle" }
-    | { status: "loading" }
-    | { status: "ready"; youtube: number; destinations: number }
-    | { status: "failed"; message: string };
   const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
   const stopCountSeq = useRef(0);
   const count = destinations.length;
@@ -811,14 +830,7 @@ function BulkDestinationControl({
   // stop-all touches, and the one the stop is judged by. Until then, the count on screen stands in.
   const shownCount = stopCount.status === "ready" ? stopCount.destinations : count;
   const consequence = t("dash.stopAllConsequence", { count: String(shownCount) });
-  const stopDescription =
-    stopCount.status === "loading" || stopCount.status === "idle"
-      ? t("dash.stopCountLoading")
-      : stopCount.status === "failed"
-        ? `${t("dash.stopCountFailed")} ${stopCount.message}`
-        : stopCount.youtube > 0
-          ? `${consequence} ${t(stopCount.youtube === 1 ? "golive.stopYoutubeOne" : "golive.stopYoutube", { count: stopCount.youtube })}`
-          : consequence;
+  const stopDescription = stopDescriptionFor(t, stopCount, consequence);
 
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
@@ -1105,11 +1117,7 @@ export function FailoverControl({
       {state.reason && <p className="text-sm text-muted-foreground">{state.reason}</p>}
 
       <p className="text-sm text-muted-foreground">
-        {onPrimary
-          ? t("dash.failoverPinnedHere")
-          : manualReturn
-            ? t("dash.failoverManualHint")
-            : t("dash.failoverAutoHint")}
+        {failoverHint(t, onPrimary, manualReturn)}
       </p>
 
       {/* A PIN ON A DEAD PRIMARY IS ACCEPTED AND DOES NOT SWITCH. engine's
@@ -1852,7 +1860,7 @@ export function Dashboard() {
                 Which tiles those are, and what each one plays, is decided by
                 previewLayout() in src/lib -- a plain function of the polled
                 telemetry, so the decision is testable without a page test. */}
-            {lanes.laned ? null : preview.grid ? (
+            {!lanes.laned && preview.grid && (
               <div className="grid gap-3 sm:grid-cols-2">
                 {preview.panes.map((pane) => (
                   <figure key={pane.id} className="flex flex-col gap-1.5">
@@ -1863,7 +1871,8 @@ export function Dashboard() {
                   </figure>
                 ))}
               </div>
-            ) : (
+            )}
+            {!lanes.laned && !preview.grid && (
               <PreviewPlayer
                 active={settingsPreview}
                 {...preview.panes[0].player}
@@ -2156,13 +2165,14 @@ export function Dashboard() {
             it -- two different answers to "what is configured here" seconds
             apart. Waiting is the honest render; it is a fact we do not have
             yet, not a fact that is empty. #663. */}
-        {!snapshotKnown ? (
+        {!snapshotKnown && (
           <Card>
             <CardContent className="py-8 text-center">
               <p className="text-sm text-muted-foreground">{t("dash.loadingDestinations")}</p>
             </CardContent>
           </Card>
-        ) : destinations.length === 0 && checklist ? (
+        )}
+        {snapshotKnown && destinations.length === 0 && checklist && (
           <SetupChecklist
             checklist={checklist}
             addresses={checklistAddresses}
@@ -2174,7 +2184,8 @@ export function Dashboard() {
               setDialogOpen(true);
             }}
           />
-        ) : destinations.length === 0 ? (
+        )}
+        {snapshotKnown && destinations.length === 0 && !checklist && (
           // app-council A83: the kit's empty state.
           <EmptyState
             icon={Plus}
@@ -2188,7 +2199,8 @@ export function Dashboard() {
               },
             }}
           />
-        ) : (
+        )}
+        {snapshotKnown && destinations.length > 0 && (
           <div className="flex flex-col gap-5">
             {lanes.laned ? (
               /* ONE LANE PER PROGRAMME: its picture and the destinations that

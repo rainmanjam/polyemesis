@@ -104,6 +104,16 @@ export function SettingsOverview({
   // The strip and the checklist below it read the same steps (readyToStream),
   // so "Ready to stream" never sits above "2 of 5 done".
   const ready = checklist !== null && readyToStream(checklist);
+  let readiness: string;
+  if (checklist === null) {
+    readiness = readFailedText(reads.destinations, t);
+  } else if (ready) {
+    readiness = t("settingsUx.readyYes");
+  } else {
+    readiness =
+      t("settingsUx.readyNotYet", { done: checklist.done, total: 5 }) +
+      (nextStep ? " " + t("settingsUx.readyNext", { step: t(STEP_TITLE[nextStep.id]) }) : "");
+  }
 
   const tiles = overviewTiles({
     settings,
@@ -127,12 +137,7 @@ export function SettingsOverview({
           {t("settingsUx.readyTitle")}
         </span>
         <span className="mr-auto text-sm">
-          {checklist === null
-            ? readFailedText(reads.destinations, t)
-            : ready
-              ? t("settingsUx.readyYes")
-              : t("settingsUx.readyNotYet", { done: checklist.done, total: 5 }) +
-                (nextStep ? " " + t("settingsUx.readyNext", { step: t(STEP_TITLE[nextStep.id]) }) : "")}
+          {readiness}
         </span>
       </div>
 

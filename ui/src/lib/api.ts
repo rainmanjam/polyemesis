@@ -316,12 +316,9 @@ async function readBody(resp: Response): Promise<unknown> {
 /** The ApiError for a non-ok response whose body is already read. `fallback`
  *  is the sentence when the body has none. */
 function apiErrorFrom(status: number, body: unknown, fallback = `request failed (${status})`): ApiError {
-  const msg =
-    body && typeof body === "object" && "error" in body
-      ? String((body as { error: unknown }).error)
-      : typeof body === "string" && body && !looksLikeHtml(body)
-        ? body
-        : fallback;
+  let msg = fallback;
+  if (body && typeof body === "object" && "error" in body) msg = String((body as { error: unknown }).error);
+  else if (typeof body === "string" && body && !looksLikeHtml(body)) msg = body;
   // Omitted by the server on every error that has nothing to branch on, so
   // absent is the common case and "" is the honest reading of it.
   const code =

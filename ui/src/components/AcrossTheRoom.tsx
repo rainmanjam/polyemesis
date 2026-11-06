@@ -10,7 +10,7 @@ import { toneForState } from "@/lib/signal";
 import { kbps } from "@/lib/format";
 import { useMotionTransition } from "@/lib/motion";
 import type { Status } from "@/lib/types";
-import { useStateLabel, useT } from "@/lib/i18n";
+import { useStateLabel, useT, type Translator } from "@/lib/i18n";
 
 /* ===========================================================================
    ACROSS-THE-ROOM MODE.
@@ -94,6 +94,16 @@ export function AcrossTheRoom({
  *  It also means the content FREEZES during the fade out. AnimatePresence keeps
  *  rendering the element it was handed last, so a destination that changes
  *  state mid-dismissal does not flicker on a panel that is already leaving. */
+function airTone(live: boolean, failed: number): "live" | "down" | "idle" {
+  if (live) return "live";
+  return failed > 0 ? "down" : "idle";
+}
+
+function airHeadline(known: boolean, live: boolean, t: Translator): string {
+  if (!known) return t("common.loading");
+  return live ? t("room.onAir") : t("room.offAir");
+}
+
 function RoomPanel({
   onClose,
   status,
@@ -135,14 +145,14 @@ function RoomPanel({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-5">
-          <StatusDot tone={live ? "live" : air.failed > 0 ? "down" : "idle"} size="xl" />
+          <StatusDot tone={airTone(live, air.failed)} size="xl" />
           <div>
             {/* clamp() rather than a token: the type scale in index.css tops out
                 at 28px for a page title, which is correct for the console and
                 half the size this needs. A seventh scale step used by one view
                 would be a step somebody picks by accident later. */}
             <div className="text-[clamp(2.5rem,9vw,7rem)] font-semibold uppercase leading-none tracking-tight">
-              {!known ? t("common.loading") : live ? t("room.onAir") : t("room.offAir")}
+              {airHeadline(known, live, t)}
             </div>
             <div className="tnum mt-2 font-mono text-[clamp(1rem,2.5vw,1.75rem)] text-muted-foreground">
               {known && t(air.enabled === 1 ? "room.liveOfEnabledOne" : "room.liveOfEnabled", { live: air.live, enabled: air.enabled })}

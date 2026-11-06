@@ -17,7 +17,7 @@ import {
   isOperable,
 } from "@/features/automod/automodArmed";
 import { ACTION_KEYS, CHECKER_KEYS, checkerReady } from "@/lib/automodConfig";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import type {
   AutomodAction,
   AutomodCell,
@@ -61,6 +61,12 @@ import type {
 export interface AutomodMatrixProps {
   settings: Settings;
   onChange: (next: Settings) => void;
+}
+
+function armedLabel(t: Translator, armed: number): string {
+  if (armed === 0) return t("automod.nothingAutomatic");
+  if (armed === 1) return t("automod.armedOne");
+  return t("automod.armedMany", { count: armed });
 }
 
 export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProps>) {
@@ -267,11 +273,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                   )}
                   <span className="font-medium capitalize">{platform}</span>
                   <span className="text-xs text-muted-foreground">
-                    {armed === 0
-                      ? t("automod.nothingAutomatic")
-                      : armed === 1
-                        ? t("automod.armedOne")
-                        : t("automod.armedMany", { count: armed })}
+                    {armedLabel(t, armed)}
                   </span>
                 </button>
 
@@ -362,9 +364,9 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                             const cell = byKey.get(key);
                             const available = cell?.available ?? false;
                             const ready = readiness.get(checker);
-                            return (
-                              <td key={checker} className="px-2 py-2 text-center">
-                                {!isOperable(action) ? (
+                            const renderCell = () => {
+                              if (!isOperable(action)) {
+                                return (
                                   /* FIXED TEXT, NOT A SWITCH — a CONTROL, and
                                      the same one this file already applies to
                                      an unavailable cell twelve lines down.
@@ -393,7 +395,10 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                   >
                                     {t("automod.alwaysOn")}
                                   </span>
-                                ) : available && ready && !ready.ready ? (
+                                );
+                              }
+                              if (available && ready && !ready.ready) {
+                                return (
                                   /* INERT WITH THE REASON, exactly as an
                                      unavailable platform's cell is, and for
                                      the same reason spelled out below it: a
@@ -425,7 +430,10 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                   >
                                     {t("automod.notConfigured")}
                                   </span>
-                                ) : available ? (
+                                );
+                              }
+                              if (available) {
+                                return (
                                   <Switch
                                     checked={Boolean(automod.on?.[key])}
                                     onCheckedChange={(v) => setCell(key, v)}
@@ -435,18 +443,24 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                       platform,
                                     })}
                                   />
-                                ) : (
-                                  /* Inert WITH a reason, never an unticked box.
-                                     A switch that silently does nothing leaves
-                                     the operator believing this channel is
-                                     protected. */
-                                  <span
-                                    className="cursor-help text-sm text-muted-foreground"
-                                    title={cell?.reason ?? t("automod.notSupportedHere")}
-                                  >
-                                    {t("automod.notApplicable")}
-                                  </span>
-                                )}
+                                );
+                              }
+                              return (
+                                /* Inert WITH a reason, never an unticked box.
+                                   A switch that silently does nothing leaves
+                                   the operator believing this channel is
+                                   protected. */
+                                <span
+                                  className="cursor-help text-sm text-muted-foreground"
+                                  title={cell?.reason ?? t("automod.notSupportedHere")}
+                                >
+                                  {t("automod.notApplicable")}
+                                </span>
+                              );
+                            };
+                            return (
+                              <td key={checker} className="px-2 py-2 text-center">
+                                {renderCell()}
                               </td>
                             );
                           })}

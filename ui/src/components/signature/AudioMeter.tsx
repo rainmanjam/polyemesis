@@ -457,15 +457,14 @@ export function MeterScale({ className, range }: Readonly<{ className?: string; 
     <div className={cn("relative h-4 w-full select-none", className)}>
       {marks.map((m) => {
         const left = dbToFraction(m, r) * 100;
+        let transform = "translateX(-50%)";
+        if (m === r.minDb) transform = "translateX(0)";
+        else if (m === r.maxDb) transform = "translateX(-100%)";
         return (
           <div
             key={m}
             className="absolute top-0 font-mono text-[9px] leading-none text-muted-foreground"
-            style={{
-              left: `${left}%`,
-              transform:
-                m === r.minDb ? "translateX(0)" : m === r.maxDb ? "translateX(-100%)" : "translateX(-50%)",
-            }}
+            style={{ left: `${left}%`, transform }}
             title={m === STREAMING_REFERENCE_DB ? t("routing.meters.streamingMark") : undefined}
           >
             {showNumber(m) ? m : null}

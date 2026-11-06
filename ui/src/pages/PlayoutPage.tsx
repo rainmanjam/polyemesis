@@ -42,6 +42,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { api } from "@/lib/api";
+import type { SignalTone } from "@/lib/signal";
 import { bytes as fmtBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { sourceChoices } from "@/lib/destinationSource";
@@ -512,7 +513,9 @@ export function ProgrammeCard({
   // A dead id matches no item, so the trigger shows nothing rather than
   // claiming the default -- which is not what is stored, and not what the
   // public page is doing.
-  const value = gone ? "" : play.sourceId != null ? String(play.sourceId) : "default";
+  let value = "default";
+  if (gone) value = "";
+  else if (play.sourceId != null) value = String(play.sourceId);
 
   return (
     <Card className="mb-3">
@@ -1038,10 +1041,13 @@ function RungRow({
     track < 0 ||
     track > 63;
   const reason = model.dirty && invalid ? t("play.fixValuesFirst") : null;
+  let dotTone: SignalTone = "idle";
+  if (st?.running) dotTone = "live";
+  else if (v.enabled) dotTone = "warn";
   return (
     <div className="grid items-end gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[auto_1fr_1fr_auto_auto]">
       <div className="flex items-center gap-2 pb-2">
-        <StatusDot tone={st?.running ? "live" : v.enabled ? "warn" : "idle"} />
+        <StatusDot tone={dotTone} />
         <Switch
           checked={v.enabled}
           disabled={busy}

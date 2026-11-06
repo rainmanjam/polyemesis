@@ -326,12 +326,10 @@ export function Timeline({
     dragRef.current = null;
   };
 
-  const cursor =
-    variant === "overview" && windowMs
-      ? "grab"
-      : dragRef.current === "in" || dragRef.current === "out"
-        ? "ew-resize"
-        : "pointer";
+  let cursor: string;
+  if (variant === "overview" && windowMs) cursor = "grab";
+  else if (dragRef.current === "in" || dragRef.current === "out") cursor = "ew-resize";
+  else cursor = "pointer";
 
   const hoverSprite = detail && hover !== null ? spriteAt(sprites, hover) : null;
 

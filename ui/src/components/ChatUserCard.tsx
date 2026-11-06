@@ -128,18 +128,16 @@ export function ChatUserCard({
   // to lift: the platform cannot ban at all, which `ban.reason` already says.
   const sanction = card?.sanction;
   const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
-  const sanctionDetail =
-    sanction?.action === "timeout" && sanction.until
-      ? t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel })
-      : sanction?.action === "ban"
-        ? t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel })
-        : card && !sanction
-          ? // "so Lift ban stays available" is false where the platform
-            // cannot ban, so that half is said only where it is true.
-            ban.ok
-            ? t("chatCard.sanctionUnknownDetail")
-            : t("chatCard.sanctionUnknownNoBan")
-          : "";
+  let sanctionDetail = "";
+  if (sanction?.action === "timeout" && sanction.until) {
+    sanctionDetail = t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel });
+  } else if (sanction?.action === "ban") {
+    sanctionDetail = t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel });
+  } else if (card && !sanction) {
+    // "so Lift ban stays available" is false where the platform
+    // cannot ban, so that half is said only where it is true.
+    sanctionDetail = ban.ok ? t("chatCard.sanctionUnknownDetail") : t("chatCard.sanctionUnknownNoBan");
+  }
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -169,12 +167,10 @@ export function ChatUserCard({
   // all of them share one precondition and one sentence for failing it. Said
   // once here rather than three times below, because three copies is how two
   // of them end up wrong.
-  const nothingToHide =
-    messages.length === 0
-      ? failed
-        ? t("chatCard.nothingToHideFailed")
-        : t("chatCard.nothingToHideEmpty")
-      : "";
+  let nothingToHide = "";
+  if (messages.length === 0) {
+    nothingToHide = failed ? t("chatCard.nothingToHideFailed") : t("chatCard.nothingToHideEmpty");
+  }
 
   /** Hides every message the card is holding, at one scope or the other.
    *
@@ -214,17 +210,59 @@ export function ChatUserCard({
         detail: t(one ? "chatCard.hiddenLocalOne" : "chatCard.hiddenLocalMany", { count, platform }),
       };
     }
+    if (hidden) {
+      return {
+        detail: t(one ? "chatCard.hiddenUpstreamOne" : "chatCard.hiddenUpstreamMany", {
+          count,
+          platform: accent.label,
+        }),
+      };
+    }
     return {
-      detail: hidden
-        ? t(one ? "chatCard.hiddenUpstreamOne" : "chatCard.hiddenUpstreamMany", {
-            count,
-            platform: accent.label,
-          })
-        : t(one ? "chatCard.shownUpstreamOne" : "chatCard.shownUpstreamMany", {
-            count,
-            platform: accent.label,
-          }),
+      detail: t(one ? "chatCard.shownUpstreamOne" : "chatCard.shownUpstreamMany", {
+        count,
+        platform: accent.label,
+      }),
     };
+  };
+
+  let description: string;
+  if (loading) {
+    description = t("chatCard.reading");
+  } else if (failed) {
+    description = t("chatCard.readFailed");
+  } else {
+    description = t(messages.length === 1 ? "chatCard.onRecordOne" : "chatCard.onRecordMany", {
+      count: `${messages.length}${card?.truncated ? "+" : ""}`,
+    });
+  }
+
+  const renderBody = () => {
+    if (loading && messages.length === 0) {
+      return (
+        <p className="p-2 text-[11px] text-muted-foreground">
+          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+          {t("common.loading")}
+        </p>
+      );
+    }
+    if (failed) {
+      /* NOT the empty state. "Nothing from this person is in the
+         scrollback" is a positive claim — it says the server answered
+         and this person has said nothing — and a moderator reads it as a
+         first offence. An unanswered question must not produce an
+         answer, least of all the exonerating one. */
+      return <p className="p-2 text-[11px] text-warn">{t("chatCard.failedBody")}</p>;
+    }
+    if (messages.length === 0) {
+      return <p className="p-2 text-[11px] text-muted-foreground">{t("chatCard.emptyBody")}</p>;
+    }
+    return messages.map((m: ChatMessage) => (
+      <div key={m.id} className="py-0.5 text-[12px] leading-snug">
+        <span className="tnum mr-1.5 font-mono text-sm text-muted-foreground">{clockTime(m.at)}</span>
+        <span className="break-words">{m.text}</span>
+      </div>
+    ));
   };
 
   return (
@@ -250,46 +288,13 @@ export function ChatUserCard({
           {/* Keyed with the rest of this dialog's prose, so the paragraph is
               never half-translated. */}
           <DialogDescription>
-            {loading
-              ? t("chatCard.reading")
-              : failed
-                ? t("chatCard.readFailed")
-                : t(messages.length === 1 ? "chatCard.onRecordOne" : "chatCard.onRecordMany", {
-                    count: `${messages.length}${card?.truncated ? "+" : ""}`,
-                  })}
+            {description}
           </DialogDescription>
         </DialogHeader>
 
         {/* ---- what they said ---- */}
         <div className="max-h-64 overflow-y-auto rounded border border-border bg-card-raised p-2">
-          {loading && messages.length === 0 ? (
-            <p className="p-2 text-[11px] text-muted-foreground">
-              <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-              {t("common.loading")}
-            </p>
-          ) : failed ? (
-            /* NOT the empty state. "Nothing from this person is in the
-               scrollback" is a positive claim — it says the server answered
-               and this person has said nothing — and a moderator reads it as a
-               first offence. An unanswered question must not produce an
-               answer, least of all the exonerating one. */
-            <p className="p-2 text-[11px] text-warn">
-              {t("chatCard.failedBody")}
-            </p>
-          ) : messages.length === 0 ? (
-            <p className="p-2 text-[11px] text-muted-foreground">
-              {t("chatCard.emptyBody")}
-            </p>
-          ) : (
-            messages.map((m: ChatMessage) => (
-              <div key={m.id} className="py-0.5 text-[12px] leading-snug">
-                <span className="tnum mr-1.5 font-mono text-sm text-muted-foreground">
-                  {clockTime(m.at)}
-                </span>
-                <span className="break-words">{m.text}</span>
-              </div>
-            ))
-          )}
+          {renderBody()}
         </div>
 
         {/* The honest caveat. Rendered, not tucked away: a moderator reading
