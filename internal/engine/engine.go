@@ -1336,7 +1336,15 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	for _, d := range dests {
 		dest := d
 		wg.Add(1)
-		go func() { defer wg.Done(); e.teardownDest(dest) }()
+		go func() {
+			defer wg.Done()
+			e.teardownDest(dest)
+			// A drain this took over: whoever is waiting in CutDelay hears it
+			// only now that the child is down.
+			if dest.delay != nil {
+				dest.delay.finish()
+			}
+		}()
 	}
 	for _, m := range monitors {
 		mon := m

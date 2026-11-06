@@ -3063,9 +3063,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// READ BEFORE THE DELETE, because the question is about the row and about its
 	// siblings, and after DeleteDestination neither the key nor the id ordering
 	// that answers it exists any more. A row that does not exist falls through
-	// to the delete's own 404; any other failed read refuses the delete, because
-	// the confirmation below is a guard and an unread row may be carrying a
-	// broadcast.
+	// to the delete's own 404. Any other failed read means the row's broadcast
+	// state is unknown, so the delete needs the same confirmation a live row
+	// does -- refused outright it would leave a row with unreadable JSON
+	// undeletable, and deleting it is the remedy for that.
 	//
 	// It does NOT remove the platform's ingest stream, and the long comment at
 	// noteOrphanedIngestStream says why that is the answer rather than a gap.
@@ -3089,10 +3090,17 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	var leftovers []string
 	dest, err := s.store.GetDestination(id)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		writeStoreError(w, err)
-		return
+		if !req.Confirm {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"destination %d could not be read (%v), so whether it is carrying a broadcast "+
+					"is unknown, and deleting a live one ends that broadcast on the platform. "+
+					`Repeat this request with a JSON body of {"confirm": true} once that is intended.`,
+				id, err))
+			return
+		}
+		dest, err = nil, nil
 	}
-	if err == nil {
+	if dest != nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
 		// "live" that could drift from what the coordinator then does.

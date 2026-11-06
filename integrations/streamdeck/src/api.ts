@@ -17,6 +17,7 @@ import type {
   TrackLevelResult,
   ViewersLive,
 } from "./model.js";
+import { isLevelApplied } from "./model.js";
 import { MAX_GAIN } from "./trackLevel.js";
 import contractFile from "./apiContract.json" with { type: "json" };
 
@@ -308,7 +309,7 @@ export class PolyemesisClient {
         name: typeof r?.name === "string" ? r.name : "",
         outcome,
       };
-      if (r?.applied === "live" || r?.applied === "restart") row.applied = r.applied;
+      if (isLevelApplied(r?.applied)) row.applied = r.applied;
       if (typeof r?.message === "string" && r.message !== "") row.message = r.message;
       return row;
     });
@@ -468,7 +469,7 @@ export class PolyemesisClient {
       sourceId,
       body,
     );
-    if (out?.applied !== "live" && out?.applied !== "restart") {
+    if (!isLevelApplied(out?.applied)) {
       throw new ApiError("malformed", 200, "the answer does not say how the level applied");
     }
     const result: TrackLevelResult = { applied: out.applied };

@@ -10,20 +10,22 @@ its first tagged release.
 
 ### Fixed
 
-- **Re-detecting hardware reaches the encoders that are already running.** A VAAPI rendition pinned the
-  render node it found at its first start, for as long as the programme's engine lived, so a GPU passed
-  through or a driver upgraded afterwards showed `h264_vaapi` working in the encoder list while the
-  running programme kept using the old node. The render node now has one owner, refreshed by
-  `GET /api/v1/encoders?redetect=1` and read at every rendition start.
+- **Re-detecting hardware reaches the next VAAPI rendition start of a running programme.** A VAAPI
+  rendition pinned the render node it found at its first start, for as long as the programme's engine
+  lived, so a GPU passed through or a driver upgraded afterwards showed `h264_vaapi` working in the
+  encoder list while every later rendition start kept using the old node. The render node now has one
+  owner, refreshed by `GET /api/v1/encoders?redetect=1` and read at every rendition start (a rendition
+  that is already running keeps its node until it restarts).
 - **Deleting a destination no longer skips the "this ends a live broadcast" confirmation when its
   row cannot be read.** A store error on that read used to turn the refusal into an unconfirmed delete.
-  It now fails the request and deletes nothing.
+  It now asks for `{"confirm": true}`, since whether the row is carrying a broadcast is unknown; a row
+  with unreadable data can still be deleted that way.
 - **`GET /api/v1/system` no longer serves a stale ingest block when the source cannot be read.** It fell
   back to the settings blob's own ingest copy while `GET /api/v1/settings` failed on the same fault.
   Both now return the store error.
 - **`playout.json` no longer holds the playback token in plaintext.** The token is sealed with the key
   the database seals stream keys with (`secret.key`); an existing plaintext file is read and rewritten
-  sealed on the first start, so watch links keep working. A `playout.json` that is corrupt, or whose
+  sealed when the server starts, so watch links keep working. A `playout.json` that is corrupt, or whose
   token this install's key cannot open (a restored backup without its `secret.key`), is replaced with
   protected defaults and now logs a warning saying so, instead of silently losing the title, offline
   card and token.

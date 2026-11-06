@@ -88,9 +88,9 @@ type destDelay struct {
 	due bool
 	// cut is set by Stop now, so the drain's end is reported as a cut.
 	cut atomic.Bool
-	// finished is closed when the drain's teardown has run (or someone else
-	// took the destination over), so CutDelay can wait for it instead of
-	// polling the engine's maps.
+	// finished is closed once the drain's teardown has run: by finishDrain, or
+	// by Shutdown when it took the destination over. CutDelay waits on it
+	// instead of polling the engine's maps.
 	finished   chan struct{}
 	finishOnce sync.Once
 }
@@ -389,7 +389,6 @@ func (e *Engine) beginDrain(d *destination) {
 
 // finishDrain tears a drained (or cut) destination down, once.
 func (e *Engine) finishDrain(d *destination) {
-	defer d.delay.finish()
 	e.mu.Lock()
 	mine := e.draining[d.row.ID] == d
 	if mine {
@@ -418,6 +417,7 @@ func (e *Engine) finishDrain(d *destination) {
 		delete(e.retiring, d.row.ID)
 	}
 	e.mu.Unlock()
+	d.delay.finish()
 	e.publishStatus()
 }
 

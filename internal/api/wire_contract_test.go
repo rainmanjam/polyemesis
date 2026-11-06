@@ -432,11 +432,9 @@ func presetFigures() []presetFigure {
 // TestWireContract holds the three generated files to what the server says.
 func TestWireContract(t *testing.T) {
 	c := buildWireContract(t)
-	deck := c
-	deck.AppliedStates = nil
 	outputs := map[string][]byte{
 		wireConsoleFile:    consoleSource(t, c),
-		wireStreamDeckFile: marshalWire(t, deck),
+		wireStreamDeckFile: marshalWire(t, c),
 		wireSiteFile:       marshalWire(t, siteFacts(t)),
 		wireFiguresFile:    marshalWire(t, map[string]any{"_comment": wireComment, "presets": presetFigures()}),
 	}
