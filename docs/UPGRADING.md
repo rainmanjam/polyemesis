@@ -243,6 +243,45 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.15.0
+
+**Check your Kick and Twitch destinations before you upgrade.** An Amazon IVS
+ingest URL without the `/app` application path (Kick's dashboard prints
+`rtmps://<host>.global-contribute.live-video.net/`) never worked: IVS drops the
+connection when the stream key arrives as the application name. 0.15.0 says so
+louder:
+
+- **The API refuses to save one.** `POST /api/v1/destinations`, and a
+  `PUT /api/v1/destinations/{id}` that changes the URL to one, answer `400` and
+  name the URL that works (`rtmps://<host>:443/app`). A script or MCP client that
+  creates Kick destinations from the dashboard's URL as printed must add `/app`.
+  A destination that already holds such a URL keeps working as before for
+  renames, switching off and other saves, with a warning each time.
+- **Its failure is a refusal, not a TLS failure.** An `rtmps://` connection that
+  opens and is then dropped is now classified as `key_rejected`, as an unknown
+  RTMP application is, so repeated quick refusals hold the destination instead of
+  restarting it for ever. The failure reason carries a new `urlFix` field with the
+  corrected URL, and the card, alert and webhook name it. An alert rule or webhook
+  receiver keyed on the TLS verdict for such a destination will see `key_rejected`
+  instead.
+- **Refresh stream key** stores the corrected URL when a platform answers with
+  an IVS URL without `/app`, and its response says so.
+
+**A destination card shows Starting, not LIVE, until media moves.** The card,
+the YouTube vertical row and the Renditions page used to draw any destination
+whose FFmpeg was running as on air, even while every connect was refused; the
+on-air bar counts such a destination as trying. The API's `state` is unchanged,
+so API clients see no difference.
+
+**Instagram Live is a manual-key destination** instead of a preset marked
+unsupported. Paste the stream URL and key from Instagram's desktop flow
+(**+ Create → Live video → Go live with streaming software**); a persistent key
+keeps the destination ready between live videos. The **Go live** click and ending
+the live video stay in Instagram.
+
+**Nothing else changes.** The database schema is unchanged (version 1), so a
+0.14.0 binary opens a 0.15.0 database, and no step runs at the first start.
+
 ### Upgrading to 0.14.0
 
 **Check two things before you upgrade: the first start of 0.14.0 acts on both.**
