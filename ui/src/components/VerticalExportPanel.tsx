@@ -237,12 +237,11 @@ export function VerticalExportPanel({
                       const img = e.currentTarget;
                       if (img.naturalWidth > 0 && img.naturalHeight > 0) setSrcAspect(img.naturalWidth / img.naturalHeight);
                     }} />}
-                  <div
-                    role="img"
-                    tabIndex={0}
+                  <button
+                    type="button"
                     aria-label={t("clipedit.vertical.faceBox")}
                     data-testid="face-box"
-                    className="absolute border-2 border-primary bg-primary-dim"
+                    className="absolute cursor-move border-2 border-primary bg-primary-dim"
                     style={{
                       left: `${spec.face.x * 100}%`,
                       top: `${spec.face.y * 100}%`,
@@ -256,7 +255,7 @@ export function VerticalExportPanel({
                         onChange({ ...spec, face: next });
                       }
                     }}
-                  />
+                  ></button>
                 </div>
                 <p className="text-tiny text-muted-foreground">{t("clipedit.vertical.faceBoxHint")}</p>
                 <Label className="flex flex-col gap-1 text-tiny">

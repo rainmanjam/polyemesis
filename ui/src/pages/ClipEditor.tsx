@@ -709,7 +709,7 @@ export function ClipEditor() {
             <CardContent className="p-0">
               <div className="relative aspect-video w-full overflow-hidden rounded-t-md bg-black">
                 {seg?.proxy ? (
-                  <video
+                  <video // NOSONAR S4084: the proxy is a bare recording segment; its words are in the transcript card beside it, there is no caption file to attach
                     ref={videoRef}
                     src={seg.proxy}
                     poster={seg.poster}
@@ -1066,7 +1066,7 @@ export function ClipEditor() {
                   </div>
                   <div
                     className="flex max-h-[28rem] flex-col gap-0.5 overflow-y-auto"
-                    onMouseUp={onTranscriptMouseUp}
+                    onMouseUp={onTranscriptMouseUp} // NOSONAR S6848: delegated listener that reads the text selection the mouse made; keyboard users pick lines through the rows themselves
                   >
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-center text-tiny text-muted-foreground">

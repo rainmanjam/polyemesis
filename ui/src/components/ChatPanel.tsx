@@ -80,7 +80,7 @@ const CHAT_STATE_KEY: Record<ChatState, TranslationKey> = {
 
 function nameTone(name: string): string {
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; // NOSONAR S7758: hashes UTF-16 units on purpose; codePointAt would shift every emoji name onto a different tone
   return NAME_TONES[h % NAME_TONES.length];
 }
 
@@ -179,10 +179,10 @@ function MessageRow({
     : undefined;
 
   return (
-    <div
+    <div // NOSONAR S6847: a message is one stop in the chat log (WAI-ARIA feed pattern); Enter / Shift+F10 open its moderation menu, the keyboard twin of right-click
       role="group"
       aria-roledescription={t("chatpage.messageRole")}
-      tabIndex={onMenu ? 0 : undefined}
+      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message is a focus stop so a keyboard moderator can reach its menu
       onKeyDown={openMenuFromKeyboard}
       onContextMenu={openMenu}
       onDoubleClick={openMenu}
@@ -559,7 +559,7 @@ export function ChatComposer({
             // An IME confirms a candidate with an Enter that belongs to the
             // composition, not to the message. isComposing is the standard
             // signal; Safari reports the same keystroke as keyCode 229.
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // NOSONAR S1874: Safari reports the IME-confirming Enter only as keyCode 229; key and code say "Enter"
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();

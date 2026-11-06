@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Fixed
 
+- **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
+  and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
+  could take quadratic time on a hostile paste (endpoint and ingest URLs, timecodes, stream-health values,
+  Mermaid fences, the translation script) are plain scans; the chat message row, face box and a few
+  delegating containers got proper keyboard roles or a documented reason; the Stream Deck inspector's
+  issue list is labelled for screen readers; and the deprecated React types (`ElementRef`, `FormEvent`,
+  `MutableRefObject`) are replaced with their current forms. No behaviour changes.
+
 - **Re-detecting hardware reaches the next VAAPI rendition start of a running programme.** A VAAPI
   rendition pinned the render node it found at its first start, for as long as the programme's engine
   lived, so a GPU passed through or a driver upgraded afterwards showed `h264_vaapi` working in the
@@ -234,6 +242,10 @@ its first tagged release.
 
 ### Changed
 
+- **Connecting a Twitch account now stores the RTMPS ingest.** Fetching the stream key hands back
+  `rtmps://live.twitch.tv:443/app` instead of `rtmp://live.twitch.tv/app`: the same ingest and key over TLS,
+  which also passes networks that block port 1935. Existing destinations keep the URL they stored until
+  their key is refreshed. The "Twitch (RTMPS)" preset now spells out `:443`.
 - **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
   failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
   available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).

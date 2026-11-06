@@ -222,7 +222,13 @@ func (t *Twitch) Account(ctx context.Context, clientID, accessToken string) (*Ac
 // nearest PoP. The /ingests endpoint offers a ranked list, but the automatic
 // endpoint is what Twitch itself recommends and avoids pinning a user to a
 // server that is nearest to the *polyemesis host* rather than to them.
-const twitchIngestURL = "rtmp://live.twitch.tv/app"
+//
+// RTMPS on 443 rather than plain RTMP on 1935: the same ingest and the same
+// key, over TLS, and it gets through networks that block 1935. live.twitch.tv
+// is not an Amazon IVS host, so services.IVSAppPathFix does not apply, and the
+// path is already /app. Destinations connected before this change keep the URL
+// they stored until their key is refreshed.
+const twitchIngestURL = "rtmps://live.twitch.tv:443/app"
 
 func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
 	acct, err := t.Account(ctx, clientID, accessToken)

@@ -191,7 +191,7 @@ export function destinationLayout(tone: KeyTone, mark: DestinationMark, titleLin
 
 const rgb = (c: Rgb) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const xml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 
 /** The layout as an SVG document. */
 export function layoutSvg(l: FaceLayout): string {

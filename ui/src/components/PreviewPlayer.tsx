@@ -165,7 +165,7 @@ export function PreviewPlayer({
       )}
       style={ratio ? { aspectRatio: ratio } : undefined}
     >
-      <video
+      <video // NOSONAR S4084: a live programme preview is muted by default and its encoder carries no caption file
         ref={videoRef}
         className="h-full w-full object-contain"
         muted={muted}

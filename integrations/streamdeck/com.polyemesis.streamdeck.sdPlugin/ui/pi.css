@@ -1,7 +1,7 @@
 :root { color-scheme: light dark; font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; }
 body { margin: 0; padding: 12px; }
 .block { margin-bottom: 14px; }
-label { display: block; font-weight: 600; margin-bottom: 4px; }
+label, .label { display: block; font-weight: 600; margin-bottom: 4px; }
 input, textarea { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid #8a8f98; border-radius: 6px; font: inherit; background: transparent; color: inherit; }
 textarea { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 button { padding: 7px 12px; border-radius: 6px; border: 0; background: #0e7490; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }

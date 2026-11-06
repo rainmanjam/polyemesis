@@ -191,7 +191,7 @@ const PRESETS: DestPreset[] = [
     transport: "rtmps",
     kind: "rtmp",
     platform: "twitch",
-    url: "rtmps://live.twitch.tv/app",
+    url: "rtmps://live.twitch.tv:443/app",
     separateKey: true,
     helpUrl: "https://help.twitch.tv/s/article/broadcast-guidelines",
     notes: "addDest.presetNote.twitchRtmps",
@@ -1311,7 +1311,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 <div className="flex items-center gap-2 border-b px-2">
                   <Search className="size-3.5 shrink-0 opacity-50" />
                   <input
-                    autoFocus
+                    autoFocus // NOSONAR S9379: the picker was just opened by the user to search; the search box is the only thing in it, and a keyboard user would otherwise have to tab back into it
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={t("addDest.searchPlatforms", { count: PRESETS.length })}

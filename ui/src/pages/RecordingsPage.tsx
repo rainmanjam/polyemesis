@@ -670,7 +670,7 @@ export function RecordingsPage() {
         subject={t("rec.enabled")}
         title={t("rec.stopWhileLiveTitle")}
         description={t("rec.stopWhileLiveDescription")}
-        onConfirm={async () => {
+        onConfirm={() => {
           confirmRecordingOff.close();
           saveRecording({ enabled: false });
         }}

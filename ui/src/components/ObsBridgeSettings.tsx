@@ -108,7 +108,7 @@ export function ObsBridgeSettings() {
   }, []);
 
   const onProgramme = useMemo(
-    () => dests.filter((d) => draft !== null && Number(d.sourceId ?? NaN) === draft.sourceId),
+    () => dests.filter((d) => draft !== null && Number(d.sourceId ?? Number.NaN) === draft.sourceId),
     [dests, draft],
   );
 
