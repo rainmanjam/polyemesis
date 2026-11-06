@@ -261,7 +261,7 @@ func (s *Server) handleExportPolls(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, hist)
 		return
 	}
-	w.Header().Set(headerContentType, "text/csv; charset=utf-8")
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"poll_id", "started_at", "ended_at", "state", "question", "option", "label", "platform", "votes"})

@@ -360,3 +360,27 @@ func TestTheChatWarningsAreIndependent(t *testing.T) {
 		t.Errorf("warnings %q", res.Warnings)
 	}
 }
+
+// Chat or a transcript that cannot be read fails the scan, with the step
+// named: a scan that silently lost a signal would store worse suggestions.
+func TestAnUnreadableChatOrTranscriptFailsTheScan(t *testing.T) {
+	d, saved, _ := scanDeps(t)
+	d.ChatTimes = func(int64, int64) ([]ChatStamp, error) { return nil, errors.New("db gone") }
+	if _, err := Scan(context.Background(), d, scanParams(false), &fakeReporter{}); err == nil ||
+		!strings.Contains(err.Error(), "highlights: read chat") {
+		t.Errorf("chat failure: err = %v", err)
+	}
+	if len(*saved) != 0 {
+		t.Errorf("a failed scan stored %d suggestions", len(*saved))
+	}
+
+	d, saved, _ = scanDeps(t)
+	d.Transcript = func(int64) ([]Line, error) { return nil, errors.New("db gone") }
+	if _, err := Scan(context.Background(), d, scanParams(false), &fakeReporter{}); err == nil ||
+		!strings.Contains(err.Error(), "highlights: read transcript") {
+		t.Errorf("transcript failure: err = %v", err)
+	}
+	if len(*saved) != 0 {
+		t.Errorf("a failed scan stored %d suggestions", len(*saved))
+	}
+}

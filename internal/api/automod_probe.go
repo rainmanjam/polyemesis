@@ -68,38 +68,10 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	slot, ok := parseSlot(req.Checker)
-	if !ok {
-		writeError(w, http.StatusBadRequest, `checker must be "primary" or "secondary"`)
+	slot, proto, msg := checkAutomodTestRequest(req)
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
-	}
-	proto := automod.Protocol(req.Protocol)
-	if !automod.KnownProtocol(proto) {
-		writeError(w, http.StatusBadRequest, `protocol must be "jev" or "openai"`)
-		return
-	}
-	if req.Preset != "" {
-		if p, ok := automod.PresetByID(req.Preset); !ok || p.Protocol != proto {
-			writeError(w, http.StatusBadRequest, "preset is not one of this protocol's presets")
-			return
-		}
-	}
-	// HOSTILE INPUT, even from an admin: an absolute http(s) URL and nothing
-	// else. Private addresses are allowed on purpose -- see ModelConfig.Endpoint
-	// for why a local model is the recommended deployment, not an SSRF.
-	if u, err := url.Parse(strings.TrimSpace(req.Endpoint)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		writeError(w, http.StatusBadRequest, "endpoint must be an absolute http or https URL")
-		return
-	}
-	if req.TimeoutSeconds < 0 || req.TimeoutSeconds > automodTestMaxTimeout {
-		writeError(w, http.StatusBadRequest, "timeoutSeconds must be between 1 and 30")
-		return
-	}
-	if req.MinConfidence != 0 {
-		if _, err := automod.ParseConfidence(req.MinConfidence); err != nil {
-			writeError(w, http.StatusBadRequest, "minConfidence must be between 0.01 and 1")
-			return
-		}
 	}
 
 	mu := &s.automodTestPrimary
@@ -137,20 +109,9 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "endpoint must not carry credentials or a fragment")
 		return
 	}
-	key := strings.TrimSpace(req.Key)
-	binding := target
-	supplied := key != ""
-	if !supplied {
-		var err error
-		if key, binding, err = s.store.GetAutomodKeyBound(s.box, string(slot)); err != nil {
-			writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
-			return
-		}
-		if key != "" && binding != target {
-			writeError(w, http.StatusBadRequest,
-				"the stored key was given for the saved endpoint; enter the key for this endpoint to test it")
-			return
-		}
+	key, binding, supplied, ok := s.automodTestKey(w, req.Key, slot, target)
+	if !ok {
+		return
 	}
 	// No budget: a spent hourly allowance must not make a working endpoint
 	// look broken, and the per-checker lock above bounds what a test costs.
@@ -163,23 +124,97 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	res := automod.Probe(ctx, checker)
 
 	out := automodTestResponse{ProbeResult: res, Checker: slot}
-	if res.Passed {
-		// A key that was typed for this test is the key this pass is for, so
-		// it is kept -- bound to the tested address, as the checker's key or
-		// as a pending one. See the request type.
-		if supplied {
-			pending, err := s.store.SealTestedAutomodKey(s.box, string(slot), key, target)
-			if err != nil {
-				writeStoreError(w, err)
-				return
-			}
-			out.KeyPending = pending
-		}
-		if err := s.store.PutAutomodTestPass(string(slot), checkerFingerprint(conn)); err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		out.Tested = true
+	if res.Passed && !s.recordAutomodPass(w, &out, slot, conn, key, target, supplied) {
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// checkAutomodTestRequest checks a probe request's shape, returning the
+// checker slot and protocol, or the message refusing it.
+func checkAutomodTestRequest(req automodTestRequest) (slot automod.Slot, proto automod.Protocol, msg string) {
+	slot, ok := parseSlot(req.Checker)
+	if !ok {
+		return slot, "", `checker must be "primary" or "secondary"`
+	}
+	proto = automod.Protocol(req.Protocol)
+	if !automod.KnownProtocol(proto) {
+		return slot, proto, `protocol must be "jev" or "openai"`
+	}
+	if req.Preset != "" {
+		if p, ok := automod.PresetByID(req.Preset); !ok || p.Protocol != proto {
+			return slot, proto, "preset is not one of this protocol's presets"
+		}
+	}
+	if !absoluteHTTPURL(req.Endpoint) {
+		return slot, proto, "endpoint must be an absolute http or https URL"
+	}
+	if req.TimeoutSeconds < 0 || req.TimeoutSeconds > automodTestMaxTimeout {
+		return slot, proto, "timeoutSeconds must be between 1 and 30"
+	}
+	if req.MinConfidence != 0 {
+		if _, err := automod.ParseConfidence(req.MinConfidence); err != nil {
+			return slot, proto, "minConfidence must be between 0.01 and 1"
+		}
+	}
+	return slot, proto, ""
+}
+
+// absoluteHTTPURL reports whether raw (trimmed) is an absolute http or https
+// URL with a host.
+//
+// HOSTILE INPUT, even from an admin: an absolute http(s) URL and nothing
+// else. Private addresses are allowed on purpose -- see ModelConfig.Endpoint
+// for why a local model is the recommended deployment, not an SSRF.
+func absoluteHTTPURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// automodTestKey is the key a probe uses: the one typed for it (supplied),
+// or the stored key, which must have been given for the endpoint under test.
+// It answers the request and reports false when there is no usable key.
+func (s *Server) automodTestKey(w http.ResponseWriter, typed string, slot automod.Slot,
+	target string) (key, binding string, supplied, ok bool) {
+	key = strings.TrimSpace(typed)
+	binding = target
+	supplied = key != ""
+	if supplied {
+		return key, binding, supplied, true
+	}
+	var err error
+	if key, binding, err = s.store.GetAutomodKeyBound(s.box, string(slot)); err != nil {
+		writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
+		return key, binding, supplied, false
+	}
+	if key != "" && binding != target {
+		writeError(w, http.StatusBadRequest,
+			"the stored key was given for the saved endpoint; enter the key for this endpoint to test it")
+		return key, binding, supplied, false
+	}
+	return key, binding, supplied, true
+}
+
+// recordAutomodPass records a passed probe, keeping a typed key, so the
+// connection may be enabled. It answers the request and reports false when
+// the store refuses.
+func (s *Server) recordAutomodPass(w http.ResponseWriter, out *automodTestResponse, slot automod.Slot,
+	conn db.AutomodModel, key, target string, supplied bool) bool {
+	// A key that was typed for this test is the key this pass is for, so
+	// it is kept -- bound to the tested address, as the checker's key or
+	// as a pending one. See the request type.
+	if supplied {
+		pending, err := s.store.SealTestedAutomodKey(s.box, string(slot), key, target)
+		if err != nil {
+			writeStoreError(w, err)
+			return false
+		}
+		out.KeyPending = pending
+	}
+	if err := s.store.PutAutomodTestPass(string(slot), checkerFingerprint(conn)); err != nil {
+		writeStoreError(w, err)
+		return false
+	}
+	out.Tested = true
+	return true
 }

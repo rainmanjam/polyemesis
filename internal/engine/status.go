@@ -17,6 +17,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/redact"
@@ -418,35 +419,7 @@ func (e *Engine) Status() Status {
 			Loudness:     []meters.Report{},
 		}
 	}
-	// ONE acquisition for everything e.mu owns. Status used to take it here and
-	// again inside SourceInfo, and a reconcile landing between the two paired
-	// the ingest's state with a layout from a different instant -- "running"
-	// beside a track list that had just been invalidated, which reads as a
-	// fault that is not there.
-	e.mu.RLock()
-	ingest, recorder, preview, meters := e.ingest, e.recorder, e.preview, e.meters
-	dests := make([]*destination, 0, len(e.dests))
-	for _, d := range e.dests {
-		dests = append(dests, d)
-	}
-	// Snapshotted under the SAME lock as e.dests, so a destination cannot appear
-	// in neither map: stopDestinations moves it from one to the other while
-	// holding e.mu, and this reads both sides of that move at once.
-	retiring := make(map[int64]*destination, len(e.retiring))
-	for id, d := range e.retiring {
-		retiring[id] = d
-	}
-	// Same lock, same reason: a destination moves from e.dests to e.draining
-	// under it, and must be in one or the other.
-	draining := make(map[int64]*destination, len(e.draining))
-	for id, d := range e.draining {
-		draining[id] = d
-	}
-	source := e.sourceInfoLocked()
-	// Under the same lock as e.ingest, so the mode and the child are one
-	// instant: a mode change swaps both inside reconcileIngest.
-	configured := ingestConfigured(ingest != nil, e.settings.Ingest.Mode, !e.sourceDisabled)
-	e.mu.RUnlock()
+	snap := e.statusSnapshot()
 
 	// Read outside the lock: it is published atomically by reconcileOutputs and
 	// is not part of the coherent snapshot the lock above exists to give.
@@ -454,17 +427,17 @@ func (e *Engine) Status() Status {
 
 	st := Status{
 		DestinationHold: hold,
-		Source:          source,
+		Source:          snap.source,
 		Relay:           e.hub.Stats(),
 		Renditions:      e.Renditions(),
 		Destinations:    []DestStatus{},
 		Loudness:        e.Loudness(),
 		Clips:           e.ClipBuffer(),
 	}
-	st.Ingest = procStatus(ingest)
-	st.Recorder = procStatus(recorder)
-	st.Preview = procStatus(preview)
-	st.Meters = procStatus(meters)
+	st.Ingest = procStatus(snap.ingest)
+	st.Recorder = procStatus(snap.recorder)
+	st.Preview = procStatus(snap.preview)
+	st.Meters = procStatus(snap.meters)
 	st.Silence = e.Silence()
 	st.Failover = e.Failover()
 
@@ -475,28 +448,15 @@ func (e *Engine) Status() Status {
 	if e.mon != nil {
 		primary = e.mon.Bitrate()
 	}
-	sourceLive := sourceLiveFor(primary, st.Failover, time.Now())
-	st.ingestConfigured = configured
-
-	names := make(map[int64]string, len(st.Renditions))
-	// The shared encodes' processes, for DroppingFrames: a destination fed by
-	// a rendition copies its video, so the frames are dropped (if anywhere)
-	// in the rendition's encoder, not in the destination's own FFmpeg.
-	rendProc := make(map[int64]*supervisor.Status, len(st.Renditions))
-	for _, r := range st.Renditions {
-		names[r.ID] = r.Name
-		rendProc[r.ID] = r.Process
+	in := destStatusInputs{
+		sourceLive: sourceLiveFor(primary, st.Failover, time.Now()),
+		configured: snap.configured,
+		video:      snap.source.Video,
+		draining:   snap.draining,
+		retiring:   snap.retiring,
 	}
-
-	// Indexed once instead of scanned twice per row. destByID is linear, and it
-	// was called with the same argument twice for every destination on a
-	// function that runs per WebSocket push and per telemetry tick.
-	byID := make(map[int64]*destination, len(dests))
-	for _, d := range dests {
-		if d.row != nil {
-			byID[d.row.ID] = d
-		}
-	}
+	st.ingestConfigured = snap.configured
+	in.index(st.Renditions, snap.dests)
 
 	// Every destination row appears, running or not, so the dashboard shows a
 	// disabled destination rather than silently omitting it.
@@ -515,177 +475,280 @@ func (e *Engine) Status() Status {
 	rows, err := e.store.ListDestinationsBySource(e.sourceID)
 	if err == nil {
 		for _, row := range rows {
-			ds := DestStatus{
-				ID: row.ID, Name: row.Name, Kind: row.Kind,
-				Platform: row.Platform, Enabled: row.Enabled,
-				RenditionID:  row.RenditionID,
-				SourceID:     row.SourceID,
-				DelaySeconds: row.DelaySeconds,
-
-				DelayDumpSeconds: row.DelayDumpSeconds,
-			}
-			if row.RenditionID != nil {
-				ds.RenditionName = names[*row.RenditionID]
-			}
-			ds.FacebookBroadcastID = row.Facebook.BroadcastID
-			// Read for EVERY row, running or not. The rows this matters for are
-			// precisely the ones with no live entry left: a destination that was
-			// stopped is gone from e.dests, so anything hung off `live` below
-			// would be silently absent exactly when the warning is true.
-			ds.StopWarning, _ = e.StopUnreaped(row.ID)
-			ds.RolledOverTo, _ = e.RolledOver(row.ID)
-			ds.LevelChange = e.levelChangeText(row.ID)
-			// Looked up ONCE. This was two identical linear scans of the same
-			// list with the same argument, per row, on a function that runs per
-			// WebSocket push and per telemetry tick.
-			live := byID[row.ID]
-			if live != nil {
-				ds.BackupProcess = procStatus(live.backup)
-				ds.BackupError = live.backupErr
-				// What THIS run negotiated, which is the only run an operator
-				// can ask about. A destination that is not running has nothing
-				// to report here rather than a stale answer from last time --
-				// the negotiation is per go-live and a minted key expires with
-				// the broadcast it was minted for.
-				ds.MultitrackNote = live.multitrack.Note
-				if live.multitrack.Asked {
-					ds.MultitrackVerdict = string(live.multitrack.Verdict)
-				}
-				for _, d := range live.multitrack.Divergences {
-					ds.MultitrackDivergences = append(ds.MultitrackDivergences,
-						DivergenceStatus{Field: d.Field, Detail: d.Detail})
-				}
-				ds.VODAudioDropped = live.vodDropped
-			}
-			if live != nil {
-				ds.Summary = live.compiled.Summary
-				ds.Tracks = live.compiled.Tracks
-				ds.FilterComplex = live.compiled.FilterComplex
-				ds.Normalization = live.compiled.Normalization
-				ds.Warnings = live.compiled.Warnings
-				ds.Error = live.err
-				ds.Process = procStatus(live.proc)
-				ds.Delay = delayStatusOf(live.delay)
-			} else if dr := draining[row.ID]; dr != nil {
-				// Stopped, and still publishing its delayed tail. The process is
-				// reported as it is, Delay.Phase says why, and the dashboard
-				// offers Stop now.
-				ds.Summary = dr.compiled.Summary
-				ds.Tracks = dr.compiled.Tracks
-				ds.FilterComplex = dr.compiled.FilterComplex
-				ds.Normalization = dr.compiled.Normalization
-				ds.Process = procStatus(dr.proc)
-				ds.BackupProcess = procStatus(dr.backup)
-				ds.Delay = delayStatusOf(dr.delay)
-			} else if going := retiring[row.ID]; going != nil {
-				// Left the running set, child not yet confirmed dead. Report the
-				// process it still has, and say plainly that it is on its way
-				// out -- the alternative was reporting nothing at all, which
-				// reads as a destination that died.
-				ds.Summary = going.compiled.Summary
-				ds.Tracks = going.compiled.Tracks
-				ds.FilterComplex = going.compiled.FilterComplex
-				ds.Normalization = going.compiled.Normalization
-				ds.Process = procStatus(going.proc)
-				ds.Transitioning = true
-			} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
-				// Not running: still show what it *would* send, so the card is
-				// informative before the stream is ever started.
-				ds.Summary = c.Summary
-				ds.Tracks = c.Tracks
-				ds.FilterComplex = c.FilterComplex
-				ds.Normalization = c.Normalization
-				ds.Warnings = c.Warnings
-			} else {
-				ds.Error = cerr.Error()
-			}
-			// The compiled summary describes the MIX, and for a destination
-			// that copies its audio the mix does not happen: its line would end
-			// "→ stereo" about tracks that are being forwarded untouched, at
-			// whatever width they arrived. Rewritten here rather than inside
-			// Compile because copy is a property of the destination and Compile
-			// is only shown the profile. FilterComplex is left as compiled and
-			// not blanked -- it is what the graph WOULD be, the expert preview
-			// already shows the real argv, and an empty box on the card would
-			// read as a failure to compile rather than as a mode.
-			if row.Audio.Copy && ds.Error == "" {
-				ds.Summary = routing.CopySummary(ds.Tracks)
-			}
-			// A destination whose stored stream key would not decrypt on this
-			// machine. It is disabled by the store, so nothing above this line
-			// has anything to say about it -- there is no process, no error and
-			// no compile failure, and without this the card would be a healthy
-			// looking destination that is simply switched off, which is the one
-			// reading that would send somebody hunting in the wrong place.
-			//
-			// A warning rather than Error: the row is not broken and the
-			// routing still compiles, the credential is unreadable. Warnings is
-			// also the field the card already renders as "needs attention".
-			//
-			// slices.Clip first, because ds.Warnings above is the COMPILED
-			// slice, shared with routing's cache and with every other
-			// destination on the same profile: appending in place would write
-			// this destination's warning into theirs the moment there is spare
-			// capacity. Clip forces the append to allocate.
-			if row.KeyUnreadable != "" {
-				ds.Warnings = append(slices.Clip(ds.Warnings), row.KeyUnreadable)
-			}
-			// Same Clip discipline as above, and for the same reason: ds.Warnings
-			// may still be routing's shared compiled slice.
-			//
-			// source.Video, NOT e.videoInfo. The lock this function takes is
-			// released ~150 lines above, so reading the engine field here would
-			// be an unsynchronised read of something commitProbe writes under
-			// e.mu -- a data race, and the race detector said so. `source` is
-			// the snapshot taken inside that lock, which is also the coherent
-			// one: the warning then describes the same instant as the rest of
-			// the payload rather than a codec from a later probe.
-			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
-				ds.Warnings = append(slices.Clip(ds.Warnings), w)
-			}
-			ds.Stalled = destinationStalled(ds.Process, st.ingestConfigured, sourceLive)
-			if ds.Reason = destinationReason(ds.Process, st.ingestConfigured, sourceLive, time.Now()); ds.Reason != nil &&
-				ds.Reason.Cause == failreason.KeyRejected {
-				// Only for a refused key: that is the one failure a rotated key
-				// explains, and the check costs a platform API call.
-				ds.Reason.KeyChanged = e.keyChanged(row)
-			}
-			// The URL that works, when this one is an IVS ingest without /app:
-			// the cause FFmpeg's output suggests is not the thing to change.
-			if ds.Reason != nil {
-				ds.Reason.URLFix = urlFixFor(ds.Reason, row.Kind, row.URL)
-			}
-			// The Stream Deck's signals (destsignals.go). Additive fields, each
-			// absent while there is nothing to say.
-			ds.RestartStorm = destinationRestartStorm(ds.Process)
-			var rend *supervisor.Status
-			if row.RenditionID != nil {
-				rend = rendProc[*row.RenditionID]
-			}
-			ds.DroppingFrames = droppingFramesFor(ds.Process, rend, st.ingestConfigured, sourceLive)
-			ds.AccountHealth = e.accountHealth(row)
-			ds.PlatformHealth = e.platformHealth(row, ds.Process)
-			if w := stallWarning(ds); w != "" {
-				ds.Warnings = append(slices.Clip(ds.Warnings), w)
-			}
-			if w := delayWarning(ds.Delay); w != "" {
-				ds.Warnings = append(slices.Clip(ds.Warnings), w)
-			}
-			st.Destinations = append(st.Destinations, ds)
+			st.Destinations = append(st.Destinations, e.destStatus(row, &in))
 		}
 	}
-	// A destination still airing its delayed tail whose ROW IS GONE -- deleted
-	// mid-drain by something that did not cut it. It is on the air, so it must
-	// be visible, and visible means cuttable: Stop now finds it by id.
-	listed := make(map[int64]bool, len(st.Destinations))
-	for _, ds := range st.Destinations {
+	st.Destinations = appendOrphanDrains(st.Destinations, snap.draining)
+	return st
+}
+
+// statusSnap is everything Status reads under ONE acquisition of e.mu.
+type statusSnap struct {
+	ingest, recorder, preview, meters *supervisor.Process
+
+	dests              []*destination
+	retiring, draining map[int64]*destination
+	source             SourceInfo
+	configured         bool
+}
+
+// statusSnapshot copies, under one read lock, every field of e that Status
+// reports.
+func (e *Engine) statusSnapshot() statusSnap {
+	// ONE acquisition for everything e.mu owns. Status used to take it here and
+	// again inside SourceInfo, and a reconcile landing between the two paired
+	// the ingest's state with a layout from a different instant -- "running"
+	// beside a track list that had just been invalidated, which reads as a
+	// fault that is not there.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	s := statusSnap{ingest: e.ingest, recorder: e.recorder, preview: e.preview, meters: e.meters}
+	s.dests = make([]*destination, 0, len(e.dests))
+	for _, d := range e.dests {
+		s.dests = append(s.dests, d)
+	}
+	// Snapshotted under the SAME lock as e.dests, so a destination cannot appear
+	// in neither map: stopDestinations moves it from one to the other while
+	// holding e.mu, and this reads both sides of that move at once.
+	s.retiring = maps.Clone(e.retiring)
+	// Same lock, same reason: a destination moves from e.dests to e.draining
+	// under it, and must be in one or the other.
+	s.draining = maps.Clone(e.draining)
+	s.source = e.sourceInfoLocked()
+	// Under the same lock as e.ingest, so the mode and the child are one
+	// instant: a mode change swaps both inside reconcileIngest.
+	s.configured = ingestConfigured(e.ingest != nil, e.settings.Ingest.Mode, !e.sourceDisabled)
+	return s
+}
+
+// destStatusInputs is what every row's DestStatus is built from, read once per
+// Status call rather than per row.
+type destStatusInputs struct {
+	sourceLive time.Duration
+	configured bool
+	// source.Video from the locked snapshot, NOT e.videoInfo: see destStatus.
+	video *ffmpeg.VideoStream
+
+	names map[int64]string
+	// The shared encodes' processes, for DroppingFrames: a destination fed by
+	// a rendition copies its video, so the frames are dropped (if anywhere)
+	// in the rendition's encoder, not in the destination's own FFmpeg.
+	rendProc map[int64]*supervisor.Status
+	// Indexed once instead of scanned twice per row. destByID is linear, and it
+	// was called with the same argument twice for every destination on a
+	// function that runs per WebSocket push and per telemetry tick.
+	byID               map[int64]*destination
+	draining, retiring map[int64]*destination
+}
+
+// index builds the per-id lookups over the renditions and running destinations.
+func (in *destStatusInputs) index(rends []RenditionStatus, dests []*destination) {
+	in.names = make(map[int64]string, len(rends))
+	in.rendProc = make(map[int64]*supervisor.Status, len(rends))
+	for _, r := range rends {
+		in.names[r.ID] = r.Name
+		in.rendProc[r.ID] = r.Process
+	}
+	in.byID = make(map[int64]*destination, len(dests))
+	for _, d := range dests {
+		if d.row != nil {
+			in.byID[d.row.ID] = d
+		}
+	}
+}
+
+// destStatus is one destination row's card.
+func (e *Engine) destStatus(row *db.Destination, in *destStatusInputs) DestStatus {
+	ds := DestStatus{
+		ID: row.ID, Name: row.Name, Kind: row.Kind,
+		Platform: row.Platform, Enabled: row.Enabled,
+		RenditionID:  row.RenditionID,
+		SourceID:     row.SourceID,
+		DelaySeconds: row.DelaySeconds,
+
+		DelayDumpSeconds: row.DelayDumpSeconds,
+	}
+	if row.RenditionID != nil {
+		ds.RenditionName = in.names[*row.RenditionID]
+	}
+	ds.FacebookBroadcastID = row.Facebook.BroadcastID
+	// Read for EVERY row, running or not. The rows this matters for are
+	// precisely the ones with no live entry left: a destination that was
+	// stopped is gone from e.dests, so anything hung off `live` below
+	// would be silently absent exactly when the warning is true.
+	ds.StopWarning, _ = e.StopUnreaped(row.ID)
+	ds.RolledOverTo, _ = e.RolledOver(row.ID)
+	ds.LevelChange = e.levelChangeText(row.ID)
+	// Looked up ONCE. This was two identical linear scans of the same
+	// list with the same argument, per row, on a function that runs per
+	// WebSocket push and per telemetry tick.
+	live := in.byID[row.ID]
+	if live != nil {
+		fillLiveExtras(&ds, live)
+	}
+	e.fillDestRouting(&ds, row, live, in)
+	// The compiled summary describes the MIX, and for a destination
+	// that copies its audio the mix does not happen: its line would end
+	// "→ stereo" about tracks that are being forwarded untouched, at
+	// whatever width they arrived. Rewritten here rather than inside
+	// Compile because copy is a property of the destination and Compile
+	// is only shown the profile. FilterComplex is left as compiled and
+	// not blanked -- it is what the graph WOULD be, the expert preview
+	// already shows the real argv, and an empty box on the card would
+	// read as a failure to compile rather than as a mode.
+	if row.Audio.Copy && ds.Error == "" {
+		ds.Summary = routing.CopySummary(ds.Tracks)
+	}
+	// A destination whose stored stream key would not decrypt on this
+	// machine. It is disabled by the store, so nothing above this line
+	// has anything to say about it -- there is no process, no error and
+	// no compile failure, and without this the card would be a healthy
+	// looking destination that is simply switched off, which is the one
+	// reading that would send somebody hunting in the wrong place.
+	//
+	// A warning rather than Error: the row is not broken and the
+	// routing still compiles, the credential is unreadable. Warnings is
+	// also the field the card already renders as "needs attention".
+	//
+	// slices.Clip first, because ds.Warnings above is the COMPILED
+	// slice, shared with routing's cache and with every other
+	// destination on the same profile: appending in place would write
+	// this destination's warning into theirs the moment there is spare
+	// capacity. Clip forces the append to allocate.
+	if row.KeyUnreadable != "" {
+		ds.Warnings = append(slices.Clip(ds.Warnings), row.KeyUnreadable)
+	}
+	// Same Clip discipline as above, and for the same reason: ds.Warnings
+	// may still be routing's shared compiled slice.
+	//
+	// The snapshot's video, NOT e.videoInfo. The lock Status takes is
+	// released before any row is built, so reading the engine field here
+	// would be an unsynchronised read of something commitProbe writes under
+	// e.mu -- a data race, and the race detector said so. The snapshot taken
+	// inside that lock is also the coherent one: the warning then describes
+	// the same instant as the rest of the payload rather than a codec from a
+	// later probe.
+	if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, in.video); w != "" {
+		ds.Warnings = append(slices.Clip(ds.Warnings), w)
+	}
+	e.fillDestSignals(&ds, row, in)
+	return ds
+}
+
+// fillLiveExtras copies what only a running destination can report.
+func fillLiveExtras(ds *DestStatus, live *destination) {
+	ds.BackupProcess = procStatus(live.backup)
+	ds.BackupError = live.backupErr
+	// What THIS run negotiated, which is the only run an operator
+	// can ask about. A destination that is not running has nothing
+	// to report here rather than a stale answer from last time --
+	// the negotiation is per go-live and a minted key expires with
+	// the broadcast it was minted for.
+	ds.MultitrackNote = live.multitrack.Note
+	if live.multitrack.Asked {
+		ds.MultitrackVerdict = string(live.multitrack.Verdict)
+	}
+	for _, d := range live.multitrack.Divergences {
+		ds.MultitrackDivergences = append(ds.MultitrackDivergences,
+			DivergenceStatus{Field: d.Field, Detail: d.Detail})
+	}
+	ds.VODAudioDropped = live.vodDropped
+}
+
+// fillDestRouting fills the routing, process and delay fields from whichever
+// state the destination is in: running, draining, retiring, or stopped.
+func (e *Engine) fillDestRouting(ds *DestStatus, row *db.Destination, live *destination, in *destStatusInputs) {
+	if live != nil {
+		ds.Summary = live.compiled.Summary
+		ds.Tracks = live.compiled.Tracks
+		ds.FilterComplex = live.compiled.FilterComplex
+		ds.Normalization = live.compiled.Normalization
+		ds.Warnings = live.compiled.Warnings
+		ds.Error = live.err
+		ds.Process = procStatus(live.proc)
+		ds.Delay = delayStatusOf(live.delay)
+	} else if dr := in.draining[row.ID]; dr != nil {
+		// Stopped, and still publishing its delayed tail. The process is
+		// reported as it is, Delay.Phase says why, and the dashboard
+		// offers Stop now.
+		ds.Summary = dr.compiled.Summary
+		ds.Tracks = dr.compiled.Tracks
+		ds.FilterComplex = dr.compiled.FilterComplex
+		ds.Normalization = dr.compiled.Normalization
+		ds.Process = procStatus(dr.proc)
+		ds.BackupProcess = procStatus(dr.backup)
+		ds.Delay = delayStatusOf(dr.delay)
+	} else if going := in.retiring[row.ID]; going != nil {
+		// Left the running set, child not yet confirmed dead. Report the
+		// process it still has, and say plainly that it is on its way
+		// out -- the alternative was reporting nothing at all, which
+		// reads as a destination that died.
+		ds.Summary = going.compiled.Summary
+		ds.Tracks = going.compiled.Tracks
+		ds.FilterComplex = going.compiled.FilterComplex
+		ds.Normalization = going.compiled.Normalization
+		ds.Process = procStatus(going.proc)
+		ds.Transitioning = true
+	} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
+		// Not running: still show what it *would* send, so the card is
+		// informative before the stream is ever started.
+		ds.Summary = c.Summary
+		ds.Tracks = c.Tracks
+		ds.FilterComplex = c.FilterComplex
+		ds.Normalization = c.Normalization
+		ds.Warnings = c.Warnings
+	} else {
+		ds.Error = cerr.Error()
+	}
+}
+
+// fillDestSignals derives the health signals and their warnings from the
+// process status already on ds.
+func (e *Engine) fillDestSignals(ds *DestStatus, row *db.Destination, in *destStatusInputs) {
+	ds.Stalled = destinationStalled(ds.Process, in.configured, in.sourceLive)
+	if ds.Reason = destinationReason(ds.Process, in.configured, in.sourceLive, time.Now()); ds.Reason != nil &&
+		ds.Reason.Cause == failreason.KeyRejected {
+		// Only for a refused key: that is the one failure a rotated key
+		// explains, and the check costs a platform API call.
+		ds.Reason.KeyChanged = e.keyChanged(row)
+	}
+	// The URL that works, when this one is an IVS ingest without /app:
+	// the cause FFmpeg's output suggests is not the thing to change.
+	if ds.Reason != nil {
+		ds.Reason.URLFix = urlFixFor(ds.Reason, row.Kind, row.URL)
+	}
+	// The Stream Deck's signals (destsignals.go). Additive fields, each
+	// absent while there is nothing to say.
+	ds.RestartStorm = destinationRestartStorm(ds.Process)
+	var rend *supervisor.Status
+	if row.RenditionID != nil {
+		rend = in.rendProc[*row.RenditionID]
+	}
+	ds.DroppingFrames = droppingFramesFor(ds.Process, rend, in.configured, in.sourceLive)
+	ds.AccountHealth = e.accountHealth(row)
+	ds.PlatformHealth = e.platformHealth(row, ds.Process)
+	if w := stallWarning(*ds); w != "" {
+		ds.Warnings = append(slices.Clip(ds.Warnings), w)
+	}
+	if w := delayWarning(ds.Delay); w != "" {
+		ds.Warnings = append(slices.Clip(ds.Warnings), w)
+	}
+}
+
+// appendOrphanDrains adds a destination still airing its delayed tail whose ROW
+// IS GONE -- deleted mid-drain by something that did not cut it. It is on the
+// air, so it must be visible, and visible means cuttable: Stop now finds it by
+// id.
+func appendOrphanDrains(out []DestStatus, draining map[int64]*destination) []DestStatus {
+	listed := make(map[int64]bool, len(out))
+	for _, ds := range out {
 		listed[ds.ID] = true
 	}
 	for id, dr := range draining {
 		if listed[id] || dr.row == nil {
 			continue
 		}
-		st.Destinations = append(st.Destinations, DestStatus{
+		out = append(out, DestStatus{
 			ID: id, Name: dr.row.Name, Kind: dr.row.Kind, Platform: dr.row.Platform,
 			SourceID: dr.row.SourceID, DelaySeconds: dr.row.DelaySeconds, DelayDumpSeconds: dr.row.DelayDumpSeconds,
 			Summary: dr.compiled.Summary, Process: procStatus(dr.proc),
@@ -694,7 +757,7 @@ func (e *Engine) Status() Status {
 				"still airing; Cut now ends it"},
 		})
 	}
-	return st
+	return out
 }
 
 // ingestConfigured is whether this programme has an ingest that can be lost:

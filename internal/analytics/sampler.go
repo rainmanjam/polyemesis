@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -430,22 +431,8 @@ func (s *Sampler) Tick(ctx context.Context) {
 	s.prune(now, c)
 	configured := int(c.Interval / time.Second)
 
-	onAir := c.Enabled && s.src.OnAir()
-	if !onAir {
-		s.wait = c.Interval
-		s.firstSeen = map[string]time.Time{}
-		if s.open != 0 && (!c.Enabled || now.Sub(s.lastOnAir) >= s.grace(c)) {
-			s.closeOpen()
-		}
-		s.publish(func(l *Live) {
-			l.Enabled, l.OnAir = c.Enabled, false
-			l.IntervalSeconds, l.EffectiveIntervalSeconds, l.Stretched = configured, configured, false
-			l.At = &now
-			l.Total, l.Reported, l.Readings, l.Player, l.Partial = nil, 0, []Reading{}, nil, false
-			if s.open == 0 {
-				l.Stream, l.Points = nil, []Point{}
-			}
-		})
+	if !c.Enabled || !s.src.OnAir() {
+		s.offAir(now, c, configured)
 		return
 	}
 
@@ -461,16 +448,8 @@ func (s *Sampler) Tick(ctx context.Context) {
 	if playerOK {
 		qoe = &pq
 	}
-	if s.open == 0 {
-		// The chat lead is the wait actually in force, so a stream rolled over
-		// while the interval is stretched keeps its chat (R9).
-		id, err := s.store.OpenAnalyticsStream(now, qoe, max(c.Interval, s.onAirWait))
-		if err != nil {
-			s.log.Warn("analytics: could not open a stream record", "err", err)
-			return
-		}
-		s.open, s.openStart, s.qoeStart = id, now, qoe
-		s.publish(func(l *Live) { l.Points = []Point{} })
+	if s.open == 0 && !s.openStream(now, c, qoe) {
+		return
 	}
 
 	targets, listed, readings, title := s.read(ctx, now, c)
@@ -481,14 +460,8 @@ func (s *Sampler) Tick(ctx context.Context) {
 	s.lastTargets = targets
 	s.wait = s.src.Interval(c.Interval, targets)
 	effective := int(s.wait / time.Second)
-	chats := make([]ChatAccount, 0, len(targets))
-	for _, t := range targets {
-		if !t.Unlinked && t.Account != "" {
-			chats = append(chats, ChatAccount{Platform: t.Platform, Account: t.Account})
-		}
-	}
 	if err := s.store.RecordAnalyticsTick(s.open, Tick{
-		At: now, Readings: readings, ChatAccounts: chats, TallyChat: listed,
+		At: now, Readings: readings, ChatAccounts: chatAccounts(targets), TallyChat: listed,
 		Title: title, QoE: qoe, Wait: s.wait,
 	}); err != nil {
 		// Memory follows the store (#13): nothing advances for a tick that was
@@ -500,22 +473,12 @@ func (s *Sampler) Tick(ctx context.Context) {
 	s.onAirWait = s.wait
 
 	total, reported := Total(readings)
-	partial := false
-	for _, r := range readings {
-		if transient(r.Reason) {
-			partial = true
-		}
-	}
+	partial := slices.ContainsFunc(readings, func(r Reading) bool { return transient(r.Reason) })
 	point := Point{At: now, Total: total, Partial: partial}
 	if partial {
 		point.Total = nil
 	}
-	var player *PlayerQoE
-	if playerOK && s.qoeStart != nil {
-		if d, ok := pq.Delta(*s.qoeStart); ok {
-			player = &d
-		}
-	}
+	player := s.playerDelta(playerOK, pq)
 	start := s.openStart
 	id := s.open
 	s.publish(func(l *Live) {
@@ -529,6 +492,63 @@ func (s *Sampler) Tick(ctx context.Context) {
 			l.Points = append([]Point(nil), l.Points[len(l.Points)-sparkPoints:]...)
 		}
 	})
+}
+
+// playerDelta is the player's QoE since the stream's baseline, nil without a
+// reading or a baseline.
+func (s *Sampler) playerDelta(playerOK bool, pq PlayerQoE) *PlayerQoE {
+	if !playerOK || s.qoeStart == nil {
+		return nil
+	}
+	if d, ok := pq.Delta(*s.qoeStart); ok {
+		return &d
+	}
+	return nil
+}
+
+// offAir is a tick with nothing on air (or analytics off): the open stream
+// closes once the grace has passed, and the live view goes quiet.
+func (s *Sampler) offAir(now time.Time, c Config, configured int) {
+	s.wait = c.Interval
+	s.firstSeen = map[string]time.Time{}
+	if s.open != 0 && (!c.Enabled || now.Sub(s.lastOnAir) >= s.grace(c)) {
+		s.closeOpen()
+	}
+	s.publish(func(l *Live) {
+		l.Enabled, l.OnAir = c.Enabled, false
+		l.IntervalSeconds, l.EffectiveIntervalSeconds, l.Stretched = configured, configured, false
+		l.At = &now
+		l.Total, l.Reported, l.Readings, l.Player, l.Partial = nil, 0, []Reading{}, nil, false
+		if s.open == 0 {
+			l.Stream, l.Points = nil, []Point{}
+		}
+	})
+}
+
+// openStream opens a stream record for this broadcast, and reports whether
+// it could.
+func (s *Sampler) openStream(now time.Time, c Config, qoe *PlayerQoE) bool {
+	// The chat lead is the wait actually in force, so a stream rolled over
+	// while the interval is stretched keeps its chat (R9).
+	id, err := s.store.OpenAnalyticsStream(now, qoe, max(c.Interval, s.onAirWait))
+	if err != nil {
+		s.log.Warn("analytics: could not open a stream record", "err", err)
+		return false
+	}
+	s.open, s.openStart, s.qoeStart = id, now, qoe
+	s.publish(func(l *Live) { l.Points = []Point{} })
+	return true
+}
+
+// chatAccounts is the linked accounts whose chat is tallied.
+func chatAccounts(targets []Target) []ChatAccount {
+	chats := make([]ChatAccount, 0, len(targets))
+	for _, t := range targets {
+		if !t.Unlinked && t.Account != "" {
+			chats = append(chats, ChatAccount{Platform: t.Platform, Account: t.Account})
+		}
+	}
+	return chats
 }
 
 // backoffFor is how long an account is left alone after its n-th
@@ -557,18 +577,7 @@ func (s *Sampler) read(ctx context.Context, now time.Time, c Config) ([]Target, 
 		s.log.Warn("analytics: could not list accounts", "err", err)
 		return nil, false, []Reading{}, ""
 	}
-	// When each target came on air, for the offline window; a target that
-	// left forgets it.
-	seen := make(map[string]time.Time, len(targets))
-	for _, t := range targets {
-		k := targetKey(t)
-		if at, ok := s.firstSeen[k]; ok {
-			seen[k] = at
-		} else {
-			seen[k] = now
-		}
-	}
-	s.firstSeen = seen
+	seen := s.trackFirstSeen(targets, now)
 	window := max(OfflineWindow, 2*max(c.Interval, s.onAirWait))
 	sort.SliceStable(targets, func(i, j int) bool {
 		if targets[i].Platform != targets[j].Platform {
@@ -585,70 +594,104 @@ func (s *Sampler) read(ctx context.Context, now time.Time, c Config) ([]Target, 
 		if t.ChatOnly {
 			continue
 		}
-		r := Reading{Platform: t.Platform, Account: t.Account, Name: t.Name}
-		key := targetKey(t)
-		switch {
-		case t.Unlinked:
-			r.Reason = ReasonUnlinked
-			out = append(out, r)
-			continue
-		case now.Before(s.retryAt[key]) || now.Before(s.platformRetryAt[t.Platform]):
-			// Backing off: the platform asked us to wait, or keeps failing.
-			r.Reason = ReasonError
-			out = append(out, r)
-			continue
-		case !s.src.Allow(t):
-			r.Reason = ReasonQuota
-			out = append(out, r)
-			continue
-		}
-		rctx, cancel := context.WithTimeout(ctx, readTimeout)
-		st, err := s.src.Read(rctx, t)
-		cancel()
-		switch {
-		case errors.Is(err, ErrQuota):
-			r.Reason = ReasonQuota
-		case err != nil:
-			r.Reason = ReasonError
-			s.failures[key]++
-			var retry *RetryAfterError
-			errors.As(err, &retry)
-			if d := backoffFor(s.failures[key], retry); d > 0 {
-				s.retryAt[key] = now.Add(d)
-				if retry != nil {
-					// A 429 is the app's bucket: every account on it waits (R7).
-					s.platformRetryAt[t.Platform] = now.Add(d)
-				}
-			}
-			if !errors.Is(err, context.Canceled) {
-				s.log.Info("analytics: platform read failed", "platform", t.Platform, "err", err)
-			}
-		case !st.Live:
-			// Not live is not a count of zero viewers on a live stream. A
-			// platform that is not carrying this broadcast has nobody to
-			// report, so it is left out of the total like any other silence.
-			// Just after its destination came on air it is going live, and the
-			// tick is partial; after the window it is a steady offline (R1).
-			r.Reason = ReasonOffline
-			if now.Sub(seen[key]) < window {
-				r.Reason = ReasonStarting
-			}
-		case st.Viewers == nil:
-			r.Live, r.Reason = true, ReasonHidden
-		default:
-			v := *st.Viewers
-			r.Live, r.Viewers = true, &v
-		}
-		if err == nil {
-			delete(s.failures, key)
-			delete(s.retryAt, key)
-		}
-		if st.Live && title == "" {
-			title = st.Title
+		r, liveTitle := s.readOne(ctx, t, now, now.Sub(seen[targetKey(t)]) < window)
+		if title == "" {
+			title = liveTitle
 		}
 		out = append(out, r)
 	}
 	return targets, true, out, title
+}
+
+// trackFirstSeen records when each target came on air, for the offline
+// window; a target that left forgets it.
+func (s *Sampler) trackFirstSeen(targets []Target, now time.Time) map[string]time.Time {
+	seen := make(map[string]time.Time, len(targets))
+	for _, t := range targets {
+		k := targetKey(t)
+		if at, ok := s.firstSeen[k]; ok {
+			seen[k] = at
+		} else {
+			seen[k] = now
+		}
+	}
+	s.firstSeen = seen
+	return seen
+}
+
+// readOne asks one target for its viewers. starting is a target still inside
+// its offline window. title is the broadcast title when the target is live.
+func (s *Sampler) readOne(ctx context.Context, t Target, now time.Time, starting bool) (r Reading, title string) {
+	r = Reading{Platform: t.Platform, Account: t.Account, Name: t.Name}
+	key := targetKey(t)
+	if reason := s.notAsked(t, key, now); reason != "" {
+		r.Reason = reason
+		return r, ""
+	}
+	rctx, cancel := context.WithTimeout(ctx, readTimeout)
+	st, err := s.src.Read(rctx, t)
+	cancel()
+	switch {
+	case errors.Is(err, ErrQuota):
+		r.Reason = ReasonQuota
+	case err != nil:
+		r.Reason = ReasonError
+		s.readFailed(t, key, now, err)
+	case !st.Live:
+		// Not live is not a count of zero viewers on a live stream. A
+		// platform that is not carrying this broadcast has nobody to
+		// report, so it is left out of the total like any other silence.
+		// Just after its destination came on air it is going live, and the
+		// tick is partial; after the window it is a steady offline (R1).
+		r.Reason = ReasonOffline
+		if starting {
+			r.Reason = ReasonStarting
+		}
+	case st.Viewers == nil:
+		r.Live, r.Reason = true, ReasonHidden
+	default:
+		v := *st.Viewers
+		r.Live, r.Viewers = true, &v
+	}
+	if err == nil {
+		delete(s.failures, key)
+		delete(s.retryAt, key)
+	}
+	if st.Live {
+		title = st.Title
+	}
+	return r, title
+}
+
+// notAsked is the reason a target is not read this tick, or "" to read it.
+func (s *Sampler) notAsked(t Target, key string, now time.Time) string {
+	switch {
+	case t.Unlinked:
+		return ReasonUnlinked
+	case now.Before(s.retryAt[key]) || now.Before(s.platformRetryAt[t.Platform]):
+		// Backing off: the platform asked us to wait, or keeps failing.
+		return ReasonError
+	case !s.src.Allow(t):
+		return ReasonQuota
+	}
+	return ""
+}
+
+// readFailed counts a failed read and backs the account off.
+func (s *Sampler) readFailed(t Target, key string, now time.Time, err error) {
+	s.failures[key]++
+	var retry *RetryAfterError
+	errors.As(err, &retry)
+	if d := backoffFor(s.failures[key], retry); d > 0 {
+		s.retryAt[key] = now.Add(d)
+		if retry != nil {
+			// A 429 is the app's bucket: every account on it waits (R7).
+			s.platformRetryAt[t.Platform] = now.Add(d)
+		}
+	}
+	if !errors.Is(err, context.Canceled) {
+		s.log.Info("analytics: platform read failed", "platform", t.Platform, "err", err)
+	}
 }
 
 // resume picks up the stream a previous process left open: the newest one

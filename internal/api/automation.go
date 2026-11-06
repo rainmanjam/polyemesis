@@ -1159,7 +1159,7 @@ func serveFileDownload(w http.ResponseWriter, r *http.Request, path, filename, c
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set(headerContentType, contentType)
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(filename)))
 	http.ServeContent(w, r, filename, stat.ModTime(), f)
 }

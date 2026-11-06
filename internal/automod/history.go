@@ -149,18 +149,7 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	defer h.mu.Unlock()
 
 	h.sweepIdleLocked(now)
-
-	key := authorKey(p, authorID)
-	log := h.authors[key]
-	if log == nil {
-		log = &authorLog{}
-		h.authors[key] = log
-	}
-	log.entries = append(log.entries, entry{at: now, norm: norm, links: countLinks(text)})
-	log.last = now
-	if len(log.entries) > h.limits.Retain {
-		log.entries = log.entries[len(log.entries)-h.limits.Retain:]
-	}
+	log := h.recordLocked(authorKey(p, authorID), entry{at: now, norm: norm, links: countLinks(text)})
 	// AFTER the insert, or the map settles one over the cap forever: checking
 	// before adding leaves room for the author about to arrive.
 	h.capAuthorsLocked()
@@ -173,8 +162,9 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 		}
 	}
 
+	reasons := append(h.windowReasons(inWindow, norm), h.messageReasons(text)...)
 	var out []Finding
-	add := func(reason string) {
+	for _, reason := range reasons {
 		out = append(out, Finding{
 			Checker:        CheckerHistory,
 			Action:         h.limits.Action,
@@ -185,45 +175,78 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 			Reason:   reason,
 		})
 	}
+	return sortByConsequence(out)
+}
 
+// recordLocked appends e to the author's log, keeping at most Retain entries,
+// and returns the log.
+func (h *History) recordLocked(key string, e entry) *authorLog {
+	log := h.authors[key]
+	if log == nil {
+		log = &authorLog{}
+		h.authors[key] = log
+	}
+	log.entries = append(log.entries, e)
+	log.last = e.at
+	if len(log.entries) > h.limits.Retain {
+		log.entries = log.entries[len(log.entries)-h.limits.Retain:]
+	}
+	return log
+}
+
+// windowReasons judges the author's messages inside the window: how many,
+// how many repeats of this one, and how many links.
+func (h *History) windowReasons(inWindow []entry, norm string) []string {
+	var out []string
 	if n := len(inWindow); h.limits.MaxMessages > 0 && n > h.limits.MaxMessages {
-		add(fmt.Sprintf("%d messages in %s", n, h.limits.Window))
+		out = append(out, fmt.Sprintf("%d messages in %s", n, h.limits.Window))
 	}
-
 	if h.limits.MaxRepeats > 0 && norm != "" {
-		repeats := 0
-		for _, e := range inWindow {
-			if e.norm == norm {
-				repeats++
-			}
-		}
-		if repeats > h.limits.MaxRepeats {
-			add(fmt.Sprintf("the same message %d times in %s", repeats, h.limits.Window))
+		if repeats := countRepeats(inWindow, norm); repeats > h.limits.MaxRepeats {
+			out = append(out, fmt.Sprintf("the same message %d times in %s", repeats, h.limits.Window))
 		}
 	}
-
 	if h.limits.MaxLinks > 0 {
-		links := 0
-		for _, e := range inWindow {
-			links += e.links
-		}
-		if links > h.limits.MaxLinks {
-			add(fmt.Sprintf("%d links in %s", links, h.limits.Window))
+		if links := windowLinks(inWindow); links > h.limits.MaxLinks {
+			out = append(out, fmt.Sprintf("%d links in %s", links, h.limits.Window))
 		}
 	}
+	return out
+}
 
+// countRepeats is how many entries are norm.
+func countRepeats(entries []entry, norm string) int {
+	n := 0
+	for _, e := range entries {
+		if e.norm == norm {
+			n++
+		}
+	}
+	return n
+}
+
+// windowLinks is the links across entries.
+func windowLinks(entries []entry) int {
+	n := 0
+	for _, e := range entries {
+		n += e.links
+	}
+	return n
+}
+
+// messageReasons judges this one message: its mentions and its upper case.
+func (h *History) messageReasons(text string) []string {
+	var out []string
 	if h.limits.MaxMentionsPerMessage > 0 {
 		if n := strings.Count(text, "@"); n > h.limits.MaxMentionsPerMessage {
-			add(fmt.Sprintf("%d mentions in one message", n))
+			out = append(out, fmt.Sprintf("%d mentions in one message", n))
 		}
 	}
-
 	if r, ok := capsRatio(text, h.limits.MinLengthForCaps); ok &&
 		h.limits.MaxCapsRatio > 0 && r > h.limits.MaxCapsRatio {
-		add(fmt.Sprintf("%.0f%% upper case", r*100))
+		out = append(out, fmt.Sprintf("%.0f%% upper case", r*100))
 	}
-
-	return sortByConsequence(out)
+	return out
 }
 
 // sweepInterval is how often the full scan runs. Short enough that an idle

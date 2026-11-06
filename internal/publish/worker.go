@@ -161,87 +161,115 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	log := d.Log
-	return jobs.WorkerFunc(func(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
-		var p Params
-		if err := json.Unmarshal(job.Params, &p); err != nil || p.PublicationID <= 0 {
-			return jobs.Permanent(errors.New("publish: this job does not name a publication"))
-		}
-		pub, err := d.Ledger.Begin(p.PublicationID, p.Nonce)
-		switch {
-		case errors.Is(err, db.ErrPublicationPosted):
-			// Already on the platform. Success, and nothing is sent.
-			rep.SetResult(Result{Platform: pub.Platform, PostID: pub.PlatformPostID, URL: pub.PostURL, Privacy: pub.ActualPrivacy})
-			return nil
-		case errors.Is(err, db.ErrPublicationNotArmed):
-			rep.Logf("not started: no confirmed click armed this publication")
-			return jobs.Permanent(err)
-		case err != nil:
-			return err
-		}
+	return jobs.WorkerFunc(d.run)
+}
 
-		ad, ok := d.Adapters[pub.Platform]
-		if !ok || (pub.Platform == PlatformX && !d.Gates.XPublish) {
-			return d.giveUp(pub, p.Nonce, fail(CauseGated, false, "%s", gateCopy(pub.Platform)))
-		}
+// run is one attempt at one publication job.
+func (d WorkerDeps) run(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
+	var p Params
+	if err := json.Unmarshal(job.Params, &p); err != nil || p.PublicationID <= 0 {
+		return jobs.Permanent(errors.New("publish: this job does not name a publication"))
+	}
+	pub, err := d.Ledger.Begin(p.PublicationID, p.Nonce)
+	if stop, err := beginOutcome(pub, err, rep); stop {
+		return err
+	}
 
-		meta := Meta{Title: pub.Title, Description: pub.Description, Tags: pub.Tags, Privacy: pub.Privacy}
+	ad, ok := d.Adapters[pub.Platform]
+	if !ok || (pub.Platform == PlatformX && !d.Gates.XPublish) {
+		return d.giveUp(pub, p.Nonce, fail(CauseGated, false, "%s", gateCopy(pub.Platform)))
+	}
 
-		cred, err := d.Tokens(ctx, pub.AccountID)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if errors.Is(err, ErrReconnectRequired) {
-				return d.giveUp(pub, p.Nonce, fail(CauseNeedsReconnect, false, "%s", scrubAll(err.Error())))
-			}
-			return d.settle(job, pub, p.Nonce, fail(CauseTokenRejected, true, "%s", scrubAll(err.Error())), cred)
-		}
-		if f := ad.Ready(cred); f != nil {
-			return d.giveUp(pub, p.Nonce, f)
-		}
+	meta := Meta{Title: pub.Title, Description: pub.Description, Tags: pub.Tags, Privacy: pub.Privacy}
 
-		file, err := d.Clips(ctx, pub.ClipJobID)
-		if err != nil {
-			if errors.Is(err, ErrClipGone) {
-				return d.giveUp(pub, p.Nonce, fail(CauseClipMissing, false, "%s", err.Error()))
-			}
-			if errors.Is(err, ErrNotAClip) {
-				return d.giveUp(pub, p.Nonce, fail(CauseClipRejected, false, "%s", err.Error()))
-			}
-			return d.settle(job, pub, p.Nonce, fail(CauseUnknown, true, "%s", scrubAll(err.Error())), cred)
-		}
+	cred, err := d.Tokens(ctx, pub.AccountID)
+	if err != nil {
+		return d.tokenFailed(ctx, job, pub, p.Nonce, cred, err)
+	}
+	if f := ad.Ready(cred); f != nil {
+		return d.giveUp(pub, p.Nonce, f)
+	}
 
-		sess := &Session{l: d.Ledger, id: pub.ID, nonce: p.Nonce, Remote: pub.PlatformPostID}
-		done, err := ad.Publish(ctx, Run{Pub: pub, Meta: meta, Cred: cred, File: file, Sess: sess, Rep: rep})
-		if err != nil {
-			if ctx.Err() != nil {
-				// Shutdown or cancel: the row stays in flight and the queue
-				// decides whether the job comes back.
-				return ctx.Err()
-			}
-			if errors.Is(err, db.ErrPublicationNotArmed) {
-				// The click was revoked or replaced while this run was in flight.
-				rep.Logf("stopped: this publish was cancelled or replaced by a newer click")
-				return jobs.Permanent(err)
-			}
-			var f *Failure
-			if !errors.As(err, &f) {
-				f = fail(CauseNetwork, true, "%s", scrubAll(err.Error()))
-			}
-			return d.settle(job, pub, p.Nonce, f, cred)
-		}
-		if err := d.Ledger.RecordPost(pub.ID, done.PostID, done.URL, done.Privacy); err != nil {
-			// The platform has the post and the ledger could not say so. A
-			// retry would find the stored session or remote id and resolve to
-			// the same post, so this is retried, never repeated.
-			return fmt.Errorf("publish: the post was made but could not be recorded: %w", err)
-		}
-		rep.SetResult(Result{Platform: pub.Platform, PostID: done.PostID, URL: done.URL, Privacy: done.Privacy})
-		rep.Progress(1)
-		log.Info("clip published", "platform", pub.Platform, "publication", pub.ID)
-		return nil
-	})
+	file, err := d.Clips(ctx, pub.ClipJobID)
+	if err != nil {
+		return d.clipFailed(job, pub, p.Nonce, cred, err)
+	}
+
+	sess := &Session{l: d.Ledger, id: pub.ID, nonce: p.Nonce, Remote: pub.PlatformPostID}
+	done, err := ad.Publish(ctx, Run{Pub: pub, Meta: meta, Cred: cred, File: file, Sess: sess, Rep: rep})
+	if err != nil {
+		return d.publishFailed(ctx, job, pub, p.Nonce, cred, rep, err)
+	}
+	if err := d.Ledger.RecordPost(pub.ID, done.PostID, done.URL, done.Privacy); err != nil {
+		// The platform has the post and the ledger could not say so. A
+		// retry would find the stored session or remote id and resolve to
+		// the same post, so this is retried, never repeated.
+		return fmt.Errorf("publish: the post was made but could not be recorded: %w", err)
+	}
+	rep.SetResult(Result{Platform: pub.Platform, PostID: done.PostID, URL: done.URL, Privacy: done.Privacy})
+	rep.Progress(1)
+	d.Log.Info("clip published", "platform", pub.Platform, "publication", pub.ID)
+	return nil
+}
+
+// beginOutcome reads the ledger's answer to Begin: stop reports that the run
+// ends here, with err as its result.
+func beginOutcome(pub db.Publication, err error, rep jobs.Reporter) (stop bool, _ error) {
+	switch {
+	case errors.Is(err, db.ErrPublicationPosted):
+		// Already on the platform. Success, and nothing is sent.
+		rep.SetResult(Result{Platform: pub.Platform, PostID: pub.PlatformPostID, URL: pub.PostURL, Privacy: pub.ActualPrivacy})
+		return true, nil
+	case errors.Is(err, db.ErrPublicationNotArmed):
+		rep.Logf("not started: no confirmed click armed this publication")
+		return true, jobs.Permanent(err)
+	case err != nil:
+		return true, err
+	}
+	return false, nil
+}
+
+// tokenFailed ends or retries a run whose credential could not be had.
+func (d WorkerDeps) tokenFailed(ctx context.Context, job jobs.Job, pub db.Publication, nonce string,
+	cred Credential, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, ErrReconnectRequired) {
+		return d.giveUp(pub, nonce, fail(CauseNeedsReconnect, false, "%s", scrubAll(err.Error())))
+	}
+	return d.settle(job, pub, nonce, fail(CauseTokenRejected, true, "%s", scrubAll(err.Error())), cred)
+}
+
+// clipFailed ends or retries a run whose clip could not be resolved.
+func (d WorkerDeps) clipFailed(job jobs.Job, pub db.Publication, nonce string, cred Credential, err error) error {
+	if errors.Is(err, ErrClipGone) {
+		return d.giveUp(pub, nonce, fail(CauseClipMissing, false, "%s", err.Error()))
+	}
+	if errors.Is(err, ErrNotAClip) {
+		return d.giveUp(pub, nonce, fail(CauseClipRejected, false, "%s", err.Error()))
+	}
+	return d.settle(job, pub, nonce, fail(CauseUnknown, true, "%s", scrubAll(err.Error())), cred)
+}
+
+// publishFailed ends or retries a run whose adapter returned err.
+func (d WorkerDeps) publishFailed(ctx context.Context, job jobs.Job, pub db.Publication, nonce string,
+	cred Credential, rep jobs.Reporter, err error) error {
+	if ctx.Err() != nil {
+		// Shutdown or cancel: the row stays in flight and the queue
+		// decides whether the job comes back.
+		return ctx.Err()
+	}
+	if errors.Is(err, db.ErrPublicationNotArmed) {
+		// The click was revoked or replaced while this run was in flight.
+		rep.Logf("stopped: this publish was cancelled or replaced by a newer click")
+		return jobs.Permanent(err)
+	}
+	var f *Failure
+	if !errors.As(err, &f) {
+		f = fail(CauseNetwork, true, "%s", scrubAll(err.Error()))
+	}
+	return d.settle(job, pub, nonce, f, cred)
 }
 
 func gateCopy(platform string) string {

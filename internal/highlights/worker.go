@@ -123,78 +123,32 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 		durMS = max(durMS, part.StartMS+part.DurationMS)
 	}
 
-	var samples []Sample
-	var chat []int64
-	var lines []Line
-	unplaced := 0
-	seenChat := map[int64]bool{}
+	g := gathered{seenChat: map[int64]bool{}}
 	for i, part := range p.Parts {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
 		rep.Progress(float64(i) / float64(len(p.Parts)+1))
-		if part.Path != "" && d.Run != nil {
-			var got []Sample
-			err := d.Run(ctx, d.FFmpeg, LoudnessArgs(part.Path), func(r io.Reader) error {
-				var perr error
-				got, perr = ParseMomentary(r, part.StartMS)
-				return perr
-			})
-			if err != nil {
-				if ctx.Err() != nil {
-					return res, ctx.Err()
-				}
-				res.Warnings = append(res.Warnings, fmt.Sprintf("the loudness of part %d could not be measured: %v", i+1, err))
-			} else if len(got) > 0 {
-				samples = append(samples, got...)
-				res.LoudnessMeasured = true
-			}
-		}
-		switch {
-		case part.StartedAtMS <= 0:
-			unplaced++
-		case d.ChatTimes != nil:
-			res.ChatAvailable = true
-			times, err := d.ChatTimes(part.StartedAtMS, part.StartedAtMS+part.DurationMS)
-			if err != nil {
-				return res, fmt.Errorf("highlights: read chat: %w", err)
-			}
-			for _, m := range times {
-				// Counted once, on the first file that contains it: two
-				// files whose clocks overlap return the same messages.
-				if seenChat[m.ID] {
-					continue
-				}
-				seenChat[m.ID] = true
-				chat = append(chat, part.StartMS+m.AtMS-part.StartedAtMS)
-			}
-		}
-		if d.Transcript != nil {
-			ls, err := d.Transcript(part.RecordingID)
-			if err != nil {
-				return res, fmt.Errorf("highlights: read transcript: %w", err)
-			}
-			for _, l := range ls {
-				lines = append(lines, Line{StartMS: part.StartMS + l.StartMS, EndMS: part.StartMS + l.EndMS, Text: l.Text})
-			}
+		if err := g.part(ctx, d, i, part, &res); err != nil {
+			return res, err
 		}
 	}
-	res.ChatMessages = len(chat)
+	res.ChatMessages = len(g.chat)
 	// Independent: some files may have no start time while the rest have
 	// no chat, and the operator is owed both facts.
-	if unplaced > 0 {
+	if g.unplaced > 0 {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d of %d recording files have no recorded start time, "+
-			"so chat could not be lined up with them", unplaced, len(p.Parts)))
+			"so chat could not be lined up with them", g.unplaced, len(p.Parts)))
 	}
-	if res.ChatAvailable && len(chat) == 0 {
+	if res.ChatAvailable && len(g.chat) == 0 {
 		res.Warnings = append(res.Warnings, "no chat was stored for this recording's time -- chat was not "+
 			"connected, or its history has since been pruned -- so chat did not contribute")
 	}
 
-	signals := append(ChatSpikes(chat, durMS, DefaultChatParams()), LoudnessPeaks(samples, durMS, DefaultLoudParams())...)
-	sugs := Build(signals, lines, durMS, DefaultBuildParams())
+	signals := append(ChatSpikes(g.chat, durMS, DefaultChatParams()), LoudnessPeaks(g.samples, durMS, DefaultLoudParams())...)
+	sugs := Build(signals, g.lines, durMS, DefaultBuildParams())
 	res.Suggestions = len(sugs)
-	rep.Logf("%d chat messages, %d loudness readings, %d candidate moments", len(chat), len(samples), len(sugs))
+	rep.Logf("%d chat messages, %d loudness readings, %d candidate moments", len(g.chat), len(g.samples), len(sugs))
 
 	if p.UseModel && len(sugs) > 0 {
 		sugs = scoreWithModel(ctx, d, sugs, &res)
@@ -210,6 +164,93 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 	rep.Progress(1)
 	rep.SetResult(res)
 	return res, nil
+}
+
+// gathered is the signals a scan collects across its recording files, each
+// already placed on the scan's own timeline.
+type gathered struct {
+	samples  []Sample
+	chat     []int64
+	lines    []Line
+	unplaced int
+	seenChat map[int64]bool
+}
+
+// part collects one recording file's loudness, chat and transcript.
+func (g *gathered) part(ctx context.Context, d Deps, i int, part Part, res *JobResult) error {
+	if err := g.loudness(ctx, d, i, part, res); err != nil {
+		return err
+	}
+	if err := g.chatFor(d, part, res); err != nil {
+		return err
+	}
+	return g.transcript(d, part)
+}
+
+// loudness measures one file. A failed measurement is a warning, not a failed
+// scan, unless the scan itself was cancelled.
+func (g *gathered) loudness(ctx context.Context, d Deps, i int, part Part, res *JobResult) error {
+	if part.Path == "" || d.Run == nil {
+		return nil
+	}
+	var got []Sample
+	err := d.Run(ctx, d.FFmpeg, LoudnessArgs(part.Path), func(r io.Reader) error {
+		var perr error
+		got, perr = ParseMomentary(r, part.StartMS)
+		return perr
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		res.Warnings = append(res.Warnings, fmt.Sprintf("the loudness of part %d could not be measured: %v", i+1, err))
+	} else if len(got) > 0 {
+		g.samples = append(g.samples, got...)
+		res.LoudnessMeasured = true
+	}
+	return nil
+}
+
+// chatFor collects the chat stored during one file's wall-clock span. A file
+// with no start time cannot be lined up with chat and is only counted.
+func (g *gathered) chatFor(d Deps, part Part, res *JobResult) error {
+	switch {
+	case part.StartedAtMS <= 0:
+		g.unplaced++
+		return nil
+	case d.ChatTimes == nil:
+		return nil
+	}
+	res.ChatAvailable = true
+	times, err := d.ChatTimes(part.StartedAtMS, part.StartedAtMS+part.DurationMS)
+	if err != nil {
+		return fmt.Errorf("highlights: read chat: %w", err)
+	}
+	for _, m := range times {
+		// Counted once, on the first file that contains it: two
+		// files whose clocks overlap return the same messages.
+		if g.seenChat[m.ID] {
+			continue
+		}
+		g.seenChat[m.ID] = true
+		g.chat = append(g.chat, part.StartMS+m.AtMS-part.StartedAtMS)
+	}
+	return nil
+}
+
+// transcript collects one file's transcript lines.
+func (g *gathered) transcript(d Deps, part Part) error {
+	if d.Transcript == nil {
+		return nil
+	}
+	ls, err := d.Transcript(part.RecordingID)
+	if err != nil {
+		return fmt.Errorf("highlights: read transcript: %w", err)
+	}
+	for _, l := range ls {
+		g.lines = append(g.lines, Line{StartMS: part.StartMS + l.StartMS, EndMS: part.StartMS + l.EndMS, Text: l.Text})
+	}
+	return nil
 }
 
 func scoreWithModel(ctx context.Context, d Deps, sugs []Suggestion, res *JobResult) []Suggestion {

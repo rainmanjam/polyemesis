@@ -168,16 +168,9 @@ type TranscriptTrackFiles struct {
 // track's file.
 func RemoveTranscriptFiles(recordingsDir, filename string, others []string, track *TranscriptTrackFiles) ([]string, error) {
 	base := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
-	bases := map[string]bool{base: true}
-	for _, o := range others {
-		ob := strings.TrimSuffix(filepath.Base(o), filepath.Ext(o))
-		if ob == base {
-			// Another recording with the same base name (a different
-			// container): its transcripts and this one's are the same files,
-			// and they are not this delete's to take.
-			return nil, nil
-		}
-		bases[ob] = true
+	bases, ok := transcriptBases(base, others)
+	if !ok {
+		return nil, nil
 	}
 	dir := filepath.Join(recordingsDir, transcribe.TranscriptsSubdir)
 	entries, err := os.ReadDir(dir)
@@ -187,28 +180,10 @@ func RemoveTranscriptFiles(recordingsDir, filename string, others []string, trac
 		}
 		return nil, err
 	}
-	wanted := func(name string) bool {
-		if owner, ok := transcriptOwner(name, bases); !ok || owner != base {
-			return false
-		}
-		if track == nil {
-			return true
-		}
-		stem := strings.TrimSuffix(name, filepath.Ext(name))
-		if stem == base || stem == base+"-all" {
-			return true
-		}
-		for _, part := range track.SpeakerParts {
-			if part != "" && stem == base+"-"+part {
-				return true
-			}
-		}
-		return false
-	}
 	var removed []string
 	var firstErr error
 	for _, e := range entries {
-		if e.IsDir() || !wanted(e.Name()) {
+		if e.IsDir() || !wantedTranscript(e.Name(), base, bases, track) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
@@ -220,4 +195,42 @@ func RemoveTranscriptFiles(recordingsDir, filename string, others []string, trac
 		removed = append(removed, e.Name())
 	}
 	return removed, firstErr
+}
+
+// transcriptBases is the set of recording base names transcripts can belong
+// to, this one's included. ok is false when another recording shares base.
+func transcriptBases(base string, others []string) (map[string]bool, bool) {
+	bases := map[string]bool{base: true}
+	for _, o := range others {
+		ob := strings.TrimSuffix(filepath.Base(o), filepath.Ext(o))
+		if ob == base {
+			// Another recording with the same base name (a different
+			// container): its transcripts and this one's are the same files,
+			// and they are not this delete's to take.
+			return nil, false
+		}
+		bases[ob] = true
+	}
+	return bases, true
+}
+
+// wantedTranscript reports whether the transcript file name belongs to base
+// and is one the delete (of every track, or of track) removes.
+func wantedTranscript(name, base string, bases map[string]bool, track *TranscriptTrackFiles) bool {
+	if owner, ok := transcriptOwner(name, bases); !ok || owner != base {
+		return false
+	}
+	if track == nil {
+		return true
+	}
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	if stem == base || stem == base+"-all" {
+		return true
+	}
+	for _, part := range track.SpeakerParts {
+		if part != "" && stem == base+"-"+part {
+			return true
+		}
+	}
+	return false
 }

@@ -95,3 +95,38 @@ func TestResetSentCollectionsLeavesWhatTheBodyDoesNotOwn(t *testing.T) {
 		t.Errorf(`a json:"-" field was reset: %+v`, d.Skip)
 	}
 }
+
+// RcNames is an embedded field that is not a struct, so it is matched by its
+// own name like any other field.
+type RcNames []string
+
+type rcEmbeddedPtr struct {
+	*rcEmbedded
+	RcNames
+}
+
+// An embedded pointer is walked only when set, and an embedded non-struct is
+// left to the ordinary per-field rule.
+func TestResetEmbedded(t *testing.T) {
+	obj := map[string]json.RawMessage{"flat": json.RawMessage(`[]`)}
+	typ := reflect.TypeOf(rcEmbeddedPtr{})
+	ptrField, namesField := typ.Field(0), typ.Field(1)
+
+	var unset rcEmbeddedPtr
+	if _, done := resetEmbedded(obj, ptrField.Type, reflect.ValueOf(&unset).Elem().Field(0)); !done {
+		t.Error("a nil embedded pointer should be dealt with (skipped)")
+	}
+
+	set := rcEmbeddedPtr{rcEmbedded: &rcEmbedded{Flat: []rcCell{{N: 1, Invert: true}}}}
+	if _, done := resetEmbedded(obj, ptrField.Type, reflect.ValueOf(&set).Elem().Field(0)); !done {
+		t.Error("a set embedded struct pointer should be walked")
+	}
+	if set.Flat != nil {
+		t.Errorf("the embedded struct's sent collection was not cleared: %+v", set.Flat)
+	}
+
+	v := reflect.ValueOf(&set).Elem().Field(1)
+	if got, done := resetEmbedded(obj, namesField.Type, v); done || got.Kind() != reflect.Slice {
+		t.Errorf("an embedded non-struct should fall through unchanged: done=%v kind=%v", done, got.Kind())
+	}
+}

@@ -824,7 +824,7 @@ func (s *Server) handleLibraryMedia(w http.ResponseWriter, r *http.Request) {
 	// Derived files are rewritten only by a job the user triggered, so a short
 	// cache is safe and is what stops a scrubbing player refetching the sprite
 	// sheet on every hover. Private: it is behind a session.
-	w.Header().Set(headerCacheControl, "private, max-age=300")
+	w.Header().Set("Cache-Control", "private, max-age=300")
 	// ServeContent gives range requests, which is what makes seeking in the
 	// proxy work at all.
 	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)

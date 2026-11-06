@@ -132,67 +132,86 @@ func (g *Synth) packetize(pid uint16, payload []byte, pcr int64, rai bool) []byt
 	first := true
 	for len(payload) > 0 || first {
 		var af []byte
-		if first && (pcr >= 0 || rai) {
-			flags := byte(0)
-			if rai {
-				flags |= 0x40
-			}
-			af = []byte{flags}
-			if pcr >= 0 {
-				af[0] |= 0x10
-				af = append(af, byte(pcr>>25), byte(pcr>>17), byte(pcr>>9), byte(pcr>>1), byte(pcr<<7)|0x7E, 0)
-			}
+		if first {
+			af = startAF(pcr, rai)
 		}
 		room := 184
 		if af != nil {
 			room -= 1 + len(af)
 		}
-		n := len(payload)
-		if n > room {
-			n = room
-		}
+		n := min(len(payload), room)
 		if first && g.firstRoom > 0 && n > g.firstRoom {
 			n = g.firstRoom
 		}
 		if n < room {
 			// Stuff through the adaptation field.
-			total := 184 - n // bytes of adaptation field incl. its length byte
-			if af == nil && total >= 2 {
-				af = []byte{0}
-			}
-			if af != nil {
-				for len(af)+1 < total {
-					af = append(af, 0xFF)
-				}
-			}
+			af = stuffAF(af, 184-n)
 		}
-		p := make([]byte, 4, packetSize)
-		p[0] = syncByte
-		p[1] = byte(pid >> 8)
-		if first {
-			p[1] |= 0x40
-		}
-		p[2] = byte(pid)
-		afc := byte(0x10)
-		switch {
-		case af != nil:
-			afc = 0x30
-			p = append(p, byte(len(af)))
-			p = append(p, af...)
-		case 184-n == 1:
-			afc = 0x30
-			p = append(p, 0)
-		}
-		p[3] = afc | g.nextCC(pid)
-		p = append(p, payload[:n]...)
-		if len(p) != packetSize {
-			panic("packetize: bad packet size")
-		}
-		out = append(out, p...)
+		out = append(out, g.packet(pid, first, af, payload[:n])...)
 		payload = payload[n:]
 		first = false
 	}
 	return out
+}
+
+// startAF is a PES's first adaptation field, without its length byte: the
+// random-access flag and a PCR, or nil when it carries neither.
+func startAF(pcr int64, rai bool) []byte {
+	if pcr < 0 && !rai {
+		return nil
+	}
+	flags := byte(0)
+	if rai {
+		flags |= 0x40
+	}
+	af := []byte{flags}
+	if pcr >= 0 {
+		af[0] |= 0x10
+		af = append(af, byte(pcr>>25), byte(pcr>>17), byte(pcr>>9), byte(pcr>>1), byte(pcr<<7)|0x7E, 0)
+	}
+	return af
+}
+
+// stuffAF pads af with 0xFF to total bytes of adaptation field, its length
+// byte included. One byte of room is left to packet, as a bare length byte.
+func stuffAF(af []byte, total int) []byte {
+	if af == nil && total >= 2 {
+		af = []byte{0}
+	}
+	if af != nil {
+		for len(af)+1 < total {
+			af = append(af, 0xFF)
+		}
+	}
+	return af
+}
+
+// packet is one TS packet on pid: its header, af (without its length byte)
+// and data.
+func (g *Synth) packet(pid uint16, first bool, af, data []byte) []byte {
+	p := make([]byte, 4, packetSize)
+	p[0] = syncByte
+	p[1] = byte(pid >> 8)
+	if first {
+		p[1] |= 0x40
+	}
+	p[2] = byte(pid)
+	afc := byte(0x10)
+	switch {
+	case af != nil:
+		afc = 0x30
+		p = append(p, byte(len(af)))
+		p = append(p, af...)
+	case 184-len(data) == 1:
+		afc = 0x30
+		p = append(p, 0)
+	}
+	p[3] = afc | g.nextCC(pid)
+	p = append(p, data...)
+	if len(p) != packetSize {
+		panic("packetize: bad packet size")
+	}
+	return p
 }
 
 func (g *Synth) psi() []byte {
@@ -364,28 +383,40 @@ func (g *Synth) Mux(dur time.Duration) *Stream {
 			return s
 		}
 		if vt <= at {
-			if v%g.GOP == 0 {
-				add(g.psi(), vt)
-				if g.QuietPID && v == 0 {
-					hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
-					putTS(hdr[9:], 2, g.at(0))
-					add(g.packetize(QuietPIDNumber, hdr, -1, false), vt)
-				}
-				if g.ChurnPIDs {
-					g.churn++
-					hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
-					putTS(hdr[9:], 2, g.at(int64(v*FrameTicks)))
-					add(g.packetize(0x300+g.churn, hdr, -1, false), vt)
-				}
-			}
-			add(g.picture(v), vt)
-			if g.Leading && g.HEVC && v%g.GOP == 0 && (g.LeadingFrom == 0 || v >= g.LeadingFrom) {
-				add(g.leading(v), vt)
-			}
+			g.muxPicture(v, vt, add)
 			v++
 		} else {
 			add(g.audioFrame(a), at)
 			a++
 		}
+	}
+}
+
+// muxPicture adds picture v at vt: a GOP's first after the PSI and any extra
+// PIDs, and followed by its leading picture when there is one.
+func (g *Synth) muxPicture(v int, vt time.Duration, add func([]byte, time.Duration)) {
+	if v%g.GOP == 0 {
+		g.muxKeyPreamble(v, vt, add)
+	}
+	add(g.picture(v), vt)
+	if g.Leading && g.HEVC && v%g.GOP == 0 && (g.LeadingFrom == 0 || v >= g.LeadingFrom) {
+		add(g.leading(v), vt)
+	}
+}
+
+// muxKeyPreamble adds what goes before a GOP's first picture v: the PSI, the
+// QuietPID's one PES at the start, and a churned PID's PES.
+func (g *Synth) muxKeyPreamble(v int, vt time.Duration, add func([]byte, time.Duration)) {
+	add(g.psi(), vt)
+	if g.QuietPID && v == 0 {
+		hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
+		putTS(hdr[9:], 2, g.at(0))
+		add(g.packetize(QuietPIDNumber, hdr, -1, false), vt)
+	}
+	if g.ChurnPIDs {
+		g.churn++
+		hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
+		putTS(hdr[9:], 2, g.at(int64(v*FrameTicks)))
+		add(g.packetize(0x300+g.churn, hdr, -1, false), vt)
 	}
 }

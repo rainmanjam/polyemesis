@@ -86,50 +86,14 @@ var ErrInvalid = errors.New("invalid publish request")
 func Normalize(platform string, m Meta) (Meta, error) {
 	m.Title = strings.TrimSpace(m.Title)
 	m.Description = strings.TrimSpace(m.Description)
-	seen := map[string]bool{}
-	tags := make([]string, 0, len(m.Tags))
-	for _, t := range m.Tags {
-		t = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(t), "#"))
-		t = strings.Join(strings.Fields(t), "")
-		if t == "" || seen[strings.ToLower(t)] {
-			continue
-		}
-		seen[strings.ToLower(t)] = true
-		tags = append(tags, t)
-	}
-	m.Tags = tags
+	m.Tags = normalizeTags(m.Tags)
 	if len(m.Tags) > maxTags {
 		return m, fmt.Errorf("%w: at most %d hashtags", ErrInvalid, maxTags)
 	}
 
 	switch platform {
 	case PlatformYouTube:
-		if m.Title == "" {
-			return m, fmt.Errorf("%w: a title is required", ErrInvalid)
-		}
-		if n := utf16Len(m.Title); n > maxYouTubeTitle {
-			return m, fmt.Errorf("%w: the title is %d characters; YouTube allows %d", ErrInvalid, n, maxYouTubeTitle)
-		}
-		if strings.ContainsAny(m.Title, "<>") || strings.ContainsAny(m.Description, "<>") {
-			return m, fmt.Errorf("%w: YouTube does not accept < or > in a title or description", ErrInvalid)
-		}
-		if len(m.Description) > maxYouTubeDescription {
-			return m, fmt.Errorf("%w: the description is longer than YouTube's %d bytes", ErrInvalid, maxYouTubeDescription)
-		}
-		total := 0
-		for _, t := range m.Tags {
-			total += len(t) + 1
-		}
-		if total > maxYouTubeTagsChars {
-			return m, fmt.Errorf("%w: the hashtags are too long for YouTube", ErrInvalid)
-		}
-		switch m.Privacy {
-		case "":
-			m.Privacy = PrivacyPrivate
-		case PrivacyPrivate, PrivacyUnlisted, PrivacyPublic:
-		default:
-			return m, fmt.Errorf("%w: unknown privacy %q", ErrInvalid, m.Privacy)
-		}
+		return normalizeYouTube(m)
 	case PlatformTikTok:
 		// There is no choice to make: until TikTok audits the app every post
 		// must be private, so whatever the request carried is replaced.
@@ -144,6 +108,55 @@ func Normalize(platform string, m Meta) (Meta, error) {
 		}
 	default:
 		return m, fmt.Errorf("%w: unknown platform %q", ErrInvalid, platform)
+	}
+	return m, nil
+}
+
+// normalizeTags trims each tag, strips its leading '#' and inner spaces, and
+// drops empties and case-insensitive duplicates.
+func normalizeTags(in []string) []string {
+	seen := map[string]bool{}
+	tags := make([]string, 0, len(in))
+	for _, t := range in {
+		t = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(t), "#"))
+		t = strings.Join(strings.Fields(t), "")
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		tags = append(tags, t)
+	}
+	return tags
+}
+
+// normalizeYouTube checks m against YouTube's limits and defaults its privacy
+// to private.
+func normalizeYouTube(m Meta) (Meta, error) {
+	if m.Title == "" {
+		return m, fmt.Errorf("%w: a title is required", ErrInvalid)
+	}
+	if n := utf16Len(m.Title); n > maxYouTubeTitle {
+		return m, fmt.Errorf("%w: the title is %d characters; YouTube allows %d", ErrInvalid, n, maxYouTubeTitle)
+	}
+	if strings.ContainsAny(m.Title, "<>") || strings.ContainsAny(m.Description, "<>") {
+		return m, fmt.Errorf("%w: YouTube does not accept < or > in a title or description", ErrInvalid)
+	}
+	if len(m.Description) > maxYouTubeDescription {
+		return m, fmt.Errorf("%w: the description is longer than YouTube's %d bytes", ErrInvalid, maxYouTubeDescription)
+	}
+	total := 0
+	for _, t := range m.Tags {
+		total += len(t) + 1
+	}
+	if total > maxYouTubeTagsChars {
+		return m, fmt.Errorf("%w: the hashtags are too long for YouTube", ErrInvalid)
+	}
+	switch m.Privacy {
+	case "":
+		m.Privacy = PrivacyPrivate
+	case PrivacyPrivate, PrivacyUnlisted, PrivacyPublic:
+	default:
+		return m, fmt.Errorf("%w: unknown privacy %q", ErrInvalid, m.Privacy)
 	}
 	return m, nil
 }

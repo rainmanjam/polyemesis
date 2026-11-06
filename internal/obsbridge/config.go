@@ -163,11 +163,20 @@ func (c Config) Problems() []string {
 	if c.StopGraceSeconds < 0 || c.StopGraceSeconds > MaxStopGraceSeconds {
 		probs = append(probs, fmt.Sprintf("stopGraceSeconds must be between 0 and %d", MaxStopGraceSeconds))
 	}
-	if len(c.Destinations) > MaxDestinations {
+	destProbs, selected := destinationProblems(c.Destinations)
+	probs = append(probs, destProbs...)
+	return append(probs, sceneProblems(c.Scenes, selected)...)
+}
+
+// destinationProblems checks the bridge's destination list and returns the
+// ids it selects, as far as they were read.
+func destinationProblems(ids []int64) ([]string, map[int64]bool) {
+	var probs []string
+	if len(ids) > MaxDestinations {
 		probs = append(probs, fmt.Sprintf("at most %d destinations", MaxDestinations))
 	}
 	selected := map[int64]bool{}
-	for _, id := range c.Destinations {
+	for _, id := range ids {
 		if id <= 0 {
 			probs = append(probs, "destination ids are positive")
 			break
@@ -177,7 +186,14 @@ func (c Config) Problems() []string {
 		}
 		selected[id] = true
 	}
-	if len(c.Scenes) > MaxSceneRules {
+	return probs, selected
+}
+
+// sceneProblems checks the scene rules against the routing presets and the
+// bridge's selected destinations.
+func sceneProblems(rules []SceneRule, selected map[int64]bool) []string {
+	var probs []string
+	if len(rules) > MaxSceneRules {
 		probs = append(probs, fmt.Sprintf("at most %d scene rules", MaxSceneRules))
 	}
 	presets := map[string]bool{}
@@ -185,7 +201,7 @@ func (c Config) Problems() []string {
 		presets[p.ID] = true
 	}
 	scenes := map[string]bool{}
-	for i, r := range c.Scenes {
+	for i, r := range rules {
 		label := fmt.Sprintf("scene rule %d", i+1)
 		switch {
 		case strings.TrimSpace(r.Scene) == "":

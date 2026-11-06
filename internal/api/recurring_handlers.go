@@ -130,7 +130,7 @@ func (s *Server) handleSetBroadcastThumbnail(w http.ResponseWriter, r *http.Requ
 		writeStoreError(w, err)
 		return
 	}
-	mime := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get(headerContentType), ";")[0]))
+	mime := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
 	if mime != "image/png" && mime != "image/jpeg" {
 		writeError(w, http.StatusBadRequest, "a thumbnail must be a PNG or a JPEG")
 		return

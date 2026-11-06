@@ -194,7 +194,7 @@ func (s *Server) handleExportDebug(w http.ResponseWriter, r *http.Request) {
 	// Named with the time so two bundles in one support thread can be told
 	// apart, which is otherwise a real problem for whoever receives them.
 	name := fmt.Sprintf("polyemesis-debug-%s.json", b.GeneratedAt.Format("20060102-150405"))
-	w.Header().Set(headerContentType, "application/json")
+	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 
 	// BEFORE THE WRITE, ON PURPOSE, and this was queried in review. Publishing

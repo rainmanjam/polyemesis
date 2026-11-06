@@ -277,6 +277,24 @@ func (s Schedule) Validate() error {
 	if _, err := s.Location(); err != nil {
 		return err
 	}
+	if err := s.whenError(); err != nil {
+		return err
+	}
+	if s.GraceSeconds != 0 && (s.GraceSeconds < MinGraceSeconds || s.GraceSeconds > MaxGraceSeconds) {
+		return fmt.Errorf("schedule %q needs a grace between %d and %d seconds",
+			s.Name, MinGraceSeconds, MaxGraceSeconds)
+	}
+	// Last, so a schedule that is wrong in some other way says that first.
+	// app-council A54. A destination schedule says what it acts on: a list, or
+	// allDestinations. Neither is refused because an empty list used to MEAN
+	// every destination, and for a stop that is the whole broadcast taken down
+	// by a schedule whose author ticked nothing. Both is refused because either
+	// resolution acts on something the author did not say.
+	return s.destinationTargetError()
+}
+
+// whenError checks the kind and the fields that say when that kind runs.
+func (s Schedule) whenError() error {
 	switch s.Kind {
 	case KindOnce:
 		if s.RunAt.IsZero() {
@@ -292,26 +310,23 @@ func (s Schedule) Validate() error {
 	default:
 		return fmt.Errorf("schedule %q has an unknown kind %q", s.Name, s.Kind)
 	}
-	if s.GraceSeconds != 0 && (s.GraceSeconds < MinGraceSeconds || s.GraceSeconds > MaxGraceSeconds) {
-		return fmt.Errorf("schedule %q needs a grace between %d and %d seconds",
-			s.Name, MinGraceSeconds, MaxGraceSeconds)
+	return nil
+}
+
+// destinationTargetError checks a destination schedule names its targets one
+// way, and only one.
+func (s Schedule) destinationTargetError() error {
+	if s.TargetsPlaylist() {
+		return nil
 	}
-	// Last, so a schedule that is wrong in some other way says that first.
-	// app-council A54. A destination schedule says what it acts on: a list, or
-	// allDestinations. Neither is refused because an empty list used to MEAN
-	// every destination, and for a stop that is the whole broadcast taken down
-	// by a schedule whose author ticked nothing. Both is refused because either
-	// resolution acts on something the author did not say.
-	if !s.TargetsPlaylist() {
-		if len(s.DestinationIDs) == 0 && !s.AllDestinations {
-			return fmt.Errorf("schedule %q names no destinations. Pick the destinations "+
-				"it acts on, or set allDestinations to act on every destination on this "+
-				"install", s.Name)
-		}
-		if len(s.DestinationIDs) > 0 && s.AllDestinations {
-			return fmt.Errorf("schedule %q names %d destination(s) and also sets "+
-				"allDestinations; send one or the other", s.Name, len(s.DestinationIDs))
-		}
+	if len(s.DestinationIDs) == 0 && !s.AllDestinations {
+		return fmt.Errorf("schedule %q names no destinations. Pick the destinations "+
+			"it acts on, or set allDestinations to act on every destination on this "+
+			"install", s.Name)
+	}
+	if len(s.DestinationIDs) > 0 && s.AllDestinations {
+		return fmt.Errorf("schedule %q names %d destination(s) and also sets "+
+			"allDestinations; send one or the other", s.Name, len(s.DestinationIDs))
 	}
 	return nil
 }

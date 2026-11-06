@@ -544,6 +544,16 @@ func destinationRows(v any) []any {
 	return out
 }
 
+// onSource reports whether a destination summary belongs to source, which
+// nil matches every summary.
+func onSource(sum map[string]any, source *int64) bool {
+	if source == nil {
+		return true
+	}
+	sid, ok := jsonInt(sum["sourceId"])
+	return ok && sid == *source
+}
+
 // destSummary is a destination row reduced to what an agent needs to name and
 // act on it. The read-safe view has already masked the URL; it is kept so an
 // agent can tell two YouTube destinations apart by their server.
@@ -559,179 +569,41 @@ func mcpCatalogue() []mcpTool {
 			name: "get_status", title: "Server status", tier: mcpRead,
 			description: "What is on air now: ingest, recorder, failover, every destination's state and failure reason, loudness and the clip buffer.",
 			props:       map[string]any{"source": schemaSource},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source *int64 `json:"source"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				st, err := c.call(http.MethodGet, routeStatus, q, nil)
-				if err != nil {
-					return nil, err
-				}
-				out := pick(st, "ingest", "recorder", "failover", "silence", "source", "loudness", "clips", "relay")
-				var dests []any
-				for _, d := range asList(st, "destinations") {
-					dests = append(dests, destHealth(d))
-				}
-				out["destinations"] = dests
-				return c.result(out, false)
-			},
+			run:         runGetStatus,
 		},
 		{
 			name: "list_destinations", title: "Destinations and health", tier: mcpRead,
 			description: "Every destination with its live health and, when one is failing, why (cause, held, keyChanged).",
 			props:       map[string]any{"source": schemaSource},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source *int64 `json:"source"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				rows, err := c.call(http.MethodGet, "/destinations", nil, nil)
-				if err != nil {
-					return nil, err
-				}
-				st, err := c.call(http.MethodGet, routeStatus, q, nil)
-				if err != nil {
-					return nil, err
-				}
-				health := healthByID(st)
-				out := []any{}
-				for _, d := range destinationRows(rows) {
-					sum := destSummary(d)
-					if a.Source != nil {
-						if sid, ok := jsonInt(sum["sourceId"]); !ok || sid != *a.Source {
-							continue
-						}
-					}
-					if id, ok := jsonInt(sum["id"]); ok {
-						if h, ok := health[id]; ok {
-							sum["health"] = h
-						}
-					}
-					out = append(out, sum)
-				}
-				return c.result(map[string]any{"destinations": out}, false)
-			},
+			run:         runListDestinations,
 		},
 		{
 			name: "get_destination", title: "One destination and why it is failing", tier: mcpRead,
 			description: "One destination's settings summary, routing and live health, including the classified failure cause, its explanation, whether retries are held and whether the platform reports a different stream key.",
 			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource},
 			required:    []string{"destinationId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					DestinationID int64  `json:"destinationId"`
-					Source        *int64 `json:"source"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkID("destinationId", a.DestinationID); err != nil {
-					return nil, err
-				}
-				d, err := c.getDestination(a.DestinationID)
-				if err != nil {
-					return nil, err
-				}
-				out := destSummary(d)
-				for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience", "delaySeconds") {
-					out[k] = v
-				}
-				src := a.Source
-				if src == nil {
-					if sid, ok := jsonInt(out["sourceId"]); ok {
-						src = &sid
-					}
-				}
-				q, err := sourceQuery(src)
-				if err != nil {
-					return nil, err
-				}
-				st, err := c.call(http.MethodGet, routeStatus, q, nil)
-				if err != nil {
-					return nil, err
-				}
-				if h, ok := healthByID(st)[a.DestinationID]; ok {
-					out["health"] = h
-				}
-				return c.result(out, false)
-			},
+			run:         runGetDestination,
 		},
 		{
 			name: "list_sources", title: "Programmes, ingest and link stats", tier: mcpRead,
 			description: "Every programme (source): its ingest mode, whether something is publishing to it, and SRT/RTMP link statistics.",
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				if err := decodeArgs(raw, &struct{}{}); err != nil {
-					return nil, err
-				}
-				v, err := c.call(http.MethodGet, "/sources", nil, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runListSources,
 		},
 		{
 			name: "list_routing_presets", title: "Routing presets", tier: mcpRead,
 			description: "The audio routing presets apply_routing_preset accepts, with what each does.",
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				if err := decodeArgs(raw, &struct{}{}); err != nil {
-					return nil, err
-				}
-				v, err := c.call(http.MethodGet, "/routing/presets", nil, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runListRoutingPresets,
 		},
 		{
 			name: "get_levels", title: "Audio levels", tier: mcpRead,
 			description: "Current audio levels per ingest track, and each destination's track gains and mutes.",
 			props:       map[string]any{"source": schemaSource},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source *int64 `json:"source"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				v, err := c.call(http.MethodGet, "/levels", q, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runGetLevels,
 		},
 		{
 			name: "list_recordings", title: "Recordings", tier: mcpRead,
 			description: "Recordings on this server: when, how long, how large, and whether a transcript exists.",
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				if err := decodeArgs(raw, &struct{}{}); err != nil {
-					return nil, err
-				}
-				v, err := c.call(http.MethodGet, "/recordings", nil, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runListRecordings,
 		},
 		{
 			name: "get_polls", title: "Chat polls", tier: mcpRead,
@@ -739,25 +611,7 @@ func mcpCatalogue() []mcpTool {
 			props: map[string]any{
 				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "How many finished polls (default 10)."},
 			},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Limit int `json:"limit"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if a.Limit == 0 {
-					a.Limit = 10
-				}
-				if a.Limit < 1 || a.Limit > 100 {
-					return nil, argErr("limit must be 1 to 100")
-				}
-				v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run: runGetPolls,
 		},
 		{
 			name: "get_timeline", title: "Timeline and alerts", tier: mcpRead,
@@ -766,57 +620,13 @@ func mcpCatalogue() []mcpTool {
 				"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "How many rows (default 50)."},
 				"minSeverity": map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}, "description": "Only rows at least this severe."},
 			},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Limit       int    `json:"limit"`
-					MinSeverity string `json:"minSeverity"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if a.Limit == 0 {
-					a.Limit = 50
-				}
-				if a.Limit < 1 || a.Limit > 500 {
-					return nil, argErr("limit must be 1 to 500")
-				}
-				rank := map[string]int{"": 0, "info": 0, "warning": 1, "critical": 2}
-				floor, ok := rank[a.MinSeverity]
-				if !ok {
-					return nil, argErr("minSeverity must be info, warning or critical")
-				}
-				v, err := c.call(http.MethodGet, "/timeline", url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
-				if err != nil {
-					return nil, err
-				}
-				rows := []any{}
-				for _, row := range asList(v, "") {
-					sev, _ := pick(row, "severity")["severity"].(string)
-					if rank[sev] >= floor {
-						rows = append(rows, row)
-					}
-				}
-				return c.result(map[string]any{"events": rows}, false)
-			},
+			run: runGetTimeline,
 		},
 		{
 			name: "get_stop_impact", title: "What a stop would end", tier: mcpRead,
 			description: "How many destinations a stop would end and how many live YouTube broadcasts would be completed (which cannot be undone). Omit destinationId for stop-all.",
 			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					DestinationID int64  `json:"destinationId"`
-					Source        *int64 `json:"source"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				v, err := c.stopImpact(a.DestinationID, a.Source)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runGetStopImpact,
 		},
 
 		// --- content: what viewers wrote or said ---
@@ -829,37 +639,7 @@ func mcpCatalogue() []mcpTool {
 				"recordingId": map[string]any{"type": "integer", "minimum": 1, "maximum": mcpMaxID},
 			},
 			required: []string{"query"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Query       string `json:"query"`
-					Limit       int    `json:"limit"`
-					RecordingID int64  `json:"recordingId"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkText("query", a.Query, 1, 200); err != nil {
-					return nil, err
-				}
-				if a.Limit == 0 {
-					a.Limit = 20
-				}
-				if a.Limit < 1 || a.Limit > 50 {
-					return nil, argErr("limit must be 1 to 50")
-				}
-				q := url.Values{"q": {a.Query}, "limit": {strconv.Itoa(a.Limit)}}
-				if a.RecordingID != 0 {
-					if err := checkID("recordingId", a.RecordingID); err != nil {
-						return nil, err
-					}
-					q.Set("recordingId", strconv.FormatInt(a.RecordingID, 10))
-				}
-				v, err := c.call(http.MethodGet, "/library/search", q, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, true)
-			},
+			run:      runSearchTranscripts,
 		},
 		{
 			name: "search_chat", title: "Search chat", tier: mcpContent,
@@ -870,37 +650,7 @@ func mcpCatalogue() []mcpTool {
 				"limit":    map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 			},
 			required: []string{"query"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Query    string `json:"query"`
-					Platform string `json:"platform"`
-					Limit    int    `json:"limit"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkText("query", a.Query, 1, 200); err != nil {
-					return nil, err
-				}
-				if a.Platform != "" && !platformName.MatchString(a.Platform) {
-					return nil, argErr("platform must be a platform name such as twitch")
-				}
-				if a.Limit == 0 {
-					a.Limit = 50
-				}
-				if a.Limit < 1 || a.Limit > 100 {
-					return nil, argErr("limit must be 1 to 100")
-				}
-				q := url.Values{"q": {a.Query}, "limit": {strconv.Itoa(a.Limit)}}
-				if a.Platform != "" {
-					q.Set("platform", a.Platform)
-				}
-				v, err := c.call(http.MethodGet, "/chat/search", q, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, true)
-			},
+			run:      runSearchChat,
 		},
 		{
 			name: "get_chat_user", title: "Chat user card", tier: mcpContent,
@@ -910,26 +660,7 @@ func mcpCatalogue() []mcpTool {
 				"authorId": map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
 			},
 			required: []string{"platform", "authorId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Platform string `json:"platform"`
-					AuthorID string `json:"authorId"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if !platformName.MatchString(a.Platform) {
-					return nil, argErr("platform must be a platform name such as twitch")
-				}
-				if err := checkText("authorId", a.AuthorID, 1, 128); err != nil {
-					return nil, err
-				}
-				v, err := c.call(http.MethodGet, "/chat/users", url.Values{"platform": {a.Platform}, "authorId": {a.AuthorID}}, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, true)
-			},
+			run:      runGetChatUser,
 		},
 
 		// --- writes ---
@@ -938,9 +669,7 @@ func mcpCatalogue() []mcpTool {
 			description: "Start one destination streaming. Starting an already running destination changes nothing.",
 			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource},
 			required:    []string{"destinationId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				return c.destAction(raw, "/start", false)
-			},
+			run:         runStartDestination,
 		},
 		{
 			name: "stop_destination", title: "Stop a destination", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
@@ -948,9 +677,7 @@ func mcpCatalogue() []mcpTool {
 			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. A destination with a broadcast delay plays its buffered tail out before it stops; now:true cuts the tail instead (also cuts a tail already playing). Needs confirm:true; without it, answers with what the stop would end.",
 			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm, "now": schemaStopNow},
 			required:    []string{"destinationId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				return c.destAction(raw, "/stop", true)
-			},
+			run:         runStopDestination,
 		},
 		{
 			name: "retry_destination", title: "Retry a destination", tier: mcpWrite, destructive: true,
@@ -964,82 +691,14 @@ func mcpCatalogue() []mcpTool {
 			name: "go_live", title: "Go live", tier: mcpWrite, idempotent: true,
 			description: "Start every destination of a programme, paced. Puts video in front of an audience on every platform, so it needs confirm:true; without it, answers with what would start.",
 			props:       map[string]any{"source": schemaSource, "confirm": schemaConfirm},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source  *int64 `json:"source"`
-					Confirm bool   `json:"confirm"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = "every destination"
-				if !a.Confirm {
-					rows, err := c.call(http.MethodGet, "/destinations", nil, nil)
-					if err != nil {
-						return nil, err
-					}
-					would := []any{}
-					for _, d := range destinationRows(rows) {
-						sum := pick(d, "id", "name", "platform", "enabled", "sourceId")
-						if a.Source != nil {
-							if sid, ok := jsonInt(sum["sourceId"]); !ok || sid != *a.Source {
-								continue
-							}
-						}
-						would = append(would, sum)
-					}
-					return c.refusal("Not done: going live starts every one of these destinations. "+
-						"Show the list to the user, then call go_live again with confirm:true.", map[string]any{"destinations": would})
-				}
-				v, err := c.call(http.MethodPost, "/destinations/start-all", q, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runGoLive,
 		},
 		{
 			name: "stop_all_destinations", title: "Stop all destinations", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
 			confirms:    "every call",
 			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return, and every broadcast delay is cut: nothing still buffered airs. Needs confirm:true; without it, answers with what would end.",
 			props:       map[string]any{"source": schemaSource, "confirm": schemaConfirm},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source  *int64 `json:"source"`
-					Confirm bool   `json:"confirm"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = "every destination"
-				if !a.Confirm {
-					impact, err := c.stopImpact(0, a.Source)
-					if err != nil {
-						return nil, err
-					}
-					return c.refusal("Not done: this stops every destination. Show the user this impact, "+
-						"then call stop_all_destinations again with confirm:true.", map[string]any{"stopImpact": impact})
-				}
-				impact, err := c.stopImpact(0, a.Source)
-				if err != nil {
-					return nil, err
-				}
-				// The REST route's own confirmation, which it requires of every
-				// caller; MCP passes it only after the agent has.
-				v, err := c.call(http.MethodPost, "/destinations/stop-all", q, map[string]bool{"confirm": true})
-				if err != nil {
-					return nil, err
-				}
-				return c.result(map[string]any{"stopImpact": impact, "result": v}, false)
-			},
+			run:         runStopAllDestinations,
 		},
 		{
 			name: "dump_destination_delay", title: "Dump a destination's broadcast delay", tier: mcpWrite, destructive: true, stopping: true,
@@ -1050,43 +709,7 @@ func mcpCatalogue() []mcpTool {
 				"Needs confirm:true; without it, answers with the destination's delay now.",
 			props:    map[string]any{"destinationId": schemaDestID, "source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm},
 			required: []string{"destinationId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					DestinationID int64    `json:"destinationId"`
-					Source        *int64   `json:"source"`
-					Seconds       *float64 `json:"seconds"`
-					Confirm       bool     `json:"confirm"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkID("destinationId", a.DestinationID); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = fmt.Sprintf("destination %d", a.DestinationID)
-				if !a.Confirm {
-					delays, err := c.delays(a.Source, a.DestinationID)
-					if err != nil {
-						return nil, err
-					}
-					return c.refusal("Not done: a dump drops the newest part of this destination's broadcast delay, which "+
-						"then never airs, and its delay stays shorter until it next starts. Show the user this delay, then "+
-						"call dump_destination_delay again with confirm:true.", map[string]any{"delay": delays})
-				}
-				body := map[string]any{}
-				if a.Seconds != nil {
-					body["seconds"] = *a.Seconds
-				}
-				v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/delay/dump"), q, body)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:      runDumpDestinationDelay,
 		},
 		{
 			name: "dump_all_delays", title: "Dump every broadcast delay", tier: mcpWrite, destructive: true, stopping: true,
@@ -1097,43 +720,7 @@ func mcpCatalogue() []mcpTool {
 			props: map[string]any{"source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm,
 				"allProgrammes": map[string]any{"type": "boolean",
 					"description": "With no source on an install with more than one programme: true to dump every programme's delayed destinations. Otherwise name the source."}},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source        *int64   `json:"source"`
-					Seconds       *float64 `json:"seconds"`
-					Confirm       bool     `json:"confirm"`
-					AllProgrammes bool     `json:"allProgrammes"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = "every delayed destination"
-				if !a.Confirm {
-					delays, err := c.delays(a.Source, 0)
-					if err != nil {
-						return nil, err
-					}
-					return c.refusal("Not done: this dumps every delayed destination. Show the user these delays, then "+
-						"call dump_all_delays again with confirm:true.", map[string]any{"delays": delays})
-				}
-				// The REST route's own confirmation, passed only after the agent's.
-				body := map[string]any{"confirm": true}
-				if a.Seconds != nil {
-					body["seconds"] = *a.Seconds
-				}
-				if a.Source == nil && a.AllProgrammes {
-					body["allProgrammes"] = true
-				}
-				v, err := c.call(http.MethodPost, "/destinations/delay/dump-all", q, body)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run: runDumpAllDelays,
 		},
 		{
 			name: "set_track_level", title: "Mute or set gain", tier: mcpWrite, idempotent: true,
@@ -1146,46 +733,7 @@ func mcpCatalogue() []mcpTool {
 				"gain":          map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 8, "description": "1.0 is unity."},
 			},
 			required: []string{"destinationId", "track"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					DestinationID int64    `json:"destinationId"`
-					Source        *int64   `json:"source"`
-					Track         *int     `json:"track"`
-					Muted         *bool    `json:"muted"`
-					Gain          *float64 `json:"gain"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkID("destinationId", a.DestinationID); err != nil {
-					return nil, err
-				}
-				if a.Track == nil || *a.Track < 0 || *a.Track > 63 {
-					return nil, argErr("track must be 0 to 63")
-				}
-				if a.Muted == nil && a.Gain == nil {
-					return nil, argErr("give muted, gain or both")
-				}
-				if a.Gain != nil && (*a.Gain <= 0 || *a.Gain > 8) {
-					return nil, argErr("gain must be above 0 and at most 8")
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = fmt.Sprintf("destination %d track %d", a.DestinationID, *a.Track)
-				v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/tracks/"+strconv.Itoa(*a.Track)+"/gain"), q,
-					trackGainBody{Muted: a.Muted, Gain: a.Gain})
-				if err != nil {
-					return nil, err
-				}
-				// The route answers with the whole destination row as well as
-				// how the level was applied; the agent needs the second.
-				if m, ok := v.(map[string]any); ok {
-					delete(m, "destination")
-				}
-				return c.result(v, false)
-			},
+			run:      runSetTrackLevel,
 		},
 		{
 			name: "apply_routing_preset", title: "Apply a routing preset", tier: mcpWrite, destructive: true,
@@ -1207,33 +755,7 @@ func mcpCatalogue() []mcpTool {
 			description: "Turn recording on or off. Turning it off ends the recording in progress, so that needs confirm:true; without it, answers with the recorder's state.",
 			props:       map[string]any{"enabled": map[string]any{"type": "boolean"}, "confirm": schemaConfirm},
 			required:    []string{"enabled"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Enabled *bool `json:"enabled"`
-					Confirm bool  `json:"confirm"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if a.Enabled == nil {
-					return nil, argErr("enabled is required")
-				}
-				c.target = "recording"
-				c.stopping = !*a.Enabled
-				if !*a.Enabled && !a.Confirm {
-					st, err := c.call(http.MethodGet, "/recording", nil, nil)
-					if err != nil {
-						return nil, err
-					}
-					return c.refusal("Not done: turning recording off ends the recording in progress. "+
-						"Confirm with the user, then call set_recording again with confirm:true.", map[string]any{"recording": st})
-				}
-				v, err := c.call(http.MethodPost, "/recording", nil, map[string]bool{"enabled": *a.Enabled})
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:         runSetRecording,
 		},
 		{
 			name: "switch_failover_source", title: "Switch failover input", tier: mcpWrite,
@@ -1243,30 +765,7 @@ func mcpCatalogue() []mcpTool {
 				"input":  map[string]any{"type": "string", "enum": []string{"primary", "backup", "slate", "playlist", "auto"}},
 			},
 			required: []string{"input"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source *int64 `json:"source"`
-					Input  string `json:"input"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				switch a.Input {
-				case "primary", "backup", "slate", "playlist", "auto":
-				default:
-					return nil, argErr("input must be primary, backup, slate, playlist or auto")
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = "failover: " + a.Input
-				v, err := c.call(http.MethodPost, "/failover/source", q, map[string]string{"source": a.Input})
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:      runSwitchFailoverSource,
 		},
 		{
 			name: "create_clip", title: "Create a clip", tier: mcpWrite,
@@ -1276,28 +775,7 @@ func mcpCatalogue() []mcpTool {
 				"seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 3600},
 			},
 			required: []string{"seconds"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					Source  *int64 `json:"source"`
-					Seconds int    `json:"seconds"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if a.Seconds < 1 || a.Seconds > 3600 {
-					return nil, argErr("seconds must be 1 to 3600")
-				}
-				q, err := sourceQuery(a.Source)
-				if err != nil {
-					return nil, err
-				}
-				c.target = fmt.Sprintf("clip of %ds", a.Seconds)
-				v, err := c.call(http.MethodPost, "/clips", q, map[string]int{"seconds": a.Seconds})
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:      runCreateClip,
 		},
 		{
 			name: "start_poll", title: "Start a chat poll", tier: mcpWrite,
@@ -1325,42 +803,7 @@ func mcpCatalogue() []mcpTool {
 				"confirm": schemaConfirm,
 			},
 			required: []string{"pollId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				var a struct {
-					PollID  int64 `json:"pollId"`
-					Confirm bool  `json:"confirm"`
-				}
-				if err := decodeArgs(raw, &a); err != nil {
-					return nil, err
-				}
-				if err := checkID("pollId", a.PollID); err != nil {
-					return nil, err
-				}
-				c.target = fmt.Sprintf("poll %d", a.PollID)
-				if !a.Confirm {
-					// The preview is a READ of GET /polls, which writes nothing
-					// and so is not audited: the poll as it stands, if it is the
-					// running one, so the user sees which question ends.
-					v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {"1"}}, nil)
-					if err != nil {
-						return nil, err
-					}
-					var running any
-					if cur, ok := v.(map[string]any)["current"].(map[string]any); ok {
-						if id, ok := jsonInt(cur["id"]); ok && id == a.PollID {
-							running = pick(cur, "id", "question", "options", "total", "state", "endsAt")
-						}
-					}
-					return c.refusal("Not done: ending this poll closes it now and posts its result into every "+
-						"connected chat as the streamer. Show the user which poll this is, then call end_poll "+
-						"again with confirm:true.", map[string]any{"pollId": a.PollID, "running": running})
-				}
-				v, err := c.call(http.MethodPost, fmt.Sprintf("/polls/%d/end", a.PollID), nil, nil)
-				if err != nil {
-					return nil, err
-				}
-				return c.result(v, false)
-			},
+			run:      runEndPoll,
 		},
 		{
 			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite, destructive: true,
@@ -1382,6 +825,641 @@ func mcpCatalogue() []mcpTool {
 			run:      runSchedule,
 		},
 	}
+}
+
+// runGetStatus is the get_status tool.
+func runGetStatus(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source *int64 `json:"source"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	st, err := c.call(http.MethodGet, routeStatus, q, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := pick(st, "ingest", "recorder", "failover", "silence", "source", "loudness", "clips", "relay")
+	var dests []any
+	for _, d := range asList(st, "destinations") {
+		dests = append(dests, destHealth(d))
+	}
+	out["destinations"] = dests
+	return c.result(out, false)
+}
+
+// runListDestinations is the list_destinations tool.
+func runListDestinations(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source *int64 `json:"source"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := c.call(http.MethodGet, "/destinations", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	st, err := c.call(http.MethodGet, routeStatus, q, nil)
+	if err != nil {
+		return nil, err
+	}
+	health := healthByID(st)
+	out := []any{}
+	for _, d := range destinationRows(rows) {
+		sum := destSummary(d)
+		if !onSource(sum, a.Source) {
+			continue
+		}
+		if id, ok := jsonInt(sum["id"]); ok {
+			if h, ok := health[id]; ok {
+				sum["health"] = h
+			}
+		}
+		out = append(out, sum)
+	}
+	return c.result(map[string]any{"destinations": out}, false)
+}
+
+// runGetDestination is the get_destination tool.
+func runGetDestination(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		DestinationID int64  `json:"destinationId"`
+		Source        *int64 `json:"source"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkID("destinationId", a.DestinationID); err != nil {
+		return nil, err
+	}
+	d, err := c.getDestination(a.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	out := destSummary(d)
+	for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience", "delaySeconds") {
+		out[k] = v
+	}
+	src := a.Source
+	if src == nil {
+		if sid, ok := jsonInt(out["sourceId"]); ok {
+			src = &sid
+		}
+	}
+	q, err := sourceQuery(src)
+	if err != nil {
+		return nil, err
+	}
+	st, err := c.call(http.MethodGet, routeStatus, q, nil)
+	if err != nil {
+		return nil, err
+	}
+	if h, ok := healthByID(st)[a.DestinationID]; ok {
+		out["health"] = h
+	}
+	return c.result(out, false)
+}
+
+// runListSources is the list_sources tool.
+func runListSources(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	if err := decodeArgs(raw, &struct{}{}); err != nil {
+		return nil, err
+	}
+	v, err := c.call(http.MethodGet, "/sources", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runListRoutingPresets is the list_routing_presets tool.
+func runListRoutingPresets(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	if err := decodeArgs(raw, &struct{}{}); err != nil {
+		return nil, err
+	}
+	v, err := c.call(http.MethodGet, "/routing/presets", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runGetLevels is the get_levels tool.
+func runGetLevels(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source *int64 `json:"source"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	v, err := c.call(http.MethodGet, "/levels", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runListRecordings is the list_recordings tool.
+func runListRecordings(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	if err := decodeArgs(raw, &struct{}{}); err != nil {
+		return nil, err
+	}
+	v, err := c.call(http.MethodGet, "/recordings", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runGetPolls is the get_polls tool.
+func runGetPolls(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Limit int `json:"limit"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if a.Limit == 0 {
+		a.Limit = 10
+	}
+	if a.Limit < 1 || a.Limit > 100 {
+		return nil, argErr("limit must be 1 to 100")
+	}
+	v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runGetTimeline is the get_timeline tool.
+func runGetTimeline(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Limit       int    `json:"limit"`
+		MinSeverity string `json:"minSeverity"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if a.Limit == 0 {
+		a.Limit = 50
+	}
+	if a.Limit < 1 || a.Limit > 500 {
+		return nil, argErr("limit must be 1 to 500")
+	}
+	rank := map[string]int{"": 0, "info": 0, "warning": 1, "critical": 2}
+	floor, ok := rank[a.MinSeverity]
+	if !ok {
+		return nil, argErr("minSeverity must be info, warning or critical")
+	}
+	v, err := c.call(http.MethodGet, "/timeline", url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	rows := []any{}
+	for _, row := range asList(v, "") {
+		sev, _ := pick(row, "severity")["severity"].(string)
+		if rank[sev] >= floor {
+			rows = append(rows, row)
+		}
+	}
+	return c.result(map[string]any{"events": rows}, false)
+}
+
+// runGetStopImpact is the get_stop_impact tool.
+func runGetStopImpact(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		DestinationID int64  `json:"destinationId"`
+		Source        *int64 `json:"source"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	v, err := c.stopImpact(a.DestinationID, a.Source)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runSearchTranscripts is the search_transcripts tool.
+func runSearchTranscripts(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Query       string `json:"query"`
+		Limit       int    `json:"limit"`
+		RecordingID int64  `json:"recordingId"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkText("query", a.Query, 1, 200); err != nil {
+		return nil, err
+	}
+	if a.Limit == 0 {
+		a.Limit = 20
+	}
+	if a.Limit < 1 || a.Limit > 50 {
+		return nil, argErr("limit must be 1 to 50")
+	}
+	q := url.Values{"q": {a.Query}, "limit": {strconv.Itoa(a.Limit)}}
+	if a.RecordingID != 0 {
+		if err := checkID("recordingId", a.RecordingID); err != nil {
+			return nil, err
+		}
+		q.Set("recordingId", strconv.FormatInt(a.RecordingID, 10))
+	}
+	v, err := c.call(http.MethodGet, "/library/search", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, true)
+}
+
+// runSearchChat is the search_chat tool.
+func runSearchChat(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Query    string `json:"query"`
+		Platform string `json:"platform"`
+		Limit    int    `json:"limit"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkText("query", a.Query, 1, 200); err != nil {
+		return nil, err
+	}
+	if a.Platform != "" && !platformName.MatchString(a.Platform) {
+		return nil, argErr("platform must be a platform name such as twitch")
+	}
+	if a.Limit == 0 {
+		a.Limit = 50
+	}
+	if a.Limit < 1 || a.Limit > 100 {
+		return nil, argErr("limit must be 1 to 100")
+	}
+	q := url.Values{"q": {a.Query}, "limit": {strconv.Itoa(a.Limit)}}
+	if a.Platform != "" {
+		q.Set("platform", a.Platform)
+	}
+	v, err := c.call(http.MethodGet, "/chat/search", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, true)
+}
+
+// runGetChatUser is the get_chat_user tool.
+func runGetChatUser(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Platform string `json:"platform"`
+		AuthorID string `json:"authorId"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if !platformName.MatchString(a.Platform) {
+		return nil, argErr("platform must be a platform name such as twitch")
+	}
+	if err := checkText("authorId", a.AuthorID, 1, 128); err != nil {
+		return nil, err
+	}
+	v, err := c.call(http.MethodGet, "/chat/users", url.Values{"platform": {a.Platform}, "authorId": {a.AuthorID}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, true)
+}
+
+// runStartDestination is the start_destination tool.
+func runStartDestination(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	return c.destAction(raw, "/start", false)
+}
+
+// runStopDestination is the stop_destination tool.
+func runStopDestination(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	return c.destAction(raw, "/stop", true)
+}
+
+// runGoLive is the go_live tool.
+func runGoLive(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source  *int64 `json:"source"`
+		Confirm bool   `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = "every destination"
+	if !a.Confirm {
+		rows, err := c.call(http.MethodGet, "/destinations", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		would := []any{}
+		for _, d := range destinationRows(rows) {
+			sum := pick(d, "id", "name", "platform", "enabled", "sourceId")
+			if !onSource(sum, a.Source) {
+				continue
+			}
+			would = append(would, sum)
+		}
+		return c.refusal("Not done: going live starts every one of these destinations. "+
+			"Show the list to the user, then call go_live again with confirm:true.", map[string]any{"destinations": would})
+	}
+	v, err := c.call(http.MethodPost, "/destinations/start-all", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runStopAllDestinations is the stop_all_destinations tool.
+func runStopAllDestinations(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source  *int64 `json:"source"`
+		Confirm bool   `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = "every destination"
+	if !a.Confirm {
+		impact, err := c.stopImpact(0, a.Source)
+		if err != nil {
+			return nil, err
+		}
+		return c.refusal("Not done: this stops every destination. Show the user this impact, "+
+			"then call stop_all_destinations again with confirm:true.", map[string]any{"stopImpact": impact})
+	}
+	impact, err := c.stopImpact(0, a.Source)
+	if err != nil {
+		return nil, err
+	}
+	// The REST route's own confirmation, which it requires of every
+	// caller; MCP passes it only after the agent has.
+	v, err := c.call(http.MethodPost, "/destinations/stop-all", q, map[string]bool{"confirm": true})
+	if err != nil {
+		return nil, err
+	}
+	return c.result(map[string]any{"stopImpact": impact, "result": v}, false)
+}
+
+// runDumpDestinationDelay is the dump_destination_delay tool.
+func runDumpDestinationDelay(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		DestinationID int64    `json:"destinationId"`
+		Source        *int64   `json:"source"`
+		Seconds       *float64 `json:"seconds"`
+		Confirm       bool     `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkID("destinationId", a.DestinationID); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = fmt.Sprintf("destination %d", a.DestinationID)
+	if !a.Confirm {
+		delays, err := c.delays(a.Source, a.DestinationID)
+		if err != nil {
+			return nil, err
+		}
+		return c.refusal("Not done: a dump drops the newest part of this destination's broadcast delay, which "+
+			"then never airs, and its delay stays shorter until it next starts. Show the user this delay, then "+
+			"call dump_destination_delay again with confirm:true.", map[string]any{"delay": delays})
+	}
+	body := map[string]any{}
+	if a.Seconds != nil {
+		body["seconds"] = *a.Seconds
+	}
+	v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/delay/dump"), q, body)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runDumpAllDelays is the dump_all_delays tool.
+func runDumpAllDelays(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source        *int64   `json:"source"`
+		Seconds       *float64 `json:"seconds"`
+		Confirm       bool     `json:"confirm"`
+		AllProgrammes bool     `json:"allProgrammes"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = "every delayed destination"
+	if !a.Confirm {
+		delays, err := c.delays(a.Source, 0)
+		if err != nil {
+			return nil, err
+		}
+		return c.refusal("Not done: this dumps every delayed destination. Show the user these delays, then "+
+			"call dump_all_delays again with confirm:true.", map[string]any{"delays": delays})
+	}
+	// The REST route's own confirmation, passed only after the agent's.
+	body := map[string]any{"confirm": true}
+	if a.Seconds != nil {
+		body["seconds"] = *a.Seconds
+	}
+	if a.Source == nil && a.AllProgrammes {
+		body["allProgrammes"] = true
+	}
+	v, err := c.call(http.MethodPost, "/destinations/delay/dump-all", q, body)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runSetTrackLevel is the set_track_level tool.
+func runSetTrackLevel(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		DestinationID int64    `json:"destinationId"`
+		Source        *int64   `json:"source"`
+		Track         *int     `json:"track"`
+		Muted         *bool    `json:"muted"`
+		Gain          *float64 `json:"gain"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkID("destinationId", a.DestinationID); err != nil {
+		return nil, err
+	}
+	if a.Track == nil || *a.Track < 0 || *a.Track > 63 {
+		return nil, argErr("track must be 0 to 63")
+	}
+	if a.Muted == nil && a.Gain == nil {
+		return nil, argErr("give muted, gain or both")
+	}
+	if a.Gain != nil && (*a.Gain <= 0 || *a.Gain > 8) {
+		return nil, argErr("gain must be above 0 and at most 8")
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = fmt.Sprintf("destination %d track %d", a.DestinationID, *a.Track)
+	v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/tracks/"+strconv.Itoa(*a.Track)+"/gain"), q,
+		trackGainBody{Muted: a.Muted, Gain: a.Gain})
+	if err != nil {
+		return nil, err
+	}
+	// The route answers with the whole destination row as well as
+	// how the level was applied; the agent needs the second.
+	if m, ok := v.(map[string]any); ok {
+		delete(m, "destination")
+	}
+	return c.result(v, false)
+}
+
+// runSetRecording is the set_recording tool.
+func runSetRecording(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Enabled *bool `json:"enabled"`
+		Confirm bool  `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if a.Enabled == nil {
+		return nil, argErr("enabled is required")
+	}
+	c.target = "recording"
+	c.stopping = !*a.Enabled
+	if !*a.Enabled && !a.Confirm {
+		st, err := c.call(http.MethodGet, "/recording", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return c.refusal("Not done: turning recording off ends the recording in progress. "+
+			"Confirm with the user, then call set_recording again with confirm:true.", map[string]any{"recording": st})
+	}
+	v, err := c.call(http.MethodPost, "/recording", nil, map[string]bool{"enabled": *a.Enabled})
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runSwitchFailoverSource is the switch_failover_source tool.
+func runSwitchFailoverSource(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source *int64 `json:"source"`
+		Input  string `json:"input"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	switch a.Input {
+	case "primary", "backup", "slate", "playlist", "auto":
+	default:
+		return nil, argErr("input must be primary, backup, slate, playlist or auto")
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = "failover: " + a.Input
+	v, err := c.call(http.MethodPost, "/failover/source", q, map[string]string{"source": a.Input})
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runCreateClip is the create_clip tool.
+func runCreateClip(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		Source  *int64 `json:"source"`
+		Seconds int    `json:"seconds"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if a.Seconds < 1 || a.Seconds > 3600 {
+		return nil, argErr("seconds must be 1 to 3600")
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = fmt.Sprintf("clip of %ds", a.Seconds)
+	v, err := c.call(http.MethodPost, "/clips", q, map[string]int{"seconds": a.Seconds})
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// runEndPoll is the end_poll tool.
+func runEndPoll(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		PollID  int64 `json:"pollId"`
+		Confirm bool  `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkID("pollId", a.PollID); err != nil {
+		return nil, err
+	}
+	c.target = fmt.Sprintf("poll %d", a.PollID)
+	if !a.Confirm {
+		// The preview is a READ of GET /polls, which writes nothing
+		// and so is not audited: the poll as it stands, if it is the
+		// running one, so the user sees which question ends.
+		v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {"1"}}, nil)
+		if err != nil {
+			return nil, err
+		}
+		var running any
+		if cur, ok := v.(map[string]any)["current"].(map[string]any); ok {
+			if id, ok := jsonInt(cur["id"]); ok && id == a.PollID {
+				running = pick(cur, "id", "question", "options", "total", "state", "endsAt")
+			}
+		}
+		return c.refusal("Not done: ending this poll closes it now and posts its result into every "+
+			"connected chat as the streamer. Show the user which poll this is, then call end_poll "+
+			"again with confirm:true.", map[string]any{"pollId": a.PollID, "running": running})
+	}
+	v, err := c.call(http.MethodPost, fmt.Sprintf("/polls/%d/end", a.PollID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
 }
 
 // runStartPoll validates locally so the preview shows exactly what would be

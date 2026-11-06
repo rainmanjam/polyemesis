@@ -51,65 +51,18 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 	if err != nil {
 		return in, err
 	}
-	if src != nil && src.CaptionTrack != nil {
-		in.track = *src.CaptionTrack
-	}
-	if src != nil {
-		in.policy = captions.TextPolicy{
-			Vocabulary: src.CaptionPolicy.Vocabulary,
-			Blocklist:  src.CaptionPolicy.Blocklist,
-		}
-	}
+	in.fromSource(src)
 	dests, err := e.store.ListDestinationsBySource(e.sourceID)
 	if err != nil {
 		return in, err
-	}
-	used := map[int64]bool{}
-	for _, d := range dests {
-		if d.Enabled && d.RenditionID != nil {
-			used[*d.RenditionID] = true
-		}
 	}
 	rends, err := e.store.ListRenditionsBySource(e.sourceID)
 	if err != nil {
 		return in, err
 	}
-	for _, r := range rends {
-		if r.CaptionBurn != db.CaptionBurnOff && used[r.ID] {
-			in.burns = append(in.burns, fmt.Sprintf("%d:%s", r.ID, r.CaptionBurn))
-		}
-	}
+	in.burns = captionBurns(dests, rends)
 	for _, d := range dests {
-		if !d.Enabled {
-			continue
-		}
-		mode := captions.Mode(d.CaptionMode)
-		if mode == captions.ModeOff || mode == "" {
-			continue
-		}
-		if !captions.Allowed(string(d.Platform), mode, e.facebookCaptions.Load()) {
-			continue
-		}
-		if mode == captions.ModeYouTubePOST {
-			// Without a URL for the current key there is nowhere to post, so the
-			// destination is not a caption target at all. db.SetDestinationEnabled
-			// already refuses to start one, so this is a URL lost mid-show.
-			u, err := e.store.CaptionIngestURL(d.ID, d.StreamKey)
-			if err != nil || u == "" {
-				continue
-			}
-			if in.posts == nil {
-				in.posts = map[int64]string{}
-			}
-			in.posts[d.ID] = u
-		}
-		// The delay polyemesis applies to the output, which the cue must wait
-		// for. A youtube_post destination's is 0: YouTube holds the delay, and its
-		// cues go at once, stamped with when the words were spoken (captionSink).
-		in.targets = append(in.targets, captions.CueTarget{
-			ID:    d.ID,
-			Delay: time.Duration(d.OutputDelaySeconds()) * time.Second,
-		})
+		e.addCaptionTarget(&in, d)
 	}
 	in.on = len(in.targets) > 0 || len(in.burns) > 0
 	sort.Strings(in.burns)
@@ -128,6 +81,74 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 		in.targets[i].Delay -= e.delayDumped(in.targets[i].ID)
 	}
 	return in, nil
+}
+
+// fromSource takes the captioner's track and text policy from the programme's
+// source row, when there is one.
+func (in *captionIntent) fromSource(src *db.Source) {
+	if src == nil {
+		return
+	}
+	if src.CaptionTrack != nil {
+		in.track = *src.CaptionTrack
+	}
+	in.policy = captions.TextPolicy{
+		Vocabulary: src.CaptionPolicy.Vocabulary,
+		Blocklist:  src.CaptionPolicy.Blocklist,
+	}
+}
+
+// captionBurns lists, as "id:position", the renditions that burn captions in
+// and that an enabled destination uses.
+func captionBurns(dests []*db.Destination, rends []*db.Rendition) []string {
+	used := map[int64]bool{}
+	for _, d := range dests {
+		if d.Enabled && d.RenditionID != nil {
+			used[*d.RenditionID] = true
+		}
+	}
+	var burns []string
+	for _, r := range rends {
+		if r.CaptionBurn != db.CaptionBurnOff && used[r.ID] {
+			burns = append(burns, fmt.Sprintf("%d:%s", r.ID, r.CaptionBurn))
+		}
+	}
+	return burns
+}
+
+// addCaptionTarget adds d to the intent's targets when it is enabled and asks
+// for a caption mode its platform accepts.
+func (e *Engine) addCaptionTarget(in *captionIntent, d *db.Destination) {
+	if !d.Enabled {
+		return
+	}
+	mode := captions.Mode(d.CaptionMode)
+	if mode == captions.ModeOff || mode == "" {
+		return
+	}
+	if !captions.Allowed(string(d.Platform), mode, e.facebookCaptions.Load()) {
+		return
+	}
+	if mode == captions.ModeYouTubePOST {
+		// Without a URL for the current key there is nowhere to post, so the
+		// destination is not a caption target at all. db.SetDestinationEnabled
+		// already refuses to start one, so this is a URL lost mid-show.
+		u, err := e.store.CaptionIngestURL(d.ID, d.StreamKey)
+		if err != nil || u == "" {
+			return
+		}
+		if in.posts == nil {
+			in.posts = map[int64]string{}
+		}
+		in.posts[d.ID] = u
+	}
+	// The delay polyemesis applies to the output, which the cue must wait
+	// for. A youtube_post destination's is 0: YouTube holds the delay, and its
+	// cues go at once, stamped with when the words were spoken (captionSink).
+	in.targets = append(in.targets, captions.CueTarget{
+		ID:    d.ID,
+		Delay: time.Duration(d.OutputDelaySeconds()) * time.Second,
+	})
 }
 
 // intentSig is the stable identity of an intent: the switch, the track and each

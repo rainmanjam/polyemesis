@@ -732,6 +732,99 @@ type broadcastPusher interface {
 	PushBroadcastSettings(ctx context.Context, clientID, accessToken string, s oauth.BroadcastSettings) (*oauth.MetadataResult, error)
 }
 
+// pushBroadcastHalf sends the broadcast settings where the platform has them,
+// merging the answer into res; a failure or an absent capability is recorded
+// on out as a warning or skipped fields.
+func pushBroadcastHalf(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken string,
+	bc oauth.BroadcastSettings, out *metadataOutcome, res *oauth.MetadataResult) {
+	// The broadcast settings, where the platform has them. YouTube is the only
+	// one today; Twitch has no equivalent and Kick's entire surface is three
+	// fields. A type assertion rather than a method on the shared interface,
+	// so a platform that never grows these does not carry a stub that returns
+	// "unsupported" for every operator who tries.
+	if bp, ok := pusher.(broadcastPusher); ok {
+		bres, err := bp.PushBroadcastSettings(ctx, clientID, accessToken, bc)
+		switch {
+		case err != nil:
+			// Reported, not fatal. The metadata write above may already
+			// have landed, and failing the whole row would send the
+			// operator back to redo work that took.
+			//
+			// Recorded on out, which is what makes the append at the end of
+			// this function load-bearing rather than decorative: it was an
+			// assignment, and it threw this away between recording it and
+			// showing it.
+			out.Warnings = append(out.Warnings, err.Error())
+			out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
+		case bres != nil:
+			appendMetadataResult(res, bres)
+		}
+	} else {
+		// Named rather than silently dropped: an operator who set a DVR
+		// toggle and saw nothing happen on Twitch deserves to know the
+		// platform has no such thing.
+		out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{
+			oauth.FieldScheduledStart, oauth.FieldContentDetails, oauth.FieldTags,
+		})
+	}
+}
+
+// pushComplianceHalf sends the stored compliance settings where the platform
+// has a compliance API, merging the answer (or why not) into res.
+func (s *Server) pushComplianceHalf(ctx context.Context, t metadataTarget, clientID string,
+	acct *db.PlatformAccount, res *oauth.MetadataResult) {
+	// The compliance write: the operator's stored privacy, COPPA declaration and
+	// content labels. This is the call the whole feature was missing -- the
+	// capability existed and was tested for a full release while nothing
+	// invoked it, so the settings were editable and unsendable at the same time.
+	//
+	// As[CompliancePusher] rather than a type assertion, and absence rather than an
+	// error: Kick has no compliance API, and a red row for a field the platform
+	// does not have teaches the operator to ignore red rows. Absent is still
+	// SAID, though -- see the else below.
+	if cp, ok := oauth.As[oauth.CompliancePusher](s.providers, t.Platform); ok {
+		cres, err := cp.PushCompliance(ctx, clientID, acct.AccessToken,
+			oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
+			t.Compliance)
+		switch {
+		case err != nil:
+			// Reported, not fatal, for the same reason the broadcast half is:
+			// the metadata write above may already have landed, and failing
+			// the whole row would send the operator back to redo work that
+			// took. Merged into res so it survives the assignments below.
+			res.Warnings = append(res.Warnings, err.Error())
+			res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+			s.log.Warn("compliance push failed", "platform", t.Platform,
+				"account", t.AccountName, "err", err)
+		case cres != nil:
+			appendMetadataResult(res, cres)
+		}
+	} else {
+		// Skipped with a reason, not failed. The platform genuinely has
+		// nowhere to put this, so attempting it would be a lie and colouring
+		// the row red would train the operator to ignore the colour -- but
+		// staying silent reproduces in miniature the exact defect this whole
+		// feature exists to end: a stored setting that goes nowhere and says
+		// nothing, leaving the operator expecting a declaration that will
+		// never be made.
+		res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"%s has no compliance API, so the compliance settings stored for this "+
+				"account were not sent.", t.Platform))
+	}
+}
+
+// appendMetadataResult merges a second call's answer into res: its fields and
+// warnings appended, and its target named when res has none.
+func appendMetadataResult(res, more *oauth.MetadataResult) {
+	res.Applied = append(res.Applied, more.Applied...)
+	res.Skipped = append(res.Skipped, more.Skipped...)
+	res.Warnings = append(res.Warnings, more.Warnings...)
+	if res.Target == "" {
+		res.Target = more.Target
+	}
+}
+
 // pushOne is one account's whole story: refresh the token, call the platform,
 // and turn whatever came back into a row a human can act on.
 func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t metadataTarget) metadataOutcome {
@@ -788,89 +881,12 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		}
 	}
 
-	// The broadcast settings, where the platform has them. YouTube is the only
-	// one today; Twitch has no equivalent and Kick's entire surface is three
-	// fields. A type assertion rather than a method on the shared interface,
-	// so a platform that never grows these does not carry a stub that returns
-	// "unsupported" for every operator who tries.
 	if !bc.Empty() {
-		if bp, ok := pusher.(broadcastPusher); ok {
-			bres, err := bp.PushBroadcastSettings(ctx, creds.ClientID, acct.AccessToken, bc)
-			switch {
-			case err != nil:
-				// Reported, not fatal. The metadata write above may already
-				// have landed, and failing the whole row would send the
-				// operator back to redo work that took.
-				//
-				// Recorded on out, which is what makes the append at the end of
-				// this function load-bearing rather than decorative: it was an
-				// assignment, and it threw this away between recording it and
-				// showing it.
-				out.Warnings = append(out.Warnings, err.Error())
-				out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
-			case bres != nil:
-				res.Applied = append(res.Applied, bres.Applied...)
-				res.Skipped = append(res.Skipped, bres.Skipped...)
-				res.Warnings = append(res.Warnings, bres.Warnings...)
-				if res.Target == "" {
-					res.Target = bres.Target
-				}
-			}
-		} else {
-			// Named rather than silently dropped: an operator who set a DVR
-			// toggle and saw nothing happen on Twitch deserves to know the
-			// platform has no such thing.
-			out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{
-				oauth.FieldScheduledStart, oauth.FieldContentDetails, oauth.FieldTags,
-			})
-		}
+		pushBroadcastHalf(ctx, pusher, creds.ClientID, acct.AccessToken, bc, &out, res)
 	}
 
-	// The compliance write: the operator's stored privacy, COPPA declaration and
-	// content labels. This is the call the whole feature was missing -- the
-	// capability existed and was tested for a full release while nothing
-	// invoked it, so the settings were editable and unsendable at the same time.
-	//
-	// As[CompliancePusher] rather than a type assertion, and absence rather than an
-	// error: Kick has no compliance API, and a red row for a field the platform
-	// does not have teaches the operator to ignore red rows. Absent is still
-	// SAID, though -- see the else below.
 	if !t.Compliance.Empty() {
-		if cp, ok := oauth.As[oauth.CompliancePusher](s.providers, t.Platform); ok {
-			cres, err := cp.PushCompliance(ctx, creds.ClientID, acct.AccessToken,
-				oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
-				t.Compliance)
-			switch {
-			case err != nil:
-				// Reported, not fatal, for the same reason the broadcast half is:
-				// the metadata write above may already have landed, and failing
-				// the whole row would send the operator back to redo work that
-				// took. Merged into res so it survives the assignments below.
-				res.Warnings = append(res.Warnings, err.Error())
-				res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
-				s.log.Warn("compliance push failed", "platform", t.Platform,
-					"account", t.AccountName, "err", err)
-			case cres != nil:
-				res.Applied = append(res.Applied, cres.Applied...)
-				res.Skipped = append(res.Skipped, cres.Skipped...)
-				res.Warnings = append(res.Warnings, cres.Warnings...)
-				if res.Target == "" {
-					res.Target = cres.Target
-				}
-			}
-		} else {
-			// Skipped with a reason, not failed. The platform genuinely has
-			// nowhere to put this, so attempting it would be a lie and colouring
-			// the row red would train the operator to ignore the colour -- but
-			// staying silent reproduces in miniature the exact defect this whole
-			// feature exists to end: a stored setting that goes nowhere and says
-			// nothing, leaving the operator expecting a declaration that will
-			// never be made.
-			res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
-			res.Warnings = append(res.Warnings, fmt.Sprintf(
-				"%s has no compliance API, so the compliance settings stored for this "+
-					"account were not sent.", t.Platform))
-		}
+		s.pushComplianceHalf(ctx, t, creds.ClientID, acct, res)
 	}
 
 	out.Applied = res.Applied

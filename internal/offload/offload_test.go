@@ -674,3 +674,41 @@ func TestPruneDropsEverythingGoneFromAConfirmedVolume(t *testing.T) {
 		}
 	}
 }
+
+// due decides, per known item, whether this pass attempts it: verified and
+// unchanged, stuck, or failed and still backing off are left alone; a verified
+// file that changed since is reset to pending and sent again.
+func TestDueSkipsSettledItemsAndResendsAChangedFile(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	s := &Service{now: func() time.Time { return now }}
+	cand := candidate{size: 100, mtime: now.Add(-time.Hour)}
+	cases := []struct {
+		name      string
+		it        db.OffloadItem
+		cand      candidate
+		want      bool
+		wantState string
+	}{
+		{"verified unchanged", db.OffloadItem{State: db.OffloadVerified, Bytes: 100, VerifiedAt: now}, cand, false, db.OffloadVerified},
+		{"verified, size changed", db.OffloadItem{State: db.OffloadVerified, Bytes: 99, VerifiedAt: now, Attempts: 3}, cand, true, db.OffloadPending},
+		{"verified, modified since", db.OffloadItem{State: db.OffloadVerified, Bytes: 100, VerifiedAt: now.Add(-2 * time.Hour)}, cand, true, db.OffloadPending},
+		{"stuck", db.OffloadItem{State: db.OffloadStuck}, cand, false, db.OffloadStuck},
+		{"failed, backing off", db.OffloadItem{State: db.OffloadFailed, NextAttemptAt: now.Add(time.Minute)}, cand, false, db.OffloadFailed},
+		{"failed, due", db.OffloadItem{State: db.OffloadFailed, NextAttemptAt: now.Add(-time.Minute)}, cand, true, db.OffloadFailed},
+		{"pending", db.OffloadItem{State: db.OffloadPending}, cand, true, db.OffloadPending},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			it := c.it
+			if got := s.due(&it, c.cand); got != c.want {
+				t.Errorf("due = %v, want %v", got, c.want)
+			}
+			if it.State != c.wantState {
+				t.Errorf("state = %v, want %v", it.State, c.wantState)
+			}
+			if c.wantState == db.OffloadPending && c.it.State == db.OffloadVerified && (it.Attempts != 0 || !it.NextAttemptAt.IsZero()) {
+				t.Errorf("a changed file kept its attempts: %+v", it)
+			}
+		})
+	}
+}

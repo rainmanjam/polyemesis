@@ -690,60 +690,9 @@ func (p Profile) Validate() error {
 
 	switch p.Mode {
 	case ModeSimple:
-		seen := map[int]bool{}
-		matched := false
-		for _, t := range p.Tracks {
-			if t.Track < 0 || t.Track >= MaxTracks {
-				probs = append(probs, fmt.Sprintf("track %d out of range (0..%d)", t.Track, MaxTracks-1))
-				continue
-			}
-			if seen[t.Track] {
-				probs = append(probs, fmt.Sprintf("duplicate entry for track %d", t.Track))
-			}
-			seen[t.Track] = true
-			if t.Gain < 0 || t.Gain > MaxGain {
-				probs = append(probs, fmt.Sprintf("track %d gain %.3f out of range (0..%.1f)", t.Track, t.Gain, MaxGain))
-			}
-			if t.Enabled && t.Gain > 0 {
-				matched = true
-			}
-		}
-		if !matched {
-			probs = append(probs, "no track is enabled with non-zero gain")
-		}
-
+		probs = append(probs, p.validateTracks()...)
 	case ModeMatrix:
-		type key struct{ t, c, o int }
-		seen := map[key]bool{}
-		matched := false
-		for _, c := range p.Matrix {
-			if c.Track < 0 || c.Track >= MaxTracks {
-				probs = append(probs, fmt.Sprintf("matrix cell track %d out of range (0..%d)", c.Track, MaxTracks-1))
-				continue
-			}
-			if c.Channel < 0 || c.Channel >= MaxChannels {
-				probs = append(probs, fmt.Sprintf("matrix cell track %d channel %d out of range (0..%d)", c.Track, c.Channel, MaxChannels-1))
-				continue
-			}
-			if c.Out < 0 || c.Out >= OutChannels {
-				probs = append(probs, fmt.Sprintf("matrix cell track %d channel %d has output %d (want 0 or 1)", c.Track, c.Channel, c.Out))
-				continue
-			}
-			k := key{c.Track, c.Channel, c.Out}
-			if seen[k] {
-				probs = append(probs, fmt.Sprintf("duplicate matrix cell track %d channel %d out %d", c.Track, c.Channel, c.Out))
-			}
-			seen[k] = true
-			if c.Gain < 0 || c.Gain > MaxGain {
-				probs = append(probs, fmt.Sprintf("matrix cell track %d channel %d gain %.3f out of range (0..%.1f)", c.Track, c.Channel, c.Gain, MaxGain))
-			}
-			if c.Gain > 0 {
-				matched = true
-			}
-		}
-		if !matched {
-			probs = append(probs, "matrix has no cell with non-zero gain")
-		}
+		probs = append(probs, p.validateMatrix()...)
 	}
 
 	probs = append(probs, p.validateOptional()...)
@@ -753,6 +702,76 @@ func (p Profile) Validate() error {
 		return &ValidationError{Problems: probs}
 	}
 	return nil
+}
+
+// validateTracks checks a simple-mode profile's track selections.
+func (p Profile) validateTracks() []string {
+	var probs []string
+	seen := map[int]bool{}
+	matched := false
+	for _, t := range p.Tracks {
+		if t.Track < 0 || t.Track >= MaxTracks {
+			probs = append(probs, fmt.Sprintf("track %d out of range (0..%d)", t.Track, MaxTracks-1))
+			continue
+		}
+		if seen[t.Track] {
+			probs = append(probs, fmt.Sprintf("duplicate entry for track %d", t.Track))
+		}
+		seen[t.Track] = true
+		if t.Gain < 0 || t.Gain > MaxGain {
+			probs = append(probs, fmt.Sprintf("track %d gain %.3f out of range (0..%.1f)", t.Track, t.Gain, MaxGain))
+		}
+		if t.Enabled && t.Gain > 0 {
+			matched = true
+		}
+	}
+	if !matched {
+		probs = append(probs, "no track is enabled with non-zero gain")
+	}
+	return probs
+}
+
+// validateMatrix checks a matrix-mode profile's cells.
+func (p Profile) validateMatrix() []string {
+	var probs []string
+	type key struct{ t, c, o int }
+	seen := map[key]bool{}
+	matched := false
+	for _, c := range p.Matrix {
+		if prob := cellRangeProblem(c); prob != "" {
+			probs = append(probs, prob)
+			continue
+		}
+		k := key{c.Track, c.Channel, c.Out}
+		if seen[k] {
+			probs = append(probs, fmt.Sprintf("duplicate matrix cell track %d channel %d out %d", c.Track, c.Channel, c.Out))
+		}
+		seen[k] = true
+		if c.Gain < 0 || c.Gain > MaxGain {
+			probs = append(probs, fmt.Sprintf("matrix cell track %d channel %d gain %.3f out of range (0..%.1f)", c.Track, c.Channel, c.Gain, MaxGain))
+		}
+		if c.Gain > 0 {
+			matched = true
+		}
+	}
+	if !matched {
+		probs = append(probs, "matrix has no cell with non-zero gain")
+	}
+	return probs
+}
+
+// cellRangeProblem is the first of a matrix cell's track, channel and output
+// that is out of range, as a problem, or "" when all three are in range.
+func cellRangeProblem(c Cell) string {
+	switch {
+	case c.Track < 0 || c.Track >= MaxTracks:
+		return fmt.Sprintf("matrix cell track %d out of range (0..%d)", c.Track, MaxTracks-1)
+	case c.Channel < 0 || c.Channel >= MaxChannels:
+		return fmt.Sprintf("matrix cell track %d channel %d out of range (0..%d)", c.Track, c.Channel, MaxChannels-1)
+	case c.Out < 0 || c.Out >= OutChannels:
+		return fmt.Sprintf("matrix cell track %d channel %d has output %d (want 0 or 1)", c.Track, c.Channel, c.Out)
+	}
+	return ""
 }
 
 // validateOptional checks the post-v1 fields. It is separate so that the shape

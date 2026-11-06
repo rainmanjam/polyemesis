@@ -666,57 +666,80 @@ func (s *Server) sweep(now time.Time) {
 	if s.stopped {
 		return
 	}
-	s.groups = slices.DeleteFunc(s.groups, func(g *group) bool {
-		g.links = slices.DeleteFunc(g.links, func(l *link) bool {
-			if now.Sub(l.lastSeen) <= s.linkTimeout {
-				return false
-			}
-			delete(s.links, l.addr)
-			s.log.Info("srtla link timed out", "peer", l.addr.String(),
-				"upstreamLocal", g.up.LocalAddr().String())
-			return true
-		})
-		if len(g.links) == 0 {
-			if g.emptySince.IsZero() {
-				g.emptySince = now
-			}
-			if now.Sub(g.emptySince) > s.groupTimeout {
-				s.log.Info("srtla group removed", "upstreamLocal", g.up.LocalAddr().String())
-				_ = g.up.Close()
-				return true
-			}
-		} else if l := s.links[g.lastActive]; l == nil || l.group != g {
-			// The last active link was just reaped; point non-ACK traffic at
-			// whichever remaining link was heard from most recently until data
-			// says otherwise.
-			best := g.links[0]
-			for _, l := range g.links[1:] {
-				if l.lastSeen.After(best.lastSeen) {
-					best = l
-				}
-			}
-			g.lastActive = best.addr
-		}
-		if el := now.Sub(g.windowStart); el >= s.window {
-			var total uint64
-			for _, l := range g.links {
-				total += l.windowBytes
-			}
-			for _, l := range g.links {
-				l.kbps = float64(l.windowBytes) * 8 / 1000 / el.Seconds()
-				l.share = 0
-				if total > 0 {
-					l.share = float64(l.windowBytes) / float64(total)
-				}
-				l.windowBytes = 0
-			}
-			g.windowStart = now
-		}
-		return false
-	})
+	s.groups = slices.DeleteFunc(s.groups, func(g *group) bool { return s.sweepGroup(g, now) })
 	for ip, bk := range s.buckets {
 		if bk.refill(now, s.reg1Rate, s.reg1Burst); bk.tokens >= s.reg1Burst {
 			delete(s.buckets, ip)
 		}
+	}
+}
+
+// sweepGroup reaps g's silent links and closes its rate window, and reports
+// whether g has been empty long enough to be removed (its upstream is then
+// closed). s.mu is held.
+func (s *Server) sweepGroup(g *group, now time.Time) (remove bool) {
+	s.reapLinks(g, now)
+	if len(g.links) == 0 {
+		if g.emptySince.IsZero() {
+			g.emptySince = now
+		}
+		if now.Sub(g.emptySince) > s.groupTimeout {
+			s.log.Info("srtla group removed", "upstreamLocal", g.up.LocalAddr().String())
+			_ = g.up.Close()
+			return true
+		}
+	} else if l := s.links[g.lastActive]; l == nil || l.group != g {
+		// The last active link was just reaped; point non-ACK traffic at
+		// whichever remaining link was heard from most recently until data
+		// says otherwise.
+		g.lastActive = mostRecentLink(g.links).addr
+	}
+	if el := now.Sub(g.windowStart); el >= s.window {
+		closeRateWindow(g, el)
+		g.windowStart = now
+	}
+	return false
+}
+
+// reapLinks drops g's links that have been silent past the link timeout.
+// s.mu is held.
+func (s *Server) reapLinks(g *group, now time.Time) {
+	g.links = slices.DeleteFunc(g.links, func(l *link) bool {
+		if now.Sub(l.lastSeen) <= s.linkTimeout {
+			return false
+		}
+		delete(s.links, l.addr)
+		s.log.Info("srtla link timed out", "peer", l.addr.String(),
+			"upstreamLocal", g.up.LocalAddr().String())
+		return true
+	})
+}
+
+// mostRecentLink is the link heard from last; the first wins a tie. links is
+// not empty.
+func mostRecentLink(links []*link) *link {
+	best := links[0]
+	for _, l := range links[1:] {
+		if l.lastSeen.After(best.lastSeen) {
+			best = l
+		}
+	}
+	return best
+}
+
+// closeRateWindow turns each link's bytes over the elapsed window into its
+// rate and its share of the group, and starts the next window's count.
+func closeRateWindow(g *group, el time.Duration) {
+	var total uint64
+	for _, l := range g.links {
+		total += l.windowBytes
+	}
+	for _, l := range g.links {
+		l.kbps = float64(l.windowBytes) * 8 / 1000 / el.Seconds()
+		l.share = 0
+		if total > 0 {
+			l.share = float64(l.windowBytes) / float64(total)
+		}
+		l.windowBytes = 0
 	}
 }

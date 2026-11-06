@@ -493,105 +493,127 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 	snap.Storage = r.storageStates(now)
 
 	for _, e := range engines {
-		st := e.Status()
-		src := mqtt.SourceState{
-			ID:          e.SourceID(),
-			Name:        e.SourceName(),
-			Slug:        mqtt.Slug(e.SourceName()),
-			LossPercent: st.Relay.LossPercent,
-			Dests:       len(st.Destinations),
-			At:          now,
-		}
-		// Liveness from the relay's bitrate, not from process state: an RTMP
-		// ingest child sits in "running" for as long as it waits for a
-		// publisher, and an SRT source has no ingest process at all -- the
-		// shared listener feeds its hub directly. This was "RxBytes > 0 and the
-		// child is running", which read an SRT programme never live and an
-		// RTMP one live for ever after its first show (RxBytes is a total).
-		// IngestLive is the answer the dashboard, webhooks and alerts use.
-		src.Live = e.IngestLive()
-		if st.Ingest != nil {
-			src.IngestError = st.Ingest.LastError
-			src.UptimeSec = st.Ingest.UptimeSec
-			src.Restarts = st.Ingest.Restarts
-			src.BitrateKbps = st.Ingest.Progress.BitrateKbps
-		} else if b := e.Monitor().Bitrate(); len(b) > 0 {
-			// No child to report a bitrate: an SRT source. The relay's own
-			// 1 Hz sample, the figure the scrape publishes.
-			src.BitrateKbps = b[len(b)-1].Kbps
-		}
-		src.IngestMode = string(e.Settings().Ingest.Mode)
-		src.Recording = st.Recorder != nil && st.Recorder.State == supervisor.StateRunning
-		if st.Failover != nil {
-			src.Failover = string(st.Failover.Active)
-			src.FailoverReason = st.Failover.Reason
-			src.Degraded = st.Failover.Degraded
-		}
-
-		item := mqtt.SourceSnapshot{}
-		for _, d := range st.Destinations {
-			// The engine's own verdict, the one alerts and hooks judge,
-			// delay rule included. Nothing here decides what "up" means.
-			judged := d.AlertState()
-			running := judged.Running
-			if running {
-				src.DestsUp++
-			}
-			ds := mqtt.DestState{
-				ID: d.ID, Name: d.Name, Slug: mqtt.Slug(d.Name),
-				Platform: string(d.Platform), Kind: string(d.Kind),
-				Enabled: judged.Enabled, Running: running,
-				// Scrubbed HERE and not in Status (#160). Everything else on
-				// this topic tree was already covered -- SourceState.IngestError
-				// comes from supervisor Status.LastError, which Process.scrub
-				// has already put through the ingest's exact secret set -- and
-				// this one field arrived from the engine untouched. Same
-				// retained topic, so the same rule has to hold: a retained
-				// message outlives the process and is redelivered to every
-				// future subscriber, which makes a credential landing here
-				// unfixable by rotation.
-				Error:     e.ScrubDestinationText(d.ID, d.Error),
-				Rendition: d.RenditionName, At: now,
-			}
-			// The classified failure. The line is scrubbed by the supervisor
-			// already and scrubbed again here, for Error's reason above: it is
-			// FFmpeg stderr, and this topic is retained.
-			if r := d.Reason; r != nil {
-				ds.Cause, ds.Held = string(r.Cause), r.Held
-				ds.CauseDetail = e.ScrubDestinationText(d.ID, r.Line)
-			}
-			if d.Process != nil {
-				ds.BitrateKbps = d.Process.Progress.BitrateKbps
-				ds.UptimeSec = d.Process.UptimeSec
-				ds.Restarts = d.Process.Restarts
-			}
-			item.Dests = append(item.Dests, ds)
-		}
-		for _, rd := range st.Renditions {
-			rs := mqtt.RenditionState{
-				ID: rd.ID, Name: rd.Name, Slug: mqtt.Slug(rd.Name),
-				Consumers: rd.Consumers, Width: rd.Width, Height: rd.Height,
-				FPS: rd.FPS, Codec: rd.Codec, Encoder: string(rd.Encoder),
-				Error: rd.Error, At: now,
-			}
-			if rd.Process != nil {
-				rs.Running = rd.Process.State == supervisor.StateRunning
-				rs.BitrateKbps = rd.Process.Progress.BitrateKbps
-			}
-			item.Renditions = append(item.Renditions, rs)
-		}
-
-		if src.Live {
+		item := mqttSourceSnapshot(e, now)
+		if item.State.Live {
 			snap.Host.SourcesLive++
 		}
-		snap.Host.Dests += src.Dests
-		snap.Host.DestsUp += src.DestsUp
-
-		item.State = src
+		snap.Host.Dests += item.State.Dests
+		snap.Host.DestsUp += item.State.DestsUp
 		snap.Sources = append(snap.Sources, item)
 	}
 	snap.Audience = r.audience.state()
 	return snap
+}
+
+// mqttSourceSnapshot is one engine's source, destinations and renditions.
+func mqttSourceSnapshot(e mqttEngine, now time.Time) mqtt.SourceSnapshot {
+	st := e.Status()
+	src := mqttSourceState(e, st, now)
+	item := mqtt.SourceSnapshot{}
+	for _, d := range st.Destinations {
+		ds := mqttDestState(e, d, now)
+		if ds.Running {
+			src.DestsUp++
+		}
+		item.Dests = append(item.Dests, ds)
+	}
+	for _, rd := range st.Renditions {
+		item.Renditions = append(item.Renditions, mqttRenditionState(rd, now))
+	}
+	item.State = src
+	return item
+}
+
+// mqttSourceState is one engine's source row, its destinations not yet
+// counted up.
+func mqttSourceState(e mqttEngine, st engine.Status, now time.Time) mqtt.SourceState {
+	src := mqtt.SourceState{
+		ID:          e.SourceID(),
+		Name:        e.SourceName(),
+		Slug:        mqtt.Slug(e.SourceName()),
+		LossPercent: st.Relay.LossPercent,
+		Dests:       len(st.Destinations),
+		At:          now,
+	}
+	// Liveness from the relay's bitrate, not from process state: an RTMP
+	// ingest child sits in "running" for as long as it waits for a
+	// publisher, and an SRT source has no ingest process at all -- the
+	// shared listener feeds its hub directly. This was "RxBytes > 0 and the
+	// child is running", which read an SRT programme never live and an
+	// RTMP one live for ever after its first show (RxBytes is a total).
+	// IngestLive is the answer the dashboard, webhooks and alerts use.
+	src.Live = e.IngestLive()
+	if st.Ingest != nil {
+		src.IngestError = st.Ingest.LastError
+		src.UptimeSec = st.Ingest.UptimeSec
+		src.Restarts = st.Ingest.Restarts
+		src.BitrateKbps = st.Ingest.Progress.BitrateKbps
+	} else if b := e.Monitor().Bitrate(); len(b) > 0 {
+		// No child to report a bitrate: an SRT source. The relay's own
+		// 1 Hz sample, the figure the scrape publishes.
+		src.BitrateKbps = b[len(b)-1].Kbps
+	}
+	src.IngestMode = string(e.Settings().Ingest.Mode)
+	src.Recording = st.Recorder != nil && st.Recorder.State == supervisor.StateRunning
+	if st.Failover != nil {
+		src.Failover = string(st.Failover.Active)
+		src.FailoverReason = st.Failover.Reason
+		src.Degraded = st.Failover.Degraded
+	}
+	return src
+}
+
+// mqttDestState is one destination's row. Nothing secret crosses here: see
+// snapshot.
+func mqttDestState(e mqttEngine, d engine.DestStatus, now time.Time) mqtt.DestState {
+	// The engine's own verdict, the one alerts and hooks judge,
+	// delay rule included. Nothing here decides what "up" means.
+	judged := d.AlertState()
+	running := judged.Running
+	ds := mqtt.DestState{
+		ID: d.ID, Name: d.Name, Slug: mqtt.Slug(d.Name),
+		Platform: string(d.Platform), Kind: string(d.Kind),
+		Enabled: judged.Enabled, Running: running,
+		// Scrubbed HERE and not in Status (#160). Everything else on
+		// this topic tree was already covered -- SourceState.IngestError
+		// comes from supervisor Status.LastError, which Process.scrub
+		// has already put through the ingest's exact secret set -- and
+		// this one field arrived from the engine untouched. Same
+		// retained topic, so the same rule has to hold: a retained
+		// message outlives the process and is redelivered to every
+		// future subscriber, which makes a credential landing here
+		// unfixable by rotation.
+		Error:     e.ScrubDestinationText(d.ID, d.Error),
+		Rendition: d.RenditionName, At: now,
+	}
+	// The classified failure. The line is scrubbed by the supervisor
+	// already and scrubbed again here, for Error's reason above: it is
+	// FFmpeg stderr, and this topic is retained.
+	if r := d.Reason; r != nil {
+		ds.Cause, ds.Held = string(r.Cause), r.Held
+		ds.CauseDetail = e.ScrubDestinationText(d.ID, r.Line)
+	}
+	if d.Process != nil {
+		ds.BitrateKbps = d.Process.Progress.BitrateKbps
+		ds.UptimeSec = d.Process.UptimeSec
+		ds.Restarts = d.Process.Restarts
+	}
+	return ds
+}
+
+// mqttRenditionState is one shared encode's row.
+func mqttRenditionState(rd engine.RenditionStatus, now time.Time) mqtt.RenditionState {
+	rs := mqtt.RenditionState{
+		ID: rd.ID, Name: rd.Name, Slug: mqtt.Slug(rd.Name),
+		Consumers: rd.Consumers, Width: rd.Width, Height: rd.Height,
+		FPS: rd.FPS, Codec: rd.Codec, Encoder: string(rd.Encoder),
+		Error: rd.Error, At: now,
+	}
+	if rd.Process != nil {
+		rs.Running = rd.Process.State == supervisor.StateRunning
+		rs.BitrateKbps = rd.Process.Progress.BitrateKbps
+	}
+	return rs
 }
 
 // mqttAudienceFeed hands the analytics sampler's picture to the MQTT runner.

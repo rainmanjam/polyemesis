@@ -308,5 +308,5 @@ func redactInPlace(s string) string {
 func principalVaryingResponse(w http.ResponseWriter) {
 	w.Header().Add("Vary", "Authorization")
 	w.Header().Add("Vary", "Cookie")
-	w.Header().Set(headerCacheControl, "private, no-store")
+	w.Header().Set("Cache-Control", "private, no-store")
 }

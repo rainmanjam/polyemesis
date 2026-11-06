@@ -291,8 +291,8 @@ func (s *Server) recordingCaptionPolicy(id int64) captions.TextPolicy {
 }
 
 func writeCaptionExport(w http.ResponseWriter, out captionExport, disposition string) {
-	w.Header().Set(headerContentType, out.contentType)
+	w.Header().Set("Content-Type", out.contentType)
 	w.Header().Set("Content-Disposition", disposition)
-	w.Header().Set(headerCacheControl, "no-store")
+	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(out.body)
 }

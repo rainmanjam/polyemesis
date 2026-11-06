@@ -211,34 +211,9 @@ func isOption(a string) bool { return len(a) > 1 && a[0] == '-' }
 func CheckExpertFileAccess(field string, argv []string) error {
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
-		if !isOption(a) {
-			return fmt.Errorf("%s: %q is not the value of any option, so FFmpeg would treat it as "+
-				"another output and create it as a file on the server. The destination's URL is "+
-				"its only output", field, a)
-		}
-		base := optionBase(a)
-		if why, ok := fileOptions[base]; ok {
-			return fmt.Errorf("%s: %s %s. Expert mode cannot touch files on the server", field, a, why)
-		}
-		if base == "-i" {
-			// Checked here and not only by the API: this walk also runs at
-			// spawn, and a stored -i reads any file or device into the output.
-			return fmt.Errorf("%s: -i adds an input, which can read a file or device on the "+
-				"server. The destination's input is the relay and cannot be changed here", field)
-		}
-		if ffmpegNestedOptions[base] {
-			return fmt.Errorf("%s: %s passes its own option list to another component, past "+
-				"every check on this page. Expert mode cannot accept it", field, a)
-		}
-		if ffmpegFileishOptions[base] {
-			return fmt.Errorf("%s: %s names a file, path, URL or log in FFmpeg's own help for it. "+
-				"Expert mode cannot touch files on the server", field, a)
-		}
-		boolean, known := optionKind(a)
-		if !known {
-			return fmt.Errorf("%s: %s is not an option this server's FFmpeg table knows, so it "+
-				"cannot tell whether the token after it is a value or another output. Check the "+
-				"spelling; expert mode refuses what it cannot classify", field, a)
+		boolean, err := checkExpertOption(field, a)
+		if err != nil {
+			return err
 		}
 		if boolean {
 			continue
@@ -247,34 +222,80 @@ func CheckExpertFileAccess(field string, argv []string) error {
 			return fmt.Errorf("%s: %s needs a value, and there is none after it", field, a)
 		}
 		i++
-		v := argv[i]
-		switch {
-		case base == "-f":
-			allowed, side := outputFormats, "output"
-			if strings.HasPrefix(field, "input") {
-				allowed, side = inputFormats, "input"
-			}
-			if !allowed[strings.ToLower(v)] {
-				return fmt.Errorf("%s: -f %s is not one of the %s formats expert mode allows; "+
-					"other formats and devices can write or read files on the server", field, v, side)
-			}
-		case base == "-apad":
-			// -apad hands its value to the apad filter as option text, where
-			// the /option= form loads a value from a file.
-			if fileValuedFilterOption.MatchString(v) {
-				return fmt.Errorf("%s: -apad %s loads a value from a file (the /option= form). "+
-					"Expert mode cannot touch files on the server", field, v)
-			}
-		case filterGraphFlags[base]:
-			if err := checkFilterGraph(v); err != nil {
-				return fmt.Errorf("%s: the filter graph after %s %v. Expert mode cannot touch "+
-					"files on the server", field, a, err)
-			}
-		case codecParamFlags[base]:
-			if key := codecParamOpensFile(v); key != "" {
-				return fmt.Errorf("%s: %s= in %s is not one of the encoder keys expert mode "+
-					"allows; keys outside that list can name a file on the server", field, key, a)
-			}
+		if err := checkExpertValue(field, a, argv[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkExpertOption refuses an argv token that is not an option, or is one
+// that opens a file or that the table cannot classify. boolean reports that
+// it takes no value.
+func checkExpertOption(field, a string) (boolean bool, err error) {
+	if !isOption(a) {
+		return false, fmt.Errorf("%s: %q is not the value of any option, so FFmpeg would treat it as "+
+			"another output and create it as a file on the server. The destination's URL is "+
+			"its only output", field, a)
+	}
+	base := optionBase(a)
+	if why, ok := fileOptions[base]; ok {
+		return false, fmt.Errorf("%s: %s %s. Expert mode cannot touch files on the server", field, a, why)
+	}
+	if base == "-i" {
+		// Checked here and not only by the API: this walk also runs at
+		// spawn, and a stored -i reads any file or device into the output.
+		return false, fmt.Errorf("%s: -i adds an input, which can read a file or device on the "+
+			"server. The destination's input is the relay and cannot be changed here", field)
+	}
+	if ffmpegNestedOptions[base] {
+		return false, fmt.Errorf("%s: %s passes its own option list to another component, past "+
+			"every check on this page. Expert mode cannot accept it", field, a)
+	}
+	if ffmpegFileishOptions[base] {
+		return false, fmt.Errorf("%s: %s names a file, path, URL or log in FFmpeg's own help for it. "+
+			"Expert mode cannot touch files on the server", field, a)
+	}
+	boolean, known := optionKind(a)
+	if !known {
+		return false, fmt.Errorf("%s: %s is not an option this server's FFmpeg table knows, so it "+
+			"cannot tell whether the token after it is a value or another output. Check the "+
+			"spelling; expert mode refuses what it cannot classify", field, a)
+	}
+	return boolean, nil
+}
+
+// checkExpertValue refuses the value v of option a when it would open a file:
+// a format outside the allowed list, or a filter graph, apad text or codec
+// parameter that loads one.
+func checkExpertValue(field, a, v string) error {
+	base := optionBase(a)
+	switch {
+	case base == "-f":
+		allowed, side := outputFormats, "output"
+		if strings.HasPrefix(field, "input") {
+			allowed, side = inputFormats, "input"
+		}
+		if !allowed[strings.ToLower(v)] {
+			return fmt.Errorf("%s: -f %s is not one of the %s formats expert mode allows; "+
+				"other formats and devices can write or read files on the server", field, v, side)
+		}
+	case base == "-apad":
+		// -apad hands its value to the apad filter as option text, where
+		// the /option= form loads a value from a file.
+		if fileValuedFilterOption.MatchString(v) {
+			return fmt.Errorf("%s: -apad %s loads a value from a file (the /option= form). "+
+				"Expert mode cannot touch files on the server", field, v)
+		}
+	case filterGraphFlags[base]:
+		if err := checkFilterGraph(v); err != nil {
+			return fmt.Errorf("%s: the filter graph after %s %v. Expert mode cannot touch "+
+				"files on the server", field, a, err)
+		}
+	case codecParamFlags[base]:
+		if key := codecParamOpensFile(v); key != "" {
+			return fmt.Errorf("%s: %s= in %s is not one of the encoder keys expert mode "+
+				"allows; keys outside that list can name a file on the server", field, key, a)
 		}
 	}
 	return nil

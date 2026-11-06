@@ -746,6 +746,72 @@ func (d Destination) Validate() error {
 	var probs []string
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
+	d.captionProblems(add)
+
+	d.xGoLiveProblems(add)
+
+	if strings.TrimSpace(d.Name) == "" {
+		add("name is required")
+	}
+	switch d.Kind {
+	case DestRTMP, DestSRT, DestFile, DestAudio:
+	default:
+		add("unknown destination kind %q", d.Kind)
+	}
+	if d.Platform != "" && !d.Platform.acceptsDestinations() {
+		add("unknown platform %q", d.Platform)
+	}
+	if d.AudioBitrate < 32 || d.AudioBitrate > 512 {
+		add("audio bitrate %d kbps out of range (32-512)", d.AudioBitrate)
+	}
+
+	d.targetProblems(add)
+
+	d.streamKeyProblems(add)
+
+	if err := d.Profile.Validate(); err != nil {
+		add("%v", err)
+	}
+
+	addEach(add, d.Transport.problems())
+	addEach(add, d.Resilience.problems())
+	if d.DelaySeconds < 0 || d.DelaySeconds > MaxDestDelaySeconds {
+		add("delay must be between 0 and %d seconds (15 minutes), got %d",
+			MaxDestDelaySeconds, d.DelaySeconds)
+	}
+	if d.DelayDumpSeconds < 0 || d.DelayDumpSeconds > MaxDestDelaySeconds {
+		add("dump seconds must be between 0 and %d, got %d", MaxDestDelaySeconds, d.DelayDumpSeconds)
+	}
+	addEach(add, d.Audio.problems(d.Kind, d.Profile))
+	// Refused at save time rather than at go-live. A compliance field that
+	// fails when the operator presses "go live" fails at the one moment they
+	// cannot stop to fix it.
+	addEach(add, d.Compliance.Problems())
+	// Every field readSafeDestination blanks or masks. See redaction_guard.go.
+	probs = append(probs, redactionPlaceholderProblems(
+		credentialField{"streamKey", d.StreamKey},
+		credentialField{"backupStreamKey", d.BackupStreamKey},
+		credentialField{"url", d.URL},
+		credentialField{"backupUrl", d.BackupURL},
+		credentialField{"extraInputArgs", d.ExtraInputArgs},
+		credentialField{"extraOutputArgs", d.ExtraOutputArgs},
+	)...)
+
+	if len(probs) > 0 {
+		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
+	}
+	return nil
+}
+
+// addEach records every problem in ps as it stands.
+func addEach(add problemAdder, ps []string) {
+	for _, p := range ps {
+		add("%s", p)
+	}
+}
+
+// captionProblems checks the caption mode against the platform and delay.
+func (d Destination) captionProblems(add problemAdder) {
 	// Captions: the mode must be one this build knows, the platform must accept
 	// it, and the YouTube HTTP POST path needs the 30 s or 60 s delay YouTube
 	// documents for it. "" and "off" need no check. facebook_sei is allowed
@@ -762,7 +828,10 @@ func (d Destination) Validate() error {
 			add("YouTube caption POST needs a 30 s or 60 s broadcast delay, not %d s", d.DelaySeconds)
 		}
 	}
+}
 
+// xGoLiveProblems checks the X go-live announcement and title settings.
+func (d Destination) xGoLiveProblems(add problemAdder) {
 	// The X go-live announcement: one of three choices, and only X acts on it.
 	if d.XGoLiveTweet != "" {
 		if !validXGoLiveTweet(d.XGoLiveTweet) {
@@ -780,22 +849,10 @@ func (d Destination) Validate() error {
 			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
 		}
 	}
+}
 
-	if strings.TrimSpace(d.Name) == "" {
-		add("name is required")
-	}
-	switch d.Kind {
-	case DestRTMP, DestSRT, DestFile, DestAudio:
-	default:
-		add("unknown destination kind %q", d.Kind)
-	}
-	if d.Platform != "" && !d.Platform.acceptsDestinations() {
-		add("unknown platform %q", d.Platform)
-	}
-	if d.AudioBitrate < 32 || d.AudioBitrate > 512 {
-		add("audio bitrate %d kbps out of range (32-512)", d.AudioBitrate)
-	}
-
+// targetProblems checks the URL or filename against the destination's kind.
+func (d Destination) targetProblems(add problemAdder) {
 	target := strings.TrimSpace(d.URL)
 	switch d.Kind {
 	case DestRTMP:
@@ -825,25 +882,34 @@ func (d Destination) Validate() error {
 			add("file destination must be a relative name inside the recordings directory")
 		}
 	case DestAudio:
-		// Two shapes, one kind: a live Icecast mount, or an audio file. The
-		// file form gets the same confinement DestFile gets, because "audio
-		// only" changes what is written, never where it may be written.
-		switch {
-		case target == "":
-			add("an Icecast URL or an output filename is required")
-		case strings.Contains(target, "://"):
-			if u, err := url.Parse(target); err != nil {
-				add("malformed audio destination URL: %v", err)
-			} else if u.Scheme != strings.TrimSuffix(IcecastScheme, "://") {
-				add("audio destination URL must start with %s (got %q)", IcecastScheme, u.Scheme)
-			} else if strings.Trim(u.Path, "/") == "" {
-				add("Icecast destination needs a mount point, e.g. %sHOST:8000/live.mp3", IcecastScheme)
-			}
-		case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
-			add("audio file destination must be a relative name inside the recordings directory")
-		}
+		audioTargetProblems(target, add)
 	}
+}
 
+// audioTargetProblems checks an audio destination's target. Two shapes, one
+// kind: a live Icecast mount, or an audio file. The file form gets the same
+// confinement DestFile gets, because "audio only" changes what is written,
+// never where it may be written.
+func audioTargetProblems(target string, add problemAdder) {
+	switch {
+	case target == "":
+		add("an Icecast URL or an output filename is required")
+	case strings.Contains(target, "://"):
+		if u, err := url.Parse(target); err != nil {
+			add("malformed audio destination URL: %v", err)
+		} else if u.Scheme != strings.TrimSuffix(IcecastScheme, "://") {
+			add("audio destination URL must start with %s (got %q)", IcecastScheme, u.Scheme)
+		} else if strings.Trim(u.Path, "/") == "" {
+			add("Icecast destination needs a mount point, e.g. %sHOST:8000/live.mp3", IcecastScheme)
+		}
+	case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
+		add("audio file destination must be a relative name inside the recordings directory")
+	}
+}
+
+// streamKeyProblems checks the stream keys are ones that can be carried and
+// sent exactly as stored.
+func (d Destination) streamKeyProblems(add problemAdder) {
 	// A STREAM KEY ON A KIND THAT CANNOT CARRY ONE IS REFUSED (#610).
 	//
 	// Retyping an existing RTMP destination to srt, file or audio left the key
@@ -942,47 +1008,6 @@ func (d Destination) Validate() error {
 				k.field, k.value[i], i)
 		}
 	}
-
-	if err := d.Profile.Validate(); err != nil {
-		add("%v", err)
-	}
-
-	for _, p := range d.Transport.problems() {
-		add("%s", p)
-	}
-	for _, p := range d.Resilience.problems() {
-		add("%s", p)
-	}
-	if d.DelaySeconds < 0 || d.DelaySeconds > MaxDestDelaySeconds {
-		add("delay must be between 0 and %d seconds (15 minutes), got %d",
-			MaxDestDelaySeconds, d.DelaySeconds)
-	}
-	if d.DelayDumpSeconds < 0 || d.DelayDumpSeconds > MaxDestDelaySeconds {
-		add("dump seconds must be between 0 and %d, got %d", MaxDestDelaySeconds, d.DelayDumpSeconds)
-	}
-	for _, p := range d.Audio.problems(d.Kind, d.Profile) {
-		add("%s", p)
-	}
-	// Refused at save time rather than at go-live. A compliance field that
-	// fails when the operator presses "go live" fails at the one moment they
-	// cannot stop to fix it.
-	for _, p := range d.Compliance.Problems() {
-		add("%s", p)
-	}
-	// Every field readSafeDestination blanks or masks. See redaction_guard.go.
-	probs = append(probs, redactionPlaceholderProblems(
-		credentialField{"streamKey", d.StreamKey},
-		credentialField{"backupStreamKey", d.BackupStreamKey},
-		credentialField{"url", d.URL},
-		credentialField{"backupUrl", d.BackupURL},
-		credentialField{"extraInputArgs", d.ExtraInputArgs},
-		credentialField{"extraOutputArgs", d.ExtraOutputArgs},
-	)...)
-
-	if len(probs) > 0 {
-		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
-	}
-	return nil
 }
 
 // ErrKeyUnreadable is the sentinel behind Destination.KeyUnreadable.

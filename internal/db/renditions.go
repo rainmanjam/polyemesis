@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -532,6 +533,52 @@ func (r Rendition) Validate() error {
 		add("name is required")
 	}
 
+	r.dimensionProblems(add)
+
+	if r.FPS < 0 || r.FPS > MaxRenditionFPS {
+		add("fps %d out of range (1-%d, or 0 to keep the source's)", r.FPS, MaxRenditionFPS)
+	}
+
+	if r.VideoBitrate < MinRenditionBitrate || r.VideoBitrate > MaxRenditionBitrate {
+		add("video bitrate %d kbps out of range (%d-%d)",
+			r.VideoBitrate, MinRenditionBitrate, MaxRenditionBitrate)
+	}
+
+	if !slices.Contains(KnownEncoders, r.Encoder) {
+		add("unknown encoder %q", r.Encoder)
+	}
+
+	if !presetTokenOK(r.Preset) {
+		add("preset %q must be a single word of letters, digits, '-', '_' or '.'", r.Preset)
+	}
+
+	if r.GOPSeconds < MinRenditionGOP || r.GOPSeconds > MaxRenditionGOP {
+		add("gop %.4gs out of range (%g-%g seconds)", r.GOPSeconds, MinRenditionGOP, MaxRenditionGOP)
+	}
+
+	r.rateControlProblems(add)
+
+	r.pictureProblems(add)
+
+	for _, p := range r.Overlay.problems(r.Width, r.Height) {
+		add("%s", p)
+	}
+	for _, p := range r.Text.problems(r.Width, r.Height) {
+		add("%s", p)
+	}
+	r.captionBurnProblems(add)
+
+	if len(probs) > 0 {
+		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
+	}
+	return nil
+}
+
+// problemAdder records one validation problem, formatted like fmt.Sprintf.
+type problemAdder func(f string, a ...any)
+
+// dimensionProblems checks the output width and height.
+func (r Rendition) dimensionProblems(add problemAdder) {
 	// 0 is the "keep source" sentinel on both axes and must stay legal.
 	for _, d := range []struct {
 		axis string
@@ -552,35 +599,10 @@ func (r Rendition) Validate() error {
 			add("%s %d must be an even number of pixels", d.axis, d.v)
 		}
 	}
+}
 
-	if r.FPS < 0 || r.FPS > MaxRenditionFPS {
-		add("fps %d out of range (1-%d, or 0 to keep the source's)", r.FPS, MaxRenditionFPS)
-	}
-
-	if r.VideoBitrate < MinRenditionBitrate || r.VideoBitrate > MaxRenditionBitrate {
-		add("video bitrate %d kbps out of range (%d-%d)",
-			r.VideoBitrate, MinRenditionBitrate, MaxRenditionBitrate)
-	}
-
-	known := false
-	for _, e := range KnownEncoders {
-		if r.Encoder == e {
-			known = true
-			break
-		}
-	}
-	if !known {
-		add("unknown encoder %q", r.Encoder)
-	}
-
-	if !presetTokenOK(r.Preset) {
-		add("preset %q must be a single word of letters, digits, '-', '_' or '.'", r.Preset)
-	}
-
-	if r.GOPSeconds < MinRenditionGOP || r.GOPSeconds > MaxRenditionGOP {
-		add("gop %.4gs out of range (%g-%g seconds)", r.GOPSeconds, MinRenditionGOP, MaxRenditionGOP)
-	}
-
+// rateControlProblems checks maxrate and bufsize against the target bitrate.
+func (r Rendition) rateControlProblems(add problemAdder) {
 	// RATE CONTROL. Zero on either is "derive it" and always legal; the checks
 	// below only apply to a value somebody actually set.
 	//
@@ -615,22 +637,17 @@ func (r Rendition) Validate() error {
 			add("bufsize %d kbps out of range (max %d)", r.BufsizeKbps, MaxRenditionBitrate*4)
 		}
 	}
+}
 
+// pictureProblems checks the aspect conversion, pad colour and deinterlace
+// settings.
+func (r Rendition) pictureProblems(add problemAdder) {
 	// An unknown mode is refused here rather than at start time, because the
 	// filter builder degrades it to a plain scale — which is a silently
 	// different picture, and the operator would have no way to tell that the
 	// mode they chose is not the one running.
-	if r.AspectMode != "" {
-		known := false
-		for _, m := range ffmpeg.AspectModes {
-			if string(m) == r.AspectMode {
-				known = true
-				break
-			}
-		}
-		if !known {
-			add("unknown aspect mode %q", r.AspectMode)
-		}
+	if r.AspectMode != "" && !slices.ContainsFunc(ffmpeg.AspectModes, func(m ffmpeg.AspectMode) bool { return string(m) == r.AspectMode }) {
+		add("unknown aspect mode %q", r.AspectMode)
 	}
 	// Aspect conversion resolves a mismatch between two known shapes. With one
 	// axis free the scale already preserves aspect and the mode would do
@@ -648,25 +665,13 @@ func (r Rendition) Validate() error {
 	// builder degrades an unrecognised mode to OFF, so the operator would get an
 	// interlaced picture from a rendition whose stored setting says otherwise,
 	// with nothing anywhere to tell them which one is running.
-	if r.Deinterlace != "" {
-		known := false
-		for _, m := range ffmpeg.DeinterlaceModes {
-			if string(m) == r.Deinterlace {
-				known = true
-				break
-			}
-		}
-		if !known {
-			add("unknown deinterlace mode %q", r.Deinterlace)
-		}
+	if r.Deinterlace != "" && !slices.ContainsFunc(ffmpeg.DeinterlaceModes, func(m ffmpeg.DeinterlaceMode) bool { return string(m) == r.Deinterlace }) {
+		add("unknown deinterlace mode %q", r.Deinterlace)
 	}
+}
 
-	for _, p := range r.Overlay.problems(r.Width, r.Height) {
-		add("%s", p)
-	}
-	for _, p := range r.Text.problems(r.Width, r.Height) {
-		add("%s", p)
-	}
+// captionBurnProblems checks the burned-in caption setting.
+func (r Rendition) captionBurnProblems(add problemAdder) {
 	// Burned-in captions are sized and placed against the output frame, so
 	// the frame has to be a number when the arguments are built, for the same
 	// reason the text needs it: with a free axis drawtext is never added.
@@ -676,11 +681,6 @@ func (r Rendition) Validate() error {
 		add("burned-in captions need both a width and a height on this rendition, " +
 			"because the captions are sized against the output picture")
 	}
-
-	if len(probs) > 0 {
-		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
-	}
-	return nil
 }
 
 // PresetDisclaimer is the exact wording the UI and the docs must show beside

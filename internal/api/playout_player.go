@@ -77,7 +77,7 @@ func (s *Server) beaconGate() *beaconGate {
 // credential the gate exists to check.
 func (s *Server) handlePlayoutBeacon(w http.ResponseWriter, r *http.Request) {
 	playoutVaryingResponse(w)
-	w.Header().Set(headerCacheControl, "no-store")
+	w.Header().Set("Cache-Control", "no-store")
 
 	switch access := s.authorizePlayout(r); access {
 	case playoutDenyChallenge:
@@ -291,7 +291,7 @@ func (s *Server) handlePlayoutOfflineClip(w http.ResponseWriter, r *http.Request
 	}
 	// Private: the answer depends on the credential, and a shared cache keyed
 	// on the bare URL is exactly what the Vary above is there to stop.
-	w.Header().Set(headerCacheControl, "private, max-age=300")
+	w.Header().Set("Cache-Control", "private, max-age=300")
 	// ServeContent answers Range, which is how a browser seeks and loops.
 	http.ServeContent(w, r, filepath.Base(path), st.ModTime(), f)
 }

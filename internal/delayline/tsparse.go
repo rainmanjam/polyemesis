@@ -250,47 +250,63 @@ func adtsFrames(es []byte) ([]audioFrame, bool) {
 func opusFrames(es []byte) ([]audioFrame, bool) {
 	var out []audioFrame
 	for off := 0; off < len(es); {
-		start := off
-		if off+2 > len(es) || es[off] != 0x7F || es[off+1]&0xE0 != 0xE0 {
-			return nil, false
-		}
-		flags := es[off+1]
-		off += 2
-		size := 0
-		for {
-			if off >= len(es) {
-				return nil, false
-			}
-			v := int(es[off])
-			off++
-			size += v
-			if v != 0xFF {
-				break
-			}
-		}
-		if flags&0x10 != 0 {
-			off += 2
-		}
-		if flags&0x08 != 0 {
-			off += 2
-		}
-		if flags&0x04 != 0 {
-			if off >= len(es) {
-				return nil, false
-			}
-			off += 1 + int(es[off])
-		}
-		if size < 1 || off+size > len(es) {
-			return nil, false
-		}
-		ticks, ok := opusTicks(es[off : off+size])
+		end, ticks, ok := opusFrameAt(es, off)
 		if !ok {
 			return nil, false
 		}
-		off += size
-		out = append(out, audioFrame{off: start, size: off - start, ticks: ticks})
+		out = append(out, audioFrame{off: off, size: end - off, ticks: ticks})
+		off = end
 	}
 	return out, len(out) > 0
+}
+
+// opusFrameAt reads the control header and access unit that start at off:
+// where they end and the access unit's duration.
+func opusFrameAt(es []byte, off int) (end int, ticks int64, ok bool) {
+	if off+2 > len(es) || es[off] != 0x7F || es[off+1]&0xE0 != 0xE0 {
+		return 0, 0, false
+	}
+	flags := es[off+1]
+	size, off, ok := opusAUSize(es, off+2)
+	if !ok {
+		return 0, 0, false
+	}
+	if flags&0x10 != 0 {
+		off += 2
+	}
+	if flags&0x08 != 0 {
+		off += 2
+	}
+	if flags&0x04 != 0 {
+		if off >= len(es) {
+			return 0, 0, false
+		}
+		off += 1 + int(es[off])
+	}
+	if size < 1 || off+size > len(es) {
+		return 0, 0, false
+	}
+	ticks, ok = opusTicks(es[off : off+size])
+	if !ok {
+		return 0, 0, false
+	}
+	return off + size, ticks, true
+}
+
+// opusAUSize reads a control header's au_size at off: bytes summed up to and
+// including the first that is not 0xFF. next is the byte after it.
+func opusAUSize(es []byte, off int) (size, next int, ok bool) {
+	for {
+		if off >= len(es) {
+			return 0, off, false
+		}
+		v := int(es[off])
+		off++
+		size += v
+		if v != 0xFF {
+			return size, off, true
+		}
+	}
 }
 
 // opusTicks is an Opus packet's duration at 90 kHz, from its TOC byte.
@@ -361,35 +377,9 @@ func packetizePES(pid uint16, pes []byte) []byte {
 // across packet boundaries, the PES header included. It reports whether it
 // found one.
 func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
-	var at []int // indices into held of the elementary-stream bytes, in order
-	hdr := -1    // PES header bytes still to pass; -1 before the PES start
-	for off := 0; off+mpegts.PacketSize <= len(held) && len(at) < nalScanLimit; off += mpegts.PacketSize {
-		p := held[off : off+mpegts.PacketSize]
-		if mpegts.PID(p) != vpid || !mpegts.HasPayload(p) {
-			continue
-		}
-		if mpegts.PUSI(p) {
-			h, complete := parsePES(p, nil)
-			if !complete {
-				// The header runs into the next video packet: read it across
-				// the two, as the resync did.
-				h, complete = parsePES(p, nextPayloadPacket(held, off+mpegts.PacketSize, vpid))
-			}
-			if !complete || !h.ok {
-				return false
-			}
-			hdr = h.hdrLen
-		}
-		if hdr < 0 {
-			continue
-		}
-		for i := off + mpegts.PayloadStart(p); i < off+mpegts.PacketSize; i++ {
-			if hdr > 0 {
-				hdr--
-				continue
-			}
-			at = append(at, i)
-		}
+	at, ok := heldESIndices(held, vpid)
+	if !ok {
+		return false
 	}
 	for i := 0; i+3 < len(at); i++ {
 		if held[at[i]] != 0 || held[at[i+1]] != 0 || held[at[i+2]] != 1 {
@@ -402,6 +392,58 @@ func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 		}
 	}
 	return false
+}
+
+// heldESIndices is the indices into held of the video PES's elementary-stream
+// bytes, in order, up to the scan limit. ok is false when the PES header
+// cannot be read.
+func heldESIndices(held []byte, vpid uint16) (at []int, ok bool) {
+	hdr := -1 // PES header bytes still to pass; -1 before the PES start
+	for off := 0; off+mpegts.PacketSize <= len(held) && len(at) < nalScanLimit; off += mpegts.PacketSize {
+		p := held[off : off+mpegts.PacketSize]
+		if mpegts.PID(p) != vpid || !mpegts.HasPayload(p) {
+			continue
+		}
+		if mpegts.PUSI(p) {
+			if hdr, ok = heldHeaderLen(held, off, vpid); !ok {
+				return nil, false
+			}
+		}
+		if hdr < 0 {
+			continue
+		}
+		at, hdr = appendPastHeader(at, off+mpegts.PayloadStart(p), off+mpegts.PacketSize, hdr)
+	}
+	return at, true
+}
+
+// appendPastHeader appends the indices from to to, less the first hdr of
+// them, which are PES header; it returns the header bytes still to pass.
+func appendPastHeader(at []int, from, to, hdr int) ([]int, int) {
+	for i := from; i < to; i++ {
+		if hdr > 0 {
+			hdr--
+			continue
+		}
+		at = append(at, i)
+	}
+	return at, hdr
+}
+
+// heldHeaderLen is the length of the PES header that starts in held's packet
+// at off.
+func heldHeaderLen(held []byte, off int, vpid uint16) (int, bool) {
+	p := held[off : off+mpegts.PacketSize]
+	h, complete := parsePES(p, nil)
+	if !complete {
+		// The header runs into the next video packet: read it across
+		// the two, as the resync did.
+		h, complete = parsePES(p, nextPayloadPacket(held, off+mpegts.PacketSize, vpid))
+	}
+	if !complete || !h.ok {
+		return 0, false
+	}
+	return h.hdrLen, true
 }
 
 // nextPayloadPacket is the first packet of pid with a payload in held from

@@ -121,7 +121,7 @@ func (s *Server) handleDownloadCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, "application/x-pem-file")
+	w.Header().Set("Content-Type", "application/x-pem-file")
 	w.Header().Set("Content-Disposition", `attachment; filename="polyemesis-ca.crt"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)

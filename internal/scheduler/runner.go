@@ -142,9 +142,7 @@ func (r *Runner) Tick(now time.Time) []Result {
 	var (
 		out     []Result
 		changed bool
-		all     []int64
-		allErr  error
-		allDone bool
+		all     allDestinations
 	)
 	for _, s := range rows {
 		s = s.Normalized()
@@ -155,135 +153,14 @@ func (r *Runner) Tick(now time.Time) []Result {
 		if !d.Fire && !d.Skip {
 			continue
 		}
-		res := Result{ID: s.ID, Name: s.Name, Action: s.Action, At: d.At, Reason: d.Reason}
-
-		if d.Skip {
-			// Recorded as handled without acting: this is the missed window,
-			// and the only thing worse than not starting is starting late.
-			res.Skipped = true
-			if err := r.mark(s.ID, d.At); err != nil {
-				res.Err = err.Error()
-			}
-			r.log.Warn("schedule window missed; not acting on it",
-				"schedule", s.Name, "occurrence", d.At.Format(time.RFC3339),
-				"lateBy", now.UTC().Sub(d.At).Round(time.Second).String())
-			out = append(out, res)
-			r.emit(res)
-			continue
-		}
-
-		// The playlist half. It must branch HERE, above the destination
-		// expansion: Enables() answers Action == ActionStart, so playlist.stop
-		// reaching the code below would disable every destination in the
-		// install.
-		if s.TargetsPlaylist() {
-			enable := s.Action == ActionPlaylistStart
-			if err := r.act.SetPlaylistEnabled(enable); err != nil {
-				// NOT marked handled: unlike a destination sweep there is no
-				// partial success to avoid re-applying, so the next sweep
-				// should try again while the occurrence is still inside its
-				// grace window.
-				res.Err = err.Error()
-				r.log.Warn("schedule cannot set the playlist",
-					"schedule", s.Name, "err", err)
-				out = append(out, res)
-				r.emit(res)
-				continue
-			}
-			// Without this the setting is written and nothing applies it: Tick
-			// only reconciles when something changed.
-			changed = true
-			res.Fired = true
-			if err := r.mark(s.ID, d.At); err != nil {
-				res.Err = err.Error()
-			}
-			// "target" rather than a playlist-specific key so one log query
-			// finds every schedule that fired, whatever it acted on. The
-			// destination branch below says `"target", "destinations"` for
-			// the same reason and carries the count separately.
-			r.log.Info("schedule fired",
-				"schedule", s.Name, "action", string(s.Action),
-				"target", "playlist", "occurrence", d.At.Format(time.RFC3339))
-			out = append(out, res)
-			r.emit(res)
-			continue
-		}
-
-		// AllDestinations, not an empty list, is what expands (app-council
-		// A54). Evaluate has already refused a destination schedule that has
-		// neither, so a row reaching here with an empty list and no flag acts
-		// on nothing -- which is the safe reading of a stop nobody aimed.
-		targets := s.DestinationIDs
-		if s.AllDestinations {
-			if !allDone {
-				all, allErr = r.act.ListDestinationIDs()
-				allDone = true
-			}
-			if allErr != nil {
-				// Not marked as handled: the occurrence is still inside its
-				// grace window, so the next sweep gets to try again.
-				res.Err = allErr.Error()
-				r.log.Warn("schedule cannot list destinations", "schedule", s.Name, "err", allErr)
-				out = append(out, res)
-				r.emit(res)
-				continue
-			}
-			targets = all
-		}
-
-		enabled := s.Enables()
-		var failed error
-		for _, id := range targets {
-			if err := r.act.SetDestinationEnabled(id, enabled); err != nil {
-				failed = err
-				r.log.Warn("schedule cannot set destination",
-					"schedule", s.Name, "destination", id, "err", err)
-				continue
-			}
-			changed = true
-		}
-
-		res.Fired = true
-		res.Targets = targets
-		if failed != nil {
-			res.Err = failed.Error()
-		}
-		// Marked handled even when a destination flip failed: retrying the
-		// whole occurrence on the next sweep would re-apply it to the ones that
-		// worked, and the failure is already logged and surfaced.
-		if err := r.mark(s.ID, d.At); err != nil && res.Err == "" {
-			res.Err = err.Error()
-		}
-		r.log.Info("schedule fired",
-			"schedule", s.Name, "action", string(s.Action),
-			"target", "destinations", "count", len(targets),
-			"occurrence", d.At.Format(time.RFC3339))
+		res, moved := r.handleOccurrence(s, d, now, &all)
+		changed = changed || moved
 		out = append(out, res)
 		r.emit(res)
 	}
 
 	if changed {
-		// #709. A schedule that fired, wrote its intent and could not reconcile
-		// has changed the database and not the running pipeline -- and nothing
-		// retries it, because Reconcile is event-driven with no ticker. The log
-		// line alone left /schedules reporting every occurrence as fired.
-		//
-		// The reason rides on EVERY result in this sweep, because the reconcile
-		// is one call for the whole batch: it is not knowable which of the
-		// schedules that fired took effect, and saying so on each is honest
-		// where attributing it to one would not be.
-		if err := r.act.Reconcile(); err != nil {
-			r.log.Error("a schedule fired but the pipeline was not reconciled; "+
-				"the stored intent and the running processes have diverged and "+
-				"nothing retries this", "err", err)
-			for i := range out {
-				if !out[i].Fired {
-					continue
-				}
-				out[i].ReconcileErr = "the schedule fired and was saved, but the running " +
-					"pipeline could not be updated to match it: " + err.Error()
-			}
-		}
+		r.reconcileFired(out)
 	}
 	if len(out) > 0 {
 		r.mu.Lock()
@@ -291,6 +168,162 @@ func (r *Runner) Tick(now time.Time) []Result {
 		r.mu.Unlock()
 	}
 	return out
+}
+
+// allDestinations is the install's destination list, read at most once per
+// sweep and only by a schedule that targets every destination.
+type allDestinations struct {
+	ids  []int64
+	err  error
+	done bool
+}
+
+// handleOccurrence handles one due occurrence: a missed window, the playlist,
+// or the destinations. It reports whether it changed anything a reconcile must
+// apply.
+func (r *Runner) handleOccurrence(s Schedule, d Decision, now time.Time, all *allDestinations) (Result, bool) {
+	res := Result{ID: s.ID, Name: s.Name, Action: s.Action, At: d.At, Reason: d.Reason}
+
+	if d.Skip {
+		// Recorded as handled without acting: this is the missed window,
+		// and the only thing worse than not starting is starting late.
+		res.Skipped = true
+		if err := r.mark(s.ID, d.At); err != nil {
+			res.Err = err.Error()
+		}
+		r.log.Warn("schedule window missed; not acting on it",
+			"schedule", s.Name, "occurrence", d.At.Format(time.RFC3339),
+			"lateBy", now.UTC().Sub(d.At).Round(time.Second).String())
+		return res, false
+	}
+
+	// The playlist half. It must branch HERE, above the destination
+	// expansion: Enables() answers Action == ActionStart, so playlist.stop
+	// reaching the code below would disable every destination in the
+	// install.
+	if s.TargetsPlaylist() {
+		return r.firePlaylist(s, d, res)
+	}
+	return r.fireDestinations(s, d, res, all)
+}
+
+// firePlaylist switches the playlist on or off for one occurrence.
+func (r *Runner) firePlaylist(s Schedule, d Decision, res Result) (Result, bool) {
+	enable := s.Action == ActionPlaylistStart
+	if err := r.act.SetPlaylistEnabled(enable); err != nil {
+		// NOT marked handled: unlike a destination sweep there is no
+		// partial success to avoid re-applying, so the next sweep
+		// should try again while the occurrence is still inside its
+		// grace window.
+		res.Err = err.Error()
+		r.log.Warn("schedule cannot set the playlist",
+			"schedule", s.Name, "err", err)
+		return res, false
+	}
+	res.Fired = true
+	if err := r.mark(s.ID, d.At); err != nil {
+		res.Err = err.Error()
+	}
+	// "target" rather than a playlist-specific key so one log query
+	// finds every schedule that fired, whatever it acted on. The
+	// destination branch below says `"target", "destinations"` for
+	// the same reason and carries the count separately.
+	r.log.Info("schedule fired",
+		"schedule", s.Name, "action", string(s.Action),
+		"target", "playlist", "occurrence", d.At.Format(time.RFC3339))
+	// Changed: without the reconcile this asks for, the setting is written
+	// and nothing applies it, since Tick only reconciles when something
+	// changed.
+	return res, true
+}
+
+// fireDestinations enables or disables a schedule's destinations for one
+// occurrence.
+func (r *Runner) fireDestinations(s Schedule, d Decision, res Result, all *allDestinations) (Result, bool) {
+	// AllDestinations, not an empty list, is what expands (app-council
+	// A54). Evaluate has already refused a destination schedule that has
+	// neither, so a row reaching here with an empty list and no flag acts
+	// on nothing -- which is the safe reading of a stop nobody aimed.
+	targets := s.DestinationIDs
+	if s.AllDestinations {
+		if !all.done {
+			all.ids, all.err = r.act.ListDestinationIDs()
+			all.done = true
+		}
+		if all.err != nil {
+			// Not marked as handled: the occurrence is still inside its
+			// grace window, so the next sweep gets to try again.
+			res.Err = all.err.Error()
+			r.log.Warn("schedule cannot list destinations", "schedule", s.Name, "err", all.err)
+			return res, false
+		}
+		targets = all.ids
+	}
+
+	changed, failed := r.setDestinations(s, targets)
+
+	res.Fired = true
+	res.Targets = targets
+	if failed != nil {
+		res.Err = failed.Error()
+	}
+	// Marked handled even when a destination flip failed: retrying the
+	// whole occurrence on the next sweep would re-apply it to the ones that
+	// worked, and the failure is already logged and surfaced.
+	if err := r.mark(s.ID, d.At); err != nil && res.Err == "" {
+		res.Err = err.Error()
+	}
+	r.log.Info("schedule fired",
+		"schedule", s.Name, "action", string(s.Action),
+		"target", "destinations", "count", len(targets),
+		"occurrence", d.At.Format(time.RFC3339))
+	return res, changed
+}
+
+// setDestinations applies the schedule's action to each target. It reports
+// whether any flip succeeded, and the last failure.
+func (r *Runner) setDestinations(s Schedule, targets []int64) (bool, error) {
+	enabled := s.Enables()
+	changed := false
+	var failed error
+	for _, id := range targets {
+		if err := r.act.SetDestinationEnabled(id, enabled); err != nil {
+			failed = err
+			r.log.Warn("schedule cannot set destination",
+				"schedule", s.Name, "destination", id, "err", err)
+			continue
+		}
+		changed = true
+	}
+	return changed, failed
+}
+
+// reconcileFired applies what this sweep's schedules wrote, and marks every
+// fired result when it could not.
+func (r *Runner) reconcileFired(out []Result) {
+	// #709. A schedule that fired, wrote its intent and could not reconcile
+	// has changed the database and not the running pipeline -- and nothing
+	// retries it, because Reconcile is event-driven with no ticker. The log
+	// line alone left /schedules reporting every occurrence as fired.
+	//
+	// The reason rides on EVERY result in this sweep, because the reconcile
+	// is one call for the whole batch: it is not knowable which of the
+	// schedules that fired took effect, and saying so on each is honest
+	// where attributing it to one would not be.
+	err := r.act.Reconcile()
+	if err == nil {
+		return
+	}
+	r.log.Error("a schedule fired but the pipeline was not reconciled; "+
+		"the stored intent and the running processes have diverged and "+
+		"nothing retries this", "err", err)
+	for i := range out {
+		if !out[i].Fired {
+			continue
+		}
+		out[i].ReconcileErr = "the schedule fired and was saved, but the running " +
+			"pipeline could not be updated to match it: " + err.Error()
+	}
 }
 
 // Last reports what the most recent sweep that did anything did, for a status

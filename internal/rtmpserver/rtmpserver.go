@@ -998,74 +998,94 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 		s.mu.Lock()
 		st := s.streams[key]
 		s.mu.Unlock()
-		if st != nil {
-			st.mu.Lock()
-			st.cacheSetup(msg)
-			// READINESS, ENFORCED MID-SESSION.
-			//
-			// Ready was checked once, at admission, and never again -- so an
-			// ingest child that died a second later left this loop dropping
-			// every message into an empty subscriber set for the rest of the
-			// session. The encoder stays green, the bytes go nowhere, and
-			// nothing reports a fault: the green-encoder-no-output failure that
-			// Ready exists to prevent, reached after Ready had already said yes.
-			//
-			// A grace first, because an empty set is ordinary and transient --
-			// the ingest child exits whenever its publisher does and is
-			// respawned on a 500ms-5s backoff, and a reconcile restarts it on
-			// any settings change. Only a sustained absence means nobody is
-			// coming.
-			//
-			// The policy call, stated plainly: the publisher is DROPPED rather
-			// than left running. RTMP carries no way to tell an encoder "keep
-			// sending, nobody is listening yet", so the alternatives were to
-			// stream into the void indefinitely or to disconnect and let the
-			// encoder retry into the readiness grace, which is built for exactly
-			// this. A disconnect is visible in the encoder and recoverable
-			// without anyone intervening; silence is neither.
-			if len(st.subs) == 0 {
-				if st.emptySince.IsZero() {
-					st.emptySince = time.Now()
-				} else if time.Since(st.emptySince) > subscriberGrace {
-					st.mu.Unlock()
-					s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
-						"component", logComponent, "for", subscriberGrace)
-					return nil
-				}
-			} else {
-				st.emptySince = time.Time{}
-			}
-			for sub := range st.subs {
-				// Non-blocking: a subscriber that cannot keep up is dropped
-				// rather than allowed to stall the publisher. One slow consumer
-				// must not become backpressure on the encoder, which has
-				// nowhere to put the frames it is still producing.
-				select {
-				case sub.ch <- msg:
-				default:
-					sub.dropped++
-					// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
-					//
-					// sub.dropped is otherwise reported ONLY in the deferred
-					// cleanup when a subscriber disconnects, so a run that is
-					// shedding messages for its whole life says nothing until
-					// teardown -- and by then the stream nobody could decode is
-					// gone. This is the counter that would have shown, in the
-					// first minute, that audio was being dropped.
-					// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
-					// "tell me about every drop" is 1, and dropped%1 is always
-					// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
-					// that logs NOTHING. That produced a clean "0 drops" during
-					// #674 which read as "the server dropped nothing" when it
-					// meant "the counter cannot fire". 1%N is 1 for every N>1,
-					// so the every-Nth behaviour is unchanged.
-					if shouldLogDrop(sub.dropped, dropLogEvery) {
-						s.log.Warn("rtmp subscriber dropping messages LIVE",
-							"component", logComponent, "dropped", sub.dropped)
-					}
-				}
-			}
-			st.mu.Unlock()
+		if st != nil && !s.fanOut(st, msg) {
+			return nil
+		}
+	}
+}
+
+// fanOut caches msg's setup and offers msg to every subscriber of st. It
+// reports false when the publisher is to be dropped because nothing has been
+// reading the stream for longer than subscriberGrace.
+func (s *Server) fanOut(st *stream, msg message.Message) bool {
+	st.mu.Lock()
+	st.cacheSetup(msg)
+	// READINESS, ENFORCED MID-SESSION.
+	//
+	// Ready was checked once, at admission, and never again -- so an
+	// ingest child that died a second later left this loop dropping
+	// every message into an empty subscriber set for the rest of the
+	// session. The encoder stays green, the bytes go nowhere, and
+	// nothing reports a fault: the green-encoder-no-output failure that
+	// Ready exists to prevent, reached after Ready had already said yes.
+	//
+	// A grace first, because an empty set is ordinary and transient --
+	// the ingest child exits whenever its publisher does and is
+	// respawned on a 500ms-5s backoff, and a reconcile restarts it on
+	// any settings change. Only a sustained absence means nobody is
+	// coming.
+	//
+	// The policy call, stated plainly: the publisher is DROPPED rather
+	// than left running. RTMP carries no way to tell an encoder "keep
+	// sending, nobody is listening yet", so the alternatives were to
+	// stream into the void indefinitely or to disconnect and let the
+	// encoder retry into the readiness grace, which is built for exactly
+	// this. A disconnect is visible in the encoder and recoverable
+	// without anyone intervening; silence is neither.
+	if st.unreadTooLong() {
+		st.mu.Unlock()
+		s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
+			"component", logComponent, "for", subscriberGrace)
+		return false
+	}
+	for sub := range st.subs {
+		s.offer(sub, msg)
+	}
+	st.mu.Unlock()
+	return true
+}
+
+// unreadTooLong tracks how long st has had no subscriber and reports whether
+// that has outlasted subscriberGrace. Caller holds st.mu.
+func (st *stream) unreadTooLong() bool {
+	if len(st.subs) != 0 {
+		st.emptySince = time.Time{}
+		return false
+	}
+	if st.emptySince.IsZero() {
+		st.emptySince = time.Now()
+		return false
+	}
+	return time.Since(st.emptySince) > subscriberGrace
+}
+
+// offer hands msg to sub without blocking. A subscriber that cannot keep up is
+// dropped rather than allowed to stall the publisher. One slow consumer must
+// not become backpressure on the encoder, which has nowhere to put the frames
+// it is still producing. Caller holds the stream's mu.
+func (s *Server) offer(sub *subscriber, msg message.Message) {
+	select {
+	case sub.ch <- msg:
+	default:
+		sub.dropped++
+		// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
+		//
+		// sub.dropped is otherwise reported ONLY in the deferred
+		// cleanup when a subscriber disconnects, so a run that is
+		// shedding messages for its whole life says nothing until
+		// teardown -- and by then the stream nobody could decode is
+		// gone. This is the counter that would have shown, in the
+		// first minute, that audio was being dropped.
+		// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
+		// "tell me about every drop" is 1, and dropped%1 is always
+		// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
+		// that logs NOTHING. That produced a clean "0 drops" during
+		// #674 which read as "the server dropped nothing" when it
+		// meant "the counter cannot fire". 1%N is 1 for every N>1,
+		// so the every-Nth behaviour is unchanged.
+		if shouldLogDrop(sub.dropped, dropLogEvery) {
+			s.log.Warn("rtmp subscriber dropping messages LIVE",
+				"component", logComponent, "dropped", sub.dropped)
 		}
 	}
 }
