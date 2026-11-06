@@ -1,6 +1,7 @@
 package clips
 
 import (
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"io"
 	"log/slog"
 	"net"
@@ -105,10 +106,10 @@ func TestCapturerWritesAPlayableClipFromTheRollingBuffer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
-		if len(data) < 3*tsPacketSize {
+		if len(data) < 3*mpegts.PacketSize {
 			t.Fatalf("clip is only %d bytes", len(data))
 		}
-		if data[0] != tsSyncByte || packetPID(data[:tsPacketSize]) != pidPAT {
+		if data[0] != mpegts.SyncByte || mpegts.PID(data[:mpegts.PacketSize]) != mpegts.PIDPAT {
 			t.Fatal("a clip must begin with a sync byte and the PAT")
 		}
 		if !clip.KeyframeAligned {

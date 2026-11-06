@@ -1,6 +1,9 @@
 package relay
 
-import "testing"
+import (
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
+	"testing"
+)
 
 // tsPkt describes one synthetic 188-byte transport packet. Building them by
 // hand keeps the loss arithmetic testable without an encoder in the loop.
@@ -13,8 +16,8 @@ type tsPkt struct {
 }
 
 func (p tsPkt) bytes() []byte {
-	b := make([]byte, tsPacketSize)
-	b[0] = tsSyncByte
+	b := make([]byte, mpegts.PacketSize)
+	b[0] = mpegts.SyncByte
 	b[1] = byte(p.pid>>8) & 0x1F
 	b[2] = byte(p.pid)
 	if p.errored {
@@ -25,7 +28,7 @@ func (p tsPkt) bytes() []byte {
 	switch {
 	case p.noPayload:
 		afc = 0x02
-		b[4] = tsPacketSize - 5
+		b[4] = mpegts.PacketSize - 5
 	case p.discont:
 		afc = 0x03
 		b[4] = 1
@@ -114,7 +117,7 @@ func TestContinuityCountsOnlyRealLoss(t *testing.T) {
 		},
 		{
 			name:       "the null PID is ignored however its counter moves",
-			pkts:       []tsPkt{{pid: tsNullPID, cc: 0}, {pid: tsNullPID, cc: 9}, {pid: tsNullPID, cc: 2}},
+			pkts:       []tsPkt{{pid: mpegts.NullPID, cc: 0}, {pid: mpegts.NullPID, cc: 9}, {pid: mpegts.NullPID, cc: 2}},
 			wantChecks: 0,
 		},
 		{
@@ -183,8 +186,8 @@ func TestContinuityIgnoresPayloadsThatAreNotTransportStream(t *testing.T) {
 	}{
 		{name: "empty datagram", dgram: nil},
 		{name: "shorter than one TS packet", dgram: make([]byte, 100)},
-		{name: "right length but no sync byte", dgram: make([]byte, tsPacketSize)},
-		{name: "sync byte in the wrong place", dgram: append([]byte{0x00, tsSyncByte}, make([]byte, tsPacketSize)...)},
+		{name: "right length but no sync byte", dgram: make([]byte, mpegts.PacketSize)},
+		{name: "sync byte in the wrong place", dgram: append([]byte{0x00, mpegts.SyncByte}, make([]byte, mpegts.PacketSize)...)},
 	}
 
 	for _, tt := range tests {
@@ -205,7 +208,7 @@ func TestContinuityIgnoresPayloadsThatAreNotTransportStream(t *testing.T) {
 func TestContinuityStopsAtLostPacketAlignment(t *testing.T) {
 	var c continuity
 	good := datagram(tsPkt{pid: videoPID, cc: 0}, tsPkt{pid: videoPID, cc: 1})
-	garbage := make([]byte, tsPacketSize)
+	garbage := make([]byte, mpegts.PacketSize)
 	trailing := datagram(tsPkt{pid: videoPID, cc: 2})
 
 	checks, breaks, lost := c.inspect(append(append(good, garbage...), trailing...))
@@ -219,7 +222,7 @@ func TestContinuityStopsAtLostPacketAlignment(t *testing.T) {
 // the end of the buffer.
 func TestContinuityIgnoresATrailingPartialPacket(t *testing.T) {
 	var c continuity
-	dgram := append(datagram(tsPkt{pid: videoPID, cc: 0}), tsSyncByte, 0x00, 0x00, 0x11)
+	dgram := append(datagram(tsPkt{pid: videoPID, cc: 0}), mpegts.SyncByte, 0x00, 0x00, 0x11)
 
 	checks, breaks, lost := c.inspect(dgram)
 
@@ -296,7 +299,7 @@ func BenchmarkContinuityInspectDatagram(b *testing.B) {
 	dgram := datagram(
 		tsPkt{pid: videoPID, cc: 0}, tsPkt{pid: videoPID, cc: 1}, tsPkt{pid: audioPID, cc: 0},
 		tsPkt{pid: videoPID, cc: 2}, tsPkt{pid: videoPID, cc: 3}, tsPkt{pid: audioPID, cc: 1},
-		tsPkt{pid: tsNullPID, cc: 0},
+		tsPkt{pid: mpegts.NullPID, cc: 0},
 	)
 
 	b.SetBytes(int64(len(dgram)))

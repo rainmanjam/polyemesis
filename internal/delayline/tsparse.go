@@ -1,15 +1,12 @@
 package delayline
 
+import "github.com/rainmanjam/polyemesis/internal/mpegts"
+
 // MPEG-TS, PES and audio-frame parsing for the dump (splice.go). Just enough
 // of each format to find a cut point, rewrite timestamps and trim an audio PES
 // at a frame boundary; nothing here decodes media.
 
 const (
-	tsPacketSize = 188
-	tsSyncByte   = 0x47
-	tsNullPID    = 0x1FFF
-	pidPAT       = 0x0000
-
 	// ptsModulus is the wrap of the 33-bit PTS, DTS and PCR base.
 	ptsModulus = int64(1) << 33
 )
@@ -23,39 +20,20 @@ const (
 )
 
 func tsAligned(d []byte) bool {
-	if len(d) == 0 || len(d)%tsPacketSize != 0 {
+	if len(d) == 0 || len(d)%mpegts.PacketSize != 0 {
 		return false
 	}
-	for off := 0; off < len(d); off += tsPacketSize {
-		if d[off] != tsSyncByte {
+	for off := 0; off < len(d); off += mpegts.PacketSize {
+		if d[off] != mpegts.SyncByte {
 			return false
 		}
 	}
 	return true
 }
 
-func pktPID(p []byte) uint16        { return uint16(p[1]&0x1F)<<8 | uint16(p[2]) }
-func pktPUSI(p []byte) bool         { return p[1]&0x40 != 0 }
-func pktHasPayload(p []byte) bool   { return p[3]&0x10 != 0 }
-func pktHasAF(p []byte) bool        { return p[3]&0x20 != 0 }
-func pktRandomAccess(p []byte) bool { return pktHasAF(p) && p[4] > 0 && p[5]&0x40 != 0 }
+func pktRandomAccess(p []byte) bool { return mpegts.HasAdaptation(p) && p[4] > 0 && p[5]&0x40 != 0 }
 
-// payloadStart is where the payload begins, or tsPacketSize when there is none.
-func payloadStart(p []byte) int {
-	if !pktHasPayload(p) {
-		return tsPacketSize
-	}
-	s := 4
-	if pktHasAF(p) {
-		s += 1 + int(p[4])
-	}
-	if s > tsPacketSize {
-		return tsPacketSize
-	}
-	return s
-}
-
-func payloadOf(p []byte) []byte { return p[payloadStart(p):] }
+func payloadOf(p []byte) []byte { return p[mpegts.PayloadStart(p):] }
 
 // pesHeader is a PES header located across one packet's payload or, when it
 // runs past it, the next packet's payload on the same PID too.
@@ -178,7 +156,7 @@ func writeTS(b []byte, v int64) {
 
 // pcrAt is where a packet's PCR is, or -1.
 func pcrAt(p []byte) int {
-	if !pktHasAF(p) || p[4] < 7 || p[5]&0x10 == 0 {
+	if !mpegts.HasAdaptation(p) || p[4] < 7 || p[5]&0x10 == 0 {
 		return -1
 	}
 	return 6
@@ -210,80 +188,27 @@ func ptsAfter(a, b int64) bool {
 	return d != 0 && d < ptsModulus/2
 }
 
-// sectionOf is the PSI section a packet starts, or nil.
-func sectionOf(p []byte) []byte {
-	if !pktPUSI(p) {
-		return nil
-	}
-	s := payloadStart(p)
-	if s >= tsPacketSize {
-		return nil
-	}
-	s += 1 + int(p[s])
-	if s >= tsPacketSize {
-		return nil
-	}
-	return p[s:]
-}
-
-func parsePAT(sec []byte) (uint16, bool) {
-	if len(sec) < 12 || sec[0] != 0x00 {
-		return 0, false
-	}
-	end := 3 + (int(sec[1]&0x0F)<<8 | int(sec[2]))
-	if end > len(sec) {
-		end = len(sec)
-	}
-	for off := 8; off+4 <= end-4; off += 4 {
-		if program := uint16(sec[off])<<8 | uint16(sec[off+1]); program == 0 {
-			continue
-		}
-		return uint16(sec[off+2]&0x1F)<<8 | uint16(sec[off+3]), true
-	}
-	return 0, false
-}
-
-// esInfo is one elementary stream of a PMT.
-type esInfo struct {
-	pid        uint16
-	streamType byte
-}
-
 // parsePMT returns the first video elementary stream, its codec, and every
 // elementary stream the PMT lists.
-func parsePMT(sec []byte) (uint16, videoCodec, []esInfo, bool) {
-	if len(sec) < 16 || sec[0] != 0x02 {
+func parsePMT(sec []byte) (uint16, videoCodec, []mpegts.Stream, bool) {
+	all, ok := mpegts.PMTStreams(sec)
+	if !ok {
 		return 0, codecNone, nil, false
 	}
-	end := 3 + (int(sec[1]&0x0F)<<8 | int(sec[2]))
-	if end > len(sec) {
-		end = len(sec)
-	}
-	var (
-		vpid  uint16
-		codec videoCodec
-		found bool
-		all   []esInfo
-	)
-	off := 12 + (int(sec[10]&0x0F)<<8 | int(sec[11]))
-	for off+5 <= end-4 {
-		st := sec[off]
-		pid := uint16(sec[off+1]&0x1F)<<8 | uint16(sec[off+2])
-		all = append(all, esInfo{pid: pid, streamType: st})
-		if !found {
-			switch st {
-			case 0x1B:
-				vpid, codec, found = pid, codecH264, true
-			case 0x24:
-				vpid, codec, found = pid, codecHEVC, true
-			case 0x01, 0x02, 0x10, 0x33, 0x42, 0xD1, 0xEA:
-				// Video, but not a codec a dump can classify.
-				vpid, codec, found = pid, codecNone, true
-			}
+	for _, st := range all {
+		if !mpegts.IsVideo(st.Type) {
+			continue
 		}
-		off += 5 + (int(sec[off+3]&0x0F)<<8 | int(sec[off+4]))
+		switch st.Type {
+		case mpegts.StreamTypeH264:
+			return st.PID, codecH264, all, true
+		case mpegts.StreamTypeHEVC:
+			return st.PID, codecHEVC, all, true
+		}
+		// Video, but not a codec a dump can classify.
+		return st.PID, codecNone, all, true
 	}
-	return vpid, codec, all, found || len(all) > 0
+	return 0, codecNone, all, len(all) > 0
 }
 
 // ---- audio frames ------------------------------------------------------------
@@ -401,8 +326,8 @@ func packetizePES(pid uint16, pes []byte) []byte {
 	var out []byte
 	first := true
 	for len(pes) > 0 {
-		p := make([]byte, 4, tsPacketSize)
-		p[0] = tsSyncByte
+		p := make([]byte, 4, mpegts.PacketSize)
+		p[0] = mpegts.SyncByte
 		p[1] = byte(pid>>8) & 0x1F
 		if first {
 			p[1] |= 0x40
@@ -438,17 +363,17 @@ func packetizePES(pid uint16, pes []byte) []byte {
 func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 	var at []int // indices into held of the elementary-stream bytes, in order
 	hdr := -1    // PES header bytes still to pass; -1 before the PES start
-	for off := 0; off+tsPacketSize <= len(held) && len(at) < nalScanLimit; off += tsPacketSize {
-		p := held[off : off+tsPacketSize]
-		if pktPID(p) != vpid || !pktHasPayload(p) {
+	for off := 0; off+mpegts.PacketSize <= len(held) && len(at) < nalScanLimit; off += mpegts.PacketSize {
+		p := held[off : off+mpegts.PacketSize]
+		if mpegts.PID(p) != vpid || !mpegts.HasPayload(p) {
 			continue
 		}
-		if pktPUSI(p) {
+		if mpegts.PUSI(p) {
 			h, complete := parsePES(p, nil)
 			if !complete {
 				// The header runs into the next video packet: read it across
 				// the two, as the resync did.
-				h, complete = parsePES(p, nextPayloadPacket(held, off+tsPacketSize, vpid))
+				h, complete = parsePES(p, nextPayloadPacket(held, off+mpegts.PacketSize, vpid))
 			}
 			if !complete || !h.ok {
 				return false
@@ -458,7 +383,7 @@ func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 		if hdr < 0 {
 			continue
 		}
-		for i := off + payloadStart(p); i < off+tsPacketSize; i++ {
+		for i := off + mpegts.PayloadStart(p); i < off+mpegts.PacketSize; i++ {
 			if hdr > 0 {
 				hdr--
 				continue
@@ -482,8 +407,8 @@ func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 // nextPayloadPacket is the first packet of pid with a payload in held from
 // off on, or nil.
 func nextPayloadPacket(held []byte, off int, pid uint16) []byte {
-	for ; off+tsPacketSize <= len(held); off += tsPacketSize {
-		if p := held[off : off+tsPacketSize]; pktPID(p) == pid && pktHasPayload(p) {
+	for ; off+mpegts.PacketSize <= len(held); off += mpegts.PacketSize {
+		if p := held[off : off+mpegts.PacketSize]; mpegts.PID(p) == pid && mpegts.HasPayload(p) {
 			return p
 		}
 	}

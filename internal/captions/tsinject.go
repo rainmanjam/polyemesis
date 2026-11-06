@@ -1,5 +1,7 @@
 package captions
 
+import "github.com/rainmanjam/polyemesis/internal/mpegts"
+
 // Injector rewrites an MPEG-TS stream so that every H.264 picture carries the
 // CEA-608 pair its presentation time is due. It sits between the relay and a
 // destination's FFmpeg and changes nothing else: non-video packets pass through
@@ -17,14 +19,7 @@ package captions
 // untouched and counted in Stats, because the A/53 SEI this path carries is an
 // H.264 construct.
 
-const (
-	tsPacketSize = 188
-	tsSyncByte   = 0x47
-	pidPAT       = 0x0000
-
-	streamTypeH264 = 0x1B
-	streamTypeHEVC = 0x24
-)
+const ()
 
 // InjectorStats counts what the injector did. Pictures is every access unit
 // that had a picture start on the H.264 PID, and Injected is how many of those
@@ -113,18 +108,18 @@ func (in *Injector) Stats() InjectorStats { return in.stats }
 func (in *Injector) Write(data []byte) []byte {
 	buf := append(in.pending, data...)
 	var out []byte
-	for len(buf) >= tsPacketSize {
-		if buf[0] != tsSyncByte {
+	for len(buf) >= mpegts.PacketSize {
+		if buf[0] != mpegts.SyncByte {
 			// Lost sync. Discard up to the next sync byte, if there is one.
 			i := 1
-			for i < len(buf) && buf[i] != tsSyncByte {
+			for i < len(buf) && buf[i] != mpegts.SyncByte {
 				i++
 			}
 			buf = buf[i:]
 			continue
 		}
-		out = append(out, in.packet(buf[:tsPacketSize])...)
-		buf = buf[tsPacketSize:]
+		out = append(out, in.packet(buf[:mpegts.PacketSize])...)
+		buf = buf[mpegts.PacketSize:]
 	}
 	in.pending = append([]byte(nil), buf...)
 	return out
@@ -143,8 +138,8 @@ func (in *Injector) packet(p []byte) []byte {
 	pid := uint16(p[1]&0x1F)<<8 | uint16(p[2])
 	pusi := p[1]&0x40 != 0
 	switch {
-	case pid == pidPAT && pusi:
-		if pmt := parsePATPMTPID(p); pmt != 0 {
+	case pid == mpegts.PIDPAT && pusi:
+		if pmt, ok := mpegts.PATProgram(mpegts.SectionOf(p)); ok {
 			in.pmtPID = pmt
 		}
 		return p
@@ -156,7 +151,7 @@ func (in *Injector) packet(p []byte) []byte {
 		// The rest of a program map longer than one packet.
 		return append(in.continuePMT(p), p...)
 	case in.videoPID != 0 && pid == in.videoPID:
-		if !validAdaptation(p) {
+		if !mpegts.ValidAdaptation(p) {
 			// The packet cannot be read, so it is dropped rather than passed through
 			// out of order with the access unit it belongs to.
 			in.stats.Malformed++
@@ -167,25 +162,14 @@ func (in *Injector) packet(p []byte) []byte {
 	return p
 }
 
-// validAdaptation reports whether a packet's adaptation field fits inside the
-// packet. Every later read of the field depends on this, so it is checked once,
-// where the packet enters the injector.
-func validAdaptation(p []byte) bool {
-	if (p[3]>>4)&0x2 == 0 {
-		return true
-	}
-	n := int(p[4])
-	return n <= tsPacketSize-5 && 5+n <= len(p)
-}
-
 // bufferedBytes is the size of every access unit the injector is holding.
 func (in *Injector) bufferedBytes() int {
 	n := 0
 	for _, au := range in.ready {
-		n += len(au.pkts) * tsPacketSize
+		n += len(au.pkts) * mpegts.PacketSize
 	}
 	if in.held != nil {
-		n += len(in.held.pkts) * tsPacketSize
+		n += len(in.held.pkts) * mpegts.PacketSize
 	}
 	return n
 }
@@ -468,8 +452,8 @@ func (in *Injector) renumber(pkts [][]byte) []byte {
 // packetOut builds one TS packet on the video PID. full reports that the
 // payload fills the packet with no adaptation field needed.
 func (in *Injector) packetOut(pusi bool, af, payload []byte, full bool) []byte {
-	p := make([]byte, tsPacketSize)
-	p[0] = tsSyncByte
+	p := make([]byte, mpegts.PacketSize)
+	p[0] = mpegts.SyncByte
 	p[1] = byte(in.videoPID >> 8)
 	if pusi {
 		p[1] |= 0x40
@@ -482,7 +466,7 @@ func (in *Injector) packetOut(pusi bool, af, payload []byte, full bool) []byte {
 		p[3] = 0x30 | in.nextCC
 		// The length byte covers everything after it, and the field runs right up
 		// to the payload, so the last packet is exact without a separate pad.
-		afLen := tsPacketSize - 5 - len(payload)
+		afLen := mpegts.PacketSize - 5 - len(payload)
 		p[at] = byte(afLen)
 		at++
 		if afLen > 0 {
@@ -498,26 +482,9 @@ func (in *Injector) packetOut(pusi bool, af, payload []byte, full bool) []byte {
 			}
 		}
 	}
-	copy(p[tsPacketSize-len(payload):], payload)
+	copy(p[mpegts.PacketSize-len(payload):], payload)
 	in.nextCC = (in.nextCC + 1) & 0x0F
 	return p
-}
-
-// parsePATPMTPID returns the PMT PID of the first program in a PAT packet, or
-// zero if the packet is not a usable PAT.
-func parsePATPMTPID(p []byte) uint16 {
-	s := sectionOf(p)
-	if len(s) < 12 || s[0] != 0x00 {
-		return 0
-	}
-	end := 3 + (int(s[1]&0x0F)<<8 | int(s[2])) - 4
-	for i := 8; i+4 <= end && i+4 <= len(s); i += 4 {
-		prog := uint16(s[i])<<8 | uint16(s[i+1])
-		if prog != 0 {
-			return uint16(s[i+2]&0x1F)<<8 | uint16(s[i+3])
-		}
-	}
-	return 0
 }
 
 // parsePMT reads a program map and records its video PIDs. An H.264 stream is
@@ -536,7 +503,7 @@ func parsePATPMTPID(p []byte) uint16 {
 // move to HEVC.
 func (in *Injector) parsePMT(p []byte) []byte {
 	in.pmtBuf = nil
-	s := sectionOf(p)
+	s := mpegts.SectionOf(p)
 	if len(s) < 3 || s[0] != 0x02 {
 		return nil
 	}
@@ -559,7 +526,7 @@ const maxPMTSection = 1024
 // continuePMT adds one continuation packet to a program map being collected,
 // and reads the map once it is whole.
 func (in *Injector) continuePMT(p []byte) []byte {
-	if !validAdaptation(p) || p[3]&0x10 == 0 {
+	if !mpegts.ValidAdaptation(p) || p[3]&0x10 == 0 {
 		return nil
 	}
 	at := 4
@@ -584,30 +551,22 @@ func (in *Injector) continuePMT(p []byte) []byte {
 
 // readPMT reads one whole program map section.
 func (in *Injector) readPMT(s []byte) []byte {
-	if len(s) < 12 {
+	if len(s) < 12 || mpegts.SectionLen(s) > len(s) {
 		return nil
 	}
-	end := 3 + (int(s[1]&0x0F)<<8 | int(s[2])) - 4
-	if end > len(s) {
-		return nil
-	}
-	info := int(s[10]&0x0F)<<8 | int(s[11])
+	streams, _ := mpegts.PMTStreams(s)
 	var h264, hevc uint16
-	for i := 12 + info; i+5 <= end; {
-		typ := s[i]
-		pid := uint16(s[i+1]&0x1F)<<8 | uint16(s[i+2])
-		esInfo := int(s[i+3]&0x0F)<<8 | int(s[i+4])
-		switch typ {
-		case streamTypeH264:
+	for _, st := range streams {
+		switch st.Type {
+		case mpegts.StreamTypeH264:
 			if h264 == 0 {
-				h264 = pid
+				h264 = st.PID
 			}
-		case streamTypeHEVC:
+		case mpegts.StreamTypeHEVC:
 			if hevc == 0 {
-				hevc = pid
+				hevc = st.PID
 			}
 		}
-		i += 5 + esInfo
 	}
 	var out []byte
 	if h264 != in.videoPID {
@@ -622,29 +581,6 @@ func (in *Injector) readPMT(s []byte) []byte {
 		}
 	}
 	return out
-}
-
-// sectionOf returns the PSI section of a packet that starts a section, past any
-// adaptation field and the pointer field. A packet that does not start a section
-// (no payload_unit_start, so no pointer field), carries no payload (an
-// adaptation-only packet, whose bytes after the field are not PSI) or has an
-// adaptation field longer than itself has no section, and returns nil.
-func sectionOf(p []byte) []byte {
-	if len(p) < tsPacketSize || p[1]&0x40 == 0 || p[3]&0x10 == 0 || !validAdaptation(p) {
-		return nil
-	}
-	at := 4
-	if (p[3]>>4)&0x2 != 0 {
-		at += 1 + int(p[4])
-	}
-	if at >= len(p) {
-		return nil
-	}
-	at += 1 + int(p[at])
-	if at >= len(p) {
-		return nil
-	}
-	return p[at:]
 }
 
 // readPTS decodes the 33-bit presentation timestamp in a five-byte PES field.

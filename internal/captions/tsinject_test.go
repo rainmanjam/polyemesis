@@ -2,6 +2,7 @@ package captions
 
 import (
 	"bytes"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"reflect"
 	"sort"
 	"testing"
@@ -515,8 +516,8 @@ func TestInjectorPassesVideoThroughUntilItsPMTHasBeenSeen(t *testing.T) {
 // panic on it, because a panic would take the relay down with the stream. The
 // packet is dropped and counted, and the packets around it still go out.
 func TestInjectorDropsAVideoPacketWhoseAdaptationFieldRunsPastThePacket(t *testing.T) {
-	bad := make([]byte, tsPacketSize)
-	bad[0] = tsSyncByte
+	bad := make([]byte, mpegts.PacketSize)
+	bad[0] = mpegts.SyncByte
 	bad[1] = 0x40 | byte(testVideoPID>>8) // payload unit start on the video PID
 	bad[2] = byte(testVideoPID & 0xFF)
 	bad[3] = 0x30 // adaptation field and payload
@@ -662,8 +663,8 @@ func TestInjectorResumesCaptionsInOrderAcrossABackwardClockJump(t *testing.T) {
 // videoPID is 0x0100, want 0x0200.
 func TestPMTUpdateReplacesTheDiscoveredVideoPID(t *testing.T) {
 	inj := NewInjector(NewSchedule(0))
-	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(streamTypeH264, 0x0F)))
-	moved := pmtSection(streamTypeH264, 0x0F)
+	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(mpegts.StreamTypeH264, 0x0F)))
+	moved := pmtSection(mpegts.StreamTypeH264, 0x0F)
 	moved[13] = 0xE2 // the video ES PID is in bytes 13-14; 0x02 in the high bits makes it 0x0200
 	inj.parsePMT(psiPacket(testPMTPID, 1, moved))
 	if inj.videoPID != 0x0200 {

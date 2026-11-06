@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"testing"
 	"time"
 )
@@ -31,7 +32,7 @@ func patOn(cc uint8) []byte {
 // a payload that is the empty PES header and nothing else.
 func assertWakePacket(t *testing.T, p []byte, pid int, cc, streamID uint8) {
 	t.Helper()
-	if p[0] != tsSyncByte {
+	if p[0] != mpegts.SyncByte {
 		t.Fatalf("not a TS packet: % x", p[:4])
 	}
 	if got := int(p[1]&0x1F)<<8 | int(p[2]); got != pid {
@@ -101,14 +102,14 @@ func TestWakeSendsTheStoppingConsumerAnEmptyPESStartOnEachPIDOnlyIntoSilence(t *
 		if len(got) != 1 {
 			t.Fatalf("wake %d: the stopping consumer got %d datagrams, want 1", i+1, len(got))
 		}
-		if len(got[0]) != 2*tsPacketSize {
+		if len(got[0]) != 2*mpegts.PacketSize {
 			t.Fatalf("wake %d: %d bytes, want two packets -- one per PES PID, none for "+
 				"the PAT", i+1, len(got[0]))
 		}
 		// The second wake continues where the first left off, not where the
 		// publisher did.
-		assertWakePacket(t, got[0][:tsPacketSize], videoPID, cc[0], 0xE0)
-		assertWakePacket(t, got[0][tsPacketSize:], audioPID, cc[1], 0xC0)
+		assertWakePacket(t, got[0][:mpegts.PacketSize], videoPID, cc[0], 0xE0)
+		assertWakePacket(t, got[0][mpegts.PacketSize:], audioPID, cc[1], 0xC0)
 	}
 	if got := receiveWithin(t, running, 1, 150*time.Millisecond); len(got) != 0 {
 		t.Errorf("a consumer that is still running was sent the wake: % x", got[0][:8])

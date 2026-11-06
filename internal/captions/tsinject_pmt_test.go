@@ -1,6 +1,7 @@
 package captions
 
 import (
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"testing"
 )
 
@@ -25,23 +26,23 @@ func pmtWithVideoAt(typ byte, pid uint16) []byte {
 // adaptation-only packet.
 func TestPSIIsReadOnlyFromAPacketThatStartsASectionAndCarriesAPayload(t *testing.T) {
 	inj := NewInjector(NewSchedule(0))
-	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(streamTypeH264, 0x0F)))
+	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(mpegts.StreamTypeH264, 0x0F)))
 	if inj.videoPID != testVideoPID {
 		t.Fatalf("setup: videoPID = %#x, want %#x", inj.videoPID, testVideoPID)
 	}
 
 	// Adaptation field only (0x20), a one-byte field, then what reads as a pointer
 	// field and a PMT moving video to 0x200.
-	bogus := make([]byte, tsPacketSize)
-	bogus[0] = tsSyncByte
+	bogus := make([]byte, mpegts.PacketSize)
+	bogus[0] = mpegts.SyncByte
 	bogus[1] = 0x40 | byte(testPMTPID>>8)
 	bogus[2] = byte(testPMTPID & 0xFF)
 	bogus[3] = 0x20
 	bogus[4] = 1
 	bogus[5] = 0x00
 	bogus[6] = 0x00 // "pointer field"
-	copy(bogus[7:], pmtWithVideoAt(streamTypeH264, 0x0200))
-	if s := sectionOf(bogus); s != nil {
+	copy(bogus[7:], pmtWithVideoAt(mpegts.StreamTypeH264, 0x0200))
+	if s := mpegts.SectionOf(bogus); s != nil {
 		t.Fatalf("sectionOf read %d bytes of PSI from a packet with no payload", len(s))
 	}
 	inj.Write(bogus)
@@ -49,9 +50,9 @@ func TestPSIIsReadOnlyFromAPacketThatStartsASectionAndCarriesAPayload(t *testing
 		t.Fatalf("videoPID = %#x after an adaptation-only packet, want it left at %#x", inj.videoPID, testVideoPID)
 	}
 
-	cont := psiPacket(testPMTPID, 1, pmtWithVideoAt(streamTypeH264, 0x0200))
+	cont := psiPacket(testPMTPID, 1, pmtWithVideoAt(mpegts.StreamTypeH264, 0x0200))
 	cont[1] &^= 0x40 // not a section start
-	if s := sectionOf(cont); s != nil {
+	if s := mpegts.SectionOf(cont); s != nil {
 		t.Fatalf("sectionOf read PSI from a packet without payload_unit_start")
 	}
 }
@@ -66,9 +67,9 @@ func TestPSIIsReadOnlyFromAPacketThatStartsASectionAndCarriesAPayload(t *testing
 // when the map has no H.264 stream. Observed: FAIL -- videoPID stayed 0x100.
 func TestAPMTThatMovesVideoToHEVCStopsTheOldH264PIDBeingRewritten(t *testing.T) {
 	inj := NewInjector(NewSchedule(0))
-	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(streamTypeH264, 0x0F)))
+	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(mpegts.StreamTypeH264, 0x0F)))
 	for i := 0; i < 3; i++ {
-		inj.parsePMT(psiPacket(testPMTPID, uint8(i+1), pmtWithVideoAt(streamTypeHEVC, 0x0200)))
+		inj.parsePMT(psiPacket(testPMTPID, uint8(i+1), pmtWithVideoAt(mpegts.StreamTypeHEVC, 0x0200)))
 	}
 	if inj.videoPID != 0 {
 		t.Fatalf("videoPID = %#x after the PMT moved video to HEVC, want 0 (nothing to rewrite)", inj.videoPID)
@@ -79,7 +80,7 @@ func TestAPMTThatMovesVideoToHEVCStopsTheOldH264PIDBeingRewritten(t *testing.T) 
 	if got := inj.Stats().Unsupported; got != 1 {
 		t.Fatalf("Unsupported = %d after one HEVC PMT repeated three times, want 1", got)
 	}
-	inj.parsePMT(psiPacket(testPMTPID, 4, pmtSection(streamTypeH264, 0x0F)))
+	inj.parsePMT(psiPacket(testPMTPID, 4, pmtSection(mpegts.StreamTypeH264, 0x0F)))
 	if inj.videoPID != testVideoPID || inj.hevcPID != 0 {
 		t.Fatalf("after H.264 came back: videoPID = %#x, hevcPID = %#x; want %#x and 0", inj.videoPID, inj.hevcPID, testVideoPID)
 	}
@@ -95,14 +96,14 @@ func TestAPMTThatMovesVideoToHEVCStopsTheOldH264PIDBeingRewritten(t *testing.T) 
 // re-pointing the PID. Observed: FAIL -- 9 packets went out on PID 0.
 func TestAccessUnitsHeldWhenTheVideoPIDMovesGoOutOnTheirOwnPID(t *testing.T) {
 	var in []byte
-	in = append(in, psFixture(streamTypeH264)...)
+	in = append(in, psFixture(mpegts.StreamTypeH264)...)
 	var cc uint8
 	const units = 4
 	for d := 0; d < units; d++ {
 		pes := append(pesHeader(int64(90000+d*frameTicks)), auFor(d == 0)...)
 		in = append(in, pesPackets(testVideoPID, &cc, pes, nil)...)
 	}
-	in = append(in, psiPacket(testPMTPID, 1, pmtWithVideoAt(streamTypeHEVC, 0x0200))...)
+	in = append(in, psiPacket(testPMTPID, 1, pmtWithVideoAt(mpegts.StreamTypeHEVC, 0x0200))...)
 
 	inj := NewInjector(NewSchedule(0))
 	out := append(inj.Write(in), inj.Flush()...)

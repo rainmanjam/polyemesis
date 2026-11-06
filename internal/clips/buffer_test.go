@@ -2,6 +2,7 @@ package clips
 
 import (
 	"bytes"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"testing"
 	"time"
 )
@@ -26,8 +27,8 @@ func TestBufferEvictsByAgeSoItCostsSecondsTimesTheObservedBitrate(t *testing.T) 
 	if s.Packets != 11 {
 		t.Fatalf("packets = %d, want the 10 second window (11 datagrams inclusive)", s.Packets)
 	}
-	if s.Bytes != int64(11*tsPacketSize) {
-		t.Fatalf("bytes = %d, want %d", s.Bytes, 11*tsPacketSize)
+	if s.Bytes != int64(11*mpegts.PacketSize) {
+		t.Fatalf("bytes = %d, want %d", s.Bytes, 11*mpegts.PacketSize)
 	}
 	if s.Evicted != 19 {
 		t.Fatalf("evicted = %d, want 19", s.Evicted)
@@ -44,12 +45,12 @@ func TestBufferEvictsByAgeSoItCostsSecondsTimesTheObservedBitrate(t *testing.T) 
 func TestBufferCeilingBindsBeforeTheWindowOnAFatStream(t *testing.T) {
 	// The case the ceiling exists for: a window the operator asked for that a
 	// 25 Mbit/s feed would turn into hundreds of megabytes.
-	b := NewBuffer(60*time.Second, 10*tsPacketSize)
+	b := NewBuffer(60*time.Second, 10*mpegts.PacketSize)
 	fill(b, 40, 100*time.Millisecond, func(i int) []byte { return datagram(audioPacket()) })
 
 	s := b.Stats()
-	if s.Bytes > 10*tsPacketSize {
-		t.Fatalf("bytes = %d, over the ceiling of %d", s.Bytes, 10*tsPacketSize)
+	if s.Bytes > 10*mpegts.PacketSize {
+		t.Fatalf("bytes = %d, over the ceiling of %d", s.Bytes, 10*mpegts.PacketSize)
 	}
 	if !s.Truncated {
 		t.Fatal("the ceiling binding must be reported, or a short clip looks like a bug")
@@ -174,16 +175,16 @@ func TestCutPrependsThePSISoAPlayerNeedNotWaitForIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cut: %v", err)
 	}
-	if len(cut.Data) < 3*tsPacketSize {
+	if len(cut.Data) < 3*mpegts.PacketSize {
 		t.Fatalf("cut is only %d bytes", len(cut.Data))
 	}
-	if packetPID(cut.Data[:tsPacketSize]) != pidPAT {
+	if mpegts.PID(cut.Data[:mpegts.PacketSize]) != mpegts.PIDPAT {
 		t.Fatal("a clip must open with the PAT")
 	}
-	if packetPID(cut.Data[tsPacketSize:2*tsPacketSize]) != testPMTPID {
+	if mpegts.PID(cut.Data[mpegts.PacketSize:2*mpegts.PacketSize]) != testPMTPID {
 		t.Fatal("the PMT must follow the PAT")
 	}
-	if !bytes.Equal(cut.Data[2*tsPacketSize:3*tsPacketSize], videoPacket(true)) {
+	if !bytes.Equal(cut.Data[2*mpegts.PacketSize:3*mpegts.PacketSize], videoPacket(true)) {
 		t.Fatal("the payload must begin at the keyframe packet itself")
 	}
 }
@@ -202,7 +203,7 @@ func TestCutCopiesSoTheRecycledRingCannotOverwriteAClip(t *testing.T) {
 	// Churn the ring hard enough that the free list hands the old payloads back
 	// out. If Cut had returned references, the clip would change underneath us.
 	for i := 0; i < 500; i++ {
-		b.Write(bytes.Repeat([]byte{0xAA}, tsPacketSize), base.Add(time.Duration(i+2)*time.Second))
+		b.Write(bytes.Repeat([]byte{0xAA}, mpegts.PacketSize), base.Add(time.Duration(i+2)*time.Second))
 	}
 	if !bytes.Equal(before, cut.Data) {
 		t.Fatal("a captured cut must not alias the ring")
