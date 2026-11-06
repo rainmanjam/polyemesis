@@ -148,10 +148,12 @@ func TestPowerShellStepsDeclareTheirShell(t *testing.T) {
 			}
 		}
 	}
-	// POSITIVE CONTROL: ci.yml's Windows leg has at least seven PowerShell
-	// steps. Zero means the marker stopped matching, not that they went away.
-	if seen < 7 {
+	// POSITIVE CONTROL: ci.yml's Windows leg has at least six PowerShell
+	// steps (a seventh, the FFmpeg install, now lives in
+	// .github/actions/install-ffmpeg). Zero means the marker stopped matching,
+	// not that they went away.
+	if seen < 6 {
 		t.Errorf("found only %d PowerShell steps across .github/workflows; expected at "+
-			"least the seven in ci.yml's Windows leg. The marker regexp has gone stale.", seen)
+			"least the six in ci.yml's Windows leg. The marker regexp has gone stale.", seen)
 	}
 }
