@@ -31,12 +31,12 @@ export function InfoHint({
   /** Accessible name for the button. Defaults to a generic "More information". */
   label,
   className,
-}: {
+}: Readonly<{
   body: TranslationKey;
   title?: TranslationKey;
   label?: string;
   className?: string;
-}) {
+}>) {
   const t = useT();
 
   // Names the setting when it can. A page carries a dozen of these, and a

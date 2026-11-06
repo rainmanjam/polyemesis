@@ -2,6 +2,27 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { toneMark, type SignalTone } from "@/lib/signal";
 
+type DotSize = "sm" | "md" | "lg" | "xl";
+
+const DOT_SIZE: Record<DotSize, string> = {
+  sm: "h-1.5 w-1.5",
+  md: "h-2 w-2",
+  lg: "h-3 w-3",
+  xl: "h-8 w-8",
+};
+
+const RING_WIDTH: Record<DotSize, string> = {
+  sm: "border-[1.5px]",
+  md: "border-2",
+  lg: "border-2",
+  xl: "border-4",
+};
+
+const PULSE: Partial<Record<SignalTone, string>> = {
+  live: "animate-signal",
+  warn: "animate-signal-fast",
+};
+
 /** The single "is it on air" indicator, used everywhere a state is shown.
  *  Live breathes slowly; reconnecting blinks urgently; everything else is
  *  static. Motion is a signal here, not decoration.
@@ -16,34 +37,21 @@ export function StatusDot({
   size = "md",
   className,
   title,
-}: {
+}: Readonly<{
   tone: SignalTone;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: DotSize;
   className?: string;
   /** Overrides the tone's own wording, for a dot whose row can say something
    *  more specific than "Failed" -- a rendition nobody has enabled, say. */
   title?: string;
-}) {
-  const dim =
-    size === "sm"
-      ? "h-1.5 w-1.5"
-      : size === "lg"
-        ? "h-3 w-3"
-        : size === "xl"
-          ? "h-8 w-8"
-          : "h-2 w-2";
+}>) {
+  const dim = DOT_SIZE[size];
   const t = useT();
   const mark = toneMark[tone];
   // A ring scaled with the dot. At 6px a 2px border leaves a 2px hole that
   // closes up into a solid dot at any distance, which loses exactly the
   // distinction the hollow tones exist to make.
-  const ring = mark.hollow
-    ? size === "sm"
-      ? "border-[1.5px]"
-      : size === "xl"
-        ? "border-4"
-        : "border-2"
-    : null;
+  const ring = mark.hollow ? RING_WIDTH[size] : null;
   // THE HALO PULSES, NEVER THE DOT.
   //
   // `live` was already built this way — a separate absolutely-positioned halo
@@ -56,7 +64,7 @@ export function StatusDot({
   // once: the more urgent state was the one rendered harder to see. The two
   // tones now share one structure, so the asymmetry cannot come back by
   // someone editing a single branch.
-  const pulse = tone === "live" ? "animate-signal" : tone === "warn" ? "animate-signal-fast" : null;
+  const pulse = PULSE[tone] ?? null;
   // A THIRD CHANNEL, in words. Hue and silhouette both require knowing the
   // vocabulary before they say anything, and neither reaches a screen reader.
   // The wording lives on toneMark in lib/signal.ts so a new tone cannot be

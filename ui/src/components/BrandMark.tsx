@@ -22,7 +22,7 @@
  * mark that drifts with the palette stops matching the site it is supposed to
  * match. A logo is a constant, not a themed surface.
  */
-export function BrandMark({ size = 20, className }: { size?: number; className?: string }) {
+export function BrandMark({ size = 20, className }: Readonly<{ size?: number; className?: string }>) {
   return (
     <svg
       width={size}

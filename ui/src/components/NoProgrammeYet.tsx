@@ -28,11 +28,11 @@ export function NoProgrammeYet({
   title,
   body,
   action,
-}: {
+}: Readonly<{
   title: string;
   body: string;
   action?: EmptyStateAction;
-}) {
+}>) {
   const t = useT();
   const navigate = useNavigate();
   // app-council A83: drawn by the kit's EmptyState, so this state and every

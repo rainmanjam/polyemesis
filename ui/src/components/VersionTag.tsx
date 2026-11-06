@@ -22,7 +22,7 @@ import { useT } from "@/lib/i18n";
  *  about their install from a fact nobody has stated yet -- which is #663 in
  *  miniature, and the reason this waits instead.
  */
-export function VersionTag({ info }: { info: VersionInfo | null }) {
+export function VersionTag({ info }: Readonly<{ info: VersionInfo | null }>) {
   const t = useT();
   if (!info?.version) return null;
 

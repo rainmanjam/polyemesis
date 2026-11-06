@@ -617,12 +617,12 @@ function AdvancedCard({
   settings,
   inError,
   children,
-}: {
+}: Readonly<{
   card: AdvancedCardKey;
   settings: Settings;
   inError: boolean;
   children: React.ReactNode;
-}) {
+}>) {
   const ctx = useContext(AdvancedContext);
   const shown = advancedCardShown(card, { show: ctx.show, settings, inError, revealed: ctx.revealed });
   return (
@@ -640,11 +640,11 @@ function AdvancedHiddenLine({
   settings,
   inError,
   cards,
-}: {
+}: Readonly<{
   settings: Settings;
   inError: boolean;
   cards: readonly AdvancedCardKey[];
-}) {
+}>) {
   const t = useT();
   const ctx = useContext(AdvancedContext);
   const hidden = cards.filter(
@@ -666,8 +666,15 @@ function AdvancedHiddenLine({
   );
 }
 
+const CHECK_BADGE_VARIANT: Record<CredentialCheck["state"], "live" | "down" | "warn" | "outline"> = {
+  verified: "live",
+  rejected: "down",
+  unreachable: "warn",
+  unverified: "outline",
+};
+
 /** A group heading inside a tab (settings-council R4). */
-function SettingsGroupHeading({ title, desc }: { title: TranslationKey; desc: TranslationKey }) {
+function SettingsGroupHeading({ title, desc }: Readonly<{ title: TranslationKey; desc: TranslationKey }>) {
   const t = useT();
   return (
     <div className="flex flex-col gap-0.5 pt-1 lg:col-span-2">
@@ -678,7 +685,7 @@ function SettingsGroupHeading({ title, desc }: { title: TranslationKey; desc: Tr
 }
 
 /** Says which programmes a card's settings apply to (settings-council R8). */
-function ScopeNote({ programme }: { programme?: string | null }) {
+function ScopeNote({ programme }: Readonly<{ programme?: string | null }>) {
   const t = useT();
   if (programme === undefined) {
     return (
@@ -707,14 +714,14 @@ function IngestSettings({
   onSave,
   saving,
   programme,
-}: {
+}: Readonly<{
   settings: Settings;
   system: SystemInfo | null;
   onSave: (s: Settings) => Promise<void>;
   saving: boolean;
   /** The programme this form writes to, or null when it could not be named. */
   programme: string | null;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   // The kit's save model (A95): the draft is held over the stored settings,
@@ -737,6 +744,94 @@ function IngestSettings({
   const listeners = draft.listeners ?? DEFAULT_LISTENERS;
   const setListeners = (patch: Partial<typeof listeners>) =>
     setDraft({ ...draft, listeners: { ...listeners, ...patch } });
+
+  const renderIngestFields = () => {
+    if (draft.ingest.mode === "pull") {
+      return <SettingsPullIngestFields draft={draft} setDraft={setDraft} />;
+    }
+    if (draft.ingest.mode === "srt") {
+      return (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="srt-latency">{t("set.latencyMs")}</Label>
+              <Input
+                id="srt-latency"
+                type="number"
+                value={draft.ingest.srt.latencyMs}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    ingest: {
+                      ...draft.ingest,
+                      srt: { ...draft.ingest.srt, latencyMs: Number(e.target.value) },
+                    },
+                  })
+                }
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="srt-pass">{t("set.passphrase")}</Label>
+            <SecretInput
+              id="srt-pass"
+              value={draft.ingest.srt.passphrase}
+              placeholder={t("set.passphrasePlaceholder")}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  ingest: {
+                    ...draft.ingest,
+                    srt: { ...draft.ingest.srt, passphrase: e.target.value },
+                  },
+                })
+              }
+            />
+            <span className="text-sm text-muted-foreground">{t("set.passphraseNote")}</span>
+          </div>
+        </>
+      );
+    }
+    return (
+      <>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="rtmp-app">{t("set.app")}</Label>
+            <Input
+              id="rtmp-app"
+              value={draft.ingest.rtmp.app}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  ingest: {
+                    ...draft.ingest,
+                    rtmp: { ...draft.ingest.rtmp, app: e.target.value },
+                  },
+                })
+              }
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="rtmp-key">{t("set.streamKey")}</Label>
+          <SecretInput
+            id="rtmp-key"
+            value={draft.ingest.rtmp.streamKey}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                ingest: {
+                  ...draft.ingest,
+                  rtmp: { ...draft.ingest.rtmp, streamKey: e.target.value },
+                },
+              })
+            }
+          />
+          <span className="text-sm text-muted-foreground">{t("set.streamKeyNote")}</span>
+        </div>
+      </>
+    );
+  };
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -772,87 +867,7 @@ function IngestSettings({
             )}
           </div>
 
-          {draft.ingest.mode === "pull" ? (
-            <SettingsPullIngestFields draft={draft} setDraft={setDraft} />
-          ) : draft.ingest.mode === "srt" ? (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="srt-latency">{t("set.latencyMs")}</Label>
-                  <Input
-                    id="srt-latency"
-                    type="number"
-                    value={draft.ingest.srt.latencyMs}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        ingest: {
-                          ...draft.ingest,
-                          srt: { ...draft.ingest.srt, latencyMs: Number(e.target.value) },
-                        },
-                      })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="srt-pass">{t("set.passphrase")}</Label>
-                <SecretInput
-                  id="srt-pass"
-                  value={draft.ingest.srt.passphrase}
-                  placeholder={t("set.passphrasePlaceholder")}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      ingest: {
-                        ...draft.ingest,
-                        srt: { ...draft.ingest.srt, passphrase: e.target.value },
-                      },
-                    })
-                  }
-                />
-                <span className="text-sm text-muted-foreground">{t("set.passphraseNote")}</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="rtmp-app">{t("set.app")}</Label>
-                  <Input
-                    id="rtmp-app"
-                    value={draft.ingest.rtmp.app}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        ingest: {
-                          ...draft.ingest,
-                          rtmp: { ...draft.ingest.rtmp, app: e.target.value },
-                        },
-                      })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="rtmp-key">{t("set.streamKey")}</Label>
-                <SecretInput
-                  id="rtmp-key"
-                  value={draft.ingest.rtmp.streamKey}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      ingest: {
-                        ...draft.ingest,
-                        rtmp: { ...draft.ingest.rtmp, streamKey: e.target.value },
-                      },
-                    })
-                  }
-                />
-                <span className="text-sm text-muted-foreground">{t("set.streamKeyNote")}</span>
-              </div>
-            </>
-          )}
+          {renderIngestFields()}
 
           {/* Degraded-link failover's thresholds (#6) are per programme, and
               their ONE HOME is that programme's row on Sources (settings-
@@ -941,11 +956,11 @@ function ListenerPortsCard({
   listeners,
   setListeners,
   footer,
-}: {
+}: Readonly<{
   listeners: ListenerSettings;
   setListeners: (patch: Partial<ListenerSettings>) => void;
   footer?: React.ReactNode;
-}) {
+}>) {
   const t = useT();
   return (
     <Card>
@@ -1011,11 +1026,11 @@ function ListenerPortsOnly({
   settings,
   onSave,
   saving,
-}: {
+}: Readonly<{
   settings: Settings;
   onSave: (s: Settings) => Promise<void>;
   saving: boolean;
-}) {
+}>) {
   const t = useT();
   const model = useSaveModel<ListenerSettings>({
     stored: settings.listeners ?? DEFAULT_LISTENERS,
@@ -1048,7 +1063,7 @@ function ListenerPortsOnly({
  *  council R13). It used to be a card of its own on the zero-source branch and
  *  a row inside the Encoder URL card on the other, so the same check looked
  *  like two different things depending on whether a source existed. */
-function FfmpegCard({ system }: { system: SystemInfo | null }) {
+function FfmpegCard({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   return (
     <Card className="h-fit">
@@ -1072,7 +1087,7 @@ function FfmpegCard({ system }: { system: SystemInfo | null }) {
  *  -- and that operator has, by definition, not created a source yet. Leaving
  *  it inside the ingest form would have taken the FFmpeg check away from the
  *  one person the check was written for. */
-function FfmpegBadges({ system }: { system: SystemInfo | null }) {
+function FfmpegBadges({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   /* NOT `return null`. This renders inside a card whose only other content is
    * its title, so nothing meant an empty box with a heading on it and no way
@@ -1119,10 +1134,10 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
 function SettingsPullIngestFields({
   draft,
   setDraft,
-}: {
+}: Readonly<{
   draft: Settings;
   setDraft: (s: Settings) => void;
-}) {
+}>) {
   return (
     <PullIngestFields
       value={draft.ingest.pull}
@@ -1196,14 +1211,14 @@ function PipelineSettings({
   // AutomodConfig can render a rejected regex against the rule that carries it.
   // A toast cannot: the operator is looking at the pattern they mistyped.
   saveError,
-}: {
+}: Readonly<{
   settings: Settings;
   onSave: (s: Settings) => Promise<void>;
   onSaveMqtt: (s: Settings, password: string) => Promise<void>;
   onClearMqttPassword: () => Promise<void>;
   saving: boolean;
   saveError: string | null;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const [draft, setDraft] = useState(settings);
@@ -2282,10 +2297,10 @@ const PCI_VENDORS = [
 function MultitrackHardware({
   draft,
   setDraft,
-}: {
+}: Readonly<{
   draft: Settings;
   setDraft: (s: Settings) => void;
-}) {
+}>) {
   const t = useT();
   const gpus = draft.multitrack?.gpus ?? [];
   // Always sent as an explicit array, never omitted, so clearing the last entry
@@ -2519,12 +2534,12 @@ function PlatformList({
   creds,
   accounts,
   onChanged,
-}: {
+}: Readonly<{
   guides: SetupGuide[];
   creds: PlatformCreds[];
   accounts: PlatformAccount[];
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [open, setOpen] = useState<string | null>(null);
   const rows = guides.map((g) => {
@@ -2587,14 +2602,14 @@ export function PlatformRow({
   open,
   onToggle,
   onChanged,
-}: {
+}: Readonly<{
   guide: SetupGuide;
   creds: PlatformCreds | null;
   accounts: PlatformAccount[];
   open: boolean;
   onToggle: () => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const panelId = `platform-panel-${guide.platform}`;
   const reading = platformSetupStatus({
@@ -2605,11 +2620,9 @@ export function PlatformRow({
     reconnectNeeded: accounts.some((a) => a.reconnect?.needed),
   });
   // ONE button, and its word says what opening the row is for.
-  const action: TranslationKey = !guide.supported
-    ? "settingsUx.details"
-    : creds?.hasSecret || accounts.length > 0
-      ? "settingsUx.manage"
-      : "settingsUx.setUp";
+  const configuredAction: TranslationKey =
+    creds?.hasSecret || accounts.length > 0 ? "settingsUx.manage" : "settingsUx.setUp";
+  const action: TranslationKey = guide.supported ? configuredAction : "settingsUx.details";
   return (
     <li className="border-t border-border first:border-t-0" data-platform-row={guide.platform}>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
@@ -2791,12 +2804,12 @@ export function PlatformCredCard({
   creds,
   accounts,
   onChanged,
-}: {
+}: Readonly<{
   guide: SetupGuide;
   creds: PlatformCreds | null;
   accounts: PlatformAccount[];
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [clientId, setClientId] = useState(creds?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
@@ -2973,15 +2986,7 @@ export function PlatformCredCard({
 
   const verdictBadge = check && (
     <Badge
-      variant={
-        check.state === "verified"
-          ? "live"
-          : check.state === "rejected"
-            ? "down"
-            : check.state === "unreachable"
-              ? "warn"
-              : "outline"
-      }
+      variant={CHECK_BADGE_VARIANT[check.state]}
     >
       {check.state === "verified" && t("i18nSweep.credVerified")}
       {check.state === "rejected" && t("i18nSweep.credRejected")}
@@ -3325,7 +3330,7 @@ export function PlatformCredCard({
 
 /* ---------------------------------------------------------------- security */
 
-function SecuritySettings({ system }: { system: SystemInfo | null }) {
+function SecuritySettings({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -3551,7 +3556,7 @@ const acmeStanceCopy: Record<AcmeStance, TranslationKey> = {
  *  Guidance is safe to show over HTTP. So: it says what to write, checks
  *  whether it would work first, and leaves the writing to a person with a
  *  shell. */
-function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
+function LetsEncryptWalkthrough({ tls }: Readonly<{ tls: TlsStatus }>) {
   const t = useT();
   const stance = acmeStance(tls);
   // The address bar is the fallback source of the name, and only the browser
@@ -3860,7 +3865,7 @@ function shortenPath(path: string, max = 48): string {
   return `${path.slice(0, keep)}…${path.slice(path.length - keep)}`;
 }
 
-function SecretKeyCard({ system }: { system: SystemInfo | null }) {
+function SecretKeyCard({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   const tn = useTN();
   const [ack, setAck] = useState(readSecretKeyAck);
@@ -3995,6 +4000,59 @@ function ApiTokens() {
   };
   const tokenCopied = minted != null && copiedKey === minted.plaintext;
 
+  const renderTokenList = () => {
+    if (readFailed(tokens)) {
+      return <span className="text-sm text-warn">{t("set.tokensUnread")}</span>;
+    }
+    if (!mayClaim(tokens)) {
+      return <span className="text-sm text-muted-foreground">{t("set.tokensLoading")}</span>;
+    }
+    if (tokens.value.length === 0) {
+      return <span className="text-sm text-muted-foreground">{t("set.noTokens")}</span>;
+    }
+    return (
+      <div className="flex flex-col gap-1">
+        {tokens.value.map((tok) => (
+          <div
+            key={tok.id}
+            className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm">{tok.name}</span>
+                {/* Admin is the one worth spotting in a list, so it is the
+                    one that gets the loud variant. A read token is the
+                    expected case and reads as ordinary. */}
+                <Badge variant={tok.scope === "admin" || tok.scope === "mcp-admin" ? "warn" : "outline"}>
+                  {tok.scope}
+                </Badge>
+              </div>
+              <div className="font-mono text-sm text-muted-foreground">
+                {tok.prefix}… · {t("set.tokenCreated", { date: dateOnly(tok.createdAt) })} ·{" "}
+                {tokenLastUsed(tok, t)}
+              </div>
+            </div>
+            {/* Asks, and asks with the name typed. Revoking is
+                irreversible in the strongest sense this app has: the
+                plaintext exists nowhere any more, so an accidental revoke
+                cannot be undone by re-entering it -- every scraper holding
+                it starts 401ing and a new token has to be distributed.
+                Removing a platform credential 700 lines up already
+                required typing; a misclick here was one click. */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => confirmRevoke.ask(tok)}
+              aria-label={t("set.tokenRevokeAria", { name: tok.name })}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
@@ -4055,53 +4113,7 @@ function ApiTokens() {
           </div>
         )}
 
-        {readFailed(tokens) ? (
-          <span className="text-sm text-warn">{t("set.tokensUnread")}</span>
-        ) : !mayClaim(tokens) ? (
-          <span className="text-sm text-muted-foreground">{t("set.tokensLoading")}</span>
-        ) : tokens.value.length === 0 ? (
-          <span className="text-sm text-muted-foreground">{t("set.noTokens")}</span>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {tokens.value.map((tok) => (
-              <div
-                key={tok.id}
-                className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm">{tok.name}</span>
-                    {/* Admin is the one worth spotting in a list, so it is the
-                        one that gets the loud variant. A read token is the
-                        expected case and reads as ordinary. */}
-                    <Badge variant={tok.scope === "admin" || tok.scope === "mcp-admin" ? "warn" : "outline"}>
-                      {tok.scope}
-                    </Badge>
-                  </div>
-                  <div className="font-mono text-sm text-muted-foreground">
-                    {tok.prefix}… · {t("set.tokenCreated", { date: dateOnly(tok.createdAt) })} ·{" "}
-                    {tokenLastUsed(tok, t)}
-                  </div>
-                </div>
-                {/* Asks, and asks with the name typed. Revoking is
-                    irreversible in the strongest sense this app has: the
-                    plaintext exists nowhere any more, so an accidental revoke
-                    cannot be undone by re-entering it -- every scraper holding
-                    it starts 401ing and a new token has to be distributed.
-                    Removing a platform credential 700 lines up already
-                    required typing; a misclick here was one click. */}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => confirmRevoke.ask(tok)}
-                  aria-label={t("set.tokenRevokeAria", { name: tok.name })}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
+        {renderTokenList()}
         {/* Paste a token here to see what it is before a plugin uses it. The
             check is read-only and changes nothing on the install. */}
         <div className="border-t pt-4">

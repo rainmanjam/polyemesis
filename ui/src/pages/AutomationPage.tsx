@@ -303,6 +303,16 @@ const errText = (err: unknown, fallback: string) =>
 /** The tabs, so ?tab= can only name one that exists. */
 const AUTOMATION_TABS = ["alerts", "schedules", "hooks", "mcp"] as const;
 
+function runOutcomeVariant(r: ScheduleRun): "down" | "live" | "outline" {
+  if (r.error) return "down";
+  return r.fired ? "live" : "outline";
+}
+
+function runOutcomeLabel(t: Translator, r: ScheduleRun): string {
+  if (r.error) return t("auto.runError");
+  return r.fired ? t("auto.fired") : t("auto.skipped");
+}
+
 /** A schedule save or delete's `warnings`, in the server's words: an event
  *  page the change could not withdraw (Facebook has no cancel call), or a
  *  one-time schedule beyond Facebook's seven-day horizon. */
@@ -509,14 +519,14 @@ function AlertRules({
   onReload,
   onEdit,
   onNew,
-}: {
+}: Readonly<{
   rules: AlertRule[];
   meta: AlertsMeta | null;
   loadFailed: boolean;
   onReload: () => void;
   onEdit: (r: AlertRule) => void;
   onNew: () => void;
-}) {
+}>) {
   const t = useT();
   const [testing, setTesting] = useState<number | null>(null);
 
@@ -574,12 +584,13 @@ function AlertRules({
               rather than a control: nothing here can make the read succeed,
               and the operator's mistake is believing an answer they were never
               given. */}
-          {loadFailed ? (
+          {loadFailed && (
             <div className="flex items-start gap-1.5 px-3 py-8 text-center text-sm text-warn">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span className="text-left">{t("auto.rulesUnread")}</span>
             </div>
-          ) : rules.length === 0 ? (
+          )}
+          {!loadFailed && rules.length === 0 && (
             <EmptyState
               className="m-3"
               icon={Bell}
@@ -587,7 +598,8 @@ function AlertRules({
               body={t("auto.noRulesBody")}
               action={{ label: t("auto.newRuleButton"), onClick: onNew }}
             />
-          ) : (
+          )}
+          {!loadFailed && rules.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -736,12 +748,12 @@ function RuleDialog({
   meta,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   draft: AlertRule;
   meta: AlertsMeta;
   onClose: () => void;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const [form, setForm] = useState<AlertRule>(draft);
   const [saving, setSaving] = useState(false);
@@ -987,14 +999,14 @@ function Schedules({
   onReload,
   onEdit,
   onNew,
-}: {
+}: Readonly<{
   schedules: Schedule[];
   runs: ScheduleRun[];
   loadFailed: boolean;
   onReload: () => void;
   onEdit: (s: Schedule) => void;
   onNew: () => void;
-}) {
+}>) {
   const t = useT();
   const { status } = useLiveData();
   const destNames = useMemo(() => {
@@ -1069,12 +1081,13 @@ function Schedules({
           </Button>
         </CardHeader>
         <CardContent className="px-0 pb-0">
-          {loadFailed ? (
+          {loadFailed && (
             <div className="flex items-start gap-1.5 px-3 py-8 text-sm text-warn">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span className="text-left">{t("auto.schedulesUnread")}</span>
             </div>
-          ) : schedules.length === 0 ? (
+          )}
+          {!loadFailed && schedules.length === 0 && (
             <EmptyState
               className="m-3"
               icon={CalendarClock}
@@ -1082,7 +1095,8 @@ function Schedules({
               body={t("auto.noSchedulesBody")}
               action={{ label: t("auto.newSchedule"), onClick: onNew }}
             />
-          ) : (
+          )}
+          {!loadFailed && schedules.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1166,8 +1180,8 @@ function Schedules({
               <div key={`${r.id}-${r.at}`} className="flex flex-col gap-0.5 border-b border-border pb-2 last:border-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm">{r.name}</span>
-                  <Badge variant={r.error ? "down" : r.fired ? "live" : "outline"}>
-                    {r.error ? t("auto.runError") : r.fired ? t("auto.fired") : t("auto.skipped")}
+                  <Badge variant={runOutcomeVariant(r)}>
+                    {runOutcomeLabel(t, r)}
                   </Badge>
                 </div>
                 <span className="tnum font-mono text-sm text-muted-foreground">
@@ -1202,11 +1216,11 @@ function ScheduleDialog({
   draft,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   draft: Schedule;
   onClose: () => void;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const { status } = useLiveData();
   const [form, setForm] = useState<Schedule>(draft);
@@ -1421,7 +1435,7 @@ function ScheduleDialog({
                   <span className="text-sm text-muted-foreground">{t("auto.allDestinationsHint")}</span>
                 </span>
               </label>
-              {allDests ? null : destinationsKnown ? (
+              {!allDests && destinationsKnown && (
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {status.destinations.map((d) => (
                     <label key={d.id} className="flex items-center gap-2 text-sm">
@@ -1433,7 +1447,8 @@ function ScheduleDialog({
                     </label>
                   ))}
                 </div>
-              ) : (
+              )}
+              {!allDests && !destinationsKnown && (
                 // An empty list is a positive claim -- "this install has no
                 // destinations" -- so it is not drawn before the list arrives.
                 <span className="text-sm text-warn">

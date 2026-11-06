@@ -135,10 +135,10 @@ interface TrackRowsProps {
 export function RoleBadge({
   role,
   excluded,
-}: {
+}: Readonly<{
   role: Exclude<TrackRole, "">;
   excluded: boolean;
-}) {
+}>) {
   const t = useT();
   const name = t(ROLE_LABEL_KEY[role]);
   return (
@@ -170,7 +170,7 @@ export function TrackRows({
   duckTarget = [],
   live,
   draftMute,
-}: TrackRowsProps) {
+}: Readonly<TrackRowsProps>) {
   const t = useT();
   const translate = useT();
   /* A10: the last measured peak per track, and when it was measured. Kept in a
@@ -308,17 +308,16 @@ export function TrackRows({
         const rowBusy = busy[t.index] === true;
         const shownGain = drag[t.index] ?? sel.gain;
         const muteColumn = !!live || !!draftMute;
+        let rowTone = "border-border bg-card opacity-55 hover:opacity-80";
+        if (excluded) rowTone = "border-warn/35 bg-warn-dim/25";
+        else if (sending) rowTone = "border-primary/35 bg-primary-dim/30";
 
         return (
           <div
             key={t.index}
             className={cn(
               "@container flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors",
-              excluded
-                ? "border-warn/35 bg-warn-dim/25"
-                : sending
-                  ? "border-primary/35 bg-primary-dim/30"
-                  : "border-border bg-card opacity-55 hover:opacity-80",
+              rowTone,
             )}
           >
             {/* TWO LAYOUTS, BY THE ROW'S OWN WIDTH (a container query, so the
@@ -622,14 +621,14 @@ export function TrackSummary({
   labels,
   count,
   className,
-}: {
+}: Readonly<{
   tracks: number[] | null;
   labels?: (string | undefined)[] | null;
   /** How many tracks the ingest carries, when known (lib/trackLabels.ts
    *  trackCount). One chip per track; see trackChipCount. */
   count?: number | null;
   className?: string;
-}) {
+}>) {
   const t = useT();
   const list = tracks ?? [];
   return (

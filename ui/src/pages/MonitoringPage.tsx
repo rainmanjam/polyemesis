@@ -59,7 +59,7 @@ import {
   type LogLine,
   type ProcessInfo,
 } from "@/lib/types";
-import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type Translator, type TranslationKey } from "@/lib/i18n";
 import { processRunning } from "@/lib/liveness";
 import { MoreAbout } from "@/components/MoreAbout";
 
@@ -74,6 +74,15 @@ const LOG_LEVEL_CLASS: Record<string, string> = {
  *  Deep enough to explain a restart that happened before the page opened,
  *  shallow enough that the tail stays a tail. */
 const BACKFILL_LIMIT = 400;
+
+function logVerdictText(t: Translator, state: ReturnType<typeof verdict>): string {
+  if (state.kind === "clean") return t("monitor.verdictClean", { window: VERDICT_WINDOW_SEC });
+  return t(state.count === 1 ? "monitor.verdictErrorsOne" : "monitor.verdictErrors", {
+    process: state.process,
+    count: state.count,
+    window: state.windowSec,
+  });
+}
 
 const lineKey = (l: LogLine) => `${l.time} ${l.process} ${l.text}`;
 
@@ -486,12 +495,12 @@ function TileRemedy({
   label,
   to,
   onClick,
-}: {
+}: Readonly<{
   text: string;
   label: string;
   to?: string;
   onClick?: () => void;
-}) {
+}>) {
   return (
     <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-sm text-warn">
       <span>{text}</span>
@@ -799,6 +808,36 @@ export function MonitoringPage() {
   const cpuHigh = cpuOver(system?.cpuPercent, cpuWarn);
   const memHigh = memoryOver(system?.memPercent);
 
+  const renderLogLines = () => {
+    if (merged.length === 0) {
+      return (
+        <EmptyState
+          title={t("mon.noLogLinesTitle")}
+          body={t("mon.noLogLinesBody")}
+          className="border-0 font-sans"
+        />
+      );
+    }
+    if (groups.length === 0) {
+      return <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />;
+    }
+    return groups.map((g, i) => (
+      <div key={i} className="flex gap-2">
+        <span className="tnum shrink-0 text-muted-foreground">{clockTime(g.line.time)}</span>
+        <span className="shrink-0 text-muted-foreground">{g.line.process}</span>
+        {g.count > 1 && (
+          <span
+            className="shrink-0 rounded bg-muted px-1 tnum text-muted-foreground"
+            title={t("monitor.repeatTitle", { count: g.count })}
+          >
+            {`×${g.count}`}
+          </span>
+        )}
+        <span className={cn("break-all", LOG_LEVEL_CLASS[g.line.level] ?? "")}>{g.line.text}</span>
+      </div>
+    ));
+  };
+
   return (
     <div className="p-3">
       <PageHeader
@@ -1091,13 +1130,7 @@ export function MonitoringPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             <p role="status" className="text-tiny text-muted-foreground">
-              {verdictState.kind === "clean"
-                ? t("monitor.verdictClean", { window: VERDICT_WINDOW_SEC })
-                : t(verdictState.count === 1 ? "monitor.verdictErrorsOne" : "monitor.verdictErrors", {
-                    process: verdictState.process,
-                    count: verdictState.count,
-                    window: verdictState.windowSec,
-                  })}
+              {logVerdictText(t, verdictState)}
             </p>
             {/* A9: the verdict names a process, so it offers that process's
                 log -- outside the status line, which is read as one sentence. */}
@@ -1143,35 +1176,7 @@ export function MonitoringPage() {
             >
               {/* app-council A83: the kit's empty state, set in the sans face
                   and without its own border inside the log box. */}
-              {merged.length === 0 ? (
-                <EmptyState
-                  title={t("mon.noLogLinesTitle")}
-                  body={t("mon.noLogLinesBody")}
-                  className="border-0 font-sans"
-                />
-              ) : groups.length === 0 ? (
-                <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />
-              ) : (
-                groups.map((g, i) => (
-                  <div key={i} className="flex gap-2">
-                    <span className="tnum shrink-0 text-muted-foreground">
-                      {clockTime(g.line.time)}
-                    </span>
-                    <span className="shrink-0 text-muted-foreground">{g.line.process}</span>
-                    {g.count > 1 && (
-                      <span
-                        className="shrink-0 rounded bg-muted px-1 tnum text-muted-foreground"
-                        title={t("monitor.repeatTitle", { count: g.count })}
-                      >
-                        {`×${g.count}`}
-                      </span>
-                    )}
-                    <span className={cn("break-all", LOG_LEVEL_CLASS[g.line.level] ?? "")}>
-                      {g.line.text}
-                    </span>
-                  </div>
-                ))
-              )}
+              {renderLogLines()}
             </div>
             <div>
               <Button

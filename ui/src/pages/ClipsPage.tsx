@@ -98,6 +98,11 @@ const errText = (err: unknown, fallback: string) =>
 const clipDownloadUrl = (name: string) =>
   `/api/v1/clips/${encodeURIComponent(name)}/download`;
 
+function keyframeStatValue(t: ReturnType<typeof useT>, verdict: ReturnType<typeof keyframeVerdict>["verdict"]): string {
+  if (verdict === "unknown") return "—";
+  return verdict === "seen" ? t("clips.seen") : t("clips.none");
+}
+
 /** Instant replay for the operator: everything that arrived in the last N
  *  seconds is already in memory, so capturing it is a copy rather than a
  *  recording somebody has to have started in advance. */
@@ -331,22 +336,25 @@ export function ClipsPage() {
               <CardTitle>{t("clips.captured")}</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
-              {failed ? (
+              {failed && (
                 <div className="px-3 py-8 text-center text-sm text-warn">
                   {t("clips.listUnread")}
                 </div>
-              ) : !mayClaim(read) ? (
+              )}
+              {!failed && !mayClaim(read) && (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
-              ) : clips.length === 0 ? (
+              )}
+              {mayClaim(read) && clips.length === 0 && (
                 <EmptyState
                   icon={Film}
                   title={t("clips.noneYet")}
                   body={t("clips.noneYetBody")}
                   className="mx-3 mb-3 border-0"
                 />
-              ) : (
+              )}
+              {mayClaim(read) && clips.length > 0 && (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -450,13 +458,7 @@ export function ClipsPage() {
               />
               <Stat
                 labelKey="clips.keyframes"
-                value={
-                  keyframes.verdict === "unknown"
-                    ? "—"
-                    : keyframes.verdict === "seen"
-                      ? t("clips.seen")
-                      : t("clips.none")
-                }
+                value={keyframeStatValue(t, keyframes.verdict)}
                 tone={keyframes.warn ? "warn" : "muted"}
               />
             </CardContent>

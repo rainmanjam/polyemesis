@@ -27,7 +27,7 @@ export function DelayPanel({
   onCutNow,
   onDump,
   busy,
-}: {
+}: Readonly<{
   dest: DestStatus;
   /** Discards the buffered tail. Absent for a card that cannot act. */
   onCutNow?: () => void;
@@ -36,7 +36,7 @@ export function DelayPanel({
    *  its reason. Absent for a card that cannot act. */
   onDump?: (seconds?: number) => Promise<DelayDumpResult>;
   busy?: boolean;
-}) {
+}>) {
   const t = useT();
   const [asking, setAsking] = useState(false);
   const [mode, setMode] = useState<"since" | "seconds">("since");

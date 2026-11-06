@@ -14,10 +14,10 @@ import type { ChatCommandSettings as Value, SourceView } from "@/lib/types";
 export function ChatCommandSettings({
   value,
   onChange,
-}: {
+}: Readonly<{
   value: Value | undefined;
   onChange: (next: Value) => void;
-}) {
+}>) {
   const t = useT();
   const v: Value = value ?? { enabled: false };
   // The programme list is a convenience for the picker, not a precondition:

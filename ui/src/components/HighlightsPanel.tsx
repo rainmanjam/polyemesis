@@ -30,7 +30,7 @@ interface ScanJob {
   state: string;
 }
 
-export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted }: Props) {
+export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted }: Readonly<Props>) {
   const t = useT();
   const [view, setView] = useState<HighlightsView | null>(null);
   const [useModel, setUseModel] = useState(false);

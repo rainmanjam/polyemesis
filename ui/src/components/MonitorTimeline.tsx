@@ -86,7 +86,7 @@ export function MonitorTimeline() {
               : t("timeline.refreshFailed", { time: clockTime(readAt) })}
           </p>
         )}
-        {rows === null ? null : rows.length === 0 ? (
+        {rows !== null && (rows.length === 0 ? (
           <p className="text-tiny text-muted-foreground">{t("timeline.empty")}</p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -149,7 +149,7 @@ export function MonitorTimeline() {
             })}
           </ol>
           </div>
-        )}
+        ))}
       </CardContent>
     </Card>
   );

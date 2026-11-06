@@ -35,7 +35,7 @@ export function ChatFlaggedList({
   failed,
   filtered,
   onOpenUser,
-}: {
+}: Readonly<{
   /** Already narrowed to the platforms the timeline is showing. */
   flags: ChatFlaggedMessage[];
   /** The read did not answer; say so rather than "nothing flagged". */
@@ -43,7 +43,7 @@ export function ChatFlaggedList({
   /** Some flags exist but the platform filter hides all of them. */
   filtered: boolean;
   onOpenUser: (m: ChatMessage) => void;
-}) {
+}>) {
   const t = useT();
 
   if (failed) {

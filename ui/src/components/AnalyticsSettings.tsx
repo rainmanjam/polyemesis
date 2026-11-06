@@ -14,10 +14,10 @@ const DEFAULTS: Value = { enabled: true, intervalSeconds: 60, retentionDays: 90 
 export function AnalyticsSettings({
   value,
   onChange,
-}: {
+}: Readonly<{
   value: Value | undefined;
   onChange: (next: Value) => void;
-}) {
+}>) {
   const t = useT();
   const v: Value = { ...DEFAULTS, ...value };
   return (

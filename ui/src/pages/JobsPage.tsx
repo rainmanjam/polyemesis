@@ -601,7 +601,7 @@ export function JobsPage() {
 
 /** What the machine is asserting right now, and which of it is holding work
  *  back. This is the panel that turns "why is nothing running" into a fact. */
-function GatePanel({ view }: { view: JobsOverview }) {
+function GatePanel({ view }: Readonly<{ view: JobsOverview }>) {
   const t = useT();
   const g = view.governor?.gates;
   const blocked = useMemo(
@@ -706,7 +706,7 @@ function JobTable({
   onRelease,
   onDelete,
   onPublish,
-}: {
+}: Readonly<{
   jobs: JobView[];
   empty: string;
   /** One sentence under the empty title, when there is more to say. */
@@ -718,7 +718,7 @@ function JobTable({
   onDelete?: (id: number) => void;
   /** Opens the Publish dialog for a finished clip export. */
   onPublish?: (id: number) => void;
-}) {
+}>) {
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
 
@@ -886,7 +886,7 @@ function JobTable({
   );
 }
 
-function ProgressCell({ job }: { job: JobView }) {
+function ProgressCell({ job }: Readonly<{ job: JobView }>) {
   const t = useT();
   if (job.state === "done") {
     return <span className="text-sm text-muted-foreground">{t("jobs.complete")}</span>;
@@ -946,7 +946,7 @@ function PolicyEditor({
   onPatch,
   onSave,
   onRevert,
-}: {
+}: Readonly<{
   draft: PostProdSettings;
   kinds: JobKindInfo[];
   /** What this machine can do about speech to text. The model picker needs it
@@ -959,7 +959,7 @@ function PolicyEditor({
   onPatch: (p: Partial<PostProdSettings>) => void;
   onSave: () => void;
   onRevert: () => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   /** The per-kind row, created on first edit. A kind with no row inherits the
@@ -1323,7 +1323,7 @@ function NumberField({
   invalid,
   note,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
@@ -1335,7 +1335,7 @@ function NumberField({
   /** A line under the hint, e.g. why the Advanced section is open. */
   note?: ReactNode;
   onChange: (n: number) => void;
-}) {
+}>) {
   // What is typed is kept as text, so an emptied field stays empty. The old
   // code wrote NaN through as the minimum, so clearing the box to type 70 over
   // 85 left "1" in it mid-edit (A62). On blur or Enter the value is clamped.
@@ -1398,14 +1398,14 @@ function WindowEditor({
   idBase,
   windows,
   onChange,
-}: {
+}: Readonly<{
   /** Makes the zone datalist's id unique. One of these editors is rendered per
    *  scheduled kind, and two <datalist> elements sharing an id is the kind of
    *  invalid HTML that works until it does not. */
   idBase: string;
   windows: JobWindow[];
   onChange: (next: JobWindow[]) => void;
-}) {
+}>) {
   const t = useT();
   const tz = browserZone();
   const zoneListId = `jobs-window-tz-${idBase}`;

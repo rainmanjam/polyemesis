@@ -215,6 +215,30 @@ export function MetersPage() {
     }
   };
 
+  const renderReports = () => {
+    if (reports.length === 0) {
+      if (monitorOn === null) {
+        return <DisabledReason id={monitorReasonId} reason={t("meters.monitorUnknown")} />;
+      }
+      // app-council A83: the kit's empty state, which also lifts this
+      // off the 11px step.
+      return (
+        <EmptyState
+          title={monitorOn ? t("meters.emptyTitle") : t("meters.monitorOffTitle")}
+          body={monitorOn ? t("meters.emptyBody") : t("meters.monitorOffBody")}
+        />
+      );
+    }
+    return reports.map((rep) => (
+      <ComplianceRow
+        key={`${rep.destinationId}-${rep.mix ?? "live"}`}
+        report={rep}
+        truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
+        integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
+      />
+    ));
+  };
+
   return (
     <div className="p-3">
       <PageHeader
@@ -440,27 +464,7 @@ export function MetersPage() {
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {reports.length === 0 ? (
-            monitorOn === null ? (
-              <DisabledReason id={monitorReasonId} reason={t("meters.monitorUnknown")} />
-            ) : (
-              // app-council A83: the kit's empty state, which also lifts this
-              // off the 11px step.
-              <EmptyState
-                title={monitorOn ? t("meters.emptyTitle") : t("meters.monitorOffTitle")}
-                body={monitorOn ? t("meters.emptyBody") : t("meters.monitorOffBody")}
-              />
-            )
-          ) : (
-            reports.map((rep) => (
-              <ComplianceRow
-                key={`${rep.destinationId}-${rep.mix ?? "live"}`}
-                report={rep}
-                truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
-                integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
-              />
-            ))
-          )}
+          {renderReports()}
           <p className="text-sm text-muted-foreground">
             {t("meters.integratedNote", {
               seconds: loudness?.bounds.minIntegrationSeconds ?? 20,
@@ -482,11 +486,11 @@ export function ComplianceRow({
   report,
   truePeakFailOverDb,
   integrationSeconds = 20,
-}: {
+}: Readonly<{
   report: LoudnessReport;
   truePeakFailOverDb: number;
   integrationSeconds?: number;
-}) {
+}>) {
   const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
@@ -500,6 +504,9 @@ export function ComplianceRow({
     measured &&
     targeted &&
     report.truePeakDbtp > report.target.truePeakDbtp + truePeakFailOverDb;
+  let verdictLabel: string = report.verdict;
+  if (report.error) verdictLabel = t("meters.analyserFailed");
+  else if (notSet) verdictLabel = t("routing.meters.notSet");
 
   return (
     <div className="flex flex-col gap-1.5 border-b border-border pb-2 last:border-0 last:pb-0">
@@ -507,7 +514,7 @@ export function ComplianceRow({
         <span className="text-[12px]">{report.destination}</span>
         {report.mix === "vod" && <Badge variant="outline">{t("wave3.vod.mixVod")}</Badge>}
         <Badge variant={toneBadge[tone]} title={report.reason}>
-          {report.error ? t("meters.analyserFailed") : notSet ? t("routing.meters.notSet") : report.verdict}
+          {verdictLabel}
         </Badge>
         {notSet && (
           <Button asChild variant="outline" size="sm" className="h-6 px-2 text-xs">

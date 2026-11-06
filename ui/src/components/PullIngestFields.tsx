@@ -43,11 +43,11 @@ export function PullIngestFields({
   value,
   onChange,
   idPrefix = "pull",
-}: {
+}: Readonly<{
   value: PullSettings | undefined;
   onChange: (next: PullSettings) => void;
   idPrefix?: string;
-}) {
+}>) {
   const t = useT();
   const pull = value ?? DEFAULT_PULL;
   const set = (patch: Partial<PullSettings>) => onChange({ ...pull, ...patch });

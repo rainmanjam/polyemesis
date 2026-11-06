@@ -860,7 +860,7 @@ export function RoutingPage() {
           tone: d.enabled
             ? toneForState(destinationShownState(status?.destinations?.find((x) => x.id === d.id)?.process))
             : "idle",
-          kind: !isSel ? "select" : live.mode === "matrix" ? "matrix" : "editable",
+          kind: overviewKind(isSel, live.mode),
           routed: routedTracks(live),
           vodBound: vodMix !== null,
           vodRouted: vodMix ? routedTracks(vodMix) : [],
@@ -918,11 +918,9 @@ export function RoutingPage() {
   // A28: why Save changes is greyed, as visible text linked to it. A compile
   // error is named too: the mix it belongs to may sit inside the collapsed
   // Advanced section, out of view.
-  const saveReason = !dirty
-    ? t("route.nothingToSave")
-    : blockingError
-      ? blockingError
-      : null;
+  let saveReason: string | null = null;
+  if (!dirty) saveReason = t("route.nothingToSave");
+  else if (blockingError) saveReason = blockingError;
   // app-council A95 + A26: the kit's save model, and ONE of it. Every edit,
   // mute and gain included, waits in the draft for Save changes. The draft
   // itself stays in this page's own state rather than in useSaveModel: the
@@ -1223,6 +1221,11 @@ interface EditorContext {
   muteBlocked: string | null;
 }
 
+function overviewKind(isSel: boolean, mode: RoutingProfile["mode"]): OverviewRow["kind"] {
+  if (!isSel) return "select";
+  return mode === "matrix" ? "matrix" : "editable";
+}
+
 function ProfileEditor({
   idPrefix,
   ctx,
@@ -1235,7 +1238,7 @@ function ProfileEditor({
   onCompiledGraph,
   advancedExtra,
   nested = false,
-}: {
+}: Readonly<{
   /** Namespaces every DOM id this editor emits. Must differ between instances. */
   idPrefix: string;
   ctx: EditorContext;
@@ -1266,7 +1269,7 @@ function ProfileEditor({
    *  (the second mix): its own advanced cards are shown inline rather than
    *  behind a second disclosure inside the first. */
   nested?: boolean;
-}) {
+}>) {
   const t = useT();
   const [compiled, setCompiled] = useState<RoutingResult | null>(null);
   const [compileError, setCompileError] = useState<string>("");
@@ -1644,7 +1647,7 @@ function ProfileEditor({
 /** What the operator is told about mute and gain (A26): that they wait for
  *  Save changes like every other edit, or, once for the whole destination, why
  *  no Mute can apply at all. */
-function MuteGainNote({ blocked }: { blocked: string | null }) {
+function MuteGainNote({ blocked }: Readonly<{ blocked: string | null }>) {
   const t = useT();
   if (blocked) {
     return (
@@ -1695,7 +1698,7 @@ function SecondMixCard({
   multitrack,
   blockedByToggle,
   probed,
-}: {
+}: Readonly<{
   profile: RoutingProfile | null;
   /** Seeds a newly enabled second mix when there is nothing to restore. */
   liveProfile: RoutingProfile;
@@ -1708,7 +1711,7 @@ function SecondMixCard({
   /** Whether the ingest has been probed. An unprobed one drops the second mix
    *  on every platform — see engine/destinations.go's provisional path. */
   probed: boolean;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const enable = (on: boolean) => {
@@ -1853,7 +1856,7 @@ function PresetRow({
   trackOptions,
   onApply,
   showMusicPolicy = false,
-}: PresetRowProps) {
+}: Readonly<PresetRowProps>) {
   const t = useT();
   return (
     <div className="flex flex-wrap items-start gap-2">
@@ -1945,12 +1948,12 @@ function TrackPick({
   value,
   options,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   value: number;
   options: { value: string; label: string }[];
   onChange: (v: number) => void;
-}) {
+}>) {
   const t = useT();
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
@@ -1983,19 +1986,82 @@ function MusicRightsCard({
   excludeRoles,
   musicTracks,
   onExcludeRoles,
-}: {
+}: Readonly<{
   platformName: string;
   decision?: MusicDecision;
   excludeRoles: TrackRole[];
   musicTracks: number[];
   onExcludeRoles: (roles: TrackRole[]) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const excluded = excludeRoles.includes("music");
   const platformWants = decision?.exclude ?? false;
   const reason = decision?.reason || t("route.musicPolicyFallback");
   const who = platformName || t("route.thisDestinationSPlatform");
+
+  let statusBadge: ReactNode;
+  let statusTip: ReactNode;
+  if (excluded) {
+    statusBadge = (
+      <Badge variant="live">
+        <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
+      </Badge>
+    );
+    statusTip = (
+      <>
+        {t("route.musicTipExcluded")}{" "}
+        {platformWants && <>{t("route.musicTipExcludedWhy", { who, reason })} </>}
+        {t("route.musicTipNothingElse")}
+      </>
+    );
+  } else if (platformWants) {
+    statusBadge = (
+      <Badge variant="down">
+        <Music className="h-2.5 w-2.5" /> {t("route.musicBeingSent")}
+      </Badge>
+    );
+    statusTip = <>{t("route.musicTipSent", { who, reason })}</>;
+  } else {
+    statusBadge = (
+      <Badge variant="outline">
+        <Music className="h-2.5 w-2.5" /> {t("route.musicAllowed")}
+      </Badge>
+    );
+    statusTip = <>{t("route.musicTipUnknown")}</>;
+  }
+
+  let trackNote: ReactNode;
+  if (!excluded) {
+    trackNote = <>{t("route.everyTrackReaches")}</>;
+  } else if (musicTracks.length > 0) {
+    trackNote = (
+      <>
+        {tn(
+          musicTracks.length === 1
+            ? "route.musicTracksExcludedOne"
+            : "route.musicTracksExcludedMany",
+          {
+            tracks: (
+              <span className="text-ok">
+                {musicTracks
+                  .map((n) => t("routing.overview.trackLabel", { n: n + 1 }))
+                  .join(", ")}
+              </span>
+            ),
+          },
+        )}
+      </>
+    );
+  } else {
+    trackNote = (
+      <>
+        {tn("route.noMusicTrack", {
+          labelTracks: <span className="text-foreground">{t("route.labelTracks")}</span>,
+        })}
+      </>
+    );
+  }
 
   const toggleRole = (role: TrackRole, on: boolean) => {
     const next = on
@@ -2013,33 +2079,11 @@ function MusicRightsCard({
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="cursor-help">
-              {excluded ? (
-                <Badge variant="live">
-                  <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
-                </Badge>
-              ) : platformWants ? (
-                <Badge variant="down">
-                  <Music className="h-2.5 w-2.5" /> {t("route.musicBeingSent")}
-                </Badge>
-              ) : (
-                <Badge variant="outline">
-                  <Music className="h-2.5 w-2.5" /> {t("route.musicAllowed")}
-                </Badge>
-              )}
+              {statusBadge}
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-80 leading-relaxed">
-            {excluded ? (
-              <>
-                {t("route.musicTipExcluded")}{" "}
-                {platformWants && <>{t("route.musicTipExcludedWhy", { who, reason })} </>}
-                {t("route.musicTipNothingElse")}
-              </>
-            ) : platformWants ? (
-              <>{t("route.musicTipSent", { who, reason })}</>
-            ) : (
-              <>{t("route.musicTipUnknown")}</>
-            )}
+            {statusTip}
           </TooltipContent>
         </Tooltip>
       </CardHeader>
@@ -2057,34 +2101,7 @@ function MusicRightsCard({
         </label>
 
         <p className="text-sm leading-relaxed text-muted-foreground">
-          {excluded ? (
-            musicTracks.length > 0 ? (
-              <>
-                {tn(
-                  musicTracks.length === 1
-                    ? "route.musicTracksExcludedOne"
-                    : "route.musicTracksExcludedMany",
-                  {
-                    tracks: (
-                      <span className="text-ok">
-                        {musicTracks
-                          .map((n) => t("routing.overview.trackLabel", { n: n + 1 }))
-                          .join(", ")}
-                      </span>
-                    ),
-                  },
-                )}
-              </>
-            ) : (
-              <>
-                {tn("route.noMusicTrack", {
-                  labelTracks: <span className="text-foreground">{t("route.labelTracks")}</span>,
-                })}
-              </>
-            )
-          ) : (
-            <>{t("route.everyTrackReaches")}</>
-          )}
+          {trackNote}
         </p>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
@@ -2125,18 +2142,30 @@ export function LoudnessCard({
   loudness,
   normalize,
   onChange,
-}: {
+}: Readonly<{
   loudness: Loudness | null;
   normalize: NormalizeMode;
   onChange: (l: Loudness | null) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const named = loudness && LOUDNESS_PRESETS.some((p) => p.lufs === loudness.targetLufs);
-  const value = !loudness ? LOUDNESS_OFF : named ? String(loudness.targetLufs) : LOUDNESS_CUSTOM;
+  let value: string = LOUDNESS_CUSTOM;
+  if (!loudness) value = LOUDNESS_OFF;
+  else if (named) value = String(loudness.targetLufs);
   // A target under `off` or `limiter` is stored but inert — routing never
   // overrides a clip-protection mode the operator chose by hand.
   const inert = loudness !== null && !LOUDNESS_ARMS.includes(normalize);
+  let loudnessNote: ReactNode;
+  if (loudness) {
+    loudnessNote = t("route.measuredOverTheWholeProgramme");
+  } else if (normalize === "loudnorm") {
+    loudnessNote = tn("route.loudnormFixed", {
+      lufs: <span className="tnum">{LUFS_PODCAST} LUFS</span>,
+    });
+  } else {
+    loudnessNote = t("route.withoutATargetTheMix");
+  }
 
   const select = (v: string) => {
     if (v === LOUDNESS_OFF) return onChange(null);
@@ -2229,15 +2258,7 @@ export function LoudnessCard({
         )}
 
         <p className="text-sm leading-relaxed text-muted-foreground">
-          {loudness ? (
-            t("route.measuredOverTheWholeProgramme")
-          ) : normalize === "loudnorm" ? (
-            tn("route.loudnormFixed", {
-              lufs: <span className="tnum">{LUFS_PODCAST} LUFS</span>,
-            })
-          ) : (
-            t("route.withoutATargetTheMix")
-          )}
+          {loudnessNote}
         </p>
       </CardContent>
     </Card>
@@ -2260,11 +2281,11 @@ export function DelayCard({
   delayMs,
   videoDelayMs,
   onChange,
-}: {
+}: Readonly<{
   delayMs: number;
   videoDelayMs: number;
   onChange: (ms: number) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const direction: DelayDirection = delayMs < 0 ? "video" : "audio";
@@ -2275,6 +2296,21 @@ export function DelayCard({
     const capped = Math.min(magnitude, d === "audio" ? MAX_DELAY_MS : -MIN_DELAY_MS);
     onChange(d === "audio" ? capped : -capped);
   };
+
+  let delayNote: ReactNode;
+  if (delayMs === 0) {
+    delayNote = t("route.audioAndVideoGoOut");
+  } else if (direction === "audio") {
+    delayNote = tn("route.delayAudioDesc", {
+      ms: <span className="tnum text-foreground">{magnitude} ms</span>,
+      max: MAX_DELAY_MS / 1000,
+    });
+  } else {
+    delayNote = tn("route.delayVideoDesc", {
+      ms: <span className="tnum text-foreground">{magnitude} ms</span>,
+      max: -MIN_DELAY_MS / 1000,
+    });
+  }
 
   const setMagnitude = (n: number) => {
     const clamped = Math.max(0, Math.min(Math.round(n), max));
@@ -2321,19 +2357,7 @@ export function DelayCard({
         </div>
 
         <p className="text-sm leading-relaxed text-muted-foreground">
-          {delayMs === 0 ? (
-            t("route.audioAndVideoGoOut")
-          ) : direction === "audio" ? (
-            tn("route.delayAudioDesc", {
-              ms: <span className="tnum text-foreground">{magnitude} ms</span>,
-              max: MAX_DELAY_MS / 1000,
-            })
-          ) : (
-            tn("route.delayVideoDesc", {
-              ms: <span className="tnum text-foreground">{magnitude} ms</span>,
-              max: -MIN_DELAY_MS / 1000,
-            })
-          )}
+          {delayNote}
         </p>
       </CardContent>
     </Card>
@@ -2358,13 +2382,13 @@ export function DuckingCard({
   allTracks,
   annotations,
   onChange,
-}: {
+}: Readonly<{
   ducking: Ducking | null;
   mixedTracks: number[];
   allTracks: number[];
   annotations: TrackAnnotation[];
   onChange: (d: Ducking | null) => void;
-}) {
+}>) {
   const t = useT();
   // What turning this on would create, or null when nothing valid can be.
   // See features/routing/duckSeed.ts, which is also where the old "< 2 tracks in the mix"
@@ -2528,26 +2552,24 @@ function TrackChip({
   active,
   tone,
   onClick,
-}: {
+}: Readonly<{
   track: number;
   annotation?: TrackAnnotation;
   active: boolean;
   tone: "armed" | "warn";
   onClick: () => void;
-}) {
+}>) {
   const t = useT();
   const name = annotation?.label || (annotation?.role ? t(ROLE_LABEL_KEY[annotation.role as Exclude<TrackRole, "">]) : "");
+  let chipTone = "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground";
+  if (active) chipTone = tone === "armed" ? "border-idle/40 bg-idle-dim text-idle" : "border-warn/40 bg-warn-dim text-warn";
   return (
     <button
       onClick={onClick}
       aria-pressed={active}
       className={cn(
         "flex items-center gap-1.5 rounded border px-2 py-1 text-sm transition-colors",
-        active
-          ? tone === "armed"
-            ? "border-idle/40 bg-idle-dim text-idle"
-            : "border-warn/40 bg-warn-dim text-warn"
-          : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
+        chipTone,
       )}
     >
       <span className="tnum font-mono font-semibold">{track + 1}</span>
@@ -2574,7 +2596,7 @@ function NumberField({
   step,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   unit: string;
   value: number;
@@ -2584,7 +2606,7 @@ function NumberField({
   step: number;
   disabled?: boolean;
   onChange: (n: number) => void;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1">
       <span className="flex items-baseline justify-between text-sm uppercase tracking-wider text-muted-foreground">

@@ -61,6 +61,7 @@ import {
   supportInfo,
   supportOf,
   tierInfo,
+  type PlatformCapability,
 } from "@/lib/capabilities";
 import { TWITCH_LABELS } from "@/lib/types";
 import { CaptionModeControl } from "@/components/CaptionModeControl";
@@ -88,6 +89,7 @@ import type {
   RenditionConcern,
   CaptionMode,
   XGoLiveTweet,
+  VideoGuidance,
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
 import { useDismissGuard } from "@/hooks/useDismissGuard";
@@ -558,6 +560,53 @@ export function presetIdFor(d: Destination): string {
  *  non-empty string to represent it. */
 const PASSTHROUGH = "passthrough";
 
+type AccountsPanel = "picker" | "failed" | "checking" | "connect";
+
+function accountsPanelFor(hasAccounts: boolean, read: ReadState<unknown>): AccountsPanel {
+  if (hasAccounts) return "picker";
+  if (readFailed(read)) return "failed";
+  if (!mayClaim(read)) return "checking";
+  return "connect";
+}
+
+function urlLabelFor(kind: DestKind, t: Translator): string {
+  if (kind === "file") return t("addDest.urlLabelFile");
+  return kind === "srt" ? "SRT URL" : "RTMP URL";
+}
+
+function urlPlaceholderFor(kind: DestKind): string {
+  if (kind === "file") return "clean-mix.mkv";
+  return kind === "srt" ? "srt://host:9000?streamid=..." : "rtmp://host/app";
+}
+
+function manualKeyNote(caps: PlatformCapability, showOAuth: boolean, t: Translator): string {
+  const reason = caps.reasons?.streamKey ? t(caps.reasons.streamKey) : null;
+  if (showOAuth) return t("addDest.typeKeyAnyway", { reason: reason ?? "" });
+  return reason ?? t("addDest.noKeyApi", { platform: caps.name });
+}
+
+function encodesNote(read: ReadState<unknown>, renditionCount: number, t: Translator): string {
+  if (readFailed(read)) return t("addDest.encodesReadFailed");
+  if (!mayClaim(read)) return t("addDest.encodesChecking");
+  return renditionCount === 0 ? t("addDest.encodesNone") : t("addDest.encodesHelp");
+}
+
+function kbpsText(video: VideoGuidance): string | null {
+  if (!video.kbpsMin) return null;
+  if (video.kbpsMax && video.kbpsMax !== video.kbpsMin) return `${video.kbpsMin}–${video.kbpsMax} kbps`;
+  return `${video.kbpsMin} kbps`;
+}
+
+function codecNote(copyOn: boolean, kind: DestKind, t: Translator): string {
+  if (copyOn) return t("addDest.codecUnusedCopy");
+  return kind === "rtmp" ? t("addDest.codecRtmpAac") : t("addDest.codecOpusHint");
+}
+
+function madeForKidsValue(v: boolean | null | undefined): "unset" | "yes" | "no" {
+  if (v === undefined || v === null) return "unset";
+  return v ? "yes" : "no";
+}
+
 /** One rendition in a sentence, so two tiers in the same list are told apart
  *  by what they do rather than by whatever they were named. */
 function renditionSpec(r: Rendition, t: Translator): string {
@@ -612,7 +661,7 @@ interface Props {
   initialSourceId?: string;
 }
 
-export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Props) {
+export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Readonly<Props>) {
   const editing = destination !== null;
   // Every operator-visible sentence here comes from the catalogue. The preset
   // table stores keys rather than English, so its notes and group labels are
@@ -929,6 +978,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     () => (caps?.connect ? accounts.filter((a) => String(a.platform) === caps.connect) : []),
     [accounts, caps],
   );
+  const accountsPanel = accountsPanelFor(platformAccounts.length > 0, accountsRead);
   // Only a platform whose setup guide says it has a device flow can be
   // connected from inside this form without a redirect back to this origin.
   const deviceCodeOK =
@@ -1490,7 +1540,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   it navigates away and discards this half-filled dialog. The
                   connect path is offered only when the server actually
                   answered. */}
-              {platformAccounts.length > 0 ? (
+              {accountsPanel === "picker" && (
                 <>
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger data-testid="connected-account-picker">
@@ -1517,13 +1567,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   return linked ? <AccountChip account={linked} onUnlink={() => setAccountId("none")} /> : null;
                 })()}
                 </>
-              ) : readFailed(accountsRead) ? (
+              )}
+              {accountsPanel === "failed" && (
                 <p className="text-sm text-muted-foreground">
                   {t("addDest.accountsReadFailed", { platform: caps.name })}
                 </p>
-              ) : !mayClaim(accountsRead) ? (
+              )}
+              {accountsPanel === "checking" && (
                 <p className="text-sm text-muted-foreground">{t("addDest.checkingAccount")}</p>
-              ) : (
+              )}
+              {accountsPanel === "connect" && (
                 <div className="flex flex-col gap-1.5">
                   {/* The code path first where the platform has one: it stays
                       on this page, so the form is kept. The redirect is the
@@ -1622,20 +1675,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-url">
-              {kind === "file" ? t("addDest.urlLabelFile") : kind === "srt" ? "SRT URL" : "RTMP URL"}
+              {urlLabelFor(kind, t)}
             </Label>
             <Input
               id="dest-url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="font-mono"
-              placeholder={
-                kind === "file"
-                  ? "clean-mix.mkv"
-                  : kind === "srt"
-                    ? "srt://host:9000?streamid=..."
-                    : "rtmp://host/app"
-              }
+              placeholder={urlPlaceholderFor(kind)}
             />
             {kind === "file" && (
               <span className="text-sm text-muted-foreground">{t("addDest.fileHint")}</span>
@@ -1687,9 +1734,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   it so this does not read as an apology. */}
               {manualKey && caps && (
                 <span className="text-sm text-muted-foreground">
-                  {showOAuth
-                    ? t("addDest.typeKeyAnyway", { reason: caps.reasons?.streamKey ? t(caps.reasons.streamKey) : "" })
-                    : caps.reasons?.streamKey ? t(caps.reasons.streamKey) : t("addDest.noKeyApi", { platform: caps.name })}
+                  {manualKeyNote(caps, showOAuth, t)}
                 </span>
               )}
             </div>
@@ -1776,13 +1821,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                       Renditions page to build a second encode they may already
                       have. mayClaim is what makes that sentence unreachable
                       for a read that never landed. */}
-                  {readFailed(renditionsRead)
-                    ? t("addDest.encodesReadFailed")
-                    : !mayClaim(renditionsRead)
-                      ? t("addDest.encodesChecking")
-                      : renditions.length === 0
-                        ? t("addDest.encodesNone")
-                        : t("addDest.encodesHelp")}
+                  {encodesNote(renditionsRead, renditions.length, t)}
                 </span>
               </button>
             </div>
@@ -2018,11 +2057,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                         ? `${platformVideo.width}×${platformVideo.height}`
                         : null,
                       platformVideo.fps ? `${platformVideo.fps} fps` : null,
-                      platformVideo.kbpsMin
-                        ? platformVideo.kbpsMax && platformVideo.kbpsMax !== platformVideo.kbpsMin
-                          ? `${platformVideo.kbpsMin}–${platformVideo.kbpsMax} kbps`
-                          : `${platformVideo.kbpsMin} kbps`
-                        : null,
+                      kbpsText(platformVideo),
                       platformVideo.gopSeconds
                         ? t("addDest.gopKeyframes", { seconds: platformVideo.gopSeconds })
                         : null,
@@ -2159,11 +2194,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 </SelectContent>
               </Select>
               <span className="text-sm text-muted-foreground">
-                {copyOn
-                  ? t("addDest.codecUnusedCopy")
-                  : kind === "rtmp"
-                    ? t("addDest.codecRtmpAac")
-                    : t("addDest.codecOpusHint")}
+                {codecNote(copyOn, kind, t)}
               </span>
             </div>
             <div className="flex flex-col gap-1">
@@ -2235,14 +2266,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   <div className="flex flex-col gap-1">
                     <Label>{t("dest.madeForKids")}</Label>
                     <Select
-                      value={
-                        compliance.madeForKids === undefined ||
-                        compliance.madeForKids === null
-                          ? "unset"
-                          : compliance.madeForKids
-                            ? "yes"
-                            : "no"
-                      }
+                      value={madeForKidsValue(compliance.madeForKids)}
                       // null, not undefined, for the same reason the backup
                       // toggle sends a bare boolean: undefined is omitted from
                       // the body and the server decodes over the stored row, so
@@ -2858,6 +2882,11 @@ const HEALTH_LABEL: Record<NonNullable<PlatformAccount["health"]>["state"], Tran
   expired: "addDest.healthExpired",
 };
 
+function healthTextClass(state: keyof typeof HEALTH_TONE): string {
+  if (state === "ok") return "text-muted-foreground";
+  return HEALTH_TONE[state] === "warn" ? "text-warn" : "text-down";
+}
+
 /** The account a destination is linked to, and how it is doing (A5). */
 export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformAccount; onUnlink: () => void }>) {
   const t = useT();
@@ -2871,7 +2900,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
       {health && <StatusDot tone={HEALTH_TONE[health.state]} size="sm" />}
       <span className="text-sm font-medium">{account.accountName}</span>
       {health && (
-        <span className={cn("text-sm", health.state === "ok" ? "text-muted-foreground" : HEALTH_TONE[health.state] === "warn" ? "text-warn" : "text-down")}>
+        <span className={cn("text-sm", healthTextClass(health.state))}>
           {t(HEALTH_LABEL[health.state])}
         </span>
       )}

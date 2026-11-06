@@ -23,11 +23,11 @@ export function ChatOverlayView({
   lines,
   style,
   mode,
-}: {
+}: Readonly<{
   lines: readonly ShownLine[];
   style: OverlayStyle;
   mode: "overlay" | "dock" | "preview";
-}) {
+}>) {
   const t = useT();
   const dock = mode === "dock";
   const font = FONT_STACKS[style.font] ?? FONT_STACKS.sans;
@@ -140,7 +140,7 @@ export function ChatOverlayView({
 
 /** The three roles every platform has, as coloured dots. Labelled for a
  *  screen reader in the dock; on stream they are decoration. */
-function RoleDots({ line }: { line: ShownLine }) {
+function RoleDots({ line }: Readonly<{ line: ShownLine }>) {
   const t = useT();
   const dots: { key: string; color: string; label: string }[] = [];
   if (line.broadcaster) dots.push({ key: "b", color: "#ef4444", label: t("overlay.roleBroadcaster") });

@@ -63,7 +63,7 @@ import type {
   TranscriptTrack,
   TranscriptView,
 } from "@/lib/types";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, type TranslationKey, type Translator } from "@/lib/i18n";
 
 // The library is the session, not the file. A broadcast is one thing; that the
 // recorder wrote it as eleven MKV segments is an implementation detail, and the
@@ -95,6 +95,16 @@ const JOB_TOASTS: Record<
     failed: "lib.couldNotQueueTheProxy",
   },
 };
+
+function hitsLabel(results: SearchResults, t: Translator): string {
+  const n = results.hits.length;
+  if (results.total >= 0) return t("lib.hitsOf", { n, total: results.total });
+  return t(n === 1 ? "lib.hitsShownOne" : "lib.hitsShown", { n });
+}
+
+function trackCountLabel(tracks: number, t: Translator): string {
+  return t(tracks === 1 ? "lib.trackCountOne" : "lib.trackCount", { n: tracks });
+}
 
 function errText(err: unknown, fallback: string): string {
   if (err instanceof ApiError || err instanceof Error) return err.message;
@@ -402,9 +412,7 @@ export function LibraryPage() {
               )}
               {results && (
                 <span className="tnum ml-auto font-mono text-tiny text-muted-foreground">
-                  {results.total < 0
-                    ? t(results.hits.length === 1 ? "lib.hitsShownOne" : "lib.hitsShown", { n: results.hits.length })
-                    : t("lib.hitsOf", { n: results.hits.length, total: results.total })}
+                  {hitsLabel(results, t)}
                 </span>
               )}
             </div>
@@ -582,11 +590,11 @@ function HitRow({
   hit,
   markers,
   onOpen,
-}: {
+}: Readonly<{
   hit: TranscriptHit;
   markers: [string, string];
   onOpen: () => void;
-}) {
+}>) {
   return (
     <li>
       <button
@@ -631,7 +639,7 @@ function SessionCard({
   onEdit,
   onPlay,
   onChanged,
-}: {
+}: Readonly<{
   session: LibrarySession;
   expanded: boolean;
   jobsAvailable: boolean;
@@ -643,7 +651,7 @@ function SessionCard({
   onEdit: () => void;
   onPlay: (recordingId: number) => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [recordings, setRecordings] = useState<LibraryRecording[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -765,12 +773,12 @@ function SessionEditor({
   busy,
   onClose,
   onSave,
-}: {
+}: Readonly<{
   session: LibrarySession;
   busy: boolean;
   onClose: () => void;
   onSave: (patch: { title: string; description: string; tags: string[] }) => void;
-}) {
+}>) {
   const t = useT();
   const [title, setTitle] = useState(session.title);
   const [description, setDescription] = useState(session.description);
@@ -851,14 +859,14 @@ function RecordingList({
   transcriptsOffId,
   onPlay,
   onChanged,
-}: {
+}: Readonly<{
   recordings: LibraryRecording[];
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
   transcriptsOffId?: string;
   onPlay: (id: number) => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [busy, setBusy] = useState(0);
   // Above the early return: a hook after a conditional return runs in a
@@ -930,7 +938,7 @@ function RecordingList({
                 <span className="tnum block font-mono text-micro text-muted-foreground">
                   {timestamp(r.startedAt)} · {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"} ·{" "}
                   {bytes(r.bytes)}
-                  {r.tracks > 0 ? ` · ${t(r.tracks === 1 ? "lib.trackCountOne" : "lib.trackCount", { n: r.tracks })}` : ""}
+                  {r.tracks > 0 ? ` · ${trackCountLabel(r.tracks, t)}` : ""}
                 </span>
               </span>
             </button>
@@ -1035,13 +1043,13 @@ function SpeakerField({
   speaker,
   busy,
   onSave,
-}: {
+}: Readonly<{
   track: number;
   speaker: string;
   busy: boolean;
   /** Throws on failure. */
   onSave: (speaker: string) => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const model = useSaveModel<string>({
     stored: speaker,
@@ -1086,14 +1094,14 @@ export function PlayerDialog({
   transcribeAvailable,
   transcribeNote,
   onChanged,
-}: {
+}: Readonly<{
   target: PlayerTarget;
   onClose: () => void;
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
   transcribeNote?: string;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [rec, setRec] = useState<LibraryRecording | null>(null);
   const [transcript, setTranscript] = useState<TranscriptView | null>(null);

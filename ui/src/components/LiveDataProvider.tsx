@@ -36,7 +36,7 @@ const LOG_LIMIT = 600;
 /** How long one /sources read may take before it is abandoned, so the next poll can run. */
 const SOURCES_READ_TIMEOUT_MS = 10_000;
 
-export function LiveDataProvider({ children }: { children: ReactNode }) {
+export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [source, setSource] = useState<SourceInfo | null>(null);

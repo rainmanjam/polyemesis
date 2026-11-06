@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Loader2 } from "lucide-react";
+import { Check, CircleAlert, Loader2, type LucideIcon } from "lucide-react";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import type { SaveState } from "@/lib/saveModel";
 import { cn } from "@/lib/utils";
@@ -18,14 +18,24 @@ const LABEL: Record<Exclude<SaveState, "clean">, TranslationKey> = {
   failed: "save.failed",
 };
 
+const ICON: Partial<Record<SaveState, LucideIcon>> = {
+  saving: Loader2,
+  saved: Check,
+  failed: CircleAlert,
+};
+
+const TONE: Partial<Record<SaveState, string>> = {
+  failed: "text-down",
+  saved: "text-ok",
+};
+
 export function SaveStatus({ state, className }: Readonly<{ state: SaveState; className?: string }>) {
   const t = useT();
   // The region is always mounted, with empty text while clean. A live region
   // that appears already holding its text is often not announced, which is the
   // exact case of the first "Unsaved changes".
   const text = state === "clean" ? "" : t(LABEL[state]);
-  const failed = state === "failed";
-  const Icon = state === "saving" ? Loader2 : state === "saved" ? Check : failed ? CircleAlert : null;
+  const Icon = ICON[state] ?? null;
   return (
     <span
       role="status"
@@ -33,7 +43,7 @@ export function SaveStatus({ state, className }: Readonly<{ state: SaveState; cl
       data-save-state={state}
       className={cn(
         "inline-flex items-center gap-1.5 text-sm",
-        failed ? "text-down" : state === "saved" ? "text-ok" : "text-muted-foreground",
+        TONE[state] ?? "text-muted-foreground",
         className,
       )}
     >

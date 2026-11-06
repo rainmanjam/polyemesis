@@ -48,7 +48,7 @@ class ErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 }
 
 /** The notice both boundaries render. */
-function CrashNotice({ error, fullScreen }: { error: unknown; fullScreen?: boolean }) {
+function CrashNotice({ error, fullScreen }: Readonly<{ error: unknown; fullScreen?: boolean }>) {
   const t = useT();
   const stale = isChunkLoadError(error);
   return (
@@ -76,7 +76,7 @@ function CrashNotice({ error, fullScreen }: { error: unknown; fullScreen?: boole
  *  Together on purpose: a <Suspense> for a lazy chunk with no boundary around
  *  it is the blank page this file exists to prevent, and lib/chunkReload.test.ts
  *  refuses a bare <Suspense> anywhere in src/ outside this file. */
-export function LazyBoundary({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
+export function LazyBoundary({ children, fallback }: Readonly<{ children: ReactNode; fallback: ReactNode }>) {
   return (
     <ErrorBoundary fallback={(error) => <CrashNotice error={error} />}>
       <Suspense fallback={fallback}>{children}</Suspense>
@@ -85,7 +85,7 @@ export function LazyBoundary({ children, fallback }: { children: ReactNode; fall
 }
 
 /** The outermost boundary, for an error no route caught. */
-export function AppBoundary({ children }: { children: ReactNode }) {
+export function AppBoundary({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <ErrorBoundary fallback={(error) => <CrashNotice error={error} fullScreen />}>
       {children}

@@ -65,14 +65,14 @@ export function ChatMessageMenu({
   onClose,
   onOpenCard,
   onDelete,
-}: {
+}: Readonly<{
   message: ChatMessage;
   /** Viewport coordinates of the click that opened this. */
   anchor: MenuAnchor;
   onClose: () => void;
   onOpenCard: (m: ChatMessage) => void;
   onDelete?: Asks<ChatMessage>;
-}) {
+}>) {
   // Radix positions against a trigger element, and the trigger here is a point
   // rather than a control. A zero-size fixed div at the cursor is the standard
   // shape for that: it anchors correctly, collision-flips near screen edges for

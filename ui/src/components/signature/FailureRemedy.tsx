@@ -20,14 +20,14 @@ export function FailureRemedy({
   onEdit,
   onShowLog,
   className,
-}: {
+}: Readonly<{
   cause: FailureCause;
   /** The supervised process name, e.g. "dest:3", for the log link. */
   process: string;
   onEdit?: () => void;
   onShowLog?: () => void;
   className?: string;
-}) {
+}>) {
   const t = useT();
   const r = remedyFor(cause);
   const action = r.action === "edit" && !onEdit ? "log" : r.action;

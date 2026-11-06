@@ -42,6 +42,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { api } from "@/lib/api";
+import type { SignalTone } from "@/lib/signal";
 import { bytes as fmtBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { sourceChoices } from "@/lib/destinationSource";
@@ -359,11 +360,11 @@ export function ExposureBanner({
   view,
   busy,
   onTurnOn,
-}: {
+}: Readonly<{
   view: PlayoutAdminView;
   busy: boolean;
   onTurnOn: () => void;
-}) {
+}>) {
   const t = useT();
   const counts = (
     <span className="ml-auto flex shrink-0 items-center gap-3 text-sm text-muted-foreground">
@@ -497,12 +498,12 @@ export function ProgrammeCard({
   sources,
   busy,
   onSave,
-}: {
+}: Readonly<{
   play: PlayoutSettings;
   sources: SourceView[];
   busy: boolean;
   onSave: (next: PlayoutSettings) => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const choices = useMemo(() => sourceChoices(sources), [sources]);
   const gone =
@@ -512,7 +513,9 @@ export function ProgrammeCard({
   // A dead id matches no item, so the trigger shows nothing rather than
   // claiming the default -- which is not what is stored, and not what the
   // public page is doing.
-  const value = gone ? "" : play.sourceId != null ? String(play.sourceId) : "default";
+  let value = "default";
+  if (gone) value = "";
+  else if (play.sourceId != null) value = String(play.sourceId);
 
   return (
     <Card className="mb-3">
@@ -579,7 +582,7 @@ function CopyField({
   mono = true,
   disabled = false,
   describedBy,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   hint?: string;
@@ -588,7 +591,7 @@ function CopyField({
    *  nothing must not look ready to hand out. The reason is the card's. */
   disabled?: boolean;
   describedBy?: string;
-}) {
+}>) {
   const t = useT();
   const { copy, copied } = useCopy(1500, () => toast.error(t("play.clipboardUnavailable")));
   return (
@@ -626,14 +629,14 @@ export function ShareCard({
   play,
   busy,
   onRotate,
-}: {
+}: Readonly<{
   view: PlayoutAdminView;
   play: PlayoutSettings;
   busy: boolean;
   /** Awaited, so the dialog stays up until the rotation has actually landed
    *  rather than closing over a request still in flight. */
   onRotate: () => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const protectedLink = play.public && view.protection === "token";
   /* ONE CLICK ROTATED THE TOKEN. Every link already shared stopped working and
@@ -749,14 +752,14 @@ export function ProtectionCard({
   onSave,
   onSaveSettings,
   className = "mt-3",
-}: {
+}: Readonly<{
   view: PlayoutAdminView;
   play: PlayoutSettings;
   busy: boolean;
   onSave: (body: { protection?: PlayoutProtection }) => Promise<void>;
   onSaveSettings: (next: PlayoutSettings) => Promise<void>;
   className?: string;
-}) {
+}>) {
   const t = useT();
   // A15: making the stream reachable by people who are not signed in changes who
   // can watch, so it asks first. Turning it back to token or off does not.
@@ -859,7 +862,7 @@ export function VariantsCard({
   onSave,
   onApply = onSave,
   onDirtyChange,
-}: {
+}: Readonly<{
   play: PlayoutSettings;
   variants: PlayoutAdminView["status"]["variants"];
   renditions: RenditionView[];
@@ -871,7 +874,7 @@ export function VariantsCard({
   /** Per row, keyed by the rung's name, so a section can stay open while any
    *  row holds an unapplied edit. */
   onDirtyChange?: (key: string, dirty: boolean) => void;
-}) {
+}>) {
   const t = useT();
   /* Removing a rung stopped its muxer and dropped everyone watching it the
      instant the icon was clicked -- no dialog of any kind, on an install where
@@ -1004,7 +1007,7 @@ function RungRow({
   onApply,
   onRemove,
   onDirtyChange,
-}: {
+}: Readonly<{
   variant: PlayoutVariant;
   status: NonNullable<PlayoutAdminView["status"]["variants"]>[number] | undefined;
   renditions: RenditionView[];
@@ -1016,7 +1019,7 @@ function RungRow({
   /** Stable (a useCallback in the section), with the row's own key, so the
    *  effects below run when the row's dirtiness changes and not every render. */
   onDirtyChange?: (key: string, dirty: boolean) => void;
-}) {
+}>) {
   const t = useT();
   const reasonId = useId();
   const model = useSaveModel<{ name: string; audioTrack: string }>({
@@ -1038,10 +1041,13 @@ function RungRow({
     track < 0 ||
     track > 63;
   const reason = model.dirty && invalid ? t("play.fixValuesFirst") : null;
+  let dotTone: SignalTone = "idle";
+  if (st?.running) dotTone = "live";
+  else if (v.enabled) dotTone = "warn";
   return (
     <div className="grid items-end gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[auto_1fr_1fr_auto_auto]">
       <div className="flex items-center gap-2 pb-2">
-        <StatusDot tone={st?.running ? "live" : v.enabled ? "warn" : "idle"} />
+        <StatusDot tone={dotTone} />
         <Switch
           checked={v.enabled}
           disabled={busy}
@@ -1212,14 +1218,14 @@ export function PackagingCard({
   viewers,
   onApply,
   onDirtyChange,
-}: {
+}: Readonly<{
   play: PlayoutSettings;
   busy: boolean;
   viewers: number;
   /** Throws on failure, so the draft stays and says "Not saved". */
   onApply: (next: PlayoutSettings) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
-}) {
+}>) {
   const t = useT();
   const reasonId = useId();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1397,7 +1403,7 @@ export function AdvancedSection({
   viewers,
   onSave,
   onApply,
-}: {
+}: Readonly<{
   play: PlayoutSettings;
   variants: PlayoutAdminView["status"]["variants"];
   renditions: RenditionView[];
@@ -1405,7 +1411,7 @@ export function AdvancedSection({
   viewers: number;
   onSave: (next: PlayoutSettings) => Promise<void>;
   onApply: (next: PlayoutSettings) => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const id = useId();
   // Open from the start when the only explanation for a problem is inside:
@@ -1479,12 +1485,12 @@ export function PlayerPageCard({
   title,
   description,
   onSave,
-}: {
+}: Readonly<{
   title: string;
   description: string;
   /** Throws on failure, so the draft stays and says "Not saved". */
   onSave: (body: { title: string; description: string }) => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const model = useSaveModel<{ title: string; description: string }>({
     stored: { title, description },
@@ -1544,7 +1550,7 @@ export function PlayerPageCard({
 
 /** What the public players reported. Hidden until one has: a row of zeros
  *  on an install whose page nobody has opened reads as "playback is broken". */
-export function QoEStats({ qoe }: { qoe?: PlayoutQoESummary }) {
+export function QoEStats({ qoe }: Readonly<{ qoe?: PlayoutQoESummary }>) {
   const t = useT();
   if (!qoe || qoe.beacons === 0) return null;
   const errors = Object.values(qoe.errors ?? {}).reduce((a, b) => a + (b ?? 0), 0);

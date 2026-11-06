@@ -3,8 +3,9 @@ import { toast } from "sonner";
 import { Loader2, Plus, Save, Trash2 } from "lucide-react";
 
 import { api, type DestinationWithRouting } from "@/lib/api";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, type TranslationKey, type Translator } from "@/lib/i18n";
 import type {
+  ObsActionRecord,
   Destination,
   ObsConfig,
   ObsConnState,
@@ -46,6 +47,16 @@ const STATE_TONE: Record<ObsConnState, "live" | "warn" | "down" | "outline"> = {
   refused: "down",
   incompatible: "down",
 };
+
+function streamingText(streaming: boolean | null | undefined, t: Translator): string {
+  if (streaming === true) return t("obs.streaming");
+  return streaming === false ? t("obs.notStreaming") : t("obs.streamUnknown");
+}
+
+function actionText(a: ObsActionRecord, t: Translator): string {
+  if (a.action === "scene") return t("obs.actionScene", { scene: a.scene ?? "" });
+  return a.action === "start" ? t("obs.actionStart") : t("obs.actionStop");
+}
 
 /** Status is re-read on this period while the section is open, so the
  *  connection badge follows a link that drops or comes back. */
@@ -167,11 +178,7 @@ export function ObsBridgeSettings() {
             <Badge variant={STATE_TONE[conn]}>{t(STATE_LABEL[conn])}</Badge>
             {status?.connection.detail && <span className="text-muted-foreground">{status.connection.detail}</span>}
             <span className="text-muted-foreground">
-              {status?.streaming === true
-                ? t("obs.streaming")
-                : status?.streaming === false
-                  ? t("obs.notStreaming")
-                  : t("obs.streamUnknown")}
+              {streamingText(status?.streaming, t)}
             </span>
             {status?.scene && <span className="text-muted-foreground">{t("obs.sceneNow", { scene: status.scene })}</span>}
             {status?.stopPendingUntil && (
@@ -377,11 +384,7 @@ export function ObsBridgeSettings() {
             <div key={a.at + a.action} className="flex flex-col gap-0.5">
               <span className="font-medium">
                 {clockTime(a.at)} ·{" "}
-                {a.action === "scene"
-                  ? t("obs.actionScene", { scene: a.scene ?? "" })
-                  : a.action === "start"
-                    ? t("obs.actionStart")
-                    : t("obs.actionStop")}
+                {actionText(a, t)}
               </span>
               {a.results.map((r) => (
                 <span key={r.id} className="text-muted-foreground">

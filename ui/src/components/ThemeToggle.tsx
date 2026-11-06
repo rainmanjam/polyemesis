@@ -20,7 +20,7 @@ const OPTIONS: Record<ThemeChoice, { icon: LucideIcon; label: "chrome.themeLight
  *  carry no meaning on their own: every option has an aria-label and a title
  *  in the operator's language. The focus ring is the one global ring in
  *  index.css, not restated here. */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className }: Readonly<{ className?: string }>) {
   const t = useT();
   const { choice, setChoice } = useTheme();
   const refs = useRef<Partial<Record<ThemeChoice, HTMLButtonElement | null>>>({});

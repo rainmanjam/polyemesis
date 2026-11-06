@@ -29,6 +29,12 @@ const MIN_PASSWORD = 8;
  */
 const PW_CLASSES = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/];
 
+function strengthSegmentClass(score: number, seg: number): string {
+  if (score < seg) return "bg-border";
+  if (score <= 1) return "bg-down";
+  return score === 2 ? "bg-warn" : "bg-ok";
+}
+
 function scorePassword(pw: string): { score: number; label: string } {
   if (!pw) return { score: 0, label: "" };
   const classes = PW_CLASSES.filter((r) => r.test(pw)).length;
@@ -99,10 +105,10 @@ function useServerConnection(): Connection {
 export function AuthScreen({
   mode,
   onDone,
-}: {
+}: Readonly<{
   mode: "setup" | "login";
   onDone: () => void;
-}) {
+}>) {
   const t = useT();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
@@ -264,15 +270,7 @@ export function AuthScreen({
                         {[1, 2, 3, 4].map((seg) => (
                           <div
                             key={seg}
-                            className={`h-1 flex-1 rounded-full ${
-                              strength.score >= seg
-                                ? strength.score <= 1
-                                  ? "bg-down"
-                                  : strength.score === 2
-                                    ? "bg-warn"
-                                    : "bg-ok"
-                                : "bg-border"
-                            }`}
+                            className={`h-1 flex-1 rounded-full ${strengthSegmentClass(strength.score, seg)}`}
                           />
                         ))}
                       </div>

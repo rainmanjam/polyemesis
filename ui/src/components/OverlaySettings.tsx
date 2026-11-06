@@ -131,13 +131,14 @@ export function OverlaySettings() {
           </Button>
         </form>
 
-        {readFailed(data) ? (
-          <span className="text-tiny text-warn">{t("overlay.unread")}</span>
-        ) : !mayClaim(data) ? (
+        {readFailed(data) && <span className="text-tiny text-warn">{t("overlay.unread")}</span>}
+        {!readFailed(data) && !mayClaim(data) && (
           <span className="text-tiny text-muted-foreground">{t("overlay.loading")}</span>
-        ) : data.value.overlays.length === 0 ? (
+        )}
+        {mayClaim(data) && data.value.overlays.length === 0 && (
           <span className="text-tiny text-muted-foreground">{t("overlay.none")}</span>
-        ) : (
+        )}
+        {mayClaim(data) && data.value.overlays.length > 0 && (
           <>
             <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("overlay.title")}>
               {data.value.overlays.map((o) => (
@@ -190,19 +191,19 @@ export function OverlaySettings() {
  *  like idle from here. The server counts the overlay's open display streams;
  *  this says the count in words, or when one was last open. The list is read
  *  once, so Check again re-reads it. Exported for its test. */
-export function OverlayConnection({ overlay, onCheck }: { overlay: ChatOverlay; onCheck: () => void }) {
+export function OverlayConnection({ overlay, onCheck }: Readonly<{ overlay: ChatOverlay; onCheck: () => void }>) {
   const t = useT();
   if (overlay.connected === undefined) return null;
   const connected = overlay.connected > 0;
+  let status: string;
+  if (connected) status = t("overlay.connectedNow", { count: overlay.connected });
+  else if (overlay.lastSeen) status = t("overlay.lastConnected", { time: timestamp(overlay.lastSeen) });
+  else status = t("overlay.neverConnected");
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm" data-overlay-connected={connected}>
       <StatusDot tone={connected ? "live" : "idle"} />
       <span className={connected ? "text-foreground" : "text-muted-foreground"}>
-        {connected
-          ? t("overlay.connectedNow", { count: overlay.connected })
-          : overlay.lastSeen
-            ? t("overlay.lastConnected", { time: timestamp(overlay.lastSeen) })
-            : t("overlay.neverConnected")}
+        {status}
       </span>
       <Button variant="ghost" size="sm" onClick={onCheck}>
         <RefreshCw />
@@ -219,12 +220,12 @@ export function OverlayEditor({
   meta,
   onChanged,
   onDeleted,
-}: {
+}: Readonly<{
   overlay: ChatOverlay;
   meta: Pick<OverlaysResponse, "presets" | "presetOrder" | "platforms" | "maxHoldMs">;
   onChanged: (id: number) => void;
   onDeleted: () => void;
-}) {
+}>) {
   const t = useT();
   const [name, setName] = useState(overlay.name);
   const [platforms, setPlatforms] = useState<string[]>(overlay.platforms);
@@ -517,13 +518,13 @@ function NumberField({
   value,
   limits,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   value: number;
   limits: { min: number; max: number };
   onChange: (raw: string) => void;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-1">
       <Label htmlFor={id}>{label}</Label>
@@ -538,12 +539,12 @@ function ColorField({
   label,
   value,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-1">
       <Label htmlFor={id}>{label}</Label>

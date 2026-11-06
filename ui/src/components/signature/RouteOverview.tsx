@@ -51,7 +51,7 @@ interface RouteOverviewProps {
   onFix: (id: number) => void;
 }
 
-export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }: RouteOverviewProps) {
+export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }: Readonly<RouteOverviewProps>) {
   const gridId = useId();
   const t = useT();
   const dests: OverviewDest[] = rows.map((r) => ({ ...r, enabled: true }));
@@ -177,7 +177,7 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
   );
 }
 
-function RightsChip({ state }: { state: MusicRights }) {
+function RightsChip({ state }: Readonly<{ state: MusicRights }>) {
   const t = useT();
   if (state === "reachesVod") {
     return (
@@ -240,18 +240,13 @@ function OverviewCell({
   // the live mix does on this track: clicking it toggles that, not the archive.
   const liveRouted = dest.routed.includes(trackIndex);
   const liveText = liveRouted ? t("routing.overview.cellRouted") : t("routing.overview.cellOff");
-  const stateText =
-    state === "musicVod"
-      ? `${liveText}, ${t("routing.overview.cellMusicVod")}`
-      : state === "routed"
-        ? t("routing.overview.cellRouted")
-        : t("routing.overview.cellOff");
-  const onClick =
-    row.kind === "editable"
-      ? () => onToggle(trackIndex)
-      : row.kind === "select"
-        ? () => onSelect(row.id)
-        : undefined;
+  let stateText: string;
+  if (state === "musicVod") stateText = `${liveText}, ${t("routing.overview.cellMusicVod")}`;
+  else if (state === "routed") stateText = t("routing.overview.cellRouted");
+  else stateText = t("routing.overview.cellOff");
+  let onClick: (() => void) | undefined;
+  if (row.kind === "editable") onClick = () => onToggle(trackIndex);
+  else if (row.kind === "select") onClick = () => onSelect(row.id);
   return (
     <button
       type="button"

@@ -17,7 +17,7 @@ import {
  *  the widget is the same on a Twitch-only scene as on an all-platforms one.
  *  Drawn with the overlay's own style (font, size, colours) so it matches the
  *  chat lines it sits beside. Display-only: no button, no handler. */
-export function PollWidgetView({ poll, style, now }: { poll: PollDisplay; style: OverlayStyle; now: number }) {
+export function PollWidgetView({ poll, style, now }: Readonly<{ poll: PollDisplay; style: OverlayStyle; now: number }>) {
   const t = useT();
   const font = FONT_STACKS[style.font] ?? FONT_STACKS.sans;
   const pct = pollPercents(poll);

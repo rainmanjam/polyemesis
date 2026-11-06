@@ -66,7 +66,7 @@ const STATE_LABEL: Record<PlaylistItemStatus["state"], TranslationKey> = {
 // reason a PUT queues behind a GET.
 const POLL_MS = 5000;
 
-export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
+export function PlaylistEditor({ items, onChange }: Readonly<PlaylistEditorProps>) {
   const t = useT();
   const [uploads, setUploads] = useState<MediaFile[]>([]);
   const [status, setStatus] = useState<PlaylistStatus | null>(null);

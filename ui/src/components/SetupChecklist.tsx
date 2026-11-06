@@ -7,7 +7,7 @@ import { SecretCode } from "@/components/SecretCode";
 import { TourReplayButton } from "@/components/Tour";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import type { Checklist, ChecklistStepId, ChecklistStepState } from "@/lib/setupChecklist";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /* The first-run checklist for an install that has a source and no destination.
@@ -75,11 +75,8 @@ export function SetupChecklist({
       case 2:
         return t("firstRun.stepEncoderBody");
       case 3:
-        return state === "done"
-          ? t("firstRun.stepSignalDone")
-          : state === "waiting"
-            ? t("firstRun.stepSignalWaiting")
-            : null;
+        if (state === "done") return t("firstRun.stepSignalDone");
+        return state === "waiting" ? t("firstRun.stepSignalWaiting") : null;
       case 4:
         return t("firstRun.stepDestinationBody");
       case 5:
@@ -236,6 +233,19 @@ export function SetupChecklist({
   );
 }
 
+function addressRows(
+  addresses: readonly { proto: string; url: string }[],
+  ingestUrl: string,
+): readonly { proto: string; url: string }[] {
+  if (addresses.length > 0) return addresses;
+  return ingestUrl ? [{ proto: "", url: ingestUrl }] : [];
+}
+
+function addressLabel(t: Translator, proto: string): string {
+  if (proto === "streamKey") return t("sources.streamKey");
+  return proto ? proto.toUpperCase() : t("firstRun.ingestHeading");
+}
+
 /** The encoder's half of setup (A1): every publish address with its own copy
  *  button, and whether anything is arriving on them. Shown once a source
  *  exists; before that these would be addresses to nothing.
@@ -259,7 +269,7 @@ function IngestAddresses({
   const t = useT();
   // The per-protocol rows when the source has them; the install's ingest URL
   // otherwise, so the card is never empty on an older server.
-  const rows = addresses.length > 0 ? addresses : ingestUrl ? [{ proto: "", url: ingestUrl }] : [];
+  const rows = addressRows(addresses, ingestUrl);
   return (
     <Card data-testid="setup-addresses">
       <CardHeader className="flex-row items-start justify-between gap-3">
@@ -274,7 +284,7 @@ function IngestAddresses({
       <CardContent className="flex flex-col gap-3">
         {rows.map((a) => {
           const secret = a.proto === "streamKey" || urlCarriesCredential(a.url);
-          const label = a.proto === "streamKey" ? t("sources.streamKey") : a.proto ? a.proto.toUpperCase() : t("firstRun.ingestHeading");
+          const label = addressLabel(t, a.proto);
           return (
             <div key={a.proto || "ingest"} className="flex flex-col gap-1">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>

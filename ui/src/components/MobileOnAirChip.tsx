@@ -52,11 +52,24 @@ export function MobileOnAirChip({ live }: Readonly<{ live: HeaderLive }>) {
   // Before the first status frame there is nothing to count, and none is not
   // "Off air": the words say the reading is on its way instead.
   const loading = t("common.loading");
-  const sentence = !live.known ? loading : on ? t(live.key, live.params) : t(live.offKey, live.offParams);
+  let sentence: string;
+  if (!live.known) sentence = loading;
+  else if (on) sentence = t(live.key, live.params);
+  else sentence = t(live.offKey, live.offParams);
   // Scoped to one named programme: exactly when the programme switcher shows.
   const scoped = live.key === "chrome.liveCountProgramme";
-  const full = !live.known ? loading : on ? t("chrome.liveCount", { count: live.count }) : t("onAir.offAir");
-  const short = !live.known ? loading : on ? t("chrome.liveCountShort", { count: live.count }) : t("chrome.offAirShort");
+  let full: string;
+  let short: string;
+  if (!live.known) {
+    full = loading;
+    short = loading;
+  } else if (on) {
+    full = t("chrome.liveCount", { count: live.count });
+    short = t("chrome.liveCountShort", { count: live.count });
+  } else {
+    full = t("onAir.offAir");
+    short = t("chrome.offAirShort");
+  }
   const chipRef = useRef<HTMLSpanElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const fits = useChipFit(chipRef, measureRef, scoped, full);

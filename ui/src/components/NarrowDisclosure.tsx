@@ -23,14 +23,16 @@ export function NarrowDisclosure({
   label,
   className,
   children,
-}: {
+}: Readonly<{
   narrow: boolean;
   label: string;
   className?: string;
   children: ReactNode;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  let bodyClass = "contents";
+  if (narrow) bodyClass = open ? "flex min-w-0 flex-col gap-3" : "hidden";
   return (
     <div className={narrow ? cn("flex min-w-0 flex-col gap-2", className) : "contents"}>
       {narrow && (
@@ -51,7 +53,7 @@ export function NarrowDisclosure({
       <div
         id={id}
         hidden={narrow && !open}
-        className={narrow ? (open ? "flex min-w-0 flex-col gap-3" : "hidden") : "contents"}
+        className={bodyClass}
       >
         {children}
       </div>

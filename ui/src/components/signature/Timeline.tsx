@@ -180,7 +180,7 @@ export function Timeline({
   onChangeOut,
   onMoveWindow,
   className,
-}: TimelineProps) {
+}: Readonly<TimelineProps>) {
   const t = useT();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -326,12 +326,10 @@ export function Timeline({
     dragRef.current = null;
   };
 
-  const cursor =
-    variant === "overview" && windowMs
-      ? "grab"
-      : dragRef.current === "in" || dragRef.current === "out"
-        ? "ew-resize"
-        : "pointer";
+  let cursor: string;
+  if (variant === "overview" && windowMs) cursor = "grab";
+  else if (dragRef.current === "in" || dragRef.current === "out") cursor = "ew-resize";
+  else cursor = "pointer";
 
   const hoverSprite = detail && hover !== null ? spriteAt(sprites, hover) : null;
 
@@ -418,14 +416,14 @@ function Handle({
   leftPx,
   width,
   onNudge,
-}: {
+}: Readonly<{
   kind: "in" | "out";
   label: string;
   valueMs: number;
   leftPx: number;
   width: number;
   onNudge: (deltaMs: number) => void;
-}) {
+}>) {
   if (leftPx < -20 || leftPx > width + 20) return null;
   return (
     <div

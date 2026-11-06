@@ -98,7 +98,7 @@ export function StreamReports() {
   );
 }
 
-function Report({ report }: { report: AnalyticsReport }) {
+function Report({ report }: Readonly<{ report: AnalyticsReport }>) {
   const t = useT();
   const s = report.summary;
   return (
@@ -205,7 +205,7 @@ function Report({ report }: { report: AnalyticsReport }) {
   );
 }
 
-function ReportRow({ r }: { r: AnalyticsRow }) {
+function ReportRow({ r }: Readonly<{ r: AnalyticsRow }>) {
   const t = useT();
   const label = r.platform === PLAYER ? t("aud.player") : platformName(r.platform);
   return (

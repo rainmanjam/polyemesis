@@ -29,6 +29,12 @@ const REFRESH_MS = 60_000;
 
 type Notice = { tone: "ok" | "warn" | "bad"; text: string };
 
+const NOTICE_CLASS: Record<Notice["tone"], string> = {
+  ok: "text-xs text-ok",
+  warn: "text-xs text-warn",
+  bad: "text-xs text-down",
+};
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -57,7 +63,7 @@ function formFrom(s: Partial<RolloverSettings> | undefined): SettingsForm {
   };
 }
 
-export function RolloverPanel({ dest }: { dest: DestStatus }) {
+export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
   const t = useT();
   const [view, setView] = useState<RolloverView | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -184,7 +190,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
       <p className="text-xs text-muted-foreground">{t(actionKey)}</p>
 
       {notice ? (
-        <p role="status" className={notice.tone === "ok" ? "text-xs text-ok" : notice.tone === "warn" ? "text-xs text-warn" : "text-xs text-down"}>
+        <p role="status" className={NOTICE_CLASS[notice.tone]}>
           {notice.text}
         </p>
       ) : null}

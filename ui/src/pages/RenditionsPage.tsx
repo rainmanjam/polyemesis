@@ -52,7 +52,7 @@ import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
-import { deleteConsequence } from "@/features/renditions/renditionUsers";
+import { deleteConsequence, type DeleteConsequence } from "@/features/renditions/renditionUsers";
 import type {
   DestStatus,
   EncoderInfo,
@@ -267,6 +267,30 @@ function sizeLabel(t: Translator, r: { width: number; height: number }): string 
   return `${r.width}×${r.height}`;
 }
 
+type SizedConsequence = Exclude<DeleteConsequence, { kind: "none" | "unknown" }>;
+
+function affectedCount(c: SizedConsequence): number {
+  return c.kind === "named" ? c.users.length : c.total;
+}
+
+function feedsDestinationsLabel(t: Translator, c: Exclude<DeleteConsequence, { kind: "none" }>): string {
+  if (c.kind === "unknown") return t("rend.usersUnknown");
+  const count = affectedCount(c);
+  return t(count === 1 ? "rend.feedsDestinationsOne" : "rend.feedsDestinationsMany", { count });
+}
+
+function deleteDescription(t: Translator, c: DeleteConsequence): string {
+  if (c.kind === "none") return t("rend.deleteNoDestinations");
+  if (c.kind === "unknown") return t("rend.deleteUsersUnknown");
+  const count = affectedCount(c);
+  return t(count === 1 ? "rend.deleteFallbackOne" : "rend.deleteFallbackMany", { count });
+}
+
+function machineLabel(t: Translator, cores?: number): string {
+  if (!cores || cores <= 0) return "";
+  return t(cores === 1 ? "rend.costMachineCoresOne" : "rend.costMachineCores", { cores });
+}
+
 /** What this encode is likely to cost, said plainly.
  *
  *  Deliberately vague where being precise would be a lie: no percentage, no
@@ -299,7 +323,7 @@ function encodeCost(
   const rate = width * height * fps;
   const label = t("rend.costLabel", { width, height, fps });
   const mpps = `${Math.round(rate / 1e6)} MP/s`;
-  const machine = cores && cores > 0 ? t(cores === 1 ? "rend.costMachineCoresOne" : "rend.costMachineCores", { cores }) : "";
+  const machine = machineLabel(t, cores);
 
   if (hardware) {
     return {
@@ -533,6 +557,47 @@ export function RenditionsPage() {
     }
   };
 
+  const renderRenditionList = () => {
+    if (loading) {
+      return (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+    if (views.length === 0) {
+      // app-council A83: the kit's empty state, with the one step.
+      return (
+        <EmptyState
+          icon={Plus}
+          title={t("rend.emptyTitle")}
+          body={t("rend.empty")}
+          action={{ label: t("rend.newRendition"), onClick: openCreate }}
+        />
+      );
+    }
+    return (
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {views.map((v) => (
+          <RenditionCard
+            key={v.rendition.id}
+            view={v}
+            live={liveById.get(v.rendition.id)}
+            users={status ? (usersById.get(v.rendition.id) ?? []) : null}
+            encoder={encoders.find((e) => e.name === v.rendition.encoder)}
+            hardwareExists={hardwareExists}
+            source={sourceVideo}
+            cores={system?.numCpu}
+            busy={busyId === v.rendition.id}
+            onEdit={() => openEdit(v.rendition)}
+            onRestart={() => restart(v.rendition)}
+            onDelete={() => setDeleting(v.rendition)}
+          />
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="p-3">
       <PageHeader
@@ -576,38 +641,7 @@ export function RenditionsPage() {
         </CardContent>
       </Card>
 
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-      ) : views.length === 0 ? (
-        // app-council A83: the kit's empty state, with the one step.
-        <EmptyState
-          icon={Plus}
-          title={t("rend.emptyTitle")}
-          body={t("rend.empty")}
-          action={{ label: t("rend.newRendition"), onClick: openCreate }}
-        />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {views.map((v) => (
-            <RenditionCard
-              key={v.rendition.id}
-              view={v}
-              live={liveById.get(v.rendition.id)}
-              users={status ? (usersById.get(v.rendition.id) ?? []) : null}
-              encoder={encoders.find((e) => e.name === v.rendition.encoder)}
-              hardwareExists={hardwareExists}
-              source={sourceVideo}
-              cores={system?.numCpu}
-              busy={busyId === v.rendition.id}
-              onEdit={() => openEdit(v.rendition)}
-              onRestart={() => restart(v.rendition)}
-              onDelete={() => setDeleting(v.rendition)}
-            />
-          ))}
-        </div>
-      )}
+      {renderRenditionList()}
 
       <RenditionDialog
         open={dialogOpen}
@@ -644,7 +678,7 @@ export function RenditionsPage() {
 
 /** One destination, as a chip. Disabled rows are drawn too: they still select
  *  this rendition, and deleting it affects them the moment they are enabled. */
-function DestChip({ dest }: { dest: DestStatus }) {
+function DestChip({ dest }: Readonly<{ dest: DestStatus }>) {
   const t = useT();
   const state = destinationShownState(dest.process);
   const tone: SignalTone = dest.enabled ? toneForState(state) : "idle";
@@ -675,7 +709,7 @@ export function RenditionCard({
   onEdit,
   onRestart,
   onDelete,
-}: {
+}: Readonly<{
   view: RenditionView;
   live?: RenditionStatus;
   /** null before the first live snapshot, when only the counts are known. */
@@ -688,7 +722,7 @@ export function RenditionCard({
   onEdit: () => void;
   onRestart: () => void;
   onDelete: () => void;
-}) {
+}>) {
   const stateLabel = useStateLabel();
   const t = useT();
   const r = view.rendition;
@@ -704,6 +738,30 @@ export function RenditionCard({
   // with this same reason, so say it here rather than leave the row looking
   // healthy until someone enables a destination on it.
   const encoderProblemText = encoderProblem(t, encoder);
+
+  const renderFeeds = () => {
+    if (total === 0) {
+      return (
+        <p className="text-sm text-muted-foreground">
+        {t("rend.unused")}
+        </p>
+      );
+    }
+    if (users) {
+      return (
+        <div className="flex flex-wrap gap-1">
+          {users.map((d) => (
+            <DestChip key={d.id} dest={d} />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <p className="text-sm text-muted-foreground">
+      {t("rend.waitingSnapshot")}
+      </p>
+    );
+  };
 
   return (
     <Card>
@@ -761,21 +819,7 @@ export function RenditionCard({
               {t(enabled === 1 ? "rend.enabledOfTotalOne" : "rend.enabledOfTotal", { enabled, total })}
             </span>
           </div>
-          {total === 0 ? (
-            <p className="text-sm text-muted-foreground">
-            {t("rend.unused")}
-            </p>
-          ) : users ? (
-            <div className="flex flex-wrap gap-1">
-              {users.map((d) => (
-                <DestChip key={d.id} dest={d} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-            {t("rend.waitingSnapshot")}
-            </p>
-          )}
+          {renderFeeds()}
         </div>
 
         {encoderProblemText && (
@@ -969,7 +1013,7 @@ export function RenditionDialog({
   users,
   counts,
   onSaved,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The rendition being edited, or null to create one. */
@@ -991,7 +1035,7 @@ export function RenditionDialog({
   /** The database's own counts, which stand in when `users` is null. */
   counts: { destinations: number; enabledDestinations: number } | null;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const editing = rendition !== null;
@@ -1211,13 +1255,13 @@ export function RenditionDialog({
       };
       if (rendition) {
         await api.updateRendition(rendition.id, payload);
+        const savedName = payload.name ?? "";
+        const restartingKey =
+          enabledUsers === 1 ? "rend.savedRestartingOne" : "rend.savedRestartingMany";
         toast.success(
           enabledUsers > 0
-            ? t(enabledUsers === 1 ? "rend.savedRestartingOne" : "rend.savedRestartingMany", {
-                name: payload.name ?? "",
-                count: enabledUsers,
-              })
-            : t("rend.saved", { name: payload.name ?? "" }),
+            ? t(restartingKey, { name: savedName, count: enabledUsers })
+            : t("rend.saved", { name: savedName }),
         );
       } else {
         await api.createRendition(payload);
@@ -1930,17 +1974,7 @@ export function RenditionDialog({
           {editing && consequence.kind !== "none" && (
             <div className="flex flex-col gap-1 rounded border border-border bg-background p-2">
               <span className="text-sm uppercase tracking-wider text-muted-foreground">
-                {consequence.kind === "unknown"
-                  ? t("rend.usersUnknown")
-                  : t(
-                      (consequence.kind === "named" ? consequence.users.length : consequence.total) === 1
-                        ? "rend.feedsDestinationsOne"
-                        : "rend.feedsDestinationsMany",
-                      {
-                        count:
-                          consequence.kind === "named" ? consequence.users.length : consequence.total,
-                      },
-                    )}
+                {feedsDestinationsLabel(t, consequence)}
               </span>
               {consequence.kind === "named" && (
                 <div className="flex flex-wrap gap-1">
@@ -1987,7 +2021,7 @@ function DeleteRenditionDialog({
   counts,
   onOpenChange,
   onDeleted,
-}: {
+}: Readonly<{
   rendition: Rendition | null;
   /** null when the live list has not arrived. NOT `[]`: this dialog's whole
    *  job is the sentence "N destinations fall back to passthrough", and an
@@ -1996,7 +2030,7 @@ function DeleteRenditionDialog({
   counts: { destinations: number; enabledDestinations: number } | null;
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
-}) {
+}>) {
   const t = useT();
   const [busy, setBusy] = useState(false);
 
@@ -2024,19 +2058,7 @@ function DeleteRenditionDialog({
         <DialogHeader>
           <DialogTitle>{t("rend.deleteRenditionTitle", { name: rendition?.name ?? "" })}</DialogTitle>
           <DialogDescription>
-            {consequence.kind === "none"
-              ? t("rend.deleteNoDestinations")
-              : consequence.kind === "unknown"
-                ? t("rend.deleteUsersUnknown")
-                : t(
-                    (consequence.kind === "named" ? consequence.users.length : consequence.total) === 1
-                      ? "rend.deleteFallbackOne"
-                      : "rend.deleteFallbackMany",
-                    {
-                      count:
-                        consequence.kind === "named" ? consequence.users.length : consequence.total,
-                    },
-                  )}
+            {deleteDescription(t, consequence)}
           </DialogDescription>
         </DialogHeader>
 

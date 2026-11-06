@@ -197,7 +197,7 @@ export function AudioMeter({
   barGap = 3,
   className,
   range,
-}: AudioMeterProps) {
+}: Readonly<AudioMeterProps>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLSpanElement>(null);
   const t = useT();
@@ -442,7 +442,7 @@ export function AudioMeter({
  *  A zone break gets a brighter number and a tick, because the marks the bar
  *  itself now carries are useless if nothing overhead says what level they
  *  stand at — position is only a channel once it has a legend. */
-export function MeterScale({ className, range }: { className?: string; range?: DbRange }) {
+export function MeterScale({ className, range }: Readonly<{ className?: string; range?: DbRange }>) {
   const t = useT();
   const r = range ?? FIXED_RANGE;
   // A16: the -14 streaming reference is labelled, so the ruler carries the one
@@ -457,15 +457,14 @@ export function MeterScale({ className, range }: { className?: string; range?: D
     <div className={cn("relative h-4 w-full select-none", className)}>
       {marks.map((m) => {
         const left = dbToFraction(m, r) * 100;
+        let transform = "translateX(-50%)";
+        if (m === r.minDb) transform = "translateX(0)";
+        else if (m === r.maxDb) transform = "translateX(-100%)";
         return (
           <div
             key={m}
             className="absolute top-0 font-mono text-[9px] leading-none text-muted-foreground"
-            style={{
-              left: `${left}%`,
-              transform:
-                m === r.minDb ? "translateX(0)" : m === r.maxDb ? "translateX(-100%)" : "translateX(-50%)",
-            }}
+            style={{ left: `${left}%`, transform }}
             title={m === STREAMING_REFERENCE_DB ? t("routing.meters.streamingMark") : undefined}
           >
             {showNumber(m) ? m : null}

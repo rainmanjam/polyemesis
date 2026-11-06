@@ -93,6 +93,11 @@ type NavItem = {
   tour?: string;
 } & ({ labelKey: TranslationKey; label?: never } | { label: string; labelKey?: never });
 
+function railTipAfterChange(prev: string | null, open: boolean, to: string): string | null {
+  if (open) return to;
+  return prev === to ? null : prev;
+}
+
 const NAV: NavItem[] = [
   { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
   { to: "/sources", labelKey: "nav.sources", icon: RadioTower, tour: "nav-sources" },
@@ -114,10 +119,10 @@ const NAV: NavItem[] = [
 export function AppLayout({
   username,
   onSignOut,
-}: {
+}: Readonly<{
   username: string;
   onSignOut: () => void;
-}) {
+}>) {
   const { status, connected, frameError, sourceCount, programme, programmes } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
@@ -618,7 +623,7 @@ export function AppLayout({
                   // unconditional null here would immediately shut the tooltip
                   // that had just legitimately opened.
                   onOpenChange={(open) =>
-                    setOpenRailTip((prev) => (open ? to : prev === to ? null : prev))
+                    setOpenRailTip((prev) => railTipAfterChange(prev, open, to))
                   }
                 >
                   <TooltipTrigger asChild>
@@ -776,11 +781,11 @@ export function PageHeader({
   title,
   subtitle,
   actions,
-}: {
+}: Readonly<{
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>

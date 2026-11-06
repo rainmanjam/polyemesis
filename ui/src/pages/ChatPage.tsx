@@ -168,6 +168,56 @@ export function ChatPage() {
   // deliberately stopped: those are the two states nobody needs telling about.
   const troubled = statuses.filter((s) => s.state === "degraded" || s.state === "failed");
 
+  const renderTimeline = () => {
+    if (flagsOpen) {
+      return (
+        <ChatFlaggedList
+          flags={flags}
+          failed={readFailed(flagsRead.read)}
+          filtered={flags.length === 0 && allFlags.length > 0}
+          onOpenUser={setCard}
+        />
+      );
+    }
+    if (search.active) {
+      return (
+        <ChatSearchResults
+          search={search}
+          onDelete={confirmDelete.ask}
+          onOpenUser={setCard}
+          onMenu={(m, at) => setMenu({ m, at })}
+        />
+      );
+    }
+    return (
+      <ChatTimeline
+        messages={visible}
+        onDelete={confirmDelete.ask}
+        onOpenUser={setCard}
+        onMenu={(m, at) => setMenu({ m, at })}
+        empty={
+          hidden.size > 0 && messages.length > 0 ? (
+            <div className="flex h-full items-center justify-center p-3">
+              <EmptyState
+                icon={MessagesSquare}
+                title={t("chatpage.emptyFilteredTitle")}
+                body={t("chatpage.allFiltered")}
+              />
+            </div>
+          ) : (
+            <ChatEmpty
+              loading={loading}
+              configured={configured}
+              error={error}
+              statuses={statuses}
+              onOpenCredentials={() => void navigate(settingsHref("platforms"))}
+            />
+          )
+        }
+      />
+    );
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col p-3">
       <PageHeader
@@ -296,47 +346,7 @@ export function ChatPage() {
 
           <ChatSearchBox search={search} />
 
-          {flagsOpen ? (
-            <ChatFlaggedList
-              flags={flags}
-              failed={readFailed(flagsRead.read)}
-              filtered={flags.length === 0 && allFlags.length > 0}
-              onOpenUser={setCard}
-            />
-          ) : search.active ? (
-            <ChatSearchResults
-              search={search}
-              onDelete={confirmDelete.ask}
-              onOpenUser={setCard}
-              onMenu={(m, at) => setMenu({ m, at })}
-            />
-          ) : (
-            <ChatTimeline
-              messages={visible}
-              onDelete={confirmDelete.ask}
-              onOpenUser={setCard}
-              onMenu={(m, at) => setMenu({ m, at })}
-              empty={
-                hidden.size > 0 && messages.length > 0 ? (
-                  <div className="flex h-full items-center justify-center p-3">
-                    <EmptyState
-                      icon={MessagesSquare}
-                      title={t("chatpage.emptyFilteredTitle")}
-                      body={t("chatpage.allFiltered")}
-                    />
-                  </div>
-                ) : (
-                  <ChatEmpty
-                    loading={loading}
-                    configured={configured}
-                    error={error}
-                    statuses={statuses}
-                    onOpenCredentials={() => void navigate(settingsHref("platforms"))}
-                  />
-                )
-              }
-            />
-          )}
+          {renderTimeline()}
 
           <ChatComposer statuses={statuses} limits={limits} configured={configured} />
         </section>

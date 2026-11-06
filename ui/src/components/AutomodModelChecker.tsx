@@ -206,6 +206,14 @@ export function AutomodModelChecker({
   const presetLabel = (p: AutomodPreset) =>
     isCustomPreset(p) ? t("automod.presetCustom") : p.name;
 
+  const spendText = (st: AutomodModelStats) => {
+    const one = st.callsThisHour === 1;
+    if (st.ceiling > 0) {
+      return t(one ? "automod.spendOne" : "automod.spend", { used: st.callsThisHour, ceiling: st.ceiling });
+    }
+    return t(one ? "automod.spendNoCeilingOne" : "automod.spendNoCeiling", { used: st.callsThisHour });
+  };
+
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between rounded-md border p-3">
@@ -342,9 +350,7 @@ export function AutomodModelChecker({
           )}
           {stats && (
             <span className="text-sm text-muted-foreground">
-              {stats.ceiling > 0
-                ? t(stats.callsThisHour === 1 ? "automod.spendOne" : "automod.spend", { used: stats.callsThisHour, ceiling: stats.ceiling })
-                : t(stats.callsThisHour === 1 ? "automod.spendNoCeilingOne" : "automod.spendNoCeiling", { used: stats.callsThisHour })}
+              {spendText(stats)}
             </span>
           )}
           {stats && (stats.decisions ?? 0) > 0 && (

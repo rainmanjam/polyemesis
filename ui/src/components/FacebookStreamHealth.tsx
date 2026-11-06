@@ -43,7 +43,7 @@ import { useT } from "@/lib/i18n";
 /** The pane. Purely a renderer; the poll is useFacebookStreamHealth, so the
  *  card can read the same state for its confirmation dialog without asking
  *  Facebook for the same numbers twice. */
-export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
+export function FacebookStreamHealthPanel({ state }: Readonly<{ state: HealthState }>) {
   const t = useT();
 
   return (
@@ -75,10 +75,10 @@ export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
 function Body({
   state,
   t,
-}: {
+}: Readonly<{
   state: HealthState;
   t: ReturnType<typeof useT>;
-}) {
+}>) {
   switch (state.kind) {
     case "loading":
       // Words, not a skeleton. See the header note.
@@ -168,6 +168,6 @@ function Body({
   }
 }
 
-function Line({ children }: { children: React.ReactNode }) {
+function Line({ children }: Readonly<{ children: React.ReactNode }>) {
   return <div className="mt-1 text-sm text-muted-foreground">{children}</div>;
 }
