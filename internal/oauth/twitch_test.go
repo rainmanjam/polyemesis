@@ -231,3 +231,33 @@ func TestTwitchStatsSendsTheClientIdOnEveryHelixCall(t *testing.T) {
 		}
 	}
 }
+
+// TestTwitchIngestIsRTMPS: connecting an account hands back the TLS ingest on
+// 443 (the maintainer's decision), not plain RTMP on 1935. Twitch's
+// live.twitch.tv is not an IVS host, so the IVS /app-path rule leaves it alone
+// -- the path is already /app.
+func TestTwitchIngestIsRTMPS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/users":
+			_, _ = w.Write([]byte(`{"data":[{"id":"4242","login":"dj","display_name":"DJ"}]}`))
+		case "/streams/key":
+			_, _ = w.Write([]byte(`{"data":[{"stream_key":"live_4242_current"}]}`))
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	ing, err := NewTwitch(WithBaseURL(srv.URL)).Ingest(context.Background(), "cid", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "rtmps://live.twitch.tv:443/app"; ing.URL != want {
+		t.Fatalf("Ingest URL = %q, want %q", ing.URL, want)
+	}
+	if ing.Key != "live_4242_current" {
+		t.Fatalf("Ingest key = %q", ing.Key)
+	}
+}

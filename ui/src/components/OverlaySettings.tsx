@@ -88,7 +88,7 @@ export function OverlaySettings() {
   };
   useEffect(() => load(), []);
 
-  const create = async (e: React.FormEvent) => {
+  const create = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!mayClaim(data)) return;
     setBusy(true);

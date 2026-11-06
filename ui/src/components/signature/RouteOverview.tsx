@@ -82,7 +82,7 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full border-collapse text-sm" onKeyDown={onKeyDown}>
+        <table className="w-full border-collapse text-sm" onKeyDown={onKeyDown} /* NOSONAR S6847: arrow-key delegation; every focus stop is a cell control inside the table */>
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th scope="col" className="px-2 py-1.5 font-semibold">

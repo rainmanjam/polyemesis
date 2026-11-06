@@ -4,7 +4,7 @@ import { useCopy } from "@/hooks/useCopy";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import type { MutableRefObject, ReactNode } from "react";
+import type { RefObject, ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -700,7 +700,7 @@ function BulkDestinationControl({
   onFinished: () => void;
   /** Filled with this control's Stop all opener, so the on-air strip's End all
    *  (A8) reaches the same dialog rather than a second stop path. */
-  openStopAllRef?: MutableRefObject<(() => void) | null>;
+  openStopAllRef?: RefObject<(() => void) | null>;
 }>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);

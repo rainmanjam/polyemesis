@@ -98,5 +98,5 @@ export function stopTitle(
 export function inspectorLines(face: KeyFace, locale: string): string[] {
   if (face.issues || face.warning) return issueLines(face, locale);
   if (face.label.startsWith("streamdeck.state.")) return [];
-  return [titleFor(face, locale).split("\n").join(": ")];
+  return [titleFor(face, locale).replaceAll("\n", ": ")];
 }

@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "Het hele beeld over de breedte, op een vervaagde kopie ervan.",
   "clipedit.vertical.focus": "Positie van de uitsnede",
   "clipedit.vertical.faceBox": "Facecamkader",
+  "clipedit.vertical.faceBoxValue": "Links {x}%, boven {y}%",
   "clipedit.vertical.faceBoxHint": "Sleep over het beeld om een kader rond je camera te tekenen. Pijltoetsen verschuiven het.",
   "clipedit.vertical.grabFrame": "Huidig frame gebruiken",
   "clipedit.vertical.faceShare": "Hoogte van het facecampaneel",

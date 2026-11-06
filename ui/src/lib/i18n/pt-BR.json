@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "O quadro inteiro na largura, sobre uma cópia desfocada.",
   "clipedit.vertical.focus": "Posição do recorte",
   "clipedit.vertical.faceBox": "Quadro da câmera",
+  "clipedit.vertical.faceBoxValue": "Esquerda {x}%, topo {y}%",
   "clipedit.vertical.faceBoxHint": "Arraste sobre o quadro para desenhar uma caixa ao redor da câmera. As setas a deslocam.",
   "clipedit.vertical.grabFrame": "Usar o quadro atual",
   "clipedit.vertical.faceShare": "Altura do painel da câmera",

@@ -1,5 +1,14 @@
 import type { IngestStreamHealth } from "./types";
 
+/** "12.50" -> "12.5", "100.00" -> "100". Only ever called on toFixed output,
+ *  which always has a point, so the integer part's zeros are never reached. */
+function trimFractionZeros(fixed: string): string {
+  let end = fixed.length;
+  while (end > 0 && fixed[end - 1] === "0") end--;
+  if (fixed[end - 1] === ".") end--;
+  return fixed.slice(0, end);
+}
+
 /* ===========================================================================
    Turning Facebook's stream_health bag into rows a pane can draw.
 
@@ -90,7 +99,7 @@ export function formatHealthValue(value: number): string {
   // Same defect class as the viewer count one file over, arriving through
   // arithmetic instead of through a nullish default: absent is not zero, and
   // neither is small.
-  const rounded = value.toFixed(2).replace(/\.?0+$/, "");
+  const rounded = trimFractionZeros(value.toFixed(2));
   if (Number(rounded) === 0) {
     // Sign preserved: a negative that rounds to zero is still not zero, and
     // dropping the sign would be a second small lie on top of the first.

@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "フレーム全体を横幅いっぱいに、ぼかした複製の上に表示します。",
   "clipedit.vertical.focus": "切り抜き位置",
   "clipedit.vertical.faceBox": "顔カメラの枠",
+  "clipedit.vertical.faceBoxValue": "左 {x}%、上 {y}%",
   "clipedit.vertical.faceBoxHint": "フレーム上をドラッグしてカメラを囲む枠を描きます。矢印キーで微調整できます。",
   "clipedit.vertical.grabFrame": "現在のフレームを使う",
   "clipedit.vertical.faceShare": "顔パネルの高さ",

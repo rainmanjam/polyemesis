@@ -120,7 +120,7 @@ export function AuthScreen({
   // Shown under Confirm while the operator types, not after they press the button.
   const mismatch = isSetup && confirm.length > 0 && password !== confirm;
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (busy) return;
 

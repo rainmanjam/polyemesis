@@ -1,4 +1,5 @@
 import { WIRE } from "@/lib/contract/wire";
+import { trimSlashes } from "@/lib/trimSlashes";
 
 /* The console's counterpart of services.IVSAppPathFix (internal/services/services.go),
  * so the dialog can say so while the URL is being typed rather than after the
@@ -34,7 +35,7 @@ export function ivsAppPathFix(raw: string): string | null {
   if (!hostPort) return null;
   const host = hostPort[1].replace(/\.$/, "").toLowerCase();
   if (host.length <= IVS_HOST_SUFFIX.length || !host.endsWith(IVS_HOST_SUFFIX)) return null;
-  const first = m[3].replace(/^\/+|\/+$/g, "").split("/")[0];
+  const first = trimSlashes(m[3]).split("/")[0];
   if (first === IVS_APP) return null;
   const port = hostPort[2] ?? (scheme === "rtmps" ? "443" : "");
   return `${scheme}://${hostPort[1]}${port ? `:${port}` : ""}/${IVS_APP}`;

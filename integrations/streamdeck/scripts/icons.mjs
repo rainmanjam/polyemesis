@@ -236,7 +236,7 @@ GLYPH["track-gain"] = any(
 // file's unit square. The plugin icon draws them in their colours on the
 // favicon's ground; the category icon, which the SDK requires monochrome #FFFFFF
 // on transparent, draws the same bars in white with no tile.
-const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const hex = (h) => [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16));
 const FAVICON_BARS = [
   // x, y, width, height, fill -- as written in favicon.svg; every bar has rx = width / 2.
   [2.5, 8, 2.5, 6, "#5b7fc7"],

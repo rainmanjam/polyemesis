@@ -122,6 +122,7 @@ func TestTheIVSCheckLeavesCorrectAndLookAlikeURLsAlone(t *testing.T) {
 		"rtmps://evilglobal-contribute.live-video.net/",
 		"rtmps://global-contribute.live-video.net/",
 		"rtmps://live.twitch.tv/",
+		"rtmps://live.twitch.tv:443/app",
 		"srt://fa723fc1b171.global-contribute.live-video.net:9000",
 		"",
 	} {

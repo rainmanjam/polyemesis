@@ -191,7 +191,7 @@ const PRESETS: DestPreset[] = [
     transport: "rtmps",
     kind: "rtmp",
     platform: "twitch",
-    url: "rtmps://live.twitch.tv/app",
+    url: "rtmps://live.twitch.tv:443/app",
     separateKey: true,
     helpUrl: "https://help.twitch.tv/s/article/broadcast-guidelines",
     notes: "addDest.presetNote.twitchRtmps",
@@ -523,10 +523,29 @@ const PRESETS: DestPreset[] = [
  *  match wins; failing that the OAuth platform is enough to name it. Returning
  *  "" is fine — a destination predates the catalogue, and nothing about it
  *  changes just because we could not label it. */
-function presetIdFor(d: Destination): string {
+/** Scheme and host, lower-cased, the way the server's presetForIngest names an
+ *  ingest: a port or path difference (rtmps://host vs rtmps://host:443) is the
+ *  same preset. Exported for the test. */
+function ingestKey(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    return u.hostname ? `${u.protocol.toLowerCase()}//${u.hostname.toLowerCase()}` : "";
+  } catch {
+    return "";
+  }
+}
+
+export function presetIdFor(d: Destination): string {
   const platform = d.platform || "custom";
   const exact = PRESETS.find((p) => p.url !== "" && p.url === d.url);
   if (exact) return exact.id;
+  const key = ingestKey(d.url ?? "");
+  if (key) {
+    const sameIngest = PRESETS.filter(
+      (p) => p.url !== "" && !p.url.includes("{") && ingestKey(p.url) === key && (!p.platform || p.platform === platform),
+    );
+    if (sameIngest.length === 1) return sameIngest[0].id;
+  }
   if (platform !== "custom") {
     const byPlatform = PRESETS.find((p) => p.platform === platform);
     if (byPlatform) return byPlatform.id;
@@ -1311,7 +1330,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 <div className="flex items-center gap-2 border-b px-2">
                   <Search className="size-3.5 shrink-0 opacity-50" />
                   <input
-                    autoFocus
+                    autoFocus // NOSONAR S9379: the picker was just opened by the user to search; the search box is the only thing in it, and a keyboard user would otherwise have to tab back into it
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={t("addDest.searchPlatforms", { count: PRESETS.length })}

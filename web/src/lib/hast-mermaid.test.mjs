@@ -130,3 +130,19 @@ describe("the mermaid visitor", () => {
     expect(visitWith(preWith(null, "plain"))).toBeNull();
   });
 });
+
+describe("hastMermaid source trimming", () => {
+  it("drops the trailing newlines of the fence and keeps interior ones", () => {
+    const out = visitWith(preWith("mermaid", "flowchart TD\n\n  A --> B\n\n\n"));
+    expect(out.children[0].value).toBe("flowchart TD\n\n  A --> B");
+  });
+
+  it("finishes fast on a long run of newlines that is not at the end", () => {
+    // /\n+$/ rescans the whole run from every starting newline: quadratic.
+    const source = `${"\n".repeat(200_000)}x`;
+    const t0 = performance.now();
+    const out = visitWith(preWith("mermaid", source));
+    expect(performance.now() - t0).toBeLessThan(250);
+    expect(out.children[0].value).toBe(source);
+  });
+});

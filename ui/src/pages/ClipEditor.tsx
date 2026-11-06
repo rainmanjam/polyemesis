@@ -37,7 +37,7 @@ import {
   timecode,
   type SpriteCue,
 } from "@/lib/timeline";
-import { http } from "@/lib/api";
+import { api, http } from "@/lib/api";
 import { HighlightsPanel } from "@/components/HighlightsPanel";
 import { PublishClipDialog } from "@/components/PublishClipDialog";
 import { VerticalExportPanel } from "@/components/VerticalExportPanel";
@@ -310,9 +310,13 @@ export function ClipEditor() {
           return [];
         }
       }),
-    ).then((all) => {
-      if (!cancelled) setSprites(all.flat());
-    });
+    )
+      .then((all) => {
+        if (!cancelled) setSprites(all.flat());
+      })
+      // Each fetch already degrades to no thumbnails; this catches anything
+      // the merge itself throws, so the scrubber just stays plain.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -705,7 +709,7 @@ export function ClipEditor() {
             <CardContent className="p-0">
               <div className="relative aspect-video w-full overflow-hidden rounded-t-md bg-black">
                 {seg?.proxy ? (
-                  <video
+                  <video // NOSONAR S4084: a track is attached below whenever the recording is one segment; a stitched recording's caption file is on the recording's timeline, not this segment's, so it cannot be attached to one segment's proxy
                     ref={videoRef}
                     src={seg.proxy}
                     poster={seg.poster}
@@ -718,7 +722,20 @@ export function ClipEditor() {
                       if (next < segments.length) seek(segments[next].startMs);
                       else setShuttle(0);
                     }}
-                  />
+                  >
+                    {/* The recording's caption file (stored transcript, else the
+                        live captions), as the library's player attaches it. Its
+                        cues are on the recording's timeline, which is this
+                        video's only when there is a single segment. A recording
+                        with neither answers 404 and shows no track. */}
+                    {segments.length === 1 && source && (
+                      <track
+                        kind="captions"
+                        label={t("wave3.captions.playerTrack")}
+                        src={api.captionExportUrl(source.recordingId, "vtt", source.hasTranscript ? "recording" : "live")}
+                      />
+                    )}
+                  </video>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
                     <p className="text-sm text-on-video-dim">
@@ -1062,7 +1079,7 @@ export function ClipEditor() {
                   </div>
                   <div
                     className="flex max-h-[28rem] flex-col gap-0.5 overflow-y-auto"
-                    onMouseUp={onTranscriptMouseUp}
+                    onMouseUp={onTranscriptMouseUp} // NOSONAR S6848: delegated listener that reads the text selection the mouse made; keyboard users pick lines through the rows themselves
                   >
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-center text-tiny text-muted-foreground">

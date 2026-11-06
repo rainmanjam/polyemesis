@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "Seluruh bingkai selebar layar, di atas salinan buramnya.",
   "clipedit.vertical.focus": "Posisi potongan",
   "clipedit.vertical.faceBox": "Kotak kamera wajah",
+  "clipedit.vertical.faceBoxValue": "Kiri {x}%, atas {y}%",
   "clipedit.vertical.faceBoxHint": "Seret pada bingkai untuk menggambar kotak di sekitar kamera. Tombol panah menggesernya.",
   "clipedit.vertical.grabFrame": "Gunakan frame saat ini",
   "clipedit.vertical.faceShare": "Tinggi panel wajah",

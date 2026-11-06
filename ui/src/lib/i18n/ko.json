@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "전체 화면을 가로로 맞추고 흐린 복사본 위에 놓습니다.",
   "clipedit.vertical.focus": "자르기 위치",
   "clipedit.vertical.faceBox": "얼굴 캠 영역",
+  "clipedit.vertical.faceBoxValue": "왼쪽 {x}%, 위 {y}%",
   "clipedit.vertical.faceBoxHint": "화면을 드래그해 카메라 주위에 영역을 그립니다. 화살표 키로 조금씩 옮길 수 있습니다.",
   "clipedit.vertical.grabFrame": "현재 프레임 사용",
   "clipedit.vertical.faceShare": "얼굴 패널 높이",

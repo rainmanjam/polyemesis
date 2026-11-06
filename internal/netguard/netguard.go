@@ -103,14 +103,14 @@ func IsHostLocalAddr(ip net.IP) bool {
 var nonPublicRanges = func() []*net.IPNet {
 	out := make([]*net.IPNet, 0, 8)
 	for _, s := range []string{
-		"100.64.0.0/10",   // RFC6598 shared address space (CGNAT, Tailscale)
-		"192.0.0.0/24",    // RFC6890 IETF protocol assignments
-		"198.18.0.0/15",   // RFC2544 benchmarking
-		"192.0.2.0/24",    // RFC5737 TEST-NET-1
-		"198.51.100.0/24", // TEST-NET-2
-		"203.0.113.0/24",  // TEST-NET-3
-		"240.0.0.0/4",     // RFC1112 reserved
-		"64:ff9b::/96",    // RFC6052 IPv4/IPv6 translation -- an embedded v4 target
+		"100.64.0.0/10",   // RFC6598 shared address space (CGNAT, Tailscale) NOSONAR S1313: a blocklist entry, not an address we connect to
+		"192.0.0.0/24",    // RFC6890 IETF protocol assignments NOSONAR S1313: a blocklist entry, not an address we connect to
+		"198.18.0.0/15",   // RFC2544 benchmarking NOSONAR S1313: a blocklist entry, not an address we connect to
+		"192.0.2.0/24",    // RFC5737 TEST-NET-1 NOSONAR S1313: a blocklist entry, not an address we connect to
+		"198.51.100.0/24", // TEST-NET-2 NOSONAR S1313: a blocklist entry, not an address we connect to
+		"203.0.113.0/24",  // TEST-NET-3 NOSONAR S1313: a blocklist entry, not an address we connect to
+		"240.0.0.0/4",     // RFC1112 reserved NOSONAR S1313: a blocklist entry, not an address we connect to
+		"64:ff9b::/96",    // RFC6052 IPv4/IPv6 translation -- an embedded v4 target NOSONAR S1313: a blocklist entry, not an address we connect to
 	} {
 		_, n, err := net.ParseCIDR(s)
 		if err != nil {

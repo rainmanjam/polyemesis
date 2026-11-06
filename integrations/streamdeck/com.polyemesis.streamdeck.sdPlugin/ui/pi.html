@@ -101,8 +101,8 @@
        hovered, so every current issue is listed here. Filled by pi.js with
        textContent only: the lines carry server words. -->
   <section class="block" id="block-issues" hidden>
-    <label data-i18n="streamdeck.pi.issues">Current issues</label>
-    <ul id="issues" class="issues"></ul>
+    <span id="issues-label" class="label" data-i18n="streamdeck.pi.issues">Current issues</span>
+    <ul id="issues" class="issues" aria-labelledby="issues-label"></ul>
     <p id="issues-empty" class="hint" hidden></p>
   </section>
 

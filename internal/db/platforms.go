@@ -672,7 +672,7 @@ var destinationPresets = withRegistry([]DestinationPreset{
 	{
 		ID: "twitch-rtmps", Name: "Twitch (RTMPS)", Group: GroupMajor,
 		Transport: PresetRTMPS, Kind: DestRTMP,
-		URL:         "rtmps://live.twitch.tv/app",
+		URL:         "rtmps://live.twitch.tv:443/app",
 		SeparateKey: true,
 		HelpURL:     "https://help.twitch.tv/s/article/broadcast-guidelines",
 		Notes: "RTMP over TLS on 443, for networks that block 1935. Twitch's TLS support is per-ingest: if this host " +

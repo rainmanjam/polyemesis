@@ -204,7 +204,7 @@ export function expireLines(lines: ShownLine[], fadeSeconds: number, now: number
 export function withOpacity(hex: string, opacity: number): string {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return "transparent";
-  const [r, g, b] = [m[1], m[2], m[3]].map((x) => parseInt(x, 16));
+  const [r, g, b] = [m[1], m[2], m[3]].map((x) => Number.parseInt(x, 16));
   const a = Math.max(0, Math.min(100, opacity)) / 100;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
@@ -271,7 +271,7 @@ export function pollVisible(p: ShownPoll | null, now: number, lingerMs = POLL_LI
   if (p.state === "open" || p.state === "closing") return true;
   if (p.state !== "ended") return false;
   if (now - p.receivedAt >= lingerMs) return false;
-  const ended = p.endedAt ? Date.parse(p.endedAt) : NaN;
+  const ended = p.endedAt ? Date.parse(p.endedAt) : Number.NaN;
   if (!Number.isNaN(ended) && now - ended >= lingerMs + CLOCK_SLACK_MS) return false;
   return true;
 }
@@ -303,7 +303,7 @@ export class SSEParser {
   private buf = "";
 
   push(chunk: string): SSEFrame[] {
-    this.buf += chunk.replace(/\r\n/g, "\n");
+    this.buf += chunk.replaceAll("\r\n", "\n");
     const out: SSEFrame[] = [];
     let at: number;
     while ((at = this.buf.indexOf("\n\n")) >= 0) {

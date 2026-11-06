@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "Toute l'image sur la largeur, sur une copie floutée d'elle-même.",
   "clipedit.vertical.focus": "Position du recadrage",
   "clipedit.vertical.faceBox": "Cadre webcam",
+  "clipedit.vertical.faceBoxValue": "Gauche {x} %, haut {y} %",
   "clipedit.vertical.faceBoxHint": "Faites glisser sur l'image pour tracer un cadre autour de votre caméra. Les flèches le déplacent.",
   "clipedit.vertical.grabFrame": "Utiliser l'image actuelle",
   "clipedit.vertical.faceShare": "Hauteur du panneau webcam",

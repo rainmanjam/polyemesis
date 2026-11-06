@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * at --tracking-caps. The catalogue already writes labels in sentence case;
  * the uppercase was only ever this class. */
 const Label = React.forwardRef<
-  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentRef<typeof LabelPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
 >(({ className, ...props }, ref) => (
   <LabelPrimitive.Root

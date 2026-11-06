@@ -612,6 +612,7 @@ export function OfflineCard({
             muted
             loop
             playsInline
+            tabIndex={-1}
             aria-hidden="true"
           />
         ) : (

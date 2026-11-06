@@ -628,8 +628,8 @@ export function MonitoringPage() {
           procOk();
         })
         .catch(procFailed);
-    load();
-    const t = window.setInterval(load, 5000);
+    void load();
+    const t = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(t);
     // programme, because listProcesses is scoped. An empty array froze it at
     // the mount value -- null -- so every poll went out unscoped and this whole

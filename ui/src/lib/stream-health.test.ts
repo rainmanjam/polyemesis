@@ -97,3 +97,16 @@ describe("Facebook's published timings", () => {
     expect(FACEBOOK_STREAM_HEALTH_INTERVAL_MS).toBe(2000);
   });
 });
+
+describe("formatHealthValue trailing zeros", () => {
+  it.each([
+    [100.5, "100.5"],
+    [12.3, "12.3"],
+    [1234.567, "1234.57"],
+    [10.004, "10"],
+    [0.5, "0.5"],
+    [-2.5, "-2.5"],
+  ])("renders %s as %s", (v, want) => {
+    expect(formatHealthValue(v)).toBe(want);
+  });
+});

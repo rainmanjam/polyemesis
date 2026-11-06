@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "Cały kadr na szerokość, na rozmytej kopii samego siebie.",
   "clipedit.vertical.focus": "Położenie kadru",
   "clipedit.vertical.faceBox": "Ramka kamerki",
+  "clipedit.vertical.faceBoxValue": "Od lewej {x}%, od góry {y}%",
   "clipedit.vertical.faceBoxHint": "Przeciągnij po kadrze, aby narysować ramkę wokół kamery. Strzałki ją przesuwają.",
   "clipedit.vertical.grabFrame": "Użyj bieżącej klatki",
   "clipedit.vertical.faceShare": "Wysokość panelu kamerki",

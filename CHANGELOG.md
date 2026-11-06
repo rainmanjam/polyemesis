@@ -23,6 +23,14 @@ its first tagged release.
 
 ### Fixed
 
+- **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
+  and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
+  could take quadratic time on a hostile paste (endpoint and ingest URLs, timecodes, stream-health values,
+  Mermaid fences, the translation script) are plain scans; the chat message row, face box and a few
+  delegating containers got proper keyboard roles or a documented reason; the Stream Deck inspector's
+  issue list is labelled for screen readers; and the deprecated React types (`ElementRef`, `FormEvent`,
+  `MutableRefObject`) are replaced with their current forms. No behaviour changes.
+
 - **Re-detecting hardware reaches the next VAAPI rendition start of a running programme.** A VAAPI
   rendition pinned the render node it found at its first start, for as long as the programme's engine
   lived, so a GPU passed through or a driver upgraded afterwards showed `h264_vaapi` working in the
@@ -247,6 +255,13 @@ its first tagged release.
 
 ### Changed
 
+- **New Twitch destinations connected through an account default to the RTMPS ingest.** Fetching the
+  stream key hands back `rtmps://live.twitch.tv:443/app` (the same ingest and key over TLS, which also
+  passes networks that block port 1935) for a destination with no URL yet. Refreshing a key keeps the
+  transport an existing destination already uses: the "Twitch" preset stays on plain RTMP, "Twitch (RTMPS)"
+  on RTMPS, and an unlabelled one keeps its stored scheme, so the plain-RTMP fallback for networks that
+  refuse TLS survives a refresh. The "Twitch (RTMPS)" preset now spells out `:443`, and the destination
+  dialog recognises an RTMPS Twitch URL with or without the port.
 - **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
   failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
   available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).

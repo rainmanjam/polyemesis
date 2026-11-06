@@ -274,7 +274,7 @@ export function RoutingPage() {
         setPresetOpts(p.defaults);
         setLoading(false);
         if (!id && dests.length > 0) {
-          navigate(`/routing/${dests[0].destination.id}`, { replace: true });
+          void navigate(`/routing/${dests[0].destination.id}`, { replace: true });
         }
       })
       .catch((err) => {

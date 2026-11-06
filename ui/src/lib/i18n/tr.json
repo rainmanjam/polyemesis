@@ -3862,6 +3862,7 @@
   "clipedit.vertical.blurBody": "Karenin tamamı genişlik boyunca, bulanık bir kopyasının üstünde.",
   "clipedit.vertical.focus": "Kırpma konumu",
   "clipedit.vertical.faceBox": "Yüz kamerası kutusu",
+  "clipedit.vertical.faceBoxValue": "Soldan {x}%, yukarıdan {y}%",
   "clipedit.vertical.faceBoxHint": "Kameranın çevresine kutu çizmek için karede sürükle. Ok tuşları onu kaydırır.",
   "clipedit.vertical.grabFrame": "Geçerli kareyi kullan",
   "clipedit.vertical.faceShare": "Yüz panelinin yüksekliği",

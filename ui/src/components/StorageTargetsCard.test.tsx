@@ -240,3 +240,16 @@ describe("StorageTargetsCard editor dismissal", () => {
     expect(screen.queryByRole("dialog")).not.toBeNull();
   });
 });
+
+describe("secretRequired endpoint comparison", () => {
+  it("ignores case, whitespace and trailing slashes, and finishes fast on a slash flood", async () => {
+    const { secretRequired } = await import("./StorageTargetsCard");
+    const saved = target({ endpoint: "https://s3.example.com", hasSecret: true });
+    const draft = (endpoint: string) => ({ ...saved, endpoint, secret: "" });
+    expect(secretRequired(saved, draft("  HTTPS://S3.Example.com///  ")).rebind).toBe(false);
+    expect(secretRequired(saved, draft("https://other.example.com")).rebind).toBe(true);
+    const t0 = performance.now();
+    expect(secretRequired(saved, draft(`https://s3.example.com${"/".repeat(200_000)}x`)).rebind).toBe(true);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+});

@@ -157,7 +157,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
   );
 
   return (
-    <div
+    <div // NOSONAR S6848: delegation point for Ctrl/Cmd+Z; the focusable parts are the cell inputs inside
       className="flex flex-col gap-2"
       // Ctrl+Z / Cmd+Z anywhere in the matrix. The cells are controlled inputs,
       // so the browser's own undo has nothing to walk back.

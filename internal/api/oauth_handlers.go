@@ -971,7 +971,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 			return errRefreshAccountChanged
 		}
 		if ingestURL != "" {
-			cur.URL = ingestURL
+			cur.URL = ingestURLKeepingTransport(cur, ingestURL)
 		}
 		cur.StreamKey = b.Ingest.Key
 		cur.Kind = db.DestRTMP
@@ -1425,6 +1425,38 @@ func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientI
 		return nil, err
 	}
 	return &oauth.Broadcast{Ingest: *ing}, nil
+}
+
+// ingestURLKeepingTransport is the URL a key refresh stores. The platform's
+// answer, except for Twitch, whose one ingest host is reachable over both
+// RTMP and RTMPS: the destination keeps the transport it chose, because the
+// twitch-rtmps preset tells an operator whose network refuses TLS to fall back
+// to plain RTMP, and a refresh that wrote the provider's RTMPS URL over that
+// would undo it (and leave the preset label and the URL disagreeing). The
+// "twitch" preset keeps plain RTMP, "twitch-rtmps" keeps RTMPS, an unlabelled
+// destination keeps the scheme it already stores, and one with no URL yet --
+// a destination just created from an OAuth account -- takes the provider's
+// RTMPS.
+func ingestURLKeepingTransport(cur *db.Destination, ingestURL string) string {
+	if cur.Platform != db.PlatformTwitch {
+		return ingestURL
+	}
+	wantTLS := true
+	switch {
+	case cur.PresetID == "twitch":
+		wantTLS = false
+	case cur.PresetID == "twitch-rtmps":
+	case strings.HasPrefix(strings.ToLower(strings.TrimSpace(cur.URL)), "rtmp://"):
+		wantTLS = false
+	}
+	id := "twitch-rtmps"
+	if !wantTLS {
+		id = "twitch"
+	}
+	if p, ok := db.DestinationPresetByID(id); ok && p.URL != "" {
+		return p.URL
+	}
+	return ingestURL
 }
 
 // refreshLocks serializes concurrent token refreshes of the SAME account. The
