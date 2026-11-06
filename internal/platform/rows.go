@@ -134,7 +134,8 @@ func buildRows() []Row {
 		},
 		{
 			// TikTok exists to publish clips; destinations on it are refused.
-			Key: TikTok, Enum: TikTok, Name: "TikTok", ShortName: "TikTok",
+			Key: TikTok, Enum: TikTok, Name: "TikTok LIVE", ShortName: "TikTok",
+			Presets: []string{"tiktok"},
 			Text:    Text{CaptionMax: 2200},
 			APIHost: tikTokAPI,
 		},

@@ -25,7 +25,10 @@ package oauth
 // exists" is not a source, and a wrong SupportNo becomes a refusal the operator
 // cannot argue with.
 
-import "github.com/rainmanjam/polyemesis/internal/db"
+import (
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
+)
 
 // Capability is one column of the matrix.
 type Capability string
@@ -203,12 +206,12 @@ func (p PlatformCapability) Streamable() bool { return p.Tier != TierUnsupported
 // platformCapabilities is the matrix. Order is display order: most integrated
 // first, unsupported last, because the last row is the one nobody should have
 // to scroll to find.
-var platformCapabilities = []PlatformCapability{
+var platformCapabilities = withRegistry([]PlatformCapability{
 	{
-		PresetID: "youtube", Name: "YouTube Live", Platform: db.PlatformYouTube,
-		Tier:    TierIntegrated,
-		Summary: "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
-		HelpURL: "https://support.google.com/youtube/answer/2907883",
+		PresetID: "youtube",
+		Tier:     TierIntegrated,
+		Summary:  "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
+		HelpURL:  "https://support.google.com/youtube/answer/2907883",
 		Caps: map[Capability]Support{
 			CapSSO:                SupportYes,
 			CapStreamKey:          SupportYes,
@@ -237,10 +240,10 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "twitch", Name: "Twitch", Platform: db.PlatformTwitch,
-		Tier:    TierIntegrated,
-		Summary: "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
-		HelpURL: "https://dev.twitch.tv/console/apps",
+		PresetID: "twitch",
+		Tier:     TierIntegrated,
+		Summary:  "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
+		HelpURL:  "https://dev.twitch.tv/console/apps",
 		Caps: map[Capability]Support{
 			CapSSO:                SupportYes,
 			CapStreamKey:          SupportYes,
@@ -268,9 +271,9 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "facebook", Name: "Facebook Live", Platform: db.PlatformFacebook,
-		Tier:    TierIntegrated,
-		Summary: "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
+		PresetID: "facebook",
+		Tier:     TierIntegrated,
+		Summary:  "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
 		// Up front, not in step six. Meta's review is measured in days and it
 		// is the operator's to do — a setup guide that mentions it late has
 		// already wasted their evening.
@@ -320,7 +323,7 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "kick", Name: "Kick", Platform: db.PlatformKick,
+		PresetID: "kick",
 		// INTEGRATED, not partial. Kick answers SupportYes on all seven
 		// capabilities -- one more than YouTube or Twitch, both of which are
 		// integrated -- and the key is fetched over streamkey:read rather than
@@ -360,7 +363,7 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "vimeo", Name: "Vimeo Livestream", Platform: db.PlatformVimeo,
+		PresetID: "vimeo",
 		// THE FIRST ROW IN THIS TIER SINCE KICK LEFT IT, and the tier's own
 		// comment predicted exactly this shape: "a provider can ship SSO long
 		// before it exposes a key endpoint". Vimeo signs in on any plan and
@@ -421,7 +424,7 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "x", Name: "X (Twitter) Live", Platform: db.PlatformX, Tier: TierManual,
+		PresetID: "x", Tier: TierManual,
 		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
 		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off (the operator turns them on with POLYEMESIS_X_LIVESTREAM=1 once X has approved it) and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
@@ -453,7 +456,7 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "rumble", Name: "Rumble", Platform: db.PlatformRumble,
+		PresetID:  "rumble",
 		Tier:      TierManual,
 		Summary:   "Paste your ingest URL and stream key from Rumble Studio. Chat is different: Rumble's live-stream API hands over the chat with a key from your own account settings, so the pane works without any sign-in.",
 		ReadFirst: "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
@@ -522,7 +525,7 @@ var platformCapabilities = []PlatformCapability{
 		"Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
 	),
 	manualUnverified(
-		"dailymotion", "Dailymotion",
+		"dailymotion", "",
 		"Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
 		"api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
 	),
@@ -532,11 +535,24 @@ var platformCapabilities = []PlatformCapability{
 	// that. Every other cell is still unverified.
 	tikTokRow(),
 	manualUnverified(
-		"linkedin", "LinkedIn Live",
+		"linkedin", "",
 		"Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
 		"LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
 	),
 	instagramRow(),
+})
+
+// withRegistry fills the display name and the Platform from internal/platform,
+// which owns both. A row with no registry entry keeps the name it was written
+// with and has no Platform.
+func withRegistry(rows []PlatformCapability) []PlatformCapability {
+	for i := range rows {
+		if r, ok := platform.ByKey(rows[i].PresetID); ok {
+			rows[i].Name = r.Name
+			rows[i].Platform = db.Platform(r.Enum)
+		}
+	}
+	return rows
 }
 
 // manualUnverified builds the row shared by every platform polyemesis can
@@ -556,11 +572,10 @@ var platformCapabilities = []PlatformCapability{
 // stream key is pasted, and the live surface is unverified.
 func tikTokRow() PlatformCapability {
 	c := manualUnverified(
-		"tiktok", "TikTok LIVE",
+		"tiktok", "",
 		"Paste the server URL and key TikTok issues for the broadcast. Streaming works. Connecting a TikTok account is for posting finished clips, not for going live.",
 		"TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
 	)
-	c.Platform = db.PlatformTikTok
 	c.Tier = TierPartial
 	c.Caps[CapSSO] = SupportYes
 	return c
@@ -593,7 +608,7 @@ func tikTokRow() PlatformCapability {
 // the public reference above and nothing more.
 func instagramRow() PlatformCapability {
 	return PlatformCapability{
-		PresetID: "instagram", Name: "Instagram Live", Tier: TierManual,
+		PresetID: "instagram", Tier: TierManual,
 		Summary:   "Paste the stream URL and key from instagram.com → + Create → Live video → Go live with streaming software, then click Go live in Instagram once the preview appears. Streaming works; chat, title and the Go live click stay in Instagram for now.",
 		ReadFirst: "A live video on Instagram ends after one hour, and Instagram needs a public professional (Creator or Business) account with 1,000+ followers. Use a persistent stream key where your account offers one, so the destination stays ready between broadcasts, and end the live video in Instagram before stopping the destination.",
 		HelpURL:   "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",

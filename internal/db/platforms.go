@@ -756,7 +756,7 @@ var destinationPresets = withRegistry([]DestinationPreset{
 		Aliases: []string{"meta", "ig"},
 	},
 	{
-		ID: "tiktok", Name: "TikTok LIVE", Group: GroupMajor,
+		ID: "tiktok", Group: GroupMajor,
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "TikTok issues the server URL and key per broadcast, and only to accounts granted LIVE access. Create " +

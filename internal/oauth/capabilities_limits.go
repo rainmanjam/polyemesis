@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // Platform limits are the caps a broadcast runs into on the platform's side,
@@ -60,39 +61,36 @@ type PlatformLimit struct {
 // PlatformLimits returns the limit table in display order.
 func PlatformLimits() []PlatformLimit {
 	return []PlatformLimit{
-		{
-			PresetID: "twitch", Platform: db.PlatformTwitch,
-			Kind: LimitKindBroadcastDuration, Hours: 48, Status: LimitReported,
-			Source: "https://help.twitch.tv/s/article/broadcasting-guidelines?language=en_US",
-			Note:   "Twitch's Broadcasting Guidelines give 48 hours as the maximum broadcast length and say it cannot be changed. The guideline page itself did not load in the check that recorded this, so it is reported, not read. Rollover is a reconnect, not an end-and-create, because Twitch publishes no broadcast lifecycle API (see the Start / end column).",
-		},
-		{
-			PresetID: "youtube", Platform: db.PlatformYouTube,
-			Kind: LimitKindArchiveDuration, Hours: 12, Status: LimitDocumented,
-			Source: "https://support.google.com/youtube/answer/6247592?hl=en",
-			Note:   "YouTube's archive help page says a stream over 12 hours may not be captured at all, so a longer broadcast can lose its replay. The DVR page gives the same 12-hour figure but states the consequence only as DVR being limited, so it is not the citation used here. Rollover ends and restarts the broadcast before this point.",
-		},
-		{
-			PresetID: "facebook", Platform: db.PlatformFacebook,
-			Kind: LimitKindBroadcastDuration, Hours: 8, Status: LimitDocumented,
-			Source: "https://developers.facebook.com/docs/live-video-api/reference",
-			Note:   "Meta's live video API reference lists \"Not exceed 8 hours\" among the requirements for a successful broadcast. Older sources cite 4 hours; the current reference is the one recorded here.",
-		},
-		{
-			PresetID: "kick", Platform: db.PlatformKick,
-			Kind: LimitKindBroadcastDuration, Hours: 0, Status: LimitUnverified,
-			Note: "No platform source was confirmed. Third-party guides disagree: some say Kick has no stream length limit, and one says only the first 48 hours of a stream are saved as a replay. Replay retention is also reported as 30 days for verified and 7 days for unverified channels, which conflicts with the 48-hour figure. Verify against Kick's help centre before adding a countdown.",
-		},
-		{
-			// No Platform: Instagram has no integration behind it, so its
-			// destinations save as custom and RolloverLimitFor never hands
-			// this row to one. It is listed so the cap is on record with its
-			// source, and so the limits route can show it.
-			PresetID: "instagram",
-			Kind:     LimitKindBroadcastDuration, Hours: 1, Status: LimitReported,
-			Source: "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key",
-			Note:   "Restream's Instagram help (read 2026-11-05) says Instagram limits a live video to one hour and that a longer stream may end automatically. Reported rather than documented because the page is Restream's, not Meta's. polyemesis cannot start the next Instagram live video, so there is no automatic rollover: plan a broadcast as one-hour segments.",
-		},
+		limit("twitch",
+			"Twitch's Broadcasting Guidelines give 48 hours as the maximum broadcast length and say it cannot be changed. The guideline page itself did not load in the check that recorded this, so it is reported, not read. Rollover is a reconnect, not an end-and-create, because Twitch publishes no broadcast lifecycle API (see the Start / end column)."),
+		limit("youtube",
+			"YouTube's archive help page says a stream over 12 hours may not be captured at all, so a longer broadcast can lose its replay. The DVR page gives the same 12-hour figure but states the consequence only as DVR being limited, so it is not the citation used here. Rollover ends and restarts the broadcast before this point."),
+		limit("facebook",
+			"Meta's live video API reference lists \"Not exceed 8 hours\" among the requirements for a successful broadcast. Older sources cite 4 hours; the current reference is the one recorded here."),
+		limit("kick",
+			"No platform source was confirmed. Third-party guides disagree: some say Kick has no stream length limit, and one says only the first 48 hours of a stream are saved as a replay. Replay retention is also reported as 30 days for verified and 7 days for unverified channels, which conflicts with the 48-hour figure. Verify against Kick's help centre before adding a countdown."),
+		// No Platform: Instagram has no integration behind it, so its
+		// destinations save as custom and RolloverLimitFor never hands
+		// this row to one. It is listed so the cap is on record with its
+		// source, and so the limits route can show it.
+		limit("instagram",
+			"Restream's Instagram help (read 2026-11-05) says Instagram limits a live video to one hour and that a longer stream may end automatically. Reported rather than documented because the page is Restream's, not Meta's. polyemesis cannot start the next Instagram live video, so there is no automatic rollover: plan a broadcast as one-hour segments."),
+	}
+}
+
+// limit builds one row from the platform registry, which owns the number, its
+// status and where it was read; the note is prose and stays here with the
+// other operator-facing text.
+func limit(presetID, note string) PlatformLimit {
+	row, ok := platform.ByPreset(presetID)
+	if !ok || len(row.Limits) == 0 {
+		panic("oauth: preset " + presetID + " has no limit in the platform registry")
+	}
+	l := row.Limits[0]
+	return PlatformLimit{
+		PresetID: presetID, Platform: db.Platform(row.Enum),
+		Kind: LimitKind(l.Kind), Hours: l.Hours, Status: LimitStatus(l.Status),
+		Source: l.Source, Note: note,
 	}
 }
 
