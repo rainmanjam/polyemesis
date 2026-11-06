@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { settingsHref } from "@/lib/settingsSearch";
 import { toast } from "sonner";
 import { Flag, MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
 import { Link, useNavigate } from "react-router";
@@ -24,7 +25,7 @@ import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
-import { useChatFlags } from "@/hooks/useChatFlags";
+import { useChatFlags } from "@/features/chat/useChatFlags";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useT } from "@/lib/i18n";
 import { mayClaim, readFailed } from "@/lib/readState";
@@ -330,7 +331,7 @@ export function ChatPage() {
                     configured={configured}
                     error={error}
                     statuses={statuses}
-                    onOpenCredentials={() => void navigate("/settings?tab=platforms")}
+                    onOpenCredentials={() => void navigate(settingsHref("platforms"))}
                   />
                 )
               }
@@ -375,7 +376,7 @@ export function ChatPage() {
           {configured && statuses.length === 0 && (
             <p className="rounded-md border border-border bg-card px-2 py-1.5 text-sm leading-relaxed text-muted-foreground">
               {t("chatpage.noAccount")}{" "}
-              <Link to="/settings?tab=platforms" className="text-primary-bright underline-offset-2 hover:underline">
+              <Link to={settingsHref("platforms")} className="text-primary-bright underline-offset-2 hover:underline">
                 {t("chatpage.openCredentials")}
               </Link>
             </p>

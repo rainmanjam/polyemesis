@@ -38,7 +38,7 @@ import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
 import { useFacebookStreamHealth } from "@/hooks/useFacebookStreamHealth";
 import { TrackSummary } from "@/components/signature/TrackRows";
-import { useHeldStop, useSettledAction } from "@/hooks/useHeldStop";
+import { useHeldStop, useSettledAction } from "@/features/destinations/useHeldStop";
 import { undoSecondsLeft } from "@/lib/destinationAction";
 import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";

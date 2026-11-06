@@ -1,4 +1,5 @@
 import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
+import { settingsHref } from "@/lib/settingsSearch";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -33,10 +34,10 @@ import {
   sourceIdForSave,
   sourceIsChosen,
 } from "@/lib/destinationSource";
-import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
-import { ivsAppPathFix } from "@/lib/ivsIngest";
+import { FACEBOOK_PRIVACIES } from "@/features/destinations/facebookPrivacy";
+import { ivsAppPathFix } from "@/features/destinations/ivsIngest";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
-import { DEST_STEPS, stepForError, type DestStep } from "@/lib/destinationSteps";
+import { DEST_STEPS, stepForError, type DestStep } from "@/features/destinations/destinationSteps";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { InfoHint } from "@/components/InfoHint";
@@ -49,7 +50,7 @@ import {
   rowsOf,
   type ReadState,
 } from "@/lib/readState";
-import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
+import { computeLeaving, joinConsequence, leaveConsequence } from "@/features/destinations/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -2299,7 +2300,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unset">{t("dest.leaveOnFacebook")}</SelectItem>
-                      {/* Rendered FROM lib/facebookPrivacy, not typed out here.
+                      {/* Rendered FROM features/destinations/facebookPrivacy, not typed out here.
                           That array is pinned to db.FacebookPrivacies by
                           internal/db/compliance_drift_test.go, and the pin only
                           means something while this select is the array's one
@@ -2867,7 +2868,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
           {t("addDest.unlink")}
         </Button>
         <Button type="button" variant="ghost" size="sm" asChild>
-          <Link to="/settings?tab=platforms">{t("addDest.manageAccounts")}</Link>
+          <Link to={settingsHref("platforms")}>{t("addDest.manageAccounts")}</Link>
         </Button>
       </span>
     </div>

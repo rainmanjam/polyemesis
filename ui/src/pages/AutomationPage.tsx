@@ -64,7 +64,7 @@ import {
   scheduleActionLabel,
   type ScheduleAction,
 } from "@/lib/scheduleActions";
-import { formForAction, scheduleBlock } from "@/lib/scheduleCreate";
+import { formForAction, scheduleBlock } from "@/features/automation/scheduleCreate";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";

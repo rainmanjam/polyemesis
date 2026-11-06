@@ -33,7 +33,6 @@ vi.mock("@/lib/api", async () => {
     api: {
       connectUrl: (p: string) => `/api/v1/oauth/${p}/start`,
       putCreds: vi.fn(),
-      deleteCreds: vi.fn(),
       confirmDeleteCreds: vi.fn(),
       checkCreds: vi.fn(),
       deleteAccount: vi.fn(),

@@ -53,7 +53,6 @@ describe("DangerZone", () => {
     // refused with creds_in_use while accounts use the app, which is exactly
     // the state this card shows ("Connected accounts using this app: 1").
     const del = vi.spyOn(api, "confirmDeleteCreds").mockResolvedValue({ status: "ok" } as never);
-    const unconfirmed = vi.spyOn(api, "deleteCreds");
     const ok = vi.spyOn(toast, "success").mockImplementation(() => "");
     render(<DangerZone />);
     await screen.findByText(/Connected accounts using this app: 1\./);
@@ -62,7 +61,6 @@ describe("DangerZone", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Remove credentials" }).at(-1) as HTMLButtonElement);
     await waitFor(() => expect(del).toHaveBeenCalledWith("twitch"));
     await waitFor(() => expect(ok).toHaveBeenCalled());
-    expect(unconfirmed).not.toHaveBeenCalled();
   });
 
   it("shows the server's own refusal when the credentials cannot be removed", async () => {

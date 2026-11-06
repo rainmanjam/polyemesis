@@ -210,8 +210,7 @@ Every string is passed in already translated.
 
 **Status words.** `lib/status.ts` returns a `StatusReading` (`labelKey`, `tone`,
 `indicator`) for every domain: `processStatus`, `destinationStatus`,
-`delayStatus`, `renditionStatus`, `recorderStatus`, `clipBufferStatus`,
-`ingestPhaseStatus` and `outputStatus`. Render it with
+`recorderStatus` and `clipBufferStatus`. Render it with
 `components/StatusPill.tsx`. The tone is `ok` (on air, the only green), `warn`
 (a transition, or something that needs a look), `bad` (failed) or `idle`
 (not running by choice or by absence). The indicator is the non-colour cue:

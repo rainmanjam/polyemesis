@@ -46,10 +46,10 @@ import {
   isErrorLine,
   type LogLevelFilter,
   verdict,
-} from "@/lib/logSummary";
+} from "@/features/monitoring/logSummary";
 import { cn } from "@/lib/utils";
-import { bitrateTrace } from "@/lib/bitrateTrace";
-import { cpuOver, memoryOver, monitorVerdict, type MonitorVerdictTone } from "@/lib/monitorVerdict";
+import { bitrateTrace } from "@/features/monitoring/bitrateTrace";
+import { cpuOver, memoryOver, monitorVerdict, type MonitorVerdictTone } from "@/features/monitoring/monitorVerdict";
 import {
   asDestinationId,
   asSourceId,
@@ -760,7 +760,7 @@ export function MonitoringPage() {
     [processes],
   );
 
-  // THE ONE SENTENCE UNDER THE TITLE (A66). lib/monitorVerdict.ts decides it
+  // THE ONE SENTENCE UNDER THE TITLE (A66). features/monitoring/monitorVerdict.ts decides it
   // from the process states AND every tile below that can warn (freshness,
   // ingest loss, CPU, memory), with the tiles' own thresholds, so "all
   // running" never sits above a CPU warning. It does not reuse the Dashboard

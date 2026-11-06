@@ -60,7 +60,7 @@ describe("api.exportDebug", () => {
     // cannot put an entry in the audit trail.
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("same-origin");
-    expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok-abc123");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("tok-abc123");
   });
 
   it("takes the filename the SERVER chose", async () => {

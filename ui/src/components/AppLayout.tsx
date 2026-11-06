@@ -60,7 +60,7 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
-import { useNavCollapsed } from "@/hooks/useNavCollapsed";
+import { useNavCollapsed } from "@/features/shell/useNavCollapsed";
 import { ingestSignalTone } from "@/lib/liveness";
 import { duration, kbps } from "@/lib/format";
 import {
@@ -71,7 +71,7 @@ import {
   useT,
   type TranslationKey,
 } from "@/lib/i18n";
-import { NAV_SECTIONS } from "@/lib/navSections";
+import { NAV_SECTIONS } from "@/features/shell/navSections";
 import { cn } from "@/lib/utils";
 
 /** A nav entry names itself either through the catalogue or, for a page whose
@@ -86,7 +86,7 @@ type NavItem = {
    *
    *  Written out as a LITERAL rather than derived from `to`, and that is the
    *  whole point: ui/src/lib/tour-drift.test.ts asserts that the selector in
-   *  lib/tourSteps.ts appears in this file as an attribute, and a computed
+   *  features/tour/tourSteps.ts appears in this file as an attribute, and a computed
    *  `data-tour={`nav-${to}`}` would leave nothing for it to find — the guard
    *  would go vacuous while still passing. See the note on TOUR_STEPS. */
   tour?: string;

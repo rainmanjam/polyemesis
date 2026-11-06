@@ -1,10 +1,10 @@
 /* ===========================================================================
    The client for the recurring-event (#18) and planned-rollover (#19) routes.
 
-   It is built on autoApi for JSON, with two exceptions:
-   - the thumbnail is a raw image body. autoApi JSON-encodes every body and
-     forces application/json, and the server checks image/png or image/jpeg
-     against the bytes' magic numbers, so this module sends the real type.
+   It is built on autoApi for JSON, with one exception: the thumbnail is a raw
+   image body. The JSON verbs encode every body and force application/json, and
+   the server checks image/png or image/jpeg against the bytes' magic numbers,
+   so that call goes through requestRaw with the real type.
    The rollover routes take no ?source=. The server resolves the programme
    from the destination row itself, which is always current; a programme
    named by the client could only be a stale copy of it, and requireSource
@@ -14,9 +14,8 @@
    `status`, and the server's sentence stays the message.
    =========================================================================== */
 
-import { ApiError } from "./api";
+import { ApiError, apiErrorFromResponse, requestRaw } from "./api";
 import { autoApi } from "./autoApi";
-import { noteResponseStatus } from "./session";
 import type { BroadcastTemplate, OccurrenceView, RolloverSettings, RolloverView } from "./types";
 
 /** The 2 MB limit the server enforces on a thumbnail (scheduler.MaxThumbnailBytes). Checked here
@@ -57,25 +56,12 @@ export async function uploadThumbnail(scheduleId: number, file: Blob, mime: stri
   if (file.size > MAX_THUMBNAIL_BYTES) {
     throw new Error("the thumbnail is larger than 2 MB");
   }
-  const path = `/api/v1/schedules/${scheduleId}/template/thumbnail`;
-  const resp = await fetch(path, {
+  const resp = await requestRaw(`/schedules/${scheduleId}/template/thumbnail`, {
     method: "PUT",
     body: file,
-    headers: { "Content-Type": mime, "X-CSRF-Token": csrfToken() },
-    credentials: "same-origin",
+    headers: { "Content-Type": mime },
   });
-  noteResponseStatus(path, resp.status);
-  if (!resp.ok) {
-    const text = await resp.text();
-    let msg = `request failed (${resp.status})`;
-    try {
-      const body = JSON.parse(text) as { error?: unknown };
-      if (typeof body.error === "string") msg = body.error;
-    } catch {
-      if (text) msg = text;
-    }
-    throw new ApiError(resp.status, msg, "");
-  }
+  if (!resp.ok) throw await apiErrorFromResponse(resp);
 }
 
 /** The calendar window, as RFC 3339 instants. The server refuses a window wider than 90 days. */
@@ -109,10 +95,4 @@ export function saveRollover(
  *  platform answered and refused, and a 409 means the destination was not in a state to roll over. */
 export function runRollover(destinationId: number): Promise<{ status: string }> {
   return autoApi.post<{ status: string }>(`/destinations/${destinationId}/rollover/run`);
-}
-
-/** The CSRF token from the cookie, as autoApi reads it. Kept as a copy: autoApi does not export it. */
-function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : "";
 }

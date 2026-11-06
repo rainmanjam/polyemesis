@@ -78,32 +78,3 @@ export function InfoHint({
     </Popover>
   );
 }
-
-/** A label with its hint attached, for the common case.
- *
- *  Exists so the pairing is one element rather than a flex wrapper repeated at
- *  every field — several hundred times across the settings pages, which is
- *  several hundred chances to get the spacing subtly different. */
-export function LabelWithHint({
-  label,
-  body,
-  title,
-  htmlFor,
-  className,
-}: {
-  label: TranslationKey;
-  body: TranslationKey;
-  title?: TranslationKey;
-  htmlFor?: string;
-  className?: string;
-}) {
-  const t = useT();
-  return (
-    <span className={cn("inline-flex items-center gap-1", className)}>
-      <label htmlFor={htmlFor} className="text-[12px] font-medium">
-        {t(label)}
-      </label>
-      <InfoHint body={body} title={title} label={`${t(label)} — ${t("common.moreInfo")}`} />
-    </span>
-  );
-}

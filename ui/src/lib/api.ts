@@ -1,6 +1,5 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
-import type { LevelChange, TrackLevelResult } from "@/lib/liveTrackLevel";
 import type { SaveApplied } from "@/lib/saveImpact";
 import type {
   BroadcastWindowRow,
@@ -32,9 +31,7 @@ import type {
   BroadcastEnd,
   YouTubeVerticalView,
   BulkDestReport,
-  DelayDumpAllReport,
   DelayDumpResult,
-  ChatMessage,
   ChatModerationResult,
   ChatOverview,
   ChatPlatform,
@@ -273,63 +270,82 @@ export function isAccountInUse(e: unknown): e is ApiError {
   return e instanceof ApiError && e.code === ACCOUNT_IN_USE;
 }
 
+/** The cookie the server sets for the double-submit CSRF check, and the header
+ *  that must echo it (internal/auth: csrfCookieName, csrfHeaderName). */
+const CSRF_COOKIE = "polyemesis_csrf";
+const CSRF_HEADER = "X-CSRF-Token";
+
 /** Read the double-submit CSRF token the server set as a readable cookie. */
 function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+/** Send one request to the API with the session's credentials, the CSRF header
+ *  on every non-GET, and the session-ended check, and hand back the raw
+ *  Response. This is the ONLY place that decorates a request; `request` parses
+ *  JSON on top of it, and the callers that need the body untouched (an image
+ *  upload, a file download) use it directly. A `Content-Type` already on
+ *  `init.headers` is kept. */
+export async function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
-  if (method !== "GET" && method !== "HEAD") {
-    headers.set("X-CSRF-Token", csrfToken());
-  }
+  // Only a string body is JSON; a FormData or Blob body brings its own type.
+  if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (method !== "GET" && method !== "HEAD") headers.set(CSRF_HEADER, csrfToken());
 
-  const resp = await fetch(BASE + path, {
-    ...init,
-    headers,
-    credentials: "same-origin",
-  });
+  const resp = await fetch(BASE + path, { ...init, headers, credentials: "same-origin" });
   // A 401 mid-session returns the console to the login screen; see
   // lib/session.ts for which 401s do not.
   noteResponseStatus(path, resp.status);
+  return resp;
+}
 
-  if (resp.status === 204) return undefined as T;
-
+/** The body of a response, parsed as JSON when it is, else as the raw text. */
+async function readBody(resp: Response): Promise<unknown> {
   const text = await resp.text();
-  let body: unknown = null;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
+}
 
-  if (!resp.ok) {
-    const msg =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : typeof body === "string" && body && !looksLikeHtml(body)
-          ? body
-          : `request failed (${resp.status})`;
-    // Omitted by the server on every error that has nothing to branch on, so
-    // absent is the common case and "" is the honest reading of it.
-    const code =
-      body && typeof body === "object" && "code" in body
-        ? String((body as { code: unknown }).code)
-        : "";
-    const storedVersion =
-      body && typeof body === "object" && "version" in body
-        ? String((body as { version: unknown }).version)
-        : "";
-    throw new ApiError(resp.status, msg, code, refusedDestinations(body), storedVersion);
-  }
+/** The ApiError for a non-ok response whose body is already read. `fallback`
+ *  is the sentence when the body has none. */
+function apiErrorFrom(status: number, body: unknown, fallback = `request failed (${status})`): ApiError {
+  const msg =
+    body && typeof body === "object" && "error" in body
+      ? String((body as { error: unknown }).error)
+      : typeof body === "string" && body && !looksLikeHtml(body)
+        ? body
+        : fallback;
+  // Omitted by the server on every error that has nothing to branch on, so
+  // absent is the common case and "" is the honest reading of it.
+  const code =
+    body && typeof body === "object" && "code" in body
+      ? String((body as { code: unknown }).code)
+      : "";
+  const storedVersion =
+    body && typeof body === "object" && "version" in body
+      ? String((body as { version: unknown }).version)
+      : "";
+  return new ApiError(status, msg, code, refusedDestinations(body), storedVersion);
+}
+
+/** The ApiError for a non-ok response nobody has read yet. */
+export async function apiErrorFromResponse(resp: Response, fallback?: string): Promise<ApiError> {
+  return apiErrorFrom(resp.status, await readBody(resp), fallback);
+}
+
+/** JSON in, JSON out, and the ApiError (with `code`, the refused destinations
+ *  and a settings-conflict `storedVersion`) on failure. */
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const resp = await requestRaw(path, init);
+  if (resp.status === 204) return undefined as T;
+  const body = await readBody(resp);
+  if (!resp.ok) throw apiErrorFrom(resp.status, body);
   reportReconcileFailure(body);
   return body as T;
 }
@@ -423,6 +439,9 @@ const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
 const delWithBody = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "DELETE", body: JSON.stringify(body) });
 
+/** The generic verbs, for routes that have no named wrapper in `api` (lib/autoApi.ts). */
+export const http = { get, post, put, del };
+
 /** `?t=<token>` when a playback token is in play, empty otherwise. The public
  *  routes accept the token this way because an <img> src and a <video> src are
  *  the only handles a player page has on those requests. */
@@ -444,7 +463,7 @@ function tokenQuery(token?: string): string {
  *  where it cannot be. Optional in the type for exactly that reason: a
  *  destination row written before sources existed carries no `sourceId`, and
  *  guessing one on its behalf is the bug this parameter exists to end. */
-function sourceQuery(sourceId?: number | null): string {
+export function sourceQuery(sourceId?: number | null): string {
   return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
 }
 
@@ -476,27 +495,27 @@ export function uploadMedia(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", BASE + "/media");
     xhr.withCredentials = true;
-    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.setRequestHeader(CSRF_HEADER, csrfToken());
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
-      let body: unknown = null;
+      // The same session-ended check and error shape as requestRaw: an expired
+      // session mid-upload returns the console to sign-in, and the server's
+      // `code` survives.
+      noteResponseStatus("/media", xhr.status);
+      let body: unknown = xhr.responseText;
       try {
         body = JSON.parse(xhr.responseText);
       } catch {
-        body = xhr.responseText;
+        /* a non-JSON body is read as text */
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(body as MediaFile);
         return;
       }
-      const msg =
-        body && typeof body === "object" && "error" in body
-          ? String((body as { error: unknown }).error)
-          : `upload failed (${xhr.status})`;
-      reject(new ApiError(xhr.status, msg));
+      reject(apiErrorFrom(xhr.status, body, `upload failed (${xhr.status})`));
     };
     // A network failure and an abort are different things to a user: one is
     // "try again", the other is "you did that on purpose".
@@ -858,39 +877,6 @@ export const api = {
     // 0 travels: it is "everything since the last dump point" and overrides
     // the destination's own default, which an absent body would apply.
     post<DelayDumpResult>(`/destinations/${id}/delay/dump`, seconds === undefined ? undefined : { seconds }),
-  /** Live per-track mute or gain (I4). Writes the STORED live mix and
-   *  reconciles, so a level-only change reaches the running FFmpeg without a
-   *  restart. `applied` says which happened and `reason` why. 409 for an
-   *  audio-copy destination, 404 for a track outside the stored selection. Named
-   *  by programme like every other scoped write (#497). */
-  setTrackLevel: (
-    id: DestinationId,
-    track: number,
-    change: LevelChange,
-    sourceId?: number | null,
-  ) =>
-    post<TrackLevelResult>(
-      `/destinations/${id}/tracks/${track}/gain${sourceQuery(sourceId)}`,
-      change,
-    ),
-
-  /* --- every destination at once ----------------------------------------
-   *
-   *  These are startDestination/stopDestination run over every row on the
-   *  server, not a new capability: same handler code, same reconcile, same
-   *  read-back. There is no id list because there is no selection — the
-   *  routes act on the whole install.
-   *
-   *  SLOW ON PURPOSE. Starts are paced server-side, so this resolves after
-   *  the last destination has been dealt with rather than on acknowledgement.
-   *  A caller that aborts leaves the untouched tail reported as `skipped`.
-   *
-   *  STOPPING ENDS EVERY YOUTUBE BROADCAST ON THE INSTALL, PERMANENTLY: stop
-   *  and disable are one thing on the server, and the broadcast lifecycle
-   *  coordinator ends the broadcast of a disabled destination. Starting again
-   *  puts video back on the wire; it does not bring the broadcasts back. See
-   *  internal/api/destinations_bulk.go. */
-  startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
   /** Stop every destination. Carries `confirm` because the server refuses this
    *  route without it: it ends every live broadcast on the install, and a
    *  broadcast that has ended cannot be resumed. The dialog in front of this
@@ -898,14 +884,6 @@ export const api = {
    *  a caller that never showed one is exactly who the refusal is for. */
   stopAllDestinations: () =>
     post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
-  /** Dump the delay of every enabled, delayed destination of one programme.
-   *  Carries `confirm` for the reason stop-all does: the server refuses it
-   *  without one. Undelayed destinations are not listed in the answer. */
-  dumpAllDelays: (sourceId?: number | null, seconds?: number) =>
-    post<DelayDumpAllReport>(`/destinations/delay/dump-all${sourceQuery(sourceId)}`, {
-      confirm: true,
-      ...(seconds ? { seconds } : {}),
-    }),
   /** What a stop-all would end right now: the server's count, from each row's recorded phase.
    *  The Stop dialog shows this and nothing local, so the dialog and the stop agree. Read-only. */
   stopImpact: () =>
@@ -989,26 +967,13 @@ export const api = {
    *  Returns the text and the filename the server chose, so the caller does the
    *  saving — this module does not touch the DOM. */
   exportDebug: async (): Promise<{ text: string; filename: string }> => {
-    const resp = await fetch(`${BASE}/debug/export`, {
-      method: "POST",
-      // The same double-submit token every other non-GET carries. Built here
-      // rather than through request() because that helper parses the body as
-      // JSON, and this one needs the raw text and the Content-Disposition.
-      headers: { "X-CSRF-Token": csrfToken() },
-      credentials: "same-origin",
-    });
-    noteResponseStatus("/debug/export", resp.status);
-    const text = await resp.text();
+    // Through requestRaw rather than request() because that parses the body
+    // as JSON, and this one needs the raw text and the Content-Disposition.
+    const resp = await requestRaw("/debug/export", { method: "POST" });
     if (!resp.ok) {
-      let msg = `export failed (${resp.status})`;
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        if (parsed.error) msg = parsed.error;
-      } catch {
-        /* a non-JSON body; the status is all there is to report */
-      }
-      throw new ApiError(resp.status, msg);
+      throw apiErrorFrom(resp.status, await readBody(resp), `export failed (${resp.status})`);
     }
+    const text = await resp.text();
     // The server names the file with a timestamp so two bundles in one support
     // thread can be told apart. Fall back only if the header is missing.
     const cd = resp.headers.get("Content-Disposition") ?? "";
@@ -1057,7 +1022,6 @@ export const api = {
   listServices: () =>
     get<{ provenance: string; services: ServiceInfo[] }>("/services"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
-  getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   /** #661: what this rendition would be doing wrong on that platform.
    *  An unknown platform answers [], because a custom RTMP destination has
    *  nothing published to be outside of. */
@@ -1232,10 +1196,6 @@ export const api = {
       return false;
     }
   },
-  /** The HLS ladder. Relative, so it works under whatever host or proxy prefix
-   *  the viewer reached the page through. */
-  playoutMasterUrl: (token?: string) =>
-    "/playout/master.m3u8" + tokenQuery(token),
 
   // --- monitoring ---
   /** Every process is called `ingest`, `recorder`, `preview` or `meters` in
@@ -1293,7 +1253,6 @@ export const api = {
       "/jobs" + (qs ? `?${qs}` : ""),
     );
   },
-  getJob: (id: number) => get<JobView>(`/jobs/${id}`),
   cancelJob: (id: number) => post<JobView>(`/jobs/${id}/cancel`),
   retryJob: (id: number) => post<JobView>(`/jobs/${id}/retry`),
   /** Releases ONE job from the governor's gates. Deliberately not per-kind:
@@ -1306,10 +1265,6 @@ export const api = {
   purgeJobs: (body: { days?: number; keep?: number }) =>
     post<{ purged: number }>("/jobs/purge", body),
 
-  jobPolicy: () =>
-    get<{ policy: PostProdSettings; kinds: JobKindInfo[]; modes: string[] }>(
-      "/jobs/policy",
-    ),
   /** `restartRequired` is true when concurrency changed: the queue fixes that
    *  when it is constructed, so the new value is saved but not yet live. */
   putJobPolicy: (policy: PostProdSettings) =>
@@ -1325,15 +1280,10 @@ export const api = {
     get<{ session: LibrarySession; recordings: LibraryRecording[] }>(
       `/library/sessions/${id}`,
     ),
-  createLibrarySession: (m: Metadata & { recordings?: number[] }) =>
-    post<LibrarySession>("/library/sessions", m),
   /** Omitting `recordings` leaves the membership alone, so renaming a session
    *  cannot silently empty it. */
   updateLibrarySession: (id: number, m: Metadata & { recordings?: number[] }) =>
     put<LibrarySession>(`/library/sessions/${id}`, m),
-  /** Ungroups the segments; it never deletes media. */
-  deleteLibrarySession: (id: number) =>
-    del<{ status: string; note: string }>(`/library/sessions/${id}`),
   /** Re-runs the grouping backfill: additive, idempotent, and it never merges
    *  a grouping a human has already split. */
   regroupSessions: () =>
@@ -1349,9 +1299,6 @@ export const api = {
     get<{ recording: LibraryRecording; transcriptTracks: TranscriptTrack[] | null }>(
       `/library/recordings/${id}`,
     ),
-  updateLibraryRecording: (id: number, m: Metadata) =>
-    put<Metadata & { recordingId: number }>(`/library/recordings/${id}`, m),
-
   transcript: (id: number) =>
     get<TranscriptView>(`/library/recordings/${id}/transcript`),
   /** A caption file for one recording (#8): the stored transcript, or with
@@ -1419,16 +1366,6 @@ export const api = {
   // page that refuses to render teaches the operator nothing.
   chatOverview: (limit?: number) =>
     get<ChatOverview>("/chat" + (limit ? `?limit=${limit}` : "")),
-  /** Older scrollback, out of the database rather than the live ring. */
-  chatMessages: (opts: { platform?: ChatPlatform; limit?: number } = {}) => {
-    const q = new URLSearchParams();
-    if (opts.platform) q.set("platform", opts.platform);
-    if (opts.limit) q.set("limit", String(opts.limit));
-    const qs = q.toString();
-    return get<{ messages: ChatMessage[]; stored: boolean }>(
-      "/chat/messages" + (qs ? `?${qs}` : ""),
-    );
-  },
   /** Find a message again, by its text or by who said it.
    *
    *  Server-side and against the database, not the pane: the timeline holds one
@@ -1554,12 +1491,6 @@ export const api = {
    *  rate-limits the operator's whole app, not this feature. */
   pollDeviceAuth: (platform: string, handle: string) =>
     post<DevicePoll>(`/platforms/credentials/${platform}/device/poll`, { handle }),
-  /** Removes the app's credentials, UNCONFIRMED: refused with a 409
-   *  (`creds_in_use`) naming the accounts while any are connected through the
-   *  app, because removing the app does not disconnect them. Nothing is
-   *  deleted when it rejects. */
-  deleteCreds: (platform: string) =>
-    del<{ status: string }>(`/platforms/credentials/${platform}`),
   /** Removes the app's credentials ANYWAY. For a caller whose own dialog has
    *  already said what removing them costs; the accounts stay connected until
    *  their tokens expire. */

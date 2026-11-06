@@ -5,7 +5,7 @@ import { SETTINGS_GROUPS, SETTINGS_TABS, settingsTabFor } from "./settingsSearch
  *
  * The rail was regrouped and an Overview added. The values below are every
  * `?tab=` a link in this repository, the OAuth callback (internal/api/
- * oauth_handlers.go), the tour (lib/tourSteps.ts) or an operator's bookmark
+ * oauth_handlers.go), the tour (features/tour/tourSteps.ts) or an operator's bookmark
  * has ever carried. Each must still resolve to the panel it opened before. */
 const LEGACY = ["ingest", "pipeline", "platforms", "overlays", "obs", "security", "danger"] as const;
 

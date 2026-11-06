@@ -1,4 +1,6 @@
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { settingsHref } from "@/lib/settingsSearch";
+import { useCopy } from "@/hooks/useCopy";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -6,7 +8,7 @@ import type { MutableRefObject, ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
-import { useDestinationUsage } from "@/lib/destinationUsage";
+import { useDestinationUsage } from "@/features/dashboard/destinationUsage";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import {
@@ -17,15 +19,15 @@ import {
   ingestUptimeSec,
   processAbsence,
 } from "@/lib/dashboardFacts";
-import { laneLayout } from "@/lib/sourceLanes";
+import { laneLayout } from "@/features/dashboard/sourceLanes";
 import { cn } from "@/lib/utils";
-import { topRowLayout } from "@/lib/dashboardLayout";
-import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import { topRowLayout } from "@/features/dashboard/dashboardLayout";
+import { failoverNotice, type FailoverNotice } from "@/features/dashboard/failoverNotice";
 import {
   failoverBannerTone,
   failoverElapsedSeconds,
   failoverSinceClock,
-} from "@/lib/failoverBanner";
+} from "@/features/dashboard/failoverBanner";
 import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
 import { publishRows } from "@/lib/publish-url";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -54,7 +56,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
 import { AudiencePanel } from "@/components/AudiencePanel";
 import { NarrowDisclosure } from "@/components/NarrowDisclosure";
-import { useIsNarrow } from "@/hooks/useIsNarrow";
+import { useIsNarrow } from "@/features/dashboard/useIsNarrow";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -946,7 +948,7 @@ export function FailoverExposure({ notice }: { notice: FailoverNotice }) {
       <div className="min-w-0 text-muted-foreground">
         <p>
           <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
-          <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+          <Link to={settingsHref("pipeline", "failover")} className="underline underline-offset-2">
             {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
           </Link>
         </p>
@@ -1188,12 +1190,13 @@ export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
   const narrow = useIsNarrow();
-  const { status, bitrate, snapshotKnown, programme } = useLiveData();
+  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, sourceCountKnown, refreshSources } =
+    useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
    * until the read lands, and failoverNotice() treats that as "say nothing"
-   * rather than "unprotected" -- see lib/failoverNotice.ts. */
+   * rather than "unprotected" -- see features/dashboard/failoverNotice.ts. */
   const [failover, setFailover] = useState<FailoverSettings | null>(null);
   /* The failover TIER's live state, which is a different thing from the
    * settings above: those are what the operator configured, this is what the
@@ -1258,7 +1261,13 @@ export function Dashboard() {
 
   const [pending, setPending] = useState<DestinationId[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
-  const [sourceCount, setSourceCount] = useState<number | null>(null);
+  // How many programmes exist, which is what decides whether this page shows a
+  // pipeline or an empty state. The provider owns the count (and keeps it
+  // fresh); `null` is NOT KNOWN YET, and the branch below tests `=== 0` rather
+  // than falsiness so that unknown renders the ordinary dashboard. An operator
+  // mid-broadcast must never see their dashboard replaced because a request
+  // was slow.
+  const sourceCount = sourceCountKnown ? liveSourceCount : null;
   /* The selected programme's status frame, its relay throughput and whether it
    * is live, held the same way and for the same reason as failoverState: the
    * socket alternates between every engine's frames and the `stats` bitrate
@@ -1271,32 +1280,6 @@ export function Dashboard() {
     live: ingestLive,
     known: ingestKnown,
   } = useProgrammeIngest(sourceCount);
-
-  // How many programmes exist, which is what decides whether this page shows a
-  // pipeline or an empty state.
-  //
-  // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
-  // falsiness precisely so that unknown renders the ordinary dashboard. The
-  // cost is that a fresh install shows the pipeline for the length of one
-  // request before the empty state replaces it; the alternative is a spinner in
-  // front of the main screen on every load of every install, for a question
-  // only one install in a thousand answers differently.
-  //
-  // A count that cannot be read leaves the page rendering as it always did. The
-  // empty state is an improvement on a working dashboard, never a replacement
-  // for one, and drawing it because a request failed would tell an operator
-  // mid-broadcast that their programme is gone.
-  const readSourceCount = useCallback(async (): Promise<number | null> => {
-    try {
-      const { sources } = await api.setupStatus();
-      const n = sources ?? null;
-      setSourceCount(n);
-      return n;
-    } catch {
-      setSourceCount(null);
-      return null;
-    }
-  }, []);
 
   useEffect(() => {
     api
@@ -1312,23 +1295,7 @@ export function Dashboard() {
         // claiming an exposure it could not verify.
         setFailover(null);
       });
-    readSourceCount();
-    // AND KEEP READING IT. The count used to be read once per refreshKey, and
-    // every control that bumps refreshKey is inside the pipeline this page
-    // stops drawing the moment the count reaches zero -- so a dashboard left
-    // open while the last source went away kept rendering a publish URL, a
-    // track count and a relay subscriber for a programme that no longer
-    // existed, with nothing on the page able to notice. The status socket
-    // cannot rescue it either: status events are published BY an engine, so an
-    // install with none simply stops sending them and the last frame stays on
-    // screen for ever.
-    //
-    // The setup status rather than the source list: it is the one endpoint
-    // whose entire job is this number, it is a single row count, and it is what
-    // the empty state was given a count for in the first place.
-    const poll = setInterval(readSourceCount, 10_000);
-    return () => clearInterval(poll);
-  }, [refreshKey, readSourceCount]);
+  }, [refreshKey]);
 
   // See the failoverState declaration for why this filters by programme rather
   // than reading the snapshot straight through. `?? null` matters as much as
@@ -1419,7 +1386,7 @@ export function Dashboard() {
         // So the refusal is a prompt to ask, not an answer. Zero draws the
         // empty state; anything else says the true thing.
         if (isNoSource(err)) {
-          const n = await readSourceCount();
+          const n = await refreshSources();
           if (n !== 0) toast.error(t("dash.noEngineRunning"));
           return false;
         }
@@ -1429,7 +1396,7 @@ export function Dashboard() {
         setBusyId(null);
       }
     },
-    [readSourceCount, t],
+    [refreshSources, t],
   );
 
   const openEdit = async (id: DestinationId) => {
@@ -1543,7 +1510,7 @@ export function Dashboard() {
   );
 
   /* The top row's shape, from one call so its two halves cannot disagree.
-   * See lib/dashboardLayout.ts and #614. */
+   * See features/dashboard/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
   // One element, drawn in one of two places by width (see orderSections).
   const notice = failoverNotice(destinations.filter((d) => d.enabled).length, failover);
@@ -1728,14 +1695,10 @@ export function Dashboard() {
     ? publishRows(checklistSource.publishUrls, window.location.hostname)
     : [];
 
+  const { copy } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyIngest = async () => {
     if (!system?.ingestUrl) return;
-    try {
-      await navigator.clipboard.writeText(system.ingestUrl);
-      toast.success(t("dash.ingestUrlCopied"));
-    } catch {
-      toast.error(t("dash.clipboardUnavailable"));
-    }
+    if (await copy(system.ingestUrl)) toast.success(t("dash.ingestUrlCopied"));
   };
 
   // NO PROGRAMME YET. The whole page, not a strip above it.
@@ -1791,7 +1754,7 @@ export function Dashboard() {
             // destination count is — the empty-state twin disappears the moment
             // the operator adds their first destination, which is precisely
             // when somebody replaying the tour from Settings would be looking
-            // for it. See ui/src/lib/tourSteps.ts.
+            // for it. See ui/src/features/tour/tourSteps.ts.
             data-tour="add-destination"
             // Outline, not filled: Go live is the one filled start action on this
             // page, and Add destination is a secondary one (A9).
@@ -2128,7 +2091,7 @@ export function Dashboard() {
         </div>
 
         {/* THE ONE UNRECOVERABLE FAILURE, said where the destinations it would
-            cost are listed. See lib/failoverNotice.ts and #512.
+            cost are listed. See features/dashboard/failoverNotice.ts and #512.
 
             Here rather than in the attention panel: that panel lists what is
             wrong NOW, and its own comment explains that padding it with states

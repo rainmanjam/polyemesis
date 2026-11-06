@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import { AccountLiveStats } from "./AccountLiveStats";
-import { VIEWER_POLL_MS } from "@/lib/viewerCount";
+import { VIEWER_POLL_MS } from "@/features/accounts/viewerCount";
 
 /* THE POLLING HALF OF AccountLiveStats, WHICH ITS SIBLING TEST CANNOT REACH.
  *

@@ -58,6 +58,8 @@ function live(status: Status): LiveData {
       { id: 1, name: "Studio A" },
       { id: 2, name: "Studio B" },
     ],
+    sourceCount: 2,
+    sourceCountKnown: true,
     connected: true,
     snapshotKnown: true,
     status,

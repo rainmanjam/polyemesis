@@ -36,7 +36,7 @@
  * error, it is a page at the wrong address with 110 cross-document links
  * pointing at the old one.
  *
- * The same restructure is what fixed ui/src/lib/tourSteps.ts under the same
+ * The same restructure is what fixed ui/src/features/tour/tourSteps.ts under the same
  * SonarCloud rule (#388), and for the same reason: a file whose entries are
  * ONLY the decisions somebody actually made has nothing left to repeat. The
  * duplication finding was the symptom. Two derivable fields written out by hand

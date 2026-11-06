@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
-import { useYouTubeVerticalHealth } from "@/hooks/useYouTubeVerticalHealth";
+import { useYouTubeVerticalHealth } from "@/features/destinations/useYouTubeVerticalHealth";
 import { destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
 import { toneForState } from "@/lib/signal";

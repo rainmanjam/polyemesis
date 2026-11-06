@@ -1,7 +1,5 @@
 import { stateLabelKey, type TranslationKey } from "./i18n";
 import { toneForState, type SignalTone } from "./signal";
-import type { OutputState } from "./outputStrip";
-import type { IngestPhase } from "./sourceIngest";
 import type { ChatSanction, DelayStatus, ProcessState, ProcessStatus } from "./types";
 
 /* ONE VOCABULARY FOR EVERY "IS IT RUNNING" WORD ON THE CONSOLE.
@@ -94,32 +92,6 @@ export function destinationStatus(
   return lamp(processStatus(state));
 }
 
-/** A broadcast-delay buffer phase (types.ts DelayStatus). Buffering is filling
- *  and nothing has aired, so it reads as starting. Draining is still airing the
- *  tail after a stop, which is on air but no longer live. */
-export function delayStatus(phase: "buffering" | "on-air" | "draining"): StatusReading {
-  switch (phase) {
-    case "on-air":
-      return lamp(reading("state.live", "ok"));
-    case "draining":
-      return reading("state.draining", "warn");
-    default:
-      return reading("state.starting", "warn");
-  }
-}
-
-/** A playlist or rendition item. Ready is not live, so it is idle, not green. */
-export function renditionStatus(state: "ready" | "transcoding" | "attention"): StatusReading {
-  switch (state) {
-    case "ready":
-      return reading("state.ready", "idle");
-    case "transcoding":
-      return reading("state.transcoding", "warn");
-    default:
-      return reading("state.attention", "warn");
-  }
-}
-
 /** The recorder. A null recorder means recording is switched off, which is an
  *  operator choice and reads as Off, not as Offline or Failed. */
 export function recorderStatus(recorder?: ProcessStatus | null): StatusReading {
@@ -135,41 +107,6 @@ export function clipBufferStatus(buffer: { enabled: boolean; running: boolean })
   if (buffer.running) return reading("state.ready", "idle");
   if (buffer.enabled) return reading("state.waiting", "warn");
   return reading("state.off", "idle");
-}
-
-/** A source's ingest (sourceIngest.ts). Receiving is the only green. */
-export function ingestPhaseStatus(phase: IngestPhase): StatusReading {
-  switch (phase) {
-    case "receiving":
-      return reading("state.live", "ok");
-    case "waiting":
-      return reading("state.waiting", "idle");
-    case "unavailable":
-      return reading("state.unavailable", "bad");
-    case "off":
-      return reading("state.off", "idle");
-    default:
-      return reading("state.notSet", "idle");
-  }
-}
-
-/** A loudness monitor on an output (outputStrip.ts). Stale means the last
- *  report is old, so the number is not to be trusted, which is a warning. */
-export function outputStatus(state: OutputState): StatusReading {
-  switch (state.kind) {
-    case "live":
-      return reading("state.live", "ok");
-    case "starting":
-      return reading("state.starting", "warn");
-    case "stale":
-      return reading("state.stale", "warn");
-    case "error":
-      return reading("state.failed", "bad");
-    case "absent":
-      return reading("state.stopped", "idle");
-    default:
-      return reading("state.off", "idle");
-  }
 }
 
 /** What a platform row on Settings → Platforms says about it

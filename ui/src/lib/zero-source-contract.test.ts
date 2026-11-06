@@ -150,24 +150,24 @@ describe("the screens that meet an install with no source", () => {
   it("the dashboard draws the empty state instead of an empty pipeline", () => {
     const src = read("ui/src/pages/Dashboard.tsx");
     expect(src, "the dashboard no longer reads how many sources exist, so it cannot " +
-      "tell a fresh install from a running one").toContain("await api.setupStatus()");
+      "tell a fresh install from a running one").toMatch(/sourceCount: liveSourceCount/);
     expect(src, "the dashboard renders its pipeline unconditionally again: a preview of " +
       "a stream nobody is sending, an ingest URL no encoder can publish to, and an Add " +
       "destination button that answers 503").toMatch(/sourceCount === 0/);
     expect(src, "the dashboard no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
   });
 
-  it("the dashboard keeps re-reading the count rather than reading it once", () => {
-    const src = read("ui/src/pages/Dashboard.tsx");
+  it("the provider keeps re-reading the count rather than reading it once", () => {
+    const src = read("ui/src/components/LiveDataProvider.tsx");
     /* Status events are published BY an engine, so an install that loses its
-     * last source stops sending them and the last frame stays on screen. Every
-     * control that bumps refreshKey is inside the pipeline the empty state
-     * replaces, so a count read once per refreshKey is a count that can never
-     * be re-read once it matters. */
-    expect(src, "the dashboard reads the source count once and never again, so a tab " +
+     * last source stops sending them and the last frame stays on screen. A count
+     * read once is a count that can never be re-read once it matters. The poll
+     * lives in the provider, the one owner of the count (behaviour asserted in
+     * LiveDataProvider.resolve.test.tsx). */
+    expect(src, "the provider reads the source count once and never again, so a tab " +
       "left open while the last source went away goes on drawing a publish URL and a " +
       "track count for a programme that no longer exists")
-      .toMatch(/setInterval\(readSourceCount/);
+      .toMatch(/setInterval\(tick, 10_000\)/);
   });
 
   it("the dashboard treats the refusal as an empty state rather than a fault", () => {
@@ -188,7 +188,7 @@ describe("the screens that meet an install with no source", () => {
       "re-reading it, so an install whose engines did not start is told it has no source")
       .not.toMatch(/isNoSource\(err\)\)\s*\{\s*setSourceCount\(0\)/);
     expect(src, "the refusal branch does not re-read the count")
-      .toMatch(/isNoSource\(err\)\)\s*\{\s*const n = await readSourceCount\(\)/);
+      .toMatch(/isNoSource\(err\)\)\s*\{\s*const n = await refreshSources\(\)/);
   });
 
   it("the destination dialog does not raise a fault toast for an empty install", () => {

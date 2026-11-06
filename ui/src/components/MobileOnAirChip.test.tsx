@@ -5,13 +5,13 @@ import { setLanguage, translate } from "@/lib/i18n";
 import type { HeaderLive } from "@/lib/headerLive";
 
 /* The phone on-air chip: which words it prints, and what it keeps for a
- * screen reader. Whether the full words fit is measured by lib/chipFit (its
+ * screen reader. Whether the full words fit is measured by features/shell/chipFit (its
  * own tests pin the arithmetic; the e2e spec measures the real header); here
  * that answer is set, and a ResizeObserver stub delivers it the way the
  * browser would, on observe. */
 
 let fits = true;
-vi.mock("@/lib/chipFit", () => ({ chipFits: () => fits }));
+vi.mock("@/features/shell/chipFit", () => ({ chipFits: () => fits }));
 
 const observers: Array<() => void> = [];
 class StubResizeObserver {

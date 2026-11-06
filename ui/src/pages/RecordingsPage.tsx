@@ -63,7 +63,7 @@ import {
   savePolicyBody,
   switchPatchBody,
   type RetentionDraft,
-} from "@/lib/retentionDraft";
+} from "@/features/recordings/retentionDraft";
 import type { DiskUsage, Recording, Settings, StemCodec } from "@/lib/types";
 
 /** One per-track file the recorder wrote beside a master segment.

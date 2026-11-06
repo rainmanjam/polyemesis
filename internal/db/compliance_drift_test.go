@@ -27,7 +27,7 @@ import (
    the set of audiences the UI offers must be the set of audiences the SERVER
    accepts. Go owns db.FacebookPrivacies; TypeScript cannot see it, and a
    browser can only observe what the UI happens to render. So the mirror is
-   pinned here -- against a data declaration, ui/src/lib/facebookPrivacy.ts,
+   pinned here -- against a data declaration, ui/src/features/destinations/facebookPrivacy.ts,
    rather than against JSX. The dialog maps over that array, so the pin is
    load-bearing rather than decorative: an entry deleted there is an option
    deleted from the select.
@@ -45,7 +45,7 @@ import (
 //     rejects it, so the operator picks an audience, presses Save, and gets a
 //     400 with no field to attach it to.
 //
-// It reads ui/src/lib/facebookPrivacy.ts, which is DATA -- an exported array of
+// It reads ui/src/features/destinations/facebookPrivacy.ts, which is DATA -- an exported array of
 // {value, labelKey} -- and not a component. That distinction is the whole point
 // of issue #107. Whether the select renders, whether an operator can click an
 // option, and whether the chosen value survives a save are questions about a
@@ -57,7 +57,7 @@ import (
 // fails naming it, and the option disappears from the dialog, because the
 // dialog maps over the same array.
 func TestTheUIOffersExactlyTheAudiencesTheServerAccepts(t *testing.T) {
-	path := filepath.Join("..", "..", "ui", "src", "lib", "facebookPrivacy.ts")
+	path := filepath.Join("..", "..", "ui", "src", "features", "destinations", "facebookPrivacy.ts")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		// Not skipped: this file existing is the point. Losing it takes the
@@ -97,7 +97,7 @@ func TestTheUIOffersExactlyTheAudiencesTheServerAccepts(t *testing.T) {
 
 	for _, v := range sortedKeys(accepted) {
 		if !offered[v] {
-			t.Errorf("db.FacebookPrivacies accepts %q and ui/src/lib/facebookPrivacy.ts "+
+			t.Errorf("db.FacebookPrivacies accepts %q and ui/src/features/destinations/facebookPrivacy.ts "+
 				"does not offer it. An audience an operator cannot choose is a setting "+
 				"that can only ever be empty, and every line of Facebook privacy "+
 				"handling behind it is unreachable.", v)
@@ -105,7 +105,7 @@ func TestTheUIOffersExactlyTheAudiencesTheServerAccepts(t *testing.T) {
 	}
 	for _, v := range sortedKeys(offered) {
 		if !accepted[v] {
-			t.Errorf("ui/src/lib/facebookPrivacy.ts offers %q and db.FacebookPrivacies "+
+			t.Errorf("ui/src/features/destinations/facebookPrivacy.ts offers %q and db.FacebookPrivacies "+
 				"does not accept it. ValidFacebookPrivacy refuses the save, so an "+
 				"operator picks that audience and meets a 400 with no field to blame.", v)
 		}

@@ -23,7 +23,7 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { autoApi } from "@/lib/autoApi";
-import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
+import { keyframeVerdict, windowOnBufferToggle } from "@/features/clips/clipBufferFacts";
 import { clipBufferStatus } from "@/lib/status";
 import { useSaveModel } from "@/lib/saveModel";
 import { bytes, timestamp } from "@/lib/format";

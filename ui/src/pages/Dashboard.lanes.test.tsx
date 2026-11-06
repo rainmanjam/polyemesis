@@ -99,10 +99,12 @@ afterEach(() => {
   cleanup();
 });
 
-const draw = (over?: Partial<Status>) =>
+const draw = (over?: Partial<Status>, liveOver: Partial<LiveData> = {}) =>
   render(
     <MemoryRouter>
-      <LiveDataContext.Provider value={over ? ({ ...live, status: { ...status, ...over } } as LiveData) : live}>
+      <LiveDataContext.Provider
+        value={{ ...live, ...liveOver, ...(over ? { status: { ...status, ...over } } : {}) } as LiveData}
+      >
         <Dashboard />
       </LiveDataContext.Provider>
     </MemoryRouter>,
@@ -159,7 +161,10 @@ describe("Dashboard: empty lists use the kit's EmptyState (app-council A83)", ()
   });
 
   it("draws an install with no destinations as an EmptyState whose action opens Add destination", async () => {
-    draw({ destinations: [] } as Partial<Status>);
+    // The kit's EmptyState is what the page draws while the programme count is
+    // not known yet; once it is, an install with no destinations gets the setup
+    // checklist instead (see Dashboard.reach.test.tsx).
+    draw({ destinations: [] } as Partial<Status>, { programmeKnown: false, programmes: [] });
     const title = await screen.findByText(translate("en", "dash.noDestinationsTitle"));
     const box = title.closest(".border-dashed") as HTMLElement;
     expect(box).not.toBeNull();

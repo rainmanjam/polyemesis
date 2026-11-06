@@ -4,15 +4,10 @@ import { destinationShownState } from "./liveness";
 import {
   chatSanctionStatus,
   clipBufferStatus,
-  delayStatus,
-
   destinationStatus,
-  ingestPhaseStatus,
-  outputStatus,
   platformSetupStatus,
   processStatus,
   recorderStatus,
-  renditionStatus,
 } from "./status";
 
 /* One word per state, and the tone decides the colour. The tests pin the
@@ -59,13 +54,11 @@ describe("destinationStatus", () => {
   // lit lamp; a running process that is not on air is not a lamp either.
   it("marks on air and recording as lamps, and nothing that is not ok", () => {
     expect(destinationStatus(true, "running").lamp).toBe(true);
-    expect(delayStatus("on-air").lamp).toBe(true);
     expect(recorderStatus({ state: "running" } as never).lamp).toBe(true);
     expect(destinationStatus(true, "failed")).not.toHaveProperty("lamp");
     expect(destinationStatus(true, "reconnecting")).not.toHaveProperty("lamp");
     expect(destinationStatus(false, "running")).not.toHaveProperty("lamp");
     expect(recorderStatus({ state: "failed" } as never)).not.toHaveProperty("lamp");
-    expect(delayStatus("draining")).not.toHaveProperty("lamp");
     expect(processStatus("running")).not.toHaveProperty("lamp");
   });
 
@@ -85,19 +78,7 @@ describe("destinationStatus", () => {
   });
 });
 
-describe("delayStatus, renditionStatus, recorderStatus, clipBufferStatus", () => {
-  it("delay: on-air is live, draining is not green", () => {
-    expect(delayStatus("on-air").tone).toBe("ok");
-    expect(delayStatus("draining")).toMatchObject({ labelKey: "state.draining", tone: "warn" });
-    expect(delayStatus("buffering").labelKey).toBe("state.starting");
-  });
-
-  it("rendition: ready is idle, not live, so it never looks like air", () => {
-    expect(renditionStatus("ready")).toMatchObject({ labelKey: "state.ready", tone: "idle" });
-    expect(renditionStatus("transcoding").tone).toBe("warn");
-    expect(renditionStatus("attention")).toMatchObject({ labelKey: "state.attention", tone: "warn" });
-  });
-
+describe("recorderStatus, clipBufferStatus", () => {
   it("recorder: switched off is Off, not Offline or Failed", () => {
     expect(recorderStatus(null)).toMatchObject({ labelKey: "state.off", tone: "idle" });
     expect(recorderStatus({ state: "running" } as never).labelKey).toBe("state.live");
@@ -114,35 +95,12 @@ describe("delayStatus, renditionStatus, recorderStatus, clipBufferStatus", () =>
   });
 });
 
-describe("ingestPhaseStatus and outputStatus", () => {
-  it("ingest: only receiving is green; unavailable is red, not idle", () => {
-    expect(ingestPhaseStatus("receiving").tone).toBe("ok");
-    expect(ingestPhaseStatus("unavailable")).toMatchObject({ labelKey: "state.unavailable", tone: "bad" });
-    expect(ingestPhaseStatus("unset").labelKey).toBe("state.notSet");
-    expect(ingestPhaseStatus("waiting").labelKey).toBe("state.waiting");
-    expect(ingestPhaseStatus("off").labelKey).toBe("state.off");
-  });
-
-  it("output monitor: stale is a warning, error is red, absent is Stopped", () => {
-    expect(outputStatus({ kind: "live", report: {} as never }).tone).toBe("ok");
-    expect(outputStatus({ kind: "stale", report: {} as never }).tone).toBe("warn");
-    expect(outputStatus({ kind: "error", error: "x" }).labelKey).toBe("state.failed");
-    expect(outputStatus({ kind: "absent" }).labelKey).toBe("state.stopped");
-    expect(outputStatus({ kind: "off" }).labelKey).toBe("state.off");
-  });
-});
-
 describe("every label the vocabulary can return exists in the English catalogue", () => {
   const keys = [
     processStatus("running"), processStatus("starting"), processStatus("reconnecting"),
     processStatus("failed"), processStatus("stopped"), processStatus(undefined),
-    destinationStatus(false), delayStatus("buffering"), delayStatus("on-air"), delayStatus("draining"),
-    renditionStatus("ready"), renditionStatus("transcoding"), renditionStatus("attention"),
+    destinationStatus(false),
     recorderStatus(null), clipBufferStatus({ enabled: true, running: true }), clipBufferStatus({ enabled: false, running: false }),
-    ingestPhaseStatus("unset"), ingestPhaseStatus("off"), ingestPhaseStatus("unavailable"),
-    ingestPhaseStatus("waiting"), ingestPhaseStatus("receiving"),
-    outputStatus({ kind: "off" }), outputStatus({ kind: "absent" }), outputStatus({ kind: "starting" }),
-    outputStatus({ kind: "error", error: "" }), outputStatus({ kind: "stale", report: {} as never }),
   ];
   it.each([...new Set(keys.map((k) => k.labelKey))])("%s is catalogued", (key) => {
     expect(Object.prototype.hasOwnProperty.call(en, key)).toBe(true);

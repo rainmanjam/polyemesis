@@ -25,12 +25,13 @@ const list = vi.spyOn(api, "listSources");
 const srcOf = vi.spyOn(api, "source");
 
 function Probe() {
-  const { programme, sourceCount, refreshSources, programmeKnown } = useLiveData();
+  const { programme, sourceCount, sourceCountKnown, refreshSources, programmeKnown } = useLiveData();
   return (
     <div>
       <span data-testid="programme">{String(programme)}</span>
       <span data-testid="count">{sourceCount}</span>
       <span data-testid="known">{String(programmeKnown)}</span>
+      <span data-testid="countKnown">{String(sourceCountKnown)}</span>
       <button onClick={() => void refreshSources()}>refresh</button>
     </div>
   );
@@ -140,5 +141,164 @@ describe("LiveDataProvider: self-healing from the socket", () => {
     const settled = list.mock.calls.length;
     await new Promise((r) => setTimeout(r, 300));
     expect(list.mock.calls.length).toBe(settled);
+  });
+});
+
+describe("LiveDataProvider: the source count stays true with no socket frame", () => {
+  it("notices the last source going away, because an engine-less install sends no status event", async () => {
+    // Status events are published BY an engine, so an install that loses its
+    // last source goes quiet and the last frame stays on screen. The Dashboard
+    // used to run its own 10 s poll of the count to cover this; the provider
+    // owns the count, so it owns the poll.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      list.mockResolvedValue(rows(1));
+      draw();
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+
+      list.mockResolvedValue(rows());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("0"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("LiveDataProvider: a poll that fails or answers late", () => {
+  it("keeps the last good programme and list when a later read fails", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("programme").textContent).toBe("7"));
+
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    await act(async () => {
+      screen.getByText("refresh").click();
+    });
+    // Dropping to null would unscope the socket and every REST read.
+    expect(screen.getByTestId("programme").textContent).toBe("7");
+    expect(screen.getByTestId("count").textContent).toBe("2");
+  });
+
+  it("lets only the newest read apply, whatever order the answers arrive in", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"));
+
+    let older!: (v: never) => void;
+    list.mockImplementationOnce(() => new Promise((r) => (older = r as never)));
+    list.mockResolvedValueOnce(rows(8));
+    await act(async () => {
+      screen.getByText("refresh").click(); // older request, still in flight
+      screen.getByText("refresh").click(); // newer request, answers at once
+    });
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+    // The older answer (which still lists 7) lands last and must be dropped.
+    await act(async () => older(rows(7, 8)));
+    expect(screen.getByTestId("count").textContent).toBe("1");
+    expect(screen.getByTestId("programme").textContent).toBe("8");
+  });
+});
+
+describe("LiveDataProvider: the count is unknown until /sources answers", () => {
+  it("does not report a failed first read as zero programmes", async () => {
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("known").textContent).toBe("true"));
+    expect(screen.getByTestId("countKnown").textContent).toBe("false");
+  });
+
+  it("never turns a known count back into unknown when a later read fails", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("countKnown").textContent).toBe("true"));
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    await act(async () => {
+      screen.getByText("refresh").click();
+    });
+    expect(screen.getByTestId("countKnown").textContent).toBe("true");
+    expect(screen.getByTestId("count").textContent).toBe("2");
+  });
+});
+
+describe("LiveDataProvider: the poll pauses in a hidden tab", () => {
+  const setHidden = (hidden: boolean) =>
+    Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
+  afterEach(() => setHidden(false));
+
+  it("does not poll while hidden, and reads at once on coming back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      list.mockResolvedValue(rows(1));
+      draw();
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+      const before = list.mock.calls.length;
+
+      setHidden(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(list.mock.calls.length).toBe(before);
+
+      setHidden(false);
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(list.mock.calls.length).toBe(before + 1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("LiveDataProvider: reads do not pile up", () => {
+  it("still resolves when /sources takes longer than the poll interval", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // 25 s to answer: two ticks fall inside it. A read per tick would
+      // supersede every response before it landed.
+      list.mockImplementation(() => new Promise((r) => setTimeout(() => r(rows(1, 2)), 25_000)));
+      draw();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(26_000);
+      });
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"));
+      expect(screen.getByTestId("countKnown").textContent).toBe("true");
+      expect(list.mock.calls.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers a superseded refresh with the count the newer read applied", async () => {
+    list.mockResolvedValueOnce(rows(1));
+    let refresh!: () => Promise<number | null>;
+    function Grab() {
+      refresh = useLiveData().refreshSources;
+      return null;
+    }
+    render(
+      <LiveDataProvider>
+        <Grab />
+        <Probe />
+      </LiveDataProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+
+    let older!: (v: never) => void;
+    list.mockImplementationOnce(() => new Promise((r) => (older = r as never)));
+    list.mockResolvedValueOnce(rows(5));
+    let first!: Promise<number | null>;
+    let second!: Promise<number | null>;
+    await act(async () => {
+      first = refresh();
+      second = refresh();
+    });
+    expect(await second).toBe(1);
+    await act(async () => older(rows(7, 8, 9)));
+    // Not 3: the older list was discarded, and so is its count.
+    expect(await first).toBe(1);
   });
 });

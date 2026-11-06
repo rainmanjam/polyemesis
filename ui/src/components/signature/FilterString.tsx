@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { Button } from "@/components/ui/button";
 import { Check, Copy, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -17,17 +17,8 @@ export function FilterString({
   className?: string;
 }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked (insecure origin): the text is selectable anyway */
-    }
-  };
+  // A blocked clipboard (insecure origin) is not reported: the text is selectable anyway.
+  const { copy, copied } = useCopy();
 
   if (!value) return null;
 
@@ -38,7 +29,7 @@ export function FilterString({
           <Terminal className="h-3 w-3" />
           {t("signature.filter.generated")}
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={t("signature.filter.copyAria")}>
+        <Button variant="ghost" size="icon-sm" onClick={() => void copy(value)} aria-label={t("signature.filter.copyAria")}>
           {copied ? <Check className="text-ok" /> : <Copy />}
         </Button>
       </div>

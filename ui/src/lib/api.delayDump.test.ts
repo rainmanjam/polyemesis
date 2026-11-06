@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { asDestinationId, asSourceId } from "./types";
+import { asDestinationId } from "./types";
 
 // THE DUMP'S BODY IS THE CHOICE THE CONFIRM DIALOG MADE.
 //
@@ -48,19 +48,5 @@ describe("dumping a destination's delay", () => {
     const { api } = await import("./api");
     await api.dumpDestinationDelay(asDestinationId(7), 12);
     expect(JSON.parse(String(sent().body))).toEqual({ seconds: 12 });
-  });
-
-  it("dumps every delayed destination of one programme, confirmed", async () => {
-    const { api } = await import("./api");
-    await api.dumpAllDelays(asSourceId(3));
-    const { url, body } = sent();
-    expect(url).toContain("/destinations/delay/dump-all?source=3");
-    expect(JSON.parse(String(body))).toEqual({ confirm: true });
-  });
-
-  it("carries the seconds on a dump-all too", async () => {
-    const { api } = await import("./api");
-    await api.dumpAllDelays(asSourceId(3), 10);
-    expect(JSON.parse(String(sent().body))).toEqual({ confirm: true, seconds: 10 });
   });
 });

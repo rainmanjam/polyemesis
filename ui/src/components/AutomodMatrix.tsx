@@ -15,7 +15,7 @@ import {
   armedCount,
   IRREVERSIBLE,
   isOperable,
-} from "@/lib/automodArmed";
+} from "@/features/automod/automodArmed";
 import { ACTION_KEYS, CHECKER_KEYS, checkerReady } from "@/lib/automodConfig";
 import { useT } from "@/lib/i18n";
 import type {
@@ -116,7 +116,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   /** Whether a cell could ever act: the platform can do it AND the checker
    *  that would ask exists. Both gates, in one place, because the collapsed
    *  line and the cells have to agree about what "armed" means — they did not
-   *  once already, and lib/automodArmed.ts exists because of it. */
+   *  once already, and features/automod/automodArmed.ts exists because of it. */
   const armable = useCallback(
     (key: string) => {
       const checker = key.split("/")[2] as AutomodChecker;

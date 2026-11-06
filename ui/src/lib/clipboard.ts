@@ -14,16 +14,24 @@ import type { Translator } from "@/lib/i18n";
  *  `what` is display-only, interpolated into the toast. It is lowercased for
  *  the failure message, which reads mid-sentence. */
 export function copyToClipboard(t: Translator, text: string, what: string): void {
+  void writeClipboard(text).then((ok) =>
+    ok
+      ? toast.success(t("sources.copied", { what }))
+      : toast.error(t("sources.copyFailed", { what: what.toLowerCase() })),
+  );
+}
+
+/** Write to the clipboard and say whether it worked. Never throws: the API is
+ *  absent in an insecure context (plain http), which is not an error branch of
+ *  writeText, and the browser may also refuse the write. The operator's next
+ *  step is the same either way. */
+export async function writeClipboard(text: string): Promise<boolean> {
   const clip = navigator.clipboard;
-  if (!clip) {
-    // Not an error branch of writeText: the API is absent, which is what an
-    // insecure context looks like. Same message, because the operator's next
-    // step is the same either way.
-    toast.error(t("sources.copyFailed", { what: what.toLowerCase() }));
-    return;
+  if (!clip) return false;
+  try {
+    await clip.writeText(text);
+    return true;
+  } catch {
+    return false;
   }
-  void clip
-    .writeText(text)
-    .then(() => toast.success(t("sources.copied", { what })))
-    .catch(() => toast.error(t("sources.copyFailed", { what: what.toLowerCase() })));
 }

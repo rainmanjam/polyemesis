@@ -50,6 +50,8 @@ function live(over: Partial<LiveData> = {}): LiveData {
     programme: 1,
     programmeKnown: true,
     programmes: [{ id: 1, name: "Main" }],
+    sourceCount: 1,
+    sourceCountKnown: true,
     connected: true,
     snapshotKnown: true,
     status: status(),
@@ -253,23 +255,27 @@ describe("Dashboard: the first-run checklist replaces the empty-destinations sen
 
 describe("Dashboard: a fresh install starts the checklist at step one", () => {
   it("shows the checklist on an install with no source yet", async () => {
-    const before = routes["/api/v1/setup"];
-    routes["/api/v1/setup"] = { needsSetup: false, minPasswordChars: 8, sources: 0 };
-    try {
-      draw();
-      expect(
-        await screen.findByText(translate("en", "firstRun.title")),
-        "a fresh install gets the explanation and nothing that says what to do next",
-      ).toBeTruthy();
-      // Two links to Sources on this screen: the explanation card's, and the
-      // checklist's first step. The checklist's is the one under test.
-      const checklist = screen.getByTestId("setup-checklist");
-      expect(
-        within(checklist).getByRole("link", { name: translate("en", "empty.goToSources") }),
-      ).toBeTruthy();
-    } finally {
-      routes["/api/v1/setup"] = before;
-    }
+    // The provider owns the count; zero is what an install with no source reports.
+    draw(live({ sourceCount: 0, sourceCountKnown: true, programmes: [], programme: null }));
+    expect(
+      await screen.findByText(translate("en", "firstRun.title")),
+      "a fresh install gets the explanation and nothing that says what to do next",
+    ).toBeTruthy();
+    // Two links to Sources on this screen: the explanation card's, and the
+    // checklist's first step. The checklist's is the one under test.
+    const checklist = screen.getByTestId("setup-checklist");
+    expect(
+      within(checklist).getByRole("link", { name: translate("en", "empty.goToSources") }),
+    ).toBeTruthy();
+  });
+});
+
+describe("Dashboard: an unknown programme count keeps the dashboard", () => {
+  it("does not draw the no-programme empty state from a placeholder 0", async () => {
+    // /sources slow or failed: the provider's 0 is a placeholder, not an answer.
+    draw(live({ sourceCount: 0, sourceCountKnown: false }));
+    await waitFor(() => expect(screen.getByText("Destinations")).toBeTruthy());
+    expect(screen.queryByText(translate("en", "firstRun.title"))).toBeNull();
   });
 });
 

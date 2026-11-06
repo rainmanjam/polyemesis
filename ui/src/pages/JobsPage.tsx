@@ -47,7 +47,7 @@ import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api, ApiError } from "@/lib/api";
 import { duration, timestamp } from "@/lib/format";
-import { purgeTone } from "@/lib/purgeOutcome";
+import { purgeTone } from "@/features/jobs/purgeOutcome";
 import { useSaveOutcome, type SaveState } from "@/lib/saveModel";
 import {
   ADVANCED_SETTING_COUNT,
@@ -59,7 +59,7 @@ import {
   switchChanged,
   type AdvancedNumberField,
   type AdvancedSwitchKey,
-} from "@/lib/jobPolicyDefaults";
+} from "@/features/jobs/jobPolicyDefaults";
 import { cn } from "@/lib/utils";
 import {
   JOB_MODES,
@@ -926,7 +926,7 @@ function ProgressCell({ job }: { job: JobView }) {
  *
  * ADVANCED NEVER HIDES A CHANGED OR BROKEN VALUE. It is closed only while every
  * setting inside it holds the server's default and is in range; see
- * lib/jobPolicyDefaults.ts for where the defaults come from and why "0 means
+ * features/jobs/jobPolicyDefaults.ts for where the defaults come from and why "0 means
  * default" is true of only three of them. Anything else opens it without a
  * click and keeps it open, and the field that did it says so. Once open it
  * stays open for the rest of the visit, so editing a value back to its

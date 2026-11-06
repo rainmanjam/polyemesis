@@ -35,7 +35,7 @@ import {
 
    What did NOT move here is the one claim a browser cannot make: that the
    audiences the select offers are the audiences the SERVER accepts. Go owns
-   that enum. internal/db/compliance_drift_test.go pins ui/src/lib/facebookPrivacy.ts
+   that enum. internal/db/compliance_drift_test.go pins ui/src/features/destinations/facebookPrivacy.ts
    to db.FacebookPrivacies, and this file closes the loop from the other side --
    every option the select renders is saved and read back, so an option Go would
    reject fails here with a 400 rather than reaching an operator.
@@ -195,7 +195,7 @@ test.describe("the Facebook block writes what an operator types", () => {
   //
   // This is the browser half of the pin in internal/db/compliance_drift_test.go,
   // and the two halves are deliberately not the same assertion. Go proves that
-  // every value in db.FacebookPrivacies appears in ui/src/lib/facebookPrivacy.ts,
+  // every value in db.FacebookPrivacies appears in ui/src/features/destinations/facebookPrivacy.ts,
   // which the select renders from. This proves the other direction, and proves
   // it by consequence rather than by comparison: each option is chosen, saved,
   // and read back. ValidFacebookPrivacy refuses anything the enum does not

@@ -71,6 +71,10 @@ export interface LiveData {
    *  the label carries information — on the single-source install that is the
    *  overwhelming majority, a name that never varies is furniture. */
   sourceCount: number;
+  /** Whether `sourceCount` was read from a successful /sources answer. Until
+   *  then it is a placeholder 0, and a page must not draw "no programme yet"
+   *  from it. */
+  sourceCountKnown: boolean;
   /** Every programme the server lists, id and name, in the server's display
    *  order — which is the order resolveProgramme's fallback picks from.
    *
@@ -96,8 +100,9 @@ export interface LiveData {
    *  Call after creating or deleting a source. The provider also re-resolves
    *  on its own when the status socket names a programme it has not seen --
    *  that covers the changes this tab did not make; this is the fast path for
-   *  the ones it did. #646. */
-  refreshSources: () => Promise<void>;
+   *  the ones it did. #646. Resolves with the source count it read, or null
+   *  when the list could not be read. */
+  refreshSources: () => Promise<number | null>;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;

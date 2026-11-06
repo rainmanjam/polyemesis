@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Fixed
 
+- **Copy buttons say so when the clipboard is unavailable.** On a plain-http install the browser has no
+  clipboard, and the ingest URL copy in Settings, the API token, ACME, TLS and redirect-path copies,
+  and Pull URL on a media file did nothing and said nothing. They now show "Clipboard is unavailable on this origin".
+  The clip, automation and recording pages now show a plain-text server message in their errors, as
+  every other page does, and a change the server saved but could not apply raises the same warning
+  toast there. A freshly minted API token is no longer shown as
+  "Copied" because the previous one was copied a moment ago.
+- **The Dashboard and the header agree on how many programmes exist.** The Dashboard kept its own count
+  and refreshed it on its own timer, so for up to ten seconds the two could scope the ingest figures
+  differently. The count now has one owner and a console left open notices the last source going away.
 - **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
   said 0 and the card said Starting, because a running process that had carried no media counted as
   live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and
