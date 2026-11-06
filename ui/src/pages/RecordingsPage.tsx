@@ -41,6 +41,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { processRunning } from "@/lib/liveness";
 import { recorderStatus } from "@/lib/status";
 import { api, http } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import { useT } from "@/lib/i18n";
 import {
   failedRead,
@@ -567,7 +568,8 @@ export function RecordingsPage() {
                   <Input
                     id="rec-seg"
                     type="number"
-                    min={10}
+                    min={LIMITS.recordingSegmentSeconds.min}
+                    max={LIMITS.recordingSegmentSeconds.max}
                     value={shownValue(draft?.segmentSeconds ?? settings.recording.segmentSeconds)}
                     onChange={(e) =>
                       setDraft((d) => ({ ...d, segmentSeconds: numberOrBlank(e.target.value) }))

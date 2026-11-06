@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import type { CaptionMode } from "@/lib/types";
 
 /** The caption routes each platform takes, as the console shows them.
@@ -36,14 +37,15 @@ export function captionModeNeedsDelay(mode: CaptionMode): boolean {
   return mode === "youtube_post";
 }
 
-/** How long polyemesis itself holds a destination's output back, mirroring the
- *  server's db.OutputDelaySeconds. A YouTube destination that posts captions by
+/** How long polyemesis itself holds a destination's output back, mirroring
+ *  db.(*Destination).OutputDelaySeconds; the one exception's platform and mode
+ *  come from the wire contract. A YouTube destination that posts captions by
  *  HTTP POST keeps its 30 s or 60 s delay, but YouTube applies it (the
  *  broadcast's stream delay), so its output is not held back here as well and
  *  viewers are the delay behind, not twice it. Every other destination is held
  *  back by its delay. */
 export function outputDelaySeconds(platform: string, mode: CaptionMode, delaySeconds: number): number {
-  if (platform === "youtube" && mode === "youtube_post") return 0;
+  if (platform === WIRE.captions.noLocalDelayPlatform && mode === WIRE.captions.noLocalDelayMode) return 0;
   return delaySeconds;
 }
 

@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
 import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
-import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
+import { LiveDataContext, type LiveData, type Programme } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
   Levels,
@@ -92,7 +92,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [sourceCountKnown, setSourceCountKnown] = useState(false);
   /* #638: the list, not just the count. A switcher needs names, and fetching
      them separately would mean a second copy of the resolution rule. */
-  const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
   /* The ids the last /sources answer carried, so the socket effect can tell
      "a programme we have never seen" from "the one we are already on". */
   const knownIds = useRef<number[]>([]);
@@ -311,9 +311,15 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       setSourceCount(ids.length);
       // Unchanged lists keep their identity: this runs on a timer, and a new
       // array every 10 s would re-render every consumer for nothing.
-      const next = rows.map((r) => ({ id: r.id, name: r.name }));
+      const next: Programme[] = rows.map((r) => ({ id: r.id, name: r.name, publishUrls: r.publishUrls }));
       setProgrammes((prev) =>
-        prev.length === next.length && prev.every((p, i) => p.id === next[i].id && p.name === next[i].name)
+        prev.length === next.length &&
+        prev.every(
+          (p, i) =>
+            p.id === next[i].id &&
+            p.name === next[i].name &&
+            JSON.stringify(p.publishUrls) === JSON.stringify(next[i].publishUrls),
+        )
           ? prev
           : next,
       );

@@ -1,4 +1,5 @@
-import type { DestStatus, DestinationId, SourceView } from "@/lib/types";
+import type { SourceName } from "@/lib/destinationSource";
+import type { DestStatus, DestinationId } from "@/lib/types";
 
 /* THE GO LIVE SHEET'S ARITHMETIC.
  *
@@ -33,7 +34,7 @@ export interface GoLiveRow {
  *  a missing key rather than redacted, so a false "blocked" is not offered. */
 export function goLiveRows(
   destinations: readonly DestStatus[],
-  sources: readonly SourceView[],
+  sources: readonly SourceName[],
 ): GoLiveRow[] {
   const byId = new Map(sources.map((s) => [s.id, s.name]));
   return destinations.map((d) => {

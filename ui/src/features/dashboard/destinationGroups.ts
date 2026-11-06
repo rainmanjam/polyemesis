@@ -1,4 +1,5 @@
-import type { DestStatus, SourceView } from "@/lib/types";
+import type { SourceName } from "@/lib/destinationSource";
+import type { DestStatus } from "@/lib/types";
 import { sourceChoices } from "@/lib/destinationSource";
 
 /** One programme's destinations, in the order the dashboard should draw them. */
@@ -48,7 +49,7 @@ export interface DestinationLayout {
  */
 export function destinationLayout(
   destinations: readonly DestStatus[],
-  sources: readonly SourceView[],
+  sources: readonly SourceName[],
 ): DestinationLayout {
   const choices = sourceChoices(sources);
 
