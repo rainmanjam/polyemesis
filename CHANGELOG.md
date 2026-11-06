@@ -39,7 +39,7 @@ Nothing yet.
   application, so repeated quick refusals now hold the destination instead of restarting it for
   ever. For an IVS URL without `/app`, the failure reason also carries a new `urlFix` field with
   the URL that works. The card then shows **Server URL is missing /app** with that URL, the alert
-  and webhook sentence names it, and both replace the stream-key advice. Three new FFmpeg 9
+  sentence names it, and both replace the stream-key advice. Three new FFmpeg 9
   fixtures, captured against a local listener that drops the connection after the RTMP connect,
   pin this (`internal/failreason/testdata`).
 - **A destination card no longer shows LIVE before anything is on air.** The server reports a

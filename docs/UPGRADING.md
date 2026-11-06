@@ -248,39 +248,54 @@ instead.
 **Check your Kick and Twitch destinations before you upgrade.** An Amazon IVS
 ingest URL without the `/app` application path (Kick's dashboard prints
 `rtmps://<host>.global-contribute.live-video.net/`) never worked: IVS drops the
-connection when the stream key arrives as the application name. 0.15.0 says so
-louder:
+connection when the stream key arrives as the application name. Under 0.15.0 a
+destination saved that way is **held after three quick refusals** and waits for
+**Retry**, where 0.14.0 restarted it for ever. Edit its URL to the one the card
+names (`rtmps://<host>:443/app`) and press Retry.
 
-- **The API refuses to save one.** `POST /api/v1/destinations`, and a
+- **The REST API refuses to save one.** `POST /api/v1/destinations`, and a
   `PUT /api/v1/destinations/{id}` that changes the URL to one, answer `400` and
-  name the URL that works (`rtmps://<host>:443/app`). A script or MCP client that
-  creates Kick destinations from the dashboard's URL as printed must add `/app`.
-  A destination that already holds such a URL keeps working as before for
-  renames, switching off and other saves, with a warning each time.
-- **Its failure is a refusal, not a TLS failure.** An `rtmps://` connection that
-  opens and is then dropped is now classified as `key_rejected`, as an unknown
-  RTMP application is, so repeated quick refusals hold the destination instead of
-  restarting it for ever. The failure reason carries a new `urlFix` field with the
-  corrected URL, and the card, alert and webhook name it. An alert rule or webhook
-  receiver keyed on the TLS verdict for such a destination will see `key_rejected`
-  instead.
+  name the URL that works. A script that creates Kick destinations from the
+  dashboard's URL as printed must add `/app`. A destination that already holds
+  such a URL can still be renamed and saved, with a warning each time.
 - **Refresh stream key** stores the corrected URL when a platform answers with
   an IVS URL without `/app`, and its response says so.
+
+**An RTMPS connection that opens and is then dropped is a refused key, on every
+platform.** FFmpeg's only TLS-level line in that case is the encrypted socket's
+read failing, which 0.14.0 classified as **Secure (TLS) connection failed**
+(`tls`) and retried for ever. 0.15.0 classifies it as `key_rejected`, as an
+unknown RTMP application is, so three quick ones in a row hold the destination
+until **Retry**. `tls` is now kept for a connection that could not be opened and
+for a certificate failure. An alert rule or webhook receiver keyed on `tls` will
+see `key_rejected` for these failures. For a linked account, a `key_rejected`
+verdict also asks the platform whether the key is still one of the account's
+keys, as it already did for other refusals. For an IVS URL without `/app`, the
+failure reason carries a new `urlFix` field with the corrected URL (in
+`/status` and MCP `get_destination`), and alert messages name it in their
+text. Automation webhooks carry `cause`, `held` and `keyChanged` as before, not
+the corrected URL.
 
 **A destination card shows Starting, not LIVE, until media moves.** The card,
 the YouTube vertical row and the Renditions page used to draw any destination
 whose FFmpeg was running as on air, even while every connect was refused; the
-on-air bar counts such a destination as trying. The API's `state` is unchanged,
-so API clients see no difference.
+on-air bar now counts such a destination as coming up. The API's process
+`state` is unchanged. The header's live count and the
+dashboard lane headings still count it as live.
 
 **Instagram Live is a manual-key destination** instead of a preset marked
 unsupported. Paste the stream URL and key from Instagram's desktop flow
 (**+ Create → Live video → Go live with streaming software**); a persistent key
-keeps the destination ready between live videos. The **Go live** click and ending
-the live video stay in Instagram.
+keeps the destination ready between live videos. A live video ends after one
+hour; end it in Instagram before stopping the destination. Instagram Live needs a public
+professional (Creator or Business) account with 1,000+ followers, and the
+**Go live** click and ending the live video stay in Instagram. API clients see
+the capability matrix move Instagram from unsupported to manual key, and the
+limits table gain Instagram's one-hour cap (as reported by Restream; it drives
+no countdown, because Instagram destinations save as `custom`).
 
 **Nothing else changes.** The database schema is unchanged (version 1), so a
-0.14.0 binary opens a 0.15.0 database, and no step runs at the first start.
+0.14.0 binary opens a 0.15.0 database. The first start runs no new step.
 
 ### Upgrading to 0.14.0
 
