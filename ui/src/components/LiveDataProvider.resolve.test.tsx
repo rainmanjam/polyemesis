@@ -252,3 +252,53 @@ describe("LiveDataProvider: the poll pauses in a hidden tab", () => {
     }
   });
 });
+
+describe("LiveDataProvider: reads do not pile up", () => {
+  it("still resolves when /sources takes longer than the poll interval", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // 25 s to answer: two ticks fall inside it. A read per tick would
+      // supersede every response before it landed.
+      list.mockImplementation(() => new Promise((r) => setTimeout(() => r(rows(1, 2)), 25_000)));
+      draw();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(26_000);
+      });
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"));
+      expect(screen.getByTestId("countKnown").textContent).toBe("true");
+      expect(list.mock.calls.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers a superseded refresh with the count the newer read applied", async () => {
+    list.mockResolvedValueOnce(rows(1));
+    let refresh!: () => Promise<number | null>;
+    function Grab() {
+      refresh = useLiveData().refreshSources;
+      return null;
+    }
+    render(
+      <LiveDataProvider>
+        <Grab />
+        <Probe />
+      </LiveDataProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+
+    let older!: (v: never) => void;
+    list.mockImplementationOnce(() => new Promise((r) => (older = r as never)));
+    list.mockResolvedValueOnce(rows(5));
+    let first!: Promise<number | null>;
+    let second!: Promise<number | null>;
+    await act(async () => {
+      first = refresh();
+      second = refresh();
+    });
+    expect(await second).toBe(1);
+    await act(async () => older(rows(7, 8, 9)));
+    // Not 3: the older list was discarded, and so is its count.
+    expect(await first).toBe(1);
+  });
+});

@@ -13,9 +13,9 @@ its first tagged release.
 - **Copy buttons say so when the clipboard is unavailable.** On a plain-http install the browser has no
   clipboard, and the ingest URL copy in Settings, the API token, ACME, TLS and redirect-path copies,
   and Pull URL on a media file did nothing and said nothing. They now show "Clipboard is unavailable on this origin".
-  The clip, automation and recording pages' errors also show a plain-text server message and the
-  stored version of a settings conflict, as every other page does, and a change the server saved but
-  could not apply raises the same warning toast there. A freshly minted API token is no longer shown as
+  The clip, automation and recording pages now show a plain-text server message in their errors, as
+  every other page does, and a change the server saved but could not apply raises the same warning
+  toast there. A freshly minted API token is no longer shown as
   "Copied" because the previous one was copied a moment ago.
 - **The Dashboard and the header agree on how many programmes exist.** The Dashboard kept its own count
   and refreshed it on its own timer, so for up to ten seconds the two could scope the ingest figures

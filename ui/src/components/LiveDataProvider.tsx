@@ -111,6 +111,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      the scoped socket and send unscoped requests the server refuses with
      source_required on a multi-programme install. */
   const resolvedOnce = useRef(false);
+  /* The newest read's promise, and whether it is still running. The timer is
+     single-flight: with /sources slower than the 10 s tick, a new read per tick
+     would supersede every response before it landed and the count would never
+     resolve. */
+  const latestRead = useRef<Promise<number | null> | null>(null);
+  const readInFlight = useRef(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -291,12 +297,13 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      died, Clips showed "No clips yet.", all against a healthy server, until
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
-  const resolveSources = useCallback(async (): Promise<number | null> => {
-    const gen = ++resolveGen.current;
+  const resolveOnce = useCallback(async (gen: number): Promise<number | null> => {
     try {
       const rows = await api.listSources();
       const ids = rows.map((r) => r.id);
-      if (gen !== resolveGen.current) return ids.length;
+      // Superseded while in flight: answer with what the newer read applied,
+      // not with this stale list.
+      if (gen !== resolveGen.current) return latestRead.current ?? null;
       resolvedOnce.current = true;
       setSourceCountKnown(true);
       knownIds.current = ids;
@@ -324,12 +331,24 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       // A console that will not render because it could not list sources is
       // worse than one showing the install's only programme. Only before the
       // first answer, though: see resolvedOnce.
-      if (gen === resolveGen.current && !resolvedOnce.current) setProgramme(null);
+      if (gen !== resolveGen.current) return latestRead.current ?? null;
+      if (!resolvedOnce.current) setProgramme(null);
       return null;
     } finally {
+      if (gen === resolveGen.current) readInFlight.current = false;
       setProgrammeKnown(true);
     }
   }, []);
+
+  /* A manual refresh or the self-heal may supersede a read in flight (the
+     newest wins); the timer may not. */
+  const resolveSources = useCallback((): Promise<number | null> => {
+    const gen = ++resolveGen.current;
+    readInFlight.current = true;
+    const p = resolveOnce(gen);
+    latestRead.current = p;
+    return p;
+  }, [resolveOnce]);
 
   /* #638: THE HALF THAT WAS MISSING.
    *
@@ -379,12 +398,11 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     // Not while the tab is hidden: nobody is looking at the count, and a
     // background tab would otherwise poll for as long as it is open. Coming
     // back reads it at once.
-    const poll = window.setInterval(() => {
-      if (!document.hidden) void resolveSources();
-    }, 10_000);
-    const onVisible = () => {
-      if (!document.hidden) void resolveSources();
+    const tick = () => {
+      if (!document.hidden && !readInFlight.current) void resolveSources();
     };
+    const poll = window.setInterval(tick, 10_000);
+    const onVisible = tick;
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(poll);

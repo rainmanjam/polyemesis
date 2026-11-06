@@ -18,7 +18,7 @@ export type ChecklistStepState = "done" | "next" | "waiting" | "todo" | "locked"
 export type GoLiveReason = "needSourceAndDestination" | "needDestination" | "needSource" | null;
 
 export interface ChecklistInput {
-  /** From setupStatus. Null until it arrives. */
+  /** LiveData's source count. Null until it has been read (sourceCountKnown). */
   sourceCount: number | null;
   /** Whether bytes are arriving on the ingest (useIngestLive), not whether a
    *  process is running. Only meaningful with a source. */
