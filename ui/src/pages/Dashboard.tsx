@@ -68,6 +68,7 @@ import {
   type MetaTarget,
 } from "@/lib/metadataPush";
 import { duration, kbps } from "@/lib/format";
+import { destinationOnAir, ingestSignalTone } from "@/lib/liveness";
 import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
 import type {
@@ -898,7 +899,7 @@ function BulkDestinationControl({
  *  the lane was live. */
 export function LaneHeading({ name, destinations }: { name: string; destinations: readonly DestStatus[] }) {
   const t = useT();
-  const live = destinations.filter((d) => d.process?.state === "running").length;
+  const live = destinations.filter(destinationOnAir).length;
   const onAir = live > 0;
   const Cue = onAir ? Radio : Circle;
   return (
@@ -1488,7 +1489,7 @@ export function Dashboard() {
   // the show is going out. Say so instead of leaving a bare OFFLINE beside the
   // on-air banner. `failoverState` is the programme-scoped snapshot.
   const onBackup = backupOnAir(failoverState);
-  const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  const ingestTone = ingestSignalTone(ingest, ingestLive, onBackup);
   // The primary's failure stays visible here while the backup is on air: this
   // card is about the primary, and the reason it fell over is what the
   // operator needs to fix it. The header chip, which speaks for the show,
@@ -1634,7 +1635,7 @@ export function Dashboard() {
                   confirmDelete.ask({
                     id: d.id,
                     name: d.name,
-                    live: d.process?.state === "running",
+                    live: destinationOnAir(d),
                   })
                 }
                 onRefreshKey={async () => {
@@ -1907,6 +1908,7 @@ export function Dashboard() {
                   const r = ingestChipReading(ingest, ingestLive, onBackup, ingestKnown);
                   if (r.kind === "backup") return t("dash.ingestBackupOnAir");
                   if (r.kind === "pending") return t("common.loading");
+                  if (r.kind === "waiting") return t("state.waiting");
                   return r.kind === "bitrate" ? stateLabel("running") : stateLabel(r.state);
                 })()}
               </Badge>

@@ -47,7 +47,8 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { destinationProcessState, destinationStatus } from "@/lib/status";
+import { destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -178,12 +179,12 @@ export function DestinationCard({
   const stateLabel = useStateLabel();
   const state = dest.process?.state;
   // What the badge and its tone say: "running" reads as starting until this
-  // run has carried media (see destinationProcessState). `running` below stays
+  // run has carried media (see destinationShownState). `running` below stays
   // the server's word, because it gates the live readings, and a starting
   // process's 0 kbps and blank uptime are true.
-  const shownState = destinationProcessState(dest.process);
+  const shownState = destinationShownState(dest.process);
   const tone = dest.enabled ? toneForState(shownState) : "idle";
-  const running = state === "running";
+  const running = processRunning(dest.process);
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
   const reason = dest.enabled ? dest.reason : undefined;

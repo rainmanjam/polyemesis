@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { planStarts, runPacedStarts, type GoLiveRow } from "@/lib/goLive";
+import { destinationLanded, processRunning } from "@/lib/liveness";
 import { unconfirmedVerticalPairs } from "@/lib/youtubeVertical";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { StatusReason } from "@/components/signature/StatusReason";
@@ -168,14 +169,14 @@ export function GoLiveSheet({
     if (errors.has(id)) return "failed";
     const proc = liveOf(id)?.process;
     const state = proc?.state;
-    // Live means the process is running AND its output has moved, and it is
-    // not stalled. The supervisor says running the moment FFmpeg spawns, so a
+    // Live is lib/liveness's destinationLanded: running, media moved, not
+    // stalled. The supervisor says running the moment FFmpeg spawns, so a
     // start the platform is about to refuse reads running for a moment; until
     // media has gone out it is still starting. An enabled destination with no
     // process, or one that is retrying, is not live either.
-    if (state === "running" && !proc?.stalled && (proc?.progress?.outTimeMs ?? 0) > 0) return "live";
+    if (destinationLanded(proc)) return "live";
     if (state === "failed") return "failed";
-    if (attempted.has(id) || state === "starting" || state === "reconnecting" || state === "running") return "starting";
+    if (attempted.has(id) || state === "starting" || state === "reconnecting" || processRunning(proc)) return "starting";
     return "pending";
   };
 

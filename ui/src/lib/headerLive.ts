@@ -1,4 +1,6 @@
 import type { TranslateParams, TranslationKey } from "@/lib/i18n";
+import { destinationOnAir } from "@/lib/liveness";
+import type { ProcessStatus } from "@/lib/types";
 
 /** What the header's live badge counts, and the words that say whose count it
  *  is (app-council A81).
@@ -30,7 +32,12 @@ export interface HeaderLive {
 
 interface DestLike {
   sourceId?: number | null;
-  process?: { state?: string } | null;
+  enabled?: boolean;
+  process?: Pick<ProcessStatus, "state"> & {
+    uptimeSec?: number;
+    stalled?: boolean;
+    progress?: { outTimeMs?: number } | null;
+  } | null;
 }
 
 export function headerLive({
@@ -45,7 +52,7 @@ export function headerLive({
   sourceCount: number;
 }): HeaderLive {
   const known = destinations !== undefined;
-  const live = (destinations ?? []).filter((d) => d.process?.state === "running");
+  const live = (destinations ?? []).filter(destinationOnAir);
   if (sourceCount <= 1) {
     return { known, count: live.length, key: "chrome.liveCount", params: { count: live.length }, offKey: "onAir.offAir" };
   }

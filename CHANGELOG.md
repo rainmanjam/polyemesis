@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Fixed
 
+- **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
+  said 0 and the card said Starting, because a running process that had carried no media counted as
+  live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and
+  delete confirm, routing overview and go-live sheet now share one rule. A waiting ingest listener
+  reads Waiting, not Running.
+- **MQTT reads a destination's delay the way alerts and webhooks do.** A stopped destination still
+  playing its delayed tail out is `enabled` on the retained topic until the tail ends, instead of
+  reading disabled while it was still on the air.
 - **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
   Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
   adapter, which stamped its own account on it. Each delivery now goes to the adapter for the

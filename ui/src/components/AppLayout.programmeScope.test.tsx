@@ -139,7 +139,8 @@ describe("the header live badge counts and names the selected programme", () => 
     id,
     sourceId,
     name: `d${id}`,
-    process: { state: running ? "running" : "stopped" },
+    enabled: true,
+    process: { state: running ? "running" : "stopped", uptimeSec: running ? 10 : 0 },
   });
 
   it("reads 'Studio A: 2 live' when Studio B carries three more live destinations", () => {

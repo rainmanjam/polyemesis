@@ -1,3 +1,4 @@
+import { ingestProcessUp } from "./liveness";
 import type { Levels, ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
 
 /* What the dashboard is allowed to assert, as plain functions.
@@ -316,9 +317,9 @@ export function ingestUptimeSec(
   relay: Pick<RelayStats, "receivingSec"> | null | undefined,
   live: boolean,
 ): number | null {
-  const running = ingest?.state === "running";
-  if (running && ingest.uptimeSec > 0) return ingest.uptimeSec;
+  const proc = ingest && ingestProcessUp(ingest) ? ingest : null;
+  if (proc && proc.uptimeSec > 0) return proc.uptimeSec;
   const arriving = relay?.receivingSec;
   if (live && arriving !== undefined && arriving > 0) return arriving;
-  return running ? ingest.uptimeSec : null;
+  return proc ? proc.uptimeSec : null;
 }

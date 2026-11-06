@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { AcrossTheRoom } from "@/components/AcrossTheRoom";
 import { attention, onAir } from "@/lib/attention";
+import { ingestProcessUp, onAirSeconds } from "@/lib/liveness";
 import type { SignalTone } from "@/lib/signal";
 import type { FailoverStatus, Status } from "@/lib/types";
 import { useStateLabel, useT, type TranslationKey } from "@/lib/i18n";
@@ -81,15 +82,13 @@ export function OnAirBar({
   // The ingest's uptime only means something while it is running. SRT has no
   // ingest process at all (#514), so on a healthy SRT install this is null and
   // the verdict simply omits the stability clause rather than inventing one.
-  const ingestUptime = status?.ingest?.state === "running" ? status.ingest.uptimeSec : null;
+  const ingestUptime = ingestProcessUp(status?.ingest) ? status?.ingest?.uptimeSec ?? null : null;
   const offPrimary = !!failover && failover.active !== "primary" && failover.active !== "";
   const verdict = healthVerdict(air, items, ingestUptime, offPrimary, ingestReceiving);
   // How long the broadcast has been on air: the longest-running destination,
   // since the first one up is when the audience could first see it.
-  const onAirSec = (status?.destinations ?? []).reduce(
-    (max, d) => (d.process?.state === "running" ? Math.max(max, d.process.uptimeSec ?? 0) : max),
-    0,
-  );
+  const onAirSec = onAirSeconds(status?.destinations);
+
 
   /* Follow a row to the card it describes.
    *

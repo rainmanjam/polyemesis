@@ -77,7 +77,8 @@ import {
   useStateLabel,
   type StateLabeller,
 } from "@/lib/i18n";
-import { destinationProcessState, destinationStatus } from "@/lib/status";
+import { destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationStatus } from "@/lib/status";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -488,7 +489,7 @@ export function RenditionsPage() {
   };
 
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
-  const running = (status?.renditions ?? []).filter((r) => r.process?.state === "running").length;
+  const running = (status?.renditions ?? []).filter((r) => processRunning(r.process)).length;
   const sourceVideo = status?.source.video ?? null;
 
   const encoders = caps?.encoders ?? [];
@@ -652,7 +653,7 @@ export function RenditionsPage() {
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
   const t = useT();
-  const state = destinationProcessState(dest.process);
+  const state = destinationShownState(dest.process);
   const tone: SignalTone = dest.enabled ? toneForState(state) : "idle";
   return (
     <span className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm">
@@ -735,23 +736,23 @@ export function RenditionCard({
           <Stat labelKey="rend.target" value={kbps(r.videoBitrate)} />
           <Stat
             labelKey="rend.live"
-            value={proc?.state === "running" ? kbps(proc.progress?.bitrateKbps ?? 0) : "—"}
-            tone={proc?.state === "running" ? "live" : "muted"}
+            value={processRunning(proc) ? kbps(proc?.progress?.bitrateKbps ?? 0) : "—"}
+            tone={processRunning(proc) ? "live" : "muted"}
           />
           <Stat
             labelKey="rend.speed"
-            value={proc?.state === "running" ? `${(proc.progress?.speed ?? 0).toFixed(2)}×` : "—"}
+            value={processRunning(proc) ? `${(proc?.progress?.speed ?? 0).toFixed(2)}×` : "—"}
             // Below real time the encode is losing the race, and every
             // destination under it inherits the stutter.
             tone={
-              proc?.state === "running" && (proc.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
+              processRunning(proc) && (proc?.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
             }
           />
           <Stat labelKey="rend.gop" value={`${r.gopSeconds}s`} tone="muted" />
           <Stat labelKey="rend.preset" value={r.preset} tone="muted" />
           <Stat
             labelKey="rend.uptime"
-            value={proc?.state === "running" ? duration(proc.uptimeSec) : "—"}
+            value={processRunning(proc) ? duration(proc?.uptimeSec ?? 0) : "—"}
             tone="muted"
           />
         </div>
@@ -794,7 +795,7 @@ export function RenditionCard({
             {live.error}
           </div>
         )}
-        {proc?.lastError && proc.state !== "running" && (
+        {proc?.lastError && !processRunning(proc) && (
           <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             {proc.lastError}
           </div>

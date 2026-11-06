@@ -1,6 +1,6 @@
 import type { DestinationId, DestStatus, FailureCause, ProcessState, RenditionStatus, Status } from "./types";
 import type { SignalTone } from "./signal";
-import { destinationProcessState } from "./status";
+import { destinationShownState, ingestProcessUp } from "./liveness";
 
 /* What the dashboard says FIRST, as plain functions.
  *
@@ -39,12 +39,13 @@ export interface OnAir {
 
 export function onAir(destinations: readonly DestStatus[] | null | undefined): OnAir {
   const rows = (destinations ?? []).filter((d) => d.enabled);
-  // Through destinationProcessState, as the card is: a process that is running
-  // and has not yet carried media is starting, so it counts as degraded and not
-  // live -- or the bar would say "1 live" over a card that says Starting.
+  // Through destinationShownState, as the card and the header are: a process
+  // that is running and has not yet carried media is starting, so it counts as
+  // degraded and not live -- or the bar would say "1 live" over a card that
+  // says Starting.
   const count = (...states: ProcessState[]) =>
     rows.filter((d) => {
-      const state = destinationProcessState(d.process);
+      const state = destinationShownState(d.process);
       return !!state && states.includes(state);
     }).length;
   return {
@@ -107,7 +108,7 @@ export function attention(status: Status | null | undefined): AttentionItem[] {
   // destination below it is carrying the same feed, so an ingest that is down
   // explains the whole panel rather than being one more row in it.
   const ingest = status.ingest;
-  if (ingest && ingest.state !== "running" && ingest.state !== "stopped") {
+  if (ingest && !ingestProcessUp(ingest) && ingest.state !== "stopped") {
     items.push({
       key: "ingest",
       tone: ingest.state === "failed" ? "down" : "warn",
@@ -119,7 +120,9 @@ export function attention(status: Status | null | undefined): AttentionItem[] {
 
   for (const d of status.destinations ?? []) {
     if (!d.enabled) continue;
-    const state = d.process?.state;
+    // The same reading onAir counts by, so a destination the bar calls
+    // degraded always has a row here to say why.
+    const state = destinationShownState(d.process);
     if (state === "failed") {
       items.push({
         key: `dest-${d.id}`,
