@@ -1,5 +1,6 @@
+import { platformName } from "@/lib/platforms";
 import type { TranslationKey } from "@/lib/i18n";
-import type { ChatMessage, ChatPlatform } from "@/lib/types";
+import type { ChatMessage } from "@/lib/types";
 
 // Where a viewer can be looked at on the platform they were talking on.
 //
@@ -129,17 +130,4 @@ export function openPlatformLink(link: PlatformLink): void {
 }
 
 /** Human label for a platform, for menu copy. */
-export function platformNoun(p: ChatPlatform): string {
-  switch (p) {
-    case "twitch":
-      return "Twitch";
-    case "youtube":
-      return "YouTube";
-    case "kick":
-      return "Kick";
-    case "facebook":
-      return "Facebook";
-    default:
-      return p;
-  }
-}
+export const platformNoun = platformName;

@@ -10,6 +10,8 @@ import type {
   JobState,
   ObsConnState,
   OffloadState,
+  Platform,
+  ChatPlatform,
   ProcessState,
   TokenScope,
 } from "./contract/wire";
@@ -21,6 +23,8 @@ export type {
   JobState,
   ObsConnState,
   OffloadState,
+  Platform,
+  ChatPlatform,
   ProcessState,
   TokenScope,
 };
@@ -284,23 +288,6 @@ export type DestKind = "rtmp" | "srt" | "file";
 
 /** How captions reach one destination. Mirrors internal/captions Mode. */
 export type CaptionMode = "off" | "sei" | "youtube_post" | "facebook_sei";
-/*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
- *  its destination preset deliberately does not carry it, so no destination row
- *  ever arrives with it. "vimeo" IS here because its preset does carry it —
- *  Vimeo signs in, and a saved Vimeo destination is stamped with the platform
- *  even though its key is still pasted by hand. "trovo" is RETIRED (Trovo shut
- *  down on 30 June 2026): nothing offers it any more, and it stays here only
- *  because rows saved before the shutdown still carry it. */
-export type Platform =
-  | "custom"
-  | "youtube"
-  | "twitch"
-  | "kick"
-  | "facebook"
-  | "trovo"
-  | "vimeo"
-  | "x";
-
 export interface Destination {
   id: DestinationId;
   name: string;
@@ -2683,21 +2670,6 @@ export interface WsEvent {
  *  message will ever arrive carrying it. Read this as the union a message
  *  COULD be tagged with, not as a list of what works — the capability matrix
  *  in lib/capabilities.ts is the answer to that, per platform and per column. */
-/** The platforms the chat pane can show. Kept as a separate name because chat
- *  and destinations gain platforms at different times, and the two newest
- *  platforms came apart in OPPOSITE directions.
- *
- *  "trovo" IS here: it is a retired platform (Trovo shut down on 30 June
- *  2026) that old destination rows still name, and no message will ever
- *  arrive carrying it. "vimeo" is NOT:
- *  it has no chat adapter in internal/chat at all, so no message can ever carry
- *  it and the accent map has nothing to say about it. Vimeo's own live-event
- *  chat, if it exists, sits behind the same Enterprise gate as the rest of its
- *  live API — see internal/oauth/vimeo.go.
- *
- *  Read this as the union a message COULD be tagged with, not as a list of what
- *  works — lib/capabilities.ts answers that, per platform and per column. */
-export type ChatPlatform = Exclude<Platform, "vimeo">;
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */

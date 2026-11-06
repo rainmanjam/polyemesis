@@ -1922,7 +1922,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 
 | Method | Path |
 |---|---|
-| `GET` | `/platforms/presets`, `/capabilities`, `/guides` |
+| `GET` | `/platforms/presets`, `/capabilities`, `/guides`, `/registry` (the platform registry: names, stored value, which carry destinations and chat, the IVS and X title rules) |
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
 | `POST` | `/platforms/credentials/{platform}/check` |

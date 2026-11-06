@@ -29,3 +29,17 @@ export type ObsConnState = Member<typeof WIRE.obsConnStates>;
 export type OffloadState = Member<typeof WIRE.offloadStates>;
 /** internal/events.Type: every event the WebSocket and /events carry. */
 export type EventType = Member<typeof WIRE.eventTypes>;
+
+type PlatformRow = (typeof WIRE.platforms.platforms)[number];
+
+/** The value a destination's `platform` column carries (internal/platform
+ *  Row.AcceptsDestinations). "trovo" is retired: nothing offers it, and it
+ *  stays because rows saved before the shutdown still carry it. "rumble" is
+ *  here because the registry lets a destination carry it, though its preset
+ *  saves as custom. */
+export type Platform = Extract<PlatformRow, { destination: true }>["enum"];
+
+/** The platforms a chat message can come from: the ones the server has a chat
+ *  adapter for (internal/chat). Not the same set as Platform: Vimeo has no chat
+ *  adapter, and Rumble has chat but no stored-destination preset. */
+export type ChatPlatform = Extract<PlatformRow, { chat: true }>["enum"];

@@ -297,10 +297,10 @@ describe("the row delete icon is gated on what the platform can do", () => {
       // The cast is the point, not a workaround: this platform reaches the
       // renderer and the union says it cannot.
       message("1", "rumble" as unknown as ChatPlatform, "rumbler", "no moderation API at all"),
-      message("2", "trovo", "trovan", "in the union, absent from the adapter table"),
+      message("2", "trovo" as unknown as ChatPlatform, "trovan", "in the union, absent from the adapter table"),
       message("3", "twitch", "twitcher", "can be deleted upstream"),
     ];
-    feed.statuses = [status("trovo"), status("twitch")];
+    feed.statuses = [status("trovo" as unknown as ChatPlatform), status("twitch")];
   });
 
   it("disables it on a platform outside the union, and says why", () => {

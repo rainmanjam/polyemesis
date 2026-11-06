@@ -7,8 +7,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +20,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -360,6 +364,44 @@ func TestWireContract(t *testing.T) {
 		if string(got) != string(want) {
 			t.Errorf("%s is out of date: the server's values and the committed contract disagree.\n"+
 				"Regenerate with: go test ./internal/api/ -run TestWireContract -update-wire-contract", path)
+		}
+	}
+}
+
+// The registry endpoint serves what the console was built against.
+//
+// The console reads the registry from the generated file and a scripted client
+// reads it from GET /platforms/registry. They are one description, so a field
+// added to Info reaches both or neither.
+func TestThePlatformRegistryEndpointServesTheContract(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	req := jsonRequest(t, http.MethodGet, "/api/v1/platforms/registry", nil)
+	sign(req)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body)
+	}
+	var served, built any
+	if err := json.Unmarshal(rr.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(buildWireContract(t).Platforms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &built); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(served, built) {
+		t.Errorf("GET /platforms/registry and the generated contract disagree:\nserved %s\nbuilt  %s", rr.Body, b)
+	}
+	// Row has no JSON tags and carries list-order fields; the endpoint must not
+	// serve its shape.
+	for _, internal := range []string{`"Order"`, `"SendMax"`, `"Guidance"`, `"Ceilings"`} {
+		if strings.Contains(rr.Body.String(), internal) {
+			t.Errorf("the registry endpoint exposes the internal field %s", internal)
 		}
 	}
 }

@@ -76,7 +76,7 @@ describe("ChatMessageMenu", () => {
     // A platform with no capability row falls back to "unverified", and no
     // chat adapter implements anything for it. Without this sentence the menu
     // is five greyed rows with no explanation, which reads as a broken tool.
-    draw(msg({ platform: "custom" }));
+    draw(msg({ platform: "custom" as unknown as ChatPlatform }));
     expect(screen.getByText(/publishes no moderation API/)).toBeTruthy();
   });
 

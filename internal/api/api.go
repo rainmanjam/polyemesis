@@ -1657,6 +1657,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)
+			r.Get("/platforms/registry", s.handlePlatformRegistry)
 			r.Get("/platforms/guides", s.handlePlatformGuides)
 			r.Get("/platforms/credentials", s.handleListCreds)
 			r.Put("/platforms/credentials/{platform}", s.handlePutCreds)
