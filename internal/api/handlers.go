@@ -3087,7 +3087,6 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// What the delete could not take with it, said in the response. Empty in
 	// the ordinary case, and then the body is exactly {"status":"deleted"}.
 	var leftovers []string
-	var read []*db.Destination
 	if dest, err := s.store.GetDestination(id); err == nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
@@ -3101,10 +3100,15 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 				dest.Name, dest.Lifecycle.Phase))
 			return
 		}
-		read = []*db.Destination{dest}
+		// The teardown shared with a programme delete: the note about a stranded
+		// YouTube stream, and the platform events, while the row, its account
+		// and its token still exist. See delete_cascade.go.
+		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
 	}
-	// The teardown shared with a programme delete: see delete_cascade.go.
-	leftovers = s.beforeDestinationsRemoved(r.Context(), []int64{id}, read, time.Now())
+	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
+	// airing what is buffered. Marked before the reconcile so no drain starts,
+	// and cut after it for one already playing from an earlier stop.
+	s.mgr.CutOnStop(id)
 	prune, err := s.store.DeleteDestinationPruned(id)
 	if err != nil {
 		writeStoreError(w, err)
@@ -3115,7 +3119,8 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// FFmpeg child keeps publishing to a destination the console no longer
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
-	leftovers = append(leftovers, s.afterDestinationsRemoved([]int64{id}, prune)...)
+	s.mgr.CutDelay(id)
+	leftovers = append(leftovers, s.afterDestinationsRemoved(prune)...)
 	resp := map[string]any{"status": "deleted"}
 	if len(leftovers) > 0 {
 		resp["warnings"] = leftovers
@@ -3373,19 +3378,22 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 // onto the tracks that programme's annotations name (routing.DefaultPresetOptsFor),
 // which is what a bodyless apply uses. Named by ?source=; unnamed it is the one
 // programme of a single-source install, and absent when several make the
-// choice ambiguous -- the route has never refused for lack of one.
+// choice ambiguous -- the route has never refused for lack of one, and a
+// malformed or unknown ?source= leaves the field out rather than refusing.
 func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"presets":  routing.Presets(),
 		"defaults": routing.DefaultPresetOpts(),
 	}
-	id, named, ok := s.parseSourceParam(w, r)
-	if !ok {
-		return
-	}
-	if named {
-		src, _ := s.sourceForDestination(&id)
-		out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
+	// Never a refusal: this route has always ignored ?source=, so a malformed
+	// or unknown one only leaves the derived field out.
+	if raw := strings.TrimSpace(r.URL.Query().Get(sourceParam)); raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil && id > 0 {
+			if _, err := s.store.GetSource(id); err == nil {
+				src, _ := s.sourceForDestination(&id)
+				out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
+			}
+		}
 	} else if n, err := s.store.CountSources(); err == nil && n == 1 {
 		src, _ := s.sourceForDestination(nil)
 		out["roleDefaults"] = routing.DefaultPresetOptsFor(src)

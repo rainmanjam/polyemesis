@@ -1594,6 +1594,33 @@
             }
           }
         }
+      },
+      "roleDefaults": {
+        "types": [
+          "object"
+        ],
+        "fields": {
+          "cleanTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "micTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "musicTrack": {
+            "types": [
+              "number"
+            ]
+          },
+          "surroundTrack": {
+            "types": [
+              "number"
+            ]
+          }
+        }
       }
     }
   },

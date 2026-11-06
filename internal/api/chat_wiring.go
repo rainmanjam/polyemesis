@@ -834,5 +834,5 @@ func (s *Server) KickChatCallbackURL() string {
 	if base == "" || secret == "" {
 		return ""
 	}
-	return base + "/api/v1/chat/kick/" + secret
+	return base + kickWebhookPath(secret)
 }

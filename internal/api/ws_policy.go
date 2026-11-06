@@ -109,8 +109,15 @@ func eventView(ev events.Event, readOnly bool) (events.Event, bool) {
 		return ev, true
 	}
 	// One classification for the types both surfaces carry: the catalogue's.
-	if access, bridged := eventstream.BusReadAccess(ev.Type); bridged && access != eventstream.Granted {
-		return events.Event{}, false
+	if access, bridged := eventstream.BusReadAccess(ev.Type); bridged {
+		if access != eventstream.Granted {
+			return events.Event{}, false
+		}
+		// Granted by the catalogue and sent whole, unless this table adds a
+		// residual pass of its own.
+		if _, listed := wsEventPolicy[ev.Type]; !listed {
+			return ev, true
+		}
 	}
 	policy, classified := wsEventPolicy[ev.Type]
 	if !classified {

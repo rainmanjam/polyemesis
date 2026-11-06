@@ -581,7 +581,10 @@ See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
 read token with `403`, and a read-scoped `/api/v1/ws` socket is no longer sent
 `chat` events. It still receives `chatState` (which platforms are connected)
 and `chatRetract`, so a monitor that only watches connection state keeps
-working.
+working. *(Since changed: a read-scoped `/api/v1/ws` socket no longer receives
+`chatRetract` either. It names the platform account and the viewer a ban swept,
+and `/api/v1/events` already withheld it from read tokens; both now follow the
+same table. `chatState` is unchanged.)*
 
 A dashboard, bot or archiver that reads the messages themselves needs an
 `admin` token instead: create one under **Settings → API tokens** and replace

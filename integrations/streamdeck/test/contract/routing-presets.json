@@ -254,6 +254,12 @@
           "summary": "music included (custom destination)"
         }
       }
-    ]
+    ],
+    "roleDefaults": {
+      "cleanTrack": 1,
+      "micTrack": 2,
+      "musicTrack": 0,
+      "surroundTrack": 0
+    }
   }
 }

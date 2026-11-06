@@ -1515,7 +1515,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// contact sheet, the scrub sprites. A GET, so requireCSRF passes
 			// it through and a plain <video src> can reach it — which it has
 			// to, because a media element attaches no headers of its own.
-			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
+			r.Get(routeLibraryMedia, s.handleLibraryMedia)
 			r.Post("/library/recordings/{id}/offload/retry", s.handleRetryRecordingOffload)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a
@@ -1770,7 +1770,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.requireSession)
-			r.Get("/oauth/{platform}/start", s.handleOAuthStart)
+			r.Get(routeOAuthStart, s.handleOAuthStart)
 			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
 		})
 
@@ -1778,7 +1778,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// here with no session and no header polyemesis issued; the
 		// unguessable path segment is the whole credential, and the handler
 		// compares it before doing anything else. See chat_wiring.go.
-		r.HandleFunc("/chat/kick/{secret}", s.handleKickChatWebhook)
+		r.HandleFunc(routeKickWebhook, s.handleKickChatWebhook)
 
 		// The chat overlay's two reads. Outside every auth group because the
 		// overlay key is not an API credential and requireAuth must never

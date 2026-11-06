@@ -648,3 +648,35 @@ func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 		}
 	}
 }
+
+// A scene rule with no explicit options follows the programme's track roles,
+// like a bodyless preset apply: "mic only" keeps the track annotated mic, not
+// the generic OBS-convention slot.
+//
+// Mutation: start applySceneLevels from routing.DefaultPresetOpts() again.
+func TestASceneRuleWithNoOptionsFollowsTheProgrammesTrackRoles(t *testing.T) {
+	withLiveLevels(t, true)
+	o := obsServer(t)
+	sel := o.createDest(t, "twitch")
+	src := onlySourceID(t, o.h, o.sign)
+	send(t, o.h, o.sign, http.MethodPut, "/api/v1/source/annotations?source="+itoa(src),
+		map[string]any{"annotations": []map[string]any{{"track": 0, "role": "mic"}}}, http.StatusOK)
+	row, err := o.s.store.GetDestination(sel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Profile = simpleProfile(0, 1, 2)
+	if _, err := o.s.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetMicOnly})
+	if out.Outcome != outcomeApplied {
+		t.Fatalf("outcome %+v", out)
+	}
+	row, _ = o.s.store.GetDestination(sel)
+	for i, want := range []bool{false, true, true} {
+		if row.Profile.Tracks[i].Muted != want {
+			t.Errorf("track %d muted=%v, want %v: mic is annotated on track 0", i+1, row.Profile.Tracks[i].Muted, want)
+		}
+	}
+}

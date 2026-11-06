@@ -730,13 +730,11 @@ func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, c
 // string. The OAuth round trip is a full navigation, so there is no XHR to
 // return JSON to.
 func (s *Server) oauthDone(w http.ResponseWriter, r *http.Request, ok, errMsg string) {
-	target := "/settings?tab=platforms"
 	if errMsg != "" {
-		target += "&oauth_error=" + urlEscape(errMsg)
-	} else {
-		target += "&oauth_ok=" + urlEscape(ok)
+		http.Redirect(w, r, settingsRedirect([2]string{oauthErrorKey, urlEscape(errMsg)}), http.StatusFound)
+		return
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	http.Redirect(w, r, settingsRedirect([2]string{oauthOKKey, urlEscape(ok)}), http.StatusFound)
 }
 
 // oauthWarn is oauthDone with a third outcome: connected, AND there is
@@ -755,8 +753,8 @@ func (s *Server) oauthWarn(w http.ResponseWriter, r *http.Request, ok, warn stri
 		s.oauthDone(w, r, ok, "")
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=platforms&oauth_ok="+urlEscape(ok)+
-		"&oauth_warn="+urlEscape(warn), http.StatusFound)
+	http.Redirect(w, r, settingsRedirect(
+		[2]string{oauthOKKey, urlEscape(ok)}, [2]string{oauthWarnKey, urlEscape(warn)}), http.StatusFound)
 }
 
 func urlEscape(s string) string {
