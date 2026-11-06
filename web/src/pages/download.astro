@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import CodeBlock from "../components/CodeBlock.astro";
+import { FFMPEG_FLOOR, GO_FLOOR, NODE_BUILD_FLOOR } from "../data/facts.mjs";
 
 const REPO = "https://github.com/rainmanjam/polyemesis";
 ---
@@ -172,7 +173,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       <div class="card p-6">
         <h2 class="text-lg font-medium">Build from a clone</h2>
         <p class="mt-2 text-sm leading-relaxed text-muted">
-          Go 1.27.0+, Node 20.19+/22.12+ and FFmpeg. The UI is built and embedded
+          Go {GO_FLOOR}+, Node {NODE_BUILD_FLOOR} and FFmpeg. The UI is built and embedded
           by the same target, so there is one artefact at the end of it.
         </p>
         <CodeBlock
@@ -299,7 +300,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
       <dl class="mt-6 divide-y divide-line border-y border-line">
         {
           [
-            ["FFmpeg", "The only dependency the server itself needs. Needs libsrt for SRT ingest. Without it you fall back to RTMP, which carries one audio track on classic RTMP. FFmpeg 8.0 or later is required; 8.x is what the container ships, and CI tests the latest 8.x and 9.x."],
+            ["FFmpeg", `The only dependency the server itself needs. Needs libsrt for SRT ingest. Without it you fall back to RTMP, which carries one audio track on classic RTMP. FFmpeg ${FFMPEG_FLOOR} or later is required; 8.x is what the container ships, and CI tests the latest 8.x and 9.x.`],
             ["CPU", "Video is copied, not re-encoded, so cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC. Renditions are the exception: those are a real encode, and the UI estimates what one will cost before you save it."],
             ["Ports", "One TCP port for the UI and API. One UDP port for SRT, shared by every source. RTMP is optional and works the same way: one TCP port, shared by every source that uses it."],
             ["Disk", "Only if you record. Retention is bounded by age, total size, and a free-space floor that accounts for files polyemesis did not write."],

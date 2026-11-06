@@ -1,4 +1,5 @@
 ---
+import { MAX_TRACKS } from "../data/facts.mjs";
 /* What replaces the logo marquee.
  *
  * Both design passes independently said to kill the greyed-out customer-logo
@@ -17,7 +18,7 @@
  */
 const specs = [
   { k: "Ingest", v: "SRT and RTMP" },
-  { k: "Tracks over SRT", v: "up to 32" },
+  { k: "Tracks over SRT", v: `up to ${MAX_TRACKS}` },
   { k: "Video", v: "-c:v copy" },
   { k: "Ships as", v: "one static binary" },
   { k: "Runtime deps", v: "FFmpeg only" },

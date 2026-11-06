@@ -53,6 +53,7 @@ const (
 	wireConsoleFile    = "../../ui/src/lib/contract/wire.generated.ts"
 	wireStreamDeckFile = "../../integrations/streamdeck/test/contract/wire.json"
 	wireSiteFile       = "../../web/src/data/facts.json"
+	wireFiguresFile    = "../../web/src/data/preset-figures.json"
 )
 
 type wireRouting struct {
@@ -129,6 +130,9 @@ type wireSite struct {
 	MaxTracks      int    `json:"maxTracks"`
 	FFmpegMinMajor int    `json:"ffmpegMinMajor"`
 	GoMinVersion   string `json:"goMinVersion"`
+	// UINodeEngines is the Node range the UI build declares: the floor "build
+	// from a clone" asks of a reader.
+	UINodeEngines string `json:"uiNodeEngines"`
 }
 
 type wireContract struct {
@@ -370,14 +374,54 @@ func consoleSource(t *testing.T, c wireContract) []byte {
 		"export const WIRE = " + strings.TrimRight(string(body), "\n") + " as const;\n")
 }
 
+func uiNodeEngines(t *testing.T) string {
+	t.Helper()
+	var pkg struct {
+		Engines struct {
+			Node string `json:"node"`
+		} `json:"engines"`
+	}
+	if err := json.Unmarshal([]byte(repoFile(t, "ui/package.json")), &pkg); err != nil || pkg.Engines.Node == "" {
+		t.Fatalf("ui/package.json has no engines.node: %v", err)
+	}
+	return pkg.Engines.Node
+}
+
 func siteFacts(t *testing.T) wireSite {
 	t.Helper()
 	return wireSite{
+		UINodeEngines:  uiNodeEngines(t),
 		Comment:        wireComment,
 		MaxTracks:      routing.MaxTracks,
 		FFmpegMinMajor: ffmpeg.MinMajorVersion,
 		GoMinVersion:   goModVersion(t),
 	}
+}
+
+// presetFigure is one catalogue preset as the site's calculator transcribes it.
+type presetFigure struct {
+	ID         string `json:"id"`
+	Integrated bool   `json:"integrated"`
+	Transport  string `json:"transport"`
+	KbpsMin    int    `json:"kbpsMin,omitempty"`
+	KbpsMax    int    `json:"kbpsMax,omitempty"`
+	Checked    string `json:"checked,omitempty"`
+}
+
+// presetFigures is what web/scripts/check-build.mjs compares the calculator and
+// the "N other presets" sentence with. It used to read internal/db/platforms.go
+// with a regexp, which stopped finding anything when the guidance moved into the
+// platform registry; it reads the catalogue's own values now.
+func presetFigures() []presetFigure {
+	var out []presetFigure
+	for _, p := range db.DestinationPresets() {
+		f := presetFigure{ID: p.ID, Integrated: p.Platform != "", Transport: string(p.Transport)}
+		if p.Video != nil {
+			f.KbpsMin, f.KbpsMax, f.Checked = p.Video.KbpsMin, p.Video.KbpsMax, p.Video.Checked
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // TestWireContract holds the three generated files to what the server says.
@@ -387,6 +431,7 @@ func TestWireContract(t *testing.T) {
 		wireConsoleFile:    consoleSource(t, c),
 		wireStreamDeckFile: marshalWire(t, c),
 		wireSiteFile:       marshalWire(t, siteFacts(t)),
+		wireFiguresFile:    marshalWire(t, map[string]any{"_comment": wireComment, "presets": presetFigures()}),
 	}
 	for path, want := range outputs {
 		if *updateWireContract {
