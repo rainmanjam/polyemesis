@@ -79,6 +79,10 @@ type Chat struct {
 	// Order is the platform's position in the chat send-limits list, whose
 	// order is part of the API response.
 	Order int
+	// OverlayOrder is the platform's position in the chat overlay's platform
+	// filter, whose order is part of the API response. Zero means chat has no
+	// adapter for the platform, so an overlay cannot filter on it.
+	OverlayOrder int
 }
 
 // What a duration limit measures. Plain strings: internal/oauth serves them to
@@ -293,6 +297,14 @@ func Moderated() []Row {
 func ChatSenders() []Row {
 	return ordered(func(r Row) (int, bool) {
 		return r.Chat.Order, r.Chat.SendMax > 0
+	})
+}
+
+// ChatOverlays returns the rows an overlay can filter chat by: the platforms
+// chat has an adapter for, in the overlay filter's list order.
+func ChatOverlays() []Row {
+	return ordered(func(r Row) (int, bool) {
+		return r.Chat.OverlayOrder, r.Chat.OverlayOrder > 0
 	})
 }
 

@@ -82,7 +82,7 @@ func buildRows() []Row {
 			},
 			Music:      &Music{Exclude: true, Reason: "YouTube Content ID", TargetLUFS: LUFSStreaming},
 			Moderation: &Moderation{Delete: true, TimeoutBan: true, Order: 1},
-			Chat:       Chat{SendMax: YouTubeChatMax, Order: 3},
+			Chat:       Chat{SendMax: YouTubeChatMax, Order: 3, OverlayOrder: 2},
 			Limits: []Limit{{
 				Kind: LimitArchiveDuration, Hours: 12, Status: LimitDocumented,
 				Source: "https://support.google.com/youtube/answer/6247592?hl=en",
@@ -106,7 +106,7 @@ func buildRows() []Row {
 			AudioTracksMax: 1,
 			Music:          &Music{Exclude: true, Reason: "Twitch DMCA policy", TargetLUFS: LUFSStreaming},
 			Moderation:     &Moderation{Delete: true, TimeoutBan: true, Order: 2},
-			Chat:           Chat{SendMax: 500, Order: 2},
+			Chat:           Chat{SendMax: 500, Order: 2, OverlayOrder: 1},
 			Limits: []Limit{{
 				Kind: LimitBroadcastDuration, Hours: 48, Status: LimitReported,
 				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines?language=en_US",
@@ -125,7 +125,7 @@ func buildRows() []Row {
 			RefusesVideoCodecs: []string{"hevc"},
 			Music:              &Music{Exclude: true, Reason: "Kick DMCA policy", TargetLUFS: LUFSStreaming},
 			Moderation:         &Moderation{Delete: true, TimeoutBan: true, Order: 3},
-			Chat:               Chat{SendMax: 500, Order: 1},
+			Chat:               Chat{SendMax: 500, Order: 1, OverlayOrder: 3},
 			Limits:             []Limit{{Kind: LimitBroadcastDuration, Status: LimitUnverified}},
 		},
 		{
@@ -141,6 +141,7 @@ func buildRows() []Row {
 			VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
 			Music:      &Music{Exclude: true, Reason: "Facebook Rights Manager", TargetLUFS: LUFSStreaming},
 			Moderation: &Moderation{Hide: true, Delete: true, Order: 4},
+			Chat:       Chat{OverlayOrder: 4},
 			Limits: []Limit{{
 				Kind: LimitBroadcastDuration, Hours: 8, Status: LimitDocumented,
 				Source: "https://developers.facebook.com/docs/live-video-api/reference",
@@ -154,7 +155,7 @@ func buildRows() []Row {
 				Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
 			},
 			Moderation:    &Moderation{Delete: true, TimeoutBan: true, Order: 5},
-			Chat:          Chat{SendMax: 140, Order: 4},
+			Chat:          Chat{SendMax: 140, Order: 4, OverlayOrder: 6},
 			PublishScopes: []string{"tweet.write", "media.write"},
 		},
 		{
@@ -164,6 +165,7 @@ func buildRows() []Row {
 			// Listed for moderation with every action false: automod shows Rumble's
 			// rows, flag and local hide work, and nothing is claimed upstream.
 			Moderation: &Moderation{Order: 6},
+			Chat:       Chat{OverlayOrder: 5},
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
 				Source: "https://rumble.support/help/livestream-settings", Checked: "2026-08-06",
