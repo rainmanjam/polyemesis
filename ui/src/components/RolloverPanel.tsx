@@ -5,7 +5,7 @@
    cutoff when there is one to count, the settings that trigger a rollover, and a
    manual "Roll over now". It shows nothing for a platform with no cap.
 
-   The countdown rules live in lib/rolloverCountdown.ts, so this file only draws
+   The countdown rules live in features/recurring/rolloverCountdown.ts, so this file only draws
    them. A reported cap is labelled as reported. A cap that is unverified shows no
    countdown at all. "Roll over now" reports each answer as its own outcome: 200
    is done, 409 is a refusal, 502 is the platform refusing, and the rest are
@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { countdownFor, formatRemaining } from "@/lib/rolloverCountdown";
+import { countdownFor, formatRemaining } from "@/features/recurring/rolloverCountdown";
 import { classifyRun } from "@/lib/recurringOutcome";
 import { getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
 import { useT } from "@/lib/i18n";

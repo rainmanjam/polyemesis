@@ -14,7 +14,7 @@ import { expect, test, type Page } from "@playwright/test";
    the consequence line is fed the real usage numbers from the server rather
    than a plausible-looking constant. The phrasing and the arithmetic are
    covered exhaustively (and mutation-tested) in
-   src/lib/rendition-consequence.test.ts; duplicating that here would be slow
+   src/features/destinations/rendition-consequence.test.ts; duplicating that here would be slow
    and would not add a guard.
 
    The fourth consequence state — "N other enabled destinations stay on this

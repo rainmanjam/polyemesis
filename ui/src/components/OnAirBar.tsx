@@ -9,7 +9,7 @@ import { ingestProcessUp, onAirSeconds } from "@/lib/liveness";
 import type { SignalTone } from "@/lib/signal";
 import type { FailoverStatus, Status } from "@/lib/types";
 import { useStateLabel, useT, type TranslationKey } from "@/lib/i18n";
-import { healthVerdict } from "@/lib/healthVerdict";
+import { healthVerdict } from "@/features/shell/healthVerdict";
 import { duration } from "@/lib/format";
 
 /* ===========================================================================
@@ -164,7 +164,7 @@ export function OnAirBar({
 
         {/* THE ANSWER TO "IS EVERYTHING FINE, AND WHAT NEEDS ME?" in one line.
             Healthy says so and how long the ingest has held; attention says how
-            many and gives a way to the first one. Derived in lib/healthVerdict,
+            many and gives a way to the first one. Derived in features/shell/healthVerdict,
             from the same rows the list below is drawn from. */}
         {verdict?.kind === "healthy" && (
           <span className="flex items-center gap-1.5 text-[12px] text-foreground">

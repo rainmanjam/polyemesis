@@ -56,11 +56,11 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
 import { WaitingForEncoder } from "@/components/WaitingForEncoder";
 import { srtAddressParts, urlCarriesCredential } from "@/lib/credential-url";
-import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
+import { tokenNotEnforcedKey } from "@/features/sources/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
-import { ingestPhase, ingestSummary } from "@/lib/sourceIngest";
+import { ingestPhase, ingestSummary } from "@/features/sources/sourceIngest";
 import type { Source, SourceId, SourceView } from "@/lib/types";
 
 // hls.js is only needed once a card shows a receiving feed (A2), so it is
@@ -253,7 +253,7 @@ export function SourcesPage() {
             // not a source card, because a first-run install has no sources at
             // all — nothing is seeded — so the card is the one thing on this
             // page that is guaranteed absent when the tour matters most.
-            // See ui/src/lib/tourSteps.ts.
+            // See ui/src/features/tour/tourSteps.ts.
             data-tour="add-source"
             onClick={() => setCreating(true)}
           >
@@ -800,7 +800,7 @@ export function SourceCard({
             something in it. It is also the honest boundary for the step, which
             is about the address and the credential together.
 
-            See ui/src/lib/tourSteps.ts. */}
+            See ui/src/features/tour/tourSteps.ts. */}
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (

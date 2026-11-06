@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import en from "./i18n/en.json";
-import { TOUR_STEPS } from "./tourSteps";
+import { TOUR_STEPS } from "@/features/tour/tourSteps";
 
 /* ===========================================================================
    The onboarding tour's selectors still match something

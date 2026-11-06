@@ -29,7 +29,7 @@ import {
   classifyUpload,
   failureLines,
   type UploadResult,
-} from "@/lib/uploadOutcome";
+} from "@/features/library/uploadOutcome";
 import type { MediaFile } from "@/lib/types";
 
 /* ===========================================================================

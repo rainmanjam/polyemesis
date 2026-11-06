@@ -25,7 +25,7 @@ import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
-import { useChatFlags } from "@/hooks/useChatFlags";
+import { useChatFlags } from "@/features/chat/useChatFlags";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useT } from "@/lib/i18n";
 import { mayClaim, readFailed } from "@/lib/readState";

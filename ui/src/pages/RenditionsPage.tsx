@@ -51,7 +51,7 @@ import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
-import { deleteConsequence } from "@/lib/renditionUsers";
+import { deleteConsequence } from "@/features/renditions/renditionUsers";
 import type {
   DestStatus,
   EncoderInfo,
@@ -632,7 +632,7 @@ export function RenditionsPage() {
         /* `null`, NOT `[]`, before the first snapshot. An empty array is a
            claim that nothing selects this rendition; a socket that has not
            spoken is not. Both dialogs fall back to the REST counts, which is
-           what RenditionCard has always done. See lib/renditionUsers.ts. */
+           what RenditionCard has always done. See features/renditions/renditionUsers.ts. */
         users={status && editing ? (usersById.get(editing.id) ?? []) : null}
         counts={editing ? countsFor(editing.id) : null}
         onSaved={loadRenditions}
@@ -993,7 +993,7 @@ export function RenditionDialog({
   cores?: number;
   /** The live list of destinations reading this rendition, or null when the
    *  status socket has not answered yet. Never `[]` for "not known": see
-   *  lib/renditionUsers.ts. */
+   *  features/renditions/renditionUsers.ts. */
   users: DestStatus[] | null;
   /** The database's own counts, which stand in when `users` is null. */
   counts: { destinations: number; enabledDestinations: number } | null;

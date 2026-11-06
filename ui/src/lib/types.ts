@@ -2408,7 +2408,7 @@ export interface DeviceAuth {
   /** When the code dies and the flow has to be restarted. */
   expiresAt: string;
   /** The minimum wait between polls, as the platform stated it and already
-   *  floored at five seconds by the server. Honour it; see lib/deviceFlow.ts. */
+   *  floored at five seconds by the server. Honour it; see features/accounts/deviceFlow.ts. */
   intervalSeconds: number;
 }
 
@@ -2455,7 +2455,7 @@ export interface ReconnectReason {
  *  type. Typing it `number` here would compile, and would then let any caller
  *  write `{stats.viewerCount}` or `count || 0` and tell a streamer with an
  *  audience that nobody is watching. `number | undefined` is what forces the
- *  branch, and viewerReadout() in lib/viewerCount.ts is where that branch is
+ *  branch, and viewerReadout() in features/accounts/viewerCount.ts is where that branch is
  *  taken once for the whole app. */
 export interface LiveStats {
   live: boolean;

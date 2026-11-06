@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 
 import { api } from "@/lib/api";
 import type { ChatFlaggedMessage, ChatFlagsResult, ChatMessage, ChatPlatform } from "@/lib/types";
-import { FLAGS_REFRESH_MS } from "@/hooks/useChatFlags";
+import { FLAGS_REFRESH_MS } from "@/features/chat/useChatFlags";
 
 /* UX COUNCIL A48: AUTOMOD'S FLAGS, READABLE ON CHAT.
  *

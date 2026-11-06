@@ -69,7 +69,7 @@ const fake = vi.hoisted(() => {
 });
 
 vi.mock("hls.js", () => ({ default: fake.FakeHls }));
-vi.mock("@/lib/liveCaptions", () => ({ useLiveCaptionTrack: () => {} }));
+vi.mock("@/features/player/liveCaptions", () => ({ useLiveCaptionTrack: () => {} }));
 vi.mock("@/lib/api", () => ({
   ApiError: class extends Error {},
   api: {

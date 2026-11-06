@@ -4,7 +4,7 @@ import Hls from "hls.js";
 import { api, ApiError } from "@/lib/api";
 import type { BeaconKind, PlayoutPublicView } from "@/lib/types";
 import { useT } from "@/lib/i18n";
-import { type ClockAnchor, useLiveCaptionTrack } from "@/lib/liveCaptions";
+import { type ClockAnchor, useLiveCaptionTrack } from "@/features/player/liveCaptions";
 import {
   browserCodecEnv,
   type CodecSupport,
@@ -12,9 +12,9 @@ import {
   forSegments,
   nativeSource,
   playableVariants,
-} from "@/lib/playerCodecs";
-import { countdownUnit, mediaTimeFor, parsePlayerLink, shareLinkAt, wallTimeAt } from "@/lib/playerLink";
-import { classifyHlsError, classifyMediaError, HEARTBEAT_MS, QoETracker } from "@/lib/qoeBeacon";
+} from "@/features/player/playerCodecs";
+import { countdownUnit, mediaTimeFor, parsePlayerLink, shareLinkAt, wallTimeAt } from "@/features/player/playerLink";
+import { classifyHlsError, classifyMediaError, HEARTBEAT_MS, QoETracker } from "@/features/player/qoeBeacon";
 import {
   hasDvrWindow,
   isBehindLive,
@@ -22,7 +22,7 @@ import {
   type PlayRange,
   type QualityOption,
   qualityOptions,
-} from "@/lib/playerControls";
+} from "@/features/player/playerControls";
 
 /** The public player page, served at /watch and /watch/:token.
  *

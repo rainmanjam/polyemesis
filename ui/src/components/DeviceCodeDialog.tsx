@@ -22,7 +22,7 @@ import {
   devicePollDelayMs,
   deviceSecondsRemaining,
   type DeviceFlowPhase,
-} from "@/lib/deviceFlow";
+} from "@/features/accounts/deviceFlow";
 import { useT } from "@/lib/i18n";
 
 /* ===========================================================================

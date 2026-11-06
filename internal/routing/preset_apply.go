@@ -11,7 +11,7 @@ import (
 //
 // DefaultPresetOpts are generic OBS-convention slots (music 0, mic 2, clean 1)
 // that know nothing about this ingest. The console has never applied a preset
-// with them as they stand: ui/src/lib/presetTrackDefaults.ts presetOptsFromRoles
+// with them as they stand: ui/src/features/routing/presetTrackDefaults.ts presetOptsFromRoles
 // opens each picker on the annotated track, so on a programme whose music sits
 // on track 3 "No music" drops track 3. A client with no pickers -- a Stream Deck
 // key, an agent -- sent no body and got track 0 dropped instead. This is that

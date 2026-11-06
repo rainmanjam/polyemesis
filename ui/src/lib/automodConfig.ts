@@ -19,7 +19,7 @@ import type {
    two places that need it — the matrix, which decides whether a cell is a
    switch at all, and the editor, which decides whether a field is complete —
    must not drift apart. They already did once, between the server's summary
-   and the operator's draft, and lib/automodArmed.ts exists because of it.
+   and the operator's draft, and features/automod/automodArmed.ts exists because of it.
    =========================================================================== */
 
 /** The vocabulary, once.

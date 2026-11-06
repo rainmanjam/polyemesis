@@ -8,7 +8,7 @@ import type { MutableRefObject, ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
-import { useDestinationUsage } from "@/lib/destinationUsage";
+import { useDestinationUsage } from "@/features/dashboard/destinationUsage";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import {
@@ -19,15 +19,15 @@ import {
   ingestUptimeSec,
   processAbsence,
 } from "@/lib/dashboardFacts";
-import { laneLayout } from "@/lib/sourceLanes";
+import { laneLayout } from "@/features/dashboard/sourceLanes";
 import { cn } from "@/lib/utils";
-import { topRowLayout } from "@/lib/dashboardLayout";
-import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import { topRowLayout } from "@/features/dashboard/dashboardLayout";
+import { failoverNotice, type FailoverNotice } from "@/features/dashboard/failoverNotice";
 import {
   failoverBannerTone,
   failoverElapsedSeconds,
   failoverSinceClock,
-} from "@/lib/failoverBanner";
+} from "@/features/dashboard/failoverBanner";
 import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
 import { publishRows } from "@/lib/publish-url";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -56,7 +56,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
 import { AudiencePanel } from "@/components/AudiencePanel";
 import { NarrowDisclosure } from "@/components/NarrowDisclosure";
-import { useIsNarrow } from "@/hooks/useIsNarrow";
+import { useIsNarrow } from "@/features/dashboard/useIsNarrow";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -1196,7 +1196,7 @@ export function Dashboard() {
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
    * until the read lands, and failoverNotice() treats that as "say nothing"
-   * rather than "unprotected" -- see lib/failoverNotice.ts. */
+   * rather than "unprotected" -- see features/dashboard/failoverNotice.ts. */
   const [failover, setFailover] = useState<FailoverSettings | null>(null);
   /* The failover TIER's live state, which is a different thing from the
    * settings above: those are what the operator configured, this is what the
@@ -1510,7 +1510,7 @@ export function Dashboard() {
   );
 
   /* The top row's shape, from one call so its two halves cannot disagree.
-   * See lib/dashboardLayout.ts and #614. */
+   * See features/dashboard/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
   // One element, drawn in one of two places by width (see orderSections).
   const notice = failoverNotice(destinations.filter((d) => d.enabled).length, failover);
@@ -1754,7 +1754,7 @@ export function Dashboard() {
             // destination count is — the empty-state twin disappears the moment
             // the operator adds their first destination, which is precisely
             // when somebody replaying the tour from Settings would be looking
-            // for it. See ui/src/lib/tourSteps.ts.
+            // for it. See ui/src/features/tour/tourSteps.ts.
             data-tour="add-destination"
             // Outline, not filled: Go live is the one filled start action on this
             // page, and Add destination is a secondary one (A9).
@@ -2091,7 +2091,7 @@ export function Dashboard() {
         </div>
 
         {/* THE ONE UNRECOVERABLE FAILURE, said where the destinations it would
-            cost are listed. See lib/failoverNotice.ts and #512.
+            cost are listed. See features/dashboard/failoverNotice.ts and #512.
 
             Here rather than in the attention panel: that panel lists what is
             wrong NOW, and its own comment explains that padding it with states

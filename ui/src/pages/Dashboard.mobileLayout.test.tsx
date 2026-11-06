@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 
 import { Dashboard } from "./Dashboard";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
-import { NARROW_QUERY } from "@/hooks/useIsNarrow";
+import { NARROW_QUERY } from "@/features/dashboard/useIsNarrow";
 import { translate } from "@/lib/i18n";
 import type { Status } from "@/lib/types";
 

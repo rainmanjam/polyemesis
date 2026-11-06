@@ -55,7 +55,7 @@ import {
   isAdvancedCard,
   useShowAdvanced,
   type AdvancedCard as AdvancedCardKey,
-} from "@/lib/settingsAdvanced";
+} from "@/features/settings/settingsAdvanced";
 import {
   Select,
   SelectContent,
@@ -97,9 +97,9 @@ import {
   suggestedHostname,
   RESTART_COMMAND,
   type AcmeStance,
-} from "@/lib/acme-guidance";
+} from "@/features/settings/acme-guidance";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
-import { mqttPlainScheme } from "@/lib/mqtt";
+import { mqttPlainScheme } from "@/features/settings/mqtt";
 import { dateOnly, timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
@@ -109,7 +109,7 @@ import {
 import { LIMITS } from "@/lib/limits";
 import { credentialLabelsFor } from "@/lib/platformCredentialLabels";
 import { cn } from "@/lib/utils";
-import { pipelineDirty, pipelineSaveCarriesPassword } from "@/lib/pipelineSave";
+import { pipelineDirty, pipelineSaveCarriesPassword } from "@/features/settings/pipelineSave";
 import {
   failedRead,
   mayClaim,
@@ -607,7 +607,7 @@ const AdvancedContext = createContext<{
 }>({ show: true, revealed: new Set(), setShow: () => {} });
 
 /** One advanced card (settings-council R4, R7), HIDDEN rather than unmounted
- *  when it is not shown -- see lib/settingsAdvanced.ts for why. `settings` is
+ *  when it is not shown -- see features/settings/settingsAdvanced.ts for why. `settings` is
  *  the STORED document, not the draft: a card shown because its saved value is
  *  not the default must not vanish under the operator's cursor the moment they
  *  type the default back in. */
@@ -3046,7 +3046,7 @@ export function PlatformCredCard({
                     <div className="font-mono text-sm text-muted-foreground">{a.accountRef}</div>
                     {/* What the capability matrix promises, on the account it
                         is a promise about. Polled while this row is open; see
-                        lib/viewerCount.ts for why the interval is what it is. */}
+                        features/accounts/viewerCount.ts for why the interval is what it is. */}
                     <AccountLiveStats accountId={a.id} />
                     {/* Said in full rather than as a bare badge: a token cannot
                         gain a permission it was not issued with, which is
@@ -3890,7 +3890,7 @@ function SecretKeyCard({ system }: { system: SystemInfo | null }) {
             no statement of why it matters. Reached at /settings?tab=security:
             the tab is URL-driven (see the Tabs in SettingsPage above), which is
             what lets the tour navigate straight to it rather than asking the
-            operator to find it. See ui/src/lib/tourSteps.ts. */}
+            operator to find it. See ui/src/features/tour/tourSteps.ts. */}
         <div data-tour="data-directory" className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
             <span className="shrink-0 text-sm text-muted-foreground">{t("set.dataDirectory")}</span>

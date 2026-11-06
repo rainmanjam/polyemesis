@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ViewerReadoutLine } from "./AccountLiveStats";
-import { viewerReadout } from "@/lib/viewerCount";
+import { viewerReadout } from "@/features/accounts/viewerCount";
 import type { AccountStats } from "@/lib/types";
 
 /* THE ASSERTION THAT MATTERS: a live stream whose viewer count was withheld

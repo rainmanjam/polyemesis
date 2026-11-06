@@ -14,7 +14,7 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData, useSourceTracks, useStaleTracker } from "@/hooks/useLiveData";
 import { autoApi } from "@/lib/autoApi";
 import { db } from "@/lib/format";
-import { loudnessMeasured } from "@/lib/meterFacts";
+import { loudnessMeasured } from "@/features/meters/meterFacts";
 import type { LoudnessMix } from "@/lib/types";
 import { autoZoomRange, FIXED_RANGE, type DbRange } from "@/lib/meterScale";
 import { toneBadge, type SignalTone } from "@/lib/signal";

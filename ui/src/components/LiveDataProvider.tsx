@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
-import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
+import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
 import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useLanguage, useT } from "@/lib/i18n";
 import { toneBadge, toneForState, toneText } from "@/lib/signal";
-import { VIEWER_POLL_MS, viewerReadout, type ViewerReadout } from "@/lib/viewerCount";
+import { VIEWER_POLL_MS, viewerReadout, type ViewerReadout } from "@/features/accounts/viewerCount";
 
 /* ===========================================================================
    One connected account's live state, beside the account it belongs to.

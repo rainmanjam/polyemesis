@@ -5,7 +5,7 @@ import { channelLabels } from "@/lib/channels";
 import type { MatrixCell, SourceTrack } from "@/lib/types";
 import { RotateCcw, Undo2, Volume2, VolumeX } from "lucide-react";
 import { useT } from "@/lib/i18n";
-import { gainDbLabel, gainState } from "@/lib/matrixGain";
+import { gainDbLabel, gainState } from "@/features/routing/matrixGain";
 
 /* ===========================================================================
    Advanced mode: the full mix matrix.

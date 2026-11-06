@@ -3,7 +3,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { useT } from "@/lib/i18n";
 import type { HeaderLive } from "@/lib/headerLive";
 import { cn } from "@/lib/utils";
-import { chipFits } from "@/lib/chipFit";
+import { chipFits } from "@/features/shell/chipFit";
 
 /** Re-measures with a ResizeObserver on the row, the yardstick and every item
  *  beside the chip (a switcher whose label settles after the programme list
