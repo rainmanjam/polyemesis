@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -18,8 +18,8 @@ import (
 // It is deliberately dumb everywhere except ScrubDestinationText, which is the
 // one thing under test. That one applies the BOUNDARY half of what the real
 // engine applies -- the exact secret set built from the destination's own row --
-// and stops there. The real helper follows it with alerts.Redact as a residual;
-// this does not, on purpose, because alerts.Redact has a call-site allowlist
+// and stops there. The real helper follows it with redact.Redact as a residual;
+// this does not, on purpose, because redact.Redact has a call-site allowlist
 // (#162) and a test fake is not a place worth widening it for. Nothing here
 // measures whether the scrub WORKS, only whether snapshot calls it; whether it
 // works is internal/engine's TestScrubDestinationTextCoversTheRetainedTopic.
@@ -60,7 +60,7 @@ func (f *fakeMQTTEngine) ScrubDestinationText(id int64, text string) string {
 		return text
 	}
 	if key := f.dests[id]; key != "" {
-		text = alerts.NewSecretSet(nil, key).Scrub(text)
+		text = redact.NewSecretSet(nil, key).Scrub(text)
 	}
 	return text
 }
@@ -136,7 +136,7 @@ func TestTheRetainedDestTopicIsScrubbedAtTheSink(t *testing.T) {
 			"subscriber and rotating the key does not recall it. The assignment in "+
 			"mqttRunner.snapshot must stay `e.ScrubDestinationText(d.ID, d.Error)` (#160).", got)
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("DestState.Error = %q -- the key is gone but nothing says a redaction "+
 			"happened, which usually means the diagnostic was dropped rather than masked", got)
 	}

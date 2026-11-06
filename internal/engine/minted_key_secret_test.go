@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The operator's own key, and the minted key Twitch answers a successful
@@ -49,7 +49,7 @@ const (
 // it reaches an FFmpeg command line and therefore reaches process.log, the
 // monitoring page's argv, and every error the supervisor renders.
 // supervisor.Process removes exactly the literals it was handed in Spec.Secrets
-// and alerts.SecretSet.Scrub does that with strings.ReplaceAll.
+// and redact.SecretSet.Scrub does that with strings.ReplaceAll.
 //
 // So registering the ORIGINAL key -- which destSecrets did, and which is what a
 // reasonable person would assume covers "the stream key" -- masks the minted
@@ -91,7 +91,7 @@ func TestTheMintedKeyIsMaskedWholeAndNotJustItsTail(t *testing.T) {
 
 	// What the supervisor would be told to remove -- the value engine/
 	// multitrack.go really puts in Destination.MintedKey, query and all.
-	set := alerts.NewSecretSet(nil, destSecrets(row, mintedKeyAsRegistered)...)
+	set := redact.NewSecretSet(nil, destSecrets(row, mintedKeyAsRegistered)...)
 
 	// A log line of the shape FFmpeg actually produces when a publish fails, and
 	// carrying the key WITHOUT its query -- which is the case the registered
@@ -148,7 +148,7 @@ func TestTheMintedKeyIsMaskedWholeAndNotJustItsTail(t *testing.T) {
 func TestTheMintedKeyIsMaskedWithoutItsClientConfigIDQuery(t *testing.T) {
 	// No row key, no URL: the composed minted value is the only secret in play,
 	// so nothing else can account for a pass.
-	set := alerts.NewSecretSet(nil, wireSpellings([]string{mintedKeyAsRegistered})...)
+	set := redact.NewSecretSet(nil, wireSpellings([]string{mintedKeyAsRegistered})...)
 
 	got := set.Scrub("Failed to open output rtmps://h/app/" + mintedKeyWhole)
 	if strings.Contains(got, mintedKeyWhole) {
@@ -164,7 +164,7 @@ func TestTheMintedKeyIsMaskedWithoutItsClientConfigIDQuery(t *testing.T) {
 // TestWireSpellingsNeverEmitsAnEmptyLiteral guards the boundary both prefix
 // expansions share.
 //
-// An empty string in an alerts.SecretSet matches at every position of every
+// An empty string in an redact.SecretSet matches at every position of every
 // line, so a `i >= 0` where the code says `i > 0` would not fail loudly -- it
 // would quietly turn every log line into mask characters, or be dropped
 // downstream and look like nothing happened. Either way the value that got the
@@ -192,7 +192,7 @@ func TestWireSpellingsNeverEmitsAnEmptyLiteral(t *testing.T) {
 
 // TestRegisteringOnlyTheOriginalKeyLeavesTheSignatureStanding is the negative
 // control, and it exists because the test above could pass for the wrong
-// reason -- alerts.Redact runs a residual pattern pass, and if THAT were what
+// reason -- redact.Redact runs a residual pattern pass, and if THAT were what
 // removed the signature then destSecrets would be untested and the protection
 // would be an accident.
 //
@@ -213,7 +213,7 @@ func TestRegisteringOnlyTheOriginalKeyLeavesTheSignatureStanding(t *testing.T) {
 		StreamKey: mintedOperatorKey,
 	}
 	// Deliberately NOT passing the minted key: this is the naive protection.
-	set := alerts.NewSecretSet(nil, destSecrets(row)...)
+	set := redact.NewSecretSet(nil, destSecrets(row)...)
 	got := set.Scrub("publishing to /app/" + mintedKeyWhole)
 
 	if !strings.Contains(got, mintedSignature) {

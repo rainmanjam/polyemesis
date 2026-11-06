@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The planned-rollover API (#19). Four routes: the platform caps the countdown counts to, one destination's settings
@@ -207,7 +207,7 @@ func (s *Server) handleRunRollover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 	case err != nil:
 		// A failed live-start read reaches here unredacted by act, and its text can carry a platform response body.
-		writeError(w, http.StatusInternalServerError, alerts.Redact(err.Error()))
+		writeError(w, http.StatusInternalServerError, redact.Redact(err.Error()))
 	default:
 		// The call is synchronous, so the rollover has finished by the time this answers.
 		writeJSON(w, http.StatusOK, map[string]string{"status": "rolled over"})
@@ -264,7 +264,7 @@ func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, account,
 	}
 	for _, r := range results {
 		if !r.OK {
-			return errors.New(alerts.Redact(r.Detail))
+			return errors.New(redact.Redact(r.Detail))
 		}
 	}
 	return nil

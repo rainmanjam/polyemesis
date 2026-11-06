@@ -1,4 +1,4 @@
-package alerts
+package redact
 
 import (
 	"log/slog"
@@ -21,7 +21,7 @@ import (
 //     the operator loses the thing they opened the page for. The failure is
 //     over-masking. Nothing escapes.
 //   - Too HIGH and a genuinely short credential is not covered by the exact
-//     pass at all. alerts.Redact still runs over the same bytes as the residual
+//     pass at all. redact.Redact still runs over the same bytes as the residual
 //     outer pass, but Redact is best-effort and grammatically incapable over
 //     FFmpeg's open `-flag value` namespace, so this IS a real, permanent
 //     residual on the stderr path for very short credentials.
@@ -52,7 +52,7 @@ var ffmpegCommonWord = map[string]bool{
 // SecretSet is a set of EXACT credential literals to remove from any text that
 // is about to be shown, logged or published.
 //
-// Exact, not heuristic, and that is the whole point. alerts.Redact recognises
+// Exact, not heuristic, and that is the whole point. redact.Redact recognises
 // URLs, `key=value` pairs and space-separated Bearer headers, and it was the
 // only masking on the process-argv egresses. That is a GRAMMAR over an open
 // namespace: FFmpeg accepts arbitrary `-flag value` pairs, so `-rtmp_conn
@@ -97,7 +97,7 @@ func NewSecretSet(log *slog.Logger, values ...string) *SecretSet {
 		if len(v) < MinSecretLen {
 			if log != nil {
 				log.Debug("secret literal refused: shorter than the exact-match floor, "+
-					"so only the residual alerts.Redact pass covers it",
+					"so only the residual redact.Redact pass covers it",
 					"length", len(v), "floor", MinSecretLen)
 			}
 			continue
@@ -137,7 +137,7 @@ func (s *SecretSet) Len() int {
 // reaches the argv glued to whatever surrounded it -- `S:<key>`,
 // `Authorization:Bearer\<key>`, `rtmps://host/app/<key>` -- and a token-boundary
 // rule would miss all three. There is no shape of surrounding text that defeats
-// this, which is exactly the property alerts.Redact cannot have.
+// this, which is exactly the property redact.Redact cannot have.
 func (s *SecretSet) Scrub(text string) string {
 	if s == nil || len(s.lits) == 0 || text == "" {
 		return text

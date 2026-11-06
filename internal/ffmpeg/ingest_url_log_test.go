@@ -24,7 +24,7 @@ import (
  * the recorder is a second consumer and the inner handler still writes the
  * original record.
  *
- * NOT alerts.RedactURL EITHER, and this is the part worth stating. That is the
+ * NOT redact.RedactURL EITHER, and this is the part worth stating. That is the
  * residual pass, written for strings nobody constructed. Its keyCarrying table
  * is rtmp/rtsp/srt/udp/rtp -- https is absent -- so a CDN pull URL of the shape
  * https://cdn.example/live/<TOKEN>/index.m3u8 goes through it untouched. Here we

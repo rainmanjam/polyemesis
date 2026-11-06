@@ -9,7 +9,7 @@ package db
 // supervisor wrote it to data/logs/process.log. The credential scrubber holds
 // EXACT literals and it held the stored 65 bytes, so it matched nothing.
 //
-// Every downstream defence in this repository -- alerts.SecretSet, the API leak
+// Every downstream defence in this repository -- redact.SecretSet, the API leak
 // scan in internal/api/argv_leak_test.go, step 8 of
 // scripts/acceptance-multistream.sh -- assumes the value it was told about is
 // the value that goes out. These tests pin the boundary that makes the
@@ -65,7 +65,7 @@ func TestAStreamKeyWithAControlCharacterIsRefused(t *testing.T) {
 				t.Fatalf("Validate accepted a stream key carrying a control character.\n" +
 					"FFmpeg stops reading the publish URL there, so the stored key and the " +
 					"key that reaches the platform are different strings -- and " +
-					"alerts.SecretSet, which is exact substring replacement, only knows the " +
+					"redact.SecretSet, which is exact substring replacement, only knows the " +
 					"stored one. That is #306: the key was written to process.log in the " +
 					"clear on a live run with the scrub correctly wired.")
 			}

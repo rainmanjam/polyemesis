@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -213,7 +213,7 @@ func TestASuccessfulNegotiationPublishesToTheMintedTarget(t *testing.T) {
 // run where FFmpeg printed a 56-byte prefix of a key back on stderr.
 //
 // It prints the LAST PATH SEGMENT of its output target rather than the whole
-// URL, and that is the load-bearing detail. alerts.Redact recognises an RTMP
+// URL, and that is the load-bearing detail. redact.Redact recognises an RTMP
 // URL and masks its last segment on sight, so a line that still looks like a
 // URL is scrubbed whether or not anything was registered as a secret -- a test
 // built on one cannot fail. A bare token is the shape Redact has no rule for,
@@ -304,7 +304,7 @@ func TestTheMintedKeyReachesTheProcessSecretSet(t *testing.T) {
 }
 
 // The negative control, and it exists because the test above could pass for the
-// wrong reason. alerts.Redact runs a residual pattern pass after the declared
+// wrong reason. redact.Redact runs a residual pattern pass after the declared
 // literals are removed, and if THAT were what removed the signature then
 // destSecrets would be untested and the protection an accident.
 //
@@ -320,17 +320,17 @@ func TestTheMintedKeyReachesTheProcessSecretSet(t *testing.T) {
 // rediscover it.
 func TestTheResidualPassAloneDoesNotRemoveTheMintedSignature(t *testing.T) {
 	row := twitchRow()
-	set := alerts.NewSecretSet(nil, destSecrets(row)...)
+	set := redact.NewSecretSet(nil, destSecrets(row)...)
 
 	bare := set.Scrub("stream key rejected: " + mintedFromTwitch + "?clientConfigId=abc")
-	if !strings.Contains(alerts.Redact(bare), mintedSigPrefix) {
+	if !strings.Contains(redact.Redact(bare), mintedSigPrefix) {
 		t.Fatalf("the signature was already gone without registering the minted key, so "+
 			"TestTheMintedKeyReachesTheProcessSecretSet is not testing what it says:\n%s", bare)
 	}
 
 	urlish := set.Scrub("Failed to open " + negotiatedHost + "/" + mintedFromTwitch)
-	if strings.Contains(alerts.Redact(urlish), mintedSigPrefix) {
-		t.Error("alerts.Redact no longer masks a whole RTMP path segment, so the guard above " +
+	if strings.Contains(redact.Redact(urlish), mintedSigPrefix) {
+		t.Error("redact.Redact no longer masks a whole RTMP path segment, so the guard above " +
 			"could be made simpler -- assert on Process.CommandString instead of spawning a child")
 	}
 }

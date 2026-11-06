@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 const (
@@ -80,7 +81,7 @@ type Stats struct {
 	LastSent time.Time `json:"lastSent,omitempty"`
 	// LastError is a copy of the last DeliveryRecord.Error and carries the same
 	// three passes; see deliver. It is SERVED to a read-scoped token at GET
-	// /api/v1/hooks/meta, so "has already been through alerts.Redact" -- which
+	// /api/v1/hooks/meta, so "has already been through redact.Redact" -- which
 	// is what this comment used to say -- was both the wrong claim and the
 	// wrong standard: Redact cannot see an https path secret, which is the only
 	// credential this field has ever plausibly carried.
@@ -136,7 +137,7 @@ type DeliveryRecord struct {
 	//
 	// Error is a TRANSPORT failure, which net/http hands over as a *url.Error
 	// carrying the FULL endpoint URL -- and a Slack or Discord webhook keeps
-	// its entire credential in that URL's PATH. alerts.Redact does not mask an
+	// its entire credential in that URL's PATH. redact.Redact does not mask an
 	// https path and never did, so this field disclosed a working webhook
 	// secret at GET /api/v1/hooks/{id}/deliveries to any token that could read
 	// it. It now goes through alerts.ClientErrorText, then this hook's exact
@@ -550,7 +551,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 	// path+query, which is where a Slack or Discord webhook keeps its entire
 	// credential, and the signing secret, which an endpoint that verifies
 	// signatures may quote back when verification fails.
-	secrets := alerts.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
+	secrets := redact.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
 
 	started := d.now()
 	rec := DeliveryRecord{
@@ -563,7 +564,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		}
 		rec.Attempts = attempt
 		status, snippet, retry, err := d.attempt(ctx, hook, body, env)
-		rec.Status, rec.Response = status, alerts.Redact(secrets.Scrub(snippet))
+		rec.Status, rec.Response = status, redact.Redact(secrets.Scrub(snippet))
 		if err == nil {
 			rec.DurationMS = d.now().Sub(started).Milliseconds()
 			sent := d.now()
@@ -572,12 +573,12 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 			return
 		}
 		// ClientErrorText FIRST, then the exact set. The transport error is a
-		// *url.Error carrying the FULL endpoint URL, and alerts.Redact is a
+		// *url.Error carrying the FULL endpoint URL, and redact.Redact is a
 		// NO-OP on an https path secret (see its doc, limit 2) -- so the
 		// Redact call that used to be here masked nothing at all on the one
 		// failure mode that mattered. Redact still runs, last and as the
 		// residual, for a credential neither of the other two could know about.
-		rec.Error = alerts.Redact(secrets.Scrub(alerts.ClientErrorText(err)))
+		rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))
 		if !retry || attempt == hook.MaxAttempts {
 			break
 		}
@@ -645,14 +646,14 @@ func (d *Dispatcher) attempt(ctx context.Context, h Hook, body []byte, env Envel
 	}()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, bodySnippet))
 	// RETURNED RAW, AND THE ORDER IS THE WHOLE POINT. This used to apply
-	// alerts.Redact here and leave the exact pass to the caller, which inverted
+	// redact.Redact here and leave the exact pass to the caller, which inverted
 	// the rule internal/alerts states about itself: the declared SecretSet is
 	// the MECHANISM and Redact is the BACKSTOP over what is left. Redact
 	// TRANSFORMS text -- RedactURL re-encodes a query string -- so a declared
 	// literal that arrived inside a URL was no longer byte-identical by the time
 	// secrets.Scrub ran, and the exact pass matched nothing.
 	//
-	// Both callers now spell it alerts.Redact(secrets.Scrub(...)), which is how
+	// Both callers now spell it redact.Redact(secrets.Scrub(...)), which is how
 	// deliverTest already wrote it one line below its own snippet handling.
 	// This is a THIRD PARTY'S response body: Redact is worst at exactly these
 	// shapes -- `{"error":"bad token XXXX"}` is JSON, which it does not see at
@@ -710,21 +711,21 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 	// handleTestHook put it straight into a 502 body. A false statement of
 	// coverage is worse than no statement, because it is the thing the next
 	// reader relies on.
-	secrets := alerts.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
+	secrets := redact.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
 
 	started := d.now()
 	status, snippet, _, err := d.attempt(ctx, hook, body, env)
 	res := TestResult{
 		Status:     status,
 		DurationMS: d.now().Sub(started).Milliseconds(),
-		Response:   alerts.Redact(secrets.Scrub(snippet)),
+		Response:   redact.Redact(secrets.Scrub(snippet)),
 		Body:       string(body),
 	}
 	if hook.Secret != "" {
 		res.Signature = Sign(hook.Secret, d.now().Unix(), body)
 	}
 	if err != nil {
-		err = errors.New(alerts.Redact(secrets.Scrub(alerts.ClientErrorText(err))))
+		err = errors.New(redact.Redact(secrets.Scrub(alerts.ClientErrorText(err))))
 	}
 	return res, err
 }

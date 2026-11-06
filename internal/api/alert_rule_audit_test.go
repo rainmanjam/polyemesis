@@ -14,6 +14,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // DELETING THE ONLY ALERT RULE USED TO LEAVE NO RECORD AT ALL.
@@ -97,7 +98,7 @@ func TestEveryAlertRuleChangeIsLoggedAndRaised(t *testing.T) {
 			t.Errorf("no %q line in the log:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "remote=203.0.113.5") || !strings.Contains(text, alerts.Mask) {
+	if !strings.Contains(text, "remote=203.0.113.5") || !strings.Contains(text, redact.Mask) {
 		t.Errorf("the log lines do not carry the address and the redacted URL:\n%s", text)
 	}
 	if strings.Contains(text, "XXXXsecretXXXX") {

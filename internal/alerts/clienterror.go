@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // ClientErrorText renders an outbound HTTP error for a place an operator will
@@ -17,7 +19,7 @@ import (
 // verbatim at GET /api/v1/alerts/meta, which a READ-SCOPED token may call. That
 // is a read token escalating to "can post into your Slack".
 //
-// WHY NOT Redact. Running alerts.Redact over this string is A NO-OP and must
+// WHY NOT Redact. Running redact.Redact over this string is A NO-OP and must
 // never be recorded as a fix: Redact only masks the last path segment of the
 // KEY-CARRYING schemes (rtmp, srt, ...), because for those the path IS the
 // stream key. An https path is left alone deliberately -- masking every https
@@ -41,7 +43,7 @@ import (
 // THIS IS NOT THE WHOLE FIX. It handles the wrapper, which is where the URL
 // arrives by construction. A credential the ENDPOINT chose to echo back in its
 // own error body is a different shape and is covered by the per-caller
-// alerts.SecretSet at the call site. Both layers, in that order.
+// redact.SecretSet at the call site. Both layers, in that order.
 func ClientErrorText(err error) string {
 	if err == nil {
 		return ""
@@ -59,10 +61,10 @@ func ClientErrorText(err error) string {
 	// error names the target, for one), and that copy is not covered by
 	// rebuilding the wrapper. Replaced by value, which needs no grammar.
 	if ue.URL != "" {
-		inner = strings.ReplaceAll(inner, ue.URL, RedactWebhookURL(ue.URL))
+		inner = strings.ReplaceAll(inner, ue.URL, redact.RedactWebhookURL(ue.URL))
 	}
 
-	out := RedactWebhookURL(ue.URL)
+	out := redact.RedactWebhookURL(ue.URL)
 	if ue.Op != "" {
 		out = ue.Op + " " + out
 	}

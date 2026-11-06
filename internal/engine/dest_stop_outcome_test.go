@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 		// it proves the token that reached the command line is the token that
 		// reaches stderr.
 		//
-		// The segment alone, never the whole URL. alerts.Redact recognises an
+		// The segment alone, never the whole URL. redact.Redact recognises an
 		// RTMP URL and masks its last segment on sight, so a line that still
 		// looks like a URL is scrubbed whether or not anything was registered
 		// as a secret — a test built on one cannot fail. A bare token is the

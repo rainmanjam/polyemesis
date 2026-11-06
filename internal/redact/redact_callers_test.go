@@ -1,4 +1,4 @@
-package alerts
+package redact
 
 import (
 	"go/ast"
@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// redactAllowlist is every file in the tree permitted to call alerts.Redact,
+// redactAllowlist is every file in the tree permitted to call redact.Redact,
 // with the reason it is allowed.
 //
 // THIS IS THE ENFORCEMENT MECHANISM FOR #162, in place of a type change.
@@ -32,11 +32,11 @@ import (
 // Redact first, satisfy yourself that the declared secrets are already gone via
 // a SecretSet, and then add the file with a sentence saying so.
 var redactAllowlist = map[string]string{
-	// --- the definition and its own tests ---
-	"internal/alerts/redact.go": "Redact is defined here; Event.Redacted is the outbound " +
-		"payload pass, applied by Publish so a careless event builder cannot skip it.",
-	"internal/alerts/redact_test.go":          "tests of Redact itself.",
-	"internal/alerts/redact_residual_test.go": "pins the documented residuals; see the comments there.",
+	// --- the definition (internal/redact/redact.go, which never calls it) and its tests ---
+	"internal/alerts/redacted.go": "Event.Redacted is the outbound payload pass, applied by " +
+		"Publish so a careless event builder cannot skip it. Whole strings, never argv elements.",
+	"internal/redact/redact_test.go":          "tests of Redact itself.",
+	"internal/redact/redact_residual_test.go": "pins the documented residuals; see the comments there.",
 	"internal/alerts/webhook_disclosure_test.go": "asserts that Redact is a NO-OP on an https " +
 		"webhook path, so nobody records \"also run Redact on LastError\" as the #160 fix.",
 
@@ -85,7 +85,7 @@ var redactAllowlist = map[string]string{
 
 	// --- the debug-mode recorder ---
 	"internal/diag/diag.go": "residual only, and applied AFTER the recorder's own " +
-		"alerts.SecretSet -- Recorder.scrub is Redact(secrets.Scrub(s)), never Redact " +
+		"redact.SecretSet -- Recorder.scrub is Redact(secrets.Scrub(s)), never Redact " +
 		"alone. The set is the mechanism and is rebuilt whenever a destination's key " +
 		"changes, because a rotated key is a literal the old set never held. It is a " +
 		"WHOLE-STRING pass over a log message and over attribute keys and values, " +
@@ -99,12 +99,12 @@ var redactAllowlist = map[string]string{
 	"internal/hooks/payload.go": "the outbound hook payload pass, the hooks-side twin of " +
 		"alerts.Event.Redacted. Whole strings, never argv elements.",
 	"internal/hooks/dispatch.go": "residual only. The boundary on this path is the per-worker " +
-		"alerts.SecretSet seeded from the hook's URL path+query and signing secret (#160), " +
+		"redact.SecretSet seeded from the hook's URL path+query and signing secret (#160), " +
 		"and the transport error goes through alerts.ClientErrorText first because Redact " +
 		"is a NO-OP on an https path secret.",
 
 	// --- the read-scoped WebSocket view ---
-	"internal/alerts/tree.go": "RedactJSONTree, the residual pass over a read-scoped " +
+	"internal/redact/tree.go": "RedactJSONTree, the residual pass over a read-scoped " +
 		"socket frame and an events-stream payload (moved here from internal/api/ws_policy.go " +
 		"when the events API became its second caller). Note the []any arm: it joins an " +
 		"all-string array and redacts the JOIN rather than the elements, precisely so a " +
@@ -154,7 +154,7 @@ var redactAllowlist = map[string]string{
 // PR copies a wire contract from. Verified before the change: a file planted at
 // internal/web/zz_probe.go containing
 //
-//	for i, a := range argv { out[i] = alerts.Redact(a) }
+//	for i, a := range argv { out[i] = redact.Redact(a) }
 //
 // -- the exact per-element loop this guard exists to stop -- and
 // TestRedactIsCalledOnlyFromTheAllowlist PASSED. A guard with a
@@ -174,9 +174,9 @@ func skipWalkDir(rel, name string) bool {
 	// .claude holds git worktrees, which are FULL CHECKOUTS OF THIS SAME
 	// MODULE. Walking one scans every file of whatever branch is checked out
 	// there, under a path the allowlist cannot match -- so
-	// `internal/alerts/redact.go`, which is allowlisted and calls Redact by
+	// `internal/redact/tree.go`, which is allowlisted and calls Redact by
 	// definition, reappears as
-	// `.claude/worktrees/agent-<id>/internal/alerts/redact.go` and fails the
+	// `.claude/worktrees/agent-<id>/internal/redact/tree.go` and fails the
 	// guard. Measured: with two agent worktrees open this reported four
 	// violations, none of them in the tree under test, and every one of them a
 	// file already on the allowlist at its real path.
@@ -196,10 +196,10 @@ func skipWalkDir(rel, name string) bool {
 }
 
 // TestRedactIsCalledOnlyFromTheAllowlist fails the build when a new file calls
-// alerts.Redact.
+// redact.Redact.
 //
 // Checked against the SYNTAX TREE, not the source text (#107). A substring
-// search for "alerts.Redact(" would match every sentence in this file and in
+// search for "redact.Redact(" would match every sentence in this file and in
 // the doc comment on Redact, and would miss an in-package call written as a
 // bare `Redact(`.
 func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
@@ -231,7 +231,7 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 		if perr != nil {
 			return nil // a file that does not parse is not a call site
 		}
-		inAlerts := file.Name.Name == "alerts"
+		inRedact := file.Name.Name == "redact"
 
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -247,12 +247,12 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 					return true
 				}
 				id, ok := fn.X.(*ast.Ident)
-				if !ok || id.Name != "alerts" {
+				if !ok || id.Name != "redact" {
 					return true
 				}
 			case *ast.Ident:
 				// A bare Redact(...) is only this function inside this package.
-				if !inAlerts || fn.Name != "Redact" {
+				if !inRedact || fn.Name != "Redact" {
 					return true
 				}
 			default:
@@ -268,21 +268,21 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 	}
 
 	if len(found) == 0 {
-		t.Fatal("no call to alerts.Redact was found anywhere in the tree. Either the " +
+		t.Fatal("no call to redact.Redact was found anywhere in the tree. Either the " +
 			"walk is broken -- in which case this guard has been silently passing -- or " +
 			"Redact is now dead and should be deleted rather than left exported.")
 	}
 
 	for path := range found {
 		if _, ok := redactAllowlist[path]; !ok {
-			t.Errorf("%s calls alerts.Redact and is not on redactAllowlist.\n\n"+
+			t.Errorf("%s calls redact.Redact and is not on redactAllowlist.\n\n"+
 				"Redact is a RESIDUAL pass, not a boundary. Read its doc comment: it is "+
 				"blind to FFmpeg's `-flag value` grammar (`-passphrase KEY` leaks even "+
 				"though `passphrase` is in its table), it does not mask an https path "+
 				"segment, it does not see JSON, and applying it PER ELEMENT of an argv is "+
 				"strictly worse than applying it to the joined text and never better.\n\n"+
 				"If what you need is a guarantee, declare the literals: "+
-				"supervisor.Spec.Secrets for a process, alerts.NewSecretSet at any other "+
+				"supervisor.Spec.Secrets for a process, redact.NewSecretSet at any other "+
 				"sink. If you genuinely want the best-effort outer pass on top of that, "+
 				"add this file to redactAllowlist with a sentence saying which exact pass "+
 				"runs first.", path)
@@ -290,7 +290,7 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 	}
 	for path, why := range redactAllowlist {
 		if !found[path] {
-			t.Errorf("redactAllowlist names %s (%q) but nothing there calls alerts.Redact "+
+			t.Errorf("redactAllowlist names %s (%q) but nothing there calls redact.Redact "+
 				"any more. Remove the entry: a stale allowlist entry is a hole somebody "+
 				"else can move into without tripping this test.", path, why)
 		}
@@ -298,7 +298,7 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 }
 
 // repoRoot walks up from the test's working directory to the module root, so
-// this test does not encode how deep internal/alerts sits.
+// this test does not encode how deep internal/redact sits.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := filepath.Abs(".")

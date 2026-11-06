@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 /* THE DEBUG ROUTES, DRIVEN THROUGH THE ROUTER.
@@ -36,7 +36,7 @@ func debugServer(t *testing.T, wired bool) (http.Handler, func(*http.Request), *
 	var rec *diag.Recorder
 	var sw *diag.Switch
 	if wired {
-		rec = diag.NewRecorder(32, alerts.NewSecretSet(nil))
+		rec = diag.NewRecorder(32, redact.NewSecretSet(nil))
 		sw = diag.NewSwitch(slog.LevelInfo)
 	}
 	_, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
@@ -250,7 +250,7 @@ func TestTheDebugRoutesNeedASession(t *testing.T) {
 // automation starting a capture with PUT /debug both keep working; only taking
 // the FILE requires a session.
 func TestOnlyASessionCanExportTheBundle(t *testing.T) {
-	rec := diag.NewRecorder(32, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(32, redact.NewSecretSet(nil))
 	sw := diag.NewSwitch(slog.LevelInfo)
 	_, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
 	sign := login(t, h)
@@ -306,7 +306,7 @@ func TestOnlyASessionCanExportTheBundle(t *testing.T) {
 // THE SET THE HANDLER ACTUALLY BUILDS, NOT ONE A TEST HANDED ITSELF.
 //
 // internal/diag's TestAPullSourceCredentialDoesNotReachTheExport constructs its
-// SecretSet with alerts.NewSecretSet(nil, camPass, cdnToken, publishToken) —
+// SecretSet with redact.NewSecretSet(nil, camPass, cdnToken, publishToken) —
 // the literals written out by hand. That proves the SCRUBBER works on values it
 // was given, and says nothing about whether the EXTRACTOR gives it the right
 // ones. It passed throughout the period when engine.SourceSecrets was reading a
@@ -319,7 +319,7 @@ func TestOnlyASessionCanExportTheBundle(t *testing.T) {
 func TestTheHandlerBuiltSetCoversAPullSourceCredential(t *testing.T) {
 	const pathSeg = "SUPERSECRETPATHSEGREVIEW"
 
-	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(64, redact.NewSecretSet(nil))
 	sw := diag.NewSwitch(slog.LevelInfo)
 	srv, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
 	sign := login(t, h)
@@ -334,7 +334,7 @@ func TestTheHandlerBuiltSetCoversAPullSourceCredential(t *testing.T) {
 	ing := base.Ingest
 	ing.Mode = db.IngestPull
 	// A CDN URL WHOSE CREDENTIAL IS A PATH SEGMENT, deliberately: no userinfo and
-	// no query, so alerts.Redact does not recognise it by shape and the DECLARED
+	// no query, so redact.Redact does not recognise it by shape and the DECLARED
 	// set is the only thing that can mask it. An rtsp://user:pass@ URL would be
 	// caught by the residual pass whatever the extractor did, which is why the
 	// first version of this test could not fail.
@@ -373,11 +373,11 @@ func TestTheHandlerBuiltSetCoversAPullSourceCredential(t *testing.T) {
 // The obs-websocket password is declared to the debug bundle's scrub set. No
 // code logs it today; this holds the set to covering it if some code ever does.
 func TestTheHandlerBuiltSetCoversTheOBSWebsocketPassword(t *testing.T) {
-	// A shape alerts.Redact does not recognise on its own -- no "password="
+	// A shape redact.Redact does not recognise on its own -- no "password="
 	// beside it -- so only the declared set can mask it.
 	secret := "OBSWS" + strings.Repeat("Zq9", 6)
 
-	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(64, redact.NewSecretSet(nil))
 	sw := diag.NewSwitch(slog.LevelInfo)
 	srv, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
 	sign := login(t, h)
@@ -416,7 +416,7 @@ func TestTheHandlerBuiltSetCoversTheOBSWebsocketPassword(t *testing.T) {
 func TestAnOBSPasswordSetWhileRecordingIsScrubbedFromTheBundle(t *testing.T) {
 	secret := "OBSWS" + strings.Repeat("Kx7", 6)
 
-	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(64, redact.NewSecretSet(nil))
 	sw := diag.NewSwitch(slog.LevelInfo)
 	_, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
 	sign := login(t, h)

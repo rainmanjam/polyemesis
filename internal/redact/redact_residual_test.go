@@ -1,4 +1,4 @@
-package alerts
+package redact
 
 import (
 	"strings"
@@ -19,7 +19,7 @@ import (
 // enumerable, so each added pattern closes one measured shape and leaves the
 // unmeasured ones exactly as open as they were, while making the next reader
 // believe the function is a boundary. The structural answer already exists:
-// declare the literal in supervisor.Spec.Secrets (or alerts.NewSecretSet at the
+// declare the literal in supervisor.Spec.Secrets (or redact.NewSecretSet at the
 // sink) and the spelling stops mattering.
 func TestRedactKnownResiduals(t *testing.T) {
 	const k = "live_284729384_pQ8fZmT3xR9wLkYvB2nHsA"

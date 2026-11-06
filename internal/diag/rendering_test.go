@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 /* THE RENDERING IS PART OF THE SCRUB, AND THREE WAYS IT WAS NOT.
@@ -44,7 +44,7 @@ func encodeBundle(t *testing.T, r *Recorder) string {
 // longer contains the literal. The stranger receiving the bundle decodes it in
 // one step.
 func TestACredentialInsideAByteSliceIsScrubbed(t *testing.T) {
-	r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(8, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 	r.Observe(Record{Level: "INFO", Message: "response body",
 		Attrs: map[string]any{"body": []byte("prefix " + sentinelKey + " suffix")}})
@@ -92,7 +92,7 @@ func decodeAllBase64(s string) []string {
 // an ampersand.
 func TestACredentialContainingAnAmpersandIsScrubbed(t *testing.T) {
 	const pw = "p&notArealPw.notreal"
-	r := NewRecorder(8, alerts.NewSecretSet(nil, pw))
+	r := NewRecorder(8, redact.NewSecretSet(nil, pw))
 	r.SetRecording(true)
 	r.Observe(Record{Level: "INFO", Message: "pull source refused",
 		Attrs: map[string]any{"detail": map[string]string{"passphrase": pw}}})
@@ -139,7 +139,7 @@ func TestACredentialContainingAnAmpersandIsScrubbed(t *testing.T) {
 // a factor of six — measured at 785,437 bytes against an asserted 393,216.
 func TestControlCharactersCannotInflateTheEncodedBundle(t *testing.T) {
 	const capacity = 16
-	r := NewRecorder(capacity, alerts.NewSecretSet(nil))
+	r := NewRecorder(capacity, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	for range capacity * 2 {
 		r.Observe(Record{Level: "INFO", Message: strings.Repeat("\x00", MaxRecordBytes*2)})
@@ -166,7 +166,7 @@ func TestControlCharactersCannotInflateTheEncodedBundle(t *testing.T) {
 // engineer reading the capture sees the field that would have explained the
 // fault, present and empty.
 func TestAGroupedAttributeKeepsItsValues(t *testing.T) {
-	r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(8, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 
 	r.Observe(Record{Level: "INFO", Message: "starting", Attrs: map[string]any{
@@ -188,7 +188,7 @@ func TestAGroupedAttributeKeepsItsValues(t *testing.T) {
 
 // And a credential inside a group is still scrubbed.
 func TestACredentialInsideAGroupIsScrubbed(t *testing.T) {
-	r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(8, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 	r.Observe(Record{Level: "INFO", Message: "publishing", Attrs: map[string]any{
 		"g": []slog.Attr{slog.String("key", sentinelKey)},

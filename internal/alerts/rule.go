@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/netguard"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Format is the JSON shape a webhook endpoint expects. Discord and Slack are
@@ -88,7 +89,7 @@ type Rule struct {
 }
 
 // RedactedURL is what an API response or a log line may show.
-func (r Rule) RedactedURL() string { return RedactWebhookURL(r.URL) }
+func (r Rule) RedactedURL() string { return redact.RedactWebhookURL(r.URL) }
 
 // MarshalJSON adds the masked endpoint, so a handler that simply encodes a
 // Rule cannot leak the real one.

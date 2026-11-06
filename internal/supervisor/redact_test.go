@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The shape from the audit: a Facebook live destination publishing to the
@@ -42,7 +42,7 @@ func facebookDestArgv() []string {
 }
 
 // Proven able to fail against the committed tree by deleting the line
-// `a = alerts.Redact(a)` from CommandString in supervisor.go: the primary key,
+// `a = redact.Redact(a)` from CommandString in supervisor.go: the primary key,
 // the backup key and the SRT passphrase all reappeared in the rendered command
 // and every secretGone assertion below failed.
 func TestTheRenderedCommandCarriesNoStreamKey(t *testing.T) {
@@ -61,9 +61,9 @@ func TestTheRenderedCommandCarriesNoStreamKey(t *testing.T) {
 	// The backup key is the one that arrived most recently and has no separate
 	// masking anywhere else, so name it: a redactor that caught only the first
 	// URL in the argv would pass everything above except this.
-	if strings.Count(got, alerts.Mask) < 3 {
+	if strings.Count(got, redact.Mask) < 3 {
 		t.Errorf("expected the primary URL, the backup URL and the passphrase to be masked "+
-			"(%d masks), got %d in: %s", 3, strings.Count(got, alerts.Mask), got)
+			"(%d masks), got %d in: %s", 3, strings.Count(got, redact.Mask), got)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestTheRenderedCommandCarriesNoStreamKey(t *testing.T) {
 // this to find out WHICH destination is refusing them and why. A redactor that
 // blanked the whole command would satisfy the test above and be useless.
 //
-// Proven able to fail against the committed tree by changing `alerts.Redact` to
-// `alerts.RedactWebhookURL` in CommandString in supervisor.go -- the signatures
+// Proven able to fail against the committed tree by changing `redact.Redact` to
+// `redact.RedactWebhookURL` in CommandString in supervisor.go -- the signatures
 // match, so it compiles, and every argument collapsed to "[redacted]".
 func TestTheRenderedCommandIsStillDiagnosable(t *testing.T) {
 	p := New(discardLog(), Spec{Name: "dest:3", Kind: "destination",
@@ -90,7 +90,7 @@ func TestTheRenderedCommandIsStillDiagnosable(t *testing.T) {
 }
 
 // Proven able to fail against the committed tree by deleting the line
-// `lines[i].Text = alerts.Redact(lines[i].Text)` from Logs in supervisor.go:
+// `lines[i].Text = redact.Redact(lines[i].Text)` from Logs in supervisor.go:
 // the publish URL came back whole and the key assertion failed.
 func TestLogsCarryNoStreamKeyOutOfTheProcess(t *testing.T) {
 	p := New(discardLog(), Spec{Name: "dest:3", Kind: "destination"})
@@ -108,7 +108,7 @@ func TestLogsCarryNoStreamKeyOutOfTheProcess(t *testing.T) {
 	if strings.Contains(got, backupKey) {
 		t.Errorf("Logs() still carries the stream key FFmpeg printed.\ngot: %s", got)
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("the key was neither present nor masked; the line was rewritten some "+
 			"third way.\ngot: %s", got)
 	}
@@ -121,8 +121,8 @@ func TestLogsCarryNoStreamKeyOutOfTheProcess(t *testing.T) {
 	}
 }
 
-// Proven able to fail against the committed tree by changing `alerts.Redact` to
-// `alerts.RedactWebhookURL` in Logs in supervisor.go -- the signatures match,
+// Proven able to fail against the committed tree by changing `redact.Redact` to
+// `redact.RedactWebhookURL` in Logs in supervisor.go -- the signatures match,
 // so it compiles, and every ordinary line collapsed to "[redacted]".
 //
 // This is the guard against overcorrecting. Almost every line in the ring is an
@@ -163,7 +163,7 @@ func TestOrdinaryLogLinesArePassedThroughUntouched(t *testing.T) {
 // this field is left sitting on the broker after polyemesis exits, readable by
 // every subscriber, behind no session at all.
 //
-// Proven able to fail against the committed tree by changing `alerts.Redact(p.lastErr)`
+// Proven able to fail against the committed tree by changing `redact.Redact(p.lastErr)`
 // back to `p.lastErr` in Status in supervisor.go.
 func TestStatusLastErrorCarriesNoStreamKey(t *testing.T) {
 	p := New(discardLog(), Spec{Name: "dest:3", Kind: "destination"})
@@ -178,7 +178,7 @@ func TestStatusLastErrorCarriesNoStreamKey(t *testing.T) {
 			"It is serialised by GET /processes, by the dashboard snapshot, and -- "+
 			"retained -- onto an MQTT topic that outlives this process.\ngot: %s", got)
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("the key was neither present nor masked.\ngot: %s", got)
 	}
 	for _, want := range []string{"exit status 1", "Error opening output", fbHost, "Connection refused"} {
@@ -221,7 +221,7 @@ func (c *capturingSink) WriteLog(l LogLine) { c.lines = append(c.lines, l) }
 // reports and ship in support tarballs, which the database beside it never is.
 //
 // Proven able to fail against the committed tree by changing appendLog's
-// `Text: alerts.Redact(text)` back to `Text: text`: measured FAIL, "the log
+// `Text: redact.Redact(text)` back to `Text: text`: measured FAIL, "the log
 // sink was handed the stream key".
 func TestTheLogSinkIsNeverHandedAStreamKey(t *testing.T) {
 	sink := &capturingSink{}
@@ -237,7 +237,7 @@ func TestTheLogSinkIsNeverHandedAStreamKey(t *testing.T) {
 		t.Errorf("the log sink was handed the stream key, and FileSink writes it to "+
 			"process.log where it stays for ever.\ngot: %s", got)
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("the key was neither present nor masked; the line was rewritten some "+
 			"third way.\ngot: %s", got)
 	}
@@ -255,7 +255,7 @@ func TestTheLogSinkIsNeverHandedAStreamKey(t *testing.T) {
 // into a ticket, which is the hazard the redaction policy exists for.
 //
 // Proven able to fail against the committed tree by changing appendLog's
-// `Text: alerts.Redact(text)` back to `Text: text`: measured FAIL, "the OnLog
+// `Text: redact.Redact(text)` back to `Text: text`: measured FAIL, "the OnLog
 // callback was handed the stream key".
 func TestTheOnLogCallbackIsNeverHandedAStreamKey(t *testing.T) {
 	var seen []LogLine
@@ -326,7 +326,7 @@ func TestTheProcessExitedLogLineCarriesNoStreamKey(t *testing.T) {
 	// Not merely absent: absent because it was masked. A scrub that dropped
 	// the error text entirely would pass the check above and take the
 	// diagnostic with it.
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("the key was neither present nor masked -- the error text\n"+
 			"has gone missing rather than been scrubbed.\ngot: %s", got)
 	}
@@ -395,7 +395,7 @@ func TestTheGivingUpLogLineCarriesNoStreamKey(t *testing.T) {
 			"This fires after a destination has been refused repeatedly, which\n" +
 			"is exactly when server.log gets copied into a bug report.")
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("the key was neither present nor masked -- the error text has\n"+
 			"gone missing rather than been scrubbed.\ngot: %s", got)
 	}

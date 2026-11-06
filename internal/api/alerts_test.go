@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The alert-rule routes were the largest untested family in this package, and
@@ -46,7 +46,7 @@ func TestAlertRuleNeverEchoesTheWebhookURL(t *testing.T) {
 		if strings.Contains(body, "XXXXsecretXXXX") {
 			t.Errorf("%s echoed the webhook secret back:\n%s", p, body)
 		}
-		if !strings.Contains(body, alerts.Mask) {
+		if !strings.Contains(body, redact.Mask) {
 			t.Errorf("%s returned no masked endpoint; the UI has nothing to show:\n%s", p, body)
 		}
 	}
@@ -77,7 +77,7 @@ func TestUpdatingARuleWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	// Rule cannot leak the real one. That is also exactly why a form hands the
 	// mask back: to the client it IS the url field.
 	masked, _ := shown["url"].(string)
-	if masked == "" || !strings.Contains(masked, alerts.Mask) {
+	if masked == "" || !strings.Contains(masked, redact.Mask) {
 		t.Fatalf("expected a masked endpoint to hand back, got %q", masked)
 	}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/recording"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -68,7 +69,7 @@ func (q alertRuleRequest) applyTo(r alerts.Rule) alerts.Rule {
 		// that has never existed and break alerting silently, so a value still
 		// carrying the mask means "unchanged" rather than an error nobody could
 		// have avoided.
-		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, alerts.Mask) {
+		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, redact.Mask) {
 			r.URL = u
 		}
 	}

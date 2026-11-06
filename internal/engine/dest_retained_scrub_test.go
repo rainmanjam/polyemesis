@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // TestScrubDestinationTextCoversTheRetainedTopic is the #160 half that has no
@@ -54,7 +54,7 @@ func TestScrubDestinationTextCoversTheRetainedTopic(t *testing.T) {
 				"This string is published to a RETAINED MQTT topic and cannot be recalled.",
 				in, got)
 		}
-		if !strings.Contains(got, alerts.Mask) {
+		if !strings.Contains(got, redact.Mask) {
 			t.Errorf("ScrubDestinationText(%q) = %q -- the key is gone but nothing says a "+
 				"redaction happened, which usually means the text was destroyed rather "+
 				"than masked", in, got)
@@ -123,7 +123,7 @@ func TestScrubDestinationTextCoversTheMintedKeyToo(t *testing.T) {
 	}
 	e.mu.Unlock()
 
-	// NOT a URL, deliberately. alerts.Redact runs a residual pass that masks the
+	// NOT a URL, deliberately. redact.Redact runs a residual pass that masks the
 	// last path segment of anything it recognises as a publish URL, so a
 	// "rtmp://h/app/<minted>" fixture passes on the UNFIXED code and this test
 	// would prove nothing -- verified by mutating status.go back and watching it
@@ -158,7 +158,7 @@ func TestScrubDestinationTextCoversTheMintedKeyToo(t *testing.T) {
 		t.Errorf("a destination that never negotiated had its diagnostic mangled: %q", got)
 	}
 
-	// THE NEGATIVE CONTROL. alerts.Redact runs a residual pass of its own, and
+	// THE NEGATIVE CONTROL. redact.Redact runs a residual pass of its own, and
 	// if THAT were what removed the signature above then this fix would be
 	// untested and the protection an accident. It is not hypothetical: the
 	// first draft of this test used a "rtmp://h/app/<minted>" fixture and

@@ -107,7 +107,7 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
   # gitleaks refuses a config that mixes the two, and a second block is what
   # keeps each set of fixtures scoped to the files it belongs to.
   [[rules.allowlists]]
-  description = "YouTube and Facebook URL fixtures for the alerts redactor"
+  description = "YouTube and Facebook URL fixtures for the redactor (internal/redact and alerts.Event.Redacted)"
   # AND, not the default OR. With OR, listing the paths below would allowlist
   # ANY secret in those two files, including a real one committed by accident —
   # and a test file is exactly where a real key tends to get committed by
@@ -116,7 +116,7 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
   condition = "AND"
   regexTarget = "match"
   regexes = [
-    # The fake YouTube stream key redact_test.go asserts is masked. If
+    # The fake YouTube stream key the redact and alerts redaction tests assert is masked. If
     # redaction ever breaks, that test fails — a better signal than gitleaks
     # flagging the fixture forever.
     '''live_284729384_pQ8fZmT3xR9wLkYvB2nHsA''',
@@ -125,7 +125,8 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     '''rtmp-api\.facebook\.com:\d+''',
   ]
   paths = [
-    '''internal/alerts/redact_test\.go''',
+    '''internal/redact/redact_test\.go''',
+    '''internal/alerts/event_redact_test\.go''',
     '''internal/oauth/facebook_test\.go''',
   ]
 

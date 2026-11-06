@@ -429,7 +429,7 @@ whitelist test had even exempted the field by name, on the reasoning that an
 error is not a URL.
 
 So free-text fields are now masked **where the line is captured**, in
-`internal/supervisor`, before anything can copy them. `alerts.RedactURL` — the
+`internal/supervisor`, before anything can copy them. `redact.RedactURL` — the
 same masking applied to webhook alerts — is what does it, so there is one
 definition rather than a second one that can drift.
 

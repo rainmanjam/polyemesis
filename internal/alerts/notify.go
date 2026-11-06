@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/netguard"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Notifier delivery defaults. The queue is generous and the sender is not:
@@ -584,7 +585,7 @@ func (n *Notifier) currentRules() []Rule {
 // rather than merely unlikely. A handful of allocations on a path that fires
 // when a broadcast fails is not a cost worth reasoning about.
 //
-// alerts.Redact is NOT the fix here and adding it would be a no-op: it does not
+// redact.Redact is NOT the fix here and adding it would be a no-op: it does not
 // mask an https path segment. See its doc, limit 2.
 func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 	err := n.post(ctx, d)
@@ -604,8 +605,8 @@ func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 // nil logger on purpose: a refusal here is not news. The floor and the
 // FFmpeg-vocabulary denylist exist for operator-typed expert arguments, and a
 // webhook path shorter than MinSecretLen is not a credential anybody minted.
-func (n *Notifier) endpointSecrets(r Rule) *SecretSet {
-	return NewSecretSet(nil, EndpointSecrets(r.URL)...)
+func (n *Notifier) endpointSecrets(r Rule) *redact.SecretSet {
+	return redact.NewSecretSet(nil, EndpointSecrets(r.URL)...)
 }
 
 // SetRetry changes the retry budget on a running Notifier.

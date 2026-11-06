@@ -38,7 +38,7 @@ import (
 // so each security type gets exactly one subject and the varying detail goes in
 // a field.
 //
-// The second is that a NAME travels and a VALUE never does. alerts.Redact is a
+// The second is that a NAME travels and a VALUE never does. redact.Redact is a
 // syntax matcher, and the description that used to stand here -- "it finds URLs,
 // key=value pairs and Bearer headers" -- was true only of the spellings its
 // table happens to hold. It finds a Bearer header written with a SPACE and not
@@ -62,7 +62,7 @@ import (
 // docs/MONITORING.md in those words rather than glossed over.
 
 // fieldAddress labels the request's source address. Deliberately not "ip" or
-// "client": alerts.SecretName normalises a field label and masks the value when
+// "client": redact.SecretName normalises a field label and masks the value when
 // it names a credential, so every label in this file has to be one that is not
 // in that table -- a field called "token" would arrive as "[redacted]" and the
 // operator would think something had gone wrong.
@@ -112,7 +112,7 @@ const (
 // that appends passes the client's own bytes along -- so without this check
 // text of an attacker's choosing could reach the operator's channel.
 //
-// alerts.Redact is not a backstop for this. It matches syntax -- URLs, k=v
+// redact.Redact is not a backstop for this. It matches syntax -- URLs, k=v
 // pairs, Bearer headers -- and a plain sentence passes through it untouched.
 //
 // A forged header falls back to the peer address, which is the truth about

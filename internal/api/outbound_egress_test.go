@@ -207,7 +207,7 @@ func TestOutboundHookPayloadCarriesNoStoredCredential(t *testing.T) {
 	serverUnderTest(t, h).hooks = d
 
 	// (1) THE POSITIVE CONTROL. A marker in the field the payload is built from,
-	// asserted to ARRIVE. alerts.Redact masks URL-shaped credentials and leaves
+	// asserted to ARRIVE. redact.Redact masks URL-shaped credentials and leaves
 	// a bare word alone, so this reaches the wire -- which is the point: this
 	// egress carries PROCESS STATE VERBATIM, and #169's "what would make it
 	// unsafe" is exactly that. Without this line, everything below is an

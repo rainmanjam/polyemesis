@@ -1215,7 +1215,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// a substring replace and the minted key ENDS WITH the operator's
 		// original, so registering only the original masks the last segment and
 		// leaves the signature and the hex manifest standing in the log. Empty
-		// when nothing was minted, which destSecrets and alerts.NewSecretSet
+		// when nothing was minted, which destSecrets and redact.NewSecretSet
 		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
 		Secrets: destSecrets(row, mt.MintedKey),
 		// The only signal that says this destination is PUBLISHING rather than

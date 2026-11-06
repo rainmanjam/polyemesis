@@ -31,6 +31,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // ------------------------------------------------------------------- fixtures
@@ -1137,7 +1138,7 @@ func TestABroadcastFaultAlertNeverCarriesASecret(t *testing.T) {
 		if strings.Contains(string(body), plantedSecret) {
 			t.Fatalf("a %s broadcast fault carried a secret to the wire:\n%s", format, body)
 		}
-		if !strings.Contains(string(body), alerts.Mask) {
+		if !strings.Contains(string(body), redact.Mask) {
 			t.Errorf("a %s broadcast fault dropped the text entirely instead of masking it; "+
 				"the operator still needs to know their broadcast will not start:\n%s",
 				format, body)

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 const plantedKey = "live_9999_PLANTEDSTREAMKEY"
@@ -80,7 +80,7 @@ func TestNoStreamKeyReachesTheWire(t *testing.T) {
 			t.Fatalf("delivery %d (%s) carried a stream key to the wire:\n%s",
 				i, events[i].Trigger, body)
 		}
-		if !strings.Contains(body, alerts.Mask) {
+		if !strings.Contains(body, redact.Mask) {
 			t.Errorf("delivery %d (%s) dropped the free text entirely instead of "+
 				"masking it; the receiver needs to know something went wrong:\n%s",
 				i, events[i].Trigger, body)
@@ -94,7 +94,7 @@ func TestNoStreamKeyReachesTheWire(t *testing.T) {
 //
 // Mutation: none available in production code today; env is built from
 // constants, and this pins that. If a future Test() ever echoes operator input
-// into Reason, this is what makes it go through alerts.Redact first.
+// into Reason, this is what makes it go through redact.Redact first.
 func TestTheTestDeliveryCarriesNoFreeTextFromTheHook(t *testing.T) {
 	rec := &recorder{}
 	d := NewDispatcher(testLogger(t), SourceFunc(func() ([]Hook, error) { return nil, nil }),
@@ -137,7 +137,7 @@ func TestNoEnvelopeFieldIsNamedAfterASecret(t *testing.T) {
 		switch node := v.(type) {
 		case map[string]any:
 			for k, child := range node {
-				if alerts.SecretName(k) {
+				if redact.SecretName(k) {
 					t.Errorf("envelope field %s%s is named after a credential; "+
 						"a hook payload must never carry one", path, k)
 				}

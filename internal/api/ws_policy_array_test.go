@@ -6,22 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
-// TestRedactJSONTreeDoesNotLeakAnArgvHeader is the #162 half of alerts.RedactJSONTree (formerly redactJSONTree here).
+// TestRedactJSONTreeDoesNotLeakAnArgvHeader is the #162 half of redact.RedactJSONTree (formerly redactJSONTree here).
 //
 // An array of strings in a payload is an argv, and an argv is where a
-// credential arrives SPLIT. alerts.Redact's grammar is `label SEP value`, so
+// credential arrives SPLIT. redact.Redact's grammar is `label SEP value`, so
 // running it over each element in turn masks nothing at all on the canonical,
 // correctly-spelled header form -- which is the shape it is most important to
-// catch. See the doc on alerts.Redact and TestRedactPerElementIsStrictlyWorse.
+// catch. See the doc on redact.Redact and TestRedactPerElementIsStrictlyWorse.
 func TestRedactJSONTreeDoesNotLeakAnArgvHeader(t *testing.T) {
 	// Named `sentinel`, not `secret`. gitleaks' generic-api-key rule keys off the
 	// IDENTIFIER on the left of the assignment -- key, api, token, secret, auth
@@ -92,7 +92,7 @@ func TestRedactJSONTreeDoesNotLeakAnArgvHeader(t *testing.T) {
 					"must test the JOIN and collapse the array when the join changes.",
 					sentinel, got)
 			}
-			if !strings.Contains(got, alerts.Mask) {
+			if !strings.Contains(got, redact.Mask) {
 				t.Errorf("nothing was masked at all in %s -- the sentinel is gone but so is "+
 					"any sign that redaction happened, which usually means the payload was "+
 					"dropped rather than redacted", got)
@@ -225,13 +225,13 @@ func TestRedactJSONTreeArrayRuleIsSoundInOneDirection(t *testing.T) {
 	}
 	for _, arr := range arrays {
 		joined := strings.Join(arr, " ")
-		if alerts.Redact(joined) != joined {
+		if redact.Redact(joined) != joined {
 			// The join changed, so the array collapses; nothing to check about
 			// the elements.
 			continue
 		}
 		for _, e := range arr {
-			if alerts.Redact(e) != e {
+			if redact.Redact(e) != e {
 				t.Errorf("the join of %v was UNCHANGED but the element %q was not. "+
 					"The []any arm recurses when the join is unchanged, so this would be "+
 					"a leak of the array rule's own reasoning: Redact must only ever "+

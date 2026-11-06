@@ -1,4 +1,4 @@
-package alerts
+package redact
 
 import (
 	"encoding/json"
