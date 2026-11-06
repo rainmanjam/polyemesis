@@ -2,11 +2,33 @@
  *  generated, so the shapes the UI actually consumes stay obvious. */
 
 import type { TranslationKey } from "./i18n";
+import { WIRE } from "./contract/wire";
+import type {
+  ChatState,
+  EventType,
+  FailureCause,
+  JobState,
+  ObsConnState,
+  OffloadState,
+  ProcessState,
+  TokenScope,
+} from "./contract/wire";
+
+export type {
+  ChatState,
+  EventType,
+  FailureCause,
+  JobState,
+  ObsConnState,
+  OffloadState,
+  ProcessState,
+  TokenScope,
+};
 
 /** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
  *  its capabilities response — prefer that where it is to hand, and treat this
  *  as the fallback for code that renders before capabilities have loaded. */
-export const MAX_TRACKS = 32;
+export const MAX_TRACKS: number = WIRE.routing.maxTracks;
 
 // ------------------------------------------------------------------ ids
 //
@@ -104,8 +126,8 @@ export const ROLE_LABEL_KEY: Record<Exclude<TrackRole, "">, TranslationKey> = {
 };
 
 /** Matches routing.MaxLabelLen / MaxLangTagLen. */
-export const MAX_LABEL_LEN = 64;
-export const MAX_LANG_TAG_LEN = 35;
+export const MAX_LABEL_LEN: number = WIRE.routing.maxLabelLen;
+export const MAX_LANG_TAG_LEN: number = WIRE.routing.maxLangTagLen;
 
 /** The operator's description of one ingest track. Keyed by index rather than
  *  by position, so it survives a track vanishing and coming back. */
@@ -134,24 +156,24 @@ export interface Loudness {
   rangeLu?: number;
 }
 
-export const LUFS_STREAMING = -14;
-export const LUFS_PODCAST = -16;
-export const LUFS_BROADCAST = -23;
-export const DEFAULT_TRUE_PEAK_DB = -1;
-export const DEFAULT_LOUDNESS_LRA = 11;
+export const LUFS_STREAMING: number = WIRE.routing.lufsStreaming;
+export const LUFS_PODCAST: number = WIRE.routing.lufsPodcast;
+export const LUFS_BROADCAST: number = WIRE.routing.lufsBroadcast;
+export const DEFAULT_TRUE_PEAK_DB: number = WIRE.routing.defaultTruePeakDb;
+export const DEFAULT_LOUDNESS_LRA: number = WIRE.routing.defaultLoudnessLra;
 
-export const MIN_TARGET_LUFS = -70;
-export const MAX_TARGET_LUFS = -5;
-export const MIN_TRUE_PEAK_DB = -9;
-export const MAX_TRUE_PEAK_DB = 0;
-export const MIN_LOUDNESS_LRA = 1;
-export const MAX_LOUDNESS_LRA = 50;
+export const MIN_TARGET_LUFS: number = WIRE.routing.minTargetLufs;
+export const MAX_TARGET_LUFS: number = WIRE.routing.maxTargetLufs;
+export const MIN_TRUE_PEAK_DB: number = WIRE.routing.minTruePeakDb;
+export const MAX_TRUE_PEAK_DB: number = WIRE.routing.maxTruePeakDb;
+export const MIN_LOUDNESS_LRA: number = WIRE.routing.minLoudnessLra;
+export const MAX_LOUDNESS_LRA: number = WIRE.routing.maxLoudnessLra;
 
 /** Audio against video, in ms. Positive holds AUDIO back (lip-sync repair, a
  *  moderation delay); negative pulls it ahead, which the compiler pays for by
  *  holding the VIDEO back instead. The bounds are asymmetric for that reason. */
-export const MIN_DELAY_MS = -2000;
-export const MAX_DELAY_MS = 30000;
+export const MIN_DELAY_MS: number = WIRE.routing.minDelayMs;
+export const MAX_DELAY_MS: number = WIRE.routing.maxDelayMs;
 
 /** Pull one group of tracks down whenever another is speaking. `trigger` is
  *  what causes the duck (the mic), `target` is what gets pushed down (the
@@ -166,15 +188,15 @@ export interface Ducking {
   releaseMs?: number;
 }
 
-export const DEFAULT_DUCK_THRESHOLD_DB = -24;
-export const DEFAULT_DUCK_RATIO = 8;
-export const DEFAULT_DUCK_ATTACK_MS = 20;
-export const DEFAULT_DUCK_RELEASE_MS = 300;
+export const DEFAULT_DUCK_THRESHOLD_DB: number = WIRE.routing.defaultDuckThresholdDb;
+export const DEFAULT_DUCK_RATIO: number = WIRE.routing.defaultDuckRatio;
+export const DEFAULT_DUCK_ATTACK_MS: number = WIRE.routing.defaultDuckAttackMs;
+export const DEFAULT_DUCK_RELEASE_MS: number = WIRE.routing.defaultDuckReleaseMs;
 
-export const MIN_DUCK_THRESHOLD_DB = -60;
-export const MAX_DUCK_THRESHOLD_DB = 0;
-export const MIN_DUCK_RATIO = 1;
-export const MAX_DUCK_RATIO = 20;
+export const MIN_DUCK_THRESHOLD_DB: number = WIRE.routing.minDuckThresholdDb;
+export const MAX_DUCK_THRESHOLD_DB: number = WIRE.routing.maxDuckThresholdDb;
+export const MIN_DUCK_RATIO: number = WIRE.routing.minDuckRatio;
+export const MAX_DUCK_RATIO: number = WIRE.routing.maxDuckRatio;
 
 export interface RoutingProfile {
   mode: RoutingMode;
@@ -792,12 +814,6 @@ export interface EncoderList {
   gpu: GpuInfo;
 }
 
-export type ProcessState =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "reconnecting"
-  | "failed";
 
 export interface Progress {
   frame: number;
@@ -835,16 +851,6 @@ export interface ProcessStatus {
 
 /** The classified cause of a failure. The codes are a published contract:
  *  the same strings reach MQTT, webhooks and alert payloads. */
-export type FailureCause =
-  | "key_rejected"
-  | "platform_not_ready"
-  | "dns"
-  | "connection_refused"
-  | "timeout"
-  | "tls"
-  | "codec_rejected"
-  | "upload_too_slow"
-  | "unknown";
 
 /** failreason.Reason, field for field. */
 export interface FailureReason {
@@ -1170,14 +1176,14 @@ export interface StreamHealthView {
  *
  *  A published floor may be encoded; an unpublished one may not. Mirrors
  *  oauth.FacebookStreamHealthInterval, which carries the same quote. */
-export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS = 2000;
+export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS: number = WIRE.limits.facebookStreamHealthIntervalMs;
 
 /** How long Facebook itself waits before reporting a stream as timed out —
  *  the second sentence of the quote above. It is here so that a pane deciding
  *  "how long may this stay empty before the encoder is gone" reads Facebook's
  *  four seconds instead of inventing a number. Mirrors
  *  oauth.FacebookStreamTimeout. */
-export const FACEBOOK_STREAM_TIMEOUT_MS = 4000;
+export const FACEBOOK_STREAM_TIMEOUT_MS: number = WIRE.limits.facebookStreamTimeoutMs;
 
 /** One shared video encode's live state.
  *
@@ -2129,7 +2135,6 @@ export interface StorageState {
  *  because narrowing a credential a running script is holding would break it
  *  without anyone being told.
  */
-export type TokenScope = "read" | "admin" | "obs" | "mcp-read" | "mcp-admin";
 
 /** An MCP capability level. The tools in each are fixed by the server
  *  (GET /mcp/access lists them); Content and Control are only ever reachable
@@ -2655,25 +2660,6 @@ export interface AcmePreflight {
   checks: AcmeCheck[];
 }
 
-export type EventType =
-  | "status"
-  | "levels"
-  | "log"
-  | "stats"
-  | "source"
-  | "recordings"
-  /** One chat message, one event. See ChatMessage. */
-  | "chat"
-  /** The whole per-platform connection table, whenever any part of it moves. */
-  | "chatState"
-  /** Messages that were delivered and are now gone — deleted here, or deleted
-   *  on the platform's own dashboard and reported back to us. See ChatRetraction.
-   *
-   *  The one event in this union that must not be dropped on the floor. Missing
-   *  a "chat" costs a line of conversation; missing this one leaves a message on
-   *  screen that a moderator deliberately removed. */
-  | "chatRetract";
-
 export interface WsEvent {
   type: EventType;
   time: string;
@@ -2715,12 +2701,6 @@ export type ChatPlatform = Exclude<Platform, "vimeo">;
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */
-export type ChatState =
-  | "connecting"
-  | "live"
-  | "degraded"
-  | "failed"
-  | "stopped";
 
 /** One badge the platform put next to a name. Deliberately loose: Twitch has
  *  id/version pairs, Kick has labels, YouTube has boolean roles. */
@@ -3216,13 +3196,6 @@ export interface DryRunResult {
 // broadcast is unrecoverable while a transcript arriving an hour later costs
 // nothing. These types are how the operator sees and steers that tradeoff.
 
-export type JobState =
-  | "queued"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled"
-  | "deferred";
 
 /** How one kind of work is allowed to take the machine.
  *  - realtime:  never held back
@@ -4038,7 +4011,6 @@ export interface ObsConfig {
   scenes: ObsSceneRule[];
 }
 
-export type ObsConnState = "off" | "connecting" | "connected" | "unreachable" | "refused" | "incompatible";
 
 /** What one bridge action did to one destination. */
 export interface ObsOutcome {
@@ -4256,7 +4228,6 @@ export interface AnalyticsReport {
 
 export type StorageProvider = "s3" | "r2" | "b2" | "minio" | "wasabi";
 /** stuck: offload stopped retrying on its own; nothing moves until Retry now. */
-export type OffloadState = "pending" | "uploading" | "verified" | "failed" | "stuck";
 
 /** One S3-compatible bucket finished recordings are offloaded to. The secret
  *  access key is write-only: the server reports hasSecret and never the key. */

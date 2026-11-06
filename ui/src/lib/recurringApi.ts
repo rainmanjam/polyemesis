@@ -16,11 +16,12 @@
 
 import { ApiError, apiErrorFromResponse, requestRaw } from "./api";
 import { autoApi } from "./autoApi";
+import { WIRE } from "./contract/wire";
 import type { BroadcastTemplate, OccurrenceView, RolloverSettings, RolloverView } from "./types";
 
 /** The 2 MB limit the server enforces on a thumbnail (scheduler.MaxThumbnailBytes). Checked here
  *  before the upload, so an oversized picture costs no round trip. */
-export const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
+export const MAX_THUMBNAIL_BYTES: number = WIRE.limits.maxThumbnailBytes;
 
 /** The picture types the server accepts for a thumbnail. */
 export const THUMBNAIL_TYPES = ["image/png", "image/jpeg"] as const;

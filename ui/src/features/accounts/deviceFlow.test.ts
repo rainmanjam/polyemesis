@@ -50,13 +50,6 @@ describe("devicePollDelayMs", () => {
   ])("falls back to the floor when the server said %s", (_name, value) => {
     expect(devicePollDelayMs(value as number)).toBe(DEVICE_POLL_FLOOR_MS);
   });
-
-  it("mirrors internal/oauth's own five-second floor", () => {
-    // Not an arbitrary constant on either side: deviceMinPollInterval is 5s and
-    // floors the platform's answer server-side, so a client floor that
-    // disagreed would be the two halves promising different things.
-    expect(DEVICE_POLL_FLOOR_MS).toBe(5_000);
-  });
 });
 
 describe("deviceFlowAfterPoll", () => {

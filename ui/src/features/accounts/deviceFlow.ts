@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import type { DevicePoll, DeviceAuth } from "@/lib/types";
 
 /* ===========================================================================
@@ -23,8 +24,8 @@ import type { DevicePoll, DeviceAuth } from "@/lib/types";
 
 /** The floor under whatever the server reports, in milliseconds.
  *
- *  FIVE SECONDS, AND IT IS A MIRROR RATHER THAN A CHOICE. internal/oauth's
- *  deviceMinPollInterval is 5s and already floors the platform's own answer, so
+ *  NOT A CHOICE: it is internal/oauth's DeviceMinPollInterval, read from the
+ *  generated contract. The server already floors the platform's own answer, so
  *  the server can never legitimately ask for less; this exists for the answers
  *  that never came from the server at all — a missing field, a `0`, a response
  *  a reload never received. Without it, `retryInSeconds ?? 0` is a `setTimeout`
@@ -32,7 +33,7 @@ import type { DevicePoll, DeviceAuth } from "@/lib/types";
  *
  *  It is deliberately not configurable. A knob here would be a knob for
  *  "how hard may this hammer the platform", which nobody should be turning. */
-export const DEVICE_POLL_FLOOR_MS = 5_000;
+export const DEVICE_POLL_FLOOR_MS: number = WIRE.limits.deviceMinPollMs;
 
 /** How long to wait before the next poll.
  *

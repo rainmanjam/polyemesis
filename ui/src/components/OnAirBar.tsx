@@ -1,3 +1,4 @@
+import { causeLabel } from "@/lib/failureRemedy";
 import { useState } from "react";
 import { Square, Tv } from "lucide-react";
 
@@ -242,7 +243,7 @@ export function OnAirBar({
                       leads to the card, where its remedy is (A9). */}
                   {item.cause && (
                     <span className="block text-tiny text-foreground">
-                      {t(`reason.cause.${item.cause}`)}
+                      {causeLabel(t, item.cause)}
                     </span>
                   )}
                   {/* The server's own sentence, never a summary of it. */}

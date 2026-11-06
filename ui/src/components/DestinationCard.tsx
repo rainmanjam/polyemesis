@@ -1,3 +1,4 @@
+import { causeLabel } from "@/lib/failureRemedy";
 import { useState } from "react";
 import { Link } from "react-router";
 import {
@@ -477,8 +478,8 @@ export function DestinationCard({
                   reason.urlFix
                     ? t("reason.urlFix.cause")
                     : reason.cause === "unknown" && reason.line
-                    ? `${t(`reason.cause.${reason.cause}`)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
-                    : t(`reason.cause.${reason.cause}`)
+                    ? `${causeLabel(t, reason.cause)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
+                    : causeLabel(t, reason.cause)
                 }
                 step={t("foundation.status.step.destination", { platform: platformLabel })}
                 asOf={reason.at}

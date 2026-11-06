@@ -1,3 +1,4 @@
+import { causeLabel } from "@/lib/failureRemedy";
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -445,7 +446,7 @@ export function GoLiveSheet({
                   liveOf(row.id as unknown as number)?.reason && (
                     <StatusReason
                       className="text-xs"
-                      reason={t(`reason.cause.${liveOf(row.id as unknown as number)!.reason!.cause}`)}
+                      reason={causeLabel(t, liveOf(row.id as unknown as number)!.reason!.cause)}
                       step={t("foundation.status.step.destination", { platform: row.platform })}
                       asOf={liveOf(row.id as unknown as number)!.reason!.at}
                     />
