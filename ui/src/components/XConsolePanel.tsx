@@ -34,7 +34,7 @@ function statusKey(phase: string | undefined): TranslationKey {
 /** The X console in the destination dialog (#3).
  *
  *  The gate state comes from the setup guide (`livestreamGate`), because only
- *  the server knows whether the operator switched X Livestream access on. The
+ *  the server knows whether the operator switched X Livestream on. The
  *  broadcast state is the destination's own lifecycle block. The go-live title
  *  is the only X metadata polyemesis can set: X takes it on the publish step and
  *  has no write that changes a running broadcast, so the field is read-only while

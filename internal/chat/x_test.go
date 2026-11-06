@@ -222,7 +222,7 @@ func TestXBanUsesAbsoluteMillisecondsForATimeout(t *testing.T) {
 	want := fmt.Sprintf(`"end_at_ms":"%d"`, now.Add(10*time.Minute).UnixMilli())
 	var got string
 	for _, c := range st.recorded() {
-		if strings.HasPrefix(c, "POST /2/broadcasts/B1run/chat/mutes ") {
+		if strings.HasPrefix(c, "POST /2/broadcasts/chat/mutes ") {
 			got = c
 		}
 	}
@@ -245,13 +245,37 @@ func TestXPermanentBanOmitsEndAt(t *testing.T) {
 		t.Fatalf("Ban: %v", err)
 	}
 	for _, c := range st.recorded() {
-		if strings.HasPrefix(c, "POST /2/broadcasts/B1run/chat/mutes ") && strings.Contains(c, "end_at_ms") {
+		if strings.HasPrefix(c, "POST /2/broadcasts/chat/mutes ") && strings.Contains(c, "end_at_ms") {
 			t.Errorf("a permanent mute carried end_at_ms: %q", c)
 		}
 	}
 }
 
-// TestXUnbanDeletesTheMute maps Unban onto DELETE .../chat/mutes/{user_id}.
+// TestXMutesAreTheBroadcastersOwnAndNeedNoBroadcast: X's mutes belong to the broadcaster and apply to every broadcast
+// they host (docs.x.com/livestream-api/chat/mute-user), so the routes are POST /2/broadcasts/chat/mutes and
+// DELETE /2/broadcasts/chat/mutes/{user_id} with no broadcast id, and no live broadcast is needed to mute. The body
+// carries no broadcast_id: that is for a moderator acting in someone else's chats.
+func TestXMutesAreTheBroadcastersOwnAndNeedNoBroadcast(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	a.told = ""
+	if err := a.Ban(context.Background(), "555", 0, ""); err != nil {
+		t.Fatalf("Ban: %v", err)
+	}
+	if err := a.Unban(context.Background(), "555"); err != nil {
+		t.Fatalf("Unban: %v", err)
+	}
+	for _, c := range st.recorded() {
+		if strings.Contains(c, "broadcast_id") {
+			t.Errorf("a broadcaster's own mute carried a broadcast_id: %q", c)
+		}
+		if strings.HasPrefix(c, "GET /2/broadcasts") {
+			t.Errorf("a mute asked X for a running broadcast it does not need: %q", c)
+		}
+	}
+}
+
+// TestXUnbanDeletesTheMute maps Unban onto DELETE /2/broadcasts/chat/mutes/{user_id}.
 func TestXUnbanDeletesTheMute(t *testing.T) {
 	st := newXChatStub(t)
 	a := st.adapter(t, time.Unix(1761904800, 0))
@@ -260,7 +284,7 @@ func TestXUnbanDeletesTheMute(t *testing.T) {
 	}
 	found := false
 	for _, c := range st.recorded() {
-		if strings.HasPrefix(c, "DELETE /2/broadcasts/B1run/chat/mutes/555 ") {
+		if strings.HasPrefix(c, "DELETE /2/broadcasts/chat/mutes/555 ") {
 			found = true
 		}
 	}

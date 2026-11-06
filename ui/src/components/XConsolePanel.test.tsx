@@ -18,7 +18,7 @@ afterEach(() => {
 const noop = () => undefined;
 
 describe("the X console", () => {
-  it("names the X Livestream access the operator needs while the gate is closed", () => {
+  it("names the X Livestream switch the operator needs while the gate is closed", () => {
     render(<XConsolePanel gate="closed" title="" onTitleChange={noop} tweet="first" onTweetChange={noop} />);
     expect(screen.getByText(en["wave3.x.gateClosed"])).toBeTruthy();
     expect(screen.queryByText(en["wave3.x.gateOpen"])).toBeNull();

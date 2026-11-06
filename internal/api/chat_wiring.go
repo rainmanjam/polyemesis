@@ -521,7 +521,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// the gate closed the account stays connected for sign-in and nothing
 		// reads or posts chat for it.
 		if s.livestreamGate(db.PlatformX) != "open" {
-			return nil, fmt.Errorf("X chat needs X Livestream access (app must be whitelisted by X)")
+			return nil, fmt.Errorf("X chat needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)")
 		}
 		return chat.NewX(chat.XConfig{
 			AccountRef: a.AccountRef,

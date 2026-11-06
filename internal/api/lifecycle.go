@@ -438,7 +438,9 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 			c.log.Warn("broadcast lifecycle: X published the broadcast with a warning",
 				"destination", d.Name, "broadcast", broadcastID, "detail", redact.Redact(w))
 		}
-		return &oauth.TransitionResult{BroadcastID: broadcastID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
+		// r.ID is the REAL broadcast id X made on go-live. broadcastID was the pending handle (or a broadcast an
+		// earlier version recorded), and the caller must record and point chat at the one that exists on X.
+		return &oauth.TransitionResult{BroadcastID: r.ID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
 	}
 	return prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, to)
 }
@@ -446,8 +448,8 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 // xShouldNotTweet is whether d's X PUBLISH suppresses X's announcement post, from
 // the destination's XGoLiveTweet setting: never posts, every always does, and the
 // default (first) posts on a show's first go-live only, so a broadcast opened by
-// renew within the same show (BroadcastControl.Renewed) is published quietly.
-// PROVISIONAL with should_not_tweet itself: X is gated until whitelisting.
+// renew within the same show (BroadcastControl.Renewed) goes live quietly.
+// PROVISIONAL with should_not_tweet itself: no live go-live has confirmed it.
 func xShouldNotTweet(d *db.Destination) bool {
 	switch d.XGoLiveTweetMode() {
 	case db.XTweetNever:
@@ -1066,8 +1068,8 @@ func (c *lifecycleCoordinator) openOrHold(ctx context.Context, d *db.Destination
 	if !d.Enabled || d.Lifecycle.Attempts >= lifecycleGiveUpAfter {
 		return
 	}
-	// An enabled destination with no broadcast opens one on its stream source. It is
-	// NOT_STARTED, so nothing is public until go-live.
+	// An enabled destination with no broadcast is opened on its stream source. That records a
+	// pending handle and creates nothing on X, so nothing is public until go-live.
 	c.open(ctx, d, creator)
 }
 
@@ -1128,13 +1130,14 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	c.recordControl(d, id, func(b *db.BroadcastControl) {
 		b.Phase, b.Attempts, b.Fault = phaseCreated, 0, ""
 	})
-	c.log.Info("broadcast lifecycle: opened a broadcast for this destination, unpublished until it goes live",
+	c.log.Info("broadcast lifecycle: opened this destination, nothing is public until it goes live",
 		"destination", d.Name, "platform", d.Platform, "broadcast", id)
 }
 
 // scrubSourceKey makes a platform error safe for the fault, the log, the escalation and
-// the timeline. X's problem detail can echo the source_id it was sent, and the source_id
-// IS the stream key, which has no credential shape redact.Redact could recognise. So the
+// the timeline. A platform's problem detail can echo what it was sent, and a stream key
+// has no credential shape redact.Redact could recognise. (X's /2/sources routes no longer
+// take the key in a request at all, but the scrub stays: it is the backstop.) So the
 // key is removed as a literal first, and the pattern pass runs over what is left.
 func scrubSourceKey(detail, key string) string {
 	if k := strings.TrimSpace(key); k != "" {
@@ -1152,6 +1155,11 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	if err != nil {
 		c.handleRefusal(d, broadcastID, plan.Send, err)
 		return
+	}
+	// A go-live can answer with a different id than the one it was asked about: X creates the broadcast at go-live,
+	// so what the row held until now was a pending handle. Everything from here names the broadcast that exists.
+	if id := strings.TrimSpace(res.BroadcastID); id != "" {
+		broadcastID = id
 	}
 	if plan.Send == oauth.PhaseLive {
 		c.tellChat(d.Platform, d.AccountID, broadcastID)

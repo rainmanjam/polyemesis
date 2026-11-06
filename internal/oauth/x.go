@@ -3,20 +3,22 @@ package oauth
 // X (Twitter) Livestream: the sign-in, the stream key, the broadcast lifecycle
 // and the metadata that X's Livestream API (docs.x.com/livestream-api) exposes.
 //
-// SWITCHED OFF BY DEFAULT. X whitelists apps for the Livestream family
-// (docs.x.com/livestream-api/getting-started, access via the Livestream access
-// form). Until the owner's developer app is whitelisted every operation in this
-// file that touches the Livestream family refuses WITHOUT making a request, and
-// the copy the operator sees is "needs X Livestream access (app must be
-// whitelisted by X)". The switch is the POLYEMESIS_X_LIVESTREAM environment
-// variable ("1" or "true"), read once when the provider is built. Paste-the-key
-// keeps working regardless.
+// SWITCHED OFF BY DEFAULT. X no longer asks for a whitelist or an access form:
+// docs.x.com/livestream-api/getting-started lists a developer app, OAuth 2.0
+// with broadcast.read and broadcast.write, an account allowed to go live, and an
+// RTMP encoder. polyemesis still keeps the family opt-in, and until the operator
+// sets POLYEMESIS_X_LIVESTREAM ("1" or "true", read once when the provider is
+// built) every operation in this file that touches it refuses WITHOUT making a
+// request, and the copy the operator sees is "needs X Livestream switched on
+// (POLYEMESIS_X_LIVESTREAM=1)". Paste-the-key keeps working regardless.
 //
-// Everything below was read from X's served OpenAPI spec (api.x.com/2/openapi.json,
-// version 2.173, 2026-10-31) and the Livestream guides. Live behaviour is NOT
-// verified: no X app has been whitelisted, so every path here is PROVISIONAL until
-// a whitelisted app runs it. The ones most likely to need a change are noted at
-// the call sites.
+// The calls follow X's Livestream docs as of 2026-11-06, including the migration
+// guide (docs.x.com/livestream-api/migration-guide). The deprecated
+// /2/users/{id}/sources and /2/users/{id}/broadcasts routes are removed on
+// 2027-01-01, so nothing here calls them: sources are /2/sources, going live is
+// POST /2/broadcasts, ending is PUT /2/broadcasts/{id}/state, and the owner comes
+// from the access token. The ones most likely to need a change after a live run
+// are noted at the call sites.
 //
 // Scopes requested: broadcast.read and broadcast.write (the Livestream family),
 // offline.access (a refresh token), users.read (GET /2/users/me, the only endpoint
@@ -35,6 +37,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -58,9 +61,9 @@ const (
 	xAuthorizePath = "/2/oauth2/authorize"
 )
 
-// xGateCopy is the copy shown when the Livestream family is switched off. It is
-// the owner's agreed wording and the tests pin it.
-const xGateCopy = "needs X Livestream access (app must be whitelisted by X)"
+// xGateCopy is the copy shown when the Livestream family is switched off. It names
+// the switch, not an X access form, and the tests pin it.
+const xGateCopy = "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"
 
 // xSourceName labels the stream source polyemesis mints for itself, so a
 // connect reuses it rather than adding one per attempt.
@@ -110,12 +113,6 @@ func (x *X) LivestreamAccess() bool { return x.livestream }
 
 func (x *X) authEndpoint() string { return x.authBase(xAPIBase) }
 func (x *X) apiEndpoint() string  { return x.apiBase(xAPIBase) }
-
-// userPath is the address of one user's Livestream resources, /2/users/{id}, which the source list, the
-// broadcast create and the PUBLISH all hang off.
-func (x *X) userPath(userID string) string {
-	return x.apiEndpoint() + "/2/users/" + url.PathEscape(userID)
-}
 
 func (x *X) Platform() db.Platform { return db.PlatformX }
 
@@ -311,8 +308,8 @@ type xUser struct {
 	Name     string `json:"name"`
 }
 
-// me returns the authenticated user. It is needed by every Livestream path that
-// has a /2/users/{id}/... address and by the account read.
+// me returns the authenticated user, for the account read. The Livestream routes take the user from the access token
+// and need no id.
 func (x *X) me(ctx context.Context, accessToken string) (xUser, error) {
 	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
 	if u, ok := x.calls.cachedUser(fp); ok {
@@ -357,21 +354,20 @@ func (x *X) Account(ctx context.Context, clientID, accessToken string) (*Account
 // EntitlementReason is the gate in X's terms, usable before anything is
 // connected. It is what the setup guide and the capability row show.
 func (x *X) EntitlementReason() string {
-	return "Livestream " + xGateCopy + ". X's Livestream API is open only to apps " +
-		"X has whitelisted, and it also needs an account that X allows to broadcast. " +
-		"Signing in works without it. Until polyemesis's app is whitelisted, paste " +
-		"the stream key from X's producer tooling."
+	return "Livestream " + xGateCopy + ". It also needs an account that X allows to go live " +
+		"(not protected). Signing in works without it. Until it is switched on, or when the account cannot " +
+		"use the API, paste the stream key from X's producer tooling."
 }
 
 // xGateError is what the Livestream family returns while the switch is off. Its
-// text is the gate copy the operator reads, and it names the app's whitelist, not
-// the operator's account. It matches the platform-wide ErrNotEntitled, which the
+// text is the gate copy the operator reads, and it names the switch, not the
+// operator's account. It matches the platform-wide ErrNotEntitled, which the
 // connect warning keys on, and ErrXLivestreamOff, which names the cause.
 type xGateError struct{}
 
 func (xGateError) Error() string {
 	return "Livestream " + xGateCopy + ". Sign-in works without it; paste the stream key from " +
-		"X's producer tooling until the app is whitelisted."
+		"X's producer tooling until it is switched on."
 }
 
 func (xGateError) Is(target error) bool {
@@ -379,26 +375,25 @@ func (xGateError) Is(target error) bool {
 }
 
 // CheckEntitlement probes the Livestream family once with the operator's fresh
-// token. It lists the account's stream sources, a read that changes nothing. A
-// 403 or 412 is the gate. Any other failure is reported as a failed probe, never
-// as a gate.
+// token. It lists the account's stream sources (GET /2/sources, which takes the
+// user from the token), a read that changes nothing. A 403 or 412 is a refusal of
+// the family, such as a token without broadcast.read. Any other failure is
+// reported as a failed probe, never as a gate.
 //
-// While the gate is closed it refuses WITHOUT a request, /2/users/me included,
-// and the refusal is xGateError, which carries the gate copy.
+// An account that cannot go live is not found here: the list answers for any
+// account, and X reports the ineligibility (403) on Go Live. That is surfaced when
+// the broadcast is opened.
+//
+// While the gate is closed it refuses WITHOUT a request and the refusal is
+// xGateError, which carries the gate copy.
 func (x *X) CheckEntitlement(ctx context.Context, clientID, accessToken string) error {
 	if !x.livestream {
 		return xGateError{}
 	}
-	u, err := x.me(ctx, accessToken)
-	if err != nil {
-		return err
-	}
 	var out struct {
-		Data struct {
-			Sources []xSource `json:"sources"`
-		} `json:"data"`
+		Data []xSource `json:"data"`
 	}
-	err = x.do(ctx, http.MethodGet, x.sourcesEndpoint(u.ID), accessToken, nil, &out)
+	err := x.do(ctx, http.MethodGet, x.sourcesEndpoint(), accessToken, nil, &out)
 	if err == nil {
 		return nil
 	}
@@ -411,23 +406,16 @@ func (x *X) CheckEntitlement(ctx context.Context, clientID, accessToken string) 
 
 // --------------------------------------------------------- the stream key
 
-// xSource is a stream source as the list and create calls return it.
+// xSource is a stream source as GET /2/sources and POST /2/sources return it. The id is X's own 19-digit source id,
+// which is NOT secret and is NOT the stream key: on /2/sources the key is a separate credential, returned only by the
+// create answer (StreamKey) and by GET /2/sources/{id}/stream_key. The list carries no key.
 type xSource struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	RTMPURL       string `json:"rtmp_url"`
-	RTMPSURL      string `json:"rtmps_url"`
-	RTMPStreamKey string `json:"rtmp_stream_key"`
-	IsActive      bool   `json:"is_stream_active"`
-}
-
-// key returns the stream key. X documents the source id as the RTMP stream key
-// too, so the id is the fallback.
-func (s xSource) key() string {
-	if s.RTMPStreamKey != "" {
-		return s.RTMPStreamKey
-	}
-	return s.ID
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	RTMPURL   string `json:"rtmp_url"`
+	RTMPSURL  string `json:"rtmps_url"`
+	StreamKey string `json:"stream_key"`
+	IsActive  bool   `json:"is_stream_active"`
 }
 
 // ingestURL prefers RTMPS, which X documents as the port-443 endpoint. The host
@@ -439,12 +427,15 @@ func (s xSource) ingestURL() string {
 	return s.RTMPURL
 }
 
-func (x *X) sourcesEndpoint(userID string) string {
-	return x.userPath(userID) + "/sources"
-}
+// xSourceIDPattern is the shape of a source id: digits, 19 of them on X's side. X answers 400 to anything else, so a
+// value outside it is refused before a request.
+var xSourceIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
 
-// StreamKeys lists every source key on the account, read-only. It backs the
-// cross-check that compares a stored key with what X holds.
+// sourcesEndpoint is the source list and create address. There is no user in it: X takes the owner from the token.
+func (x *X) sourcesEndpoint() string { return x.apiEndpoint() + "/2/sources" }
+
+// StreamKeys lists every source's stream key, read-only. It backs the cross-check that compares a stored key with what
+// X holds. The list carries no keys, so each is read from its own source: one call for the list plus one per source.
 func (x *X) StreamKeys(ctx context.Context, clientID, accessToken string) ([]string, error) {
 	if !x.livestream {
 		return nil, ErrXLivestreamOff
@@ -455,32 +446,65 @@ func (x *X) StreamKeys(ctx context.Context, clientID, accessToken string) ([]str
 	}
 	keys := make([]string, 0, len(srcs))
 	for _, s := range srcs {
-		if k := s.key(); k != "" {
+		k, err := x.sourceStreamKey(ctx, accessToken, s.ID)
+		if err != nil {
+			return nil, err
+		}
+		if k != "" {
 			keys = append(keys, k)
 		}
 	}
 	return keys, nil
 }
 
+// listSources is GET /2/sources: {"data":[...],"meta":{"result_count":n}}.
 func (x *X) listSources(ctx context.Context, accessToken string) ([]xSource, error) {
-	u, err := x.me(ctx, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	return x.listSourcesFor(ctx, accessToken, u.ID)
-}
-
-// listSourcesFor lists the sources of a user whose id the caller already holds.
-func (x *X) listSourcesFor(ctx context.Context, accessToken, userID string) ([]xSource, error) {
 	var out struct {
-		Data struct {
-			Sources []xSource `json:"sources"`
-		} `json:"data"`
+		Data   []xSource  `json:"data"`
+		Errors []xProblem `json:"errors"`
 	}
-	if err := x.do(ctx, http.MethodGet, x.sourcesEndpoint(userID), accessToken, nil, &out); err != nil {
+	if err := x.do(ctx, http.MethodGet, x.sourcesEndpoint(), accessToken, nil, &out); err != nil {
 		return nil, fmt.Errorf("X would not list stream sources: %w", err)
 	}
-	return out.Data.Sources, nil
+	if len(out.Data) == 0 && len(out.Errors) > 0 {
+		return nil, fmt.Errorf("X would not list stream sources: %s", xProblems(out.Errors))
+	}
+	return out.Data, nil
+}
+
+// sourceStreamKey is GET /2/sources/{id}/stream_key, the only read of a key after the create. The key is a credential,
+// so it is never put in an error here.
+func (x *X) sourceStreamKey(ctx context.Context, accessToken, sourceID string) (string, error) {
+	if !xSourceIDPattern.MatchString(sourceID) {
+		return "", errors.New("X returned a stream source without a usable id")
+	}
+	var out struct {
+		Data struct {
+			StreamKey string `json:"stream_key"`
+		} `json:"data"`
+		Errors []xProblem `json:"errors"`
+	}
+	if err := x.do(ctx, http.MethodGet, x.sourcesEndpoint()+"/"+sourceID+"/stream_key", accessToken, nil, &out); err != nil {
+		return "", fmt.Errorf("X would not give the stream key of source %s: %w", sourceID, err)
+	}
+	if out.Data.StreamKey == "" && len(out.Errors) > 0 {
+		return "", fmt.Errorf("X would not give the stream key of source %s: %s", sourceID, xProblems(out.Errors))
+	}
+	return out.Data.StreamKey, nil
+}
+
+// recommendedRegion is GET /2/region, which POST /2/sources needs: the create requires a region and no longer defaults.
+func (x *X) recommendedRegion(ctx context.Context, accessToken string) (string, error) {
+	var out struct {
+		Region string `json:"region"`
+	}
+	if err := x.do(ctx, http.MethodGet, x.apiEndpoint()+"/2/region", accessToken, nil, &out); err != nil {
+		return "", fmt.Errorf("X would not say which ingest region to use: %w", err)
+	}
+	if strings.TrimSpace(out.Region) == "" {
+		return "", errors.New("X returned no ingest region")
+	}
+	return out.Region, nil
 }
 
 // Ingest returns the polyemesis source's URL and key, minting the source the
@@ -491,35 +515,43 @@ func (x *X) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, 
 	if !x.livestream {
 		return nil, fmt.Errorf("%w. X Livestream %s", ErrNoStreamKeyAPI, xGateCopy)
 	}
-	u, err := x.me(ctx, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	srcs, err := x.listSourcesFor(ctx, accessToken, u.ID)
+	srcs, err := x.listSources(ctx, accessToken)
 	if err != nil {
 		return nil, err
 	}
 	for _, s := range srcs {
-		if s.Name == xSourceName && s.key() != "" && s.ingestURL() != "" {
-			return &Ingest{URL: s.ingestURL(), Key: s.key()}, nil
+		if s.Name != xSourceName || s.ingestURL() == "" {
+			continue
+		}
+		key, err := x.sourceStreamKey(ctx, accessToken, s.ID)
+		if err != nil {
+			return nil, err
+		}
+		if key != "" {
+			return &Ingest{URL: s.ingestURL(), Key: key}, nil
 		}
 	}
-	// PROVISIONAL: the create body is {"name": ...}. The spec also accepts a
-	// region, which is left to X's default.
-	var out struct {
-		Data struct {
-			Source xSource `json:"source"`
-		} `json:"data"`
+	// The create takes exactly {name, region}; any other field is a 400. The region is the one X recommends.
+	region, err := x.recommendedRegion(ctx, accessToken)
+	if err != nil {
+		return nil, err
 	}
-	if err := x.do(ctx, http.MethodPost, x.sourcesEndpoint(u.ID), accessToken,
-		map[string]string{"name": xSourceName}, &out); err != nil {
+	var out struct {
+		Data   xSource    `json:"data"`
+		Errors []xProblem `json:"errors"`
+	}
+	if err := x.do(ctx, http.MethodPost, x.sourcesEndpoint(), accessToken,
+		map[string]string{"name": xSourceName, "region": region}, &out); err != nil {
 		return nil, fmt.Errorf("X would not create a stream source: %w", err)
 	}
-	s := out.Data.Source
-	if s.key() == "" || s.ingestURL() == "" {
+	s := out.Data
+	if s.StreamKey == "" || s.ingestURL() == "" {
+		if len(out.Errors) > 0 {
+			return nil, fmt.Errorf("X would not create a stream source: %s", xProblems(out.Errors))
+		}
 		return nil, errors.New("X created the stream source but returned no ingest address or key")
 	}
-	return &Ingest{URL: s.ingestURL(), Key: s.key()}, nil
+	return &Ingest{URL: s.ingestURL(), Key: s.StreamKey}, nil
 }
 
 // --------------------------------------------------------- broadcast reads
@@ -638,48 +670,63 @@ func (x *X) BroadcastByID(ctx context.Context, clientID, accessToken, id string)
 }
 
 // BroadcastState reads the broadcast for the lifecycle. X publishes no
-// stream-liveness read, so StreamActive and MonitorStream stay nil, meaning
-// unknown, rather than false.
+// stream-liveness read on the broadcast, so StreamActive is read from the bound
+// source's is_stream_active, the only receive-side signal X exposes. It is nil
+// when the source is not found, so an unknown answer is never reported as "no
+// bytes". MonitorStream has no X equivalent and stays nil.
 //
-// StreamActive is read from the bound source's is_stream_active, which is the
-// only receive-side signal X exposes. It is nil when the source is not found,
-// so an unknown answer is never reported as "no bytes". MonitorStream has no X
-// equivalent and stays nil.
+// A pending handle (OpenBroadcast's) names no broadcast on X, so none is read: its
+// state is a synthetic NOT_STARTED and the source it stands for is the only thing
+// asked about.
 func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string) (*BroadcastLifecycleState, error) {
+	st := &BroadcastLifecycleState{BroadcastID: broadcastID}
+	if sourceID, pending := xPendingSource(broadcastID); pending {
+		if !x.livestream {
+			return nil, ErrXLivestreamOff
+		}
+		st.Status, st.BoundStreamID = XStateNotStarted, sourceID
+		if err := x.fillStreamActive(ctx, accessToken, st); err != nil {
+			return nil, err
+		}
+		return st, nil
+	}
 	b, err := x.BroadcastByID(ctx, "", accessToken, broadcastID)
 	if err != nil {
 		return nil, err
 	}
-	st := &BroadcastLifecycleState{
-		BroadcastID:   broadcastID,
-		Title:         b.Title,
-		Status:        b.State,
-		BoundStreamID: b.SourceID,
-	}
-	if b.SourceID != "" {
-		srcs, err := x.listSources(ctx, accessToken)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range srcs {
-			// X documents the source id as the stream key, but a source can carry both and they can differ, so
-			// either one names the bound source.
-			if s.RTMPStreamKey == b.SourceID || s.ID == b.SourceID {
-				active := s.IsActive
-				st.StreamActive = &active
-				if active {
-					st.StreamStatus = "active"
-				} else {
-					st.StreamStatus = "inactive"
-				}
-				break
-			}
-		}
+	st.Title, st.Status, st.BoundStreamID = b.Title, b.State, b.SourceID
+	if err := x.fillStreamActive(ctx, accessToken, st); err != nil {
+		return nil, err
 	}
 	return st, nil
 }
 
-// --------------------------------------------------------- create and publish
+// fillStreamActive sets StreamActive and StreamStatus from the source st is bound to.
+func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *BroadcastLifecycleState) error {
+	if st.BoundStreamID == "" {
+		return nil
+	}
+	srcs, err := x.listSources(ctx, accessToken)
+	if err != nil {
+		return err
+	}
+	for _, s := range srcs {
+		// The broadcast's source_id is the source id, the same value as the source's id in the list.
+		if s.ID == st.BoundStreamID {
+			active := s.IsActive
+			st.StreamActive = &active
+			if active {
+				st.StreamStatus = "active"
+			} else {
+				st.StreamStatus = "inactive"
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// ------------------------------------------------------------ go live
 
 // X's six broadcast states, as its Broadcast schema and the overview page name
 // them. Passed through unmapped in Status; XStateKnown is the only gate on them.
@@ -703,148 +750,105 @@ func XStateKnown(s string) bool {
 	return false
 }
 
-// xPublishTitleField is the PUBLISH body key for the title. PROVISIONAL: the
-// OpenAPI spec names it "title" while the prose docs name it "status"; the spec
-// is followed (VERDICTS X#8) and this one constant is the only place to change.
-const xPublishTitleField = "title"
-
 // xChatOptionMax is the largest chat_option X documents: 0 default through 6.
 const xChatOptionMax = 6
 
-// xSourceKeyPattern is the source_id shape the create spec requires. source_id
-// is the source's rtmp_stream_key, which is a secret, so a value that does not
-// match is refused without being echoed back.
-var xSourceKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,32}$`)
+// xStreamKeyPattern is the shape polyemesis accepts for a stored stream key before it looks the key up. It is a guard
+// against a pasted value with spaces or a path in it, and its refusal never echoes the value, which is a credential.
+var xStreamKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,32}$`)
 
-// XPublish is what the PUBLISH transition carries besides the state.
+// xPendingPrefix starts the handle OpenBroadcast returns. X's Go Live (POST /2/broadcasts) creates the broadcast and
+// publishes it in one call, with no unpublished NOT_STARTED step, and the broadcast is public the moment it returns
+// (it is ended as TIMED_OUT if no video arrives within five minutes). The coordinator, though, opens early and only goes
+// live once the encoder is sending, so what it holds until then is this handle: "pending:" plus the source id. It names
+// no broadcast on X, and nothing here ever sends it to X as one.
+const xPendingPrefix = "pending:"
+
+// xPendingHandle is the handle for a source that has no broadcast yet.
+func xPendingHandle(sourceID string) string { return xPendingPrefix + sourceID }
+
+// xPendingSource reports whether id is a pending handle and, if so, the source it stands for. A real broadcast id is
+// never mistaken for one: it needs the prefix and a source id after it.
+func xPendingSource(id string) (string, bool) {
+	rest, ok := strings.CutPrefix(id, xPendingPrefix)
+	if !ok || !xSourceIDPattern.MatchString(rest) {
+		return "", false
+	}
+	return rest, true
+}
+
+// XPublish is what going live carries.
 type XPublish struct {
-	// Title is the broadcast title. Empty means the title is left out and X keeps
-	// whatever it has. X documents no character limit, so none is enforced here.
+	// Title is the broadcast title. Empty means the title is left out and X uses the broadcaster's display name.
+	// X documents no character limit beyond its post length, so none is enforced here.
 	Title string
 	// ChatOption is nil when unset, which leaves the field out so X applies its
-	// default. Otherwise it must be 0 to 6.
+	// default. Otherwise it must be 0 to 6, and it is sent as a JSON integer.
 	ChatOption *int
-	// ShouldNotTweet suppresses the announcement post X makes on PUBLISH by
-	// default. False leaves the field out, so X posts as it always has.
-	//
-	// PROVISIONAL: should_not_tweet is a boolean in the PUBLISH body of the
-	// user-scoped state route (docs-x, publish-or-end-broadcast: "Set true to
-	// suppress the automatic announcement post. Default false"). X is gated
-	// until the app is whitelisted, so no live PUBLISH has confirmed it. END
-	// rejects the field with a 400, so it is never sent there.
+	// ShouldNotTweet suppresses the announcement post X makes by default. False
+	// leaves the field out, so X posts as it always has. It is sent as a JSON
+	// boolean, which is the only type the route accepts.
 	ShouldNotTweet bool
 }
 
-// XPublishResult is what PUBLISH answered.
+// XPublishResult is what going live answered.
 type XPublishResult struct {
+	// ID is the real broadcast id. It replaces the pending handle the caller held.
 	ID    string
 	State string
-	// Warnings carries tweet_error, the reason the announcing Post failed. The
-	// broadcast is still live when this is set.
+	// Warnings is kept for callers that report them. X's Go Live answer has no tweet_error: a missing tweet_id is read
+	// later from GET /2/broadcasts/{id}, so nothing sets this today.
 	Warnings []string
 }
 
-// XBroadcastCreated is the broadcast X returned from the create call.
-type XBroadcastCreated struct {
-	ID       string
-	State    string
-	ShareURL string
-}
-
-// CreateBroadcast opens a broadcast on the source whose rtmp_stream_key is
-// sourceKey. The broadcast starts NOT_STARTED, which is not public until
-// PublishBroadcast. X returns a broadcast that is already running on that source
-// instead of making a second one, and the caller sees it as RUNNING. Gated.
-func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKey string) (*XBroadcastCreated, error) {
+// OpenBroadcast implements BroadcastCreator. It resolves the stored stream key to its source id and returns a pending
+// handle. NOTHING is created on X: a broadcast made by Go Live is public at once, so it is made by PublishBroadcast,
+// when the coordinator sees the encoder sending. Gated.
+func (x *X) OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error) {
 	if !x.livestream {
-		return nil, ErrXLivestreamOff
+		return "", ErrXLivestreamOff
 	}
-	if !xSourceKeyPattern.MatchString(sourceKey) {
+	if !xStreamKeyPattern.MatchString(sourceKey) {
 		// The message names the rule, not the value: the value is the stream key.
-		return nil, errors.New("the stream source's key does not have the shape X requires " +
+		return "", errors.New("the stream source's key does not have the shape X requires " +
 			"(1 to 32 letters or digits); re-fetch the stream key from polyemesis")
 	}
-	u, err := x.me(ctx, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	var out struct {
-		Data struct {
-			Broadcast XBroadcast `json:"broadcast"`
-			ShareURL  string     `json:"share_url"`
-		} `json:"data"`
-		Errors []xProblem `json:"errors"`
-	}
-	endpoint := x.userPath(u.ID) + "/broadcasts"
-	if err := x.do(ctx, http.MethodPost, endpoint, accessToken,
-		map[string]string{"source_id": sourceKey}, &out); err != nil {
-		// source_id is the stream key, and X's problem text can echo it. The status error is scrubbed in place
-		// BEFORE the wrap, because fmt.Errorf builds its message now and a later scrub would not reach it.
-		var se *xStatusError
-		if errors.As(err, &se) {
-			se.Problems = xScrubKey(se.Problems, sourceKey)
-		}
-		return nil, fmt.Errorf("X would not create a broadcast on the stream source: %w",
-			xWrapScrubbed(err, sourceKey))
-	}
-	if out.Data.Broadcast.ID == "" && out.Data.Broadcast.BroadcastID == "" {
-		if len(out.Errors) > 0 {
-			return nil, fmt.Errorf("X would not create a broadcast: %s", xScrubKey(xProblems(out.Errors), sourceKey))
-		}
-		return nil, errors.New("X created no broadcast")
-	}
-	id := out.Data.Broadcast.ID
-	if id == "" {
-		id = out.Data.Broadcast.BroadcastID
-	}
-	return &XBroadcastCreated{ID: id, State: out.Data.Broadcast.State, ShareURL: out.Data.ShareURL}, nil
-}
-
-// xRedactedKey replaces a stream key in text an operator or a log will read.
-const xRedactedKey = "[stream key]"
-
-// xScrubKey removes every occurrence of key from s. An empty key leaves s alone: ReplaceAll with an empty old string
-// would insert the marker between every character.
-func xScrubKey(s, key string) string {
-	if key == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, key, xRedactedKey)
-}
-
-// xScrubbedError keeps a wrapped error reachable for errors.Is and errors.As while its text carries no key. The
-// inner error's own text is scrubbed too, where it is an xStatusError, by the caller.
-type xScrubbedError struct {
-	err error
-	msg string
-}
-
-func (e *xScrubbedError) Error() string { return e.msg }
-func (e *xScrubbedError) Unwrap() error { return e.err }
-
-// xWrapScrubbed returns err with key removed from its text, still unwrapping to err.
-func xWrapScrubbed(err error, key string) error {
-	return &xScrubbedError{err: err, msg: xScrubKey(err.Error(), key)}
-}
-
-// OpenBroadcast implements BroadcastCreator. It opens the broadcast on the
-// source and returns its id. The broadcast is NOT_STARTED, so it is not public
-// until PublishBroadcast. Gated.
-func (x *X) OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error) {
-	created, err := x.CreateBroadcast(ctx, "", accessToken, sourceKey)
+	id, err := x.sourceIDForKey(ctx, accessToken, sourceKey)
 	if err != nil {
 		return "", err
 	}
-	return created.ID, nil
+	return xPendingHandle(id), nil
 }
 
-// PublishBroadcast takes a NOT_STARTED broadcast to RUNNING. It is the only
-// write that can carry a title or a chat option, and it goes to the user-scoped
-// route, because the newer /2/broadcasts/{id}/state route accepts END only.
-// Gated.
-//
-// PROVISIONAL: the chat_option value is validated locally, but no live PUBLISH
-// has run against an account, so the response shape is from the spec.
+// sourceIDForKey finds the source whose stream key is key. The /2/sources routes identify a source by its id and the
+// stored key is the credential, so each source's key is read until one matches. polyemesis's own source is tried first,
+// which is the usual match and costs one extra read.
+func (x *X) sourceIDForKey(ctx context.Context, accessToken, key string) (string, error) {
+	srcs, err := x.listSources(ctx, accessToken)
+	if err != nil {
+		return "", err
+	}
+	sort.SliceStable(srcs, func(i, j int) bool {
+		return srcs[i].Name == xSourceName && srcs[j].Name != xSourceName
+	})
+	for _, s := range srcs {
+		k, err := x.sourceStreamKey(ctx, accessToken, s.ID)
+		if err != nil {
+			return "", err
+		}
+		if k == key {
+			return s.ID, nil
+		}
+	}
+	return "", errors.New("no stream source on this X account holds the stored stream key; " +
+		"reconnect the account so polyemesis can fetch it again")
+}
+
+// PublishBroadcast takes a source live: POST /2/broadcasts with the source id, in one call, and it answers the real
+// broadcast. broadcastID is the pending handle OpenBroadcast returned, or, for a destination recorded by an earlier
+// version, the id of a NOT_STARTED broadcast made on the removed create route; the new routes cannot publish that one,
+// so its source is read and taken live instead. A source that already has a live broadcast answers 200 with that
+// broadcast, unchanged, and the request's title is ignored. Gated.
 func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID string, p XPublish) (*XPublishResult, error) {
 	if !x.livestream {
 		return nil, ErrXLivestreamOff
@@ -852,9 +856,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if strings.TrimSpace(broadcastID) == "" {
 		return nil, errors.New("no broadcast id given to publish")
 	}
-	body := map[string]any{"state": "PUBLISH"}
+	body := map[string]any{}
 	if title := strings.TrimSpace(p.Title); title != "" {
-		body[xPublishTitleField] = title
+		body["title"] = title
 	}
 	if p.ChatOption != nil {
 		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {
@@ -865,54 +869,42 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if p.ShouldNotTweet {
 		body["should_not_tweet"] = true
 	}
-	u, err := x.me(ctx, accessToken)
-	if err != nil {
-		return nil, err
+	sourceID, pending := xPendingSource(broadcastID)
+	if !pending {
+		b, err := x.BroadcastByID(ctx, "", accessToken, broadcastID)
+		if err != nil {
+			return nil, err
+		}
+		sourceID = b.SourceID
+		if !xSourceIDPattern.MatchString(sourceID) {
+			return nil, fmt.Errorf("broadcast %s has no stream source X can take live", broadcastID)
+		}
 	}
+	body["source_id"] = sourceID
 	var out struct {
-		Data struct {
-			Broadcast struct {
-				ID    string `json:"id"`
-				State string `json:"state"`
-			} `json:"broadcast"`
-			// State is read as a fallback, the way END's answer is: the spec nests it under broadcast, and a flat
-			// data.state is the other shape X's state answers use.
-			State      string `json:"state"`
-			TweetError string `json:"tweet_error"`
-		} `json:"data"`
+		Data   XBroadcast `json:"data"`
 		Errors []xProblem `json:"errors"`
 	}
-	endpoint := x.userPath(u.ID) + "/broadcasts/" +
-		url.PathEscape(broadcastID) + "/state"
-	if err := x.do(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
-		return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
+	if err := x.do(ctx, http.MethodPost, x.apiEndpoint()+"/2/broadcasts", accessToken, body, &out); err != nil {
+		return nil, fmt.Errorf("X would not take the stream source live: %w", err)
 	}
-	// A 2xx can still carry X's errors. With no state the publish did nothing, so it is a failure in X's words;
-	// with a state the broadcast moved, and the errors are warnings the operator reads. PROVISIONAL, X is gated.
-	if out.Data.Broadcast.State == "" {
-		out.Data.Broadcast.State = out.Data.State
+	id := out.Data.ID
+	if id == "" {
+		id = out.Data.BroadcastID
 	}
-	switch st := out.Data.Broadcast.State; {
-	case st == "" && len(out.Errors) > 0:
-		return nil, fmt.Errorf("X would not publish broadcast %s: %s", broadcastID, xProblems(out.Errors))
-	case st == "":
-		// A 2xx with neither a state nor an error does not show the broadcast moved, and recording it as live
-		// would stop the coordinator from trying again.
-		return nil, fmt.Errorf("X answered the publish of broadcast %s with no state, so it cannot be shown to be live", broadcastID)
-	case st != XStateRunning && st != XStatePrePublished:
-		return nil, fmt.Errorf("X answered the publish of broadcast %s with state %s, not %s", broadcastID, st, XStateRunning)
+	if id == "" {
+		// A 2xx can still carry X's errors. With no broadcast the go-live did nothing, so it is a failure in X's words.
+		if len(out.Errors) > 0 {
+			return nil, fmt.Errorf("X would not take the stream source live: %s", xProblems(out.Errors))
+		}
+		return nil, errors.New("X answered the go-live with no broadcast, so it cannot be shown to be live")
 	}
-	res := &XPublishResult{ID: out.Data.Broadcast.ID, State: out.Data.Broadcast.State}
-	if res.ID == "" {
-		res.ID = broadcastID
+	if st := out.Data.State; st != XStateRunning && st != XStatePrePublished {
+		return nil, fmt.Errorf("X answered the go-live of broadcast %s with state %q, not %s", id, st, XStateRunning)
 	}
+	res := &XPublishResult{ID: id, State: out.Data.State}
 	if len(out.Errors) > 0 {
-		res.Warnings = append(res.Warnings, "X published the broadcast but reported: "+xProblems(out.Errors))
-	}
-	if strings.TrimSpace(out.Data.TweetError) != "" {
-		// Appended, not assigned: X's own errors above are a separate report and must survive a failed announcement.
-		res.Warnings = append(res.Warnings, "the broadcast is live, but X did not post its announcement: "+
-			out.Data.TweetError)
+		res.Warnings = append(res.Warnings, "X took the source live but reported: "+xProblems(out.Errors))
 	}
 	return res, nil
 }
@@ -920,11 +912,13 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 // --------------------------------------------------------------- lifecycle
 
 // TransitionBroadcast maps the three phases onto X's two writes. X has no testing
-// state: a broadcast goes from NOT_STARTED straight to RUNNING, so asking for
-// PhaseTesting is refused with that reason. PhaseLive publishes, PhaseComplete
-// ends. Gated.
+// state, so asking for PhaseTesting is refused with that reason. PhaseLive takes
+// the source live (POST /2/broadcasts) and the result carries the REAL broadcast
+// id, which replaces the pending handle the caller passed. PhaseComplete ends it
+// (PUT /2/broadcasts/{id}/state with END); a pending handle has nothing on X to
+// end, so it is reported as redundant without a request. Gated.
 //
-// PROVISIONAL: nothing has yet been published on a live account.
+// PROVISIONAL: the result shapes are from the docs; no live run has confirmed them.
 func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID string, to BroadcastPhase) (*TransitionResult, error) {
 	if !x.livestream {
 		return nil, ErrXLivestreamOff
@@ -937,21 +931,10 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		return nil, errors.New("no broadcast id given to move")
 	}
 	res := &TransitionResult{BroadcastID: broadcastID, Requested: to}
-	var out struct {
-		Data struct {
-			State     string `json:"state"`
-			Broadcast struct {
-				State string `json:"state"`
-			} `json:"broadcast"`
-		} `json:"data"`
-		// Success is END's documented answer, {success:true} (docs-x, publish-or-end).
-		Success bool       `json:"success"`
-		Errors  []xProblem `json:"errors"`
-	}
 	switch to {
 	case PhaseTesting:
-		return nil, errors.New("X has no testing state: a broadcast goes from NOT_STARTED " +
-			"straight to RUNNING when it is published, so there is no testing step to take")
+		return nil, errors.New("X has no testing state: a broadcast is created RUNNING when its source " +
+			"is taken live, so there is no testing step to take")
 	case PhaseLive:
 		// The generic transition carries no title or chat option. The coordinator
 		// uses PublishBroadcast directly when it has them.
@@ -959,29 +942,33 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		if err != nil {
 			return nil, err
 		}
-		res.Status = pub.State
+		res.BroadcastID, res.Status = pub.ID, pub.State
 		res.Warnings = pub.Warnings
 	case PhaseComplete:
+		if _, pending := xPendingSource(broadcastID); pending {
+			// No broadcast was ever made on X for this handle, so nothing is on air and nothing can be ended.
+			res.Redundant = true
+			return res, nil
+		}
+		var out struct {
+			Data struct {
+				ID    string `json:"id"`
+				State string `json:"state"`
+			} `json:"data"`
+			Errors []xProblem `json:"errors"`
+		}
 		endpoint := x.apiEndpoint() + "/2/broadcasts/" + url.PathEscape(broadcastID) + "/state"
 		if err := x.do(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "END"}, &out); err != nil {
 			return nil, fmt.Errorf("X would not end broadcast %s: %w", broadcastID, err)
 		}
-		// The END answer may carry the state at data.state or under data.broadcast.state, so both are read. A
-		// 2xx with errors and no state is a failed end. PROVISIONAL, X is gated.
+		// END answers {"data":{"id":...,"state":"ENDED"}}. A 2xx with errors and no state is a failed end, and a 2xx
+		// with neither shows nothing ended: a disabled row recorded as ended would never be tried again.
 		res.Status = out.Data.State
-		if res.Status == "" {
-			res.Status = out.Data.Broadcast.State
-		}
-		if res.Status == "" && len(out.Errors) > 0 {
-			return nil, fmt.Errorf("X would not end broadcast %s: %s", broadcastID, xProblems(out.Errors))
-		}
 		switch {
-		case res.Status == "" && !out.Success:
-			// Neither the documented success nor a state: nothing shows the broadcast ended, and a disabled row
-			// recorded as ended would never be tried again.
-			return nil, fmt.Errorf("X answered the end of broadcast %s with neither success nor a state, so it cannot be shown to have ended", broadcastID)
+		case res.Status == "" && len(out.Errors) > 0:
+			return nil, fmt.Errorf("X would not end broadcast %s: %s", broadcastID, xProblems(out.Errors))
 		case res.Status == "":
-			res.Status = XStateEnded
+			return nil, fmt.Errorf("X answered the end of broadcast %s with no state, so it cannot be shown to have ended", broadcastID)
 		case res.Status != XStateEnded && res.Status != XStateTimedOut && res.Status != XStateCanceled:
 			return nil, fmt.Errorf("X answered the end of broadcast %s with state %s, which is not ended", broadcastID, res.Status)
 		}
@@ -1016,6 +1003,6 @@ func (x *X) PushMetadata(ctx context.Context, clientID, accessToken, accountRef 
 // the gate is closed.
 func (x *X) ManualKeyReason() string {
 	return "Paste the server URL and stream key from X's producer tooling. " +
-		"Once X has whitelisted polyemesis's app, polyemesis can create the stream " +
-		"source itself. Sign-in works without that."
+		"Once X Livestream is switched on (POLYEMESIS_X_LIVESTREAM=1) and the account can go live, " +
+		"polyemesis can create the stream source itself. Sign-in works without that."
 }

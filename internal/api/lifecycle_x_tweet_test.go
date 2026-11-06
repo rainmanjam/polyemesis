@@ -9,14 +9,13 @@ import (
 
 // X'S GO-LIVE ANNOUNCEMENT, ONCE PER SHOW.
 //
-// X posts an announcement every time a broadcast is published unless the
-// PUBLISH carries should_not_tweet (PROVISIONAL: X is gated until the app is
-// whitelisted). polyemesis opens a new broadcast after X ends one while the
-// destination stays on (renew), and that one is published too, so before the
+// X posts an announcement every time a broadcast goes live unless the go-live
+// (POST /2/broadcasts) carries should_not_tweet, a JSON boolean (PROVISIONAL until a
+// live run confirms it). polyemesis opens a new broadcast after X ends one while the
+// destination stays on (renew), and that one goes live too, so before the
 // destination's XGoLiveTweet setting every renew posted a fresh announcement.
-// The default is the first go-live of a show only: the renewals after it are
-// published with should_not_tweet. A show starts when the destination is
-// switched on.
+// The default is the first go-live of a show only: the renewals after it go live
+// with should_not_tweet. A show starts when the destination is switched on.
 
 // xcPublishedTweetFlags is should_not_tweet as each PUBLISH carried it: true,
 // or false when the field was left out.
@@ -45,15 +44,15 @@ func xcShowThenRenewal(t *testing.T, setting string) (*xcFake, *db.Destination) 
 	row.XGoLiveTweet = setting
 	c, store, faults := xcFixture(t, fake, true, row)
 
-	xcSweep(t, c, store) // opens bc-1
-	xcSweep(t, c, store) // bytes arriving: publishes bc-1
+	xcSweep(t, c, store) // opens: a pending handle, nothing on X
+	xcSweep(t, c, store) // bytes arriving: takes the source live as bc-1
 	fake.set(func(f *xcFake) { f.state, f.active = oauth.XStateEnded, false })
-	renewed := xcSweep(t, c, store) // ended, encoder stopped: renews to bc-2
+	renewed := xcSweep(t, c, store) // ended, encoder stopped: renews to a pending handle
 	if renewed.Lifecycle.BroadcastID == "bc-1" || renewed.Lifecycle.BroadcastID == "" {
 		t.Fatalf("after X ended the show the recorded broadcast is %q, want a new one", renewed.Lifecycle.BroadcastID)
 	}
 	fake.set(func(f *xcFake) { f.active = true })
-	last := xcSweep(t, c, store) // bytes again: publishes bc-2
+	last := xcSweep(t, c, store) // bytes again: takes the source live as bc-2
 	if _, published, _, _ := fake.snapshot(); published != 2 {
 		t.Fatalf("published %d broadcasts, want the first show and its renewal", published)
 	}
@@ -117,8 +116,8 @@ func TestSwitchingAnXDestinationOffEndsTheShowSoTheNextGoLivePosts(t *testing.T)
 			lc:   db.BroadcastControl{Renewed: true, Attempts: 2, Fault: "X would not open a broadcast"},
 		},
 		"a renewal that never aired": {
-			fake: &xcFake{state: oauth.XStateNotStarted, id: "bc-2", seq: 2},
-			lc:   db.BroadcastControl{Renewed: true, BroadcastID: "bc-2", Phase: phaseCreated},
+			fake: &xcFake{},
+			lc:   db.BroadcastControl{Renewed: true, BroadcastID: xcPending, Phase: phaseCreated},
 		},
 	}
 	for name, tc := range cases {
@@ -141,9 +140,9 @@ func TestSwitchingAnXDestinationOffEndsTheShowSoTheNextGoLivePosts(t *testing.T)
 // renewal that never aired, the destination switched off and on, and the next
 // go-live posts.
 func TestTheNextShowAfterASwitchOffPostsItsFirstGoLive(t *testing.T) {
-	fake := &xcFake{state: oauth.XStateNotStarted, id: "bc-2", seq: 2}
+	fake := &xcFake{}
 	c, store, _ := xcFixture(t, fake, true,
-		xcRow(false, db.BroadcastControl{Renewed: true, BroadcastID: "bc-2", Phase: phaseCreated}))
+		xcRow(false, db.BroadcastControl{Renewed: true, BroadcastID: xcPending, Phase: phaseCreated}))
 	xcSweep(t, c, store) // off
 	store.mu.Lock()
 	store.rows[5].Enabled = true

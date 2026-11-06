@@ -23,6 +23,16 @@ its first tagged release.
 
 ### Fixed
 
+- **X Livestream moves off the routes X removes on 2027-01-01, and the whitelist copy is gone.** X deprecated
+  `/2/users/{id}/sources` and `/2/users/{id}/broadcasts` and removes them on 2027-01-01, after which they
+  return 404. polyemesis now uses `/2/sources`, `GET /2/sources/{id}/stream_key`, `POST /2/broadcasts` (create
+  and go live in one call) and `PUT /2/broadcasts/{id}/state`, which take the owner from the access token. A
+  source now has a separate, non-secret id, so the stored stream key is resolved to it. X's go-live is public as
+  soon as it returns, so a destination records a pending handle while its source is silent and the real
+  broadcast id is recorded when it goes live. X's Livestream docs no longer ask for a whitelist or an access
+  form, so the operator copy now says "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"; the gate
+  stays opt-in and pasting the key still works. PROVISIONAL: no live X account has run the new routes.
+
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
   could take quadratic time on a hostile paste (endpoint and ingest URLs, timecodes, stream-health values,

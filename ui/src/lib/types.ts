@@ -2494,7 +2494,7 @@ export interface SetupGuide {
    *  was reached on: reasons the displayed redirect URI may not work. */
   redirectWarnings?: string[];
   /** "open" or "closed" for a platform whose live API the operator switches on
-   *  (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM); absent for the rest. */
+   *  (POLYEMESIS_X_LIVESTREAM); absent for the rest. */
   livestreamGate?: "open" | "closed";
 }
 

@@ -172,7 +172,7 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		// mid-broadcast. See vimeo.go and entitlement.go.
 		db.PlatformVimeo: NewVimeo(opts...),
 		// X (Twitter) sign-in is open to everyone; the Livestream family behind it
-		// is whitelisted by X and switched off until the app is. See x.go.
+		// is opt-in (POLYEMESIS_X_LIVESTREAM) and switched off until the operator sets it. See x.go.
 		db.PlatformX: NewX(opts...),
 		// TikTok signs in for ONE reason: posting a finished clip with the
 		// Content Posting API. It has no destination and no stream key. See
@@ -740,7 +740,7 @@ type SetupGuide struct {
 	// by handlePlatformGuides.
 	RedirectWarnings []string `json:"redirectWarnings,omitempty"`
 	// LivestreamGate is "open" or "closed" for a platform whose live API sits
-	// behind an operator switch (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM),
+	// behind an operator switch (POLYEMESIS_X_LIVESTREAM),
 	// and empty for every other platform. Filled in per request by the API
 	// layer from the provider it actually uses.
 	LivestreamGate string `json:"livestreamGate,omitempty"`
@@ -876,19 +876,19 @@ func guides() []SetupGuide {
 			Supported:       true,
 			ManualStreamKey: true,
 			Scopes:          (&X{}).Scopes(),
-			Note: "Read this first: X's Livestream API is open only to apps X has whitelisted. " +
-				"Signing in works for any X account, and polyemesis tells you at connect time whether " +
-				"your app reaches the Livestream family. Until it does, paste the server URL and stream " +
-				"key from X's producer tooling; streaming works exactly the same. X also needs the " +
-				"account to be allowed to broadcast (X Premium or more than 1,000 followers for listing).",
+			Note: "Read this first: X's Livestream API needs a developer app, OAuth 2.0 with the broadcast.read " +
+				"and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP " +
+				"encoder. Signing in works for any X account, and polyemesis tells you at connect time whether " +
+				"Livestream is switched on (POLYEMESIS_X_LIVESTREAM=1) and reachable. When it is not, or when the " +
+				"account cannot use the API, paste the server URL and stream key from X's producer tooling; " +
+				"streaming works exactly the same.",
 			Steps: []string{
-				"Request Livestream API access with the Livestream access form (linked from docs.x.com/livestream-api/getting-started). X reviews it and whitelists the app by its developer App ID.",
 				"Open console.x.com, create a project and an app, and copy the Client ID and Client secret.",
 				"Under the app's user authentication settings, add exactly the redirect URI shown below.",
 				"Copy the Client ID and Client secret into the fields on this page and save.",
 				"Go to a destination and click Connect account. X will ask you to grant access.",
-				"If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
-				"Once X has whitelisted the app, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, opens and publishes each broadcast with the destination's go-live title, ends it, and sends and moderates chat.",
+				"If the account cannot use the Livestream API, or you have not switched it on, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
+				"To use the Livestream API, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, takes each broadcast live with the destination's go-live title once your encoder is sending, ends it, and sends and moderates chat.",
 				"To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com. It is a secret: keep it out of shared files and screenshots.",
 			},
 		},
