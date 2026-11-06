@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "The whole frame across the width, over a blurred copy of itself.",
   "clipedit.vertical.focus": "Crop position",
   "clipedit.vertical.faceBox": "Face-cam box",
+  "clipedit.vertical.faceBoxValue": "Left {x}%, top {y}%",
   "clipedit.vertical.faceBoxHint": "Drag on the frame to draw a box around your camera. Arrow keys nudge it.",
   "clipedit.vertical.grabFrame": "Use the current frame",
   "clipedit.vertical.faceShare": "Face panel height",

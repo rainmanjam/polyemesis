@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "Увесь кадр по ширині поверх його розмитої копії.",
   "clipedit.vertical.focus": "Положення обрізання",
   "clipedit.vertical.faceBox": "Рамка вебкамери",
+  "clipedit.vertical.faceBoxValue": "Зліва {x}%, зверху {y}%",
   "clipedit.vertical.faceBoxHint": "Проведіть по кадру, щоб намалювати рамку навколо камери. Стрілки зсувають її.",
   "clipedit.vertical.grabFrame": "Використати поточний кадр",
   "clipedit.vertical.faceShare": "Висота панелі камери",

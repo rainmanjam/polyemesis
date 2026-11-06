@@ -32,10 +32,13 @@ describe("ivsAppPathFix", () => {
 });
 
 describe("ivsAppPathFix on pathological input", () => {
-  it("finishes fast on a huge run of slashes and still answers", () => {
+  it("finishes fast on a long run of slashes inside the path and still answers", () => {
+    // The old /^\/+|\/+$/g trim rescanned the run from every slash that was not
+    // leading: about 15 s for 100k slashes. A leading run was always cheap, so the
+    // run has to sit after the first segment.
     const t0 = performance.now();
-    expect(ivsAppPathFix(`rtmps://${host}/${"/".repeat(200_000)}x/y`)).toBe(`rtmps://${host}:443/app`);
-    expect(ivsAppPathFix(`rtmps://${host}/${"/".repeat(200_000)}app`)).toBeNull();
+    expect(ivsAppPathFix(`rtmps://${host}/a${"/".repeat(100_000)}b`)).toBe(`rtmps://${host}:443/app`);
+    expect(ivsAppPathFix(`rtmps://${host}/app${"/".repeat(100_000)}b`)).toBeNull();
     expect(performance.now() - t0).toBeLessThan(250);
   });
 });

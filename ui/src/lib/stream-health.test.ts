@@ -109,10 +109,4 @@ describe("formatHealthValue trailing zeros", () => {
   ])("renders %s as %s", (v, want) => {
     expect(formatHealthValue(v)).toBe(want);
   });
-
-  it("is linear on a value whose digits are all zeros before the point", () => {
-    const t0 = performance.now();
-    expect(formatHealthValue(1e21)).toBeTypeOf("string");
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
 });

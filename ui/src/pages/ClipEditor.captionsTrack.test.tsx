@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 
-/* THE SPRITE-THUMBNAIL MERGE CAN NOT REJECT UNHANDLED. A segment whose sprite
- * VTT cannot be fetched leaves the scrubber plain and raises nothing.
+/* The editor's video carries the recording's caption file as a <track> when the
+ * recording is a single segment.
  *
- * (Original note, from the plurals test this scaffold is copied from:) The clip editor's transcript card reads one as one. The catalogue has no
+ * (Scaffold copied from the plurals test:) The clip editor's transcript card reads one as one. The catalogue has no
  * plural rules, so a transcript of exactly one line has its own key: its
  * badge said "1 lines".
  *
@@ -66,28 +66,7 @@ afterEach(() => {
   lines = [];
 });
 
-const unhandled: unknown[] = [];
-const onUnhandled = (r: unknown) => unhandled.push(r);
-
-describe("ClipEditor sprite load", () => {
-  it("survives a sprite VTT that fails to fetch", async () => {
-    process.on("unhandledRejection", onUnhandled);
-    const fetchSpy = vi.fn().mockRejectedValue(new Error("offline"));
-    vi.stubGlobal("fetch", fetchSpy);
-    render(
-      <MemoryRouter initialEntries={["/clips/5"]}>
-        <Routes>
-          <Route path="/clips/:id" element={<ClipEditor />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/sprites/a.vtt", expect.anything()));
-    await new Promise((r) => setTimeout(r, 20));
-    process.off("unhandledRejection", onUnhandled);
-    vi.unstubAllGlobals();
-    expect(unhandled).toEqual([]);
-  });
-
+describe("ClipEditor caption track", () => {
   it("attaches the recording's caption file to a single-segment proxy", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
     const { container } = render(

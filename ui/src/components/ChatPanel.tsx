@@ -179,10 +179,10 @@ function MessageRow({
     : undefined;
 
   return (
-    <div // NOSONAR S6847: a message is one stop in the chat log (WAI-ARIA feed pattern); Enter / Shift+F10 open its moderation menu, the keyboard twin of right-click
+    <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
       role="group"
       aria-roledescription={t("chatpage.messageRole")}
-      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message is a focus stop so a keyboard moderator can reach its menu
+      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message must be focusable for a keyboard moderator to reach its context menu
       onKeyDown={openMenuFromKeyboard}
       onContextMenu={openMenu}
       onDoubleClick={openMenu}

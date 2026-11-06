@@ -67,6 +67,31 @@ describe("VerticalExportPanel", () => {
     expect(next.face.y).toBe(spec.face.y);
   });
 
+  it("exposes the face box as an adjustable slider that reports its position", () => {
+    const spec = { ...defaultVerticalSpec(), layout: "stacked" as const };
+    const { onChange } = renderPanel(spec, 30_000);
+    const box = screen.getByRole("slider", { name: "Face-cam box" });
+    expect(box.getAttribute("tabindex")).toBe("0");
+    expect(box.getAttribute("aria-valuemin")).toBe("0");
+    expect(box.getAttribute("aria-valuemax")).toBe(String(Math.round((1 - spec.face.w) * 100)));
+    expect(box.getAttribute("aria-valuenow")).toBe(String(Math.round(spec.face.x * 100)));
+    expect(box.getAttribute("aria-valuetext")).toBe(
+      `Left ${Math.round(spec.face.x * 100)}%, top ${Math.round(spec.face.y * 100)}%`,
+    );
+    // It is no longer announced as a button that does nothing on Enter.
+    expect(screen.queryByRole("button", { name: "Face-cam box" })).toBeNull();
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect((onChange.mock.calls[0][0] as VerticalSpec).face.y).toBeCloseTo(spec.face.y + 0.01, 6);
+  });
+
+  it("focuses the face box when the pointer goes down on it", () => {
+    const spec = { ...defaultVerticalSpec(), layout: "stacked" as const };
+    renderPanel(spec, 30_000);
+    const box = screen.getByRole("slider", { name: "Face-cam box" });
+    fireEvent.pointerDown(box);
+    expect(document.activeElement).toBe(box);
+  });
+
   it("applies a saved template and switches the short on", () => {
     const { onChange, onEnabled } = renderPanel(defaultVerticalSpec(), 30_000);
     fireEvent.click(screen.getByRole("button", { name: /^Apply a template: Face top$/ }));
@@ -112,7 +137,8 @@ describe("VerticalExportPanel", () => {
   it("changes the share, the face position and the crop pan", () => {
     const stacked = { ...defaultVerticalSpec(), layout: "stacked" as const };
     const a = renderPanel(stacked, 30_000);
-    const [share] = screen.getAllByRole("slider");
+    // The face box is a slider too; the share control is the range input.
+    const [share] = screen.getAllByRole("slider").filter((el) => el.tagName === "INPUT");
     fireEvent.change(share, { target: { value: "30" } });
     expect((a.onChange.mock.calls[0][0] as VerticalSpec).faceShare).toBeCloseTo(0.3, 6);
     fireEvent.click(screen.getByRole("checkbox", { name: /bottom/i }));

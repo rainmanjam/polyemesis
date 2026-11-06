@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "Das ganze Bild über die volle Breite, vor einer unscharfen Kopie.",
   "clipedit.vertical.focus": "Ausschnittposition",
   "clipedit.vertical.faceBox": "Facecam-Rahmen",
+  "clipedit.vertical.faceBoxValue": "Links {x} %, oben {y} %",
   "clipedit.vertical.faceBoxHint": "Ziehe auf dem Bild einen Rahmen um deine Kamera. Pfeiltasten verschieben ihn.",
   "clipedit.vertical.grabFrame": "Aktuelles Bild verwenden",
   "clipedit.vertical.faceShare": "Höhe des Facecam-Bereichs",

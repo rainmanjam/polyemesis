@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "L'intera inquadratura in larghezza, su una sua copia sfocata.",
   "clipedit.vertical.focus": "Posizione del ritaglio",
   "clipedit.vertical.faceBox": "Riquadro facecam",
+  "clipedit.vertical.faceBoxValue": "Sinistra {x}%, alto {y}%",
   "clipedit.vertical.faceBoxHint": "Trascina sull'inquadratura per disegnare un riquadro intorno alla videocamera. Le frecce lo spostano.",
   "clipedit.vertical.grabFrame": "Usa il fotogramma attuale",
   "clipedit.vertical.faceShare": "Altezza del pannello facecam",

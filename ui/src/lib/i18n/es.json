@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "Todo el encuadre a lo ancho, sobre una copia desenfocada.",
   "clipedit.vertical.focus": "Posición del recorte",
   "clipedit.vertical.faceBox": "Recuadro de cámara",
+  "clipedit.vertical.faceBoxValue": "Izquierda {x} %, arriba {y} %",
   "clipedit.vertical.faceBoxHint": "Arrastra sobre el encuadre para dibujar un recuadro alrededor de tu cámara. Las flechas lo desplazan.",
   "clipedit.vertical.grabFrame": "Usar el fotograma actual",
   "clipedit.vertical.faceShare": "Altura del panel de cámara",

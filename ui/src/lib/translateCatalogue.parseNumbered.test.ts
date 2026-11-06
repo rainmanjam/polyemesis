@@ -21,10 +21,11 @@ describe("translate-catalogue parseNumbered", () => {
     expect(parseNumbered("hello\n1x. no\n", 1)).toEqual([null]);
   });
 
-  it("finishes fast on a line of padding with no marker", () => {
+  it("finishes fast on a marker followed by a long run of padding and a stray CR", () => {
+    // The old /^\s*(\d+)\s*[.)]\s*(.*)$/ gave padding back one space at a time and
+    // rescanned to the CR each time: about 15 s for 100k spaces.
     const t0 = performance.now();
-    parseNumbered(`1${" ".repeat(200_000)}x\n${" ".repeat(200_000)}`, 1);
-    parseNumbered(`1.${" ".repeat(200_000)}`, 1);
+    expect(parseNumbered(`1.${" ".repeat(100_000)}\rx\ry`, 1)).toEqual([null]);
     expect(performance.now() - t0).toBeLessThan(250);
   });
 });

@@ -3858,6 +3858,7 @@
   "clipedit.vertical.blurBody": "整幅画面按宽度铺满，叠在其模糊副本之上。",
   "clipedit.vertical.focus": "裁剪位置",
   "clipedit.vertical.faceBox": "人像框",
+  "clipedit.vertical.faceBoxValue": "左 {x}%，上 {y}%",
   "clipedit.vertical.faceBoxHint": "在画面上拖动，围绕摄像头画出方框。方向键可微调。",
   "clipedit.vertical.grabFrame": "使用当前帧",
   "clipedit.vertical.faceShare": "人像面板高度",

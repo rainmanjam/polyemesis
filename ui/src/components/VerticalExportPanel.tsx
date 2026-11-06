@@ -237,14 +237,27 @@ export function VerticalExportPanel({
                       const img = e.currentTarget;
                       if (img.naturalWidth > 0 && img.naturalHeight > 0) setSrcAspect(img.naturalWidth / img.naturalHeight);
                     }} />}
-                  <button
-                    type="button"
-                    // Safari and Firefox on macOS do not focus a clicked button, so
-                    // arrow nudging right after a drag would need a Tab first.
+                  <div
+                    // A slider on the box's left edge, whose value text also gives the
+                    // top edge: the arrow keys move it in both axes, and a screen reader
+                    // is told where it sits. Not a button, which would promise an
+                    // Enter/Space action there is none of.
+                    role="slider"
+                    tabIndex={0}
+                    aria-valuemin={0}
+                    aria-valuemax={Math.round((1 - spec.face.w) * 100)}
+                    aria-valuenow={Math.round(spec.face.x * 100)}
+                    aria-valuetext={t("clipedit.vertical.faceBoxValue", {
+                      x: Math.round(spec.face.x * 100),
+                      y: Math.round(spec.face.y * 100),
+                    })}
+                    // Focus on pointerdown: Safari and Firefox on macOS do not focus
+                    // a clicked non-text control, so arrow nudging after a drag would
+                    // need a Tab first.
                     onPointerDown={(e) => e.currentTarget.focus()}
                     aria-label={t("clipedit.vertical.faceBox")}
                     data-testid="face-box"
-                    className="absolute cursor-move border-2 border-primary bg-primary-dim"
+                    className="absolute cursor-move border-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring border-primary bg-primary-dim"
                     style={{
                       left: `${spec.face.x * 100}%`,
                       top: `${spec.face.y * 100}%`,
@@ -258,7 +271,7 @@ export function VerticalExportPanel({
                         onChange({ ...spec, face: next });
                       }
                     }}
-                  ></button>
+                  />
                 </div>
                 <p className="text-tiny text-muted-foreground">{t("clipedit.vertical.faceBoxHint")}</p>
                 <Label className="flex flex-col gap-1 text-tiny">
