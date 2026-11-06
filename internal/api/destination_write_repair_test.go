@@ -45,7 +45,10 @@ func TestEveryDestinationWriteIsRepairedFirst(t *testing.T) {
 	// The repair, and its core for the narrow writers: those run it inside
 	// their callback, on the row the write stores, so the store read happens
 	// first and the call they make is the one that takes the account list.
-	repairs := map[string]bool{repair: true, "dropUnsendableSettingsAgainst": true}
+	// destinationWriteWarnings is the create and update handlers' one call to it.
+	repairs := map[string]bool{
+		repair: true, "dropUnsendableSettingsAgainst": true, "destinationWriteWarnings": true,
+	}
 	// The whole-row writers, and the two narrow ones that also write the
 	// columns the repair clears (account_id, compliance, facebook, the X title
 	// and announcement). A writer of those columns that skipped the repair

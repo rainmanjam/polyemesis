@@ -25,7 +25,7 @@ import (
 // Every tool is a typed description of one request against the REST API (with,
 // for some writes, the reads that request needs), and it is carried out by
 // serving that request on this server's own router, in process, with the caller's own bearer token.
-// So requireAuth, requireScope, readScopeDeniedPatterns, requireSource, the
+// So requireAuth, requireScope, the readDenied flag, requireSource, the
 // stop-all confirmation, the read-safe views and every publishAudit a handler
 // already makes apply to an MCP call exactly as they apply to curl. There is no
 // second implementation of "start a destination" for an AI to reach, and so no
@@ -129,7 +129,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 		// /mcp is outside requireScope. mcpEndpoint refuses every scope that is
 		// not an MCP scope, the obs scope included; this earlier refusal only
 		// gives the OBS script's token an answer that names the one route it
-		// does reach (obsScopePatterns). While MCP is switched off, mcpGate
+		// does reach (the obsScope flag). While MCP is switched off, mcpGate
 		// answers 404 before either check runs.
 		if p.token.Scope == db.ScopeOBS {
 			writeError(w, http.StatusForbidden,
@@ -436,7 +436,7 @@ func mcpScrub(text string, secrets []string) string {
 // mcpUntrustedOpen and mcpUntrustedClose fence viewer-written text. The payload
 // between them is JSON produced by encoding/json, which escapes '<' and '>' as
 // < and >, so no chat message can spell the closing tag and break
-// out of the fence however it is worded. TestMCPChatTextCannotCloseTheFence
+// out of the fence however it is worded. TestChatAndTranscriptTextIsFencedAsUntrustedAndCannotCloseTheFence
 // holds that.
 const (
 	mcpUntrustedOpen  = "<untrusted-viewer-content>"

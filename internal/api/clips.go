@@ -165,7 +165,7 @@ func (s *Server) clipSegmentView(p clipPart) clipSegmentView {
 		Name:        p.rec.Filename,
 		StartMS:     p.startMS,
 		DurationMS:  p.rec.DurationMS,
-		MediaBase:   fmt.Sprintf("/api/v1/library/recordings/%d/media/", p.rec.ID),
+		MediaBase:   libraryMediaBase(p.rec.ID),
 		Missing:     p.path == "",
 	}
 	layout := media.LayoutFor(s.cfg.RecordingsDir(), p.rec.Filename)

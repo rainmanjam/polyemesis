@@ -388,7 +388,7 @@ func (s *Server) handlePublishTargets(w http.ResponseWriter, r *http.Request) {
 			av := publishAccountView{ID: a.ID, Name: a.AccountName}
 			if publish.GrantFailure(id, a.Scopes) != nil {
 				av.NeedsReconnect = true
-				av.ConnectPath = "/api/v1/oauth/" + id + "/start"
+				av.ConnectPath = oauthStartPath(id)
 			}
 			pv.Accounts = append(pv.Accounts, av)
 		}

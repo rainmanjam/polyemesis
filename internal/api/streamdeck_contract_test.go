@@ -567,7 +567,7 @@ func TestTheStreamDeckContract(t *testing.T) {
 //
 // Mutation-checked: moving POST /destinations/{id}/restart into the
 // session-only group fails the admin-token check by name; renaming it fails
-// the router lookup; adding GET /status to readScopeDeniedPatterns fails the
+// the router lookup; adding GET /status to the readDenied flag fails the
 // read-token check.
 func checkDeckRoutes(t *testing.T, f *deckFixture, calls []deckCall, routes []deckRoute) {
 	mux, ok := f.h.(*chi.Mux)

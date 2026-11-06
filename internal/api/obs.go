@@ -418,7 +418,7 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 	if eng := s.engineForSource(row.SourceID); eng != nil {
 		src = eng.Source()
 	}
-	opts := routing.DefaultPresetOpts()
+	opts := routing.DefaultPresetOptsFor(src)
 	if rule.Opts != nil {
 		opts = *rule.Opts
 	}

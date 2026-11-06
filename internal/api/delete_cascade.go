@@ -19,10 +19,16 @@ import (
 // is added in one place and reaches both:
 //
 //	beforeDestinationsRemoved  while the rows, their accounts and tokens exist:
-//	                           the platform events created for them.
+//	                           the note about a stranded YouTube stream, and the
+//	                           platform events created for them.
 //	(the store's delete)       schedules.destination_ids and the rollover row,
 //	                           in the delete's own transaction (db.SchedulePrune).
 //	afterDestinationsRemoved   once they are gone: the OBS bridge document.
+//
+// A buffered broadcast delay is cut by the destination delete itself
+// (CutOnStop, CutDelay). A programme delete needs neither: the engine treats a
+// destination whose row is gone as cut (rowsStillThere), pinned by
+// TestDeletingAProgrammeCutsItsDelayedDestinationsLikeDeletingThem.
 //
 // Every step is best-effort and none of them can refuse the delete: the
 // operator asked for the row to go, and a platform that is down or a token
@@ -37,6 +43,15 @@ const destinationEventsTimeout = 30 * time.Second
 
 // beforeDestinationsRemoved runs while the destinations still exist.
 func (s *Server) beforeDestinationsRemoved(ctx context.Context, ds []*db.Destination, now time.Time) []string {
+	// What goes in this request: a sibling that is also being deleted is not
+	// still using a shared key.
+	going := make(map[int64]bool, len(ds))
+	for _, d := range ds {
+		going[d.ID] = true
+	}
+	for _, d := range ds {
+		s.noteOrphanedIngestStream(d, going)
+	}
 	return s.cancelDestinationEvents(ctx, ds, now)
 }
 

@@ -584,25 +584,15 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 // reported as working, because an encoder nobody asked about is not an encoder
 // that was found wanting.
 func encoderVerdict(tools *ffmpeg.Tools, e db.VideoEncoder) (works, measured bool, reason string, ms int64) {
-	if c, ok := tools.Capability(string(e)); ok && !notProbed(c.Reason) {
+	if c, ok := tools.Capability(string(e)); ok && !ffmpeg.IsNotProbed(c.Reason) {
 		return c.Works, true, c.Reason, c.DurationMS
 	}
 	if sib := h264SiblingOf(e); sib != "" {
-		if c, ok := tools.Capability(sib); ok && !c.Works && !notProbed(c.Reason) {
+		if c, ok := tools.Capability(sib); ok && !c.Works && !ffmpeg.IsNotProbed(c.Reason) {
 			return false, false, fmt.Sprintf("%s opens the same device through the same driver and failed: %s", sib, c.Reason), 0
 		}
 	}
 	return true, false, "", 0
-}
-
-// notProbed distinguishes "the encoder failed" from "we never got to ask it".
-//
-// Detection marks a probe it could not run — a cancelled scan, an expired
-// budget — as not working, with a reason that says so. Read literally, that
-// would take every encoder out of the editor because one scan was interrupted.
-// Nothing was demonstrated in that case, so nothing may be withheld on it.
-func notProbed(reason string) bool {
-	return strings.HasPrefix(reason, "not probed:")
 }
 
 // h264SiblingOf names the encoder whose test encode stands in for one that was

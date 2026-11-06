@@ -38,7 +38,11 @@ import (
 // releaseDownloadBase is where release artefacts are fetched from. A var so a
 // test can point it at a local server, exactly as updateFeedURL is (see
 // handlers.go); nothing reads it until an operator asks to stage an upgrade.
-var releaseDownloadBase = "https://github.com/rainmanjam/polyemesis/releases/download"
+var releaseDownloadBase = "https://github.com/" + releaseRepo + "/releases/download"
+
+// releaseRepo is where polyemesis is released: the one place the slug is spelled,
+// shared by the version feed and the artefact downloads.
+const releaseRepo = "rainmanjam/polyemesis"
 
 // upgradeMu serialises the two mutating endpoints against each other.
 //

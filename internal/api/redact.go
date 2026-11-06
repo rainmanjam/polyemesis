@@ -222,7 +222,7 @@ func readSafeSettings(s db.Settings) db.Settings {
 //
 // extraInputArgs and extraOutputArgs are CREDENTIAL-CLASS, and that follows
 // from a decision this codebase had already made rather than from a new one.
-// GET /destinations/{id}/expert is on readScopeDeniedPatterns -- 403 to a read
+// GET /destinations/{id}/expert is on the readDenied flag -- 403 to a read
 // token -- for a stated reason: its response is the resolved FFmpeg argv, and
 // the argv contains the destination's stream key. These two fields ARE that
 // argv, as the operator typed it, reaching the same principal through GET

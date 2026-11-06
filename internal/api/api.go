@@ -76,6 +76,14 @@ import (
 // absent programme go through engOrNil instead.
 func (s *Server) eng() *engine.Engine { return s.mgr.Default() }
 
+// clock is the server's time. See the now field.
+func (s *Server) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
 // engOrNil is eng() for the callers that have to answer for an absent engine,
 // and it exists to make that answer ATOMIC.
 //
@@ -189,9 +197,9 @@ func (s *Server) reconcileNow(action string) string {
 //
 // A payload that is not a JSON object -- an array, a bare string -- cannot
 // carry the key, so it is written unchanged and the warning is logged. No
-// mutation response in this package has that shape today, and the guard test
-// TestEveryReconcileGoesThroughTheHelper is what keeps a new one from arriving
-// unnoticed.
+// mutation response in this package has that shape today, and
+// TestReconcileHasOneSpellingAndItsResultCannotBeDropped keeps every reconcile
+// result going through this helper.
 func writeMutation(w http.ResponseWriter, status int, warning string, v any) {
 	if warning == "" {
 		writeJSON(w, status, v)
@@ -413,18 +421,18 @@ type Server struct {
 	// verticalHealth paces the vertical status read to one YouTube call a minute per pair (#7).
 	// The zero value is ready; see youtube_vertical.go.
 	verticalHealth verticalHealthPacer
-	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
-	// the engine answers liveness, the wall clock answers time, and the shared YouTube allowance is
-	// charged.
+	// now is the one clock the server's time-dependent features read (the vertical status pacer, the
+	// audience sampler, the YouTube quota day). Nil in production: the wall clock. A test sets it to
+	// fix the time of day instead of racing Pacific midnight or sleeping a minute; see clock.
+	now func() time.Time
+	// verticalHalfLive and verticalChargeQuota are seams for tests. Nil in production: the engine
+	// answers liveness and the shared YouTube allowance is charged.
 	verticalHalfLive    func(ids ...int64) bool
-	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
-	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning
-	// and analyticsNow are its test seams (analyticsNow is the YouTube quota's clock too); nil in
-	// production. See analytics.go.
+	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store.
+	// analyticsRunning is its test seam; nil in production. See analytics.go.
 	audience         *analytics.Sampler
 	analyticsRunning func() map[int64]bool
-	analyticsNow     func() time.Time
 	// ytQuotaShared is the install's one YouTube allowance, bound to the
 	// configured Google client and drawn on by chat, the vertical read, the
 	// sampler and the oauth request meter.
@@ -612,6 +620,9 @@ type Server struct {
 	// stream is the real-time events hub behind GET /events. Optional: nil
 	// answers 503 there, and every publish through it is nil-safe.
 	stream *eventstream.Hub
+
+	// policy is what registerRoutes recorded about each route; see route_policy.go.
+	policy atomic.Pointer[routePolicy]
 
 	// overlayGate is the chat overlay's display gate, read for its counters
 	// only. Optional. overlayKicks ends open overlay streams when a key is
@@ -974,14 +985,9 @@ func New(o Options) *Server {
 		cs = s.youtubeQuota()
 	}
 	units, reserve := youtubeQuotaPair(cs)
-	// The quota's clock is the sampler's test seam when one is set, so a test
-	// fixes the time of day instead of racing Pacific midnight (R13).
-	s.ytQuotaShared = chat.NewYouTubeQuota(units, reserve, func() time.Time {
-		if s.analyticsNow != nil {
-			return s.analyticsNow()
-		}
-		return time.Now()
-	})
+	// Late-bound to the server's clock, so a test fixes the time of day instead
+	// of racing Pacific midnight (R13).
+	s.ytQuotaShared = chat.NewYouTubeQuota(units, reserve, s.clock)
 	s.bindYouTubeClient()
 	s.ytVideos = map[int64]ytLiveVideo{}
 	if o.DB != nil {
@@ -1039,14 +1045,20 @@ func (s *Server) registerRoutes(r chi.Router) {
 	var notFound http.Handler
 	r.Use(s.mcpGate(&notFound))
 
-	r.Route("/api/v1", func(r chi.Router) {
+	// Policy is declared on the registrations below and published when the
+	// router is complete; see route_policy.go.
+	rt := newRouteRecorder(s)
+	defer rt.publish(&s.policy)
+	top, api := rt.under(""), rt.under(apiBase)
+
+	r.Route(apiBase, func(r chi.Router) {
 		// --- unauthenticated ---
 		r.Get("/setup", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
 		// Not a constant any more; see handleHealth for what it now measures
 		// and why only some of it can answer 503.
-		r.Get("/health", s.handleHealth)
+		api.Get(r, "/health", s.handleHealth, logSkip)
 		// Sessionless on purpose: in selfsigned mode the browser will not let
 		// the user reach the login form until this CA is installed. See
 		// handleDownloadCA for the full argument.
@@ -1061,7 +1073,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// The player's own reports, and the offline card's clip. The same
 		// gate again: a beacon for a stream that is not published is a 404,
 		// and one without the token a 401. See playout_player.go.
-		r.Post(strings.TrimPrefix(playoutBeaconPath, "/api/v1"), s.handlePlayoutBeacon)
+		api.Post(r, strings.TrimPrefix(playoutBeaconPath, apiBase), s.handlePlayoutBeacon, logSkipUnless5xx)
 		r.Get("/playout/offline-clip", s.handlePlayoutOfflineClip)
 
 		// --- authenticated ---
@@ -1089,7 +1101,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The WRITE is admin-scoped, and it is admin-scoped BY
 			// CONSTRUCTION rather than by a list: requireScope refuses every
 			// non-GET to a read token unless the pattern is in
-			// readScopeWritePatterns, and this one deliberately is not. A
+			// the readWrite flag, and this one deliberately is not. A
 			// read-only credential must not be able to mutate user state,
 			// however small that state is -- "it is only a boolean" is the
 			// argument that ends with a read token turning off a warning
@@ -1232,7 +1244,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// is a POST so requireCSRF covers it and no prefetching browser
 			// can reach out to GitHub on the operator's behalf.
 			r.Get("/version", s.handleVersion)
-			r.Post("/version/check", s.handleCheckUpdate)
+			api.Post(r, "/version/check", s.handleCheckUpdate, readWrite)
 			// Acting on what the check found. Separate from /version on
 			// purpose: the plan probes whether the install directory is
 			// writable BY CREATING A FILE IN IT, and /version is read by the
@@ -1252,10 +1264,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// requireSource, like every mutation below that reaches a
 			// pipeline: there is no feed to describe the tracks of. See
 			// requireSource.
-			r.With(s.requireSource).Put("/source/annotations", s.handlePutAnnotations)
+			api.Put(r, "/source/annotations", s.handlePutAnnotations, needsSource)
 			// Manual failover. The tier's return mode defaults to manual, so
 			// this is how a broadcast leaves a slate.
-			r.With(s.requireSource).Post("/failover/source", s.handleSwitchSource)
+			api.Post(r, "/failover/source", s.handleSwitchSource, needsSource)
 			// Per-item playlist readiness. Its own GET rather than a field on
 			// the settings blob -- see handlePlaylistStatus.
 			r.Get("/failover/playlist", s.handlePlaylistStatus)
@@ -1276,11 +1288,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The OBS bridge (#16). See obs.go. The configuration and its
 			// password are settings writes like the MQTT pair above, reachable
 			// by an admin token. /obs/events is the one route an "obs"-scoped
-			// token reaches (obsScopePatterns): the OBS script's way in.
+			// token reaches (the obsScope flag): the OBS script's way in.
 			r.Get("/obs", s.handleGetOBS)
 			r.Put("/obs", s.handlePutOBS)
 			r.Put("/obs/password", s.handlePutOBSPassword)
-			r.Post("/obs/events", s.handleOBSEvent)
+			api.Post(r, "/obs/events", s.handleOBSEvent, obsScope)
 
 			r.Get("/tls", s.handleTLSStatus)
 			// What Let's Encrypt would need from this host, checked against
@@ -1302,7 +1314,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// -- and a page that 503s is a page that cannot explain itself.
 			// Every WRITE below reconciles a pipeline that does not exist.
 			r.Get("/destinations", s.handleListDestinations)
-			r.With(s.requireSource).Post("/destinations", s.handleCreateDestination)
+			api.Post(r, "/destinations", s.handleCreateDestination, needsSource)
 			// chi matches the static segment ahead of {id}, so this does not
 			// collide with the destination routes below.
 			//
@@ -1311,7 +1323,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Put("/destinations/order", s.handleReorderDestinations)
 			// Read-only preview of what stop and stop-all would end. Reads the
 			// recorded phase and makes no platform call. See destinations_stop_impact.go.
-			r.With(s.requireSource).Get("/destinations/stop-impact", s.handleStopImpact)
+			api.Get(r, "/destinations/stop-impact", s.handleStopImpact, needsSource)
 			// The bulk pair, beside the per-destination controls they drive.
 			// Static segments again, so they do not collide with {id} below.
 			//
@@ -1321,38 +1333,38 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// header before touching them, because "stop all" ends every
 			// YouTube broadcast on the install and that is not visible from
 			// here.
-			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
-			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
+			api.Post(r, "/destinations/start-all", s.handleStartAllDestinations, needsSource)
+			api.Post(r, "/destinations/stop-all", s.handleStopAllDestinations, needsSource)
 			// Dump every delayed destination of a programme (#11 follow-up):
 			// confirm required, scoped by ?source= as stop-all is. See
 			// destinations_delay_dump.go.
-			r.With(s.requireSource).Post("/destinations/delay/dump-all", s.handleDumpAllDelays)
+			api.Post(r, "/destinations/delay/dump-all", s.handleDumpAllDelays, needsSource)
 			r.Get("/destinations/{id}", s.handleGetDestination)
-			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
-			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
+			api.Put(r, "/destinations/{id}", s.handleUpdateDestination, needsSource)
+			api.Delete(r, "/destinations/{id}", s.handleDeleteDestination, needsSource)
 			// Live gain and mute for one track. Persists first, then reconciles; the
 			// response says whether the change went live or restarted. See
 			// destinations_track_gain.go.
-			r.With(s.requireSource).Post("/destinations/{id}/tracks/{track}/gain", s.handleSetTrackGain)
-			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
-			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
-			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
+			api.Post(r, "/destinations/{id}/tracks/{track}/gain", s.handleSetTrackGain, needsSource)
+			api.Post(r, "/destinations/{id}/start", s.handleStartDestination, needsSource)
+			api.Post(r, "/destinations/{id}/stop", s.handleStopDestination, needsSource)
+			api.Post(r, "/destinations/{id}/restart", s.handleRestartDestination, needsSource)
 			// Dump the newest part of one destination's broadcast delay and stay
 			// on the air. The dumped programme never airs; the delay stays
 			// shorter until the destination next starts.
-			r.With(s.requireSource).Post("/destinations/{id}/delay/dump", s.handleDumpDestinationDelay)
-			r.With(s.requireSource).Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
+			api.Post(r, "/destinations/{id}/delay/dump", s.handleDumpDestinationDelay, needsSource)
+			api.Post(r, "/destinations/{id}/refresh-key", s.handleRefreshKey, needsSource)
 
 			// YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast. See
 			// youtube_vertical.go. The status read is a GET; create and confirm are POSTs.
-			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical", s.handleCreateYouTubeVertical)
-			r.Get("/destinations/{id}/youtube-vertical", s.handleYouTubeVerticalStatus)
-			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical/confirm", s.handleConfirmYouTubeVertical)
+			api.Post(r, "/destinations/{id}/youtube-vertical", s.handleCreateYouTubeVertical, needsSource)
+			api.Get(r, "/destinations/{id}/youtube-vertical", s.handleYouTubeVerticalStatus, readDenied)
+			api.Post(r, "/destinations/{id}/youtube-vertical/confirm", s.handleConfirmYouTubeVertical, needsSource)
 			// Planned rollover (#19): the platform caps, one destination's countdown and settings, and a manual rollover.
 			r.Get("/rollover/limits", s.handleListRolloverLimits)
-			r.With(s.requireSource).Get("/destinations/{id}/rollover", s.handleGetRollover)
-			r.With(s.requireSource).Put("/destinations/{id}/rollover", s.handleSaveRollover)
-			r.With(s.requireSource).Post("/destinations/{id}/rollover/run", s.handleRunRollover)
+			api.Get(r, "/destinations/{id}/rollover", s.handleGetRollover, needsSource)
+			api.Put(r, "/destinations/{id}/rollover", s.handleSaveRollover, needsSource)
+			api.Post(r, "/destinations/{id}/rollover/run", s.handleRunRollover, needsSource)
 
 			// Expert mode: hand-edited FFmpeg arguments for one destination.
 			// Preview and dry-run are POSTs because they carry a candidate
@@ -1376,10 +1388,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// refusals still apply to the signed-in operator.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
-				r.Get("/destinations/{id}/expert", s.handleGetExpert)
-				r.With(s.requireSource).Put("/destinations/{id}/expert", s.handlePutExpert)
-				r.With(s.requireSource).Delete("/destinations/{id}/expert", s.handleDeleteExpert)
-				r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
+				api.Get(r, "/destinations/{id}/expert", s.handleGetExpert, readDenied)
+				api.Put(r, "/destinations/{id}/expert", s.handlePutExpert, needsSource)
+				api.Delete(r, "/destinations/{id}/expert", s.handleDeleteExpert, needsSource)
+				api.Post(r, "/destinations/{id}/expert/preview", s.handlePreviewExpert, readDenied)
 				r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
 			})
 
@@ -1424,7 +1436,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/media", s.handleListMedia)
 
 			r.Get("/renditions", s.handleListRenditions)
-			r.With(s.requireSource).Post("/renditions", s.handleCreateRendition)
+			api.Post(r, "/renditions", s.handleCreateRendition, needsSource)
 			// Static segment first, same as /destinations/order above.
 			r.Get("/renditions/presets", s.handleRenditionPresets)
 			// The font picker for text overlays. A listing rather than a
@@ -1435,9 +1447,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Read-only and query-parameterised because the dialog asks before
 			// the destination exists.
 			r.Get("/renditions/{id}/concerns", s.handleRenditionConcerns)
-			r.With(s.requireSource).Put("/renditions/{id}", s.handleUpdateRendition)
-			r.With(s.requireSource).Delete("/renditions/{id}", s.handleDeleteRendition)
-			r.With(s.requireSource).Post("/renditions/{id}/restart", s.handleRestartRendition)
+			api.Put(r, "/renditions/{id}", s.handleUpdateRendition, needsSource)
+			api.Delete(r, "/renditions/{id}", s.handleDeleteRendition, needsSource)
+			api.Post(r, "/renditions/{id}/restart", s.handleRestartRendition, needsSource)
 
 			// Which encoders this FFmpeg actually registers, so the rendition
 			// editor cannot offer one that would only fail once a stream is live.
@@ -1448,13 +1460,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// falls back to routing.DefaultSource()'s six placeholder tracks
 			// and the operator is shown a filter graph for a stream that does
 			// not exist. The catalogue in between is static and answers.
-			r.With(s.requireSource).Post("/routing/compile", s.handleCompileRouting)
+			api.Post(r, "/routing/compile", s.handleCompileRouting, needsSource|readWrite)
 			r.Get("/routing/presets", s.handleListPresets)
-			r.With(s.requireSource).Post("/routing/presets/{preset}", s.handleApplyPreset)
+			api.Post(r, "/routing/presets/{preset}", s.handleApplyPreset, needsSource)
 			// The compile above stores nothing. This one stores the preset on
 			// the programme's destinations and reconciles, by a destination
 			// PUT's rules: see routing_preset_apply.go.
-			r.With(s.requireSource).Post("/routing/presets/{preset}/apply", s.handleApplyPresetToProgramme)
+			api.Post(r, "/routing/presets/{preset}/apply", s.handleApplyPresetToProgramme, needsSource)
 
 			// Playout administration. The media itself is served outside this
 			// group; only the configuration and the operator's view of it are
@@ -1495,7 +1507,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The media library: sessions, transcripts and the full-text
 			// search over them. See library.go.
 			r.Get("/library", s.handleLibrary)
-			r.Get("/library/search", s.handleSearchTranscripts)
+			api.Get(r, "/library/search", s.handleSearchTranscripts, readDenied)
 			r.Post("/library/sessions", s.handleCreateLibrarySession)
 			r.Post("/library/sessions/regroup", s.handleRegroupSessions)
 			r.Get("/library/sessions/{id}", s.handleGetLibrarySession)
@@ -1503,8 +1515,8 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Delete("/library/sessions/{id}", s.handleDeleteLibrarySession)
 			r.Get("/library/recordings/{id}", s.handleGetLibraryRecording)
 			r.Put("/library/recordings/{id}", s.handleUpdateLibraryRecording)
-			r.Get("/library/recordings/{id}/transcript", s.handleGetTranscript)
-			r.Get("/library/recordings/{id}/transcript/export", s.handleExportTranscriptCaptions)
+			api.Get(r, "/library/recordings/{id}/transcript", s.handleGetTranscript, readDenied)
+			api.Get(r, "/library/recordings/{id}/transcript/export", s.handleExportTranscriptCaptions, readDenied)
 			r.Delete("/library/recordings/{id}/transcript", s.handleDeleteTranscript)
 			r.Put("/library/recordings/{id}/speaker", s.handleSetTranscriptSpeaker)
 			// Submitting the work the library page offers. One route per
@@ -1515,7 +1527,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// contact sheet, the scrub sprites. A GET, so requireCSRF passes
 			// it through and a plain <video src> can reach it — which it has
 			// to, because a media element attaches no headers of its own.
-			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
+			api.Get(r, routeLibraryMedia, s.handleLibraryMedia, readDenied)
 			r.Post("/library/recordings/{id}/offload/retry", s.handleRetryRecordingOffload)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a
@@ -1525,19 +1537,19 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// carries a candidate cut in the body, not because it writes —
 			// nothing here runs FFmpeg, the export is a queued job.
 			r.Get("/clipper/recordings/{id}", s.handleClipSource)
-			r.Get("/clipper/recordings/{id}/keyframes", s.handleClipKeyframes)
-			r.Get("/clipper/recordings/{id}/transcript", s.handleClipTranscript)
+			api.Get(r, "/clipper/recordings/{id}/keyframes", s.handleClipKeyframes, readDenied)
+			api.Get(r, "/clipper/recordings/{id}/transcript", s.handleClipTranscript, readDenied)
 			r.Post("/clipper/recordings/{id}/plan", s.handleClipPlan)
 			r.Post("/clipper/recordings/{id}/export", s.handleClipExport)
 			// Highlight suggestions (Wave 4 #5a). The scan is a job that stores
 			// suggestions and cuts nothing; Accept is the only route here that
 			// creates a clip, through the same submit path as /export.
 			r.Post("/clipper/recordings/{id}/highlights/scan", s.handleScanHighlights)
-			r.Get("/clipper/recordings/{id}/highlights", s.handleListHighlights)
+			api.Get(r, "/clipper/recordings/{id}/highlights", s.handleListHighlights, readDenied)
 			r.Post("/clipper/highlights/{id}/accept", s.handleAcceptHighlight)
 			r.Post("/clipper/highlights/{id}/dismiss", s.handleDismissHighlight)
 			// Saved vertical-export layouts and caption styles (Wave 4 #5b).
-			r.Get("/clipper/templates", s.handleListClipTemplates)
+			api.Get(r, "/clipper/templates", s.handleListClipTemplates, readDenied)
 			r.Post("/clipper/templates", s.handlePutClipTemplate)
 			r.Delete("/clipper/templates/{id}", s.handleDeleteClipTemplate)
 
@@ -1623,15 +1635,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// the engine and falls back to the directory, exactly as the
 			// listing and the download already do.
 			r.Get("/clips", s.handleListClips)
-			r.With(s.requireSource).Post("/clips", s.handleCaptureClip)
-			r.With(s.requireSource).Put("/clips/buffer", s.handleSetClipBuffer)
+			api.Post(r, "/clips", s.handleCaptureClip, needsSource)
+			api.Put(r, "/clips/buffer", s.handleSetClipBuffer, needsSource)
 			r.Delete("/clips/{name}", s.handleDeleteClip)
 
 			// Loudness compliance: the READ is the meters page, which answers
 			// with no measurements; the PUT switches a monitor on inside a
 			// running pipeline.
 			r.Get("/loudness", s.handleLoudness)
-			r.With(s.requireSource).Put("/loudness", s.handleSetLoudnessMonitor)
+			api.Put(r, "/loudness", s.handleSetLoudnessMonitor, needsSource)
 
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
@@ -1668,14 +1680,14 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
-			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
+			api.Get(r, "/platforms/accounts/{id}/stats", s.handleAccountStats, readDenied)
 			// Cross-platform analytics (Wave 4 #4): the live audience picture
 			// and the per-stream reports. Reads of what the sampler stored --
 			// none calls a platform -- and every one is denied to a read
-			// token; see analytics.go and readScopeDeniedPatterns.
-			r.Get("/analytics/live", s.handleAnalyticsLive)
-			r.Get("/analytics/streams", s.handleAnalyticsStreams)
-			r.Get("/analytics/streams/{id}", s.handleAnalyticsStream)
+			// token; see analytics.go and the readDenied flag.
+			api.Get(r, "/analytics/live", s.handleAnalyticsLive, readDenied)
+			api.Get(r, "/analytics/streams", s.handleAnalyticsStreams, readDenied)
+			api.Get(r, "/analytics/streams/{id}", s.handleAnalyticsStream, readDenied)
 
 			// Facebook's broadcast surface, scoped to a DESTINATION rather
 			// than an account: one account can hold several broadcasts, and
@@ -1687,8 +1699,8 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// state-changing group. The health read answers 200 with
 			// supported:false when there is nothing to report, exactly as the
 			// stats route above does.
-			r.Post("/destinations/{id}/facebook/end-broadcast", s.handleEndFacebookBroadcast)
-			r.Get("/destinations/{id}/facebook/stream-health", s.handleFacebookStreamHealth)
+			api.Post(r, "/destinations/{id}/facebook/end-broadcast", s.handleEndFacebookBroadcast, readDenied)
+			api.Get(r, "/destinations/{id}/facebook/stream-health", s.handleFacebookStreamHealth, readDenied)
 
 			// Go-live metadata. The push is a job rather than a request so a
 			// slow platform API cannot hold the dashboard open; the composer
@@ -1699,24 +1711,24 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// What is still editable on each account's current broadcast.
 			// Fetched when the composer opens, never polled -- every row is a
 			// live platform call.
-			r.Get("/metadata/broadcast-window", s.handleBroadcastWindow)
+			api.Get(r, "/metadata/broadcast-window", s.handleBroadcastWindow, readDenied)
 
 			// Unified chat. Live messages arrive on the WebSocket, not here;
 			// these four are the scrollback a freshly opened pane needs plus
 			// the three things a socket cannot do. Deletion is addressed by
 			// query parameters because a platform-issued message id does not
 			// survive a path segment. See chat.go.
-			r.Get("/chat", s.handleChatOverview)
-			r.Get("/chat/messages", s.handleChatMessages)
+			api.Get(r, "/chat", s.handleChatOverview, readDenied)
+			api.Get(r, "/chat/messages", s.handleChatMessages, readDenied)
 			// Finding one comment again. Searches the table rather than the
 			// Hub's ring, which only holds this process's lifetime.
-			r.Get("/chat/search", s.handleChatSearch)
+			api.Get(r, "/chat/search", s.handleChatSearch, readDenied)
 			// The moderator's user card: what one person has said. Read from
 			// our own scrollback, because no platform publishes this.
-			r.Get("/chat/users", s.handleChatUser)
+			api.Get(r, "/chat/users", s.handleChatUser, readDenied)
 			// Automod's review list: what it flagged, for the Chat page's
 			// Flagged chip (UX Council A48). Content, so read-scope denied.
-			r.Get("/chat/flags", s.handleChatFlags)
+			api.Get(r, "/chat/flags", s.handleChatFlags, readDenied)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
 			// Hiding is POST rather than DELETE because it is reversible, and
 			// separate from delete because the two are different decisions:
@@ -1726,7 +1738,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// route rather than a mode on the message ones.
 			// Channel-wide rules act on the ROOM, not a message or a
 			// person, so they get their own route too.
-			r.Get("/chat/settings", s.handleGetChatSettings)
+			api.Get(r, "/chat/settings", s.handleGetChatSettings, readDenied)
 			r.Patch("/chat/settings", s.handleChatSettings)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
@@ -1748,7 +1760,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.requireScope)
-			r.Get("/metrics", s.handleMetrics)
+			api.Get(r, "/metrics", s.handleMetrics, logSkip)
 		})
 
 		// OAuth redirects are top-level browser navigations, so they carry the
@@ -1770,7 +1782,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.requireSession)
-			r.Get("/oauth/{platform}/start", s.handleOAuthStart)
+			r.Get(routeOAuthStart, s.handleOAuthStart)
 			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
 		})
 
@@ -1778,7 +1790,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// here with no session and no header polyemesis issued; the
 		// unguessable path segment is the whole credential, and the handler
 		// compares it before doing anything else. See chat_wiring.go.
-		r.HandleFunc("/chat/kick/{secret}", s.handleKickChatWebhook)
+		r.HandleFunc(routeKickWebhook, s.handleKickChatWebhook)
 
 		// The chat overlay's two reads. Outside every auth group because the
 		// overlay key is not an API credential and requireAuth must never
@@ -1815,13 +1827,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.requireScope)
-			r.Get("/recordings/{id}/download", s.handleDownloadRecording)
-			r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)
+			api.Get(r, "/recordings/{id}/download", s.handleDownloadRecording, readDenied)
+			api.Get(r, "/recordings/stems/{name}/download", s.handleDownloadStem, readDenied)
 			// Addressed by the JOB rather than by a filename: the export's
 			// path was written by the server and is never handed to a client
 			// to spell back at us.
-			r.Get("/clipper/jobs/{id}/download", s.handleDownloadClipExport)
-			r.Get("/clips/{name}/download", s.handleDownloadClip)
+			api.Get(r, "/clipper/jobs/{id}/download", s.handleDownloadClipExport, readDenied)
+			api.Get(r, "/clips/{name}/download", s.handleDownloadClip, readDenied)
 		})
 	})
 
@@ -1851,11 +1863,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// itself, since it describes the same thing.
 		r.Get("/previews", s.handlePreviews)
 		hlsSrc := s.hlsSourceHandler()
-		r.Get("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)
-		r.Head("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)
+		top.Get(r, "/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP, logSkip)
+		top.Head(r, "/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP, logSkip)
 		hls := s.hlsHandler()
-		r.Get("/hls/*", hls.ServeHTTP)
-		r.Head("/hls/*", hls.ServeHTTP)
+		top.Get(r, "/hls/*", hls.ServeHTTP, logSkip)
+		top.Head(r, "/hls/*", hls.ServeHTTP, logSkip)
 	})
 
 	// --- the public origin ---
@@ -1882,13 +1894,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Post(MCPPath, s.mcpEndpoint(root).ServeHTTP)
 	})
 
-	r.Handle(PlayoutPrefix+"*", s.playoutHandler())
+	top.Handle(r, PlayoutPrefix+"*", s.playoutHandler(), logSkip)
 	// The player page. It resolves to the same SPA bundle as the admin UI but
 	// through its own route, so the frame-blocking headers can be relaxed for
 	// an embed without relaxing them for the console.
 	watch := s.watchHandler()
 	r.Handle(WatchPath, watch)
-	r.Handle(WatchPath+"/*", watch)
+	top.Handle(r, WatchPath+"/*", watch, secretInPath)
 	// The chat overlay and its dock: the SPA, sessionless, GET only. Explicit
 	// patterns rather than a wildcard, so the access log records the pattern.
 	ovPage := s.overlayPageHandler()
@@ -1943,19 +1955,18 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
 
-		// Health checks, metric scrapes and the stats poll would otherwise
-		// drown the log.
-		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/metrics" ||
-			strings.HasPrefix(r.URL.Path, "/hls/") ||
-			// A playout viewer polls a playlist every segment; a busy origin
-			// would fill the log with nothing but segment reads.
-			strings.HasPrefix(r.URL.Path, PlayoutPrefix) ||
-			// And every open player page beacons every fifteen seconds. Its
-			// refusals are counted on the scrape
-			// (polyemesis_playout_qoe_beacons_rejected_total); a WARN line per
-			// anonymous 4xx would let any stranger write the log.
-			(r.URL.Path == playoutBeaconPath && ww.Status() < 500) {
-			return
+		// Routes flagged logSkip: health checks, metric scrapes, HLS and playout
+		// segment reads would otherwise drown the log. The player beacon (every
+		// open page, every fifteen seconds) is logSkipUnless5xx: its refusals are
+		// counted on the scrape (polyemesis_playout_qoe_beacons_rejected_total),
+		// and a WARN line per anonymous 4xx would let any stranger write the log.
+		if p := s.currentPolicy(); p != nil {
+			if rc := chi.RouteContext(r.Context()); rc != nil {
+				pat := rc.RoutePattern()
+				if p.pattern(pat, logSkip) || (p.pattern(pat, logSkipUnless5xx) && ww.Status() < 500) {
+					return
+				}
+			}
 		}
 		level := slog.LevelDebug
 		switch {
@@ -1967,7 +1978,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			level = slog.LevelWarn
 		}
 		s.log.Log(r.Context(), level, "http",
-			"method", r.Method, "path", loggedPath(r),
+			"method", r.Method, "path", s.loggedPath(r),
 			"status", ww.Status(), "dur", time.Since(start).Round(time.Millisecond))
 	})
 }
@@ -2012,12 +2023,17 @@ func redactPathSecrets(p string) string {
 	return redactOverlayKeys(p)
 }
 
-func loggedPath(r *http.Request) string {
+func (s *Server) loggedPath(r *http.Request) string {
 	rc := chi.RouteContext(r.Context())
 	if rc == nil {
 		return redactPathSecrets(r.URL.Path)
 	}
 	p := rc.RoutePattern()
+	if s.currentPolicy().pattern(p, secretInPath) {
+		// A wildcard that matched a credential: the pattern with the secret
+		// segment redacted, never the path.
+		return strings.TrimSuffix(p, "*") + "[redacted]"
+	}
 	if p == "" || strings.HasSuffix(p, "*") {
 		// The raw path, minus any overlay key or playback token in it.
 		return redactPathSecrets(r.URL.Path)
@@ -2188,7 +2204,7 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	// both `sessionUser != 0` there and `if userID == 0 { return false }` in
 	// sessionEpochChanged skip the re-check, so such a socket would never be
 	// closed by a password change. That is unreachable in this build --
-	// auth.checkEpoch (internal/auth/auth.go:141) refuses an unparseable
+	// auth.Manager.checkEpoch refuses an unparseable
 	// subject before authenticate returns, pinned by
 	// TestATokenWithAnUnparseableSubjectIsRefused -- and it is written down
 	// this way round because the previous wording claimed the opposite. A
@@ -2202,186 +2218,9 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	return &principal{username: claims.Username, userID: userID, epoch: claims.Epoch}, nil
 }
 
-// readScopeWritePatterns are the POST routes a read-scoped token may still
-// reach: the ones that answer a question rather than change anything.
-//
-// They are POSTs because they carry a body or make an outbound call, not
-// because they write. Each was read before it was listed, and one candidate did
-// not survive that reading: POST /destinations/{id}/expert/dry-run SPAWNS
-// FFMPEG with an argument list the caller supplied, which is the opposite of
-// writing nothing whatever its route name suggests. POST
-// /platforms/credentials/{platform}/check is absent for the same kind of
-// reason -- it handles stored credentials.
-//
-// Keyed by chi's route PATTERN rather than the request path, so an id in the
-// URL cannot smuggle a request onto the list and no string matching has to be
-// invented for the {id} segment.
-//
-// The list is additive and that is its safety property: a route missing from it
-// is denied to read tokens, so the failure mode of forgetting to maintain it is
-// a monitoring script getting a 403 that somebody notices, never a write
-// getting through unannounced.
-//
-// The expert preview route USED TO BE ON THIS LIST and is deliberately not any
-// more. Its response is the resolved FFmpeg argv, which contains the
-// destination's stream key in the output target -- so a read token reached the
-// credential through a POST this list was hand-built to permit. The comment
-// above reasons entirely about whether each candidate WRITES; it never asks
-// what the route RETURNS, which is the method-shaped rule's blind spot
-// reproduced inside its own exception list. The argv is not masked, because
-// expert mode's contract is that the command shown is the command that runs;
-// the route is denied to read tokens instead. See readScopeDeniedPatterns.
-var readScopeWritePatterns = map[string]bool{
-	"/api/v1/version/check":   true,
-	"/api/v1/routing/compile": true,
-}
-
-// readScopeDeniedPatterns are the GETs a read-scoped token may NOT make.
-//
-// The method rule says a GET is a read. For these five it is false, in one of
-// two ways, and both were found by enumerating the route table rather than by
-// sampling it:
-//
-//	THE RESPONSE IS A CREDENTIAL. GET /destinations/{id}/expert returns the
-//	resolved argv, whose output target is rtmps://host/app/<streamKey>. Every
-//	other egress of an argv in this process is masked by redact.Redact inside
-//	supervisor; this one is deliberately raw because expert mode's whole
-//	promise is that the command an operator approves is the command that runs.
-//	Masking it would break that approval, so the route is denied instead.
-//
-//	THE GET IS NOT A READ. /clipper/.../keyframes spawns one ffprobe per
-//	overlapping timeline part, with no cap on requests.
-//	/platforms/accounts/{id}/stats and /metadata/broadcast-window each call a
-//	third party and can REFRESH AND PERSIST an OAuth token -- GETs that write
-//	the database and burn somebody else's quota, one call per connected account
-//	in the broadcast-window case.
-//
-// Keyed by chi's route PATTERN for the same reason the allowlist is: an id in
-// the URL must not be able to smuggle a request past the check.
-//
-// This list is SUBTRACTIVE, which is the opposite safety property to the
-// allowlist above, and that asymmetry is deliberate rather than sloppy:
-// forgetting to add a route here leaves a read token reaching something it
-// perhaps should not, so the recurrence guard for this half is a TEST that
-// drives each of these through the real router and asserts the 403 -- paired
-// with the same route reaching an admin, so a change that merely broke the
-// route for everybody cannot pass. See
-// TestReadTokenIsDeniedTheRoutesThatAreNotReads.
-//
-// The three playout routes are ABSENT from this list and the reason is not
-// that they were judged harmless. It is that this map CANNOT REACH THEM. It is
-// consulted in exactly one place, inside requireScope, and requireScope is
-// middleware on the authenticated group; /playout/*, /playout/public and
-// /playout/poster.jpg are all registered outside it, because a viewer has no
-// session. An entry added here for any of them would be a rule that reads as
-// enforcement and enforces nothing -- which is what this whole round of work
-// has been about deleting.
-//
-// What actually gates them is playoutOperator, inside authorizePlayout, which
-// each of the three handlers calls per request. See TestPlayoutGateMatrix and
-// TestPlayoutPosterVerdict.
-//
-// The poster's throttling was the old argument for leaving it alone and it is
-// still true -- a 10-second cache under a mutex and an 8-second timeout, so ~6
-// execs a minute however many callers ask -- but it was an answer to "is this
-// GET really a read", and the question that mattered was who gets the frame.
-// THE RESPONSE IS CONTENT, NOT METADATA is the third reason a GET is denied,
-// added for #154, and it is a different claim from the two above: these routes
-// are reads, they are cheap, and they leak no credential. They are denied
-// because of what `read` was decided to MEAN -- a monitoring script, a
-// dashboard, a status page. None of those need the bytes.
-//
-// The line is drawn at content, not at the archive: a read token still lists
-// recordings, clips, stems and sessions, still sees durations, sizes and
-// status, and still sees WHETHER a recording has a transcript. What it no
-// longer gets is the media itself or the words.
-//
-// /library/search is on this list and it is the reason the list is eight
-// entries rather than seven. The two /transcript routes are the obvious ones;
-// search is not, because it reads as a metadata query. It returns
-// db.TranscriptHit, which carries Text -- the full segment text -- plus
-// Context (the neighbouring segments joined) and Speaker. A read token that
-// iterated common words would reconstruct whole transcripts without ever
-// naming a /transcript route. Denying only the endpoints whose PATH says
-// transcript would have been a fix shaped by the URL rather than by the bytes,
-// which is the same mistake as gating on the HTTP verb.
-//
-// CHAT IS CONTENT FOR THE SAME REASON, and the four chat GETs joined the list
-// when staging-readiness row 32 found them missing: the scrollback, a search
-// over it, one viewer's history, and the overview that embeds the recent
-// messages. /chat/search is the /library/search argument again -- iterate
-// common words and the scrollback comes back. The same messages arrive live on
-// /ws, which a read token may open, so events.TypeChat is wsDrop there.
-//
-// GET /library still returns Speakers, the bare list of labels in the archive.
-// That is left reachable deliberately: it is who appears, not what was said,
-// and a dashboard that groups by speaker needs it. If that judgement is wrong
-// it is one more line here, not a redesign.
-var readScopeDeniedPatterns = map[string]bool{
-	"/api/v1/destinations/{id}/expert":          true,
-	"/api/v1/destinations/{id}/expert/preview":  true,
-	"/api/v1/clipper/recordings/{id}/keyframes": true,
-	"/api/v1/platforms/accounts/{id}/stats":     true,
-	// Both make an outbound call to Facebook on the caller's token, which is
-	// the property this list is about rather than anything in the path.
-	"/api/v1/destinations/{id}/facebook/stream-health": true,
-	"/api/v1/destinations/{id}/facebook/end-broadcast": true,
-	"/api/v1/metadata/broadcast-window":                true,
-	// The vertical half's health read (#7). It makes an outbound YouTube call on the
-	// caller's token, which is the same property as the Facebook stream-health read
-	// above: a read-scoped token must not spend the platform budget.
-	"/api/v1/destinations/{id}/youtube-vertical": true,
-
-	// #154: content, not metadata. Media bytes.
-	"/api/v1/recordings/{id}/download":             true,
-	"/api/v1/recordings/stems/{name}/download":     true,
-	"/api/v1/clips/{name}/download":                true,
-	"/api/v1/clipper/jobs/{id}/download":           true,
-	"/api/v1/library/recordings/{id}/media/{file}": true,
-	// #154: content, not metadata. The words.
-	"/api/v1/clipper/recordings/{id}/transcript": true,
-	"/api/v1/library/recordings/{id}/transcript": true,
-	// #8 caption export: the same words in a caption file, so the same denial.
-	"/api/v1/library/recordings/{id}/transcript/export": true,
-	"/api/v1/library/search":                            true,
-	// Staging-readiness row 32: content, not metadata. What viewers wrote. The
-	// overview is here too because it carries the recent messages alongside
-	// the connection states; the live copy on /ws is withheld by wsEventPolicy.
-	"/api/v1/chat":          true,
-	"/api/v1/chat/messages": true,
-	"/api/v1/chat/search":   true,
-	"/api/v1/chat/users":    true,
-	// UX Council A48: automod's review list carries each flagged message's
-	// text, which is the scrollback again under another name.
-	"/api/v1/chat/flags": true,
-	// The room's current rules (poka-yoke audit 2026-11-04). Not content, but
-	// each read is a platform call made with the moderator's token, for the
-	// moderator's own rules card -- so it stays with the rest of chat.
-	"/api/v1/chat/settings": true,
-	// Wave 4 #4: cross-platform analytics is admin-only. The reports name the
-	// stream's top chatters -- who spoke, a cut of the scrollback -- and every
-	// analytics read names the operator's connected channels. The scrape gives
-	// a read-scoped dashboard the counts without either.
-	"/api/v1/analytics/live":         true,
-	"/api/v1/analytics/streams":      true,
-	"/api/v1/analytics/streams/{id}": true,
-	// Wave 4 #5a: each highlight suggestion carries a transcript excerpt --
-	// the words again, under another name.
-	"/api/v1/clipper/recordings/{id}/highlights": true,
-	// Wave 4 #5b: the template list also reports the fonts directory's
-	// listing and the FFmpeg build's text capability, which is the editor's
-	// business and not a read-only dashboard's.
-	"/api/v1/clipper/templates": true,
-}
-
-// obsScopePatterns is everything an "obs" token may reach: one route, keyed by
-// METHOD and chi pattern together so a GET on the same path is not smuggled in
-// by the POST's entry. ALLOWLIST, the failure mode of forgetting a route being
-// a 403 an operator notices. TestAnOBSTokenReachesOnlyTheOBSEventsRoute walks
-// the whole router to hold that.
-var obsScopePatterns = map[string]bool{
-	http.MethodPost + " /api/v1/obs/events": true,
-}
+// What a read-scoped token may reach is declared on each route's registration
+// with the readWrite and readDenied flags, and the obs scope's single route with
+// obsScope; see route_policy.go for the reasoning behind each.
 
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has
 // settled who it is. It must run after requireAuth, which is what puts the
@@ -2426,7 +2265,7 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 		// an obs token must not, so it gets its own allowlist of one and a
 		// refusal for everything else, reads included.
 		if p.token.Scope == db.ScopeOBS {
-			if rc := chi.RouteContext(r.Context()); rc != nil && obsScopePatterns[r.Method+" "+rc.RoutePattern()] {
+			if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().route(r.Method, rc.RoutePattern(), obsScope) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -2441,7 +2280,7 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 		//
 		// The denials are checked BEFORE the method, because their whole point
 		// is that the method is the wrong question for them.
-		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeDeniedPatterns[rc.RoutePattern()] {
+		if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().pattern(rc.RoutePattern(), readDenied) {
 			writeError(w, http.StatusForbidden,
 				"this API token is read-only; this endpoint returns a credential or "+
 					"does real work, so it needs a token with the \"admin\" scope")
@@ -2451,7 +2290,7 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeWritePatterns[rc.RoutePattern()] {
+		if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().pattern(rc.RoutePattern(), readWrite) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -2601,16 +2440,13 @@ func writeNoSourceStored(w http.ResponseWriter, version string) {
 // the registration site is the statement, so a route added without one is a
 // route somebody has to have thought about.
 //
-// WHAT IT DOES NOT PROMISE, stated because the next reader will assume
-// otherwise. This is a check on the engine set at the moment the request
-// enters, and the handler behind it re-reads that set when it dereferences --
-// the two reads are not atomic, and Manager.reconcile deletes from the map when
-// a source goes away. Today the window cannot open: the store refuses to delete
-// the last source, so the set cannot empty under a request. When that guard is
-// removed the window becomes real for exactly the mutating handlers here, and
-// the fix is to carry the engine this middleware READ into the handler rather
-// than to re-derive it. See engOrNil, which is the same distinction one level
-// down.
+// IT HANDS THE ENGINE IT RESOLVED TO THE HANDLER. The last source may be
+// deleted (db.DeleteSource), and Manager.reconcile then deletes from the engine
+// map, so a handler that re-read the set after this check could find nothing
+// where the check found a programme. The engine read here travels in the
+// request context and scopedEngine returns it for a request that names no
+// programme, so the check and the use are one read. A request that names one
+// (?source=) resolves that engine and still refuses with 409 if it has gone.
 //
 // It is deliberately NOT applied to the routes an operator recovers through --
 // /setup, /auth/*, /sources*, /settings, /status, /system, /stats, /levels,
@@ -2623,12 +2459,23 @@ func writeNoSourceStored(w http.ResponseWriter, version string) {
 // only fills.
 func (s *Server) requireSource(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.engOrNil() == nil {
+		e := s.engOrNil()
+		if e == nil {
 			writeNoSource(w)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), resolvedEngineKey{}, e)))
 	})
+}
+
+// resolvedEngineKey carries the engine requireSource resolved.
+type resolvedEngineKey struct{}
+
+// resolvedEngine is the engine requireSource handed down, or nil on a route
+// that carries no guard.
+func resolvedEngine(r *http.Request) *engine.Engine {
+	e, _ := r.Context().Value(resolvedEngineKey{}).(*engine.Engine)
+	return e
 }
 
 // writeCreateError renders a create failure, lifting "there is no source" out

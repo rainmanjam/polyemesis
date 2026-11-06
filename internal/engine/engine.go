@@ -3415,7 +3415,7 @@ func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error
 		return fmt.Errorf("this FFmpeg build has no %s encoder", encoder)
 	}
 	works, reason := tools.EncoderWorks(string(encoder))
-	if works || notProbed(reason) {
+	if works || ffmpeg.IsNotProbed(reason) {
 		return nil
 	}
 	if reason == "" {
@@ -3424,17 +3424,6 @@ func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error
 	return fmt.Errorf("%s did not pass its test encode on this machine: %s. "+
 		"Choose a different encoder, or fix the driver and re-detect hardware from the rendition editor",
 		encoder, reason)
-}
-
-// notProbed distinguishes "the encoder failed" from "we never got to ask it".
-//
-// Detection marks a probe it could not run — a cancelled scan, an expired
-// budget — as not working, with a reason that says so. Read literally, one
-// cancelled detection would refuse every rendition on the box. That is the
-// exact shape of the SRT check that used to stop the server from starting, and
-// the lesson from it was the same one: a capability check must fail open.
-func notProbed(reason string) bool {
-	return strings.HasPrefix(reason, "not probed:")
 }
 
 // startRendition brings up one shared encode: a hub of its own, a subscription

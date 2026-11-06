@@ -100,7 +100,7 @@ func (s *Server) handleGetHook(w http.ResponseWriter, r *http.Request) {
 // handleCreateHook stores a hook and returns its signing secret ONCE.
 //
 // The plaintext appears in exactly this response and nowhere else, matching the
-// API-token handler (token_handlers.go:54). An operator pasting the key into
+// API-token handler (handleCreateAPIToken). An operator pasting the key into
 // their receiver needs it at this moment and never again, and a key that can be
 // read back from a list endpoint is a key that leaks through every screenshot.
 func (s *Server) handleCreateHook(w http.ResponseWriter, r *http.Request) {

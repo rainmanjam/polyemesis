@@ -267,15 +267,6 @@ func (p *verticalHealthPacer) flight(k verticalHealthKey) *sync.Mutex {
 	return l
 }
 
-// verticalClock is the status read's clock. A seam so the pacing test can move time forward
-// without sleeping for a minute.
-func (s *Server) verticalClock() time.Time {
-	if s.verticalNow != nil {
-		return s.verticalNow()
-	}
-	return time.Now()
-}
-
 // verticalHalfIsLive reports whether any of the given destinations is running. The status read
 // is gated on this: a vertical stream is only worth watching while one of its halves is on air.
 // The seam is for tests; production asks the engine.
@@ -343,7 +334,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 	flight := s.verticalHealth.flight(key)
 	flight.Lock()
 	defer flight.Unlock()
-	now := s.verticalClock()
+	now := s.clock()
 	if prev, ok := s.verticalHealth.recent(key, now); ok {
 		applyVerticalRead(&view, prev)
 		writeJSON(w, http.StatusOK, view)

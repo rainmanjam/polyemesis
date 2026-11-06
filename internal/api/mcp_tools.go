@@ -44,7 +44,7 @@ const (
 	mcpRead mcpTier = iota
 	// mcpContent tools read, but what they read is what viewers wrote or said.
 	// REST denies those routes to read tokens (#154, staging-readiness row 32,
-	// readScopeDeniedPatterns), so they are on the admin server only.
+	// the readDenied flag), so they are on the admin server only.
 	mcpContent
 	// mcpWrite tools change something. Admin server only, and audited.
 	mcpWrite

@@ -50,7 +50,7 @@ func TestTheSharedIngestStreamIsNeverNamedAsSomethingToDelete(t *testing.T) {
 	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "night-owl")
 	first := ytDest(t, store, acct, "First show", "key-abc")
 
-	if s.leavesAnOrphanedIngestStream(first) {
+	if s.leavesAnOrphanedIngestStream(first, nil) {
 		t.Error("the shared-stream holder was named as removable; the channel's reusable " +
 			"stream is what the operator's own scheduled events are bound to")
 	}
@@ -69,7 +69,7 @@ func TestAKeyASiblingIsStillUsingIsNotNamedAsSomethingToDelete(t *testing.T) {
 	ytDest(t, store, acct, "First show", "key-shared")
 	second := ytDest(t, store, acct, "Second show", "key-shared")
 
-	if s.leavesAnOrphanedIngestStream(second) {
+	if s.leavesAnOrphanedIngestStream(second, nil) {
 		t.Error("a destination whose key another destination is still publishing with was " +
 			"named as removable; that stream is in use")
 	}
@@ -85,7 +85,7 @@ func TestADestinationWithItsOwnStreamIsNamedAlongWithTheTitleToLookFor(t *testin
 	ytDest(t, store, acct, "First show", "key-abc")
 	second := ytDest(t, store, acct, "Second show", "key-own")
 
-	if !s.leavesAnOrphanedIngestStream(second) {
+	if !s.leavesAnOrphanedIngestStream(second, nil) {
 		t.Fatal("a destination with an ingest stream of its own left one behind unmentioned")
 	}
 	// The same function the provider titles a created stream with, so the two
@@ -106,7 +106,7 @@ func TestAManuallyKeyedDestinationLeavesNothingBehindToMention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create destination: %v", err)
 	}
-	if s.leavesAnOrphanedIngestStream(d) {
+	if s.leavesAnOrphanedIngestStream(d, nil) {
 		t.Error("a hand-keyed destination was said to leave a polyemesis stream behind")
 	}
 }

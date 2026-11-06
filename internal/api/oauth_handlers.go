@@ -730,13 +730,11 @@ func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, c
 // string. The OAuth round trip is a full navigation, so there is no XHR to
 // return JSON to.
 func (s *Server) oauthDone(w http.ResponseWriter, r *http.Request, ok, errMsg string) {
-	target := "/settings?tab=platforms"
 	if errMsg != "" {
-		target += "&oauth_error=" + urlEscape(errMsg)
-	} else {
-		target += "&oauth_ok=" + urlEscape(ok)
+		http.Redirect(w, r, settingsRedirect([2]string{oauthErrorKey, urlEscape(errMsg)}), http.StatusFound)
+		return
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	http.Redirect(w, r, settingsRedirect([2]string{oauthOKKey, urlEscape(ok)}), http.StatusFound)
 }
 
 // oauthWarn is oauthDone with a third outcome: connected, AND there is
@@ -755,8 +753,8 @@ func (s *Server) oauthWarn(w http.ResponseWriter, r *http.Request, ok, warn stri
 		s.oauthDone(w, r, ok, "")
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=platforms&oauth_ok="+urlEscape(ok)+
-		"&oauth_warn="+urlEscape(warn), http.StatusFound)
+	http.Redirect(w, r, settingsRedirect(
+		[2]string{oauthOKKey, urlEscape(ok)}, [2]string{oauthWarnKey, urlEscape(warn)}), http.StatusFound)
 }
 
 func urlEscape(s string) string {
@@ -1127,7 +1125,7 @@ func (s *Server) ingestOptionsForRefresh(dest *db.Destination) oauth.IngestOptio
 	// Setting this unconditionally was measured doing exactly that -- the
 	// end-to-end refresh test caught a second destination being moved off its
 	// own perfectly good stream onto a freshly created one.
-	opts.RotateKey = s.keyIsSharedWithASibling(dest)
+	opts.RotateKey = s.keyIsSharedWithASibling(dest, nil)
 	// The operator pressed the button, so this is the one path that may give a
 	// caption destination its own stream when it has no URL yet. That is a key
 	// change, once, and the console says so beside the caption control.
@@ -1163,7 +1161,7 @@ func (s *Server) keepCaptionIngest(dest *db.Destination, b *oauth.Broadcast) err
 // distinguishes an upgraded install, where every YouTube destination holds the
 // same key, from one already provisioned correctly. A destination with a key
 // nobody else uses is already its own ingestion source and must be left alone.
-func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
+func (s *Server) keyIsSharedWithASibling(dest *db.Destination, going map[int64]bool) bool {
 	if dest == nil || dest.AccountID == nil || strings.TrimSpace(dest.StreamKey) == "" {
 		return false
 	}
@@ -1176,7 +1174,8 @@ func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
 		return false
 	}
 	for _, other := range rows {
-		if other.ID == dest.ID || other.AccountID == nil {
+		// A sibling being deleted in the same request is not still using it.
+		if other.ID == dest.ID || other.AccountID == nil || going[other.ID] {
 			continue
 		}
 		if *other.AccountID == *dest.AccountID && other.StreamKey == dest.StreamKey {
@@ -1356,8 +1355,8 @@ func (s *Server) needsOwnIngestStream(dest *db.Destination) bool {
 // THE KEY NEVER APPEARS. The stream is named by its TITLE, which is what an
 // operator actually reads in Studio and is derived from the destination's own
 // name, and titles are the one string about a stream that is safe to log.
-func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
-	if !s.leavesAnOrphanedIngestStream(dest) {
+func (s *Server) noteOrphanedIngestStream(dest *db.Destination, going map[int64]bool) {
+	if !s.leavesAnOrphanedIngestStream(dest, going) {
 		return
 	}
 	s.log.Warn("deleting this destination leaves its YouTube ingest stream on the channel. "+
@@ -1376,7 +1375,7 @@ func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
 // stream a sibling is publishing to, would point somebody at an object whose
 // removal breaks a working setup. So both of those answer false, and so does
 // every case where the row cannot support the claim at all.
-func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
+func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination, going map[int64]bool) bool {
 	if dest == nil || dest.Platform != db.PlatformYouTube || dest.AccountID == nil {
 		// No account means the key was typed in by hand: polyemesis provisioned
 		// nothing and has nothing to say about it.
@@ -1389,7 +1388,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
 	// A sibling publishing with the same key means the stream stays in use --
 	// this is what an upgraded install looks like, where every YouTube
 	// destination was handed the account's one shared key.
-	if s.keyIsSharedWithASibling(dest) {
+	if s.keyIsSharedWithASibling(dest, going) {
 		return false
 	}
 	// And a destination that was never given a stream of its own is holding the

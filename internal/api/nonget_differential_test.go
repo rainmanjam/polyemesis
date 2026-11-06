@@ -46,7 +46,7 @@ import (
 // the exact shape that leaked on GET"), and it is live in this API today. It is
 // safe only because requireScope refuses the method. Nothing was asserting the
 // pairing of those two facts, so the day the pattern joins
-// readScopeWritePatterns -- a one-line edit, and the list already grew once for
+// the readWrite flag -- a one-line edit, and the list already grew once for
 // a route whose answer was a stream key -- eight credentials reach a read token
 // and this package stays green.
 
@@ -304,7 +304,7 @@ func assertNonGetDifferential(t *testing.T) int {
 		if lw.Code != http.StatusForbidden {
 			t.Errorf("%s answered a READ-scoped token %d with %d bytes, and the ledger "+
 				"classifies it as denied. An admin receives %d planted credentials from "+
-				"this exact request. If this pair has joined readScopeWritePatterns it "+
+				"this exact request. If this pair has joined the readWrite flag it "+
 				"must move to readScopeWriteSweep and have its bytes read; it may not stay "+
 				"here.\nbody: %s",
 				key, lw.Code, lw.Body.Len(), len(row.Sentinels),

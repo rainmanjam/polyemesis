@@ -134,7 +134,7 @@ func newAnalyticsFixture(t *testing.T) *analyticsFixture {
 	s, h, store := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(fake.srv.URL))})
 	f := &analyticsFixture{s: s, h: h, store: store, fake: fake, now: time.Unix(1_800_043_200, 0), // midday Pacific: no test races the quota reset (R13)
 		running: map[int64]bool{}, dest: map[string]int64{}}
-	s.analyticsNow = func() time.Time { return f.now }
+	s.now = func() time.Time { return f.now }
 	s.analyticsRunning = func() map[int64]bool { return f.running }
 	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformYouTube} {
 		if err := store.PutPlatformCreds(s.box, p, "cid", "client-pass"); err != nil {

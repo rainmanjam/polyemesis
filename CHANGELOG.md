@@ -20,6 +20,23 @@ its first tagged release.
 - **The Dashboard and the header agree on how many programmes exist.** The Dashboard kept its own count
   and refreshed it on its own timer, so for up to ten seconds the two could scope the ingest figures
   differently. The count now has one owner and a console left open notices the last source going away.
+- **Saving a destination refuses a routing profile that would stream silence, as creating one
+  does.** `PUT /destinations/{id}` skipped the check `POST` ran, so a save could store a profile that
+  selected nothing the programme's tracks carry. A save that changes neither the profile nor the
+  programme is still not refused. The compile preview (`POST /routing/presets/{preset}`) and OBS
+  scene rules with no options now pick tracks from the programme's roles, as applying a preset
+  already did; `GET /routing/presets` adds `roleDefaults` beside `defaults`.
+- **The default programme means one thing.** The Settings page and the settings save used the first
+  source row while `/system`, transcripts and the OBS bridge used the first source with a running
+  engine, so with the first source failing to start they described different programmes. All of them
+  (and the Sources list's default marker) now use the running one, and the first row only when none
+  is running.
+- **A read-only API token no longer receives chat retractions on the live socket.** `/api/v1/ws`
+  sent `chatRetract` (platform account, author id) to read tokens while `/api/v1/events` withheld it.
+  Both now follow one table.
+- **Deleting a programme names the YouTube ingest streams it leaves on the channel**, as deleting a
+  destination does. A request that deletes the last source can no longer reach a handler that finds
+  no programme.
 - **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
   said 0 and the card said Starting, because a running process that had carried no media counted as
   live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and

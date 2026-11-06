@@ -176,7 +176,7 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 	named := strings.TrimSpace(q.Get(sourceParam)) != ""
 
 	src := eng.Source()
-	opts := routing.PresetOptsFromRoles(routing.DefaultPresetOpts(), src)
+	opts := routing.DefaultPresetOptsFor(src)
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return

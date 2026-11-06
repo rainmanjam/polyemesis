@@ -126,9 +126,9 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 		}
 		return false
 	}
-	for pattern := range readScopeDeniedPatterns {
+	for pattern := range readDeniedPatterns(t) {
 		if !covered(pattern) {
-			t.Errorf("readScopeDeniedPatterns has %q and no case above drives it. "+
+			t.Errorf("the readDenied flag has %q and no case above drives it. "+
 				"A denial nothing asserts is a denial that can be deleted by accident.",
 				pattern)
 		}

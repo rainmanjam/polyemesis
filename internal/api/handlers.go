@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -658,15 +659,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 // a different one is the whole defect; silently ignoring the parameter would be
 // that defect with the operator's own request as the evidence they were heard.
 func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int64, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw == "" {
-		return nil, true
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-			`"`+sourceParam+`" must be a source id.`+s.availableSources())
-		return nil, false
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok || !named {
+		return nil, ok
 	}
 	if _, err := s.store.GetSource(id); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
@@ -680,7 +675,7 @@ func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int6
 
 // updateFeedURL is the release feed consulted. A var so a test can point it at
 // a local server; nothing reads it until an operator asks for a check.
-var updateFeedURL = "https://api.github.com/repos/rainmanjam/polyemesis/releases/latest"
+var updateFeedURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
 
 const (
 	// updateCheckTTL keeps a bored operator clicking Check from spending the 60
@@ -1529,7 +1524,7 @@ var errSettingsConflict = errors.New("settings conflict")
 // With no source there is nothing to view, and the blob stays authoritative;
 // that is the install handlePutSettings refuses ingest changes on anyway.
 func (s *Server) overlayDefaultSourceIngest(settings *db.Settings) error {
-	id, err := s.store.DefaultSourceID()
+	id, err := s.defaultSourceID()
 	if errors.Is(err, db.ErrSourceNotFound) {
 		return nil
 	}
@@ -1898,7 +1893,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// refusing that would make every unrelated setting unreachable until a
 		// source exists.
 		if !ingestEqual(storedIngest, settings.Ingest) {
-			switch _, err := s.store.DefaultSourceID(); {
+			switch _, err := s.defaultSourceID(); {
 			case err == nil:
 			case errors.Is(err, db.ErrSourceNotFound):
 				settings.Ingest = storedIngest
@@ -1999,7 +1994,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	//                   answered 200 for a save that silently never reached the
 	//                   pipeline, which is the failure this whole block exists
 	//                   to have stopped happening.
-	switch id, err := s.store.DefaultSourceID(); {
+	switch id, err := s.defaultSourceID(); {
 	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			// What GET will serve if the write-through fails: the blob as
@@ -2247,6 +2242,23 @@ func (s *Server) sourceForDestination(sourceID *int64) (routing.Source, bool) {
 // once so that six routes cannot drift into six spellings of it.
 const sourceParam = "source"
 
+// parseSourceParam is the one reader of `?source=<id>`: named reports whether
+// the request carried one, and a malformed or non-positive id is answered 400
+// here, for every route that accepts the parameter.
+func (s *Server) parseSourceParam(w http.ResponseWriter, r *http.Request) (id int64, named, ok bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
+	if raw == "" {
+		return 0, false, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			`"`+sourceParam+`" must be a source id.`+s.availableSources())
+		return 0, false, false
+	}
+	return id, true, true
+}
+
 // scopedEngine is the engine a request NAMES, and the point of it is what it
 // refuses.
 //
@@ -2277,14 +2289,11 @@ const sourceParam = "source"
 // purpose and must keep doing so, which is why the count of zero takes the
 // same branch as the count of one rather than being refused here.
 func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.Engine, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-				`"`+sourceParam+`" must be a source id.`+s.availableSources())
-			return nil, false
-		}
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok {
+		return nil, false
+	}
+	if named {
 		eng := s.engineForSource(&id)
 		if eng == nil {
 			// Named a programme that is not running: deleted under this
@@ -2316,6 +2325,9 @@ func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.E
 	// clip listing, the loudness read -- where eng() panics inside
 	// Manager.Default before there is an engine to test. The answer is
 	// identical everywhere else.
+	if e := resolvedEngine(r); e != nil {
+		return e, true
+	}
 	return s.engOrNil(), true
 }
 
@@ -2681,7 +2693,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 			// Nothing resolves a platform API off a custom destination. Every
 			// capability lookup in oauth.Set keys on the platform and there is
 			// no custom entry -- ScheduledBroadcastsFor, LifecycleFor and Get
-			// all answer false -- so preannounce.go:107 and lifecycle.go:539
+			// all answer false -- so the pre-announce and lifecycle sweeps
 			// skip the row entirely and no token is ever sent anywhere on its
 			// behalf. The leak this clause exists to stop cannot happen here.
 			//
@@ -2713,6 +2725,92 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	return warnings
 }
 
+// destinationWrite is the stored state of a destination that a save is checked
+// against, taken before a PUT's body is decoded over the row.
+type destinationWrite struct {
+	id          int64
+	url         string
+	captionMode string
+	sourceID    *int64
+	profileJSON []byte
+}
+
+func destinationBeforeWrite(d *db.Destination) destinationWrite {
+	// Serialised rather than copied: decoding over a row reuses its slices'
+	// backing arrays, so a shallow copy would change under the decode.
+	p, _ := json.Marshal(d.Profile)
+	var src *int64
+	if d.SourceID != nil {
+		v := *d.SourceID
+		src = &v
+	}
+	return destinationWrite{id: d.ID, url: d.URL, captionMode: d.CaptionMode, sourceID: src, profileJSON: p}
+}
+
+// refuseBadDestinationWrite is the refusal list every save of a destination row
+// goes through -- POST (prev nil) and PUT -- in one order, and it answers the
+// refusal itself. A PUT is refused only for what it CHANGES: a row already
+// holding a URL or profile these reject must stay renameable and switch-off-able.
+//
+//	captions   Facebook captions need the switch open; and are decided before a
+//	           broadcast goes live, so a change while delivering is refused.
+//	IVS        an Amazon IVS URL without /app cannot publish (refuseIVSWithoutApp).
+//	silence    a profile that would carry no audio against its own programme's
+//	           tracks (refuseIfSilent), which PUT did not run before.
+func (s *Server) refuseBadDestinationWrite(w http.ResponseWriter, next *db.Destination, prev *destinationWrite) bool {
+	stored := ""
+	if prev != nil {
+		stored = prev.captionMode
+	}
+	if prev == nil || next.CaptionMode != stored {
+		if prev != nil && s.destinationLive(prev.id) {
+			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
+			return true
+		}
+		if !captionModeAllowedNow(next.CaptionMode, stored, s.env.FacebookCaptions) {
+			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
+			return true
+		}
+	}
+	if (prev == nil || next.URL != prev.url) && refuseIVSWithoutApp(w, next.URL) {
+		return true
+	}
+	if prev == nil || prev.silenceInputsChanged(next) {
+		return s.refuseIfSilent(w, next.SourceID, next.Profile)
+	}
+	return false
+}
+
+// silenceInputsChanged reports whether the profile, or the programme it is
+// compiled against, differs from what was stored.
+func (p destinationWrite) silenceInputsChanged(next *db.Destination) bool {
+	now, _ := json.Marshal(next.Profile)
+	if !bytes.Equal(now, p.profileJSON) {
+		return true
+	}
+	if (p.sourceID == nil) != (next.SourceID == nil) {
+		return true
+	}
+	return p.sourceID != nil && *p.sourceID != *next.SourceID
+}
+
+// destinationWriteWarnings repairs what the platform cannot send
+// (dropUnsendableSettings) and adds what its registry knows the destination
+// contradicts -- most often an RTMP URL with no application path, which the far
+// end refuses by dropping the connection rather than by saying anything. Advice
+// only: Validate owns refusal. An edit is the likelier place for a URL to
+// acquire the problem, since editing is where somebody pastes a fresh address.
+func (s *Server) destinationWriteWarnings(row *db.Destination) ([]string, error) {
+	warnings, err := s.dropUnsendableSettings(row)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range row.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
+	return warnings, nil
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
@@ -2726,35 +2824,17 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if !s.requireNamedSource(w, row.SourceID) {
 		return
 	}
-	// Facebook captions stay behind their switch. The switch is checked here,
-	// on the save that turns the mode on, and never by Validate (see there).
-	if !captionModeAllowedNow(row.CaptionMode, "", s.env.FacebookCaptions) {
-		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-		return
-	}
-	if refuseIVSWithoutApp(w, row.URL) {
-		return
-	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
-	// row.SourceID, which requireNamedSource has just proved is present. The
-	// owner is known here and used to be thrown away one line later.
-	if s.refuseIfSilent(w, row.SourceID, row.Profile) {
+	if s.refuseBadDestinationWrite(w, &row, nil) {
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
-	warnings, err := s.dropUnsendableSettings(&row)
+	warnings, err := s.destinationWriteWarnings(&row)
 	if err != nil {
 		writeStoreError(w, err)
 		return
-	}
-	// What the platform registry knows and this destination contradicts --
-	// most often an RTMP URL with no application path, which the far end
-	// refuses by dropping the connection rather than by saying anything. The
-	// destination is still created: this is advice, and Validate owns refusal.
-	for _, w := range row.Warnings() {
-		warnings = append(warnings, w.Detail)
 	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
@@ -2840,12 +2920,10 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
-	// The stored caption mode, read BEFORE the decode below writes over it, so
-	// a save that changes it can be told apart from one that leaves it alone.
-	storedCaptionMode := existing.CaptionMode
-	// The stored URL, so the IVS check below refuses only a save that CHANGES
-	// the URL into one that cannot publish -- see refuseIVSWithoutApp.
-	storedURL := existing.URL
+	// The stored values the write checks compare against, read BEFORE the decode
+	// below writes over them, so a save that changes one can be told apart from
+	// one that leaves it alone. See refuseBadDestinationWrite.
+	before := destinationBeforeWrite(existing)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
@@ -2868,22 +2946,8 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if existing.URL != storedURL && refuseIVSWithoutApp(w, existing.URL) {
+	if s.refuseBadDestinationWrite(w, existing, &before) {
 		return
-	}
-	// Captions are decided before a YouTube broadcast goes live: the delay and
-	// the caption route must be set while the broadcast is still in its first
-	// state. A change while the destination is delivering is refused, and a
-	// change to Facebook captions needs the switch open.
-	if existing.CaptionMode != storedCaptionMode {
-		if s.destinationLive(id) {
-			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
-			return
-		}
-		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, s.env.FacebookCaptions) {
-			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-			return
-		}
 	}
 	// X takes a title only when the broadcast is published, and has no write
 	// that changes a running one, so a change saved now would never reach X.
@@ -2906,21 +2970,15 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// ends up on a platform that cannot send what it is holding without the
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
-	warnings, err := s.dropUnsendableSettings(existing)
+	warnings, err := s.destinationWriteWarnings(existing)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	// Same registry check create does. An edit is the more likely place for a
-	// URL to acquire this problem, not the less: creation usually starts from
-	// a preset, and editing is where somebody pastes a fresh address in.
-	for _, w := range existing.Warnings() {
-		warnings = append(warnings, w.Detail)
-	}
 
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
-	before := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
+	runBefore := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
@@ -2953,7 +3011,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	rw := s.reconcileNow("the destination")
 
 	resp := map[string]any{"destination": updated}
-	if applied, reason := s.destinationApplied(id, updated.SourceID, before, rw); applied != "" {
+	if applied, reason := s.destinationApplied(id, updated.SourceID, runBefore, rw); applied != "" {
 		resp["applied"] = applied
 		if reason != "" {
 			resp["reason"] = reason
@@ -3055,9 +3113,9 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 				dest.Name, dest.Lifecycle.Phase))
 			return
 		}
-		s.noteOrphanedIngestStream(dest)
-		// Its scheduled platform events, while the row, its account and its
-		// token still exist to cancel them with. See delete_cascade.go.
+		// The teardown shared with a programme delete: the note about a stranded
+		// YouTube stream, and the platform events, while the row, its account
+		// and its token still exist. See delete_cascade.go.
 		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
 	}
 	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
@@ -3328,11 +3386,42 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"routing": res, "profile": req.Profile})
 }
 
+// handleListPresets serves the catalogue and the generic OBS-convention
+// defaults. For a programme it also serves "roleDefaults": the defaults moved
+// onto the tracks that programme's annotations name (routing.DefaultPresetOptsFor),
+// which is what a bodyless apply uses. Named by ?source=; unnamed it is the one
+// programme of a single-source install, and absent when several make the
+// choice ambiguous -- the route has never refused for lack of one, and a
+// malformed or unknown ?source= leaves the field out rather than refusing.
 func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"presets":  routing.Presets(),
 		"defaults": routing.DefaultPresetOpts(),
-	})
+	}
+	// Never a refusal: this route has always ignored ?source=, so a malformed
+	// or unknown one only leaves the derived field out.
+	var id int64
+	if raw := strings.TrimSpace(r.URL.Query().Get(sourceParam)); raw != "" {
+		id, _ = strconv.ParseInt(raw, 10, 64)
+	} else if n, err := s.store.CountSources(); err == nil && n == 1 {
+		id, _ = s.defaultSourceID()
+	}
+	if id > 0 {
+		if row, err := s.store.GetSource(id); err == nil {
+			out["roleDefaults"] = routing.DefaultPresetOptsFor(s.sourceOfRow(row))
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceOfRow is the track layout and annotations a programme's presets are
+// derived from: the running engine's when there is one, otherwise the
+// placeholder layout carrying the annotations stored on the source row.
+func (s *Server) sourceOfRow(row *db.Source) routing.Source {
+	if e := s.engineForSource(&row.ID); e != nil {
+		return e.Source()
+	}
+	return routing.DefaultSource().WithAnnotations(row.Ingest.Annotations)
 }
 
 // handleApplyPreset compiles one of the catalogue's mixes against this
@@ -3348,17 +3437,19 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A body is optional: without one the OBS-convention defaults apply --
-	// which is what GET /routing/presets advertises under "defaults", and what
-	// this handler's own comment has always claimed.
+	// A body is optional: without one the defaults apply, derived from this
+	// programme's track roles (routing.DefaultPresetOptsFor) exactly as /apply
+	// and the OBS bridge derive them; GET /routing/presets?source= serves them
+	// under "roleDefaults".
 	//
-	// It was not true. The old code started from `var opts routing.PresetOpts`,
+	// Raw OBS-convention defaults used to apply here, and before that nothing.
+	// The old code started from `var opts routing.PresetOpts`,
 	// so a bodyless apply ran with every track index at Go's zero value, and
 	// "mic only" compiled [0:a:0] -- the full mix -- while the catalogue two
 	// routes away advertised micTrack 2. The advertised value and the applied
 	// value disagreed, and only a client that sent a body ever got the one it
 	// was promised.
-	opts := routing.DefaultPresetOpts()
+	opts := routing.DefaultPresetOptsFor(eng.Source())
 
 	// Read the body unconditionally rather than gating on Content-Length.
 	// A chunked request has ContentLength -1 WHATEVER it is carrying, so the
@@ -3763,7 +3854,7 @@ func checkSentAutomodFields(body []byte) error {
 // captionFacebookRefusal is what the operator reads when a Facebook caption mode
 // is asked for while its switch is closed. It names the switch, because "not
 // allowed" alone sends the operator looking in the wrong place.
-const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set POLYEMESIS_CAPTIONS_FACEBOOK=1 on the server to turn them on"
+const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set " + startupenv.FacebookCaptionsVar + "=1 on the server to turn them on"
 
 // captionModeAllowedNow reports whether a save may store the caption mode it
 // names. Only a save that turns Facebook captions ON (the mode is facebook_sei
