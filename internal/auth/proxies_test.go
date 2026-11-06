@@ -86,6 +86,20 @@ func TestAnIgnoredForwardingHeaderIsReportedOnce(t *testing.T) {
 	}
 }
 
+// X-Forwarded-Proto and -Host from an unlisted peer are reported too: the cost
+// there is a non-Secure cookie and an http:// OAuth redirect URI.
+func TestAnIgnoredProtoOrHostHeaderIsReported(t *testing.T) {
+	for _, h := range []string{"X-Forwarded-Proto", "X-Forwarded-Host"} {
+		var told []string
+		p := NewProxies(true, nil, func(peer string) { told = append(told, peer) })
+		r := fromPeer("172.17.0.1:1", "", "")
+		r.Header.Set(h, "x")
+		if p.Trusts(r) || len(told) != 1 {
+			t.Errorf("%s: trusted or reported %v", h, told)
+		}
+	}
+}
+
 func TestProxiesOffIgnoresExtraAndHeaders(t *testing.T) {
 	p := NewProxies(false, []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, nil)
 	if p != nil {

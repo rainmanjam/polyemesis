@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"net"
 	"sync"
 	"testing"
@@ -9,8 +10,8 @@ import (
 // tsPacketOn builds one MPEG-TS packet on the given PID with the given
 // continuity counter, which is what the hub's continuity measurement walks.
 func tsPacketOn(pid int, cc uint8) []byte {
-	p := make([]byte, tsPacketSize)
-	p[0] = tsSyncByte
+	p := make([]byte, mpegts.PacketSize)
+	p[0] = mpegts.SyncByte
 	p[1] = byte(pid >> 8 & 0x1f)
 	p[2] = byte(pid & 0xff)
 	// payload present, no adaptation field, plus the continuity counter

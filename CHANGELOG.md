@@ -21,6 +21,18 @@ its first tagged release.
   segment, and so does a segment whose recorder is still finalising it: a recorder that is
   stopping, or whose source is being deleted, now counts as running until its FFmpeg has exited,
   so `GET /recording` can answer `"state": "recording"` for those few seconds.
+- **The session cookie's `Secure` flag, the OAuth redirect URI and the client address now trust
+  forwarded headers by one rule.** With `trustProxyHeaders` on, `X-Forwarded-For` was believed only
+  from loopback and the addresses in `trustedProxies`, while `X-Forwarded-Proto` (cookie flag) and
+  `X-Forwarded-Proto` / `X-Forwarded-Host` (OAuth redirect URI) were believed from any peer. All
+  four headers are now believed only from loopback and `trustedProxies`, and the playout viewer
+  links follow the same rule once `trustProxyHeaders` is on. A proxy in another container or on
+  another host, including nginx or Caddy on the Docker host (`172.17.0.1`), must be listed in
+  `trustedProxies`, or the cookie loses its `Secure` flag and OAuth redirect URIs fall back to the
+  internal `http://` address; the startup log now says so.
+- **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
+  login throttle already does. Keyed on the full address, a client holding one /64 could rotate
+  addresses and never reach the limit.
 
 ## [0.15.0] — 2026-11-06
 

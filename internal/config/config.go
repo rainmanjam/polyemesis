@@ -52,13 +52,14 @@ type Config struct {
 	// ProxyHeaderWarning uses it too: the answer to "I set addr: 127.0.0.1 and
 	// it still listens publicly" is almost always the unit's --addr.
 	AddrFromFlag bool `yaml:"-"`
-	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
-	// deciding whether to set the Secure flag on the session cookie. Only
-	// enable it when polyemesis really is behind a reverse proxy, otherwise a
-	// client can forge the header.
+	// TrustProxyHeaders makes the server honour X-Forwarded-Proto (the
+	// session cookie's Secure flag) and X-Forwarded-For / X-Real-IP, from
+	// loopback and TrustedProxies only. Enable it only when polyemesis really
+	// is behind a reverse proxy.
 	TrustProxyHeaders bool `yaml:"trustProxyHeaders"`
 	// TrustedProxies lists the proxies, besides loopback, whose
-	// X-Forwarded-For and X-Real-IP are believed when TrustProxyHeaders is on:
+	// X-Forwarded-Proto, X-Forwarded-For and X-Real-IP are believed when
+	// TrustProxyHeaders is on:
 	// CIDRs ("172.16.0.0/12") or single addresses ("172.17.0.1"). A request
 	// from any other peer is keyed on its own socket address, so a client
 	// that reaches the listener directly cannot choose the address the login

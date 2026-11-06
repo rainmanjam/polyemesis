@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -177,9 +178,9 @@ func TestAProgramMapThatSpansTwoPacketsStillNamesTheVideoPID(t *testing.T) {
 	desc := make([]byte, pil)
 	desc[0], desc[1] = 0x05, byte(pil-2) // a registration descriptor's shape, padded
 	body = append(body, desc...)
-	body = append(body, streamTypeH264, 0xE0|0x01, 0x00, 0xF0, 0x00) // video ES on 0x0100
-	body = append(body, 0x0F, 0xE0|0x01, 0x01, 0xF0, 0x00)           // audio ES
-	body = append(body, 0, 0, 0, 0)                                  // CRC, not checked
+	body = append(body, mpegts.StreamTypeH264, 0xE0|0x01, 0x00, 0xF0, 0x00) // video ES on 0x0100
+	body = append(body, 0x0F, 0xE0|0x01, 0x01, 0xF0, 0x00)                  // audio ES
+	body = append(body, 0, 0, 0, 0)                                         // CRC, not checked
 	n := len(body)
 	section := append([]byte{0x02, 0xB0 | byte(n>>8), byte(n)}, body...)
 	payload := append([]byte{0x00}, section...) // pointer field
@@ -204,8 +205,8 @@ func TestAnSEIStageSaysOnceWhenTheVideoIsHEVC(t *testing.T) {
 	st := NewSEIStage()
 	n := 0
 	st.OnUnsupported(func() { n++ })
-	_ = st.Feed(psFixture(streamTypeHEVC))
-	_ = st.Feed(psiPacket(testPMTPID, 1, pmtSection(streamTypeHEVC, 0x0F)))
+	_ = st.Feed(psFixture(mpegts.StreamTypeHEVC))
+	_ = st.Feed(psiPacket(testPMTPID, 1, pmtSection(mpegts.StreamTypeHEVC, 0x0F)))
 	if n != 1 {
 		t.Fatalf("told %d times about one HEVC stream, want once", n)
 	}

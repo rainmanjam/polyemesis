@@ -110,16 +110,17 @@ tls:
 #    127.0.0.1 instead if the box is shared.
 
 # Set to true ONLY when polyemesis really is behind a reverse proxy you control.
-# It makes the server trust X-Forwarded-Proto and X-Forwarded-Host when marking
-# session cookies Secure and when building OAuth redirect URIs. With no proxy in
-# front, a client could forge those headers.
+# It makes the server believe X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-For
+# and X-Real-IP (session cookie Secure flag, OAuth redirect URIs, login throttling,
+# audit log) -- but only from loopback and the proxies in trustedProxies below.
+# With no proxy in front, a client could forge those headers.
 trustProxyHeaders: false
 
-# The proxies whose X-Forwarded-For / X-Real-IP are believed for login throttling
-# and the audit log, besides loopback, which is always trusted when
-# trustProxyHeaders is on. Addresses or CIDRs. A request from any other peer is
-# keyed on its own address, so a client that reaches the port directly cannot
-# pick its own. List your proxy here when it is not on this host, e.g. nginx on
+# The proxies whose X-Forwarded-Proto / -Host / -For and X-Real-IP are believed,
+# besides loopback, which is always trusted when trustProxyHeaders is on.
+# Addresses or CIDRs. From any other peer the headers are ignored: the request
+# is keyed on its own address and the session cookie follows the real
+# connection, so a client that reaches the port directly cannot choose either. List your proxy here when it is not on this host, e.g. nginx on
 # the Docker host talking to this container: ["172.17.0.1"].
 trustedProxies: []
 

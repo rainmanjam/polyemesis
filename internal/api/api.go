@@ -863,7 +863,21 @@ type Options struct {
 
 // New creates the server.
 func New(o Options) *Server {
-	s := &Server{
+	var s *Server
+	// Config.Validate has already refused a malformed trustedProxies, so an
+	// error here means a caller skipped it; loopback-only is the safe reading.
+	extra, _ := o.Config.TrustedProxyPrefixes()
+	proxies := auth.NewProxies(o.Config.TrustProxyHeaders, extra, func(peer string) {
+		// Once per process. The deployment this catches -- nginx in another
+		// container, or on another box, never listed -- would otherwise log
+		// on every request, or worse, say nothing while every client behind
+		// that proxy shares one throttle key.
+		s.log.Warn("ignored X-Forwarded-* / X-Real-IP headers from a peer that is not a trusted proxy",
+			"peer", peer,
+			"cost", "OAuth redirect URIs show the internal http:// address and fail at the provider, the session cookie is not marked Secure, and every client behind the proxy shares one throttle key",
+			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml (nginx or Caddy on the Docker host appears as 172.17.0.1, not loopback)")
+	})
+	s = &Server{
 		log:           o.Log,
 		cfg:           o.Config,
 		providers:     o.Providers,
@@ -894,6 +908,7 @@ func New(o Options) *Server {
 		diag:            o.Diag,
 		diagLevel:       o.DiagLevel,
 		startedAt:       time.Now(),
+		proxies:         proxies,
 		logins:          auth.NewThrottle(),
 		setups:          auth.NewThrottle(),
 		setupCode:       o.SetupCode,
@@ -905,7 +920,7 @@ func New(o Options) *Server {
 			// would drop the Secure flag from the session cookie on a server
 			// that is genuinely terminating TLS.
 			o.Config.ServesTLS(),
-			o.Config.TrustProxyHeaders,
+			proxies,
 			// Session revocation. Reading it through the store rather than
 			// caching it means a password change takes effect on the very next
 			// request, with no window in which a revoked token still works.
@@ -916,18 +931,6 @@ func New(o Options) *Server {
 		publishGates:   o.PublishGates,
 		publishConfirm: newConfirmBook(time.Now),
 	}
-	// Config.Validate has already refused a malformed trustedProxies, so an
-	// error here means a caller skipped it; loopback-only is the safe reading.
-	extra, _ := o.Config.TrustedProxyPrefixes()
-	s.proxies = auth.NewProxies(o.Config.TrustProxyHeaders, extra, func(peer string) {
-		// Once per process. The deployment this catches -- nginx in another
-		// container, or on another box, never listed -- would otherwise log
-		// on every request, or worse, say nothing while every client behind
-		// that proxy shares one throttle key.
-		s.log.Warn("ignored X-Forwarded-For from a peer that is not a trusted proxy",
-			"peer", peer,
-			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml")
-	})
 	// nil for both probes means "ask the real environment and the real
 	// filesystem", which is what a running server wants; the parameters exist
 	// for internal/upgrade's own tests.

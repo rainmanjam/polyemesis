@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/freedisk"
 	// For ffmpeg.PullFilePath ONLY -- see UploadFromPullURL. The dependency is
 	// the point: the gate has to key on the engine's own normalisation of a
 	// pull URL, and internal/ffmpeg imports no other package of this module, so
@@ -73,7 +74,7 @@ func New(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create uploads dir: %w", err)
 	}
-	return &Store{dir: dir, freeBytes: freeBytes}, nil
+	return &Store{dir: dir, freeBytes: FreeBytes}, nil
 }
 
 // WithFreeBytes replaces how this Store measures free space and returns the
@@ -95,10 +96,11 @@ func (s *Store) Dir() string { return s.dir }
 //
 // Exported for internal/playlistmedia, whose normalised derivatives are
 // additional copies of operator media on this same volume and must be measured
-// the same way. The alternative was a FOURTH copy of statfs in this repo, and
-// the three that exist are already one more than the comment in disk_unix.go is
-// comfortable with.
-func FreeBytes(path string) (uint64, error) { return freeBytes(path) }
+// the same way.
+func FreeBytes(path string) (uint64, error) {
+	free, _, err := freedisk.Space(path)
+	return free, err
+}
 
 // Resolve turns a stored name into an absolute path, refusing anything that is
 // not a bare filename inside the uploads directory.

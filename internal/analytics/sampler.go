@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"errors"
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"log/slog"
 	"sort"
 	"sync"
@@ -536,11 +537,7 @@ func backoffFor(n int, retry *RetryAfterError) time.Duration {
 	if n <= 1 {
 		return 0
 	}
-	d := time.Minute
-	for i := 2; i < n && d < maxBackoff; i++ {
-		d *= 2
-	}
-	return min(d, maxBackoff)
+	return backoff.Exponential(n-2, time.Minute, maxBackoff)
 }
 
 func targetKey(t Target) string { return t.Platform + "/" + t.Account }

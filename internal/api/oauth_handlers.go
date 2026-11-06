@@ -30,7 +30,7 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			guides[i].RedirectPath = origin + guides[i].RedirectPath
 			// Preflight the URI we are about to tell them to register, rather
 			// than letting the platform reject it after the fact.
-			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
+			guides[i].RedirectWarnings = redirectWarnings(s.cfg, s.proxies, r, guides[i].RedirectPath)
 		}
 		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
 	}
@@ -67,13 +67,11 @@ func (s *Server) origin(r *http.Request) string {
 	if r.TLS != nil || s.cfg.ServesTLS() {
 		scheme = "https"
 	}
-	if s.cfg.TrustProxyHeaders {
+	host := r.Host
+	if s.proxies.Trusts(r) {
 		if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
 			scheme = p
 		}
-	}
-	host := r.Host
-	if s.cfg.TrustProxyHeaders {
 		if h := r.Header.Get("X-Forwarded-Host"); h != "" {
 			host = h
 		}

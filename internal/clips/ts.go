@@ -1,5 +1,7 @@
 package clips
 
+import "github.com/rainmanjam/polyemesis/internal/mpegts"
+
 // Just enough MPEG-TS to cut the stream somewhere a decoder can start.
 //
 // TS is self-synchronising, so a file that begins at any 188-byte boundary is
@@ -15,32 +17,9 @@ package clips
 // spends, which is why it runs inline rather than being sampled.
 
 const (
-	tsPacketSize = 188
-	tsSyncByte   = 0x47
-	tsNullPID    = 0x1FFF
-	pidPAT       = 0x0000
-
 	// Adaptation-field flags, in the byte after the field length.
 	afRandomAccess = 0x40
 )
-
-// videoStreamTypes are the PMT stream_type values that carry pictures.
-//
-// A type this table has never heard of leaves the video PID unknown, which
-// makes a cut fall back to a plain packet boundary rather than refusing to
-// produce one. That is the fail-open direction on purpose: a slightly ugly
-// first second beats "your clip could not be created".
-var videoStreamTypes = map[byte]bool{
-	0x01: true, // MPEG-1 video
-	0x02: true, // MPEG-2 video
-	0x10: true, // MPEG-4 part 2
-	0x1B: true, // H.264
-	0x24: true, // HEVC
-	0x33: true, // VVC
-	0x42: true, // Chinese AVS
-	0xD1: true, // Dirac
-	0xEA: true, // VC-1
-}
 
 // demux is the running view of the transport stream.
 type demux struct {
@@ -49,36 +28,36 @@ type demux struct {
 	videoPID  uint16
 	haveVideo bool
 
-	pat      [tsPacketSize]byte
+	pat      [mpegts.PacketSize]byte
 	havePAT  bool
-	pmt      [tsPacketSize]byte
+	pmt      [mpegts.PacketSize]byte
 	pmtCache bool
 }
 
 // observe folds one datagram into the running view.
 func (d *demux) observe(dgram []byte) {
-	for off := 0; off+tsPacketSize <= len(dgram); off += tsPacketSize {
-		p := dgram[off : off+tsPacketSize]
+	for off := 0; off+mpegts.PacketSize <= len(dgram); off += mpegts.PacketSize {
+		p := dgram[off : off+mpegts.PacketSize]
 		// Losing sync means the rest of the datagram cannot be trusted to be
 		// packet-aligned, so stop rather than guess.
-		if p[0] != tsSyncByte {
+		if p[0] != mpegts.SyncByte {
 			return
 		}
-		pid := packetPID(p)
-		if pid == tsNullPID || !hasPayload(p) {
+		pid := mpegts.PID(p)
+		if pid == mpegts.NullPID || !mpegts.HasPayload(p) {
 			continue
 		}
 		switch {
-		case pid == pidPAT:
+		case pid == mpegts.PIDPAT:
 			copy(d.pat[:], p)
 			d.havePAT = true
-			if id, ok := parsePAT(sectionOf(p)); ok {
+			if id, ok := mpegts.PATProgram(mpegts.SectionOf(p)); ok {
 				d.pmtPID, d.havePMT = id, true
 			}
 		case d.havePMT && pid == d.pmtPID:
 			copy(d.pmt[:], p)
 			d.pmtCache = true
-			if v, ok := parsePMT(sectionOf(p)); ok {
+			if v, ok := videoPIDOf(mpegts.SectionOf(p)); ok {
 				d.videoPID, d.haveVideo = v, true
 			}
 		}
@@ -95,7 +74,7 @@ func (d *demux) psi() []byte {
 	if !d.havePAT {
 		return nil
 	}
-	out := make([]byte, 0, 2*tsPacketSize)
+	out := make([]byte, 0, 2*mpegts.PacketSize)
 	out = append(out, d.pat[:]...)
 	if d.pmtCache {
 		out = append(out, d.pmt[:]...)
@@ -115,12 +94,12 @@ func (d *demux) randomAccess(dgram []byte) (int, bool) {
 	if !d.haveVideo {
 		return 0, false
 	}
-	for off := 0; off+tsPacketSize <= len(dgram); off += tsPacketSize {
-		p := dgram[off : off+tsPacketSize]
-		if p[0] != tsSyncByte {
+	for off := 0; off+mpegts.PacketSize <= len(dgram); off += mpegts.PacketSize {
+		p := dgram[off : off+mpegts.PacketSize]
+		if p[0] != mpegts.SyncByte {
 			return 0, false
 		}
-		if packetPID(p) != d.videoPID {
+		if mpegts.PID(p) != d.videoPID {
 			continue
 		}
 		// payload_unit_start_indicator: without it this is the middle of an
@@ -128,7 +107,7 @@ func (d *demux) randomAccess(dgram []byte) (int, bool) {
 		if p[1]&0x40 == 0 {
 			continue
 		}
-		if !hasAdaptation(p) || p[4] == 0 {
+		if !mpegts.HasAdaptation(p) || p[4] == 0 {
 			continue
 		}
 		if p[5]&afRandomAccess != 0 {
@@ -138,81 +117,18 @@ func (d *demux) randomAccess(dgram []byte) (int, bool) {
 	return 0, false
 }
 
-func packetPID(p []byte) uint16 {
-	return uint16(p[1]&0x1F)<<8 | uint16(p[2])
-}
-
-func hasPayload(p []byte) bool    { return p[3]&0x10 != 0 }
-func hasAdaptation(p []byte) bool { return p[3]&0x20 != 0 }
-
-// sectionOf returns the PSI section bytes of a packet that starts one, i.e.
-// past the adaptation field and past the pointer_field. It returns nil for a
-// packet that continues a section, because a section split across packets is a
-// section this build declines to reassemble: PAT and PMT for a live stream fit
-// in one packet, and a stream where they do not simply leaves the video PID
-// unknown and falls back to an unaligned cut.
-func sectionOf(p []byte) []byte {
-	if p[1]&0x40 == 0 {
-		return nil
-	}
-	start := 4
-	if hasAdaptation(p) {
-		start += 1 + int(p[4])
-	}
-	if start >= tsPacketSize {
-		return nil
-	}
-	ptr := int(p[start])
-	start += 1 + ptr
-	if start >= tsPacketSize {
-		return nil
-	}
-	return p[start:]
-}
-
-// parsePAT returns the first real program's PMT PID.
-func parsePAT(sec []byte) (uint16, bool) {
-	if len(sec) < 12 || sec[0] != 0x00 {
-		return 0, false
-	}
-	length := int(sec[1]&0x0F)<<8 | int(sec[2])
-	end := 3 + length
-	if end > len(sec) {
-		end = len(sec)
-	}
-	// 5 bytes of section header after the length, then 4 bytes per program,
-	// then a 4-byte CRC that must not be read as one.
-	for off := 8; off+4 <= end-4; off += 4 {
-		program := uint16(sec[off])<<8 | uint16(sec[off+1])
-		if program == 0 {
-			// The network information table, not a program.
-			continue
+// videoPIDOf returns the first video elementary stream of a PMT section.
+//
+// A stream_type this build has never heard of leaves the video PID unknown,
+// which makes a cut fall back to a plain packet boundary rather than refusing
+// to produce one. That is the fail-open direction on purpose: a slightly ugly
+// first second beats "your clip could not be created".
+func videoPIDOf(sec []byte) (uint16, bool) {
+	streams, _ := mpegts.PMTStreams(sec)
+	for _, st := range streams {
+		if mpegts.IsVideo(st.Type) {
+			return st.PID, true
 		}
-		return uint16(sec[off+2]&0x1F)<<8 | uint16(sec[off+3]), true
-	}
-	return 0, false
-}
-
-// parsePMT returns the elementary PID carrying video.
-func parsePMT(sec []byte) (uint16, bool) {
-	if len(sec) < 16 || sec[0] != 0x02 {
-		return 0, false
-	}
-	length := int(sec[1]&0x0F)<<8 | int(sec[2])
-	end := 3 + length
-	if end > len(sec) {
-		end = len(sec)
-	}
-	infoLen := int(sec[10]&0x0F)<<8 | int(sec[11])
-	off := 12 + infoLen
-	for off+5 <= end-4 {
-		streamType := sec[off]
-		pid := uint16(sec[off+1]&0x1F)<<8 | uint16(sec[off+2])
-		esLen := int(sec[off+3]&0x0F)<<8 | int(sec[off+4])
-		if videoStreamTypes[streamType] {
-			return pid, true
-		}
-		off += 5 + esLen
 	}
 	return 0, false
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -51,8 +52,8 @@ func pcrStream(t *testing.T, ts []byte) *delaytest.Stream {
 	t.Helper()
 	s := &delaytest.Stream{}
 	first, last := int64(-1), int64(0)
-	for off := 0; off+tsPacketSize <= len(ts); off += tsPacketSize {
-		p := ts[off : off+tsPacketSize]
+	for off := 0; off+mpegts.PacketSize <= len(ts); off += mpegts.PacketSize {
+		p := ts[off : off+mpegts.PacketSize]
 		if at := pcrAt(p); at >= 0 {
 			v := readPCRBase(p[at:])
 			if first < 0 {

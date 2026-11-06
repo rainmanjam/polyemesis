@@ -2,6 +2,7 @@ package captions
 
 import (
 	"context"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"net"
 	"sync"
 	"testing"
@@ -98,14 +99,14 @@ func TestSEIStageHandsBackDatagramsNoLargerThanSevenTSPacketsAndOnlyWholePackets
 			if len(d) == 0 || len(d) > datagramBytes {
 				t.Fatalf("output datagram is %d bytes, want 1..%d", len(d), datagramBytes)
 			}
-			if len(d)%tsPacketSize != 0 {
+			if len(d)%mpegts.PacketSize != 0 {
 				t.Fatalf("output datagram is %d bytes, not a whole number of 188-byte packets", len(d))
 			}
 		}
 	}
 	for _, d := range s.Flush() {
 		total++
-		if len(d) == 0 || len(d) > datagramBytes || len(d)%tsPacketSize != 0 {
+		if len(d) == 0 || len(d) > datagramBytes || len(d)%mpegts.PacketSize != 0 {
 			t.Fatalf("flushed datagram is %d bytes, want whole packets up to %d", len(d), datagramBytes)
 		}
 	}

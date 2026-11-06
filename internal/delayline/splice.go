@@ -59,6 +59,7 @@ package delayline
 
 import (
 	"errors"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"os"
 	"slices"
 	"time"
@@ -360,7 +361,7 @@ type audioCache struct {
 const recentAudioPES = 64
 
 func (c *audioCache) push(p []byte) {
-	if pktPUSI(p) {
+	if mpegts.PUSI(p) {
 		c.finish()
 		c.skipping = false
 		h, _ := parsePES(p, nil)
@@ -371,7 +372,7 @@ func (c *audioCache) push(p []byte) {
 		c.want, c.got = h.length, len(payloadOf(p))-6
 		return
 	}
-	if c.skipping || len(c.partial) == 0 || !pktHasPayload(p) {
+	if c.skipping || len(c.partial) == 0 || !mpegts.HasPayload(p) {
 		return
 	}
 	// A bounded PES takes nothing past its length; any PES over the hold
@@ -431,22 +432,22 @@ func newTSState() tsState {
 
 // observePSI follows the PAT and PMT, and keeps the latest of each.
 func (ts *tsState) observePSI(p []byte) {
-	pid := pktPID(p)
+	pid := mpegts.PID(p)
 	switch {
-	case pid == pidPAT:
-		if sec := sectionOf(p); sec != nil {
-			if pmt, ok := parsePAT(sec); ok {
+	case pid == mpegts.PIDPAT:
+		if sec := mpegts.SectionOf(p); sec != nil {
+			if pmt, ok := mpegts.PATProgram(sec); ok {
 				ts.pmtPID, ts.havePMT = pmt, true
 				ts.patPkt = append(ts.patPkt[:0], p...)
 			}
 		}
 	case ts.havePMT && pid == ts.pmtPID:
-		if sec := sectionOf(p); sec != nil {
+		if sec := mpegts.SectionOf(p); sec != nil {
 			if v, codec, all, ok := parsePMT(sec); ok {
 				ts.videoPID, ts.codec = v, codec
 				clear(ts.es)
 				for _, e := range all {
-					ts.es[e.pid] = e.streamType
+					ts.es[e.PID] = e.Type
 				}
 				ts.pmtPkt = append(ts.pmtPkt[:0], p...)
 			}
@@ -496,7 +497,7 @@ func (ts *tsState) snapshot() []pidSnap {
 	if len(out) < maxSnapPIDs {
 		rest := make([]uint16, 0, len(ts.out))
 		for pid := range ts.out {
-			if !seen[pid] && pid != tsNullPID {
+			if !seen[pid] && pid != mpegts.NullPID {
 				rest = append(rest, pid)
 			}
 		}
@@ -537,12 +538,12 @@ func (ts *tsState) applyOffset(p []byte, h *pesHeader) {
 // prepare rewrites timestamps, holding a packet whose PES header runs into
 // the next one until that arrives.
 func (ts *tsState) prepare(p []byte) []pkt {
-	pid := pktPID(p)
-	if pid == tsNullPID {
+	pid := mpegts.PID(p)
+	if pid == mpegts.NullPID {
 		return []pkt{{b: p}}
 	}
 	if first, ok := ts.split[pid]; ok {
-		if !pktHasPayload(p) {
+		if !mpegts.HasPayload(p) {
 			ts.applyOffset(p, nil)
 			return []pkt{{b: p}}
 		}
@@ -554,7 +555,7 @@ func (ts *tsState) prepare(p []byte) []pkt {
 		}
 		return []pkt{{b: first, h: &h}, {b: p}}
 	}
-	if pktPUSI(p) && pktHasPayload(p) {
+	if mpegts.PUSI(p) && mpegts.HasPayload(p) {
 		h, complete := parsePES(p, nil)
 		if !complete {
 			ts.split[pid] = append([]byte(nil), p...)
@@ -570,8 +571,8 @@ func (ts *tsState) prepare(p []byte) []pkt {
 // post applies the splice's per-PID rules: wait for a start, gate the video,
 // trim the audio.
 func (ts *tsState) post(q pkt) []pkt {
-	pid := pktPID(q.b)
-	if pid == tsNullPID {
+	pid := mpegts.PID(q.b)
+	if pid == mpegts.NullPID {
 		return []pkt{q}
 	}
 	if ts.floorLive && ts.isVideo(pid) && q.h != nil && q.h.ok && q.h.hasPTS {
@@ -595,15 +596,15 @@ func (ts *tsState) post(q pkt) []pkt {
 	}
 	// Payload only: an adaptation-only packet (a PCR on a PID of its own)
 	// carries no part of any PES and must keep flowing.
-	if r.awaitStart && pktHasPayload(q.b) {
-		if !pktPUSI(q.b) {
+	if r.awaitStart && mpegts.HasPayload(q.b) {
+		if !mpegts.PUSI(q.b) {
 			return nil
 		}
 		r.awaitStart = false
 	}
-	if pktHasPayload(q.b) {
+	if mpegts.HasPayload(q.b) {
 		switch {
-		case pktPUSI(q.b):
+		case mpegts.PUSI(q.b):
 			r.bounded = q.h != nil && q.h.ok && q.h.length > 0
 			if r.bounded {
 				r.leftBytes = q.h.length - (len(payloadOf(q.b)) - 6)
@@ -631,7 +632,7 @@ func (ts *tsState) post(q pkt) []pkt {
 			r.gated, r.dropping = false, false
 		}
 	}
-	if r.dropping && pktHasPayload(q.b) {
+	if r.dropping && mpegts.HasPayload(q.b) {
 		return nil
 	}
 	return []pkt{q}
@@ -641,7 +642,7 @@ func (ts *tsState) post(q pkt) []pkt {
 // the kept audio ends.
 func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 	var out []pkt
-	if pktPUSI(q.b) && pktHasPayload(q.b) {
+	if mpegts.PUSI(q.b) && mpegts.HasPayload(q.b) {
 		r.trimDrop = false
 		if len(r.hold) > 0 {
 			out = ts.finishTrim(pid, r)
@@ -672,10 +673,10 @@ func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 		}
 		return out
 	}
-	if r.trimDrop && pktHasPayload(q.b) {
+	if r.trimDrop && mpegts.HasPayload(q.b) {
 		return nil
 	}
-	if len(r.hold) == 0 || !pktHasPayload(q.b) {
+	if len(r.hold) == 0 || !mpegts.HasPayload(q.b) {
 		return []pkt{q}
 	}
 	r.hold = append(r.hold, q.b...)
@@ -706,8 +707,8 @@ func framedAudio(st byte, es []byte) bool {
 // releaseHeld hands back a held PES unchanged.
 func releaseHeld(r *pidRewrite) []pkt {
 	var out []pkt
-	for off := 0; off+tsPacketSize <= len(r.hold); off += tsPacketSize {
-		p := append([]byte(nil), r.hold[off:off+tsPacketSize]...)
+	for off := 0; off+mpegts.PacketSize <= len(r.hold); off += mpegts.PacketSize {
+		p := append([]byte(nil), r.hold[off:off+mpegts.PacketSize]...)
 		q := pkt{b: p}
 		if off == 0 {
 			h, _ := parsePES(p, nil)
@@ -725,8 +726,8 @@ func releaseHeld(r *pidRewrite) []pkt {
 // of trimEnd, and dropped otherwise.
 func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
 	var pes []byte
-	for off := 0; off+tsPacketSize <= len(r.hold); off += tsPacketSize {
-		pes = append(pes, payloadOf(r.hold[off:off+tsPacketSize])...)
+	for off := 0; off+mpegts.PacketSize <= len(r.hold); off += mpegts.PacketSize {
+		pes = append(pes, payloadOf(r.hold[off:off+mpegts.PacketSize])...)
 	}
 	if len(pes) < 9 || len(pes) < 9+int(pes[8]) || pes[7]&0x80 == 0 || len(pes) < 14 {
 		r.trimming = false
@@ -785,8 +786,8 @@ func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
 	r.hold = r.hold[:0]
 	raw := packetizePES(pid, nb)
 	var out []pkt
-	for off := 0; off < len(raw); off += tsPacketSize {
-		q := pkt{b: raw[off : off+tsPacketSize]}
+	for off := 0; off < len(raw); off += mpegts.PacketSize {
+		q := pkt{b: raw[off : off+mpegts.PacketSize]}
 		if off == 0 {
 			h, _ := parsePES(q.b, nil)
 			q.h = &h
@@ -897,7 +898,7 @@ func (b *Buffer) normalLocked(at int64, data []byte) {
 	flush := func() {
 		rest := ob
 		for len(rest) > 0 {
-			n := min(len(rest), chunkPackets*tsPacketSize)
+			n := min(len(rest), chunkPackets*mpegts.PacketSize)
 			seg, off, before, bytesBefore := b.appendLocked(at, rest[:n])
 			if c := ts.cand; c != nil && !c.positioned {
 				c.seg, c.off, c.at, c.positioned = seg, off, at, true
@@ -908,8 +909,8 @@ func (b *Buffer) normalLocked(at int64, data []byte) {
 		}
 		ob = ob[:0]
 	}
-	for off := 0; off+tsPacketSize <= len(data); off += tsPacketSize {
-		p := data[off : off+tsPacketSize]
+	for off := 0; off+mpegts.PacketSize <= len(data); off += mpegts.PacketSize {
+		p := data[off : off+mpegts.PacketSize]
 		ts.observePSI(p)
 		for _, q := range ts.prepare(p) {
 			for _, r := range ts.post(q) {
@@ -926,12 +927,12 @@ func (b *Buffer) normalLocked(at int64, data []byte) {
 func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 	ts := &b.ts
 	p := q.b
-	pid := pktPID(p)
-	if pid == tsNullPID {
+	pid := mpegts.PID(p)
+	if pid == mpegts.NullPID {
 		return append(ob, p...)
 	}
 	video := ts.isVideo(pid)
-	pesStart := pktPUSI(p) && q.h != nil && q.h.ok
+	pesStart := mpegts.PUSI(p) && q.h != nil && q.h.ok
 	if video && pesStart {
 		// flush works on the caller's ob, which must be this one.
 		b.ob = ob
@@ -954,7 +955,7 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 	o := ts.out[pid]
 	if r := ts.rw[pid]; r != nil && r.renumber && o.ccSeen {
 		cc := o.cc
-		if pktHasPayload(p) {
+		if mpegts.HasPayload(p) {
 			cc = (cc + 1) & 0x0F
 		}
 		p[3] = p[3]&0xF0 | cc
@@ -991,11 +992,11 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 		if q.h.length > 0 {
 			o.remaining = max(0, q.h.length-(len(payloadOf(p))-6))
 		}
-	case pktHasPayload(p) && o.remaining > 0:
+	case mpegts.HasPayload(p) && o.remaining > 0:
 		o.remaining = max(0, o.remaining-len(payloadOf(p)))
 	}
 	ts.out[pid] = o
-	if !video && pktHasPayload(p) && (len(ts.waiting) > 0 || (ts.cand != nil && len(ts.cand.waitPIDs) > 0)) {
+	if !video && mpegts.HasPayload(p) && (len(ts.waiting) > 0 || (ts.cand != nil && len(ts.cand.waitPIDs) > 0)) {
 		b.settleWaitingLocked(pid, pesStart)
 	}
 	if video && ts.cand != nil && !ts.cand.classified {
@@ -1367,12 +1368,12 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 	// timestamp, on any stream. The platform sees a picture break until the
 	// source's next keyframe; that is said in the result.
 	force := now.Sub(ts.dumpAt) >= 2*max(minRecoveryWait, recoveryGOPs*ts.gop)
-	for off := 0; off < len(work); off += tsPacketSize {
-		p := work[off : off+tsPacketSize]
+	for off := 0; off < len(work); off += mpegts.PacketSize {
+		p := work[off : off+mpegts.PacketSize]
 		ts.observePSI(p)
-		pid := pktPID(p)
+		pid := mpegts.PID(p)
 		video := ts.isVideo(pid)
-		if _, isES := ts.es[pid]; force && !ts.holding && pktPUSI(p) && (isES || video) {
+		if _, isES := ts.es[pid]; force && !ts.holding && mpegts.PUSI(p) && (isES || video) {
 			h, complete := parsePES(p, nil)
 			if !complete {
 				// The header runs into this PID's next packet: hold the start
@@ -1388,7 +1389,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 					ts.heldDTS = h.dts()
 				}
 				if b.decideResumeLocked(now) {
-					return work[off+tsPacketSize:], true
+					return work[off+mpegts.PacketSize:], true
 				}
 			}
 		}
@@ -1403,7 +1404,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			}
 			c.push(p)
 		}
-		if video && pktPUSI(p) {
+		if video && mpegts.PUSI(p) {
 			ts.holding, ts.held, ts.heldNeedHdr = false, ts.held[:0], false
 			h, complete := parsePES(p, nil)
 			if !complete {
@@ -1425,7 +1426,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			ts.held = append(ts.held, p...)
 			if es := payloadOf(p)[h.esStart():]; len(es) > 0 && ts.cls.feed(es) {
 				if b.decideResumeLocked(now) {
-					return work[off+tsPacketSize:], true
+					return work[off+mpegts.PacketSize:], true
 				}
 			}
 			continue
@@ -1434,13 +1435,13 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			continue
 		}
 		ts.held = append(ts.held, p...)
-		if len(ts.held) > heldLimit*tsPacketSize {
+		if len(ts.held) > heldLimit*mpegts.PacketSize {
 			ts.holding, ts.held = false, ts.held[:0]
 			continue
 		}
-		if ts.heldNeedHdr && pid == ts.heldPID && pktHasPayload(p) {
+		if ts.heldNeedHdr && pid == ts.heldPID && mpegts.HasPayload(p) {
 			ts.heldNeedHdr = false
-			first := ts.held[:tsPacketSize]
+			first := ts.held[:mpegts.PacketSize]
 			h, _ := parsePES(first, p)
 			if !h.ok || !h.hasPTS {
 				ts.holding, ts.held, ts.forcing = false, ts.held[:0], false
@@ -1453,7 +1454,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			if ts.forcing {
 				// A forced resume takes any PES start: no picture to read.
 				if b.decideResumeLocked(now) {
-					return work[off+tsPacketSize:], true
+					return work[off+mpegts.PacketSize:], true
 				}
 				continue
 			}
@@ -1464,7 +1465,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			}
 			if len(es) > 0 && ts.cls.feed(es) {
 				if b.decideResumeLocked(now) {
-					return work[off+tsPacketSize:], true
+					return work[off+mpegts.PacketSize:], true
 				}
 			}
 			continue
@@ -1472,7 +1473,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 		if video && !ts.heldNeedHdr {
 			if es := payloadOf(p); len(es) > 0 && ts.cls.feed(es) {
 				if b.decideResumeLocked(now) {
-					return work[off+tsPacketSize:], true
+					return work[off+mpegts.PacketSize:], true
 				}
 			}
 		}

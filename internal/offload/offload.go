@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -733,7 +734,7 @@ func (s *Service) fail(t db.StorageTarget, it db.OffloadItem, err error, permane
 		return it, nil
 	}
 	it.State = db.OffloadFailed
-	it.NextAttemptAt = s.now().Add(backoff(it.Attempts, true))
+	it.NextAttemptAt = s.now().Add(retryDelay(it.Attempts, true))
 	return it, nil
 }
 
@@ -827,17 +828,11 @@ func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size 
 	return nil
 }
 
-func backoff(attempts int, retry bool) time.Duration {
+func retryDelay(attempts int, retry bool) time.Duration {
 	if !retry {
 		return backoffCap
 	}
-	d := backoffBase
-	for i := 1; i < attempts && d < backoffCap; i++ {
-		d *= 2
-	}
-	if d > backoffCap {
-		d = backoffCap
-	}
+	d := backoff.Exponential(attempts-1, backoffBase, backoffCap)
 	return d + time.Duration(rand.Int64N(int64(d)/5+1))
 }
 

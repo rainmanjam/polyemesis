@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
 )
 
@@ -70,7 +71,7 @@ func TestRedirectWarnings(t *testing.T) {
 				req.Header.Set("X-Forwarded-Host", tc.forwarded)
 			}
 
-			got := redirectWarnings(tc.cfg, req, tc.redirectURI)
+			got := redirectWarnings(tc.cfg, auth.NewProxies(tc.cfg.TrustProxyHeaders, nil, nil), req, tc.redirectURI)
 
 			if tc.wantSubstr == "" {
 				if len(got) != 0 {
@@ -101,8 +102,9 @@ func TestNoProxyWarningWhenHeadersAreTrusted(t *testing.T) {
 	req.Host = "internal:8080"
 	req.Header.Set("X-Forwarded-Host", "stream.example.com")
 
+	req.RemoteAddr = "127.0.0.1:5555"
 	cfg := config.Config{TrustProxyHeaders: true}
-	got := redirectWarnings(cfg, req, "https://stream.example.com/api/v1/oauth/youtube/callback")
+	got := redirectWarnings(cfg, auth.NewProxies(true, nil, nil), req, "https://stream.example.com/api/v1/oauth/youtube/callback")
 
 	for _, w := range got {
 		if strings.Contains(w, "reverse proxy") {
@@ -117,7 +119,7 @@ func TestRedirectWarningsIgnoresAnUnparseableURI(t *testing.T) {
 	req.Host = "localhost:8080"
 
 	for _, bad := range []string{"", "://nope", "not a url at all"} {
-		if got := redirectWarnings(config.Config{}, req, bad); len(got) != 0 {
+		if got := redirectWarnings(config.Config{}, nil, req, bad); len(got) != 0 {
 			t.Errorf("redirectWarnings(%q) = %v, want none", bad, got)
 		}
 	}

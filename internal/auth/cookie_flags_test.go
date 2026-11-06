@@ -34,7 +34,7 @@ import (
 )
 
 func mgr(secure, trustProxy bool) *Manager {
-	return New(bytes.Repeat([]byte{0x7a}, 32), secure, trustProxy, staticEpoch(0))
+	return New(bytes.Repeat([]byte{0x7a}, 32), secure, NewProxies(trustProxy, nil, nil), staticEpoch(0))
 }
 
 func cookies(t *testing.T, m *Manager, r *http.Request) map[string]*http.Cookie {
@@ -76,6 +76,11 @@ func TestSecureIsSetWheneverTheConnectionIsAndNotWhenAClientSaysSo(t *testing.T)
 		r.Header.Set("X-Forwarded-Proto", "https")
 		return r
 	}
+	viaProxy := func() *http.Request {
+		r := forged()
+		r.RemoteAddr = "127.0.0.1:5555"
+		return r
+	}
 	tls := func() *http.Request {
 		r := plain()
 		r.TLS = &tls.ConnectionState{}
@@ -96,7 +101,7 @@ func TestSecureIsSetWheneverTheConnectionIsAndNotWhenAClientSaysSo(t *testing.T)
 		{"forged header, proxy NOT trusted", mgr(false, false), forged(), false,
 			"a client set X-Forwarded-Proto itself; honouring it lets any client " +
 				"choose our cookie flags from outside"},
-		{"forwarded header, proxy trusted", mgr(false, true), forged(), true,
+		{"forwarded header, proxy trusted", mgr(false, true), viaProxy(), true,
 			"a proxy we were told to trust reports TLS; NOT setting the flag here " +
 				"drops the cookie on every proxied deployment"},
 	} {

@@ -1002,7 +1002,7 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 		VODURL:         cfg.VODURL,
 
 		Exposed: set.Enabled && set.Public && cfg.Protection == PlayoutProtectOpen,
-		URLs:    playoutURLsFor(r, set, cfg),
+		URLs:    playoutURLsFor(r, s.proxies, set, cfg),
 	}
 	if m := s.playoutManager(); m != nil {
 		view.Status = m.Status()
@@ -1055,8 +1055,8 @@ func readSafePlayoutView(v playoutAdminView) playoutAdminView {
 // going to paste them somewhere this server cannot see. The Host header is what
 // they typed to get here, which is the best available guess at what a viewer
 // should type too.
-func playoutURLsFor(r *http.Request, set db.PlayoutSettings, cfg playoutPublish) playoutURLs {
-	base := requestOrigin(r)
+func playoutURLsFor(r *http.Request, proxies *auth.Proxies, set db.PlayoutSettings, cfg playoutPublish) playoutURLs {
+	base := requestOrigin(r, proxies)
 	q := ""
 	// The token is only useful in a link when the stream is actually protected;
 	// appending it to an open stream's URL would teach the operator to paste a
@@ -1078,14 +1078,14 @@ func playoutURLsFor(r *http.Request, set db.PlayoutSettings, cfg playoutPublish)
 }
 
 // requestOrigin reconstructs the scheme and host the client used.
-func requestOrigin(r *http.Request) string {
+func requestOrigin(r *http.Request, proxies *auth.Proxies) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
 	// Behind a terminating proxy r.TLS is nil even though the viewer is on
 	// https, and a link that downgrades them is worse than one that guesses.
-	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" && (proxies == nil || proxies.Trusts(r)) {
 		if i := strings.IndexByte(p, ','); i > 0 {
 			p = p[:i]
 		}
@@ -1201,7 +1201,7 @@ func (s *Server) handleRotatePlayoutToken(w http.ResponseWriter, r *http.Request
 	s.log.Info("playout: playback token rotated; existing links no longer work")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": saved.Token,
-		"urls":  playoutURLsFor(r, s.playoutSettings(), saved),
+		"urls":  playoutURLsFor(r, s.proxies, s.playoutSettings(), saved),
 	})
 }
 
