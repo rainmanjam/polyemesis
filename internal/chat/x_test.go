@@ -347,20 +347,22 @@ func TestXRunReadsBroadcastChatFromTheActivityStream(t *testing.T) {
 // TestXRunKeepsTheActivityStreamOpenPastTheControlClientTimeout: the control client carries a 30 second
 // whole-request Timeout, and Go applies that to reading the response body too. The activity stream is long-lived,
 // so the same client cut it every 30 seconds, which tore the chat run down and rebuilt its subscription over and over.
-// The stream must outlive the control client's timeout. The test uses a 50ms timeout and a stream that stays silent
-// for 200ms before its first chat line, so the old client would drop the line.
+// The stream must outlive the control client's timeout. The test uses a 1s timeout and a stream that stays silent
+// for 1.5s before its first chat line, so the old client would drop the line. The timeout is long enough that an
+// ordinary control request still lands inside it on a loaded runner (50ms was not, and flaked), and the silence is
+// longer than it by a margin no scheduling jitter closes.
 func TestXRunKeepsTheActivityStreamOpenPastTheControlClientTimeout(t *testing.T) {
 	st := newXChatStub(t)
-	st.streamDelay = 200 * time.Millisecond
+	st.streamDelay = 1500 * time.Millisecond
 	st.streamLines = []string{
 		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","payload":{"message_id":"M9","broadcast_id":"B1run","message":"still here","author":{"data":{"id":"5","name":"Late"}}}}}`,
 	}
 	a := st.adapter(t, time.Unix(1761904800, 0))
-	a.cfg.HTTP = &http.Client{Timeout: 50 * time.Millisecond}
+	a.cfg.HTTP = &http.Client{Timeout: time.Second}
 
 	var got []Message
 	var mu sync.Mutex
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = a.Run(ctx, SinkFunc(func(m Message) {
 		mu.Lock()

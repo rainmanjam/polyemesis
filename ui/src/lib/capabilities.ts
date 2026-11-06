@@ -331,7 +331,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       /*  Every cell below renders as "Unverified" and not one of them means
        *  what the legend says. Metadata and start/end were CONFIRMED, from
        *  Vimeo's own live reference — they are unbuilt, not unchecked. None of
-       *  the four support values says "documented and unbuilt"; the X row above
+       *  the four support values says "documented and unbuilt"; the X row below
        *  records the same gap. Unknown is the least wrong because it is the
        *  fail-open one: "no" would be a refusal Vimeo's reference contradicts,
        *  and "yes" would be a promise no code keeps. */

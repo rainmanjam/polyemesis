@@ -370,10 +370,16 @@ func (a obsActions) ApplyScene(ctx context.Context, cfg obsbridge.Config, rule o
 	return out
 }
 
-// liveLevelsSupported mirrors engine.liveGainsSupported: on Windows every
+// liveLevelsAvailable mirrors engine.liveGainsSupported: on Windows every
 // level change restarts the destination, so "applied live where I4 allows"
-// means not applied at all there.
-var liveLevelsSupported = func() bool { return runtime.GOOS != "windows" }
+// means not applied at all there. Server.liveLevels replaces the answer in a
+// test, so the applied path does not depend on the runner's OS.
+func (s *Server) liveLevelsAvailable() bool {
+	if s.liveLevels != nil {
+		return s.liveLevels()
+	}
+	return runtime.GOOS != "windows"
+}
 
 // applySceneLevels applies one scene rule to one destination.
 //
@@ -407,7 +413,7 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 		res.Outcome, res.Message = string(bulkSkipped), why
 		return res
 	}
-	if !liveLevelsSupported() {
+	if !s.liveLevelsAvailable() {
 		return skip("live track levels are not available on Windows, and a scene switch never restarts a destination")
 	}
 	if row.Audio.Copy && row.Kind != db.DestAudio {

@@ -13,7 +13,7 @@ import (
 //
 // platform and account_id are two independent columns and nothing compared
 // them, while everything that acts on a destination reads BOTH: preannounce.go
-// resolves ScheduledBroadcastsFor(d.Platform) and then calls it with
+// resolves As[ScheduledBroadcaster](d.Platform) and then calls it with
 // tokenFor(*d.AccountID).AccessToken, and lifecycle.go carries the same pair
 // side by side. So "platform: facebook, account: <a YouTube account>" is a
 // Google OAuth bearer token sent to graph.facebook.com by a background sweep --
@@ -213,7 +213,7 @@ func TestACustomDestinationKeepsAnAccountFromARealPlatform(t *testing.T) {
 	// it like any other platform would unlink it.
 	//
 	// Nothing resolves a platform API off a custom destination: oauth.Set has
-	// no custom entry, so ScheduledBroadcastsFor and LifecycleFor both answer
+	// no custom entry, so As[ScheduledBroadcaster] and As[BroadcastLifecycler] both answer
 	// false and preannounce.go and lifecycle.go skip the row -- there is no
 	// token to send to the wrong company, which is the only thing this check
 	// exists to stop. handleRefreshStreamKey, meanwhile, picks the provider off

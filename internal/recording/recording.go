@@ -23,6 +23,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/freedisk"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
@@ -41,7 +42,7 @@ type Manager struct {
 	// onStorage is called when the free-space floor halts or resumes
 	// recording, so the owner of the recorder process can act on it.
 	onStorage func(StorageState)
-	// freeSpace is diskFree in production; tests substitute a volume they can
+	// freeSpace is freedisk.Space in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
 	// freeSpaceMu guards freeSpace once the sweep goroutine is running, which
@@ -114,7 +115,7 @@ func WithRecorderProbe(fn func() bool) Option {
 func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
-	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: diskFree}
+	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: freedisk.Space}
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -238,7 +239,7 @@ const bytesPerGB = 1024 * 1024 * 1024
 // installed here is what every sweep, at startup or on the 30s tick, sees.
 func (m *Manager) SetFreeSpace(fn func(path string) (free, total uint64, err error)) {
 	if fn == nil {
-		fn = diskFree
+		fn = freedisk.Space
 	}
 	m.freeSpaceMu.Lock()
 	m.freeSpace = fn

@@ -97,9 +97,6 @@ func TestKickCallbackSecretSurvivesARestart(t *testing.T) {
 	if second := s.kickCallbackSecret(); second != first {
 		t.Fatalf("callback secret changed between calls (%q then %q); a restart would break the operator's webhook", first, second)
 	}
-	if strings.Contains(s.KickChatCallbackURL(), first) && publicBaseURL(s.cfg) == "" {
-		t.Fatal("a callback URL was offered even though the server does not know its own public URL")
-	}
 }
 
 func TestKickChatWebhookRefusesAWrongPathSecret(t *testing.T) {
@@ -149,7 +146,7 @@ func TestAccountStatsReportsAbsenceRatherThanFailing(t *testing.T) {
 	// a test about an envelope to a roadmap it does not care about.
 	var absent db.Platform
 	for _, row := range oauth.PlatformCapabilities() {
-		if _, ok := oauth.StatsFor(row.Platform); !ok && row.Tier == oauth.TierIntegrated {
+		if _, ok := oauth.As[oauth.LiveStatter](oauth.Set{}, row.Platform); !ok && row.Tier == oauth.TierIntegrated {
 			absent = row.Platform
 			break
 		}

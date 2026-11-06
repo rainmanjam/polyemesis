@@ -101,32 +101,6 @@ type sourceState struct {
 	audio []ffmpeg.AudioStream
 }
 
-// layoutForProcessBuilding is the layout, plus whether it may be compiled into a
-// command line.
-//
-// The second return is the whole point. Compiling the placeholder produces
-// stream specifiers the ingest does not carry -- FFmpeg refuses to start rather
-// than skipping them -- and, worse, the placeholder claims two channels on every
-// track, so a real 5.1 source becomes a valid graph that silently discards the
-// centre channel where dialogue lives.
-//
-// Callers must hold the engine's mu.
-func (s *sourceState) layoutForProcessBuilding() (routing.Source, bool) {
-	return s.source, s.measured
-}
-
-// layoutForDisplay is the layout to render, whether or not it is real. Never
-// use it to build a process: that is layoutForProcessBuilding's job.
-//
-// Callers must hold the engine's mu.
-func (s *sourceState) layoutForDisplay() routing.Source { return s.source }
-
-// arrivingNow reports whether a stream is being probed right now. A UI fact, not
-// a routing one.
-//
-// Callers must hold the engine's mu.
-func (s *sourceState) arrivingNow() bool { return s.probed }
-
 // commitProbe records a freshly measured layout. Both flags and the layout move
 // together, which is the invariant this type exists to keep.
 //

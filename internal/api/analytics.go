@@ -197,7 +197,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 			continue
 		}
 		pasted[d.Platform] = true
-		if _, ok := s.providers.StatsFor(d.Platform); ok {
+		if _, ok := oauth.As[oauth.LiveStatter](s.providers, d.Platform); ok {
 			out = append(out, analytics.Target{Platform: string(d.Platform), Name: d.Name, Unlinked: true})
 		}
 	}
@@ -218,7 +218,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		}
 		// A platform with no viewer count still has chat, and the stream's
 		// chat is every running destination's account's (round 2, R2).
-		if _, ok := s.providers.StatsFor(acct.Platform); !ok {
+		if _, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform); !ok {
 			t.ChatOnly = true
 		}
 		out = append(out, t)
@@ -306,7 +306,7 @@ func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytic
 
 func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {
 	s := a.s
-	sf, ok := s.providers.StatsFor(acct.Platform)
+	sf, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform)
 	if !ok {
 		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", acct.Platform)
 	}

@@ -27,11 +27,11 @@ import (
  * revealed that the obvious resolver is wrong twice, and both corrections are
  * the interesting part:
  *
- *   STREAM KEY does not resolve through TargetsFor. Ingest is on the BASE
+ *   STREAM KEY does not resolve through As[TargetedProvider]. Ingest is on the BASE
  *   Provider interface (oauth.go:105), so every registered provider fetches a
  *   key; TargetedProvider is about which PAGE or channel to publish to, not
  *   whether a key can be had at all. A first draft of this test joined
- *   streamKey to TargetsFor and reported Twitch as a violation. Twitch is fine;
+ *   streamKey to As[TargetedProvider] and reported Twitch as a violation. Twitch is fine;
  *   the test was wrong.
  *
  *   BROADCAST LIFECYCLE has two mechanisms and only one resolver. See the
@@ -76,7 +76,7 @@ func capabilityJoins() []capabilityJoin {
 		},
 		{
 			cap: CapStreamKey, label: "Stream key",
-			// Registration, not TargetsFor: Ingest is on the base Provider
+			// Registration, not As[TargetedProvider]: Ingest is on the base Provider
 			// interface, so signing in is exactly what makes a key fetchable.
 			implemented: registered,
 			exceptions: map[db.Platform]string{
@@ -95,7 +95,7 @@ func capabilityJoins() []capabilityJoin {
 				// pastes the pair from the event's setup panel.
 				//
 				// THE RESOLVER WAS NOT WIDENED, and the obvious widening is
-				// wrong: `registered && !ManualKeyFor(p)` looks like the right
+				// wrong: `registered && !As[ManualKey](Set{}, p)` looks like the right
 				// discriminator and would fail Kick, which implements ManualKey
 				// for the legacy-token case and fetches its key perfectly well.
 				// The test's own instruction is to check the mechanism before
@@ -115,18 +115,18 @@ func capabilityJoins() []capabilityJoin {
 		},
 		{
 			cap: CapMetadata, label: "Title / category",
-			implemented: func(p db.Platform) bool { _, ok := MetadataFor(p); return ok },
+			implemented: func(p db.Platform) bool { _, ok := As[MetadataPusher](Set{}, p); return ok },
 			exceptions: map[db.Platform]string{
 				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
 			},
 		},
 		{
 			cap: CapBroadcastLifecycle, label: "Start / end",
-			implemented: func(p db.Platform) bool { _, ok := LifecycleFor(p); return ok },
+			implemented: func(p db.Platform) bool { _, ok := As[BroadcastLifecycler](Set{}, p); return ok },
 			exceptions: map[db.Platform]string{
 				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
 				// COMMANDED BY HAND RATHER THAN DRIVEN, and both are real, which
-				// is why the cell is Yes and LifecycleFor is false.
+				// is why the cell is Yes and As[BroadcastLifecycler] is false.
 				//
 				// BroadcastLifecycler is the interface the lifecycle COORDINATOR
 				// drives (internal/api/lifecycle.go: "Only platforms that implement

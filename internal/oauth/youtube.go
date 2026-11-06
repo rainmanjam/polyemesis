@@ -482,7 +482,7 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string, w
 
 // --------------------------------------------------------------------- stats
 
-// The capability is resolved by type assertion in StatsFor, so a drifting
+// The capability is resolved by type assertion in As[LiveStatter], so a drifting
 // signature would make YouTube silently stop reporting viewers rather than fail
 // to build. See twitch.go for the same guard and the drift test that catches
 // the other direction.

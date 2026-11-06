@@ -181,6 +181,7 @@ func attachKick(t *testing.T, s *Server, ref string) {
 		BroadcasterUserID: 12345,
 		Token:             func(context.Context) (string, error) { return "at", nil },
 		APIBase:           kick.URL,
+		CallbackPath:      kickWebhookPath,
 	})
 	if err != nil {
 		t.Fatalf("NewKick: %v", err)

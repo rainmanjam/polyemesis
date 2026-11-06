@@ -77,8 +77,6 @@ type YouTubeConfig struct {
 	// audience sampler and the request meter. QuotaUnits and QuotaReserve are
 	// then the pool's to apply, and only a test builds an adapter without one.
 	Quota *YouTubeQuota
-	// Backfill bounds the first poll's history.
-	Backfill time.Duration
 
 	APIBase string
 	HTTP    *http.Client
@@ -110,9 +108,6 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 	}
 	if cfg.Sleep == nil {
 		cfg.Sleep = sleepCtx
-	}
-	if cfg.Backfill <= 0 {
-		cfg.Backfill = ytDefaultBackfill
 	}
 	// THE QUOTA PAIR IS NOT NORMALISED HERE. It used to be -- an unset
 	// allowance became DefaultQuotaUnits and an unset reserve became
@@ -304,7 +299,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 
 		cutoff := time.Time{}
 		if first {
-			cutoff = y.cfg.Now().Add(-y.cfg.Backfill)
+			cutoff = y.cfg.Now().Add(-ytDefaultBackfill)
 			first = false
 		}
 		delivered := y.deliverPage(resp.Items, cutoff, sink)

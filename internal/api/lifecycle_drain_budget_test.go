@@ -72,22 +72,6 @@ func TestDrainLifecycleWithinToleratesNoCoordinator(t *testing.T) {
 	s.DrainLifecycleWithin(context.Background())
 }
 
-func TestDrainLifecycleUsesItsOwnBudgetWhenNobodyElseHasOne(t *testing.T) {
-	// The convenience wrapper kept for callers with no deadline. It must still
-	// terminate -- it is what a test or an ad-hoc caller reaches for.
-	s := &Server{lifecycle: drainCoordinator(t)}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		s.DrainLifecycle()
-	}()
-	select {
-	case <-done:
-	case <-time.After(lifecycleDrainBudget + 2*time.Second):
-		t.Fatal("DrainLifecycle did not return inside its own budget")
-	}
-}
-
 /* A DRAIN THAT ENDED NOTHING MUST SAY SO.
  *
  * Returning fast on an expired parent is correct and #645 is why, so the

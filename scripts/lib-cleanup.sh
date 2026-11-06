@@ -75,7 +75,7 @@ poly_stop_server() {
   #
   # THE OLD 15s WAS BELOW THE PRODUCT'S OWN WORST CASE, which is how
   # acceptance-postprod came to leak two encoders on every run. main.go spends up
-  # to 20s in httpServer.Shutdown ALONE, then DrainLifecycle, then eng.Stop --
+  # to 20s in httpServer.Shutdown ALONE, then DrainLifecycleWithin, then eng.Stop --
   # and eng.Stop is the call that tears the destinations down, so a SIGKILL that
   # lands before it reaches them leaves exactly the orphans #448 is about. The
   # teardown was manufacturing the leak it was later asked to detect.

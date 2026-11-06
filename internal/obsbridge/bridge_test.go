@@ -74,12 +74,6 @@ func (f *fakeActions) ApplyScene(_ context.Context, _ obsbridge.Config, rule obs
 	return []obsbridge.Outcome{{ID: 1, Outcome: "applied"}}
 }
 
-func (f *fakeActions) counts() (int, int, int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.starts, f.stops, len(f.scenes)
-}
-
 // store is a mutable stored configuration.
 type store struct {
 	mu  sync.Mutex

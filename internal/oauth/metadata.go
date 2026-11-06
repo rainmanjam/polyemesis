@@ -152,7 +152,7 @@ type MetadataResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// MetadataPusher is the optional capability. Discover it with MetadataFor;
+// MetadataPusher is the optional capability. Discover it with As[MetadataPusher];
 // never type-assert Provider to it at a call site, because "absent" is a
 // supported answer and has to be handled once.
 type MetadataPusher interface {
@@ -166,17 +166,6 @@ type MetadataPusher interface {
 	// platform that identifies the channel by id — Twitch — down to the writes
 	// themselves, on a code path the operator is running seconds before air.
 	PushMetadata(ctx context.Context, clientID, accessToken, accountRef string, m Metadata) (*MetadataResult, error)
-}
-
-// MetadataFor returns the metadata capability for a platform, or false when
-// that platform has none.
-func MetadataFor(p db.Platform) (MetadataPusher, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	mp, ok := pr.(MetadataPusher)
-	return mp, ok
 }
 
 // ------------------------------------------------------------------ transport

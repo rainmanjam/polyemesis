@@ -663,7 +663,7 @@ func (c *lifecycleCoordinator) sweepOnce(ctx context.Context, mode sweepMode) {
 
 // considerRow decides and acts for one destination.
 func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destination, mode sweepMode) {
-	prov, ok := c.providers.LifecycleFor(d.Platform)
+	prov, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, d.Platform)
 	if !ok {
 		// Either an ordinary platform -- Twitch, Kick, a custom RTMP endpoint --
 		// or one this destination was switched TO while holding a phase recorded
@@ -1210,7 +1210,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 // with. The state is still read first, so a broadcast that never aired -- or one
 // somebody already ended in the platform's console -- costs nothing.
 func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget) {
-	prov, ok := c.providers.LifecycleFor(t.Platform)
+	prov, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, t.Platform)
 	if !ok {
 		c.untrack(t.destinationID)
 		return

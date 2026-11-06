@@ -100,9 +100,9 @@ func TestYouTubeStreamHealthReadsEveryPage(t *testing.T) {
 // would have to make one up.
 func TestOnlyYouTubeOffersStreamHealth(t *testing.T) {
 	for p := range NewSet().All() {
-		_, ok := NewSet().StreamHealthFor(p)
+		_, ok := As[StreamHealthReader](NewSet(), p)
 		if ok != (p == db.PlatformYouTube) {
-			t.Errorf("%s: StreamHealthFor ok = %v", p, ok)
+			t.Errorf("%s: As[StreamHealthReader] ok = %v", p, ok)
 		}
 	}
 }

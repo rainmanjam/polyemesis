@@ -61,7 +61,7 @@ func (k *keyCrossCheck) StreamKeyChanged(ctx context.Context, destID int64) (cha
 	if d.AccountID == nil || d.StreamKey == "" {
 		return false, false, nil
 	}
-	reader, can := k.providers.StreamKeysFor(d.Platform)
+	reader, can := oauth.As[oauth.StreamKeyReader](k.providers, d.Platform)
 	if !can {
 		return false, false, nil
 	}

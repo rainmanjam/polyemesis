@@ -132,7 +132,7 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 			if !scheduleTargets(sc, d.ID) || d.AccountID == nil || d.Enabled {
 				continue
 			}
-			sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+			sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 			if !ok {
 				continue
 			}
@@ -721,7 +721,7 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if !removeRow && d.Enabled {
 			return fmt.Errorf("%w: the destination was switched on, so its event may be about to go on air", errOccurrenceRefused)
 		}
-		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 		if !ok {
 			return fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, o.PlatformEventID)
 		}

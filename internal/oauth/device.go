@@ -65,10 +65,10 @@ package oauth
 //	         operator entering the code. That is a measurement, not a reading,
 //	         and it is the whole remaining cost.
 //
-// So DeviceFlower is discovered, never assumed. Resolve it with DeviceFor (or
-// Set.DeviceFor); "this platform has no device flow polyemesis can use" is the
+// So DeviceFlower is discovered, never assumed. Resolve it with As[DeviceFlower] (or
+// As[DeviceFlower]); "this platform has no device flow polyemesis can use" is the
 // answer for four of the five and has to be handled once, exactly like
-// TargetsFor and StatsFor.
+// As[TargetedProvider] and As[LiveStatter].
 //
 // ON THE CLIENT STAYING CONFIDENTIAL. Twitch, verbatim, on public clients:
 // they "are only limited to the usage of device authorization grant flow to
@@ -88,8 +88,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // DeviceAuth is the first half of a device-code flow: what to put in front of
@@ -185,20 +183,6 @@ type DeviceFlower interface {
 	// ErrDeviceCodeSpent once the code can never work. Anything else is a real
 	// failure.
 	PollDeviceAuth(ctx context.Context, clientID, deviceCode string) (*Token, error)
-}
-
-// DeviceFor resolves the device-flow capability for a platform against the
-// production providers. False is a supported answer and means the platform has
-// no device flow polyemesis can use -- see the per-platform reasoning at the
-// top of this file. Prefer Set.DeviceFor wherever a Set is in hand, or the
-// lookup reaches the real platforms from a test that stubbed everything else.
-func DeviceFor(p db.Platform) (DeviceFlower, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	df, ok := pr.(DeviceFlower)
-	return df, ok
 }
 
 // postFormJSON is postForm's sibling for a response that is NOT a token.

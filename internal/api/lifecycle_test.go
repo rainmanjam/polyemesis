@@ -224,14 +224,6 @@ func (f *fakeLifecycleStore) remove(id int64) {
 	delete(f.rows, id)
 }
 
-func (f *fakeLifecycleStore) setEnabled(id int64, enabled bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	cp := *f.rows[id]
-	cp.Enabled = enabled
-	f.rows[id] = &cp
-}
-
 func lifecycleTestRow(enabled bool, phase string) *db.Destination {
 	acct := int64(9)
 	src := int64(1)

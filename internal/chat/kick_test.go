@@ -22,6 +22,7 @@ func kickAdapter(t *testing.T, opts func(*KickConfig)) *KickAdapter {
 		Token:             StaticToken("kick-token"),
 		APIBase:           "http://example.invalid",
 		PublicURL:         "https://stream.example.com",
+		CallbackPath:      func(secret string) string { return "/api/v1/chat/kick/" + secret },
 		Now:               fixedClock(time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)),
 		// Reachable by default so a test that is not about reachability does
 		// not have to say so.
@@ -596,5 +597,12 @@ func TestKickBanRejectsANonNumericUserID(t *testing.T) {
 	a := kickAdapter(t, nil)
 	if err := a.Ban(context.Background(), "someone", time.Minute, ""); err == nil {
 		t.Fatal("a non-numeric user id was accepted")
+	}
+}
+
+func TestNewKickWithoutACallbackPathBuilderIsRefused(t *testing.T) {
+	_, err := NewKick(KickConfig{Token: StaticToken("t")})
+	if err == nil || !strings.Contains(err.Error(), "callback path") {
+		t.Fatalf("a missing callback path builder was accepted: %v", err)
 	}
 }

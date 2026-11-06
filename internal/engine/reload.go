@@ -83,12 +83,6 @@ type ReloadRule struct {
 	Why     string
 }
 
-// ClassOf reports the rule for a dotted json path, e.g. "meters.intervalMs".
-func ClassOf(path string) (ReloadRule, bool) {
-	r, ok := settingsReload[path]
-	return r, ok
-}
-
 // The out-of-band appliers live in internal/api (and logtz, and cmd/polyemesis
 // for MQTT), which import this package, so a rule cannot hold the function
 // itself. Each is written once, here, as a package-qualified name: "api.Func",

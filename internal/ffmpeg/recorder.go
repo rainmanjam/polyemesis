@@ -82,9 +82,6 @@ const MaxFLACStemChannels = 8
 // identical file and a quiet log.
 const stemFLACBits = "24"
 
-// StemCodecs is the catalogue the UI offers, in the order it should show them.
-func StemCodecs() []StemCodec { return []StemCodec{StemFLAC, StemWAV} }
-
 // ValidStemCodec reports whether c is a codec this build understands. The empty
 // string counts: it means DefaultStemCodec, so a payload with no opinion about
 // stems is not an error.

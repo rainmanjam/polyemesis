@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // StreamKeyReader is the optional capability to READ the stream keys a
@@ -30,28 +28,6 @@ type StreamKeyReader interface {
 	// byte with the stored key by the caller -- no trimming, no case folding
 	// (see the note on streamFor about #306).
 	StreamKeys(ctx context.Context, clientID, accessToken string) ([]string, error)
-}
-
-// StreamKeysFor reports whether a platform's keys can be read without side
-// effects.
-func StreamKeysFor(p db.Platform) (StreamKeyReader, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	r, ok := prov.(StreamKeyReader)
-	return r, ok
-}
-
-// StreamKeysFor is the Set twin; see the note above MetadataFor for why every
-// capability needs one.
-func (s Set) StreamKeysFor(p db.Platform) (StreamKeyReader, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	r, ok := pr.(StreamKeyReader)
-	return r, ok
 }
 
 // StreamKeys lists every liveStream key on the channel. liveStreams.list and

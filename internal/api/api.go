@@ -410,6 +410,10 @@ func (s *Server) storageVerdict() recording.StorageState {
 type Server struct {
 	// uploadFreeBytes is Options.UploadFreeBytes; nil means the real volume.
 	uploadFreeBytes func(path string) (uint64, error)
+	// liveLevels and probeRunner are test seams; nil means the real thing. See
+	// liveLevelsAvailable and runProbe.
+	liveLevels  func() bool
+	probeRunner func(ctx context.Context, name string, args []string) ([]byte, error)
 
 	log *slog.Logger
 	// acctHealth is each connected account's last token-refresh outcome (A5).
@@ -506,7 +510,7 @@ type Server struct {
 	// lands on its own httptest server instead.
 	//
 	// Resolve EVERY capability through this field, never through the
-	// package-level oauth.Get/MetadataFor/ComplianceFor/TargetsFor. A handler
+	// package-level oauth.Get/As[MetadataPusher]/As[CompliancePusher]/As[TargetedProvider]. A handler
 	// that mixes the two holds a stubbed provider and a production one at the
 	// same time, which is the partially-redirected provider internal/oauth's
 	// endpoints.go opens by warning about.
@@ -1784,7 +1788,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.requireSession)
 			r.Get(routeOAuthStart, s.handleOAuthStart)
-			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
+			r.Get(routeOAuthCallback, s.handleOAuthCallback)
 		})
 
 		// Kick's chat webhook. Outside requireAuth because Kick's servers post

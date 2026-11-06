@@ -1767,9 +1767,3 @@ func (w *destWatch) publishedSinceRearm() bool {
 	defer w.mu.Unlock()
 	return w.published
 }
-
-func (w *destWatch) rearm() {
-	w.mu.Lock()
-	w.published = false
-	w.mu.Unlock()
-}

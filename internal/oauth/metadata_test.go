@@ -58,9 +58,9 @@ func TestMetadataCapabilityIsAbsentRatherThanErroringForPlatformsThatCannotDoIt(
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ok := MetadataFor(tc.platform)
+			_, ok := As[MetadataPusher](Set{}, tc.platform)
 			if ok != tc.want {
-				t.Fatalf("MetadataFor(%q) = %v, want %v", tc.platform, ok, tc.want)
+				t.Fatalf("As[MetadataPusher](Set{}, %q) = %v, want %v", tc.platform, ok, tc.want)
 			}
 		})
 	}
@@ -82,9 +82,9 @@ func TestMetadataCapsDescribeWhatEachPlatformActuallyAccepts(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mp, ok := MetadataFor(tc.platform)
+			mp, ok := As[MetadataPusher](Set{}, tc.platform)
 			if !ok {
-				t.Fatalf("MetadataFor(%q) reported no capability", tc.platform)
+				t.Fatalf("As[MetadataPusher](Set{}, %q) reported no capability", tc.platform)
 			}
 			if got := mp.MetadataCaps().Accepts(tc.field); got != tc.want {
 				t.Fatalf("Accepts(%q) = %v, want %v", tc.field, got, tc.want)

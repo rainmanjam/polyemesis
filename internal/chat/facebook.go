@@ -52,8 +52,6 @@ type FacebookConfig struct {
 	// LiveVideoID is the Graph id of the live video whose comments to read.
 	// Empty is a supported, explained state — see Run.
 	LiveVideoID string
-	// Backfill bounds the first poll.
-	Backfill time.Duration
 	// Interval overrides the poll spacing.
 	Interval time.Duration
 
@@ -90,9 +88,6 @@ func NewFacebook(cfg FacebookConfig) (*FacebookAdapter, error) {
 	}
 	if cfg.Sleep == nil {
 		cfg.Sleep = sleepCtx
-	}
-	if cfg.Backfill <= 0 {
-		cfg.Backfill = fbDefaultBackfill
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = fbPollInterval
@@ -203,7 +198,7 @@ func (f *FacebookAdapter) liveVideoID() string {
 // Run polls the comment thread until ctx ends.
 func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 	f.mu.Lock()
-	f.lastSeen = f.cfg.Now().Add(-f.cfg.Backfill)
+	f.lastSeen = f.cfg.Now().Add(-fbDefaultBackfill)
 	f.mu.Unlock()
 
 	interval := f.cfg.Interval

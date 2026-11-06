@@ -40,8 +40,9 @@ func TestEveryKindThatWritesSomethingKeepsTheFullGrace(t *testing.T) {
 }
 
 func TestKindsWithNoOutputExitFast(t *testing.T) {
-	// Verified against the argv each one builds: meters and loudness are
-	// -f null, silence muxes mpegts to a udp:// relay. Nothing on disk.
+	// By design these three write nothing to disk: meters and loudness are
+	// -f null, silence muxes mpegts to a udp:// relay. This test pins the
+	// mapping in graceFor; it does not inspect the argv they build.
 	for _, kind := range []procname.Kind{procname.KindMeters, procname.KindLoudness, procname.KindSilence} {
 		got := graceFor(kind)
 		if got != fastGrace {

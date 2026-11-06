@@ -584,19 +584,16 @@ func TestASceneRuleIsExpressedAsMutesOnTheTracksAlreadyInTheMix(t *testing.T) {
 	}
 }
 
-// withLiveLevels pins liveLevelsSupported for one test and restores the real
-// one after. The default is false on Windows, so a test of the applied path
-// must say so rather than inherit the runner's OS.
-func withLiveLevels(t *testing.T, ok bool) {
-	t.Helper()
-	orig := liveLevelsSupported
-	liveLevelsSupported = func() bool { return ok }
-	t.Cleanup(func() { liveLevelsSupported = orig })
+// withLiveLevels pins the server's live-levels answer for one test. The default
+// is false on Windows, so a test of the applied path must say so rather than
+// inherit the runner's OS.
+func withLiveLevels(s *Server, ok bool) {
+	s.liveLevels = func() bool { return ok }
 }
 
 func TestASceneSwitchAppliesItsRuleThroughTheTrackLevelPath(t *testing.T) {
-	withLiveLevels(t, true)
 	o := obsServer(t)
+	withLiveLevels(o.s, true)
 	sel := o.createDest(t, "twitch")
 	src := onlySourceID(t, o.h, o.sign)
 	row, err := o.s.store.GetDestination(sel)
@@ -630,13 +627,13 @@ func TestASceneSwitchAppliesItsRuleThroughTheTrackLevelPath(t *testing.T) {
 
 func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 	o := obsServer(t)
+	withLiveLevels(o.s, false)
 	sel := o.createDest(t, "twitch")
 	row, _ := o.s.store.GetDestination(sel)
 	row.Profile = simpleProfile(0, 1, 2)
 	if _, err := o.s.store.UpdateDestination(row); err != nil {
 		t.Fatal(err)
 	}
-	withLiveLevels(t, false)
 	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetMicOnly})
 	if out.Outcome != string(bulkSkipped) || !strings.Contains(out.Message, "Windows") {
 		t.Fatalf("on a platform without live levels: %+v", out)
@@ -655,8 +652,8 @@ func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 //
 // Mutation: start applySceneLevels from routing.DefaultPresetOpts() again.
 func TestASceneRuleWithNoOptionsFollowsTheProgrammesTrackRoles(t *testing.T) {
-	withLiveLevels(t, true)
 	o := obsServer(t)
+	withLiveLevels(o.s, true)
 	sel := o.createDest(t, "twitch")
 	src := onlySourceID(t, o.h, o.sign)
 	send(t, o.h, o.sign, http.MethodPut, "/api/v1/source/annotations?source="+itoa(src),

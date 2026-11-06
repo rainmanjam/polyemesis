@@ -23,7 +23,7 @@ package oauth
 // commercial cause.
 //
 // SO THE GATE IS PROBED, NOT ASSUMED. EntitlementGated is discovered like every
-// other optional capability here (TargetsFor, DeviceFor, ManualKeyFor): absent
+// other optional capability here (As[TargetedProvider], As[DeviceFlower], As[ManualKey]): absent
 // is the answer for every platform but Vimeo today, and the caller handles it
 // once. What the probe asserts is narrow and worth stating precisely -- it asks
 // the GATED API ITSELF, with the operator's own freshly minted token, whether
@@ -67,8 +67,6 @@ package oauth
 import (
 	"context"
 	"errors"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // ErrNotEntitled marks a refusal that no amount of setup will lift: the
@@ -106,35 +104,4 @@ type EntitlementGated interface {
 	// on its result -- the account connected, and that is true whatever the gate
 	// says.
 	CheckEntitlement(ctx context.Context, clientID, accessToken string) error
-}
-
-// EntitlementFor resolves the gate capability for a platform against the
-// production providers. False means the platform has no commercial gate
-// polyemesis knows how to ask about -- which covers both "there is no such
-// gate" and "there is no provider at all", because neither needs a probe.
-//
-// Prefer Set.EntitlementFor wherever a Set is in hand, for the reason
-// endpoints.go states: resolving one capability through the package function
-// while the rest of the world is stubbed is how a test posts a real operator's
-// token at a real platform.
-func EntitlementFor(p db.Platform) (EntitlementGated, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	eg, ok := pr.(EntitlementGated)
-	return eg, ok
-}
-
-// EntitlementFor is the Set-resolved twin. See endpoints.go: every capability
-// lookup in this package needs one, and this one carries a live access token to
-// a platform host, which is the worst kind to leave resolving against
-// production from a stubbed caller.
-func (s Set) EntitlementFor(p db.Platform) (EntitlementGated, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	eg, ok := pr.(EntitlementGated)
-	return eg, ok
 }

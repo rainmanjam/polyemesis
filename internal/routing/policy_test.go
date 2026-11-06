@@ -109,8 +109,8 @@ func TestPlatformPolicyTable(t *testing.T) {
 	}
 }
 
-func TestPlatformPoliciesCatalogue(t *testing.T) {
-	pols := PlatformPolicies()
+func TestPlatformPolicyTableIsComplete(t *testing.T) {
+	pols := platformPolicies
 
 	t.Run("every platform constant has a row", func(t *testing.T) {
 		want := []Platform{
@@ -138,14 +138,6 @@ func TestPlatformPoliciesCatalogue(t *testing.T) {
 			if pol.Name == "" || pol.Reason == "" {
 				t.Errorf("%q: incomplete row %+v", pol.Platform, pol)
 			}
-		}
-	})
-
-	t.Run("the catalogue is a copy the caller cannot corrupt", func(t *testing.T) {
-		pols[0].ExcludeMusic = !pols[0].ExcludeMusic
-		pols[0].Reason = "tampered"
-		if again := PlatformPolicies(); again[0].Reason == "tampered" {
-			t.Fatal("PlatformPolicies handed out the package's own table")
 		}
 	})
 }
@@ -178,7 +170,7 @@ func TestPlatformFor(t *testing.T) {
 // -------------------------------------------------------------- overriding
 
 func TestMusicPolicyOverridesEveryTableEntry(t *testing.T) {
-	for _, pol := range PlatformPolicies() {
+	for _, pol := range platformPolicies {
 		t.Run(string(pol.Platform)+" can be overridden to keep music", func(t *testing.T) {
 			dec := ResolveMusicPolicy(pol.Platform, MusicPolicyKeep)
 			if dec.Exclude {
@@ -745,7 +737,7 @@ func TestPresetCatalogue(t *testing.T) {
 	})
 
 	t.Run("every platform gets a preset built from its policy row", func(t *testing.T) {
-		for _, pol := range PlatformPolicies() {
+		for _, pol := range platformPolicies {
 			pre, ok := presetByID(PlatformPresetID(pol.Platform))
 			if !ok {
 				t.Fatalf("no preset for platform %q", pol.Platform)
@@ -886,7 +878,7 @@ func TestPolicyTableIsTheRegistryPlusFileAndCustom(t *testing.T) {
 	}
 	want = append(want, PlatformFile, PlatformCustom)
 	var got []Platform
-	for _, p := range PlatformPolicies() {
+	for _, p := range platformPolicies {
 		got = append(got, p.Platform)
 	}
 	if len(got) != len(want) {

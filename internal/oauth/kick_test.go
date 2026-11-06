@@ -154,8 +154,8 @@ func TestManualKeyForOnlyFlagsPlatformsThatAuthenticateButCannotFetchAKey(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := ManualKeyFor(tc.platform); ok != tc.want {
-				t.Fatalf("ManualKeyFor(%q) = %v, want %v", tc.platform, ok, tc.want)
+			if _, ok := As[ManualKey](Set{}, tc.platform); ok != tc.want {
+				t.Fatalf("As[ManualKey](Set{}, %q) = %v, want %v", tc.platform, ok, tc.want)
 			}
 		})
 	}
@@ -174,7 +174,7 @@ func TestManualKeyForOnlyFlagsPlatformsThatAuthenticateButCannotFetchAKey(t *tes
 				"manual-key advice, so its absence is the finding rather than a reason "+
 				"to stand down. See testdata/provider-scopes.json.", err)
 		}
-		mk, ok := ManualKeyFor(db.PlatformKick)
+		mk, ok := As[ManualKey](Set{}, db.PlatformKick)
 		if !ok {
 			t.Fatal("Kick lost its manual-key advice; an operator whose token predates " +
 				"streamkey:read would get a bare failure with nothing to act on")
@@ -880,11 +880,11 @@ func TestGuidesSeparateSigningInFromFetchingAKey(t *testing.T) {
 			if guide.ManualStreamKey != tc.manualStreamKey {
 				t.Errorf("ManualStreamKey = %v, want %v", guide.ManualStreamKey, tc.manualStreamKey)
 			}
-			// Derived from ManualKeyFor rather than written out per entry, so
+			// Derived from As[ManualKey] rather than written out per entry, so
 			// the two can never drift.
-			_, manual := ManualKeyFor(tc.platform)
+			_, manual := As[ManualKey](Set{}, tc.platform)
 			if manual != guide.ManualStreamKey {
-				t.Errorf("guide says ManualStreamKey=%v but ManualKeyFor says %v", guide.ManualStreamKey, manual)
+				t.Errorf("guide says ManualStreamKey=%v but As[ManualKey] says %v", guide.ManualStreamKey, manual)
 			}
 		})
 	}

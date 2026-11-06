@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -774,15 +773,4 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
-}
-
-// sortedIDs exists so the meta endpoint and the tests can list endpoints in a
-// stable order.
-func sortedIDs(m map[int64]*worker) []int64 {
-	out := make([]int64, 0, len(m))
-	for id := range m {
-		out = append(out, id)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }

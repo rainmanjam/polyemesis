@@ -273,7 +273,7 @@ func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, account,
 // twitchStreamStart reads when the channel's live stream began, from Helix GET /helix/streams via the same
 // Stats call the viewer-count read uses. An unreadable or missing start is an error, and the caller falls back.
 func (s *Server) twitchStreamStart(ctx context.Context, accessToken string) (time.Time, error) {
-	st, ok := s.providers.StatsFor(db.PlatformTwitch)
+	st, ok := oauth.As[oauth.LiveStatter](s.providers, db.PlatformTwitch)
 	if !ok {
 		return time.Time{}, errors.New("twitch has no stats read")
 	}

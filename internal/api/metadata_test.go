@@ -369,7 +369,7 @@ func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
 // resources, and anyone who assumes symmetry writes a call that returns 200 and
 // changes nothing.
 //
-// Mutation: delete the ComplianceFor branch from pushOne. Observed FAIL ("no
+// Mutation: delete the As[CompliancePusher] branch from pushOne. Observed FAIL ("no
 // privacy write reached YouTube").
 func TestAPushSendsTheStoredComplianceToTheProvider(t *testing.T) {
 	s, h, store, stub := stubbedServer(t, config.Config{})
@@ -612,7 +612,7 @@ func TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError(t *testing
 }
 
 // TestAKickTargetIsSkippedOutLoudRatherThanSilently is the absence half of
-// oauth.ComplianceFor, and it pins BOTH obligations at once.
+// oauth.As[CompliancePusher], and it pins BOTH obligations at once.
 //
 // Kick has no compliance surface, so the push must not attempt one and must not
 // fail the row: an operator whose Kick row turns red for a field Kick does not
@@ -644,14 +644,14 @@ func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
 
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
 
-	// Kick's own title write and nothing else. ComplianceFor answers false for
+	// Kick's own title write and nothing else. As[CompliancePusher] answers false for
 	// Kick, so a second request here would mean the call site resolved
 	// compliance through some other platform's provider and wrote the
 	// operator's declaration somewhere it does not belong.
 	for _, c := range stub.calls() {
 		if c.Path != "/public/v1/channels" {
 			t.Errorf("%v was sent for a Kick account, which has no compliance API; "+
-				"ComplianceFor's absence is being ignored at the call site", c)
+				"As[CompliancePusher]'s absence is being ignored at the call site", c)
 		}
 	}
 	if len(job.Results) != 1 {
@@ -1210,8 +1210,8 @@ func TestUnknownMetadataJobIs404(t *testing.T) {
 }
 
 func TestPrecheckSkipsUnsupportedFieldsAndRefusesOnlyOverlongOnes(t *testing.T) {
-	yt, _ := oauth.MetadataFor(db.PlatformYouTube)
-	tw, _ := oauth.MetadataFor(db.PlatformTwitch)
+	yt, _ := oauth.As[oauth.MetadataPusher](oauth.Set{}, db.PlatformYouTube)
+	tw, _ := oauth.As[oauth.MetadataPusher](oauth.Set{}, db.PlatformTwitch)
 
 	tests := []struct {
 		name        string

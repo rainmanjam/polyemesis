@@ -23,16 +23,6 @@ type oversized struct {
 	body     *countingReader
 }
 
-func noTempFiles(t *testing.T, dir string) {
-	t.Helper()
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".offload-fetch-") {
-			t.Fatalf("temporary file %s left behind", e.Name())
-		}
-	}
-}
-
 // Two files that share a basename in different subdirectories get different
 // keys, and both objects survive with their own bytes.
 func TestTwoFilesSharingABasenameNeverShareAnObject(t *testing.T) {

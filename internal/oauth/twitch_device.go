@@ -38,7 +38,7 @@ const twitchDeviceGrant = "urn:ietf:params:oauth:grant-type:device_code"
 // test that believed it was stubbed. See endpoints.go.
 func (t *Twitch) deviceEndpoint() string { return t.authBase(twitchIDBase) + "/oauth2/device" }
 
-// The capability is resolved by type assertion in DeviceFor, so a signature
+// The capability is resolved by type assertion in As[DeviceFlower], so a signature
 // that drifts would make Twitch silently stop offering device flow rather than
 // fail to build. This turns that into a compile error, next to the methods it
 // constrains -- the same guard twitch.go puts on LiveStatter.

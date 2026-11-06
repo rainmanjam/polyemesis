@@ -277,24 +277,15 @@ func ivsAppPathProblem(u *url.URL) (URLProblem, bool) {
 	return URLProblem{Field: "url", Detail: detail, Fix: fix}, true
 }
 
-// CheckEncoder reports where a destination's settings exceed what the platform
-// accepts. Zero ceilings mean "no published figure" and are skipped, so a
-// service we know little about produces no noise.
-func CheckEncoder(svc Service, audioKbps, videoKbps, fps int) []URLProblem {
-	var probs []URLProblem
-	add := func(field, f string, a ...any) {
-		probs = append(probs, URLProblem{Field: field, Detail: fmt.Sprintf(f, a...)})
-	}
+// CheckEncoder reports where a destination's audio bitrate exceeds what the
+// platform accepts. A zero ceiling means "no published figure" and is skipped,
+// so a service we know little about produces no noise. Video bitrate and fps
+// are the rendition ladder's business, not a destination's.
+func CheckEncoder(svc Service, audioKbps int) []URLProblem {
 	if m := svc.Recommended.MaxAudioKbps; m > 0 && audioKbps > m {
-		add("audioBitrate", "%s accepts at most %d kbps of audio; this destination sends %d. "+
-			"The platform will re-encode or reject it.", svc.Name, m, audioKbps)
+		return []URLProblem{{Field: "audioBitrate", Detail: fmt.Sprintf(
+			"%s accepts at most %d kbps of audio; this destination sends %d. "+
+				"The platform will re-encode or reject it.", svc.Name, m, audioKbps)}}
 	}
-	if m := svc.Recommended.MaxVideoKbps; m > 0 && videoKbps > m {
-		add("videoBitrate", "%s accepts at most %d kbps of video; this destination sends %d.",
-			svc.Name, m, videoKbps)
-	}
-	if m := svc.Recommended.MaxFps; m > 0 && fps > m {
-		add("fps", "%s accepts at most %d fps; this destination sends %d.", svc.Name, m, fps)
-	}
-	return probs
+	return nil
 }

@@ -74,6 +74,10 @@ type KickConfig struct {
 	// proxy logs, Referer headers and any plain-HTTP hop, which is what Verify
 	// below is for. A blank one is generated.
 	CallbackSecret string
+	// CallbackPath builds the path the receiver is mounted at from the secret.
+	// Required, and owned by the HTTP layer that registers the route, so the
+	// path the operator pastes into Kick cannot drift from the one served.
+	CallbackPath func(secret string) string
 	// Verify authenticates a delivery. Required: the handler refuses every POST
 	// when it is nil rather than accepting unverified events.
 	//
@@ -110,6 +114,9 @@ type KickAdapter struct {
 func NewKick(cfg KickConfig) (*KickAdapter, error) {
 	if cfg.Token == nil {
 		return nil, fmt.Errorf("kick chat is not configured: no access token, so connect the Kick account in Settings → Platforms")
+	}
+	if cfg.CallbackPath == nil {
+		return nil, fmt.Errorf("kick chat is not configured: no callback path builder")
 	}
 	if cfg.APIBase == "" {
 		cfg.APIBase = platform.KickAPIHost
@@ -166,7 +173,7 @@ func KickDeliveryBroadcaster(body []byte) int {
 // The secret is part of the path because that is what authenticates a
 // delivery in the absence of a signature scheme we can verify.
 func (k *KickAdapter) CallbackPath() string {
-	return "/api/v1/chat/kick/" + k.cfg.CallbackSecret
+	return k.cfg.CallbackPath(k.cfg.CallbackSecret)
 }
 
 // CallbackURL is the full URL, or empty when polyemesis does not know its own

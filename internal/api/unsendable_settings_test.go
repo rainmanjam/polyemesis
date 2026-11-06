@@ -12,7 +12,7 @@ import (
 // route that produces it does not mention those settings at all: the dialog
 // keeps compliance in form state across a platform change, and the update
 // handler decodes over the existing row, so {"platform":"kick"} alone is
-// enough. Stored compliance is inert on Kick -- ComplianceFor(kick) is absent
+// enough. Stored compliance is inert on Kick -- As[CompliancePusher](kick) is absent
 // and the push skips it -- but it becomes live again the moment the same
 // destination is pointed back at YouTube.
 //

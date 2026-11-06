@@ -187,7 +187,7 @@ var errNoCancelCall = fmt.Errorf("the platform offers no call to remove a schedu
 // deleted. The same rule as an occurrence: never while the destination is on
 // air, because the live broadcast may be this very event.
 func (s *Server) cancelMarker(ctx context.Context, d *db.Destination, broadcastID string) error {
-	sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 	if !ok {
 		return errNoCancelCall
 	}

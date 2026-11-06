@@ -332,7 +332,7 @@ func TestRumbleBoundsTheFirstPollToTheBackfillWindow(t *testing.T) {
 	  {"username":"New","badges":[],"text":"just now","created_on":"2026-08-13T17:59:00+00:00"}
 	]}}]}`
 	s := rumbleOK(t, body)
-	a := rumbleAdapter(t, s.URL, func(c *RumbleConfig) { c.Backfill = 5 * time.Minute })
+	a := rumbleAdapter(t, s.URL, nil)
 
 	got, err := rumbleRun(t, a, 1)
 	if err != nil {
@@ -740,7 +740,7 @@ func TestRumbleReArmsTheBackfillWindowForASecondBroadcast(t *testing.T) {
 			  {"username":"B","badges":[],"text":"an hour stale","created_on":"2026-08-13T17:00:00+00:00"}]}}]}`))
 		}
 	})
-	a := rumbleAdapter(t, s.URL, func(c *RumbleConfig) { c.Backfill = 5 * time.Minute })
+	a := rumbleAdapter(t, s.URL, nil)
 
 	got, err := rumbleRun(t, a, 3)
 	if err != nil {

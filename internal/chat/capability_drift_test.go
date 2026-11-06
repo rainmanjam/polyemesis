@@ -5,6 +5,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
@@ -119,6 +120,39 @@ func TestRegistryAgreesWithTheChatAdapters(t *testing.T) {
 		if m.Delete != pr.Delete || m.TimeoutBan != pr.Ban || m.Hide != pr.Hide {
 			t.Errorf("%s: registry delete/ban/hide = %v/%v/%v, adapter = %v/%v/%v",
 				row.Key, m.Delete, m.TimeoutBan, m.Hide, pr.Delete, pr.Ban, pr.Hide)
+		}
+	}
+}
+
+// The oauth capability matrix is what the console and docs/PLATFORMS.md show an
+// operator; the profile is what the adapter's type can actually do. oauth
+// cannot import chat, so this is the join: a platform whose adapter sends must
+// not read as unable to (or unverified), and the reverse.
+func TestTheCapabilityMatrixAgreesWithTheChatProfiles(t *testing.T) {
+	for p := range adapterTypes {
+		row, ok := oauth.CapabilityForPlatform(p)
+		if !ok {
+			t.Errorf("%s has a chat adapter and no capability row", p)
+			continue
+		}
+		pr, _ := ProfileOf(p)
+		moderates := pr.Delete || pr.Ban || pr.Hide
+		// X's adapter is built but only attached behind POLYEMESIS_X_LIVESTREAM
+		// and never run against a whitelisted app, so its cells may say
+		// Unverified; the rule for it is only that they must not say No. Every
+		// other platform's cell is Yes exactly when the adapter can do it.
+		liveGated := p == db.PlatformX
+		agrees := func(cell oauth.Support, can bool) bool {
+			if liveGated {
+				return !can || cell != oauth.SupportNo
+			}
+			return (cell == oauth.SupportYes) == can
+		}
+		if cell := row.Get(oauth.CapChatSend); !agrees(cell, pr.Send) {
+			t.Errorf("%s: matrix chat send = %q, adapter sends=%v", p, cell, pr.Send)
+		}
+		if cell := row.Get(oauth.CapModeration); !agrees(cell, moderates) {
+			t.Errorf("%s: matrix moderation = %q, adapter moderates=%v", p, cell, moderates)
 		}
 	}
 }

@@ -459,17 +459,12 @@ func archiveQualityArgs(s ArchiveSpec, prof archiveProfile, known bool) []string
 
 // ----------------------------------------------------------------- age gating
 
-// ArchiveEligible reports whether a recording is old enough to archive.
+// CheckArchiveAge reports why a recording is not old enough to archive, so a
+// refusal can be shown to the operator instead of being a silent no-op.
 //
 // A zero recordedAt is NOT eligible. Everywhere else in this repo an unknown
 // answer means "assume the best and carry on"; here the best case is deleting a
 // recording made this morning, so unknown means no.
-func ArchiveEligible(recordedAt, now time.Time, minAge time.Duration) bool {
-	return CheckArchiveAge(recordedAt, now, minAge) == nil
-}
-
-// CheckArchiveAge is ArchiveEligible with the reason attached, so a refusal can
-// be shown to the operator instead of being a silent no-op.
 func CheckArchiveAge(recordedAt, now time.Time, minAge time.Duration) error {
 	if minAge < MinArchiveMinAge {
 		return fmt.Errorf("%w: the archive age is %s, below the %s floor",

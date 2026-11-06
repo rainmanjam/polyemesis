@@ -12,9 +12,10 @@ import (
 const (
 	apiBase = "/api/v1"
 
-	routeOAuthStart   = "/oauth/{platform}/start"
-	routeKickWebhook  = "/chat/kick/{secret}"
-	routeLibraryMedia = "/library/recordings/{id}/media/{file}"
+	routeOAuthStart    = "/oauth/{platform}/start"
+	routeOAuthCallback = "/oauth/{platform}/callback"
+	routeKickWebhook   = "/chat/kick/{secret}"
+	routeLibraryMedia  = "/library/recordings/{id}/media/{file}"
 
 	// settingsPlatformsPath is the SPA route an OAuth round trip returns to;
 	// ui/src/pages/SettingsPage.tsx reads the three query keys.

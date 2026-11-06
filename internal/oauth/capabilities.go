@@ -437,8 +437,13 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// because the operator must still do the access request by hand.
 			CapStreamKey: SupportManual,
 			// Built behind the gate, not yet exercised against a whitelisted app.
-			CapMetadata:           SupportUnknown,
-			CapChatRead:           SupportUnknown,
+			CapMetadata: SupportUnknown,
+			CapChatRead: SupportUnknown,
+			// Send and moderation are built (XAdapter implements Sender, Deleter
+			// and Banner) but only attached behind POLYEMESIS_X_LIVESTREAM, and
+			// have never run against a whitelisted app, so they stay Unverified.
+			// chat's TestTheCapabilityMatrixAgreesWithTheChatProfiles allows that
+			// for a live-gated platform.
 			CapChatSend:           SupportUnknown,
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,

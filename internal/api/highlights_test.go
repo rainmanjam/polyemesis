@@ -658,12 +658,10 @@ func TestTheEditorsProbeRunsUnderTheGovernor(t *testing.T) {
 	srv.gov = jobs.NewGovernor(slog.New(slog.NewTextHandler(io.Discard, nil)), srv.jobq)
 	var gotName string
 	var gotArgs []string
-	old := runProbe
-	runProbe = func(_ context.Context, name string, args []string) ([]byte, error) {
+	srv.probeRunner = func(_ context.Context, name string, args []string) ([]byte, error) {
 		gotName, gotArgs = name, append([]string(nil), args...)
 		return nil, errors.New("recorded")
 	}
-	t.Cleanup(func() { runProbe = old })
 
 	p, ok := srv.clipProber().(clipper.FFprobe)
 	if !ok || p.Run == nil {
