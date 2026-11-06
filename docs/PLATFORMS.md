@@ -212,9 +212,10 @@ it makes no X calls for that account until the reset time X gave (at most 15
 minutes), and the wait is not counted as a failure. The account id
 (`GET /2/users/me`) is asked for once per token and kept for ten minutes. A
 confidential app authenticates its token requests with HTTP Basic, as X
-documents. The consent page is X's spec address `api.x.com/2/oauth2/authorize`;
-X's guide shows `x.com/i/oauth2/authorize` instead, and the two are one constant
-apart in `internal/oauth/x.go` (PROVISIONAL).
+documents. The consent page is `x.com/i/oauth2/authorize`, as X's guide shows. The spec's
+`api.x.com/2/oauth2/authorize` returns HTTP 403 to a browser; a live request on
+2026-11-06 confirmed the x.com address shows the consent screen, including with
+the broadcast scopes. Tokens still come from `api.x.com/2/oauth2/token`.
 
 Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
 token from console.x.com, which X's activity stream requires. It is a secret.
