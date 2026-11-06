@@ -177,7 +177,7 @@ func (m *Manager) isSecure(r *http.Request) bool {
 	// Only honoured from a listed proxy, the rule ClientIP applies to
 	// X-Forwarded-For; otherwise a client that reaches the listener directly
 	// could set the header itself and influence our cookie flags.
-	if m.proxies.trusts(socketHost(r)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if m.proxies.Trusts(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		return true
 	}
 	return false

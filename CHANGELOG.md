@@ -16,6 +16,10 @@ its first tagged release.
   reaching the listener directly could choose its own cookie flags. Both headers are now believed
   only from those listed proxies. A proxy in another container or on another host must be listed in
   `trustedProxies`, or the session cookie loses its `Secure` flag.
+  The same rule now decides the scheme and host of the OAuth redirect URI shown in Settings
+  (`X-Forwarded-Proto` / `X-Forwarded-Host`, previously believed from any peer whenever
+  `trustProxyHeaders` was on) and the scheme of the playout viewer links (`X-Forwarded-Proto`,
+  previously believed from any peer even with `trustProxyHeaders` off).
 - **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
   login throttle already does. Keyed on the full address, a client holding one /64 could rotate
   addresses and never reach the limit.

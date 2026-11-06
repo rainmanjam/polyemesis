@@ -563,7 +563,7 @@ func TestPlayoutURLsCarryTokenOnlyWhenProtected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/playout", nil)
 			r.Host = "stream.example.com"
-			urls := playoutURLsFor(r, tt.set, tt.pub)
+			urls := playoutURLsFor(r, nil, tt.set, tt.pub)
 
 			if got := strings.Contains(urls.Master, testToken); got != tt.wantToken {
 				t.Fatalf("master URL %q carries the token = %v, want %v", urls.Master, got, tt.wantToken)

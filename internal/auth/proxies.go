@@ -44,6 +44,11 @@ func NewProxies(trust bool, extra []netip.Prefix, onIgnored func(peer string)) *
 	return &Proxies{nets: nets, onIgnored: onIgnored}
 }
 
+// Trusts reports whether r's own peer is a proxy whose forwarding headers
+// (X-Forwarded-For, X-Real-IP, X-Forwarded-Proto, X-Forwarded-Host) are
+// believed. Every reader of those headers asks this one rule.
+func (p *Proxies) Trusts(r *http.Request) bool { return p.trusts(socketHost(r)) }
+
 // trusts reports whether peer, a socket host with no port, is a proxy whose
 // headers are believed.
 func (p *Proxies) trusts(peer string) bool {

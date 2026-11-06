@@ -67,13 +67,11 @@ func (s *Server) origin(r *http.Request) string {
 	if r.TLS != nil || s.cfg.ServesTLS() {
 		scheme = "https"
 	}
-	if s.cfg.TrustProxyHeaders {
+	host := r.Host
+	if s.proxies.Trusts(r) {
 		if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
 			scheme = p
 		}
-	}
-	host := r.Host
-	if s.cfg.TrustProxyHeaders {
 		if h := r.Header.Get("X-Forwarded-Host"); h != "" {
 			host = h
 		}
