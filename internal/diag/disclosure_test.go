@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 /* THE TEST THIS FEATURE EXISTS BEHIND.
@@ -25,7 +25,7 @@ import (
  * does not cover. This plants a known secret in every shape a slog record can
  * carry it and asserts none survives into what would be exported.
  *
- * A SENTINEL LONG ENOUGH TO BE A SECRET. alerts.MinSecretLen is a real floor:
+ * A SENTINEL LONG ENOUGH TO BE A SECRET. redact.MinSecretLen is a real floor:
  * literals shorter than it are REFUSED by the set (and logged as refused,
  * deliberately) because masking a four-character string would mask half the
  * English language. A test using "abc" as its secret would prove nothing about
@@ -33,7 +33,7 @@ import (
  */
 
 // A stream key shaped like the ones platforms actually issue, and long enough to
-// clear alerts.MinSecretLen so the SET covers it rather than only the residual.
+// clear redact.MinSecretLen so the SET covers it rather than only the residual.
 const sentinelKey = "live_884471209_kQxZ7fRvB2mNpL0sTdWyGhJcAe5U"
 
 // A second one that is NEVER declared, so the residual pass is exercised on its
@@ -43,7 +43,7 @@ const undeclaredBearer = "Bearer eyJhbGciOiJIUzI1NiJ9.undeclared.tokenvalue"
 
 func recorderWithSentinel(t *testing.T) *Recorder {
 	t.Helper()
-	r := NewRecorder(64, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(64, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 	return r
 }
@@ -84,7 +84,7 @@ func TestADeclaredSecretSurvivesNowhereInTheExport(t *testing.T) {
 	}
 	// And the records are still useful: masking everything would also pass the
 	// assertion above.
-	if !strings.Contains(out, alerts.Mask) {
+	if !strings.Contains(out, redact.Mask) {
 		t.Error("nothing was masked, so the sentinel never reached the recorder and " +
 			"this test proved nothing")
 	}
@@ -111,7 +111,7 @@ func TestARotatedKeyIsMaskedOnceTheSetIsToldAboutIt(t *testing.T) {
 	}
 
 	r.Reset()
-	r.SetSecrets(alerts.NewSecretSet(nil, sentinelKey, rotated))
+	r.SetSecrets(redact.NewSecretSet(nil, sentinelKey, rotated))
 	log.Info("after rotation", "key", rotated)
 
 	if out := exported(t, r); strings.Contains(out, rotated) {
@@ -125,7 +125,7 @@ func TestARotatedKeyIsMaskedOnceTheSetIsToldAboutIt(t *testing.T) {
 // switch: a recorder that keeps filling when "off" is a buffer of credentials
 // nobody knows exists.
 func TestNothingIsCapturedWhileRecordingIsOff(t *testing.T) {
-	r := NewRecorder(64, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(64, redact.NewSecretSet(nil, sentinelKey))
 	log := slog.New(NewHandler(slog.NewTextHandler(io.Discard, nil), r))
 
 	log.Info("while off", "key", sentinelKey)
@@ -138,7 +138,7 @@ func TestNothingIsCapturedWhileRecordingIsOff(t *testing.T) {
 }
 
 // The residual pass, measured rather than assumed. An UNDECLARED bearer token is
-// what alerts.Redact is for, and this states the coverage explicitly so nobody
+// what redact.Redact is for, and this states the coverage explicitly so nobody
 // has to rediscover it from the export.
 func TestTheResidualPassCoversAnUndeclaredBearerToken(t *testing.T) {
 	r := recorderWithSentinel(t)
@@ -148,14 +148,14 @@ func TestTheResidualPassCoversAnUndeclaredBearerToken(t *testing.T) {
 
 	if out := exported(t, r); strings.Contains(out, "undeclared.tokenvalue") {
 		t.Errorf("an undeclared bearer token survived the residual pass.\n"+
-			"The set cannot cover it — nothing declared it — so alerts.Redact is the "+
+			"The set cannot cover it — nothing declared it — so redact.Redact is the "+
 			"only thing between it and the export.\nexport: %s", out)
 	}
 }
 
 // The ring must forget rather than grow, and it must forget the OLDEST.
 func TestTheRingIsBoundedAndKeepsTheMostRecent(t *testing.T) {
-	r := NewRecorder(4, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(4, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 	log := slog.New(NewHandler(slog.NewTextHandler(io.Discard, nil), r))
 
@@ -225,7 +225,7 @@ func TestWrappingDoesNotChangeTheExistingOutput(t *testing.T) {
 // against it rather than against Records(). A scrub that held everywhere except
 // the export path would be the only failure that matters.
 func TestTheBundleCarriesNoDeclaredSecretAndSaysWhenItIsTruncated(t *testing.T) {
-	r := NewRecorder(3, alerts.NewSecretSet(nil, sentinelKey))
+	r := NewRecorder(3, redact.NewSecretSet(nil, sentinelKey))
 	r.SetRecording(true)
 	sw := NewSwitch(slog.LevelInfo)
 	sw.SetDebug(true)
@@ -305,7 +305,7 @@ func TestAPullSourceCredentialDoesNotReachTheExport(t *testing.T) {
 	const publishToken = "Dxl1Gevc3Tas4XHlMxAGMXwmO0bJ96Hj"
 
 	// The set as the handler now builds it: destination AND source literals.
-	r := NewRecorder(64, alerts.NewSecretSet(nil, camPass, cdnToken, publishToken))
+	r := NewRecorder(64, redact.NewSecretSet(nil, camPass, cdnToken, publishToken))
 	r.SetRecording(true)
 	log := slog.New(NewHandler(slog.NewTextHandler(io.Discard, nil), r))
 

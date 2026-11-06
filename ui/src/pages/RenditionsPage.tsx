@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
@@ -51,7 +52,7 @@ import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
-import { deleteConsequence } from "@/lib/renditionUsers";
+import { deleteConsequence } from "@/features/renditions/renditionUsers";
 import type {
   DestStatus,
   EncoderInfo,
@@ -77,20 +78,13 @@ import {
   useStateLabel,
   type StateLabeller,
 } from "@/lib/i18n";
-import { destinationProcessState, destinationStatus } from "@/lib/status";
+import { destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationStatus } from "@/lib/status";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
- *  have bounds. The server's copy is authoritative; these only have to be
- *  wide enough not to reject something the server would accept. */
-const FALLBACK_BOUNDS: RenditionBounds = {
-  minDimension: 128,
-  maxDimension: 7680,
-  maxFps: 240,
-  minBitrate: 100,
-  maxBitrate: 100_000,
-  minGopSeconds: 1,
-  maxGopSeconds: 10,
-};
+ *  have bounds. They are the same db bounds the server serves, read from the
+ *  generated contract rather than restated. */
+const FALLBACK_BOUNDS: RenditionBounds = WIRE.renditionBounds;
 
 /** Shown beside the presets if the server's own wording has not loaded. It is
  *  the same sentence db.PresetDisclaimer carries: the numbers are a place to
@@ -488,7 +482,7 @@ export function RenditionsPage() {
   };
 
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
-  const running = (status?.renditions ?? []).filter((r) => r.process?.state === "running").length;
+  const running = (status?.renditions ?? []).filter((r) => processRunning(r.process)).length;
   const sourceVideo = status?.source.video ?? null;
 
   const encoders = caps?.encoders ?? [];
@@ -631,7 +625,7 @@ export function RenditionsPage() {
         /* `null`, NOT `[]`, before the first snapshot. An empty array is a
            claim that nothing selects this rendition; a socket that has not
            spoken is not. Both dialogs fall back to the REST counts, which is
-           what RenditionCard has always done. See lib/renditionUsers.ts. */
+           what RenditionCard has always done. See features/renditions/renditionUsers.ts. */
         users={status && editing ? (usersById.get(editing.id) ?? []) : null}
         counts={editing ? countsFor(editing.id) : null}
         onSaved={loadRenditions}
@@ -652,7 +646,7 @@ export function RenditionsPage() {
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
   const t = useT();
-  const state = destinationProcessState(dest.process);
+  const state = destinationShownState(dest.process);
   const tone: SignalTone = dest.enabled ? toneForState(state) : "idle";
   return (
     <span className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm">
@@ -735,23 +729,23 @@ export function RenditionCard({
           <Stat labelKey="rend.target" value={kbps(r.videoBitrate)} />
           <Stat
             labelKey="rend.live"
-            value={proc?.state === "running" ? kbps(proc.progress?.bitrateKbps ?? 0) : "—"}
-            tone={proc?.state === "running" ? "live" : "muted"}
+            value={processRunning(proc) ? kbps(proc?.progress?.bitrateKbps ?? 0) : "—"}
+            tone={processRunning(proc) ? "live" : "muted"}
           />
           <Stat
             labelKey="rend.speed"
-            value={proc?.state === "running" ? `${(proc.progress?.speed ?? 0).toFixed(2)}×` : "—"}
+            value={processRunning(proc) ? `${(proc?.progress?.speed ?? 0).toFixed(2)}×` : "—"}
             // Below real time the encode is losing the race, and every
             // destination under it inherits the stutter.
             tone={
-              proc?.state === "running" && (proc.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
+              processRunning(proc) && (proc?.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
             }
           />
           <Stat labelKey="rend.gop" value={`${r.gopSeconds}s`} tone="muted" />
           <Stat labelKey="rend.preset" value={r.preset} tone="muted" />
           <Stat
             labelKey="rend.uptime"
-            value={proc?.state === "running" ? duration(proc.uptimeSec) : "—"}
+            value={processRunning(proc) ? duration(proc?.uptimeSec ?? 0) : "—"}
             tone="muted"
           />
         </div>
@@ -794,7 +788,7 @@ export function RenditionCard({
             {live.error}
           </div>
         )}
-        {proc?.lastError && proc.state !== "running" && (
+        {proc?.lastError && !processRunning(proc) && (
           <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             {proc.lastError}
           </div>
@@ -992,7 +986,7 @@ export function RenditionDialog({
   cores?: number;
   /** The live list of destinations reading this rendition, or null when the
    *  status socket has not answered yet. Never `[]` for "not known": see
-   *  lib/renditionUsers.ts. */
+   *  features/renditions/renditionUsers.ts. */
   users: DestStatus[] | null;
   /** The database's own counts, which stand in when `users` is null. */
   counts: { destinations: number; enabledDestinations: number } | null;

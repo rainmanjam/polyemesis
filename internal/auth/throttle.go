@@ -85,7 +85,7 @@ func newThrottle(max int, now func() time.Time) *Throttle {
 		tokens: throttleGlobalBurst, tokensAt: now()}
 }
 
-// throttleKey is the bucket an address is counted in.
+// PeerKey is the bucket an address is counted in, here and in internal/authgate.
 //
 // AN IPv6 CLIENT IS ITS /64, NOT ITS ADDRESS. A /64 is the smallest
 // allocation a host is normally given -- one VPS, one home connection -- and
@@ -97,7 +97,7 @@ func newThrottle(max int, now func() time.Time) *Throttle {
 // reports for IPv4 clients) is the IPv4 address, or one client would hold two
 // counters. Anything that is not an address -- a header value from a trusted
 // proxy that was not one -- is its own key, unchanged, as before.
-func throttleKey(k string) string {
+func PeerKey(k string) string {
 	a, err := netip.ParseAddr(k)
 	if err != nil {
 		return k
@@ -152,7 +152,7 @@ func (t *Throttle) Try(key string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	key = throttleKey(key)
+	key = PeerKey(key)
 	now := t.now()
 	wait := t.globalWaitLocked(now)
 	if a := t.attempts[key]; a != nil && now.Sub(a.seen) < throttleIdleTTL {
@@ -173,7 +173,7 @@ func (t *Throttle) Fail(key string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	key = throttleKey(key)
+	key = PeerKey(key)
 	now := t.now()
 	// No token is taken here: Try took it when it let this attempt through.
 	// Taking it again would charge every failure twice, and taking it only
@@ -211,7 +211,7 @@ func (t *Throttle) Failures(key string) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	a := t.attempts[throttleKey(key)]
+	a := t.attempts[PeerKey(key)]
 	if a == nil || t.now().Sub(a.seen) >= throttleIdleTTL {
 		return 0
 	}
@@ -225,7 +225,7 @@ func (t *Throttle) Failures(key string) int {
 func (t *Throttle) Succeed(key string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.attempts, throttleKey(key))
+	delete(t.attempts, PeerKey(key))
 	t.refillLocked(t.now())
 	if t.tokens++; t.tokens > throttleGlobalBurst {
 		t.tokens = throttleGlobalBurst

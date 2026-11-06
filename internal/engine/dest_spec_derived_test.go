@@ -22,7 +22,7 @@ import (
 // Mutation: in destArgvSig, replace `s.RelayURL = ""` with
 // `s = ffmpeg.DestSpec{Kind: s.Kind, Target: s.Target, FilterComplex: s.FilterComplex}`
 // -- the hand-written subset this replaced, which is what the old hashes were.
-// Observed to fail on both hashes. (A mutation inside destSpecFor cannot be
+// Observed to fail on both hashes. (A mutation inside DestSpecFor cannot be
 // hash-only any more, which is the point of the change: it would move the
 // command line too, and the first assertion below says so.)
 func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
@@ -41,7 +41,7 @@ func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
 			"there is nothing here for a hash to predict")
 	}
 
-	if (destSpec(row, a, "up") == destSpec(row, b, "up")) != (argvA == argvB) {
+	if (destSpec(row, a, "up", false) == destSpec(row, b, "up", false)) != (argvA == argvB) {
 		t.Error("the primary's hash disagrees with the argv about the graph's output " +
 			"label, so changing it is stored and never applied to the running process")
 	}
@@ -97,7 +97,7 @@ func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
 // `return string(s.Kind) + s.Target + s.FilterComplex`. Observed to fail on 42
 // field/kind pairs.
 func TestTheSignatureMovesExactlyWhenTheCommandLineDoes(t *testing.T) {
-	base := destSpecFor(testLogger(), backupRow(),
+	base := DestSpecFor(testLogger(), backupRow(),
 		routing.Result{FilterComplex: "anull", OutLabel: "a"},
 		"udp://127.0.0.1:1", "rtmp://live.example/app/key")
 
@@ -170,7 +170,7 @@ func TestAChangeTheCommandLineCannotSeeDoesNotRestartTheStream(t *testing.T) {
 	// guarantee explicit and testable". DestinationArgs does not read it at
 	// all -- `-c:v copy` is unconditional -- and both construction sites
 	// hardcode true, so the cost was latent. The class was not.
-	spec := destSpecFor(testLogger(), row, compiled, "", row.Target())
+	spec := DestSpecFor(testLogger(), row, compiled, "", row.Target())
 	off := spec
 	off.CopyVideo = false
 	if !equalArgs(ffmpeg.DestinationArgs(spec), ffmpeg.DestinationArgs(off)) {
@@ -296,7 +296,7 @@ func TestTheSharedInputsDidNotMergeTheTwoVerdicts(t *testing.T) {
 	before, after := backupRow(), backupRow()
 	after.BackupStreamKey = "rotated"
 
-	if destSpec(before, compiled, "up") != destSpec(after, compiled, "up") {
+	if destSpec(before, compiled, "up", false) != destSpec(after, compiled, "up", false) {
 		t.Error("rotating the BACKUP key moved the primary's hash, so the primary " +
 			"would be dropped to deliver redundancy it already had")
 	}
@@ -304,7 +304,7 @@ func TestTheSharedInputsDidNotMergeTheTwoVerdicts(t *testing.T) {
 		t.Error("rotating the backup key did not move the backup's hash, so it would " +
 			"keep publishing to an endpoint that no longer exists")
 	}
-	if destSpec(before, compiled, "up") == backupSpecOf(before, compiled, "up") {
+	if destSpec(before, compiled, "up", false) == backupSpecOf(before, compiled, "up") {
 		t.Error("the two hashes are the same value; they are not two verdicts any more")
 	}
 }
@@ -316,16 +316,16 @@ func TestTheArgvAndTheHashReadTheSameSpec(t *testing.T) {
 	compiled := routing.Result{FilterComplex: "anull", OutLabel: "a"}
 	e := &Engine{log: testLogger()}
 
-	spec := destSpecFor(e.log, row, compiled, "udp://127.0.0.1:1", row.Target())
+	spec := DestSpecFor(e.log, row, compiled, "udp://127.0.0.1:1", row.Target())
 	fromSpec := ffmpeg.DestinationArgs(spec)
 	fromEngine := e.destArgs(row, compiled, "udp://127.0.0.1:1", row.Target())
 	if !equalArgs(fromSpec, fromEngine) {
-		t.Fatalf("destArgs does not render destSpecFor's value:\n got %v\nwant %v",
+		t.Fatalf("destArgs does not render DestSpecFor's value:\n got %v\nwant %v",
 			fromEngine, fromSpec)
 	}
 	// And the hash is taken from that same value, with only the relay cleared.
 	spec.RelayURL = ""
-	if destArgvSig(spec) != destArgvSig(destSpecFor(nil, row, compiled, "", row.Target())) {
+	if destArgvSig(spec) != destArgvSig(DestSpecFor(nil, row, compiled, "", row.Target())) {
 		t.Error("the spec the hash is taken from differs from the one the argv is " +
 			"rendered from; the two can drift again")
 	}

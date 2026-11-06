@@ -220,7 +220,7 @@ func (p Plan) joinCommand(list SidecarFile) Command {
 // writes to a temporary name it owns and renames on success, so there is never
 // a file here worth protecting.
 func baseArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-y"}
+	return ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
 }
 
 // mapArgs selects the streams the clip keeps.

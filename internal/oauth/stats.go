@@ -3,8 +3,6 @@ package oauth
 import (
 	"context"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // LiveStats is a point-in-time read of a connected channel's broadcast.
@@ -20,8 +18,8 @@ import (
 // were reasonable when there was one implementor and neither survives a second:
 // a cross-platform capability named after one platform reads as Kick-specific
 // to anyone deciding whether to implement it, and an interface outside this
-// package cannot have the Set twin that endpoints.go requires of every
-// capability. The shape needed no change -- it was already neutral -- so this
+// package cannot be resolved through As on a Set, which endpoints.go requires
+// of every capability. The shape needed no change -- it was already neutral -- so this
 // is a rename and a move, not a redesign.
 type LiveStats struct {
 	Live bool `json:"live"`
@@ -73,24 +71,9 @@ type LiveStats struct {
 // people are watching.
 //
 // A platform opts in by having the method; there is no registration list. Same
-// shape as MetadataPusher and CompliancePusher -- see metadata.go:157 for the
-// pattern and endpoints.go:153 for why the Set twin below is not optional.
+// shape as MetadataPusher and CompliancePusher -- see metadata.go for the
+// pattern and As in endpoints.go for how a capability is resolved against a Set.
 type LiveStatter interface {
 	Provider
 	Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error)
-}
-
-// StatsFor reports whether a platform can be asked for viewer numbers.
-//
-// The bool is the whole point and callers must branch on it rather than on a
-// platform name: internal/api answers 200 with supported:false when it is
-// false, because "we cannot ask" and "the account is gone" are different
-// problems with different fixes.
-func StatsFor(p db.Platform) (LiveStatter, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	s, ok := prov.(LiveStatter)
-	return s, ok
 }

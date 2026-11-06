@@ -101,7 +101,7 @@ fi
 
 # --------------------------------------------------------- 2. the governor
 step "2. Measure the governor against a real stream and a real queue"
-go run "$SCRIPTS/acceptance_postprod_driver.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
+go run "$SCRIPTS/acceptance_postprod_driver.go" "$SCRIPTS/driverrelayport.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
 DRIVER=${PIPESTATUS[0]}
 [ "$DRIVER" -eq 0 ] && ok "governor measurements passed" || bad "governor measurements failed"
 

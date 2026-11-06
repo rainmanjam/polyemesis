@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/url"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // StreamHealthVerdict is the platform's verdict on one of a channel's streams.
@@ -33,16 +31,6 @@ type StreamHealthReader interface {
 	// of its stream key, so a caller can match its destination's key without
 	// holding a second plaintext copy of anyone's.
 	StreamHealths(ctx context.Context, clientID, accessToken string) (map[[32]byte]StreamHealthVerdict, error)
-}
-
-// StreamHealthFor reports whether a platform's stream health can be read.
-func (s Set) StreamHealthFor(p db.Platform) (StreamHealthReader, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	r, ok := pr.(StreamHealthReader)
-	return r, ok
 }
 
 // ytHealthStream is the part of a liveStream resource the health read uses.
@@ -81,7 +69,7 @@ func (y *YouTube) StreamHealths(ctx context.Context, _, accessToken string) (map
 		if token != "" {
 			u += "&pageToken=" + url.QueryEscape(token)
 		}
-		if err := getJSON(ctx, u, accessToken, nil, &list); err != nil {
+		if err := y.getJSON(ctx, u, accessToken, nil, &list); err != nil {
 			return nil, err
 		}
 		for _, s := range list.Items {

@@ -21,7 +21,7 @@ const ROOT = new URL("../../../", import.meta.url).pathname;
 
 function goPresetIDs(): string[] {
   const src = readFileSync(join(ROOT, "internal/db/platforms.go"), "utf8");
-  return [...src.matchAll(/ID:\s*"([a-z0-9-]+)",\s*Name:/g)].map((m) => m[1]);
+  return [...src.matchAll(/ID:\s*"([a-z0-9-]+)",\s*(?:Name|Group):/g)].map((m) => m[1]);
 }
 
 function tsPresetIDs(): string[] {
@@ -52,7 +52,7 @@ describe("the two destination preset catalogues", () => {
     // platforms have them — that is what decides whether the operator is
     // offered a starting point at all.
     const src = readFileSync(join(ROOT, "internal/db/platforms.go"), "utf8");
-    const withGuidance = [...src.matchAll(/ID:\s*"([a-z0-9-]+)",\s*Name:[^\n]*\n\s*Video:/g)].map((m) => m[1]);
+    const withGuidance = [...src.matchAll(/ID:\s*"([a-z0-9-]+)",\s*(?:Name|Group):[^\n]*\n\s*Video:/g)].map((m) => m[1]);
     expect(withGuidance.length, "platforms.go has no VideoGuidance at all").toBeGreaterThan(5);
 
     // Every platform carrying guidance must exist in the UI mirror, or the

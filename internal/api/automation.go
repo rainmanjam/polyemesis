@@ -18,7 +18,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/recording"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -68,7 +70,7 @@ func (q alertRuleRequest) applyTo(r alerts.Rule) alerts.Rule {
 		// that has never existed and break alerting silently, so a value still
 		// carrying the mask means "unchanged" rather than an error nobody could
 		// have avoided.
-		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, alerts.Mask) {
+		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, redact.Mask) {
 			r.URL = u
 		}
 	}
@@ -421,7 +423,7 @@ func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string
 		if !scheduleTargets(sc, d.ID) {
 			continue
 		}
-		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 		if !ok || at.Sub(now) <= sb.ScheduleHorizon() {
 			continue
 		}

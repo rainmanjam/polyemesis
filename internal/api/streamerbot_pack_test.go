@@ -3,13 +3,17 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // THE STREAMER.BOT PACK, REPLAYED. integrations/streamerbot/actions.json lists
@@ -93,39 +97,411 @@ func TestEveryStreamerbotPackActionReachesItsRouteWithTheScopeItDeclares(t *test
 	}
 }
 
-func TestPolyemesisCsCallsOnlyThePathsTheManifestLists(t *testing.T) {
+// csCall is one Send/Request call site in Polyemesis.cs, reduced to what goes
+// on the wire: the method, the path with its dynamic parts named as the
+// manifest names them, and the body choices the call can send.
+type csCall struct {
+	method string
+	path   string
+	bodies []string // JSON texts; empty means no body
+}
+
+// splitTopLevel splits s on sep outside string literals and parentheses.
+func splitTopLevel(s string, sep byte) []string {
+	var parts []string
+	depth, start := 0, 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			if c == '\\' {
+				i++
+			} else if c == '"' {
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case c == sep && depth == 0:
+			parts = append(parts, strings.TrimSpace(s[start:i]))
+			start = i + 1
+		}
+	}
+	return append(parts, strings.TrimSpace(s[start:]))
+}
+
+func csString(t *testing.T, lit string) string {
+	t.Helper()
+	u, err := strconv.Unquote(lit) // C# and Go agree on the escapes this file uses
+	if err != nil {
+		t.Fatalf("not a string literal: %s", lit)
+	}
+	return u
+}
+
+// csPath turns `"/api/v1/destinations/" + id + "/start"` into the manifest's
+// `/api/v1/destinations/{destinationId}/start`.
+func csPath(t *testing.T, expr string) string {
+	t.Helper()
+	dyn := map[string]string{"id": "{destinationId}", "track": "{track}", "SourceQuery()": "?source={source}"}
+	var b strings.Builder
+	for _, piece := range splitTopLevel(expr, '+') {
+		if strings.HasPrefix(piece, `"`) {
+			b.WriteString(csString(t, piece))
+		} else if v, ok := dyn[piece]; ok {
+			b.WriteString(v)
+		} else {
+			t.Fatalf("path part %q is not a literal or a known argument", piece)
+		}
+	}
+	return b.String()
+}
+
+// csCalls finds every Send/Request call in a method body.
+func csCalls(t *testing.T, body string) []csCall {
+	t.Helper()
+	var out []csCall
+	for _, m := range regexp.MustCompile(`\b(?:Send|Request)\(`).FindAllStringIndex(body, -1) {
+		end := m[1]
+		depth := 1
+		inStr := false
+		for ; depth > 0; end++ {
+			c := body[end]
+			switch {
+			case inStr:
+				if c == '\\' {
+					end++
+				} else if c == '"' {
+					inStr = false
+				}
+			case c == '"':
+				inStr = true
+			case c == '(':
+				depth++
+			case c == ')':
+				depth--
+			}
+		}
+		args := splitTopLevel(body[m[1]:end-1], ',')
+		if len(args) < 3 {
+			continue // Request(method, path, json, out body): handled by its four args below
+		}
+		c := csCall{method: csString(t, args[0]), path: csPath(t, args[1])}
+		switch {
+		case args[2] == "null":
+		case strings.HasPrefix(args[2], `"`):
+			c.bodies = []string{csString(t, args[2])}
+		default: // muted ? "{...}" : "{...}"
+			q := strings.SplitN(args[2], "?", 2)
+			if len(q) != 2 {
+				t.Fatalf("body %q is not null, a literal or a ternary of literals", args[2])
+			}
+			for _, alt := range splitTopLevel(q[1], ':') {
+				c.bodies = append(c.bodies, csString(t, alt))
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// csMethods maps each method of Polyemesis.cs to its body.
+func csMethods(code string) map[string]string {
+	re := regexp.MustCompile(`(?m)^    (?:public|private)(?: static)? \w+ (\w+)\(`)
+	idx := re.FindAllStringSubmatchIndex(code, -1)
+	out := map[string]string{}
+	for i, m := range idx {
+		end := len(code)
+		if i+1 < len(idx) {
+			end = idx[i+1][0]
+		}
+		out[code[m[2]:m[3]]] = code[m[0]:end]
+	}
+	return out
+}
+
+// Every action in the manifest is exactly one call in the code: same HTTP
+// method, same path (with the manifest's placeholders where the code splices an
+// argument), and a body that parses to the manifest's body. A prefix match let
+// the code drift from the manifest in method, trailing path or body unseen.
+func TestPolyemesisCsMakesExactlyTheCallsTheManifestLists(t *testing.T) {
 	raw, err := os.ReadFile("../../integrations/streamerbot/Polyemesis.cs")
 	if err != nil {
 		t.Fatal(err)
 	}
 	code := string(raw)
+	methods := csMethods(code)
 	pack := loadPack(t)
-	// Every method the manifest names exists in the code.
+	covered := map[string]bool{}
 	for _, a := range pack {
-		m := strings.TrimPrefix(a.Method, "Execute C# Method: ")
-		if !strings.Contains(code, "public bool "+m+"()") {
-			t.Errorf("%s names method %s, which Polyemesis.cs does not define", a.Name, m)
+		name := strings.TrimPrefix(a.Method, "Execute C# Method: ")
+		body, ok := methods[name]
+		if !ok || !strings.Contains(body, "public bool "+name+"()") {
+			t.Errorf("%s names method %s, which Polyemesis.cs does not define", a.Name, name)
+			continue
 		}
-	}
-	// Every path literal in the code is the leading part of a manifest path.
-	lit := regexp.MustCompile(`"(/api/v1/[^"]*)"`)
-	found := lit.FindAllStringSubmatch(code, -1)
-	if len(found) < 5 {
-		t.Fatalf("found %d path literals in Polyemesis.cs; the pattern is looking at the wrong thing", len(found))
-	}
-	for _, m := range found {
-		known := false
-		for _, a := range pack {
-			if strings.HasPrefix(a.Path, m[1]) {
-				known = true
-				break
+		calls := csCalls(t, body)
+		if len(calls) == 0 {
+			// MuteTrack and UnmuteTrack call the shared helper.
+			arg := regexp.MustCompile(`TrackMute\((true|false)\)`).FindStringSubmatch(body)
+			if arg == nil {
+				t.Errorf("%s: %s makes no request and calls no helper that does", a.Name, name)
+				continue
+			}
+			calls = csCalls(t, methods["TrackMute"])
+			if len(calls) != 1 || len(calls[0].bodies) != 2 {
+				t.Fatalf("TrackMute should be one call with a two-way body, got %+v", calls)
+			}
+			pick := 1
+			if arg[1] == "true" {
+				pick = 0
+			}
+			calls[0].bodies = calls[0].bodies[pick : pick+1]
+			covered["TrackMute"] = true
+		}
+		covered[name] = true
+		if len(calls) != 1 {
+			t.Errorf("%s: %s makes %d requests, the manifest lists one", a.Name, name, len(calls))
+			continue
+		}
+		c := calls[0]
+		if c.method != a.Request {
+			t.Errorf("%s: code sends %s, manifest says %s", a.Name, c.method, a.Request)
+		}
+		if c.path != a.Path {
+			t.Errorf("%s: code calls %q, manifest says %q", a.Name, c.path, a.Path)
+		}
+		wantBody := string(a.Body)
+		if wantBody == "null" {
+			wantBody = ""
+		}
+		switch {
+		case wantBody == "" && len(c.bodies) != 0:
+			t.Errorf("%s: code sends a body %q, manifest sends none", a.Name, c.bodies)
+		case wantBody != "" && len(c.bodies) != 1:
+			t.Errorf("%s: code sends no body, manifest sends %s", a.Name, wantBody)
+		case wantBody != "":
+			var got, want any
+			if err := json.Unmarshal([]byte(c.bodies[0]), &got); err != nil {
+				t.Errorf("%s: body %q is not JSON: %v", a.Name, c.bodies[0], err)
+				continue
+			}
+			_ = json.Unmarshal([]byte(wantBody), &want)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("%s: code sends %s, manifest says %s", a.Name, c.bodies[0], wantBody)
 			}
 		}
-		if !known {
-			t.Errorf("Polyemesis.cs calls %s, which actions.json does not list", m[1])
+	}
+	// No request the manifest does not account for: every method that makes
+	// one is a manifest action or the helper one is.
+	for name, body := range methods {
+		if name == "Request" || name == "Send" {
+			continue
+		}
+		if len(csCalls(t, body)) > 0 && !covered[name] {
+			t.Errorf("Polyemesis.cs method %s makes a request actions.json does not list", name)
 		}
 	}
 	if strings.Contains(code, "LogInfo(token") || strings.Contains(code, "+ token") {
 		t.Error("Polyemesis.cs logs or concatenates the token")
+	}
+}
+
+// The token goes only over https://, or http:// to this machine: the rule the
+// Stream Deck plugin (config.ts parseServerUrl) and the OBS script
+// (parse_server) enforce. Nothing here can run Streamer.bot's C#, so this holds
+// the source to the rule: the loopback set is the OBS script's, the refusal
+// says what OBS's says, and Request consults the guard before it builds the
+// request that carries the token.
+func TestPolyemesisCsRefusesToSendTheTokenInTheClear(t *testing.T) {
+	raw, err := os.ReadFile("../../integrations/streamerbot/Polyemesis.cs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := string(raw)
+	obs, err := os.ReadFile("../../integrations/obs/polyemesis_obs.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := regexp.MustCompile(`LOOPBACK = \{([^}]*)\}`).FindStringSubmatch(string(obs))
+	if set == nil {
+		t.Fatal("cannot find LOOPBACK in polyemesis_obs.py")
+	}
+	cs := regexp.MustCompile(`Loopback = \{([^}]*)\}`).FindStringSubmatch(code)
+	if cs == nil {
+		t.Fatal("Polyemesis.cs has no Loopback host list")
+	}
+	hosts := func(list string) map[string]bool {
+		m := map[string]bool{}
+		for _, h := range strings.Split(list, ",") {
+			// Uri.Host spells IPv6 with brackets; the OBS script's hostname does not.
+			m[strings.Trim(strings.TrimSpace(h), `"'[]`)] = true
+		}
+		return m
+	}
+	csHosts := hosts(cs[1])
+	for h := range hosts(set[1]) {
+		if !csHosts[h] {
+			t.Errorf("the OBS script allows http:// to %q; Polyemesis.cs does not", h)
+		}
+	}
+	for h := range csHosts {
+		if !hosts(set[1])[h] {
+			t.Errorf("Polyemesis.cs allows http:// to %q; the OBS script does not", h)
+		}
+	}
+	// Uri.Host is "[::1]" for http://[::1]:8080, so a bare "::1" entry would
+	// never match; the list must carry the bracketed form (checked on mono).
+	if !strings.Contains(cs[1], `"[::1]"`) || strings.Contains(cs[1], `"::1"`) {
+		t.Errorf("Polyemesis.cs's Loopback list must spell IPv6 loopback \"[::1]\", as Uri.Host does: %s", cs[1])
+	}
+	for _, want := range []string{
+		`u.Scheme == "https"`,
+		`u.Scheme == "http" && Array.IndexOf(Loopback, u.Host) >= 0`,
+		"the API token would cross the network unencrypted",
+	} {
+		if !strings.Contains(code, want) {
+			t.Errorf("Polyemesis.cs does not contain %q", want)
+		}
+	}
+	req := csMethods(code)["Request"]
+	guard, build := strings.Index(req, "Refusal(url)"), strings.Index(req, "new HttpRequestMessage")
+	if guard < 0 || build < 0 || guard > build {
+		t.Error("Request must refuse a cleartext address before it builds the request that carries the token")
+	}
+}
+
+// THE STATUS ACTION READS A REAL BODY. Status() counts destinations whose
+// process is running, out of GET /api/v1/status. It once read `enabled` off
+// GET /destinations, whose items are {"destination": {...}}, so it counted 0
+// forever and nothing noticed: the replay above never parsed a response. This
+// marshals the server's own Status type -- the shape handleStatus writes --
+// and walks it the way the C# does, then holds the C# to the same keys.
+func statusLive(t *testing.T, body []byte, only *int64) (live, total int) {
+	t.Helper()
+	var st struct {
+		Destinations []struct {
+			SourceID *int64 `json:"sourceId"`
+			Process  *struct {
+				State string `json:"state"`
+			} `json:"process"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("status body: %v", err)
+	}
+	for _, d := range st.Destinations {
+		if only != nil && (d.SourceID == nil || *d.SourceID != *only) {
+			continue
+		}
+		total++
+		if d.Process != nil && d.Process.State == "running" {
+			live++
+		}
+	}
+	return live, total
+}
+
+func TestStreamerbotStatusCountsRunningProcessesPerProgramme(t *testing.T) {
+	one, two := int64(1), int64(2)
+	running := &supervisor.Status{State: supervisor.StateRunning}
+	golden, err := json.Marshal(engine.Status{Destinations: []engine.DestStatus{
+		{ID: 1, SourceID: &one, Enabled: true, Process: running},
+		{ID: 2, SourceID: &one, Enabled: true, Process: &supervisor.Status{State: supervisor.StateFailed}},
+		{ID: 3, SourceID: &one, Enabled: true}, // no process: stopped
+		{ID: 4, SourceID: &two, Enabled: true, Process: running},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live, total := statusLive(t, golden, nil); live != 2 || total != 4 {
+		t.Errorf("install-wide: %d of %d running, want 2 of 4", live, total)
+	}
+	if live, total := statusLive(t, golden, &one); live != 1 || total != 3 {
+		t.Errorf("programme 1: %d of %d running, want 1 of 3", live, total)
+	}
+	if live, total := statusLive(t, golden, &two); live != 1 || total != 1 {
+		t.Errorf("programme 2: %d of %d running, want 1 of 1", live, total)
+	}
+
+	// The same walk over the live router, with the read token the manifest
+	// declares: the body is the route's own and every destination has a sourceId.
+	o := obsServer(t)
+	o.createDest(t, "youtube")
+	tok := createScopedToken(t, o.h, o.sign, "streamer.bot status", db.ScopeRead)
+	w := do(t, o.h, withBearer(jsonRequest(t, "GET", "/api/v1/status", nil), tok))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /status with a read token answered %d %s", w.Code, w.Body.String())
+	}
+	if live, total := statusLive(t, w.Body.Bytes(), nil); total != 1 || live != 0 {
+		t.Errorf("live router: %d of %d running, want 0 of 1", live, total)
+	}
+	only := onlySourceID(t, o.h, o.sign)
+	if _, total := statusLive(t, w.Body.Bytes(), &only); total != 1 {
+		t.Errorf("the destination carries no sourceId of programme %d", only)
+	}
+
+	raw, err := os.ReadFile("../../integrations/streamerbot/Polyemesis.cs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := csMethods(string(raw))["Status"]
+	// The counting itself, in order and in exact form: skip a destination of
+	// another programme, count it, then count it as running. Flipping the
+	// filter's != to ==, counting before the filter, or reading another field
+	// changes one of these lines.
+	norm := regexp.MustCompile(`\s+`).ReplaceAllString(status, " ")
+	for _, want := range []string{
+		`Request("GET", "/api/v1/status" + SourceQuery(), null, out body)`,
+		`JArray dests = JObject.Parse(body)["destinations"] as JArray;`,
+		`foreach (JToken d in dests) { ` +
+			`if (only != null && d.Value<long?>("sourceId") != only) continue; ` +
+			`total++; ` +
+			`if ((string)d.SelectToken("process.state") == "running") live++; }`,
+	} {
+		if !strings.Contains(norm, want) {
+			t.Errorf("Status() no longer contains %q", want)
+		}
+	}
+	if strings.Contains(status, `"enabled"`) {
+		t.Error("Status() counts `enabled`, which is configuration, not whether the destination is running")
+	}
+}
+
+// On an install with several programmes GET /status without ?source= is a 400
+// (scopedEngine), which is where the per-programme filter has to work: the call
+// Status() makes names the programme, answers 200, and lists every programme's
+// destinations, so the sourceId filter is what scopes the count.
+func TestStreamerbotStatusOnAnInstallWithTwoProgrammes(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	first := onlySourceID(t, h, sign)
+	second := addSource(t, h, sign, "Vertical").ID
+	for _, src := range []int64{first, second, second} {
+		send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+			"sourceId": src, "name": "d", "kind": "rtmp", "url": "rtmp://example.invalid/live", "streamKey": "k",
+		}, http.StatusCreated)
+	}
+	tok := createScopedToken(t, h, sign, "streamer.bot status", db.ScopeRead)
+	get := func(path string) *httptest.ResponseRecorder {
+		return do(t, h, withBearer(jsonRequest(t, "GET", path, nil), tok))
+	}
+	if w := get("/api/v1/status"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "source_required") {
+		t.Fatalf("GET /status with no ?source= on two programmes answered %d %s, want 400 source_required", w.Code, w.Body.String())
+	}
+	for src, want := range map[int64]int{first: 1, second: 2} {
+		w := get("/api/v1/status?source=" + strconv.FormatInt(src, 10))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /status?source=%d answered %d %s", src, w.Code, w.Body.String())
+		}
+		if _, all := statusLive(t, w.Body.Bytes(), nil); all != 3 {
+			t.Errorf("the status lists %d destinations, want every programme's 3: the client-side filter is what scopes the count", all)
+		}
+		if _, total := statusLive(t, w.Body.Bytes(), &src); total != want {
+			t.Errorf("programme %d: %d destinations after the sourceId filter, want %d", src, total, want)
+		}
 	}
 }

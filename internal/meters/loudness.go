@@ -96,15 +96,16 @@ func Args(s Spec) []string {
 	graph += fmt.Sprintf(";[%s]ebur128=metadata=1:peak=true[%s];[%s]ametadata=mode=print:file=-:direct=1[%s]",
 		out, analyserIn, analyserIn, analyserOut)
 
-	return []string{
-		"-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning",
-		"-fflags", "+genpts",
-		"-thread_queue_size", "512",
-		"-i", ffmpeg.RelayInputURL(s.RelayURL),
+	// -nostats because the analyser's stdout carries readings, so it cannot take
+	// ffmpeg.ProgressArgs; ffmpeg.MetersArgs does the same for the ingest meter.
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, false)
+	args = append(args, "-nostats")
+	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL, ffmpeg.RelayMeterQueue)...)
+	return append(args,
 		"-filter_complex", graph,
-		"-map", "[" + analyserOut + "]",
+		"-map", "["+analyserOut+"]",
 		"-f", "null", "-",
-	}
+	)
 }
 
 // LUFSFloor is what ebur128 reports while the programme has not yet risen above

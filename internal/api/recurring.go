@@ -42,9 +42,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -132,7 +132,7 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 			if !scheduleTargets(sc, d.ID) || d.AccountID == nil || d.Enabled {
 				continue
 			}
-			sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+			sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 			if !ok {
 				continue
 			}
@@ -273,7 +273,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		release()
 		// The platform's reason is kept on the template, redacted, so the operator sees a limit in the
 		// screen and not only in the log. The log line below is still written once per run of failures.
-		_ = s.store.RecordBroadcastTemplateError(sc.ID, alerts.Redact(err.Error()), time.Now())
+		_ = s.store.RecordBroadcastTemplateError(sc.ID, redact.Redact(err.Error()), time.Now())
 		n := s.noteAnnounceFailure(d.ID, sc.ID)
 		s.holdTemplateCreate(d.ID, sc.ID, now.Add(templateCreateBackoff(n, err)))
 		if n == 1 {
@@ -322,7 +322,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 	}
 	for _, w := range warnings {
 		s.log.Warn("recurring: the platform did not apply part of the event's metadata",
-			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "detail", alerts.Redact(w))
+			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "detail", redact.Redact(w))
 	}
 
 	if data, mime, terr := s.store.BroadcastThumbnail(sc.ID); terr == nil && len(data) > 0 {
@@ -437,7 +437,7 @@ func redactErr(err error) string {
 	if err == nil {
 		return ""
 	}
-	return alerts.Redact(err.Error())
+	return redact.Redact(err.Error())
 }
 
 // pointGoLiveAt sets the destination's announcement mirror to one occurrence. When b is non-nil the
@@ -721,7 +721,7 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if !removeRow && d.Enabled {
 			return fmt.Errorf("%w: the destination was switched on, so its event may be about to go on air", errOccurrenceRefused)
 		}
-		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 		if !ok {
 			return fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, o.PlatformEventID)
 		}

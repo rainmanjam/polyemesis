@@ -1,5 +1,5 @@
 import type { TranslationKey } from "@/lib/i18n";
-import type { ChatMessage, ChatPlatform } from "@/lib/types";
+import type { ChatMessage } from "@/lib/types";
 
 // Where a viewer can be looked at on the platform they were talking on.
 //
@@ -126,20 +126,4 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
  *  operator console that is already authenticated is worth refusing outright. */
 export function openPlatformLink(link: PlatformLink): void {
   window.open(link.url, `polyemesis-${link.kind}`, "noopener,noreferrer,width=420,height=720");
-}
-
-/** Human label for a platform, for menu copy. */
-export function platformNoun(p: ChatPlatform): string {
-  switch (p) {
-    case "twitch":
-      return "Twitch";
-    case "youtube":
-      return "YouTube";
-    case "kick":
-      return "Kick";
-    case "facebook":
-      return "Facebook";
-    default:
-      return p;
-  }
 }

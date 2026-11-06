@@ -52,8 +52,8 @@ func TestThrottleKeyLeavesWhatIsNotAnAddressAlone(t *testing.T) {
 		"":                     "",
 		"2001:db8:0:0:1:2:3:4": "2001:db8::/64",
 	} {
-		if got := throttleKey(in); got != want {
-			t.Errorf("throttleKey(%q) = %q, want %q", in, got, want)
+		if got := PeerKey(in); got != want {
+			t.Errorf("PeerKey(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

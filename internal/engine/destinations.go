@@ -22,6 +22,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -169,7 +171,7 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			p.err = cerr.Error()
 		} else {
 			p.compiled = compiled
-			p.spec = destSpec(row, compiled, upstream)
+			p.spec = destSpec(row, compiled, upstream, wantsSEIStage(row, e.facebookCaptions.Load()))
 			p.upstream = upstream
 		}
 		plans[row.ID] = p
@@ -281,7 +283,7 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// below once the lock is released, since it does I/O. A copy
 			// destination's argv has no graph, so it has no level to move.
 			if copyPathOf(p.row) {
-				e.setLiveNoteLocked(id, liveNote{applied: liveApplied, reason: copyNoEffect})
+				e.setLiveNoteLocked(id, liveNote{applied: AppliedLive, reason: copyNoEffect})
 			} else {
 				liveTry = append(liveTry, liveCandidate{id: id, d: d, p: p})
 			}
@@ -291,7 +293,7 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// The levels moved, but so did something a command cannot carry, so
 			// the level reaches the output by this restart. Recorded so the
 			// operator is told a restart happened rather than nothing.
-			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
+			e.setLiveNoteLocked(id, liveNote{applied: AppliedRestart, reason: structuralRestart})
 		}
 		if !keep && !wanted && d.delay != nil && d.proc != nil && stillThere[id] && !cutReq[id] {
 			// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
@@ -373,11 +375,11 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 				next.compiled = c.p.compiled
 				e.dests[c.id] = &next
 			}
-			e.setLiveNoteLocked(c.id, liveNote{applied: liveApplied})
+			e.setLiveNoteLocked(c.id, liveNote{applied: AppliedLive})
 			e.mu.Unlock()
 			continue
 		}
-		e.setLiveNoteLocked(c.id, liveNote{applied: liveRestart, reason: fallbackReason(err)})
+		e.setLiveNoteLocked(c.id, liveNote{applied: AppliedRestart, reason: fallbackReason(err)})
 		if e.dests[c.id] == c.d {
 			delete(e.dests, c.id)
 			if c.d.proc != nil {
@@ -561,7 +563,10 @@ func (e *Engine) upstreamHub(row *db.Destination) (*relay.Hub, error) {
 // upstream is its rendition's signature, empty for passthrough. Folding both it
 // and the rendition id in is what makes moving a destination between tiers, or
 // editing the tier it sits on, restart that destination and no other.
-func destSpec(row *db.Destination, compiled routing.Result, upstream string) string {
+//
+// seiStage is wantsSEIStage for this row: whether the destination runs through
+// an SEI caption stage, which changes what its FFmpeg reads.
+func destSpec(row *db.Destination, compiled routing.Result, upstream string, seiStage bool) string {
 	source := "passthrough"
 	if row.RenditionID != nil {
 		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
@@ -578,13 +583,13 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// setting stored and never reaching the process it governs) and wrong
 		// about the remedy: the remedy was to deliver it, not to drop the
 		// operator's connection in order to deliver it.
-		destArgvSig(destSpecFor(nil, row, compiled, "", row.Target())),
+		destArgvSig(DestSpecFor(nil, row, compiled, "", row.Target())),
 		// Not on the command line, and both required. Which tier a destination
 		// reads is what makes moving it between tiers, or editing the tier it
 		// sits on, restart that destination and no other.
 		source, upstream,
 	}
-	if wantsSEIStage(row) {
+	if seiStage {
 		// Adding or removing the SEI stage changes what the FFmpeg reads, so an
 		// operator save of the caption mode restarts the destination (#8).
 		parts = append(parts, "sei=stage")
@@ -604,7 +609,7 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 	return hashStrings(parts)
 }
 
-// destSpecFor is one output's ffmpeg.DestSpec: the single description of what
+// DestSpecFor is one output's ffmpeg.DestSpec: the single description of what
 // goes on its command line.
 //
 // THE ONE PLACE. destArgs renders it, destSpec and backupSpecOf hash it. Before
@@ -615,11 +620,18 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 // received differed with nothing reporting it. compiled.OutLabel had already
 // gone missing from both.
 //
+// EXPORTED because the expert-mode preview must show the command that would run,
+// and a second hand-written ffmpeg.DestSpec in internal/api had already drifted
+// from this one: it omitted the output audio encoding and the muxer and socket
+// tuning, so a destination using either was previewed without it. The function
+// is pure -- the row, the compiled graph, the relay URL and the target are all it
+// reads -- so the API can call it without an engine behind it.
+//
 // log may be nil, and is on the hashing paths: they build this purely to hash
 // it, twice per destination per reconcile, and expertArgv's warning about
 // unparseable text would otherwise be printed three times a pass about a value
 // the editor already reports.
-func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result, relayURL, target string) ffmpeg.DestSpec {
+func DestSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result, relayURL, target string) ffmpeg.DestSpec {
 	return ffmpeg.DestSpec{
 		Kind:          ffmpeg.DestKind(row.Kind),
 		Target:        target,
@@ -704,7 +716,7 @@ func destArgvSig(s ffmpeg.DestSpec) string {
 	s.RelayURL = ""
 	// A named volume level is applied live (see live_gains.go), so a change of
 	// level alone must not move the signature. Anything else still does.
-	s.FilterComplex = ffmpeg.MaskLiveVolumes(s.FilterComplex)
+	s.FilterComplex = livevolume.Mask(s.FilterComplex)
 	return hashStrings(ffmpeg.DestinationArgs(s))
 }
 
@@ -764,7 +776,7 @@ func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
 	}
 	want := destPolicy(row)
 	e.retunePolicy(d.proc, row, want, "")
-	e.retunePolicy(d.backup, row, want, destRoleBackup)
+	e.retunePolicy(d.backup, row, want, procname.RoleBackup)
 }
 
 // retunePolicy pushes a changed reconnect policy into one running process, and
@@ -807,7 +819,7 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	e.log.Info("destination reconnect policy retuned without a restart",
 		"dest", name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
 		"giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", name, reloadLive,
+	e.noteReload("destination", name, AppliedLive,
 		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
 			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
 
@@ -827,7 +839,7 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	p.Restart(ctx)
 	e.log.Info("destination revived: it had given up under the previous limit",
 		"dest", name, "giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", name, reloadRestart,
+	e.noteReload("destination", name, AppliedRestart,
 		"it had given up under the previous limit and the new one is more forgiving")
 }
 
@@ -861,7 +873,7 @@ func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []stri
 	}
 	argv, err := ffmpeg.SplitArgs(raw)
 	if err != nil {
-		// A nil log is the restart-hash path -- see destSpecFor. It builds the
+		// A nil log is the restart-hash path -- see DestSpecFor. It builds the
 		// same spec purely to hash it, twice per destination per reconcile, and
 		// this line would be printed three times a pass about a value the
 		// editor already shows the operator with the reason it will not apply.
@@ -935,25 +947,61 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
-// destSubName is the relay subscription for one of a destination's outputs.
+// destArgv builds one output's command lines: the argv each spawn runs, and the
+// same command without its expert arguments for the expert-mode preview.
 //
-// THE ROLE IS PART OF THE NAME, ALWAYS, and that is not tidiness.
-// Hub.Subscribe is a map assignment keyed by this string:
-//
-//	h.subs[name] = &subscriber{...}
-//
-// so registering two outputs under one name REPLACES the first. The replaced
-// process keeps running, keeps a correct command line, and keeps a healthy
-// card -- and receives no packets at all. Nothing about the process, its
-// target URL, or the destination's status reveals it.
-//
-// The primary's name is unchanged (`dest:<id>`), so no existing subscription
-// moves; only new roles get a suffix.
-func destSubName(id int64, role string) string {
-	if role == "" {
-		return fmt.Sprintf("dest:%d", id)
+// It holds what stays the same across spawns (the row, the relay URL, the graph
+// holder) and remembers the one thing that does not, the output target a file
+// destination resolves anew each time. That is what lets the preview show the
+// command a RUNNING destination is running without searching the child's argv
+// for the expert arguments it was started with and peeling them back off, which
+// depended on the order DestinationArgs lays its argv out in.
+type destArgv struct {
+	e     *Engine
+	row   *db.Destination
+	url   string
+	graph *graphHolder
+
+	mu  sync.Mutex
+	out string // the target the most recent build used
+}
+
+// build is the argv for a spawn writing to out, built from the graph as it
+// stands now (so a level applied live is in force after a reconnect).
+func (a *destArgv) build(out string) []string {
+	a.mu.Lock()
+	a.out = out
+	a.mu.Unlock()
+	return a.graph.argv(func(r routing.Result) []string {
+		return a.e.destArgs(a.row, r, a.url, out)
+	})
+}
+
+// base is the command the destination is running, minus the expert arguments
+// its row carries: the base a candidate edit is spliced onto.
+func (a *destArgv) base() []string {
+	a.mu.Lock()
+	out := a.out
+	a.mu.Unlock()
+	spec := DestSpecFor(nil, a.row, a.graph.get(), a.url, out)
+	spec.ExtraInputArgs, spec.ExtraOutputArgs = nil, nil
+	return ffmpeg.DestinationArgs(spec)
+}
+
+// DestinationBaseArgv is the command line a running destination was built to
+// run, without its expert arguments, and the binary it runs with. ok is false
+// when the destination is not running.
+func (e *Engine) DestinationBaseArgv(id int64) (bin string, argv []string, ok bool) {
+	if e == nil {
+		return "", nil, false
 	}
-	return fmt.Sprintf("dest:%d:%s", id, role)
+	e.mu.RLock()
+	d := e.dests[id]
+	e.mu.RUnlock()
+	if d == nil || d.argv == nil || d.proc == nil {
+		return "", nil, false
+	}
+	return e.tools.FFmpeg, d.argv.base(), true
 }
 
 // destArgs is one output's FFmpeg command line.
@@ -965,11 +1013,8 @@ func destSubName(id int64, role string) string {
 //
 // Only the relay it reads and the target it writes differ between them.
 func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
-	return ffmpeg.DestinationArgs(destSpecFor(e.log, row, compiled, relayURL, target))
+	return ffmpeg.DestinationArgs(DestSpecFor(e.log, row, compiled, relayURL, target))
 }
-
-// destRoleBackup names the redundant output's subscription.
-const destRoleBackup = "backup"
 
 // wantsBackup reports whether this destination should be publishing a
 // redundant feed right now.
@@ -1024,7 +1069,7 @@ func backupTarget(row *db.Destination) string {
 // backupSpecOf hashes everything on the BACKUP's command line.
 //
 // SAME INPUTS, SEPARATE VERDICT, and the distinction is the whole design. The
-// two share one description of the command line -- destSpecFor, with the
+// two share one description of the command line -- DestSpecFor, with the
 // backup's target substituted -- because a redundant feed encoded differently
 // from the one it backs up is not redundancy. They must never share a hash:
 // enabling backup already costs one reconnect for an unavoidable reason (a new
@@ -1036,7 +1081,7 @@ func backupTarget(row *db.Destination) string {
 func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string) string {
 	return hashStrings([]string{
 		strconv.FormatBool(wantsBackup(row)),
-		destArgvSig(destSpecFor(nil, row, compiled, "", backupTarget(row))),
+		destArgvSig(DestSpecFor(nil, row, compiled, "", backupTarget(row))),
 		upstream,
 	})
 }
@@ -1116,7 +1161,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		e.closeDelay(dd)
 		return err
 	}
-	subName := destSubName(row.ID, "")
+	subName := procname.DestProcessName(row.ID, "")
 	url, err := readHub.Subscribe(subName, port)
 	if err != nil {
 		// #711. An occupied name means another consumer is reading under it;
@@ -1163,9 +1208,8 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// The graph this process is spawned from. Every spawn reads it, so a level
 	// applied live is still in force after a crash or reconnect. See graphHolder.
 	graph := newGraphHolder(compiled)
-	buildArgs := func(out string) []string {
-		return e.destArgs(row, graph.get(), url, out)
-	}
+	argv := &destArgv{e: e, row: row, url: url, graph: graph, out: target}
+	buildArgs := argv.build
 
 	// Only a file destination needs a fresh argv per spawn, and only because
 	// its output path cannot be reused. An RTMP or SRT target is reconnected
@@ -1196,61 +1240,26 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		nextArgs = func() []string { return buildArgs(target) }
 	}
 
-	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
-
-	// Declared before the Spec because OnLog's #674 re-probe handler closes
-	// over it: that handler is built inside the Spec that constructs this
-	// very child, so it can only resolve the process lazily.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name:     subName,
-		Kind:     "destination",
-		Bin:      e.tools.FFmpeg,
-		Args:     buildArgs(target),
-		NextArgs: nextArgs,
-		// Stdin is the live command channel for gain and mute (see supervisor).
-		LiveCommands: true,
-		// The minted key is passed as an EXTRA literal rather than left to
-		// inherit the row's registration, because it cannot: SecretSet.Scrub is
-		// a substring replace and the minted key ENDS WITH the operator's
-		// original, so registering only the original masks the last segment and
-		// leaves the signature and the hex manifest standing in the log. Empty
-		// when nothing was minted, which destSecrets and alerts.NewSecretSet
-		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
-		Secrets: destSecrets(row, mt.MintedKey),
-		// The only signal that says this destination is PUBLISHING rather than
-		// merely spawned. See firstMediaLogger and #675.
-		OnProgress:  onProgress,
-		AutoRestart: true,
-		// Per-destination reconnect policy. Zero values leave the supervisor's
-		// own defaults in place, which is what every destination ran on before
-		// this was configurable. The same three values are re-applied without a
-		// restart by applyDestPolicy when they change.
-		MinBackoff:  destPolicy(row).MinBackoff,
-		MaxBackoff:  destPolicy(row).MaxBackoff,
-		MaxRestarts: destPolicy(row).MaxRestarts,
-		// Stop retrying a key or codec the platform keeps refusing; see
-		// destHoldAfterQuickRejections. Retry (RestartDestination) lifts it.
-		HoldAfterQuickRejections: destHoldAfterQuickRejections,
-		// Spaced out so going live does not spawn every destination in the
-		// same tick. First spawn only -- a reconnect is never delayed.
-		StartDelay: startDelay,
-		// #674: a destination that probed before its audio existed can only be
-		// restarted. See reprobeOnUncharacterisedAudio -- the trigger is the
-		// demuxer's own "could not find codec parameters" rather than an
-		// absence of output, because absence of output is also what a
-		// mismatched publisher and a still-probing child look like.
-		OnLog: e.reprobeOnUncharacterisedAudio(row.Name, row.Kind,
-			func() *supervisor.Process { return proc }, e.onLog),
-		OnState: e.onState,
-		LogSink: logSink{e},
-		// Every kind, not only files. A file destination is where it showed --
-		// stopped after its publisher left, it sat out the grace and was
-		// SIGKILLed with no trailer -- but an RTMP or SRT output stopped on the
-		// same silent feed took the same 8s and ended its session unflushed.
-		// The wake only ever reaches a feed that has gone quiet. See
-		// relay.Hub.Wake.
-		WakeOnStop: relayWaker(readHub, subName),
+	// The minted key is passed as an EXTRA literal rather than left to inherit
+	// the row's registration, because it cannot: SecretSet.Scrub is a substring
+	// replace and the minted key ENDS WITH the operator's original, so
+	// registering only the original masks the last segment and leaves the
+	// signature and the hex manifest standing in the log. Empty when nothing was
+	// minted, which destSecrets drops. See
+	// TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
+	//
+	// startDelay spaces out the first spawn so going live does not start every
+	// destination in the same tick. First spawn only -- a reconnect is never
+	// delayed.
+	proc, watch := e.newDestinationProcess(destConsumer{
+		relayConsumer: relayConsumer{
+			name: subName, sub: subName, kind: procname.KindDestination, hub: readHub, args: buildArgs(target),
+			secrets: destSecrets(row, mt.MintedKey),
+		},
+		row:        row,
+		label:      row.Name,
+		nextArgs:   nextArgs,
+		startDelay: startDelay,
 	})
 
 	// A refused live level change tore the previous process down so that this
@@ -1294,7 +1303,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	}
 	published := &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
-		compiled: compiled, graph: graph, hub: hub, spec: spec,
+		compiled: compiled, graph: graph, argv: argv, hub: hub, spec: spec,
 		multitrack: mt, vodDropped: vodDropped, delay: dd, capt: capt,
 	}
 	e.dests[row.ID] = published
@@ -1331,7 +1340,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
 	e.warnRenditionAgainstPlatform(row)
 	e.logMultitrack(row, mt, vodDropped)
-	e.noteReload("destination", row.Name, reloadRestart, "started")
+	e.noteReload("destination", row.Name, AppliedRestart, "started")
 	return nil
 }
 
@@ -1369,7 +1378,7 @@ func (e *Engine) teardownDest(d *destination) {
 	if d == nil {
 		return
 	}
-	e.noteReload("destination", d.row.Name, reloadRestart,
+	e.noteReload("destination", d.row.Name, AppliedRestart,
 		"its command line changed, or it was disabled or removed")
 	if d.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
@@ -1627,7 +1636,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 			"dest", d.row.Name, "err", err)
 		return
 	}
-	sub := destSubName(d.row.ID, destRoleBackup)
+	sub := procname.DestProcessName(d.row.ID, procname.RoleBackup)
 	url, err := hub.Subscribe(sub, port)
 	if err != nil {
 		// #711. Quietly, with a reason, exactly as the port refusal above does:
@@ -1640,30 +1649,24 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	}
 
 	graph := newGraphHolder(compiled)
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: sub,
-		Kind: "destination",
-		Bin:  e.tools.FFmpeg,
-		Args: e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
-		// Respawns of the backup read the same holder, so a live level survives them.
-		NextArgs:     func() []string { return e.destArgs(d.row, graph.get(), url, backupTarget(d.row)) },
-		LiveCommands: true,
-		Secrets:      destSecrets(d.row),
-		AutoRestart:  true,
-		MinBackoff:   destPolicy(d.row).MinBackoff,
-		MaxBackoff:   destPolicy(d.row).MaxBackoff,
-		MaxRestarts:  destPolicy(d.row).MaxRestarts,
-		// The backup publishes the same key to the same platform, so it is
-		// refused for the same reason and held by the same rule.
-		HoldAfterQuickRejections: destHoldAfterQuickRejections,
-		OnLog:                    e.onLog,
-		OnState:                  e.onState,
-		LogSink:                  logSink{e},
-		// The redundant output stops on the same quiet feed as its primary.
-		WakeOnStop: relayWaker(hub, sub),
+	// Respawns of the backup read the same holder, so a live level survives them.
+	// No minted key (only the primary negotiates a multitrack mint) and no
+	// StartDelay: the backup starts from publishDest once the primary is already
+	// in the map, so there is no tick to spread.
+	argv := &destArgv{e: e, row: d.row, url: url, graph: graph, out: backupTarget(d.row)}
+	proc, watch := e.newDestinationProcess(destConsumer{
+		relayConsumer: relayConsumer{
+			name: sub, sub: sub, kind: procname.KindDestination, hub: hub,
+			args:    argv.build(argv.out),
+			secrets: destSecrets(d.row),
+		},
+		row:      d.row,
+		label:    d.row.Name + " (backup)",
+		nextArgs: func() []string { return argv.build(argv.out) },
 	})
 
 	d.backup = proc
+	d.backupWatch = watch
 	d.backupGraph = graph
 	d.backupPort = port
 	d.backupSub = sub
@@ -1763,10 +1766,4 @@ func (w *destWatch) publishedSinceRearm() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.published
-}
-
-func (w *destWatch) rearm() {
-	w.mu.Lock()
-	w.published = false
-	w.mu.Unlock()
 }

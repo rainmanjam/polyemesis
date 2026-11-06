@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -19,7 +20,7 @@ import (
 func TestTheVODReportIsKeptBesideTheLiveReportForTheSameDestination(t *testing.T) {
 	s := NewStore()
 	now := time.Now()
-	target := TargetFor(&routing.Loudness{TargetLUFS: -16}, routing.PlatformTwitch)
+	target := TargetFor(&routing.Loudness{TargetLUFS: -16}, routing.Platform(platform.Twitch))
 
 	s.Put(Observe(7, "twitch", target, Frame{IntegratedLUFS: -15, Seconds: 30, Integrated: true}, now))
 	s.Put(Observe(7, "twitch", target, Frame{IntegratedLUFS: -22, Seconds: 30, Integrated: true}, now).ForMix(MixVOD))

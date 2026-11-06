@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -47,8 +48,10 @@ import (
 // only thing ever written is a scratch directory this function makes and
 // removes.
 func VerifyBackup(dir string) error {
-	dbPath := filepath.Join(dir, "polyemesis.db")
-	keyPath := filepath.Join(dir, "secret.key")
+	// A backup directory is a data directory: the same two names the server
+	// opens, from the one place that spells them.
+	layout := config.Config{DataDir: dir}
+	dbPath, keyPath := layout.DBPath(), layout.SecretPath()
 
 	if st, err := os.Stat(dbPath); err != nil {
 		return fmt.Errorf("backup has no polyemesis.db: %w", err)

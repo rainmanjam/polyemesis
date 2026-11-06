@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 )
@@ -24,11 +25,12 @@ const (
 	// startup. FFmpeg detection shells out to the binary and parses its banner,
 	// which on a cold filesystem is measured in seconds, not milliseconds.
 	startWaitHint = 30 * time.Second
-	// stopWaitHint has to cover the 20s HTTP drain plus the engine teardown
-	// that finalises recordings. Undersell it and the SCM kills us mid-flush,
-	// which is the exact truncated-recording failure the graceful path exists
-	// to prevent.
-	stopWaitHint = 45 * time.Second
+	// stopWaitHint has to cover the whole shutdown, which is one
+	// engine.ShutdownBudget (the HTTP drain and the engine teardown that
+	// finalises recordings share it), plus the StopMargin systemd is left on
+	// Unix. Undersell it and the SCM kills us mid-flush, which is the exact
+	// truncated-recording failure the graceful path exists to prevent.
+	stopWaitHint = engine.ShutdownBudget + engine.StopMargin
 	// checkInEvery keeps the checkpoint moving while a phase is taking a while.
 	// The SCM only tolerates silence up to the wait hint; a rising checkpoint
 	// restarts its clock.

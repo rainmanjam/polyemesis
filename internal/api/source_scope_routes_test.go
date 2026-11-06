@@ -296,12 +296,12 @@ var defaultEngineSites = map[string]string{
 		"programme.",
 
 	// --- install-wide questions asked of one engine, and why that is right ---
-	"defaultSourceID": "which source an UNSCOPED endpoint speaks for, and the " +
+	"defaultSourceID": "which source an UNSCOPED endpoint speaks for -- the one meaning of the default programme, used by settings, the sources list, /system, transcripts and OBS -- and the " +
 		"reach is the point of the function rather than an accident: it prefers " +
 		"the source that actually BUILT an engine over the store's first row, so " +
-		"/system cannot advertise an ingest port with no listener behind it. Its " +
-		"one caller now accepts ?source= and labels which programme it answered " +
-		"for (#551).",
+		"/system cannot advertise an ingest port with no listener behind it. " +
+		"/system accepts ?source= and labels which programme it answered for " +
+		"(#551).",
 	"farewell": "DELETE /alerts/rules/{id}'s message to the rule being " +
 		"deleted. It borrows a NOTIFIER to send one message to one stored rule, " +
 		"which is handleTestAlertRule's reach for handleTestAlertRule's reason: " +

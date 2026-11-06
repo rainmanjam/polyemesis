@@ -36,7 +36,7 @@ package db
 // internal/api/preannounce.go may not do. Preannounce refuses an enabled row
 // because it writes StreamKey, and StreamKey is inside Target(), which is the
 // first element of destSpec: writing it under a running FFmpeg cycles the
-// process at a moment nobody chose. No field below reaches destSpecFor, so no
+// process at a moment nobody chose. No field below reaches DestSpecFor, so no
 // field below reaches an argv, so no write of this block can restart anything.
 // internal/engine/lifecycle_spec_test.go pins that, by mutating every field
 // here and requiring both spec hashes to come back byte-identical.

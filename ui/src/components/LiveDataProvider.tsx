@@ -7,10 +7,10 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
-import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
+import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
 import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
-import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
+import { LiveDataContext, type LiveData, type Programme } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
   Levels,
@@ -32,6 +32,9 @@ import type {
 /** How many log lines the client keeps. The server already bounds its own
  *  buffer; this bounds the browser's so a long session cannot grow forever. */
 const LOG_LIMIT = 600;
+
+/** How long one /sources read may take before it is abandoned, so the next poll can run. */
+const SOURCES_READ_TIMEOUT_MS = 10_000;
 
 export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
@@ -85,9 +88,14 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   /* Set from the same /sources response that resolves the programme, so the
      count and the choice can never describe different lists. */
   const [sourceCount, setSourceCount] = useState(0);
+  /* Whether sourceCount came from a successful /sources answer. The 0 above is
+     only a placeholder: a slow or failed first read must not look like an
+     install with no programme (the Dashboard would draw its empty state). Never
+     reset once true: a failed later poll keeps the last good count. */
+  const [sourceCountKnown, setSourceCountKnown] = useState(false);
   /* #638: the list, not just the count. A switcher needs names, and fetching
      them separately would mean a second copy of the resolution rule. */
-  const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
   /* The ids the last /sources answer carried, so the socket effect can tell
      "a programme we have never seen" from "the one we are already on". */
   const knownIds = useRef<number[]>([]);
@@ -95,6 +103,23 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      "there is none", which is legitimate. See the effect below for why this is
      a gate WITH A DEADLINE rather than either extreme. */
   const [programmeKnown, setProgrammeKnown] = useState(false);
+
+  /* resolveSources runs from a timer, a manual refresh and the socket's
+     self-heal, so two can be in flight. Each takes a number and only the newest
+     may apply its answer: an older response landing last must not restore a
+     deleted programme or overwrite a newer count. */
+  const resolveGen = useRef(0);
+  /* Whether /sources has ever answered. After that, a failed read keeps the
+     last good list and programme: dropping to "no programme" would tear down
+     the scoped socket and send unscoped requests the server refuses with
+     source_required on a multi-programme install. */
+  const resolvedOnce = useRef(false);
+  /* The newest read's promise, and whether it is still running. The timer is
+     single-flight: with /sources slower than the 10 s tick, a new read per tick
+     would supersede every response before it landed and the count would never
+     resolve. */
+  const latestRead = useRef<Promise<number | null> | null>(null);
+  const readInFlight = useRef(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -222,8 +247,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         // sound. A CONTROL: there is no stale frame left to render as current.
         setLevels(null);
         wsRef.current = null;
-        // Back off the same way the server's supervisor does, so a restarting
-        // server does not get hammered by every open tab.
+        // Exponential backoff so a restarting server is not hammered by every
+        // open tab. Capped at 15 s, tighter than the supervisor's 30 s for
+        // FFmpeg children: a tab wants to be back as soon as the server is.
         const delay = Math.min(1000 * 2 ** retryRef.current, 15000);
         retryRef.current += 1;
         reconnectTimer = window.setTimeout(connect, delay);
@@ -275,13 +301,35 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      died, Clips showed "No clips yet.", all against a healthy server, until
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
-  const resolveSources = useCallback(async () => {
+  const resolveOnce = useCallback(async (gen: number): Promise<number | null> => {
+    // A request that never settles would hold readInFlight, and with it every
+    // later poll, for ever: the Dashboard reads its programmes only from here.
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), SOURCES_READ_TIMEOUT_MS);
     try {
-      const rows = await api.listSources();
+      const rows = await api.listSources(abort.signal);
       const ids = rows.map((r) => r.id);
+      // Superseded while in flight: answer with what the newer read applied,
+      // not with this stale list.
+      if (gen !== resolveGen.current) return latestRead.current ?? null;
+      resolvedOnce.current = true;
+      setSourceCountKnown(true);
       knownIds.current = ids;
       setSourceCount(ids.length);
-      setProgrammes(rows.map((r) => ({ id: r.id, name: r.name })));
+      // Unchanged lists keep their identity: this runs on a timer, and a new
+      // array every 10 s would re-render every consumer for nothing.
+      const next: Programme[] = rows.map((r) => ({ id: r.id, name: r.name, publishUrls: r.publishUrls }));
+      setProgrammes((prev) =>
+        prev.length === next.length &&
+        prev.every(
+          (p, i) =>
+            p.id === next[i].id &&
+            p.name === next[i].name &&
+            JSON.stringify(p.publishUrls) === JSON.stringify(next[i].publishUrls),
+        )
+          ? prev
+          : next,
+      );
       setProgramme((current) => {
         // Keep the operator on their programme while it still exists.
         // Re-resolving from scratch every time would drag a two-programme
@@ -292,14 +340,30 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         rememberProgramme(picked);
         return picked;
       });
+      return ids.length;
     } catch {
       // A console that will not render because it could not list sources is
-      // worse than one showing the install's only programme.
-      setProgramme(null);
+      // worse than one showing the install's only programme. Only before the
+      // first answer, though: see resolvedOnce.
+      if (gen !== resolveGen.current) return latestRead.current ?? null;
+      if (!resolvedOnce.current) setProgramme(null);
+      return null;
     } finally {
+      window.clearTimeout(timeout);
+      if (gen === resolveGen.current) readInFlight.current = false;
       setProgrammeKnown(true);
     }
   }, []);
+
+  /* A manual refresh or the self-heal may supersede a read in flight (the
+     newest wins); the timer may not. */
+  const resolveSources = useCallback((): Promise<number | null> => {
+    const gen = ++resolveGen.current;
+    readInFlight.current = true;
+    const p = resolveOnce(gen);
+    latestRead.current = p;
+    return p;
+  }, [resolveOnce]);
 
   /* #638: THE HALF THAT WAS MISSING.
    *
@@ -335,6 +399,31 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
   }, [resolveSources]);
+
+  /* THE COUNT KEEPS BEING READ, because the socket cannot say it fell to zero.
+
+     Status events are published BY an engine, so an install that loses its
+     last source stops sending them and the last frame stays on screen for
+     ever: a dashboard left open drew a publish URL and a track count for a
+     programme that no longer existed. The source list is a single cheap read,
+     and it is the one place sourceCount comes from, so the header chip and the
+     Dashboard's ingest card cannot scope by different counts. */
+  useEffect(() => {
+    if (!programmeKnown) return;
+    // Not while the tab is hidden: nobody is looking at the count, and a
+    // background tab would otherwise poll for as long as it is open. Coming
+    // back reads it at once.
+    const tick = () => {
+      if (!document.hidden && !readInFlight.current) void resolveSources();
+    };
+    const poll = window.setInterval(tick, 10_000);
+    const onVisible = tick;
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [programmeKnown, resolveSources]);
 
   /* SELF-HEALING, for the changes this tab did not make.
 
@@ -377,6 +466,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      sourceCountKnown,
       programmes,
       selectProgramme,
       refreshSources: resolveSources,
@@ -396,6 +486,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      sourceCountKnown,
       programmes,
       selectProgramme,
       resolveSources,

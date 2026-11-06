@@ -58,6 +58,8 @@ type managerSettingsProbe struct {
 	// back off the manager rather than created here. What is asserted is
 	// that every engine holds the SAME one, which is the whole of its job.
 	gate *alerts.InstallGate
+	// facebookCaptions is pushed open, so an engine that missed it reads false.
+	facebookCaptions bool
 }
 
 func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
@@ -69,11 +71,12 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 		attempts:  7,
 		hooks: hooks.NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)),
 			hooks.SourceFunc(func() ([]hooks.Hook, error) { return nil, nil })),
-		stream:    eventstream.NewHub(),
-		lifecycle: &stubLifecycle{},
-		keys:      &stubKeyChecker{release: make(chan struct{})},
-		accounts:  &accountHealthProbe{},
-		platforms: &stubPlatformHealth{release: make(chan struct{})},
+		stream:           eventstream.NewHub(),
+		lifecycle:        &stubLifecycle{},
+		keys:             &stubKeyChecker{release: make(chan struct{})},
+		accounts:         &accountHealthProbe{},
+		platforms:        &stubPlatformHealth{release: make(chan struct{})},
+		facebookCaptions: true,
 	}
 	m.SetTranscriber(p.tw, p.modelsDir, func(name string, args []string) (string, []string) {
 		return p.niceMark, args
@@ -85,6 +88,7 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 	m.SetKeyChecker(p.keys)
 	m.SetAccountHealth(p.accounts)
 	m.SetPlatformHealth(p.platforms)
+	m.SetFacebookCaptions(p.facebookCaptions)
 	p.gate = m.engineSettingsSnapshot().alertGate
 	if p.gate == nil {
 		t.Fatal("NewManager built no install alert gate, so every engine would " +
@@ -126,6 +130,11 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	if keys != p.keys {
 		t.Errorf("%s: key checker = %v, want the API's: this programme's refused "+
 			"destinations would never be told their platform rotated the key", what, keys)
+	}
+
+	if eng.facebookCaptions.Load() != p.facebookCaptions {
+		t.Errorf("%s: Facebook caption switch = %v, want %v: this programme's "+
+			"Facebook destinations would be staged differently from its neighbour's", what, eng.facebookCaptions.Load(), p.facebookCaptions)
 	}
 
 	if gate != p.gate {
@@ -310,7 +319,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"accountHealth", "alertAttempts", "alertGate", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "platHealth", "stream", "tw"}
+	covered := []string{"accountHealth", "alertAttempts", "alertGate", "facebookCaptions", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "platHealth", "stream", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())

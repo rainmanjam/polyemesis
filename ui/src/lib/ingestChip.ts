@@ -7,6 +7,7 @@
  *  describes the code instead of calling it is the shape this audit keeps
  *  finding, so the expression moved here and both call it.
  */
+import { ingestProcessUp, ingestWaiting } from "./liveness";
 import type { FailoverStatus, ProcessState, ProcessStatus } from "./types";
 
 /** Whether the STANDBY ingest is what is carrying the broadcast right now.
@@ -44,20 +45,27 @@ export function ingestChipReading(
   | { kind: "bitrate"; kbps: number }
   | { kind: "backup" }
   | { kind: "pending" }
+  | { kind: "waiting" }
   | { kind: "state"; state: ProcessState | null | undefined } {
   // Before the bitrate and ingestLive branches: the process and the bitrate feed
   // describe the primary, which can recover while a manual-return failover keeps
   // the backup selected. "Running" for it would hide which ingest is on air.
   if (onBackup) return { kind: "backup" };
-  if (ingest?.state === "running" && ingest.progress?.bitrateKbps != null) {
-    return { kind: "bitrate", kbps: ingest.progress.bitrateKbps };
+  // The server always serializes progress.bitrateKbps, 0 included, so a
+  // listener idling for its encoder arrives as a running child at 0 kbps. A zero
+  // with nothing arriving is therefore "waiting"; a zero while bytes ARE arriving
+  // is a child that disagrees with the relay, a real reading that still shows.
+  const kbps = ingest?.progress?.bitrateKbps;
+  if (ingestProcessUp(ingest) && kbps != null && (kbps > 0 || ingestLive)) {
+    return { kind: "bitrate", kbps };
   }
   // An SRT source is live with no child at all, so it has no bitrate to show
   // and "Running" is the honest answer rather than a zero at a stream that is
-  // fine. A running child without progress yet lands here for the same reason.
-  if (ingestLive || ingest?.state === "running") {
-    return { kind: "state", state: "running" };
-  }
+  // fine.
+  if (ingestLive) return { kind: "state", state: "running" };
+  // A listener that is up with nothing arriving is waiting for its encoder,
+  // not live: "Running" here put a green reading on an ingest with no stream.
+  if (ingestWaiting(ingest, ingestLive)) return { kind: "waiting" };
   // NO READING IS NOT A STOPPED INGEST. Before the page has what it needs to
   // decide -- the first status frame, or on a multi-programme install the two
   // frames a relay rate takes -- there is no process state and no liveness
@@ -118,6 +126,6 @@ export function ingestProblem(
   onBackup: boolean,
 ): string | null {
   if (ingestLive || onBackup) return null;
-  if (!ingest || ingest.state === "running") return null;
+  if (!ingest || ingestProcessUp(ingest)) return null;
   return ingest.lastError ? ingest.lastError : null;
 }

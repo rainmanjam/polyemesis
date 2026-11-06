@@ -11,7 +11,7 @@ import (
 //
 // DefaultPresetOpts are generic OBS-convention slots (music 0, mic 2, clean 1)
 // that know nothing about this ingest. The console has never applied a preset
-// with them as they stand: ui/src/lib/presetTrackDefaults.ts presetOptsFromRoles
+// with them as they stand: ui/src/features/routing/presetTrackDefaults.ts presetOptsFromRoles
 // opens each picker on the annotated track, so on a programme whose music sits
 // on track 3 "No music" drops track 3. A client with no pickers -- a Stream Deck
 // key, an agent -- sent no body and got track 0 dropped instead. This is that
@@ -62,6 +62,14 @@ func PresetOptsFromRoles(base PresetOpts, src Source) PresetOpts {
 		out.CleanTrack = i
 	}
 	return out
+}
+
+// DefaultPresetOptsFor is the options a preset is applied with when the caller
+// names none, for this ingest: the one answer the compile route, apply, the OBS
+// scene bridge and GET /routing/presets all use, so a preset previewed is the
+// preset applied.
+func DefaultPresetOptsFor(src Source) PresetOpts {
+	return PresetOptsFromRoles(DefaultPresetOpts(), src)
 }
 
 // Kept is what KeepOperatorDecisions carried from the stored mix into a preset:

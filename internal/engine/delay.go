@@ -14,6 +14,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
@@ -87,12 +88,19 @@ type destDelay struct {
 	due bool
 	// cut is set by Stop now, so the drain's end is reported as a cut.
 	cut atomic.Bool
+	// finished is closed once the drain's teardown has run: by finishDrain, or
+	// by Shutdown when it took the destination over. CutDelay waits on it
+	// instead of polling the engine's maps.
+	finished   chan struct{}
+	finishOnce sync.Once
 }
+
+func (dd *destDelay) finish() { dd.finishOnce.Do(func() { close(dd.finished) }) }
 
 // delayDestSubName is the line's subscription on the upstream hub. A name of
 // its own, so the FFmpeg's own name stays free for the private hub and the #711
 // guard still refuses a second reader of the same destination upstream.
-func delayDestSubName(id int64) string { return destSubName(id, "delay") }
+func delayDestSubName(id int64) string { return procname.DestProcessName(id, procname.RoleDelay) }
 
 // delayRoot is where every delayed destination of every programme spills.
 func delayRoot(dataDir string) string { return filepath.Join(dataDir, "delay") }
@@ -187,7 +195,7 @@ func (e *Engine) delayRoom(dir string) func(n int64) error {
 // e.mu, which startDest also holds to publish the destination -- the only
 // happens-before the race detector can see across a UDP hop.
 func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
-	dd := &destDelay{inSub: delayDestSubName(row.ID)}
+	dd := &destDelay{inSub: delayDestSubName(row.ID), finished: make(chan struct{})}
 	id := row.ID
 	delay := time.Duration(row.OutputDelaySeconds()) * time.Second
 	sweepDelayRoot(e.cfg.DataDir)
@@ -409,6 +417,7 @@ func (e *Engine) finishDrain(d *destination) {
 		delete(e.retiring, d.row.ID)
 	}
 	e.mu.Unlock()
+	d.delay.finish()
 	e.publishStatus()
 }
 
@@ -428,16 +437,11 @@ func (e *Engine) CutDelay(id int64) bool {
 	d.delay.line.Close()
 	// Wait for it, so a caller reading status back sees it stopped: bounded by
 	// the FFmpeg's own stop deadline and a margin.
-	deadline := time.Now().Add(stopTimeout + 2*time.Second)
-	for time.Now().Before(deadline) {
-		e.mu.RLock()
-		_, still := e.draining[id]
-		_, going := e.retiring[id]
-		e.mu.RUnlock()
-		if !still && !going {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
+	t := time.NewTimer(stopTimeout + 2*time.Second)
+	defer t.Stop()
+	select {
+	case <-d.delay.finished:
+	case <-t.C:
 	}
 	return true
 }

@@ -1,6 +1,9 @@
 package playout
 
-import "time"
+import (
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"time"
+)
 
 // LiveState is what the public page says about the stream.
 type LiveState string
@@ -24,7 +27,13 @@ const (
 	// minLiveGrace is the floor on how stale the newest segment may be and still
 	// count as live. A rung restart leaves the ladder empty for a moment, and
 	// flipping a watching viewer to "ended" for that would be wrong.
-	minLiveGrace = 15 * time.Second
+	//
+	// DERIVED FROM THE READERS' PROBE CEILING, not a second literal: a declared
+	// track that never carries data holds a relay reader's probe open for the
+	// whole ffmpeg.RelayProbeWindow, and a rung restarting in that state writes
+	// no segment for that long. A grace at or below the window would show a
+	// restart as "ended"; the extra second is the margin.
+	minLiveGrace = ffmpeg.RelayProbeWindow + time.Second
 	// EndedHold is how long "ended" is shown before the page falls back to
 	// "offline".
 	EndedHold = 12 * time.Hour

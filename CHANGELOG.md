@@ -8,7 +8,247 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Re-detecting hardware reaches the next VAAPI rendition start of a running programme.** A VAAPI
+  rendition pinned the render node it found at its first start, for as long as the programme's engine
+  lived, so a GPU passed through or a driver upgraded afterwards showed `h264_vaapi` working in the
+  encoder list while every later rendition start kept using the old node. The render node now has one
+  owner, refreshed by `GET /api/v1/encoders?redetect=1` and read at every rendition start (a rendition
+  that is already running keeps its node until it restarts).
+- **Deleting a destination no longer skips the "this ends a live broadcast" confirmation when its
+  row cannot be read.** A store error on that read used to turn the refusal into an unconfirmed delete.
+  It now asks for `{"confirm": true}`, since whether the row is carrying a broadcast is unknown; a row
+  with unreadable data can still be deleted that way.
+- **`GET /api/v1/system` no longer serves a stale ingest block when the source cannot be read.** It fell
+  back to the settings blob's own ingest copy while `GET /api/v1/settings` failed on the same fault.
+  Both now return the store error.
+- **`playout.json` no longer holds the playback token in plaintext.** The token is sealed with the key
+  the database seals stream keys with (`secret.key`); an existing plaintext file is read and rewritten
+  sealed when the server starts, so watch links keep working. A `playout.json` that is corrupt, or whose
+  token this install's key cannot open (a restored backup without its `secret.key`), is replaced with
+  protected defaults and now logs a warning saying so, instead of silently losing the title, offline
+  card and token.
+- **Copy buttons say so when the clipboard is unavailable.** On a plain-http install the browser has no
+  clipboard, and the ingest URL copy in Settings, the API token, ACME, TLS and redirect-path copies,
+  and Pull URL on a media file did nothing and said nothing. They now show "Clipboard is unavailable on this origin".
+  The clip, automation and recording pages now show a plain-text server message in their errors, as
+  every other page does, and a change the server saved but could not apply raises the same warning
+  toast there. A freshly minted API token is no longer shown as
+  "Copied" because the previous one was copied a moment ago.
+- **The Dashboard and the header agree on how many programmes exist.** The Dashboard kept its own count
+  and refreshed it on its own timer, so for up to ten seconds the two could scope the ingest figures
+  differently. The count now has one owner and a console left open notices the last source going away.
+- **The Dashboard's lanes, Go live rows and setup checklist follow programmes added, renamed or deleted
+  elsewhere.** The page kept its own one-time read of the programme list, so they held the old list until
+  the page was reloaded. They now read the same list the header does, which refreshes every ten seconds.
+- **Saving a destination refuses a routing profile that would stream silence, as creating one
+  does.** `PUT /destinations/{id}` skipped the check `POST` ran, so a save could store a profile that
+  selected nothing the programme's tracks carry. A save that changes neither the profile nor the
+  programme is still not refused. The compile preview (`POST /routing/presets/{preset}`) and OBS
+  scene rules with no options now pick tracks from the programme's roles, as applying a preset
+  already did; `GET /routing/presets` adds `roleDefaults` beside `defaults`.
+- **The default programme means one thing.** The Settings page and the settings save used the first
+  source row while `/system`, transcripts and the OBS bridge used the first source with a running
+  engine, so with the first source failing to start they described different programmes. All of them
+  (and the Sources list's default marker) now use the running one, and the first row only when none
+  is running.
+- **A read-only API token no longer receives chat retractions on the live socket.** `/api/v1/ws`
+  sent `chatRetract` (platform account, author id) to read tokens while `/api/v1/events` withheld it.
+  Both now follow one table.
+- **Deleting a programme names the YouTube ingest streams it leaves on the channel**, as deleting a
+  destination does. A request that deletes the last source can no longer reach a handler that finds
+  no programme.
+- **`POLYEMESIS_FFMPEG_LOGLEVEL` reaches every FFmpeg child, as the documentation says.** Eight
+  children ignored it and ran at a level written into their command line: the selector's copy
+  hops, the playlist feed, the HLS/DASH playout variants, the loudness monitor, the proxy, thumbnail
+  and archive jobs, the clip exporter, the playlist transcode and the transcription audio extract. With the variable
+  unset, nothing changes: each keeps its own default (`warning` for the live ones and for the proxy,
+  thumbnail, archive, clip and playlist-transcode jobs; `error` for the transcription extract and the other
+  short probes, as docs/CONFIGURATION.md lists). The variable, `POLYEMESIS_INGEST_CAPTURE` and `POLYEMESIS_FFMPEG_ASSUME_MAJOR` are
+  now read once at startup with the rest of the environment.
+- **Every relay reader opens the relay the same way, and starts faster.** The rendition encoder, the
+  silence synthesiser, the HLS/DASH playout variants, the loudness monitor and the selector's copy hops
+  read the relay without the probe limits, `-scan_all_pmts 0` and the forward-jump
+  `-dts_delta_threshold` that the destinations, recorder, preview and ingest meter already used. They now
+  carry the same input options, so they stop spending the whole probe window as dead air on start, join
+  in well under a second, tolerate a late track, and no longer swap track offsets after a long outage.
+  A declared track that never carries data can hold a reader for up to 15 s (it used to be about 5 s),
+  so the playout page waits 16 s before calling a restarting rung ended. Visible as: those children
+  start faster, and their command lines (on the Monitoring page) carry the extra input options.
+- **Every writer into the relay carries the interleave-stall fix the ingest has.** The silence
+  synthesiser, the slate, the rendition encoder and the selector's copy hops (the failover and playlist
+  feeds) muxed with FFmpeg's default 10 s interleave buffer, so a multitrack stream whose later audio
+  tracks resolved late could write nothing, video included, for up to ten seconds. They now carry
+  `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, as the ingest always has, so their output
+  timestamps start near 0 instead of 1.4 s. Audio/video spacing is unchanged; only the shared starting
+  offset moved, and every writer into a hub moved with it.
+- **A backup destination now restarts when FFmpeg cannot characterise its audio,** at most 3 times with a
+  30 s cooldown between attempts, as the primary already did.
+- **Stopping the preview, a rendition, a playout variant, the meters or a failover feed on a quiet feed no
+  longer waits out the grace to be killed.** Only the recorder and the destinations were woken when
+  stopped after their publisher left; every other relay reader blocked in its read, ignored the
+  stop signal and was killed at the end of the 8 s grace. They are all built one way now, and a
+  stopped preview returns in under a second instead of eight.
+- **A redundant (backup) output now re-probes like its primary.** It lacked the publishing signal and
+  the re-probe handler, so a backup that started before the stream's audio existed sat at running and
+  published nothing for ever, where the primary restarts to probe again. It restarts on the demuxer's
+  own complaint, and again when the ingest layout is first measured if it has never published.
+- **The expert-mode command preview of a stopped destination shows the command that would run.** It
+  omitted the muxer and socket tuning (`-flvflags`, `-rw_timeout`, the mux queue sizes), so a
+  destination using them was previewed without them. A running destination's preview is built by the
+  engine from the pieces it was started with instead of by peeling the saved arguments off its live
+  command line.
+- **Burning a recorded caption file in no longer loses whitespace at the edge of its path.** FFmpeg trims
+  unescaped leading and trailing spaces, so a path ending in one named a different file; the burn-in
+  now uses the same filter escaper as every other filter argument, which also converts Windows
+  separators.
+- **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
+  said 0 and the card said Starting, because a running process that had carried no media counted as
+  live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and
+  delete confirm, routing overview and go-live sheet now share one rule. A waiting ingest listener
+  reads Waiting, not Running.
+- **MQTT reads a destination's delay the way alerts and webhooks do.** A stopped destination still
+  playing its delayed tail out is `enabled` on the retained topic until the tail ends, instead of
+  reading disabled while it was still on the air. The audience sampler likewise no longer treats a
+  destination that carries an error as running.
+- **A saved MQTT publish interval takes effect without a restart.** The interval was read once when
+  the broker connection opened, and the "unchanged settings" check left it out on purpose, so a new
+  value did nothing until a restart or some other reconnect. The running loop now moves to it at
+  once, and the connection is not cycled to do so.
+- **`POLYEMESIS_CAPTIONS_FACEBOOK` accepts `true`, like the X switches.** It accepted only the exact
+  string `1`, so `=true` silently left Facebook captions off. Every on/off switch in the environment
+  (`POLYEMESIS_CAPTIONS_FACEBOOK`, `POLYEMESIS_X_PUBLISH`, `POLYEMESIS_X_LIVESTREAM`) now reads `1` or
+  `true`, ignoring case and surrounding space; anything else is off. The switches, the X app bearer
+  and the Rumble chat key and channel are read once at startup and handed to the parts that use them.
+- **Times on every page follow the display time zone from the first paint.** The zone was applied only
+  once a page that reads settings (Dashboard, Settings, Sources, Recordings, Playout) had loaded, so a
+  cold load onto Jobs, Clips, Monitoring, Automation or Library drew every time in UTC. The console
+  now reads it before it draws anything. The failover banner's "since" time, the output strip and
+  track meter times, the OBS bridge times, API token dates and the account expiry date used the
+  browser's own zone; they now use the display zone too (UTC on a default install) and show 24-hour
+  time.
+- **A display time zone the server cannot load is reported on a settings save as well as at start-up.**
+  Start-up warned and a save silently logged in UTC. Both paths now run the same list of what stored
+  settings configure in a running process, so a setting added to it is applied at both.
+- **An unreadable settings row stops the server from starting.** Start-up handled it four ways
+  (built-in defaults for the job tier, skipping the chat, automod and alert settings, and an abort
+  after the engines and API were already running). It now stops once, before anything is built
+  from guessed values, with an error that names the settings.
+
+- **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
+  Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
+  adapter, which stamped its own account on it. Each delivery now goes to the adapter for the
+  broadcaster it names; one for a channel that is not connected here is acknowledged and dropped.
+- **A spent YouTube quota is read the same way everywhere.** Deleting or banning in YouTube chat
+  recognised only `quotaExceeded`, so `dailyLimitExceeded` (and `dailyLimitExceededUnreg`) read as
+  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons,
+  and clip publishing tells `dailyLimitExceededUnreg` (unauthenticated use) apart, advising a reconnect
+  rather than waiting for midnight.
+- **X no longer shows a stale broadcast id.** The connected-account list and planned rollover fell
+  back to the announcement mirror for X, which X never writes from a schedule, so an ended
+  broadcast could reappear as the one on air. They now use the lifecycle's recorded id only.
+
+- **Deleting the last recorded segment works once no recorder is running, as 0.11.0 said it did.**
+  The exemption that lets `DELETE /recordings/{id}` take the stopped recorder's own segment
+  recognised only the name earlier releases wrote (`rec-YYYYMMDD-HHMMSS.mkv`). Since 0.11.0 the
+  recorder names each segment after its programme (`rec-s<id>-YYYYMMDD-HHMMSS.mkv`), so every
+  segment it had just written was still refused with `409` for up to one segment length plus two
+  minutes after recording was turned off or the free-space floor stopped it, telling the operator
+  to stop a recording that was no longer running. Both names are recognised now. A file
+  destination's output keeps the guard, including one whose rolled-over name looks like a recorder
+  segment, and so does a segment whose recorder is still finalising it: a recorder that is
+  stopping, or whose source is being deleted, now counts as running until its FFmpeg has exited,
+  so `GET /recording` can answer `"state": "recording"` for those few seconds.
+- **The session cookie's `Secure` flag, the OAuth redirect URI and the client address now trust
+  forwarded headers by one rule.** With `trustProxyHeaders` on, `X-Forwarded-For` was believed only
+  from loopback and the addresses in `trustedProxies`, while `X-Forwarded-Proto` (cookie flag) and
+  `X-Forwarded-Proto` / `X-Forwarded-Host` (OAuth redirect URI) were believed from any peer. All
+  four headers are now believed only from loopback and `trustedProxies`, and the playout viewer
+  links follow the same rule once `trustProxyHeaders` is on. A proxy in another container or on
+  another host, including nginx or Caddy on the Docker host (`172.17.0.1`), must be listed in
+  `trustedProxies`, or the cookie loses its `Secure` flag and OAuth redirect URIs fall back to the
+  internal `http://` address; the startup log now says so.
+- **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
+  login throttle already does. Keyed on the full address, a client holding one /64 could rotate
+  addresses and never reach the limit.
+- **Security: the Streamer.bot pack no longer sends the API token in the clear.** `Polyemesis.cs`
+  sent the bearer token to whatever `polyemesisUrl` held, `http://` to a remote host included.
+  It now applies the rule the Stream Deck plugin and the OBS script already had: `https://` to
+  any host, `http://` only to this machine, anything else refused with a warning in the
+  Streamer.bot log and no request made. A pack pointed at a plain-`http://` remote host stops
+  working until its URL is changed to `https://`.
+- **The Streamer.bot Status action counts running destinations.** It read `enabled` off each item of
+  `GET /destinations`, whose items nest the destination, so `%polyemesisLive%` was always 0 and the
+  summary read "0 of N destinations running"; and `enabled` is configuration, not state. It now reads
+  `GET /status?source=<polyemesisSource>` (which a multi-programme install requires) and counts
+  destinations whose process is `running`, the field the console and the Stream Deck use. The server
+  lists every programme's destinations whatever `?source=` says, so the action also filters them by
+  each destination's programme itself; the manifest lists the path the code calls.
+
+- **Poll announcements reach X.** The poll's start and end texts were sent unchanged to every chat, and
+  X, which stops a chat message at 140 characters, refused any of 141 to 200. X's chat now gets a
+  shortened text (an ellipsis where the question or a label was cut, the voting instructions kept; the
+  question is shortened before any option label, and a cut never splits an emoji or a flag); every other
+  chat keeps the full text.
+- **Instagram, LinkedIn, Dailymotion, Owncast and Rumble destinations now get their platform's encoder
+  guidance.** Each of those saves as a custom destination, so the console and the engine never found the
+  figures the catalogue holds for them and a rendition outside them raised no warning. A destination now
+  remembers the preset the operator picked for it (`presetId`, optional on create and update, checked
+  against the destination's platform, and cleared by sending it empty), and the guidance is looked up by it.
+  The dialog sends the preset only when one was picked, never the guess it uses to label an older destination. Destinations that already exist are matched once, at upgrade, by their
+  ingest URL where exactly one preset's fixed host fits; the rest stay unlabelled until they are edited
+  and saved from a preset.
+- **YouTube titles are counted the same way everywhere.** The metadata push counted characters, the clip
+  publisher and the console counted UTF-16 units (an emoji outside the Basic Multilingual Plane is
+  two), so a title could pass one check and fail another. The metadata push and recurring-broadcast
+  titles now use UTF-16 units too, and so does the title polyemesis gives a YouTube stream it creates (128).
+- **Rumble chat cannot be moderated, and the moderation matrix now says so.** Delete, timeout, ban and
+  upstream hide read as available on Rumble although it has no moderation API; they are now shown
+  as unavailable with the reason. Flagging and the local hide still work.
+- **A failure cause newer than the console no longer reads blank.** The destination card, on-air bar,
+  Go live sheet and process table looked the cause up by name and showed nothing for one they had no
+  label for; they now show "Unknown failure", as the remedy already did.
+- **Refresh stream key is offered where the platform can hand a key over.** It was hidden for Kick,
+  which can, and shown for Vimeo, X, Rumble and TikTok, which have no key API (Vimeo and X answered every press with a 400).
+- **Chat names X and Rumble properly.** The moderation menu printed "on x" in lower case, and Rumble
+  chat was labelled "Custom", and X chat lines carried no platform mark on an overlay. Every place the console names a platform now reads one list, taken from
+  the server's platform registry.
+- **The settings form's failover fallback matches the server.** Shown only when a server omits the
+  failover block, it read 10 s grace and 60 s stable return; it is now 5 s and 30 s, the server's defaults.
+- **The Go live sheet warns with the same YouTube count as the Stop dialog.** It counted every enabled
+  YouTube destination, so it could promise a broadcast would end when the Stop dialog, which asks the
+  server, said none would.
+- **Cancelling a clip export or a highlight scan returns promptly.** The clip cutter, the editor's
+  keyframe probe and the highlight loudness pass started FFmpeg without a kill grace, so a child that left
+  a worker holding its output pipe could keep a cancelled job waiting until that worker exited. They now
+  start through the shared FFmpeg runner, which gives up on the pipes five seconds after the kill.
+- **`polyemesis mcp` accepts `http://LOCALHOST`.** The stdio relay matched `localhost` case-sensitively
+  and refused a mixed-case loopback URL that the API treats as loopback.
+
+### Added
+
+- **`GET /api/v1/platforms/registry`** serves the platform registry (names, the stored platform value,
+  which platforms carry destinations and chat, and the IVS and X title rules) for scripted clients.
+  `GET /platforms/accounts` gains `isPage` on a Facebook account that is a Page.
+
+### Changed
+
+- **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
+  failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
+  available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).
+  A job of that kind stored by an earlier version still lists, as "Archive compression", and fails with
+  a message that says so instead of pointing at a Settings switch that does not exist.
+- **Audio and video ceilings follow the platforms' own pages.** Twitch's audio ceiling is 160 kbps (its
+  help page), not OBS's 320, so a destination sending more than 160 kbps to Twitch now shows the
+  audio-bitrate warning. Kick has no audio ceiling (no source gives one), so the 160 kbps warning for Kick
+  is gone. Twitch's 6000 kbps video figure is advice and no longer a ceiling. YouTube keeps 12000 kbps as
+  the recommended figure and 51000 as the maximum. `GET /services` reflects these.
+- **Connecting X now asks for `tweet.write` and `media.write`** so clips can be posted to X. An X account
+  connected before this release shows as needing a reconnect, once, before it can publish clips; the
+  prompt says that only posting clips needs it and that livestreaming and chat are unaffected.
+- **A destination's `presetId` appears in destination responses** when it has one, and
+  `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
 
 ## [0.15.0] — 2026-11-06
 

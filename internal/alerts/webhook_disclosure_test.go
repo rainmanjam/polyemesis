@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The Slack shape: the ENTIRE credential is the path. Anything that can post to
@@ -72,7 +74,7 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 				t.Fatalf("the fixture does not reproduce the leak: %v", tc.err)
 			}
 
-			got := ClientErrorText(tc.err)
+			got := redact.ClientErrorText(tc.err)
 			if strings.Contains(got, slackSecret) || strings.Contains(got, slackPath) {
 				t.Errorf("ClientErrorText leaked the webhook path: %q", got)
 			}
@@ -95,15 +97,15 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 
 	t.Run("a non-url.Error is passed through unchanged", func(t *testing.T) {
 		err := errors.New("endpoint returned 404")
-		if got := ClientErrorText(err); got != err.Error() {
-			t.Errorf("ClientErrorText(%v) = %q, want it unchanged: there is no URL "+
+		if got := redact.ClientErrorText(err); got != err.Error() {
+			t.Errorf("redact.ClientErrorText(%v) = %q, want it unchanged: there is no URL "+
 				"wrapper here and inventing one would lose the message", err, got)
 		}
 	})
 
 	t.Run("nil is empty", func(t *testing.T) {
-		if got := ClientErrorText(nil); got != "" {
-			t.Errorf("ClientErrorText(nil) = %q, want \"\"", got)
+		if got := redact.ClientErrorText(nil); got != "" {
+			t.Errorf("redact.ClientErrorText(nil) = %q, want \"\"", got)
 		}
 	})
 }
@@ -115,7 +117,7 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 // shape that matters. This test exists so nobody records it as coverage.
 func TestRedactIsANoOpOnAWebhookPathSecret(t *testing.T) {
 	raw := (&url.Error{Op: "Post", URL: slackURL, Err: errors.New("connection refused")}).Error()
-	if got := Redact(raw); !strings.Contains(got, slackSecret) {
+	if got := redact.Redact(raw); !strings.Contains(got, slackSecret) {
 		t.Fatalf("Redact now masks an https path segment (%q). That is a behaviour change "+
 			"with much wider consequences than this test -- it would blank half of every "+
 			"diagnostic in the process -- so verify it was intended before updating "+
@@ -224,7 +226,7 @@ func TestNotifierTestReturnsAMaskedError(t *testing.T) {
 // from a DNS problem. The host is published deliberately by RedactedURL, so it
 // must not be in the set.
 func TestEndpointSecretsExcludesTheHost(t *testing.T) {
-	got := EndpointSecrets(slackURL)
+	got := redact.EndpointSecrets(slackURL)
 	if len(got) == 0 {
 		t.Fatal("EndpointSecrets returned nothing for a Slack webhook URL")
 	}
@@ -236,7 +238,7 @@ func TestEndpointSecretsExcludesTheHost(t *testing.T) {
 		}
 	}
 
-	set := NewSecretSet(nil, got...)
+	set := redact.NewSecretSet(nil, got...)
 	if set.Len() == 0 {
 		t.Fatal("every literal was refused, so the set masks nothing")
 	}
@@ -253,7 +255,7 @@ func TestEndpointSecretsExcludesTheHost(t *testing.T) {
 	}
 
 	// A query-carried token is the other provider shape.
-	q := NewSecretSet(nil, EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
+	q := redact.NewSecretSet(nil, redact.EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
 	if out := q.Scrub(`{"error":"bad token QUERYSECRET123456"}`); strings.Contains(out, "QUERYSECRET123456") {
 		t.Errorf("a query-carried credential survived: %q", out)
 	}

@@ -257,8 +257,8 @@ func TestDestSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			base := destSpec(testDestination(7, nil), compiled, "")
-			got := destSpec(tt.mutate(testDestination(7, nil)), compiled, tt.upstream)
+			base := destSpec(testDestination(7, nil), compiled, "", false)
+			got := destSpec(tt.mutate(testDestination(7, nil)), compiled, tt.upstream, false)
 			if (base == got) == tt.restart {
 				t.Errorf("spec equal = %v, want %v", base == got, !tt.restart)
 			}
@@ -266,24 +266,24 @@ func TestDestSpec(t *testing.T) {
 	}
 
 	t.Run("moving between two renditions restarts the destination", func(t *testing.T) {
-		a := destSpec(testDestination(7, &one), compiled, "sig-a")
-		b := destSpec(testDestination(7, &two), compiled, "sig-b")
+		a := destSpec(testDestination(7, &one), compiled, "sig-a", false)
+		b := destSpec(testDestination(7, &two), compiled, "sig-b", false)
 		if a == b {
 			t.Error("spec unchanged across renditions; the destination would keep reading the old relay")
 		}
 	})
 
 	t.Run("editing a rendition restarts the destinations downstream of it", func(t *testing.T) {
-		before := destSpec(testDestination(7, &one), compiled, "sig-a")
-		after := destSpec(testDestination(7, &one), compiled, "sig-a2")
+		before := destSpec(testDestination(7, &one), compiled, "sig-a", false)
+		after := destSpec(testDestination(7, &one), compiled, "sig-a2", false)
 		if before == after {
 			t.Error("spec unchanged after the rendition was edited; the destination would copy a stream that no longer exists")
 		}
 	})
 
 	t.Run("an unrelated rendition edit leaves a passthrough destination alone", func(t *testing.T) {
-		before := destSpec(testDestination(7, nil), compiled, "")
-		after := destSpec(testDestination(7, nil), compiled, "")
+		before := destSpec(testDestination(7, nil), compiled, "", false)
+		after := destSpec(testDestination(7, nil), compiled, "", false)
 		if before != after {
 			t.Error("passthrough destination spec changed; it would be cycled by an edit it does not read")
 		}

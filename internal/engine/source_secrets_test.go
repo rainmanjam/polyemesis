@@ -13,7 +13,7 @@ import (
  * internal/api/debugmode.go builds the recorder's SecretSet from
  * DestinationSecrets + SourceSecrets when recording starts. Whatever
  * SourceSecrets fails to declare is covered by nothing but the residual
- * alerts.Redact pass, and travels to whoever receives the exported bundle.
+ * redact.Redact pass, and travels to whoever receives the exported bundle.
  *
  * IT WAS CALLING THE WRONG EXTRACTOR. urlSecrets says so about itself, in the
  * comment directly above it: "THIS RULE IS CORRECT ONLY FOR A PUBLISH URL ...

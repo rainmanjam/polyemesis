@@ -316,7 +316,6 @@ func TestOverlayLandsWhereTheAnchorSaysAcrossCanvasShapes(t *testing.T) {
 					t.Errorf("logo is %d px wide, want %d", gotW, wantW)
 				}
 
-				// Horizontal placement.
 				switch anchor {
 				case AnchorTopLeft, AnchorMiddleLeft, AnchorBottomLeft:
 					if abs(b.minX-marginX) > tol {

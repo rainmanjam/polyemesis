@@ -89,10 +89,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 const (
@@ -436,7 +436,7 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 		}
 		for _, w := range r.Warnings {
 			c.log.Warn("broadcast lifecycle: X published the broadcast with a warning",
-				"destination", d.Name, "broadcast", broadcastID, "detail", alerts.Redact(w))
+				"destination", d.Name, "broadcast", broadcastID, "detail", redact.Redact(w))
 		}
 		return &oauth.TransitionResult{BroadcastID: broadcastID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
 	}
@@ -663,7 +663,7 @@ func (c *lifecycleCoordinator) sweepOnce(ctx context.Context, mode sweepMode) {
 
 // considerRow decides and acts for one destination.
 func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destination, mode sweepMode) {
-	prov, ok := c.providers.LifecycleFor(d.Platform)
+	prov, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, d.Platform)
 	if !ok {
 		// Either an ordinary platform -- Twitch, Kick, a custom RTMP endpoint --
 		// or one this destination was switched TO while holding a phase recorded
@@ -687,12 +687,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 			return
 		}
 	}
-	broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
-	if broadcastID == "" && d.Platform != db.PlatformX {
-		// X never announces ahead, so its mirror is never written by a schedule.
-		// Seeding from it would bring back an ended broadcast after a second show.
-		broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
-	}
+	broadcastID := d.ActiveBroadcastID()
 	if broadcastID == "" {
 		// Taken BEFORE untrack, which clears it: an UP edge is the release of the
 		// open() hold below, and untrack would otherwise throw it away unread.
@@ -1083,13 +1078,13 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 
 // scrubSourceKey makes a platform error safe for the fault, the log, the escalation and
 // the timeline. X's problem detail can echo the source_id it was sent, and the source_id
-// IS the stream key, which has no credential shape alerts.Redact could recognise. So the
+// IS the stream key, which has no credential shape redact.Redact could recognise. So the
 // key is removed as a literal first, and the pattern pass runs over what is left.
 func scrubSourceKey(detail, key string) string {
 	if k := strings.TrimSpace(key); k != "" {
 		detail = strings.ReplaceAll(detail, k, "[redacted]")
 	}
-	return alerts.Redact(detail)
+	return redact.Redact(detail)
 }
 
 // advance sends a transition that can only ever START something: testing or
@@ -1215,7 +1210,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 // with. The state is still read first, so a broadcast that never aired -- or one
 // somebody already ended in the platform's console -- costs nothing.
 func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget) {
-	prov, ok := c.providers.LifecycleFor(t.Platform)
+	prov, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, t.Platform)
 	if !ok {
 		c.untrack(t.destinationID)
 		return

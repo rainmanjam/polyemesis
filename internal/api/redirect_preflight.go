@@ -25,10 +25,12 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
-func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []string {
+func redirectWarnings(cfg config.Config, proxies *auth.Proxies, r *http.Request, redirectURI string) []string {
 	u, err := url.Parse(redirectURI)
 	if err != nil || u.Host == "" {
 		// Nothing useful to say about a URI we cannot read. Saying nothing
@@ -39,7 +41,7 @@ func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []
 	host := u.Hostname()
 	var out []string
 
-	if u.Scheme == "http" && !isLoopbackHost(host) {
+	if u.Scheme == "http" && !netguard.IsLoopbackHost(host) {
 		out = append(out, fmt.Sprintf(
 			"This redirect URI is plain HTTP: %s. Google rejects non-HTTPS redirect "+
 				"URIs outright, and Twitch allows them only for localhost. Serve "+
@@ -52,7 +54,7 @@ func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []
 	// development -- Google names http://127.0.0.1 alongside http://localhost.
 	// Warning about the configuration they recommend is how an operator learns
 	// to click past these.
-	if net.ParseIP(host) != nil && !isLoopbackHost(host) {
+	if net.ParseIP(host) != nil && !netguard.IsLoopbackHost(host) {
 		out = append(out, fmt.Sprintf(
 			"This redirect URI uses a bare IP address: %s. Google will not accept an "+
 				"IP for a web application client. Use a hostname.", redirectURI))
@@ -65,10 +67,12 @@ func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []
 			host, configured, configured))
 	}
 
-	// Only when the headers are NOT trusted. With trustProxyHeaders on, origin()
-	// has already reconstructed the browser-visible address from them, so the
-	// URI shown is the right one and a warning would be noise.
-	if !cfg.TrustProxyHeaders && r.Header.Get("X-Forwarded-Host") != "" {
+	// Only when this request's peer is NOT a trusted proxy. From one, origin()
+	// has already reconstructed the browser-visible address from the headers,
+	// so the URI shown is the right one and a warning would be noise. A proxy
+	// that trustProxyHeaders is on for but that is not listed in trustedProxies
+	// is exactly the case this exists for.
+	if !proxies.Trusts(r) && r.Header.Get("X-Forwarded-Host") != "" {
 		out = append(out, fmt.Sprintf(
 			"A reverse proxy is forwarding this request, but trustProxyHeaders is off, "+
 				"so polyemesis cannot see the address your browser actually used. The "+
@@ -76,18 +80,4 @@ func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []
 	}
 
 	return out
-}
-
-// isLoopbackHost reports whether plain HTTP is acceptable for this host.
-// Platforms carve out localhost precisely because there is no network hop to
-// protect, so warning about it would train an operator to ignore the warning
-// that matters.
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }

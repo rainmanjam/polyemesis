@@ -37,11 +37,6 @@ const (
 	SizeLarge  ModelSize = "large"
 )
 
-// ModelSizes is the catalogue order, smallest first.
-func ModelSizes() []ModelSize {
-	return []ModelSize{SizeTiny, SizeBase, SizeSmall, SizeMedium, SizeLarge}
-}
-
 // Model is one downloadable whisper.cpp model.
 type Model struct {
 	// Name is whisper.cpp's own model name, e.g. "base.en" or "large-v3".

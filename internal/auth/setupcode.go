@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 const (
@@ -22,7 +24,7 @@ const (
 	// an acceptance script -- and so already knows the code without reading a
 	// log. Whoever can set a process's environment already owns the process,
 	// so this grants nothing that reading the file would not.
-	SetupCodeEnv = "POLYEMESIS_SETUP_CODE"
+	SetupCodeEnv = startupenv.SetupCodeVar
 
 	// setupCodeMinChars is the shortest code accepted, counted after
 	// normalising. A minted code is sixteen; a preset one shorter than twelve

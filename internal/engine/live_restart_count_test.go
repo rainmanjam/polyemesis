@@ -36,7 +36,7 @@ import (
 func waitLevelsCurrent(t *testing.T, proc *supervisor.Process, holder *graphHolder, why string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
-	for levelsStale(proc, holder) || proc.Status().State != supervisor.StateRunning {
+	for holder.stale() || proc.Status().State != supervisor.StateRunning {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s: the process was not respawned from its holder; argv is still\n%s",
 				why, strings.Join(proc.Args(), " "))
@@ -112,7 +112,7 @@ func TestRepeatedLiveLevelRespawnsTripTheRestartStormSignal(t *testing.T) {
 		} else if i > 0 {
 			holder.set(muted)
 		}
-		if !levelsStale(proc, holder) {
+		if !holder.stale() {
 			t.Fatalf("pass %d: setup did not leave the level stale", i)
 		}
 		e.respawnStaleLevels("test: failover")
@@ -195,7 +195,7 @@ func TestARefusedLevelChangeCountsTheRestartItFallsBackTo(t *testing.T) {
 	muted.Profile.Tracks[0].Muted = true
 	after := planFor(t, e, &muted)
 	e.stopDestinations(map[int64]destPlan{row.ID: after})
-	if applied, _, _ := e.DestinationLive(row.ID); applied != liveRestart {
+	if applied, _, _ := e.DestinationLive(row.ID); applied != AppliedRestart {
 		t.Fatalf("setup: applied = %q, want the restart fallback", applied)
 	}
 	e.startDestinations(map[int64]destPlan{row.ID: after})

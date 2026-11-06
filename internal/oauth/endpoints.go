@@ -46,6 +46,19 @@ type ProviderOption func(*endpoints)
 type endpoints struct {
 	api  string
 	auth string
+	// xLivestream is the operator's Livestream gate, read only by X.
+	xLivestream bool
+	// meter charges YouTube Data API calls to the install's allowance. Nil
+	// means unmetered. See quota_meter.go.
+	meter YouTubeMeter
+	// meterHosts are extra hosts metered on every path (tests only).
+	meterHosts map[string]bool
+}
+
+// WithXLivestream sets X's Livestream gate for a provider set. Production hands
+// it the switch startupenv read at startup; false is the default.
+func WithXLivestream(open bool) ProviderOption {
+	return func(e *endpoints) { e.xLivestream = open }
 }
 
 // WithBaseURL points every HTTP call the provider makes, on both the
@@ -114,9 +127,9 @@ func NewVimeo(opts ...ProviderOption) *Vimeo {
 // Set is a resolved group of providers plus the capability lookups that go with
 // it. It is the injection point internal/api was missing.
 //
-// The package-level Get, MetadataFor, ComplianceFor, TargetsFor, ManualKeyFor
-// and ScheduledBroadcastsFor all resolve against the production set, which is
-// why a caller outside this package could not aim them anywhere else -- and
+// The package-level Get and Providers resolve against the production set, and
+// the capability lookups used to as well, which is why a caller outside this
+// package could not aim them anywhere else -- and
 // why internal/api grew five function-pointer fields on Server (ingestForFn,
 // pushMetadataFn, pushComplianceFn, pushBroadcastFn, rescheduleFn) to stub out
 // the calls those lookups returned. A caller that holds a Set instead of
@@ -139,6 +152,10 @@ type Set struct {
 func NewSet(opts ...ProviderOption) Set {
 	return Set{byPlatform: ProvidersWith(opts...)}
 }
+
+// Configured reports whether the set was built by NewSet. The zero Set is not:
+// it stands for production and builds its providers on demand.
+func (s Set) Configured() bool { return s.byPlatform != nil }
 
 // All returns the providers keyed by platform.
 func (s Set) All() map[db.Platform]Provider {
@@ -168,100 +185,23 @@ func (s Set) Get(p db.Platform) (Provider, error) {
 	return nil, fmt.Errorf("no OAuth provider for platform %q", p)
 }
 
-// MetadataFor, ComplianceFor, TargetsFor, ManualKeyFor and
-// ScheduledBroadcastsFor mirror the package-level functions of the same names,
-// resolved against this set. False means the platform has no such capability,
-// which is a supported answer.
+// As resolves one capability of a platform's provider against this set: the
+// MetadataPusher, StreamKeyReader, BroadcastLifecycler and so on. False means
+// the platform has no such capability (or no provider at all), which is a
+// supported answer; callers branch on it rather than on a platform name.
 //
-// Every capability the package grows needs its twin here, and the reason is
-// mechanical: a caller that resolves one capability through the Set and another
-// through the package function is holding a stubbed provider and a production
-// one at the same time, which is the partially-redirected provider this file
-// opens by warning about.
-func (s Set) MetadataFor(p db.Platform) (MetadataPusher, bool) {
+// Every capability lookup goes through the Set in hand, never through a
+// package-level function, for the reason this file opens with: a caller that
+// resolves one capability through a stubbed Set and another through the
+// production providers holds a partially-redirected provider, and the first
+// thing it does is send a real operator's token to a real platform. Set{} is
+// production.
+func As[T any](s Set, p db.Platform) (T, bool) {
+	var zero T
 	pr, ok := s.All()[p]
 	if !ok {
-		return nil, false
+		return zero, false
 	}
-	mp, ok := pr.(MetadataPusher)
-	return mp, ok
-}
-
-func (s Set) ComplianceFor(p db.Platform) (CompliancePusher, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	cp, ok := pr.(CompliancePusher)
-	return cp, ok
-}
-
-func (s Set) TargetsFor(p db.Platform) (TargetedProvider, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	tp, ok := pr.(TargetedProvider)
-	return tp, ok
-}
-
-func (s Set) ManualKeyFor(p db.Platform) (ManualKey, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	mk, ok := pr.(ManualKey)
-	return mk, ok
-}
-
-// StatsFor is the Set twin of the package-level StatsFor in stats.go. Without
-// it a caller holding a stubbed Set would silently fall through to the
-// production providers for viewer numbers alone.
-func (s Set) StatsFor(p db.Platform) (LiveStatter, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	ls, ok := pr.(LiveStatter)
-	return ls, ok
-}
-
-// LifecycleFor is the Set twin of the package-level LifecycleFor in
-// lifecycle.go. The twin matters more here than for a read: without it a caller
-// holding a stubbed Set would resolve the production YouTube provider and send a
-// real transition -- a POST that starts or ENDS a broadcast on somebody's actual
-// channel -- from a test that believed everything was pointed at a stub.
-func (s Set) LifecycleFor(p db.Platform) (BroadcastLifecycler, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	bl, ok := pr.(BroadcastLifecycler)
-	return bl, ok
-}
-
-// DeviceFor is the Set twin of the package-level DeviceFor in device.go.
-//
-// The twin is not optional here even though only Twitch implements the
-// capability. A caller holding a stubbed Set that resolved device flow through
-// the package function would get the PRODUCTION Twitch provider, and the first
-// thing it would do is POST an operator's real client id to id.twitch.tv and
-// then poll it every five seconds -- from a test that believed the whole world
-// was pointed at a stub.
-func (s Set) DeviceFor(p db.Platform) (DeviceFlower, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	df, ok := pr.(DeviceFlower)
-	return df, ok
-}
-
-func (s Set) ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	sb, ok := pr.(ScheduledBroadcaster)
-	return sb, ok
+	c, ok := pr.(T)
+	return c, ok
 }

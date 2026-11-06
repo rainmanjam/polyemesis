@@ -13,9 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +22,10 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/freedisk"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
 // Manager scans and prunes the recordings directory.
@@ -41,7 +42,7 @@ type Manager struct {
 	// onStorage is called when the free-space floor halts or resumes
 	// recording, so the owner of the recorder process can act on it.
 	onStorage func(StorageState)
-	// freeSpace is diskFree in production; tests substitute a volume they can
+	// freeSpace is freedisk.Space in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
 	// freeSpaceMu guards freeSpace once the sweep goroutine is running, which
@@ -113,16 +114,14 @@ func WithRecorderProbe(fn func() bool) Option {
 // is silent, and the only symptom is the false 409 it exists to prevent.
 func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
-// New creates a Manager.
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
-	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: diskFree}
+	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: freedisk.Space}
 	for _, opt := range opts {
 		opt(m)
 	}
 	return m
 }
 
-// Dir is the recordings directory.
 func (m *Manager) Dir() string { return m.dir }
 
 // VolumeMarker is the file that proves the recordings directory is the volume
@@ -240,7 +239,7 @@ const bytesPerGB = 1024 * 1024 * 1024
 // installed here is what every sweep, at startup or on the 30s tick, sees.
 func (m *Manager) SetFreeSpace(fn func(path string) (free, total uint64, err error)) {
 	if fn == nil {
-		fn = diskFree
+		fn = freedisk.Space
 	}
 	m.freeSpaceMu.Lock()
 	m.freeSpace = fn
@@ -596,17 +595,16 @@ func (m *Manager) measure(rec *db.Recording) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, m.ffprobe,
+	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: m.ffprobe, Args: []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-print_format", "json",
 		"-show_entries", "format=duration:stream=codec_type",
 		path,
-	).Output()
+	}})
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return fmt.Errorf("ffprobe: %s", strings.TrimSpace(string(ee.Stderr)))
+		if stderr = strings.TrimSpace(stderr); stderr != "" {
+			return fmt.Errorf("ffprobe: %s", stderr)
 		}
 		return err
 	}
@@ -771,10 +769,6 @@ func (m *Manager) segmentSeconds() (int, bool) {
 	}
 	return s.Recording.SegmentSeconds, s.Recording.Enabled
 }
-
-// recorderSegment matches the names the recorder writes and nothing else: the
-// strftime pattern rec-%Y%m%d-%H%M%S.mkv the engine hands ffmpeg.
-var recorderSegment = regexp.MustCompile(`^rec-[0-9]{8}-[0-9]{6}\.mkv$`)
 
 // destinationOutput names the file destination, if any, that can be writing
 // name: its own URL, or the stem-TIMESTAMP rollover ResolveForWrite picks when
@@ -1003,9 +997,10 @@ func (m *Manager) Delete(id int64) error {
 	// recorder's own files are exempt. Only its own: a file destination writes
 	// into this same directory whether recording is on or not, and its outputs
 	// keep the guard. The engine clears its recorder slot before the child has
-	// finished exiting, so a delete in those few seconds unlinks a file the
-	// operator asked to be rid of, whose last bytes are the only thing lost,
-	// and the inode goes when ffmpeg exits.
+	// finished exiting, and a deleted source's engine leaves the manager's map
+	// before it stops, so the probe counts both until Stop returns (see
+	// engine.Engine.RecorderRunning and Manager.RecorderRunning): a recorder
+	// still finalising its segment keeps that segment guarded.
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return err
@@ -1027,7 +1022,7 @@ func (m *Manager) Delete(id int64) error {
 		if dest != "" {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, liveSegmentError{dest: dest})
 		}
-		if recorderLive || !recorderSegment.MatchString(r.Filename) {
+		if recorderLive || !segname.IsRecorderSegment(r.Filename) {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
 		}
 	}
@@ -1130,7 +1125,7 @@ func (m *Manager) ResolveForWrite(name string) (string, error) {
 	}
 	ext := filepath.Ext(full)
 	stem := strings.TrimSuffix(full, ext)
-	stamp := time.Now().Format("20060102-150405")
+	stamp := segname.FormatStamp(time.Now())
 	for n := 0; n < 1000; n++ {
 		cand := fmt.Sprintf("%s-%s%s", stem, stamp, ext)
 		if n > 0 {
@@ -1220,13 +1215,6 @@ func (m *Manager) Usage() (DiskUsage, error) {
 	return u, nil
 }
 
-// segmentPrefix starts every master segment's name; sourceTag follows it for
-// segments written since the name began carrying the programme.
-const (
-	segmentPrefix = "rec-"
-	sourceTag     = "s"
-)
-
 // SegmentPattern is the strftime output pattern one programme's recorder
 // writes master segments to: rec-s<sourceID>-%Y%m%d-%H%M%S.mkv.
 //
@@ -1237,33 +1225,15 @@ const (
 //
 // The timestamp stays the last two hyphen-separated fields, which is what
 // startTimeFromName, the stem pattern and ParseStemFilename already key on.
+// The format itself is package segname's.
 func SegmentPattern(dir string, sourceID int64) string {
-	return filepath.Join(dir, segmentPrefix+sourceTag+strconv.FormatInt(sourceID, 10)+"-%Y%m%d-%H%M%S.mkv")
+	return filepath.Join(dir, segname.Pattern(sourceID))
 }
 
 // SourceFromName reads the programme out of a master segment's filename, and
 // reports false for a name that does not carry one -- a segment written before
 // names did, or anything the recorder did not write. It never guesses.
-func SourceFromName(name string) (int64, bool) {
-	rest, ok := strings.CutPrefix(filepath.Base(name), segmentPrefix+sourceTag)
-	if !ok {
-		return 0, false
-	}
-	digits, _, ok := strings.Cut(rest, "-")
-	if !ok || digits == "" {
-		return 0, false
-	}
-	for _, c := range digits {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-	}
-	id, err := strconv.ParseInt(digits, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, false
-	}
-	return id, true
-}
+func SourceFromName(name string) (int64, bool) { return segname.Source(name) }
 
 func isRecording(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
@@ -1271,16 +1241,12 @@ func isRecording(name string) bool {
 }
 
 // startTimeFromName recovers the segment start from the strftime-formatted
-// filename the recorder writes (rec-20240115-143000.mkv), falling back to the
-// file's mtime. The name is more accurate: mtime moves as the file is written.
+// filename the recorder writes (rec-s3-20240115-143000.mkv), falling back to
+// the file's mtime. The name is more accurate: mtime moves as the file is
+// written.
 func startTimeFromName(name string, fallback time.Time) time.Time {
-	base := strings.TrimSuffix(name, filepath.Ext(name))
-	parts := strings.Split(base, "-")
-	if len(parts) >= 3 {
-		stamp := parts[len(parts)-2] + "-" + parts[len(parts)-1]
-		if t, err := time.ParseInLocation("20060102-150405", stamp, time.Local); err == nil {
-			return t
-		}
+	if t, ok := segname.TrailingStamp(name); ok {
+		return t
 	}
 	return fallback
 }

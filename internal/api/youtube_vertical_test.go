@@ -462,7 +462,7 @@ func TestVerticalStatusReadIsPacedToOneYouTubeCallPerMinute(t *testing.T) {
 func TestVerticalStatusReadGoesOutAgainOnceTheMinuteHasPassed(t *testing.T) {
 	s, h, _, sign, fake, id := verticalCreate(t)
 	clock := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
-	s.verticalNow = func() time.Time { return clock }
+	s.now = func() time.Time { return clock }
 	send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
 	clock = clock.Add(61 * time.Second)
 	before := fake.countCalls("GET /liveStreams?")

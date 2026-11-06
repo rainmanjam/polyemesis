@@ -51,7 +51,7 @@ func TestAFailedShortsErrorCarriesNoCaptionContent(t *testing.T) {
 	}
 	cutter := clipper.New(srv.log, "ffmpeg", "ffprobe", clipper.WithRunner(run))
 	if err := srv.jobq.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, nil,
-		clipper.WithTranscript(ClipTranscriptSource(srv.store)),
+		clipper.WithTranscript(clipper.StoreTranscript(srv.store)),
 		clipper.WithCaptionFonts(func(name string) (string, error) { return ffmpeg.FontPath(srv.cfg.FontsDir(), name) }),
 		clipper.WithCaptionBurn(true))); err != nil {
 		t.Fatal(err)

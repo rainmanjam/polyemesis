@@ -34,15 +34,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // xAPIBase is the production host for tokens and data.
-const xAPIBase = "https://api.x.com"
+const xAPIBase = platform.XAPIHost
 
 // xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
 // token and data host so a change to one does not move the other.
@@ -54,13 +54,9 @@ const xAPIBase = "https://api.x.com"
 // spec's host does not show the consent page, set these two to the guide's
 // "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
 const (
-	xAuthorizeBase = "https://api.x.com"
+	xAuthorizeBase = platform.XAPIHost
 	xAuthorizePath = "/2/oauth2/authorize"
 )
-
-// xLivestreamEnv is the operator's switch for the Livestream family. Set it to
-// 1 or true once X has whitelisted the app.
-const xLivestreamEnv = "POLYEMESIS_X_LIVESTREAM"
 
 // xGateCopy is the copy shown when the Livestream family is switched off. It is
 // the owner's agreed wording and the tests pin it.
@@ -94,24 +90,16 @@ var (
 	_ StreamKeyReader     = (*X)(nil)
 )
 
-// NewX builds the provider. The Livestream gate is read from the environment
-// here, so every call to ProvidersWith sees the same switch.
+// NewX builds the provider. The Livestream gate is closed unless
+// WithXLivestream(true) says the operator opened it (startupenv reads
+// POLYEMESIS_X_LIVESTREAM once at startup; nothing here reads the environment).
 func NewX(opts ...ProviderOption) *X {
-	return &X{endpoints: newEndpoints(opts), livestream: xLivestreamFromEnv()}
+	e := newEndpoints(opts)
+	return &X{endpoints: e, livestream: e.xLivestream}
 }
 
-// xLivestreamFromEnv reads the operator's switch. Anything other than 1 or
-// true (case-insensitive) leaves the gate closed.
-func xLivestreamFromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(xLivestreamEnv))) {
-	case "1", "true":
-		return true
-	}
-	return false
-}
-
-// WithLivestreamAccess opens the gate on this instance. Tests and the environment
-// switch use it; production sets the environment variable instead.
+// WithLivestreamAccess opens the gate on this instance. Tests use it;
+// production passes WithXLivestream when it builds the provider set.
 func (x *X) WithLivestreamAccess() *X {
 	x.livestream = true
 	return x
@@ -133,20 +121,25 @@ func (x *X) Platform() db.Platform { return db.PlatformX }
 
 // Scopes is the list the consent screen shows. See the file header for why each
 // one is here.
+//
+// The last two are what clip publishing needs (tweet.write, media.write), read
+// from the platform registry so publish and sign-in cannot disagree.
 func (x *X) Scopes() []string {
-	return []string{
+	return append([]string{
 		"broadcast.read",
 		"broadcast.write",
 		"offline.access",
 		"users.read",
 		"tweet.read",
-	}
+	}, platform.Must(platform.X).PublishScopes...)
 }
 
-// ScopeVersion is 1. X was never registered before this, so no account holds an
-// earlier grant and nothing needs a reconnect prompt. Bump it by hand when Scopes
-// changes; the scope ledger in testdata/scope-versions.json must match.
-func (x *X) ScopeVersion() int { return 1 }
+// ScopeVersion is 2. Version 1 was the five Livestream scopes; version 2 adds
+// tweet.write and media.write so clips can be posted, which an account connected
+// at version 1 does not hold and has to reconnect once to get. Bump it by hand
+// when Scopes changes; the scope ledger in testdata/scope-versions.json must
+// match.
+func (x *X) ScopeVersion() int { return 2 }
 
 // PKCE is ON. X's Livestream authentication guide recommends the PKCE flow for
 // every new integration; the challenge is sent at authorize and the verifier at

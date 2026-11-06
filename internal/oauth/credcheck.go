@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"io"
 	"net"
 	"net/http"
@@ -27,6 +26,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // checkTimeout bounds an outbound credential check. The settings page waits on
@@ -203,9 +203,9 @@ func classifyCheckError(err error) error {
 			// string -- deliberately, because a POST form makes Facebook reject
 			// correct credentials -- so interpolating err.Error() here printed
 			// the app secret into the operator's error and the logs on any DNS
-			// outage, timeout or TLS failure. alerts.ClientErrorText unwraps the
+			// outage, timeout or TLS failure. redact.ClientErrorText unwraps the
 			// *url.Error and keeps the cause without the URL.
-			return fmt.Errorf("%w: %s", ErrCheckUnreachable, alerts.ClientErrorText(err))
+			return fmt.Errorf("%w: %s", ErrCheckUnreachable, redact.ClientErrorText(err))
 		}
 		return err
 	}
@@ -213,7 +213,7 @@ func classifyCheckError(err error) error {
 	if isTransportFailure(err) {
 		// Same reasoning as above: the URL is in the error and the secret is in
 		// the URL.
-		return fmt.Errorf("%w: %s", ErrCheckUnreachable, alerts.ClientErrorText(err))
+		return fmt.Errorf("%w: %s", ErrCheckUnreachable, redact.ClientErrorText(err))
 	}
 	return err
 }

@@ -420,12 +420,15 @@ func TestPlayoutPublishDefaultsProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read seeded config: %v", err)
 	}
-	var onDisk playoutPublish
+	if strings.Contains(string(b), cfg.Token) {
+		t.Fatalf("the seeded config holds the token in the clear: %s", b)
+	}
+	var onDisk playoutOnDisk
 	if err := json.Unmarshal(b, &onDisk); err != nil {
 		t.Fatalf("unmarshal seeded config: %v", err)
 	}
-	if onDisk.Token != cfg.Token {
-		t.Fatalf("token on disk = %q, want the one in memory", onDisk.Token)
+	if got := s.playoutStore().openToken(onDisk.TokenEnc); got != cfg.Token {
+		t.Fatalf("token on disk opens to %q, want the one in memory", got)
 	}
 }
 
@@ -563,7 +566,7 @@ func TestPlayoutURLsCarryTokenOnlyWhenProtected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/playout", nil)
 			r.Host = "stream.example.com"
-			urls := playoutURLsFor(r, tt.set, tt.pub)
+			urls := playoutURLsFor(r, nil, tt.set, tt.pub)
 
 			if got := strings.Contains(urls.Master, testToken); got != tt.wantToken {
 				t.Fatalf("master URL %q carries the token = %v, want %v", urls.Master, got, tt.wantToken)

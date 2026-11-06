@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -73,7 +72,7 @@ func (s *Server) facebookBroadcastFor(ctx context.Context, id int64) (
 		// tokenFor's message already says how.
 		return nil, nil, "", http.StatusPreconditionFailed, err
 	}
-	return row, acct, strings.TrimSpace(row.Facebook.BroadcastID), 0, nil
+	return row, acct, row.ActiveBroadcastID(), 0, nil
 }
 
 // facebookProvider narrows the registered provider to Facebook's concrete type.

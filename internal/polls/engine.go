@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Timings.
@@ -99,7 +99,6 @@ func WithSender(s Sender) Option { return func(e *Engine) { e.send = s } }
 // WithMirror mirrors polls to native platform polls.
 func WithMirror(m Mirror) Option { return func(e *Engine) { e.mirror = m } }
 
-// WithLogger replaces the logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(e *Engine) {
 		if l != nil {
@@ -413,7 +412,9 @@ func (e *Engine) finaliseLocked(a *active, now time.Time) {
 	e.cur = nil
 	if e.send != nil {
 		res := snapshot(a)
-		e.goAsync(func(ctx context.Context) { e.sendText(ctx, EndText(res)) })
+		e.goAsync(func(ctx context.Context) {
+			e.sendEach(ctx, func(p db.Platform, _ string) string { return EndTextMax(res, AnnounceMax(p)) })
+		})
 	}
 }
 
@@ -531,26 +532,22 @@ func (e *Engine) announceStart(ctx context.Context, a *active) {
 		if native[chatKey{p, account}] {
 			return NativeStartText(a.spec, p)
 		}
-		return StartText(a.spec)
+		return StartTextMax(a.spec, AnnounceMax(p))
 	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a.res.Announced = results
 }
 
-func (e *Engine) sendText(ctx context.Context, text string) []Announcement {
-	return e.sendEach(ctx, func(db.Platform, string) string { return text })
-}
-
 func (e *Engine) sendEach(ctx context.Context, textFor func(db.Platform, string) string) []Announcement {
 	res, err := e.send.SendEach(ctx, textFor)
 	if err != nil {
 		e.log.Warn("polls: announce", "err", err)
-		return []Announcement{{OK: false, Detail: alerts.Redact(err.Error())}}
+		return []Announcement{{OK: false, Detail: redact.Redact(err.Error())}}
 	}
 	out := make([]Announcement, 0, len(res))
 	for _, r := range res {
-		out = append(out, Announcement{Platform: string(r.Platform), OK: r.OK, Skipped: r.Skipped, Detail: alerts.Redact(r.Detail)})
+		out = append(out, Announcement{Platform: string(r.Platform), OK: r.OK, Skipped: r.Skipped, Detail: redact.Redact(r.Detail)})
 	}
 	return out
 }
@@ -634,7 +631,7 @@ func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end 
 		}
 		c, live, err := a.mirror.Read(ctx, m, end)
 		if err != nil {
-			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", alerts.Redact(err.Error()))
+			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", redact.Redact(err.Error()))
 		}
 		res[i] = got{counts: c, live: live, err: err, read: true}
 	}

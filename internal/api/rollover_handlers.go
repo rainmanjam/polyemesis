@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The planned-rollover API (#19). Four routes: the platform caps the countdown counts to, one destination's settings
@@ -120,7 +120,7 @@ func (s *Server) rolloverCoordinatorOrNew() *rolloverCoordinator {
 	if s.rollover != nil {
 		return s.rollover
 	}
-	return newRolloverCoordinator(s.log, s.store, rolloverHost{})
+	return newRolloverCoordinator(s.log, s.store, rolloverHost{youtube: youtubeRolloverFrom(s.providers)})
 }
 
 // rolloverSettingsBody is what the settings screen sends. Every field is optional on the wire and validated below.
@@ -207,7 +207,7 @@ func (s *Server) handleRunRollover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 	case err != nil:
 		// A failed live-start read reaches here unredacted by act, and its text can carry a platform response body.
-		writeError(w, http.StatusInternalServerError, alerts.Redact(err.Error()))
+		writeError(w, http.StatusInternalServerError, redact.Redact(err.Error()))
 	default:
 		// The call is synchronous, so the rollover has finished by the time this answers.
 		writeJSON(w, http.StatusOK, map[string]string{"status": "rolled over"})
@@ -224,7 +224,7 @@ func (s *Server) destinationDelivering(id int64) bool {
 		if ds.ID != id {
 			continue
 		}
-		return ds.Enabled && ds.Error == "" && ds.Process != nil && ds.Process.State == "running" && !ds.Process.Stalled
+		return ds.Enabled && ds.IsUp() && !ds.Process.Stalled
 	}
 	return false
 }
@@ -264,7 +264,7 @@ func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, account,
 	}
 	for _, r := range results {
 		if !r.OK {
-			return errors.New(alerts.Redact(r.Detail))
+			return errors.New(redact.Redact(r.Detail))
 		}
 	}
 	return nil
@@ -273,7 +273,7 @@ func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, account,
 // twitchStreamStart reads when the channel's live stream began, from Helix GET /helix/streams via the same
 // Stats call the viewer-count read uses. An unreadable or missing start is an error, and the caller falls back.
 func (s *Server) twitchStreamStart(ctx context.Context, accessToken string) (time.Time, error) {
-	st, ok := s.providers.StatsFor(db.PlatformTwitch)
+	st, ok := oauth.As[oauth.LiveStatter](s.providers, db.PlatformTwitch)
 	if !ok {
 		return time.Time{}, errors.New("twitch has no stats read")
 	}

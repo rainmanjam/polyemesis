@@ -49,11 +49,11 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 func TestChatCommandsAreOffWhenTheSettingsCannotBeRead(t *testing.T) {
 	s := db.DefaultSettings()
 	s.ChatCommands.Enabled = true
-	o := chatCommandOptions(quiet(), chatStore{s: s, err: errors.New("disk")}, nil, nopSender{})
+	o := chatCommandOptions(quiet(), chatStore{s: s, err: errors.New("disk")}, nil, nil, nopSender{})
 	if o.Settings().Enabled {
 		t.Fatal("unreadable settings left chat commands ON; a moderator switch must be demonstrably enabled")
 	}
-	o = chatCommandOptions(quiet(), chatStore{s: s}, nil, nopSender{})
+	o = chatCommandOptions(quiet(), chatStore{s: s}, nil, nil, nopSender{})
 	if !o.Settings().Enabled {
 		t.Fatal("readable settings with commands on read as off")
 	}
@@ -68,7 +68,7 @@ func TestProgrammeZeroIsTheDefaultProgramme(t *testing.T) {
 			return eng
 		}
 		return nil
-	}, nopSender{})
+	}, func() int64 { return 0 }, nopSender{})
 	if _, ok := o.Resolve(0); !ok {
 		t.Fatal("programme 0 did not resolve to the default programme")
 	}
@@ -78,7 +78,7 @@ func TestProgrammeZeroIsTheDefaultProgramme(t *testing.T) {
 	if len(asked) != 2 || asked[0] != 4 || asked[1] != 9 {
 		t.Errorf("engines asked for %v, want [4 9]", asked)
 	}
-	o = chatCommandOptions(quiet(), chatStore{defErr: errors.New("no default")}, func(int64) chatEngine { return eng }, nopSender{})
+	o = chatCommandOptions(quiet(), chatStore{defErr: errors.New("no default")}, func(int64) chatEngine { return eng }, func() int64 { return 0 }, nopSender{})
 	if _, ok := o.Resolve(0); ok {
 		t.Error("programme 0 resolved with no default programme to resolve to")
 	}
@@ -99,5 +99,19 @@ func TestTheEngineProgrammeReportsTheSelectorsView(t *testing.T) {
 	}
 	if r := (engineProgramme{&chatFakeEngine{}}).Report(); r.Live || r.Active != "" {
 		t.Errorf("an idle engine with failover off reported %+v", r)
+	}
+}
+
+// The default programme is the running one, as the API means it: with the
+// first row's engine not built, programme 0 is the engine that is running.
+func TestProgrammeZeroFollowsTheRunningDefaultNotTheFirstRow(t *testing.T) {
+	eng := &chatFakeEngine{live: true}
+	var asked []int64
+	o := chatCommandOptions(quiet(), chatStore{defID: 1}, func(id int64) chatEngine {
+		asked = append(asked, id)
+		return eng
+	}, func() int64 { return 2 }, nopSender{})
+	if _, ok := o.Resolve(0); !ok || len(asked) != 1 || asked[0] != 2 {
+		t.Fatalf("programme 0 asked engines %v, want [2] (the running default, not row 1)", asked)
 	}
 }

@@ -71,6 +71,8 @@ func TestEveryReloadRuleNamesAFunctionThatExists(t *testing.T) {
 		filepath.Join("..", "mqtt"),
 		filepath.Join("..", "jobs"),
 		filepath.Join("..", "chat"),
+		// ModelConfig, which a highlight scan reads for its scoring switch.
+		filepath.Join("..", "highlights"),
 		// The display time zone is delivered by logtz.Set -- from the settings
 		// handler on a save, and from main at boot. It is a delivery package
 		// like the others here, so a rule naming it has to be checkable.
@@ -89,6 +91,9 @@ func TestEveryReloadRuleNamesAFunctionThatExists(t *testing.T) {
 		if rule.Why == "" {
 			t.Errorf("settingsReload[%q] has no reason. The reason is what a reviewer "+
 				"reads when they disagree with the class.", path)
+		}
+		if strings.Contains(rule.Applies, ".") {
+			continue // package-qualified: TestQualifiedReloadAppliersAreExactAndCalled
 		}
 		re := regexp.MustCompile(`func (\([^)]*\) )?` + regexp.QuoteMeta(rule.Applies) + `\b`)
 		if !re.MatchString(src) {
@@ -181,17 +186,17 @@ func readGoSources(t *testing.T, dirs []string) string {
 // know the edit still landed.
 func TestAReconcileRecordsWhatItRestartedAndWhatItAppliedLive(t *testing.T) {
 	rec := newReloadRecorder()
-	rec.note("destination", "twitch", reloadRestart, "the routing graph changed")
-	rec.note("destination", "youtube", reloadLive, "reconnect policy retuned")
+	rec.note("destination", "twitch", AppliedRestart, "the routing graph changed")
+	rec.note("destination", "youtube", AppliedLive, "reconnect policy retuned")
 
 	got := rec.snapshot()
 	if len(got) != 2 {
 		t.Fatalf("notes = %d, want 2", len(got))
 	}
-	if got[0].Action != reloadRestart || got[0].Name != "twitch" {
+	if got[0].Action != AppliedRestart || got[0].Name != "twitch" {
 		t.Errorf("first note = %+v, want the restart of twitch", got[0])
 	}
-	if got[1].Action != reloadLive {
+	if got[1].Action != AppliedLive {
 		t.Errorf("second note = %+v, want a live apply", got[1])
 	}
 }
@@ -209,7 +214,7 @@ func TestAReconcileRecordsWhatItRestartedAndWhatItAppliedLive(t *testing.T) {
 func TestNotesRaisedOutsideAReconcileAreDropped(t *testing.T) {
 	e := &Engine{log: testLogger()}
 
-	e.noteReload("preview", "preview", reloadRestart, "idle timeout")
+	e.noteReload("preview", "preview", AppliedRestart, "idle timeout")
 	if r := e.reloadRec.Load(); r != nil {
 		t.Fatalf("noteReload installed a recorder with no reconcile in flight: %+v",
 			r.snapshot())
@@ -224,7 +229,7 @@ func TestNotesRaisedOutsideAReconcileAreDropped(t *testing.T) {
 	// recording the storage guard halted an hour earlier.
 	rec := newReloadRecorder()
 	e.reloadRec.Store(rec)
-	e.noteReload("destination", "twitch", reloadLive, "policy retuned")
+	e.noteReload("destination", "twitch", AppliedLive, "policy retuned")
 	e.reloadRec.Store(nil)
 
 	notes := rec.snapshot()

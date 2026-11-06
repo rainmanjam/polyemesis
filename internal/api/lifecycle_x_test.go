@@ -188,15 +188,9 @@ func xcRow(enabled bool, lc db.BroadcastControl) *db.Destination {
 }
 
 // xcFixture wires the coordinator to the fake X with the Livestream gate open.
-// The gate is read from the environment when the provider set is built, so it
-// is set here, before NewSet.
+// The gate rides the provider set, so it is passed to NewSet.
 func xcFixture(t *testing.T, fake *xcFake, gateOpen bool, rows ...*db.Destination) (*lifecycleCoordinator, *fakeLifecycleStore, *[]lifecycleFault) {
 	t.Helper()
-	if gateOpen {
-		t.Setenv("POLYEMESIS_X_LIVESTREAM", "1")
-	} else {
-		t.Setenv("POLYEMESIS_X_LIVESTREAM", "")
-	}
 	srv := httptest.NewServer(fake.handler(t))
 	t.Cleanup(srv.Close)
 
@@ -209,7 +203,7 @@ func xcFixture(t *testing.T, fake *xcFake, gateOpen bool, rows ...*db.Destinatio
 	c := newLifecycleCoordinator(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		store,
-		oauth.NewSet(oauth.WithBaseURL(srv.URL)),
+		oauth.NewSet(oauth.WithBaseURL(srv.URL), oauth.WithXLivestream(gateOpen)),
 		func(context.Context, int64) (*db.PlatformAccount, error) {
 			return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "tok"}, nil
 		},

@@ -24,6 +24,7 @@ package relay
 import (
 	"errors"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"log/slog"
 	"net"
 	"os"
@@ -683,7 +684,6 @@ func (h *Hub) Wake(name string) bool {
 	return sent
 }
 
-// Close shuts the hub down.
 func (h *Hub) Close() error {
 	var err error
 	h.closeOnce.Do(func() {
@@ -701,14 +701,10 @@ func (h *Hub) Close() error {
 	return err
 }
 
-const (
-	tsPacketSize = 188
-	tsSyncByte   = 0x47
-	// tsNullPID carries stuffing. Its continuity counter is undefined, so
-	// reading it would manufacture loss out of padding.
-	tsNullPID = 0x1FFF
-	tsPIDs    = 0x2000
-)
+// tsPIDs is the size of the 13-bit PID space. The null PID (mpegts.NullPID)
+// carries stuffing and its continuity counter is undefined, so reading it
+// would manufacture loss out of padding.
+const tsPIDs = 0x2000
 
 // continuity tracks the MPEG-TS continuity counter of every PID in the stream.
 //
@@ -727,11 +723,11 @@ type continuity struct {
 // payload-bearing packets it checked, how many continuity breaks it saw, and
 // how many packets those breaks imply were lost.
 func (c *continuity) inspect(dgram []byte) (packets, discontinuities, lost uint64) {
-	for off := 0; off+tsPacketSize <= len(dgram); off += tsPacketSize {
-		p := dgram[off : off+tsPacketSize]
+	for off := 0; off+mpegts.PacketSize <= len(dgram); off += mpegts.PacketSize {
+		p := dgram[off : off+mpegts.PacketSize]
 		// Losing sync means the rest of the datagram cannot be trusted to be
 		// packet-aligned, so stop rather than guess.
-		if p[0] != tsSyncByte {
+		if p[0] != mpegts.SyncByte {
 			return packets, discontinuities, lost
 		}
 		pid, ok := countedPID(p)
@@ -761,7 +757,7 @@ func countedPID(p []byte) (uint16, bool) {
 		return 0, false
 	}
 	pid := uint16(p[1]&0x1F)<<8 | uint16(p[2])
-	return pid, pid != tsNullPID
+	return pid, pid != mpegts.NullPID
 }
 
 // advance folds one packet into the per-PID state and returns how many packets

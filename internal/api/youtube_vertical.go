@@ -8,12 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // YouTube paired vertical (#7), HTTP layer.
@@ -139,7 +138,7 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	acct, vp, err := s.verticalProviderFor(ctx, *dest.AccountID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
+		writeError(w, http.StatusBadGateway, redact.Redact(err.Error()))
 		return
 	}
 	rendID, rendCreated, err := s.verticalRenditionFor(dest, tier)
@@ -157,7 +156,7 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 	}()
 	vs, err := vp.CreateVerticalStream(ctx, acct.AccessToken, dest.Name)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
+		writeError(w, http.StatusBadGateway, redact.Redact(err.Error()))
 		return
 	}
 	row := &db.Destination{
@@ -268,15 +267,6 @@ func (p *verticalHealthPacer) flight(k verticalHealthKey) *sync.Mutex {
 	return l
 }
 
-// verticalClock is the status read's clock. A seam so the pacing test can move time forward
-// without sleeping for a minute.
-func (s *Server) verticalClock() time.Time {
-	if s.verticalNow != nil {
-		return s.verticalNow()
-	}
-	return time.Now()
-}
-
 // verticalHalfIsLive reports whether any of the given destinations is running. The status read
 // is gated on this: a vertical stream is only worth watching while one of its halves is on air.
 // The seam is for tests; production asks the engine.
@@ -288,7 +278,7 @@ func (s *Server) verticalHalfIsLive(ids ...int64) bool {
 		return false
 	}
 	for _, ds := range s.mgr.DestinationStatuses() {
-		if ds.Process == nil || ds.Process.State != supervisor.StateRunning {
+		if !ds.IsUp() {
 			continue
 		}
 		for _, id := range ids {
@@ -344,7 +334,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 	flight := s.verticalHealth.flight(key)
 	flight.Lock()
 	defer flight.Unlock()
-	now := s.verticalClock()
+	now := s.clock()
 	if prev, ok := s.verticalHealth.recent(key, now); ok {
 		applyVerticalRead(&view, prev)
 		writeJSON(w, http.StatusOK, view)
@@ -366,7 +356,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	acct, vp, err := s.verticalProviderFor(ctx, *dest.AccountID)
 	if err != nil {
-		view.HealthError = alerts.Redact(err.Error())
+		view.HealthError = redact.Redact(err.Error())
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
@@ -381,7 +371,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 	health, err := vp.VerticalStreamHealth(oauth.WithQuotaCharged(ctx), acct.AccessToken, pair.VerticalStreamID)
 	read := verticalHealthRead{at: now, health: health}
 	if err != nil {
-		read.err = alerts.Redact(err.Error())
+		read.err = redact.Redact(err.Error())
 		read.health = nil
 	}
 	s.verticalHealth.remember(key, read)

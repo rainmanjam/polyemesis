@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
  * impossible is these particular strings quietly going back to literals.
  *
  * DELIBERATELY NOT KEYED, and why:
- *   - (No longer an exception: lib/trackSignal.ts's "waiting for stream" and
+ *   - (No longer an exception: features/routing/trackSignal.ts's "waiting for stream" and
  *     its two siblings, the meter-row status words of components/signature,
  *     were keyed in the A19 sweep together with the rest of that family —
  *     except MixMatrix.tsx, whose "Out" is why the exclusion below remains.)

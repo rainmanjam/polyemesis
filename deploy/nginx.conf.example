@@ -96,8 +96,10 @@ server {
         # If you replace this with a chain-preserving form, keep in mind that
         # every entry left of the last one is client-supplied. #647.
         proxy_set_header X-Forwarded-For   $remote_addr;
-        # polyemesis reads these two when trustProxyHeaders is enabled: they are
-        # what make the session cookie Secure and the OAuth redirect URI https.
+        # polyemesis reads these two when trustProxyHeaders is enabled, and only
+        # from loopback or an address in trustedProxies (in Docker mode nginx on
+        # the host appears as 172.17.0.1, so list it): they are what make the
+        # session cookie Secure and the OAuth redirect URI https.
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host  $host;
 

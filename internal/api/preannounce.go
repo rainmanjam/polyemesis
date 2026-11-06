@@ -101,10 +101,10 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			// facebookScheduleHorizon constant declared in this file -- a
 			// platform fact written down twice, once as a name and once as a
 			// number, in the one package that has no way to check either.
-			// ScheduledBroadcastsFor answers both at once: absent for every
+			// As[ScheduledBroadcaster] answers both at once: absent for every
 			// platform that cannot pre-announce, and carrying that platform's
 			// own bound for the one that can.
-			sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+			sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 			if !ok {
 				continue
 			}

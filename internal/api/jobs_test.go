@@ -293,10 +293,10 @@ func TestKindInfoReportsTheEffectivePolicy(t *testing.T) {
 			name: "a kind with a row reports its own mode and says it is overridden",
 			policy: func() db.PostProdSettings {
 				p := base
-				p.Kinds = []db.PostProdKindSettings{{Kind: string(media.KindArchive), Mode: "scheduled"}}
+				p.Kinds = []db.PostProdKindSettings{{Kind: string(media.KindThumbnails), Mode: "scheduled"}}
 				return p
 			}(),
-			kind:           media.KindArchive,
+			kind:           media.KindThumbnails,
 			wantMode:       "scheduled",
 			wantOverridden: true,
 			wantAvailable:  true,

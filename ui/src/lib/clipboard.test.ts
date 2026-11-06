@@ -18,6 +18,9 @@ import { copyToClipboard } from "./clipboard";
 const t = ((key: string, args?: Record<string, unknown>) =>
   args ? `${key}:${JSON.stringify(args)}` : key) as never;
 
+// The copy settles through promises; let them run.
+const settle = () => new Promise((r) => setTimeout(r));
+
 const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 function setClipboard(value: unknown) {
   Object.defineProperty(navigator, "clipboard", { value, configurable: true });
@@ -37,7 +40,7 @@ describe("copyToClipboard", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });
     copyToClipboard(t, "value", "Secret");
-    await Promise.resolve();
+    await settle();
     expect(writeText).toHaveBeenCalledWith("value");
     expect(toast.success).toHaveBeenCalledWith('sources.copied:{"what":"Secret"}');
     expect(toast.error).not.toHaveBeenCalled();
@@ -46,24 +49,25 @@ describe("copyToClipboard", () => {
   it("reports a rejected write", async () => {
     setClipboard({ writeText: vi.fn().mockRejectedValue(new Error("denied")) });
     copyToClipboard(t, "value", "Secret");
-    await Promise.resolve();
-    await Promise.resolve();
+    await settle();
     expect(toast.error).toHaveBeenCalledWith('sources.copyFailed:{"what":"secret"}');
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("reports an ABSENT clipboard API the same way, instead of doing nothing", () => {
+  it("reports an ABSENT clipboard API the same way, instead of doing nothing", async () => {
     // The branch that was missing. Insecure contexts have no
     // navigator.clipboard at all, and a no-op here is the original bug.
     setClipboard(undefined);
     copyToClipboard(t, "value", "Secret");
+    await settle();
     expect(toast.error).toHaveBeenCalledWith('sources.copyFailed:{"what":"secret"}');
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("lowercases the noun only for the failure message", () => {
+  it("lowercases the noun only for the failure message", async () => {
     setClipboard(undefined);
     copyToClipboard(t, "v", "Token");
+    await settle();
     // "Could not copy the token" reads mid-sentence; "Token copied" does not.
     expect(toast.error.mock.calls[0][0]).toContain('"what":"token"');
   });

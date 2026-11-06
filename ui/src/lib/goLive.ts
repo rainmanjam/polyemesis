@@ -1,4 +1,5 @@
-import type { DestStatus, DestinationId, SourceView } from "@/lib/types";
+import type { SourceName } from "@/lib/destinationSource";
+import type { DestStatus, DestinationId } from "@/lib/types";
 
 /* THE GO LIVE SHEET'S ARITHMETIC.
  *
@@ -33,7 +34,7 @@ export interface GoLiveRow {
  *  a missing key rather than redacted, so a false "blocked" is not offered. */
 export function goLiveRows(
   destinations: readonly DestStatus[],
-  sources: readonly SourceView[],
+  sources: readonly SourceName[],
 ): GoLiveRow[] {
   const byId = new Map(sources.map((s) => [s.id, s.name]));
   return destinations.map((d) => {
@@ -54,13 +55,6 @@ export function goLiveRows(
 /** The destinations a Go live press starts: ready, and not already on. */
 export function planStarts(rows: readonly GoLiveRow[]): GoLiveRow[] {
   return rows.filter((r) => r.ready && !r.enabled);
-}
-
-/** How many YouTube broadcasts a Stop would end. An enabled YouTube destination
- *  is a broadcast in progress, and stopping it is permanent (see
- *  destinations_bulk.go). Counted so the operator sees it before the click. */
-export function youtubeBroadcastsAtRisk(destinations: readonly DestStatus[]): number {
-  return destinations.filter((d) => d.enabled && d.platform === "youtube").length;
 }
 
 /** Starts the destinations one at a time, `paceMs` apart, collecting a message

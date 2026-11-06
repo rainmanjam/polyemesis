@@ -165,7 +165,7 @@ func (s *Server) clipSegmentView(p clipPart) clipSegmentView {
 		Name:        p.rec.Filename,
 		StartMS:     p.startMS,
 		DurationMS:  p.rec.DurationMS,
-		MediaBase:   fmt.Sprintf("/api/v1/library/recordings/%d/media/", p.rec.ID),
+		MediaBase:   libraryMediaBase(p.rec.ID),
 		Missing:     p.path == "",
 	}
 	layout := media.LayoutFor(s.cfg.RecordingsDir(), p.rec.Filename)
@@ -538,15 +538,21 @@ func (s *Server) clipProber() clipper.Prober {
 		if s.gov != nil {
 			name, args = s.gov.NiceCommand(name, args...)
 		}
-		return runProbe(ctx, name, args)
+		return s.runProbe(ctx, name, args)
 	}}
 }
 
-// runProbe starts the editor's probe once clipProber has wrapped it. A seam so
-// a test can see the exact argv the governor produced -- the wrapper chain is
-// different on every OS (ionice then nice on Linux, nice on macOS, a creation
-// flag and no wrapper on Windows), so only the argv itself says it was used.
-var runProbe = clipper.RunLowPriority
+// runProbe starts the editor's probe once clipProber has wrapped it.
+// Server.probeRunner is the seam: a test sees the exact argv the governor
+// produced -- the wrapper chain is different on every OS (ionice then nice on
+// Linux, nice on macOS, a creation flag and no wrapper on Windows), so only the
+// argv itself says it was used.
+func (s *Server) runProbe(ctx context.Context, name string, args []string) ([]byte, error) {
+	if s.probeRunner != nil {
+		return s.probeRunner(ctx, name, args)
+	}
+	return clipper.RunLowPriority(ctx, name, args)
+}
 
 // ------------------------------------------------------------- plan and export
 

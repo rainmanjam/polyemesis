@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // keyPlaceholder is the token Twitch leaves in url_template where the stream
@@ -42,7 +44,7 @@ const keyPlaceholder = "/{stream_key}"
 // "evilglobal-contribute.live-video.net", which is a different registrable
 // domain that anyone may register and which HasSuffix cannot tell apart. With
 // it, everything that matches is a subdomain of a name Amazon controls.
-const ingestHostSuffix = ".global-contribute.live-video.net"
+const ingestHostSuffix = platform.IVSIngestHostSuffix
 
 // Target is a publish destination, split the way polyemesis splits one.
 //

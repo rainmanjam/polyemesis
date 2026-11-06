@@ -6,7 +6,7 @@ import { Compass, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useT, type TranslationKey, type Translator } from "@/lib/i18n";
-import { TOUR_STEPS } from "@/lib/tourSteps";
+import { TOUR_STEPS } from "@/features/tour/tourSteps";
 
 /* ==========================================================================
    The onboarding tour

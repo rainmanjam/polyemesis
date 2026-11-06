@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rainmanjam/polyemesis/internal/services"
 	"net/url"
 	"strings"
 	"time"
@@ -13,7 +12,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/services"
 )
 
 // DestKind is the transport a destination publishes over.
@@ -39,16 +40,16 @@ const IcecastScheme = "icecast://"
 type Platform string
 
 const (
-	PlatformCustom  Platform = "custom"
-	PlatformYouTube Platform = "youtube"
-	PlatformTwitch  Platform = "twitch"
-	PlatformKick    Platform = "kick"
+	PlatformCustom  Platform = platform.Custom
+	PlatformYouTube Platform = platform.YouTube
+	PlatformTwitch  Platform = platform.Twitch
+	PlatformKick    Platform = platform.Kick
 	// PlatformFacebook is a real platform rather than a preset because Facebook
 	// issues its ingest per broadcast over the Graph API: there is nothing for
 	// an operator to paste, so the integration has to exist for the destination
-	// to work at all. The string matches routing.PlatformFacebook, which is what
-	// makes the Rights Manager music policy apply to these destinations.
-	PlatformFacebook Platform = "facebook"
+	// to work at all. The string is platform.Facebook, which is what makes the
+	// registry's Rights Manager music policy apply to these destinations.
+	PlatformFacebook Platform = platform.Facebook
 	// PlatformRumble exists for CHAT and for nothing else, which makes it the
 	// first entry here that is not about a destination.
 	//
@@ -64,11 +65,11 @@ const (
 	// platform can be integrated for one capability and manual for another, and
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
-	PlatformRumble Platform = "rumble"
+	PlatformRumble Platform = platform.Rumble
 	// PlatformX is X (Twitter) Livestream. Sign-in and the Livestream family are
 	// behind X's whitelist, so the integration is switched off until the owner's
 	// app is whitelisted. Paste-the-key works either way. See oauth/x.go.
-	PlatformX Platform = "x"
+	PlatformX Platform = platform.X
 	// PlatformTrovo is RETIRED. Trovo ceased live streaming on 30 June 2026,
 	// and polyemesis no longer offers it anywhere: no preset, no sign-in, no
 	// create. The constant stays because rows created before the shutdown still
@@ -76,7 +77,7 @@ const (
 	// a reason (see RetiredReason and MigrateRetiredPlatforms), kept readable,
 	// and left for the operator to delete. Removing the value would make them
 	// unreadable instead, which is the one outcome worse than unrunnable.
-	PlatformTrovo Platform = "trovo"
+	PlatformTrovo Platform = platform.Trovo
 	// PlatformVimeo exists for SIGN-IN, and sign-in is the only thing it can
 	// promise every operator.
 	//
@@ -92,12 +93,12 @@ const (
 	// account is what lets polyemesis ASK Vimeo whether this operator can reach
 	// the live API, and say so at connect time rather than letting a refusal
 	// arrive mid-broadcast. See internal/oauth/vimeo.go.
-	PlatformVimeo Platform = "vimeo"
+	PlatformVimeo Platform = platform.Vimeo
 	// PlatformTikTok exists to POST CLIPS (Wave 4 #5c): a connected account is
 	// where a finished short is published, and nothing else. It is not a
 	// destination platform -- Validate does not accept it -- because TikTok LIVE
 	// stays a pasted key. See oauth/tiktok.go.
-	PlatformTikTok Platform = "tiktok"
+	PlatformTikTok Platform = platform.TikTok
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -209,6 +210,17 @@ type Destination struct {
 	// published with should_not_tweet under "first". Only X reads it, so
 	// Validate refuses a value on every other platform. See XGoLiveTweetMode.
 	XGoLiveTweet string `json:"xGoLiveTweet,omitempty"`
+	// PresetID is the catalogue preset this destination was created from, or ""
+	// for one made by hand or before the column existed (and not matched by
+	// MigrateDestinationPresetID). A destination's Platform is "custom" for
+	// every preset that is only a URL and a note, so without this the platform's
+	// own figures (Instagram, LinkedIn, Dailymotion, Owncast, Rumble) could never
+	// be found from a stored destination. Advisory: it selects guidance and gates
+	// nothing, so Validate does not look at it and an id the catalogue no longer
+	// has (a preset removed later, a row written by a newer release) is ignored
+	// rather than blocking every write to the row. An explicit write that SETS
+	// an id is checked by PresetProblem.
+	PresetID string `json:"presetId,omitempty"`
 	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
 	// for this destination's CURRENT stream key, which the "youtube_post" mode
 	// needs before the destination may start. It is set by scanDestination and
@@ -355,6 +367,25 @@ const (
 // fifteen minutes. The buffer it needs is bounded in RAM and disk by
 // internal/delayline, which is provisioned for exactly this.
 const MaxDestDelaySeconds = 15 * 60
+
+// ActiveBroadcastID is the broadcast this destination is publishing to: the
+// lifecycle's own record first, the announcement mirror second. The mirror is
+// rewritten whenever a schedule moves, so it can name a broadcast that is not the
+// one on air; it is only a fallback. X never announces ahead, so its mirror is
+// never written by a schedule, and seeding from it would bring back an ended
+// broadcast after a second show: X has no fallback.
+func (d *Destination) ActiveBroadcastID() string {
+	if d == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(d.Lifecycle.BroadcastID); id != "" {
+		return id
+	}
+	if d.Platform == PlatformX {
+		return ""
+	}
+	return strings.TrimSpace(d.Facebook.BroadcastID)
+}
 
 // OutputDelaySeconds is how long polyemesis itself holds this destination's
 // output back: the delay line the engine builds, and the delay its caption cues
@@ -758,9 +789,7 @@ func (d Destination) Validate() error {
 	default:
 		add("unknown destination kind %q", d.Kind)
 	}
-	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, PlatformX, "":
-	default:
+	if d.Platform != "" && !d.Platform.acceptsDestinations() {
 		add("unknown platform %q", d.Platform)
 	}
 	if d.AudioBitrate < 32 || d.AudioBitrate > 512 {
@@ -972,17 +1001,30 @@ var ErrKeyUnreadable = errors.New("the stream key could not be read on this mach
 // is for the operator.
 var ErrPlatformRetired = errors.New("platform retired")
 
-// retiredPlatforms is every platform that no longer exists, with the sentence
-// the operator is shown. One map, so the create refusal, the start refusal and
-// the reason on the row cannot say three different things.
-var retiredPlatforms = map[Platform]string{
-	PlatformTrovo: "Trovo shut down on 30 June 2026",
+// RetiredReason is why p can no longer be streamed to, or "" for a platform
+// that is still live. The platform registry holds the sentence, so the create
+// refusal, the start refusal and the reason on the row cannot say three
+// different things.
+func (p Platform) RetiredReason() string {
+	row, _ := platform.ByEnum(string(p))
+	return row.Retired
 }
 
-// RetiredReason is why p can no longer be streamed to, or "" for a platform
-// that is still live.
-func (p Platform) RetiredReason() string {
-	return retiredPlatforms[p]
+// acceptsDestinations reports whether Validate lets a destination carry p.
+func (p Platform) acceptsDestinations() bool {
+	row, ok := platform.ByEnum(string(p))
+	return ok && row.AcceptsDestinations
+}
+
+// retiredPlatforms lists every platform that no longer exists.
+func retiredPlatforms() []Platform {
+	var out []Platform
+	for _, row := range platform.All() {
+		if row.Retired != "" {
+			out = append(out, Platform(row.Enum))
+		}
+	}
+	return out
 }
 
 // retiredError is a refusal carrying ErrPlatformRetired and the reason.
@@ -1018,8 +1060,8 @@ type Warning struct {
 //
 // WHAT IT DOES NOT CHECK, stated so the gap is not mistaken for a pass: video
 // bitrate, resolution and frame rate belong to the rendition, not to the
-// destination, so the ceilings services.CheckEncoder can compare against them
-// are not reachable from here. Only the audio bitrate and the URL are.
+// destination, so their platform ceilings are not reachable from here. Only
+// the audio bitrate (services.CheckEncoder) and the URL are.
 func (d Destination) Warnings() []Warning {
 	var out []Warning
 	for _, p := range services.AnalyseURL(d.URL) {
@@ -1028,7 +1070,7 @@ func (d Destination) Warnings() []Warning {
 	// A destination with no registry entry -- "custom", or a platform we do
 	// not carry -- gets no encoder opinion rather than a default one.
 	if svc, ok := services.Lookup(string(d.Platform)); ok {
-		for _, p := range services.CheckEncoder(svc, d.AudioBitrate, 0, 0) {
+		for _, p := range services.CheckEncoder(svc, d.AudioBitrate) {
 			out = append(out, Warning{Field: p.Field, Detail: p.Detail})
 		}
 		if svc.PerChannelIngest && svc.Note != "" && len(out) > 0 {
@@ -1140,8 +1182,10 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// The fingerprint of the key the stored caption URL was issued with, NULL
 		// when no URL is stored. Never the URL itself: see caption_ingest.go.
 		captionKeyHash sql.NullString
-		created        int64
-		updated        int64
+		// NULL for a destination with no known preset, "" in the struct.
+		presetID sql.NullString
+		created  int64
+		updated  int64
 	)
 	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
 		&dst.StreamKey, &streamEnc,
@@ -1154,11 +1198,12 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds, &dst.DelayDumpSeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &captionKeyHash,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &presetID, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
+	dst.PresetID = presetID.String
 	// THE FAIL-CLOSED POINT, and it is here rather than in the four methods
 	// above it because here is the only place every read passes through.
 	//
@@ -1261,7 +1306,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
+	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet, preset_id,
 	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
@@ -1301,7 +1346,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?, delay_dump_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?,
+		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?, preset_id=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1483,7 +1528,6 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 	return out, rows.Err()
 }
 
-// GetDestination loads one destination.
 func (d *DB) GetDestination(id int64) (*Destination, error) {
 	row := d.sql.QueryRow(destByIDQuery, id)
 	dst, err := d.scanDestination(row)
@@ -1495,6 +1539,9 @@ func (d *DB) GetDestination(id int64) (*Destination, error) {
 
 // CreateDestination inserts a destination, defaulting anything unset.
 func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
+	if p := dst.PresetProblem(); p != "" {
+		return nil, fmt.Errorf("invalid destination: %s", p)
+	}
 	if dst.Platform.RetiredReason() != "" {
 		return nil, retiredError(dst.Platform, "a destination can no longer be created for it")
 	}
@@ -1598,9 +1645,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
+		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet, preset_id,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1611,7 +1658,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1712,7 +1759,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.
@@ -2439,7 +2486,7 @@ func (d *DB) MigrateStrandedStreamKeys() error {
 // nothing and the checkpoint is skipped.
 func (d *DB) MigrateRetiredPlatforms() error {
 	var changed int64
-	for p := range retiredPlatforms {
+	for _, p := range retiredPlatforms() {
 		for _, q := range []string{
 			`UPDATE destinations SET enabled = 0 WHERE platform = ? AND enabled <> 0`,
 			`DELETE FROM platform_accounts WHERE platform = ?`,
@@ -2764,4 +2811,45 @@ func captionModeStored(mode string) string {
 		return string(captions.ModeOff)
 	}
 	return mode
+}
+
+// presetIDStored is the column value for a preset id: NULL for none, so a
+// destination with no known preset is distinguishable from nothing at all in
+// the stored data and the column stays nullable.
+func presetIDStored(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
+// presetFitsPlatform reports whether a destination saved as plat could have been
+// made from p: a preset that saves as "custom" has Platform "".
+func presetFitsPlatform(p DestinationPreset, plat Platform) bool {
+	want, have := p.Platform, plat
+	if want == "" {
+		want = PlatformCustom
+	}
+	if have == "" {
+		have = PlatformCustom
+	}
+	return want == have
+}
+
+// PresetProblem is why a PresetID being SET on this destination should be
+// refused, or "". It is checked on create and on an update that changes the id,
+// never on a write that leaves a stored id alone: a stored id the catalogue no
+// longer knows must not make the row unwritable.
+func (d Destination) PresetProblem() string {
+	if d.PresetID == "" {
+		return ""
+	}
+	p, ok := DestinationPresetByID(d.PresetID)
+	if !ok {
+		return fmt.Sprintf("unknown preset %q", d.PresetID)
+	}
+	if !presetFitsPlatform(p, d.Platform) {
+		return fmt.Sprintf("preset %q saves as platform %q, not %q", d.PresetID, p.Platform, d.Platform)
+	}
+	return ""
 }

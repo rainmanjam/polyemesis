@@ -1,6 +1,6 @@
 import { capabilityFor, supportOf } from "@/lib/capabilities";
 import { translate, type Translator } from "@/lib/i18n";
-import { platformNoun } from "@/lib/platformLinks";
+import { platformName } from "@/lib/platforms";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /* ===========================================================================
@@ -76,13 +76,13 @@ const english: Translator = (key, params) => translate("en", key, params);
 
 /** What each platform's chat adapter actually implements.
  *
- *  Keyed by the raw platform string rather than ChatPlatform because RUMBLE IS
- *  NOT IN THAT UNION and still arrives at runtime: types.ts:234 says so out
- *  loud — "rumble is absent on purpose: its Platform value exists in Go for
- *  CHAT and its destination preset deliberately does not carry it". A message
- *  from Rumble is therefore a value the type system believes cannot exist,
- *  which is precisely why the ungated Delete button survived review. A lookup
- *  on `string` cannot be fooled by that.
+ *  Keyed by the raw platform string rather than ChatPlatform because a message
+ *  can carry a platform value this build has no row for (a platform newer than
+ *  the UI, or a retired one such as Trovo), and a lookup on `string` answers
+ *  "nothing implemented" for it instead of the type system promising it cannot
+ *  occur. Rumble is a ChatPlatform with an adapter that implements no moderation
+ *  API; its row says so, which is how an ungated Delete button once survived
+ *  review.
  *
  *  `hideUpstream` is Facebook-only for a structural reason rather than a
  *  missing feature: Facebook's live chat is a comment thread, and a comment has
@@ -101,12 +101,12 @@ const ADAPTERS: Record<
 
 /** The platform's name as an operator would write it.
  *
- *  platformNoun covers the four with adapters and returns its argument
+ *  platformName covers the four with adapters and returns its argument
  *  unchanged for everything else, which is how the menu came to print the
  *  lowercase "rumble publishes no moderation API". The capability matrix knows
  *  the proper name, so fall through to it before giving up. */
 function noun(platform: string): string {
-  const known = platformNoun(platform as ChatPlatform);
+  const known = platformName(platform as ChatPlatform);
   if (known !== platform) return known;
   return capabilityFor(platform).name;
 }

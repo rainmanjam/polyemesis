@@ -7,6 +7,7 @@ import {
   YouTubeGlyph,
 } from "@/components/platformGlyphs";
 import type { TranslationKey } from "@/lib/i18n";
+import { platformName } from "@/lib/platforms";
 import type { SignalTone } from "@/lib/signal";
 import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 
@@ -39,7 +40,6 @@ import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 const ACCENT: Record<
   ChatPlatform,
   {
-    label: string;
     icon: React.ComponentType<{ className?: string }>;
     /** Left rule on a message row. */
     rule: string;
@@ -48,68 +48,59 @@ const ACCENT: Record<
   }
 > = {
   youtube: {
-    label: "YouTube",
     icon: YouTubeGlyph,
     rule: "border-l-down",
     text: "text-down",
     chipOn: "border-down/40 bg-down-dim text-down",
   },
   twitch: {
-    label: "Twitch",
     icon: TwitchGlyph,
     rule: "border-l-primary",
     text: "text-primary-bright",
     chipOn: "border-primary/50 bg-primary-dim text-foreground",
   },
   kick: {
-    label: "Kick",
     icon: KickGlyph,
     rule: "border-l-ok",
     text: "text-ok",
     chipOn: "border-ok/40 bg-ok-dim text-ok",
   },
   facebook: {
-    label: "Facebook",
     icon: FacebookGlyph,
     // An identity colour, not a state: --cat-cyan, never --idle (grey).
     rule: "border-l-cat-cyan",
     text: "text-cat-cyan",
     chipOn: "border-cat-cyan/40 bg-cat-cyan-dim text-cat-cyan",
   },
-  /* TROVO HAS NO CHAT ADAPTER, and never will: Trovo shut down on 30 June
-     2026. The entry exists only because ChatPlatform is an alias of Platform,
-     and Platform still names "trovo" for the destination rows saved before
-     the shutdown — TypeScript requires the key whether or not a message can
-     carry it. Neutral, and labelled, so nothing ever reads a bare lowercase
-     "trovo" — the defect DestinationCard's PLATFORM_LABEL comment records. */
-  trovo: {
-    label: "Trovo",
-    icon: Tv,
-    rule: "border-l-border-strong",
-    text: "text-muted-foreground",
-    chipOn: "border-border-strong bg-secondary text-secondary-foreground",
-  },
   /* X (Twitter) Live chat, read from X's activity stream once X Livestream
      access is on. Neutral, like every platform beyond the four with an accent
      of their own: the palette has no colour to spare. */
   x: {
-    label: "X",
     icon: XGlyph,
     rule: "border-l-border-strong",
     text: "text-foreground",
     chipOn: "border-border-strong bg-secondary text-secondary-foreground",
   },
-  custom: {
-    label: "Custom",
-    icon: Radio,
+  /* Rumble chat is read and moderated locally; it has no accent of its own and
+     no brand glyph here. Until now it fell through to the unknown-platform
+     accent and was labelled "Custom". */
+  rumble: {
+    icon: Tv,
     rule: "border-l-border-strong",
-    text: "text-muted-foreground",
+    text: "text-foreground",
     chipOn: "border-border-strong bg-secondary text-secondary-foreground",
   },
 };
 
-/** Unknown platforms fall back rather than crash: the server may know about a
- *  platform this build does not. */
+/** A platform this build has no accent for: the server may know about one it
+ *  does not. Shown plainly and named by what the server called it. */
+const UNKNOWN_ACCENT = {
+  icon: Radio,
+  rule: "border-l-border-strong",
+  text: "text-muted-foreground",
+  chipOn: "border-border-strong bg-secondary text-secondary-foreground",
+};
+
 /** Timeout choices. Seconds on the wire, always — the server converts for Kick,
  *  which counts in minutes. The list stops at a day because past that a timeout
  *  is a ban with extra steps, and Kick refuses beyond seven days anyway.
@@ -124,8 +115,10 @@ export const TIMEOUTS: { label: TranslationKey; seconds: number }[] = [
   { label: "chat.timeout1Day", seconds: 86400 },
 ];
 
+/** How a platform is drawn in chat. The name comes from the registry (lib/platforms),
+ *  so there is one list of names. */
 export function accentFor(p: ChatPlatform) {
-  return ACCENT[p] ?? ACCENT.custom;
+  return { ...(Object.hasOwn(ACCENT, p) ? ACCENT[p] : UNKNOWN_ACCENT), label: platformName(p) };
 }
 
 export function chatStateTone(state: ChatStatus["state"]): SignalTone {

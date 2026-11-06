@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // TikTok implements Provider for sign-in only.
@@ -35,7 +36,7 @@ type TikTok struct {
 
 const (
 	tikTokAuthBase = "https://www.tiktok.com"
-	tikTokAPIBase  = "https://open.tiktokapis.com"
+	tikTokAPIBase  = platform.TikTokAPIHost
 )
 
 var (
@@ -54,7 +55,7 @@ func (t *TikTok) authEndpoint() string { return t.authBase(tikTokAuthBase) }
 func (t *TikTok) Platform() db.Platform { return db.PlatformTikTok }
 
 // Scopes: user.info.basic to name the account, video.publish to post.
-func (t *TikTok) Scopes() []string { return []string{"user.info.basic", "video.publish"} }
+func (t *TikTok) Scopes() []string { return []string{"user.info.basic", platform.TikTokPublishScope} }
 
 // ScopeVersion is 1: no TikTok account existed before this.
 func (t *TikTok) ScopeVersion() int { return 1 }
@@ -109,7 +110,7 @@ type tikTokUser struct {
 
 func (t *TikTok) Account(ctx context.Context, clientID, accessToken string) (*Account, error) {
 	var u tikTokUser
-	if err := getJSON(ctx, t.apiEndpoint()+"/v2/user/info/?fields=open_id,display_name", accessToken, nil, &u); err != nil {
+	if err := t.getJSON(ctx, t.apiEndpoint()+"/v2/user/info/?fields=open_id,display_name", accessToken, nil, &u); err != nil {
 		return nil, err
 	}
 	if c := u.Error.Code; c != "" && c != "ok" {

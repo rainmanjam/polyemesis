@@ -87,7 +87,7 @@ func TestARecordedTwoAudioFLVFailureIsReadBackWithItsReason(t *testing.T) {
 func TestTheRealFFmpegAnswersTheTwoAudioFLVProbeForItsVersion(t *testing.T) {
 	ff := testenv.FFmpegBinary(t, "ffmpeg", "no ffmpeg on PATH")
 	fp := testenv.FFmpegBinary(t, "ffprobe", "no ffprobe on PATH")
-	det, err := Detect(context.Background(), ff, fp)
+	det, err := Detect(context.Background(), ff, fp, "")
 	if err != nil {
 		t.Fatalf("detecting the installed FFmpeg: %v", err)
 	}

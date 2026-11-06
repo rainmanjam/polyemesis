@@ -1,4 +1,6 @@
+import { DEFAULT_LISTENERS, WIRE } from "@/lib/contract/wire";
 import { createContext, useContext, useEffect, useId, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
@@ -47,14 +49,14 @@ import { EmptyState } from "@/components/EmptyState";
 import { DisabledReason } from "@/components/DisabledReason";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { platformSetupStatus } from "@/lib/status";
-import { SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
+import { SETTINGS_ANCHORS, SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
 import {
   ADVANCED_CARDS,
   advancedCardShown,
   isAdvancedCard,
   useShowAdvanced,
   type AdvancedCard as AdvancedCardKey,
-} from "@/lib/settingsAdvanced";
+} from "@/features/settings/settingsAdvanced";
 import {
   Select,
   SelectContent,
@@ -96,10 +98,10 @@ import {
   suggestedHostname,
   RESTART_COMMAND,
   type AcmeStance,
-} from "@/lib/acme-guidance";
+} from "@/features/settings/acme-guidance";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
-import { mqttPlainScheme } from "@/lib/mqtt";
-import { timestamp } from "@/lib/format";
+import { mqttPlainScheme } from "@/features/settings/mqtt";
+import { dateOnly, timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
   platformConnectControls,
@@ -108,7 +110,7 @@ import {
 import { LIMITS } from "@/lib/limits";
 import { credentialLabelsFor } from "@/lib/platformCredentialLabels";
 import { cn } from "@/lib/utils";
-import { pipelineDirty, pipelineSaveCarriesPassword } from "@/lib/pipelineSave";
+import { pipelineDirty, pipelineSaveCarriesPassword } from "@/features/settings/pipelineSave";
 import {
   failedRead,
   mayClaim,
@@ -606,7 +608,7 @@ const AdvancedContext = createContext<{
 }>({ show: true, revealed: new Set(), setShow: () => {} });
 
 /** One advanced card (settings-council R4, R7), HIDDEN rather than unmounted
- *  when it is not shown -- see lib/settingsAdvanced.ts for why. `settings` is
+ *  when it is not shown -- see features/settings/settingsAdvanced.ts for why. `settings` is
  *  the STORED document, not the draft: a card shown because its saved value is
  *  not the default must not vanish under the operator's cursor the moment they
  *  type the default back in. */
@@ -726,13 +728,13 @@ function IngestSettings({
   // nothing on screen having said so.
   const live = useIngestLive();
 
+  const { copy: copyText } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyUrl = async () => {
     if (!system?.ingestUrl) return;
-    await navigator.clipboard.writeText(system.ingestUrl);
-    toast.success(t("set.ingestUrlCopied"));
+    if (await copyText(system.ingestUrl)) toast.success(t("set.ingestUrlCopied"));
   };
 
-  const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
+  const listeners = draft.listeners ?? DEFAULT_LISTENERS;
   const setListeners = (patch: Partial<typeof listeners>) =>
     setDraft({ ...draft, listeners: { ...listeners, ...patch } });
 
@@ -1016,7 +1018,7 @@ function ListenerPortsOnly({
 }) {
   const t = useT();
   const model = useSaveModel<ListenerSettings>({
-    stored: settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 },
+    stored: settings.listeners ?? DEFAULT_LISTENERS,
     onSave: (listeners) => onSave({ ...settings, listeners }),
     equal: sameSettings,
   });
@@ -1147,12 +1149,12 @@ function SettingsPullIngestFields({
  *  first GET lands or against a server too old to send the key. */
 function chatFrom(draft: Settings): Required<ChatRetentionSettings> {
   return {
-    retentionHours: draft.chat?.retentionHours ?? 2,
-    keepMessages: draft.chat?.keepMessages ?? 2000,
-    purgeMinutes: draft.chat?.purgeMinutes ?? 5,
-    historyMessages: draft.chat?.historyMessages ?? 500,
-    youtubeQuotaUnits: draft.chat?.youtubeQuotaUnits ?? 10000,
-    youtubeQuotaReserve: draft.chat?.youtubeQuotaReserve ?? 200,
+    retentionHours: draft.chat?.retentionHours ?? WIRE.defaults.chatRetentionHours,
+    keepMessages: draft.chat?.keepMessages ?? WIRE.defaults.chatKeepMessages,
+    purgeMinutes: draft.chat?.purgeMinutes ?? WIRE.defaults.chatPurgeMinutes,
+    historyMessages: draft.chat?.historyMessages ?? WIRE.defaults.chatHistoryMessages,
+    youtubeQuotaUnits: draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits,
+    youtubeQuotaReserve: draft.chat?.youtubeQuotaReserve ?? WIRE.defaults.youTubeQuotaReserve,
   };
 }
 
@@ -1304,7 +1306,7 @@ function PipelineSettings({
                 type="number"
                 min={0}
                 max={43800}
-                value={draft.chat?.retentionHours ?? 2}
+                value={draft.chat?.retentionHours ?? WIRE.defaults.chatRetentionHours}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1323,7 +1325,7 @@ function PipelineSettings({
                 type="number"
                 min={0}
                 max={5000000}
-                value={draft.chat?.keepMessages ?? 2000}
+                value={draft.chat?.keepMessages ?? WIRE.defaults.chatKeepMessages}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1353,7 +1355,7 @@ function PipelineSettings({
                 type="number"
                 min={1}
                 max={1440}
-                value={draft.chat?.purgeMinutes ?? 5}
+                value={draft.chat?.purgeMinutes ?? WIRE.defaults.chatPurgeMinutes}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1372,7 +1374,7 @@ function PipelineSettings({
                 type="number"
                 min={LIMITS.chatHistoryMessages.min}
                 max={LIMITS.chatHistoryMessages.max}
-                value={draft.chat?.historyMessages ?? 500}
+                value={draft.chat?.historyMessages ?? WIRE.defaults.chatHistoryMessages}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1397,7 +1399,7 @@ function PipelineSettings({
                 type="number"
                 min={LIMITS.youtubeQuotaUnits.min}
                 max={LIMITS.youtubeQuotaUnits.max}
-                value={draft.chat?.youtubeQuotaUnits ?? 10000}
+                value={draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1430,8 +1432,8 @@ function PipelineSettings({
                 id="chat-yt-reserve"
                 type="number"
                 min={0}
-                max={Math.floor((draft.chat?.youtubeQuotaUnits ?? 10000) / 2)}
-                value={draft.chat?.youtubeQuotaReserve ?? 200}
+                max={Math.floor((draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits) / WIRE.defaults.youTubeQuotaReserveFraction)}
+                value={draft.chat?.youtubeQuotaReserve ?? WIRE.defaults.youTubeQuotaReserve}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1506,7 +1508,7 @@ function PipelineSettings({
               type="number"
               min={LIMITS.alertRetryAttempts.min}
               max={LIMITS.alertRetryAttempts.max}
-              value={draft.alerts?.retryAttempts ?? 4}
+              value={draft.alerts?.retryAttempts ?? WIRE.defaults.alertRetryAttempts}
               onChange={(e) =>
                 setDraft({ ...draft, alerts: { retryAttempts: Number(e.target.value) } })
               }
@@ -1586,7 +1588,7 @@ function PipelineSettings({
               selected by ?tab=pipeline; this scrolls to the card within it, so
               a link from the dashboard lands on the switch rather than at the
               top of a long page. */}
-          <CardTitle id="failover">{t("set.failover")}</CardTitle>
+          <CardTitle id={SETTINGS_ANCHORS.failover}>{t("set.failover")}</CardTitle>
           <CardDescription>{t("settingsUx.failoverShort")}</CardDescription>
           <MoreAbout>{t("set.failoverDesc")}</MoreAbout>
         </CardHeader>
@@ -1611,7 +1613,7 @@ function PipelineSettings({
                   id="fo-grace"
                   type="number"
                   min={1}
-                  value={draft.failover?.graceSeconds ?? 10}
+                  value={draft.failover?.graceSeconds ?? WIRE.defaults.failoverGraceSeconds}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1651,7 +1653,7 @@ function PipelineSettings({
                     id="fo-stable"
                     type="number"
                     min={0}
-                    value={draft.failover?.returnStableSeconds ?? 60}
+                    value={draft.failover?.returnStableSeconds ?? WIRE.defaults.failoverReturnStableSeconds}
                     onChange={(e) =>
                       setDraft({
                         ...draft,
@@ -1994,7 +1996,7 @@ function PipelineSettings({
                       type="number"
                       min={1}
                       max={3600}
-                      value={draft.mqtt?.intervalSeconds ?? 10}
+                      value={draft.mqtt?.intervalSeconds ?? WIRE.defaults.mqttIntervalSeconds}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -2010,7 +2012,7 @@ function PipelineSettings({
                       type="number"
                       min={1}
                       max={65535}
-                      value={draft.mqtt?.keepAliveSeconds ?? 30}
+                      value={draft.mqtt?.keepAliveSeconds ?? WIRE.defaults.mqttKeepAliveSeconds}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -2799,7 +2801,7 @@ export function PlatformCredCard({
   const [clientId, setClientId] = useState(creds?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   // SEEDED FROM THE STORED VERDICT (settings-council R10). It used to start
   // null on every load, so a reload turned "the platform refused this pair"
   // back into a plain "configured". `checkedAt` is absent only for a verdict
@@ -2966,9 +2968,7 @@ export function PlatformCredCard({
   };
 
   const copyRedirect = async () => {
-    await navigator.clipboard.writeText(guide.redirectPath);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(guide.redirectPath);
   };
 
   const verdictBadge = check && (
@@ -3047,7 +3047,7 @@ export function PlatformCredCard({
                     <div className="font-mono text-sm text-muted-foreground">{a.accountRef}</div>
                     {/* What the capability matrix promises, on the account it
                         is a promise about. Polled while this row is open; see
-                        lib/viewerCount.ts for why the interval is what it is. */}
+                        features/accounts/viewerCount.ts for why the interval is what it is. */}
                     <AccountLiveStats accountId={a.id} />
                     {/* Said in full rather than as a bare badge: a token cannot
                         gain a permission it was not issued with, which is
@@ -3564,7 +3564,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<AcmePreflight | null>(null);
   const [checkError, setCheckError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   const snippet = result ? `${acmeYaml(result.hostname, email)}\n\n# ${RESTART_COMMAND}` : "";
 
@@ -3582,9 +3582,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
   };
 
   const copySnippet = async () => {
-    await navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(snippet);
   };
 
   return (
@@ -3678,7 +3676,7 @@ function TransportSecurity() {
   const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   useEffect(() => {
     api
@@ -3691,9 +3689,7 @@ function TransportSecurity() {
 
   const copyYaml = async () => {
     if (!tls) return;
-    await navigator.clipboard.writeText(tlsYaml(tls));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(tlsYaml(tls));
   };
 
   const cert = tls?.certificate ?? null;
@@ -3877,10 +3873,10 @@ function SecretKeyCard({ system }: { system: SystemInfo | null }) {
       // Not remembered; the box still shows what was ticked for this visit.
     }
   };
+  const { copy: copyText } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
   const copyDir = async () => {
     if (!dir) return;
-    await navigator.clipboard.writeText(dir);
-    toast.success(t("settingsUx.pathCopied"));
+    if (await copyText(dir)) toast.success(t("settingsUx.pathCopied"));
   };
   return (
     <Card className="lg:col-span-2">
@@ -3895,7 +3891,7 @@ function SecretKeyCard({ system }: { system: SystemInfo | null }) {
             no statement of why it matters. Reached at /settings?tab=security:
             the tab is URL-driven (see the Tabs in SettingsPage above), which is
             what lets the tour navigate straight to it rather than asking the
-            operator to find it. See ui/src/lib/tourSteps.ts. */}
+            operator to find it. See ui/src/features/tour/tourSteps.ts. */}
         <div data-tour="data-directory" className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
             <span className="shrink-0 text-sm text-muted-foreground">{t("set.dataDirectory")}</span>
@@ -3951,7 +3947,7 @@ function ApiTokens() {
   // Held in state and nowhere else: the server keeps only a hash, so this is
   // the one and only time the plaintext exists.
   const [minted, setMinted] = useState<{ token: ApiToken; plaintext: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copy: copyText, copiedKey } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   const load = () => {
     api
@@ -3970,7 +3966,6 @@ function ApiTokens() {
     setBusy(true);
     try {
       setMinted(await api.createToken(name.trim(), scope));
-      setCopied(false);
       setName("");
       setScope("read");
       load();
@@ -3994,9 +3989,11 @@ function ApiTokens() {
 
   const copy = async () => {
     if (!minted) return;
-    await navigator.clipboard.writeText(minted.plaintext);
-    setCopied(true);
+    // Keyed by the secret itself: a freshly minted token is not "Copied" because
+    // the previous one was a moment ago.
+    await copyText(minted.plaintext, minted.plaintext);
   };
+  const tokenCopied = minted != null && copiedKey === minted.plaintext;
 
   return (
     <Card className="lg:col-span-2">
@@ -4051,7 +4048,7 @@ function ApiTokens() {
             <div className="flex items-center gap-1.5">
               <SecretCode value={minted.plaintext} />
               <Button size="sm" variant="outline" onClick={copy}>
-                {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
+                {tokenCopied ? <Check /> : <Copy />} {tokenCopied ? t("clipedit.copied") : t("common.copy")}
               </Button>
             </div>
             <span className="text-sm text-muted-foreground">{t("set.tokenHashNote")}</span>
@@ -4082,7 +4079,7 @@ function ApiTokens() {
                     </Badge>
                   </div>
                   <div className="font-mono text-sm text-muted-foreground">
-                    {tok.prefix}… · {t("set.tokenCreated", { date: new Date(tok.createdAt).toLocaleDateString() })} ·{" "}
+                    {tok.prefix}… · {t("set.tokenCreated", { date: dateOnly(tok.createdAt) })} ·{" "}
                     {tokenLastUsed(tok, t)}
                   </div>
                 </div>
@@ -4132,5 +4129,5 @@ function ApiTokens() {
 function tokenLastUsed(t: ApiToken, tr: Translator): string {
   const used = new Date(t.lastUsedAt);
   if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return tr("set.tokenNeverUsed");
-  return tr("set.tokenLastUsed", { at: used.toLocaleString() });
+  return tr("set.tokenLastUsed", { at: timestamp(t.lastUsedAt) });
 }

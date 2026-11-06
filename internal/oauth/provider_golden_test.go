@@ -71,7 +71,7 @@ func liveProviderScopes() []providerScopes {
 			ScopeVersion: prov.ScopeVersion(),
 			Scopes:       append([]string(nil), prov.Scopes()...),
 		}
-		if mk, ok := ManualKeyFor(p); ok {
+		if mk, ok := As[ManualKey](Set{}, p); ok {
 			row.ManualKeyReason = mk.ManualKeyReason()
 		}
 		out = append(out, row)

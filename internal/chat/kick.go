@@ -32,12 +32,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// KickMaxMessage is Kick's published limit on chat content. The adapter
+// enforces it in Send; the registry carries the same figure for everyone else,
+// and TestRegistryAgreesWithTheChatAdapters holds the two together.
+const KickMaxMessage = 500
+
 const (
-	// KickMaxMessage is Kick's published limit on chat content.
-	KickMaxMessage = 500
 	// kickSilenceAfter is how long a connected-and-reachable adapter waits
 	// before it starts telling the operator that nothing has arrived. Long
 	// enough that a genuinely quiet ten minutes is not called an error, short
@@ -70,6 +75,10 @@ type KickConfig struct {
 	// proxy logs, Referer headers and any plain-HTTP hop, which is what Verify
 	// below is for. A blank one is generated.
 	CallbackSecret string
+	// CallbackPath builds the path the receiver is mounted at from the secret.
+	// Required, and owned by the HTTP layer that registers the route, so the
+	// path the operator pastes into Kick cannot drift from the one served.
+	CallbackPath func(secret string) string
 	// Verify authenticates a delivery. Required: the handler refuses every POST
 	// when it is nil rather than accepting unverified events.
 	//
@@ -107,14 +116,17 @@ func NewKick(cfg KickConfig) (*KickAdapter, error) {
 	if cfg.Token == nil {
 		return nil, fmt.Errorf("kick chat is not configured: no access token, so connect the Kick account in Settings → Platforms")
 	}
+	if cfg.CallbackPath == nil {
+		return nil, fmt.Errorf("kick chat is not configured: no callback path builder")
+	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://api.kick.com"
+		cfg.APIBase = platform.KickAPIHost
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
+		cfg.Sleep = backoff.SleepCtx
 	}
 	if cfg.CallbackSecret == "" {
 		cfg.CallbackSecret = randomSecret()
@@ -128,12 +140,41 @@ func NewKick(cfg KickConfig) (*KickAdapter, error) {
 func (k *KickAdapter) Platform() db.Platform { return db.PlatformKick }
 func (k *KickAdapter) Account() string       { return k.cfg.AccountRef }
 
+// BroadcasterUserID is the Kick channel this adapter listens for.
+func (k *KickAdapter) BroadcasterUserID() int { return k.cfg.BroadcasterUserID }
+
+// VerifyDelivery checks a delivery's signature with this adapter's verifier.
+// Kick signs every channel's deliveries with one key, so any adapter can vouch
+// for a delivery that belongs to none of them. A missing verifier fails closed.
+func (k *KickAdapter) VerifyDelivery(r *http.Request, body []byte) error {
+	if k.cfg.Verify == nil {
+		return fmt.Errorf("webhook verification is not configured")
+	}
+	return k.cfg.Verify(r, body)
+}
+
+// KickDeliveryBroadcaster names the channel a webhook body is about, or 0 when
+// the body does not say. Kick has one callback URL per app, so every connected
+// channel's chat arrives together and this is what tells them apart. The body
+// is not yet verified here: it only picks which adapter will verify it.
+func KickDeliveryBroadcaster(body []byte) int {
+	var ev struct {
+		Broadcaster struct {
+			UserID int `json:"user_id"`
+		} `json:"broadcaster"`
+	}
+	if json.Unmarshal(body, &ev) != nil {
+		return 0
+	}
+	return ev.Broadcaster.UserID
+}
+
 // CallbackPath is where the receiver must be mounted, and what the operator
 // pastes into the Kick app dashboard's webhook field (prefixed by PublicURL).
 // The secret is part of the path because that is what authenticates a
 // delivery in the absence of a signature scheme we can verify.
 func (k *KickAdapter) CallbackPath() string {
-	return "/api/v1/chat/kick/" + k.cfg.CallbackSecret
+	return k.cfg.CallbackPath(k.cfg.CallbackSecret)
 }
 
 // CallbackURL is the full URL, or empty when polyemesis does not know its own

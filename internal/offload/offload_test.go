@@ -550,16 +550,16 @@ func TestPrefixTemplates(t *testing.T) {
 }
 
 func TestBackoffGrowsAndCaps(t *testing.T) {
-	if d := backoff(1, true); d < backoffBase || d > backoffBase*6/5+time.Second {
+	if d := retryDelay(1, true); d < backoffBase || d > backoffBase*6/5+time.Second {
 		t.Fatalf("first %v", d)
 	}
-	if d := backoff(4, true); d < 4*backoffBase {
+	if d := retryDelay(4, true); d < 4*backoffBase {
 		t.Fatalf("fourth %v", d)
 	}
-	if d := backoff(40, true); d > backoffCap*6/5+time.Second {
+	if d := retryDelay(40, true); d > backoffCap*6/5+time.Second {
 		t.Fatalf("capped %v", d)
 	}
-	if backoff(1, false) != backoffCap {
+	if retryDelay(1, false) != backoffCap {
 		t.Fatal("a permanent refusal waits the cap")
 	}
 	_ = base64.StdEncoding

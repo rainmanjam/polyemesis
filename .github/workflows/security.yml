@@ -402,7 +402,7 @@ jobs:
       # scope.
       - name: verify the allowlist is not over-broad
         run: |
-          target=internal/alerts/redact_test.go
+          target=internal/redact/redact_test.go
 
           # A non-zero exit from gitleaks means "something was found", not
           # "the plant was found". Asserting on the exit code alone would pass

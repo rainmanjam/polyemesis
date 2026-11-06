@@ -32,9 +32,10 @@ import type { Status } from "@/lib/types";
  *    (ingestReadingKnown). Until it has, `live` false is an absence, not a
  *    verdict, and a caller must not print it as "Stopped".
  *
- *  `sourceCount` is the caller's, because the two callers know it from
- *  different reads: the dashboard from /setup (null until known), the chrome
- *  from LiveData (0 until known). Both mean "unscoped" until there are two. */
+ *  `sourceCount` is the caller's, because the two callers hold it
+ *  differently: the dashboard passes null until LiveData's count is known
+ *  (sourceCountKnown), the chrome passes LiveData's raw count (0 until
+ *  known). Both mean "unscoped" until there are two. */
 export function useProgrammeIngest(sourceCount: number | null): {
   snapshot: Status | null;
   kbps: number | null;

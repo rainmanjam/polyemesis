@@ -314,7 +314,7 @@ func TestClipTemplatesAreSavedValidatedAndListedWithTheEditorsOptions(t *testing
 // here against a fake provider, never a real one.
 func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	_, _, srv, _ := highlightFixture(t)
-	model := HighlightModel(srv.store, srv.box, automod.NewBudget(), nil)
+	model := highlights.ModelFrom(srv.store, srv.box, automod.NewBudget(), nil)
 	if c, why := model(); c != nil || !strings.Contains(why, "highlight scoring") {
 		t.Errorf("default settings: %v %q", c != nil, why)
 	}
@@ -658,12 +658,10 @@ func TestTheEditorsProbeRunsUnderTheGovernor(t *testing.T) {
 	srv.gov = jobs.NewGovernor(slog.New(slog.NewTextHandler(io.Discard, nil)), srv.jobq)
 	var gotName string
 	var gotArgs []string
-	old := runProbe
-	runProbe = func(_ context.Context, name string, args []string) ([]byte, error) {
+	srv.probeRunner = func(_ context.Context, name string, args []string) ([]byte, error) {
 		gotName, gotArgs = name, append([]string(nil), args...)
 		return nil, errors.New("recorded")
 	}
-	t.Cleanup(func() { runProbe = old })
 
 	p, ok := srv.clipProber().(clipper.FFprobe)
 	if !ok || p.Run == nil {

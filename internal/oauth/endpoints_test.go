@@ -372,21 +372,17 @@ func TestTheZeroSetIsProduction(t *testing.T) {
 	}
 }
 
-// TestEveryCapabilityLookupHasASetTwinThatResolves is the guard endpoints.go
-// asks for in prose and nothing enforced.
+// TestEveryCapabilityLookupResolvesAgainstTheSetItIsGiven is the guard
+// endpoints.go asks for in prose: As resolves a capability against the Set it
+// is handed, never against the production providers.
 //
-// The comment at endpoints.go:153 says "Every capability the package grows needs
-// its twin here", and the cost of forgetting is specific rather than cosmetic: a
-// caller holding a stubbed Set resolves the capability through the package-level
-// lookup instead, which reads the PRODUCTION providers. The test would still
-// pass, the stub would still be aimed correctly for every other call, and one
-// capability would quietly talk to the real internet.
-//
-// So this asserts the two things that make a twin real: it exists (the code does
-// not compile otherwise), and it resolves against the SET rather than the
-// package -- proven by building a Set whose members are stubbed and checking the
-// twin hands back a provider aimed at the stub.
-func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
+// The cost of getting that wrong is specific rather than cosmetic: a caller
+// holding a stubbed Set would resolve a capability from the production
+// providers, the stub would still be aimed correctly for every other call, and
+// one capability would quietly talk to the real internet. So this builds a Set
+// whose members are stubbed and checks As hands back a provider aimed at the
+// stub.
+func TestEveryCapabilityLookupResolvesAgainstTheSetItIsGiven(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 
@@ -406,11 +402,11 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 	// here cannot drift away from what the providers do.
 	var claimed, denied int
 	for _, row := range PlatformCapabilities() {
-		ls, ok := set.StatsFor(row.Platform)
+		ls, ok := As[LiveStatter](set, row.Platform)
 		if row.Caps[CapViewerStats] == SupportYes {
 			claimed++
 			if !ok {
-				t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired",
+				t.Errorf("As[LiveStatter](Set, %s) did not resolve; it implements Stats, so the twin is not wired",
 					row.Platform)
 				continue
 			}
@@ -424,7 +420,7 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 		// answer supported:false, and a nil-with-true would crash the handler.
 		denied++
 		if ok {
-			t.Errorf("Set.StatsFor(%s) resolved, but its viewerStats cell is %q — "+
+			t.Errorf("As[LiveStatter](Set, %s) resolved, but its viewerStats cell is %q — "+
 				"the assertion is matching something it should not",
 				row.Platform, row.Caps[CapViewerStats])
 		}

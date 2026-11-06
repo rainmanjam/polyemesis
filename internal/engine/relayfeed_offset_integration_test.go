@@ -37,7 +37,7 @@ import (
 // seam ledger's predictedStepMs is trying to catch in the wild.
 //
 // Measured here rather than argued, offline, against the PRODUCTION command line
-// -- relayFeedArgs itself, not a copy of it. A copy would drift from production
+// -- ffmpeg.RelayFeedArgs itself, not a copy of it. A copy would drift from production
 // on the first edit and go on answering the old question.
 //
 // Skipped without FFmpeg and in -short: it binds UDP sockets and encodes video.
@@ -152,7 +152,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	// The feed reads the hub on a port of its own, exactly as startFeed gives it
 	// one, and writes to the capture socket.
 	subPort := freeUDPPort(t)
-	args := relayFeedArgs(mustSubscribe(t, hub, "offsetbench", subPort),
+	args := ffmpeg.RelayFeedArgs(mustSubscribe(t, hub, "offsetbench", subPort),
 		"udp://127.0.0.1:"+strconv.Itoa(sinkPort), offset)
 	feed := exec.Command(ffmpegBin, args...)
 	var feedErr strings.Builder
@@ -199,7 +199,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		//
 		// readrate 4 is still four times realtime, which is all the claim
 		// below needs, and the HOP stays exactly as unpaced as production --
-		// relayFeedArgs is untouched; only the fixture's publisher is paced.
+		// ffmpeg.RelayFeedArgs is untouched; only the fixture's publisher is paced.
 		// The publisher sends an initial burst of half a second of media
 		// (~55 datagrams, FFmpeg's -readrate_initial_burst default), then
 		// ~440 a second. That leaves ~115 datagrams of room, so the hop's
@@ -356,14 +356,24 @@ func TestOutputTSOffsetAddsToTheInputTimelineRatherThanSettingIt(t *testing.T) {
 			offsetB-offsetA, step)
 	}
 
-	// ADDS, NOT SETS. Pinned so that an FFmpeg upgrade which changes it fails
+	// WHERE THE OUTPUT STARTS AT OFFSET 0. The hop used to start at the
+	// fixture's own 1.4 s, and that was never "the input's start time added
+	// through": FFmpeg rebases every input to zero, and the MPEG-TS muxer's default
+	// -muxdelay then put 1.4 s back, which is the same number only because the
+	// fixture was muxed with the same default. The production epilogue
+	// (ffmpeg.RelayProducerOutput) sets -muxdelay 0, as the ingest always has, so
+	// the constant is now ~0 and every writer into a hub shares it -- the hops and
+	// the slate alike, so it still cancels between two feeds.
+	//
+	// Pinned so that an FFmpeg upgrade which changes what the offset means fails
 	// here, in a test that says what the difference means, rather than surfacing
-	// months later as an unexplained seam.
-	if a.firstDTS < inFirst-0.25 || a.firstDTS > inFirst+0.25 {
-		t.Errorf("at offset 0 the hop started at %.3fs and the fixture starts at %.3fs. "+
-			"-output_ts_offset used to ADD to the timestamps it was handed; if it now SETS the "+
-			"start, the constant that cancels between two feeds is gone and every comment in "+
-			"selector.go about the offset needs rereading", a.firstDTS, inFirst)
+	// months later as an unexplained seam. The step assertion above is what proves
+	// the offset is ADDED to that base and does not replace it.
+	if a.firstDTS < -0.25 || a.firstDTS > 0.25 {
+		t.Errorf("at offset 0 the hop started at %.3fs, not at zero. The input is rebased to "+
+			"zero and RelayProducerOutput adds no mux delay, so the output start is the offset "+
+			"alone; if that has changed, the constant that cancels between two feeds is gone "+
+			"and every comment in selector.go about the offset needs rereading", a.firstDTS)
 	}
 
 	// THE OTHER HALF OF predictedStepMs: out_time excludes the offset. If it did
@@ -415,7 +425,7 @@ func TestOutputTSOffsetAddsToTheInputTimelineRatherThanSettingIt(t *testing.T) {
 // TestAnUnpacedCopyHopPublishesFasterThanRealtime measures the lead the seam
 // ledger's predictedStepMs exists to detect.
 //
-// relayFeedArgs has no -re. Given bytes faster than realtime it emits them
+// ffmpeg.RelayFeedArgs has no -re. Given bytes faster than realtime it emits them
 // faster than realtime, and its output timeline then runs ahead of the tier
 // clock that fixed its offset. This does NOT establish that a burst reaches a
 // feed in production -- relay.Hub is a pure fanout and queues nothing, so any
@@ -440,7 +450,7 @@ func TestAnUnpacedCopyHopPublishesFasterThanRealtime(t *testing.T) {
 	// somewhere, and the lead this measures could not exist.
 	if fast.publishWall > time.Duration(fast.span()*float64(time.Second)) {
 		t.Errorf("%.3fs of media took %s to cross an unpaced copy hop; the hop appears to be "+
-			"paced, which contradicts the absence of -re in relayFeedArgs",
+			"paced, which contradicts the absence of -re in ffmpeg.RelayFeedArgs",
 			fast.span(), fast.publishWall)
 	}
 	t.Logf("the unpaced hop ran %.1fx realtime", fast.span()/fast.publishWall.Seconds())

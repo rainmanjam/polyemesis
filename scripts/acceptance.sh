@@ -89,7 +89,7 @@ step "3. First-run setup, destinations and routing (via the API the UI uses)"
 # read "--" as its first argument and dial http://127.0.0.1:--. It is not
 # needed either -- only LEADING consecutive .go arguments are compiled, and
 # the first argument here is always a port number.
-go run "$SCRIPTS/acceptance_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /' 
+go run "$SCRIPTS/acceptance_driver.go" "$SCRIPTS/driverhelpers.go" "$SCRIPTS/driverrelayport.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /' 
 
 # ------------------------------------------------------------- 4. the stream
 # (the driver starts the source and waits; see acceptance_driver.go)

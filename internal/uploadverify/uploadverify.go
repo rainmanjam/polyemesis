@@ -98,10 +98,10 @@ const ProbeTimeout = 10 * time.Minute
 //
 // It names the UPLOAD, which is what makes the queue's Unique fold do the
 // deduplication: pressing "Check again" twice produces one job. The spelling is
-// shared with playlistmedia.NormaliseTarget on purpose -- the two are about the
+// jobs.UploadTarget's, shared with playlistmedia.NormaliseTarget on purpose -- the two are about the
 // same thing and an operator reading the jobs page should see one noun -- and
 // they cannot collide, because Unique folds on Kind AND Target.
-func Target(upload string) string { return "upload:" + upload }
+func Target(upload string) string { return jobs.UploadTarget(upload) }
 
 // Registry is the part of *jobs.Queue this package needs.
 type Registry interface {
@@ -152,9 +152,6 @@ type Processor struct {
 	log   *slog.Logger
 	cfg   Config
 	probe Prober
-	// now is time.Now, as a field only so a test can pin the ProbedAt it
-	// records. Unset means time.Now.
-	now func() time.Time
 }
 
 // Option customises a Processor.
@@ -163,7 +160,6 @@ type Option func(*Processor)
 // WithProber replaces the inspection.
 func WithProber(p Prober) Option { return func(pr *Processor) { pr.probe = p } }
 
-// New builds the processor.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg}
 	for _, o := range opts {

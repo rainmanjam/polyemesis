@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -18,8 +18,8 @@ import (
 // It is deliberately dumb everywhere except ScrubDestinationText, which is the
 // one thing under test. That one applies the BOUNDARY half of what the real
 // engine applies -- the exact secret set built from the destination's own row --
-// and stops there. The real helper follows it with alerts.Redact as a residual;
-// this does not, on purpose, because alerts.Redact has a call-site allowlist
+// and stops there. The real helper follows it with redact.Redact as a residual;
+// this does not, on purpose, because redact.Redact has a call-site allowlist
 // (#162) and a test fake is not a place worth widening it for. Nothing here
 // measures whether the scrub WORKS, only whether snapshot calls it; whether it
 // works is internal/engine's TestScrubDestinationTextCoversTheRetainedTopic.
@@ -60,7 +60,7 @@ func (f *fakeMQTTEngine) ScrubDestinationText(id int64, text string) string {
 		return text
 	}
 	if key := f.dests[id]; key != "" {
-		text = alerts.NewSecretSet(nil, key).Scrub(text)
+		text = redact.NewSecretSet(nil, key).Scrub(text)
 	}
 	return text
 }
@@ -136,7 +136,7 @@ func TestTheRetainedDestTopicIsScrubbedAtTheSink(t *testing.T) {
 			"subscriber and rotating the key does not recall it. The assignment in "+
 			"mqttRunner.snapshot must stay `e.ScrubDestinationText(d.ID, d.Error)` (#160).", got)
 	}
-	if !strings.Contains(got, alerts.Mask) {
+	if !strings.Contains(got, redact.Mask) {
 		t.Errorf("DestState.Error = %q -- the key is gone but nothing says a redaction "+
 			"happened, which usually means the diagnostic was dropped rather than masked", got)
 	}
@@ -285,5 +285,47 @@ func TestTheRetainedSourceTopicCarriesTheDegradedReason(t *testing.T) {
 	}
 	if src.Degraded != "bitrate 300 kbps below 800 kbps for 5s" {
 		t.Errorf("degraded = %q", src.Degraded)
+	}
+}
+
+// MQTT READS A DESTINATION THE WAY ALERTS AND HOOKS DO. A stopped destination
+// still playing its delayed tail out is on the air, so it is `enabled` on the
+// retained topic until the tail ends -- the verdict alertSnapshot already
+// gives, and the one mqtt.go used to skip by copying d.Enabled raw.
+func TestMQTTDestinationsFollowTheEnginesDelayRule(t *testing.T) {
+	proc := &supervisor.Status{State: supervisor.StateRunning, UptimeSec: 30}
+	for _, tc := range []struct {
+		name        string
+		d           engine.DestStatus
+		wantEnabled bool
+		wantRunning bool
+	}{
+		{"draining after stop is still enabled", engine.DestStatus{
+			ID: 1, Enabled: false, Process: proc,
+			Delay: &engine.DelayStatus{Phase: engine.DelayDraining},
+		}, true, true},
+		{"filling its delay: enabled, not running", engine.DestStatus{
+			ID: 2, Enabled: true,
+			Delay: &engine.DelayStatus{Phase: engine.DelayBuffering},
+		}, true, false},
+		{"stopped for good", engine.DestStatus{ID: 3, Enabled: false}, false, false},
+		{"running", engine.DestStatus{ID: 4, Enabled: true, Process: proc}, true, true},
+		{"running but errored", engine.DestStatus{ID: 5, Enabled: true, Process: proc, Error: "x"}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeMQTTEngine{id: 7, name: "p", status: engine.Status{
+				Destinations: []engine.DestStatus{tc.d},
+			}}
+			r := &mqttRunner{engines: func() []mqttEngine { return []mqttEngine{fake} }}
+			got := r.snapshot().Sources[0].Dests[0]
+			if got.Enabled != tc.wantEnabled || got.Running != tc.wantRunning {
+				t.Errorf("mqtt enabled=%v running=%v, want %v/%v", got.Enabled, got.Running, tc.wantEnabled, tc.wantRunning)
+			}
+			// And it must be the very judgement the alert watcher reads.
+			if a := tc.d.AlertState(); a.Enabled != got.Enabled || a.Running != got.Running {
+				t.Errorf("mqtt (%v/%v) disagrees with the alerts projection (%v/%v)",
+					got.Enabled, got.Running, a.Enabled, a.Running)
+			}
+		})
 	}
 }

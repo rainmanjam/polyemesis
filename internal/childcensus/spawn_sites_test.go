@@ -34,15 +34,17 @@ import (
 // whole device: the decision is forced, and it is recorded where the next reader
 // will find it.
 var spawnersThatNeedNoCensus = map[string]string{
-	"internal/ffmpeg": "capability probes and duration counts: every one collects its " +
-		"output and returns, is bounded by a context deadline with WaitDelay set, and " +
-		"cannot outlive the call that made it, let alone the process",
-	"internal/playlistmedia": "the probe helper only; every encode in this package goes " +
-		"through media.Exec, which enrols",
-	"internal/recording": "a single ffprobe for a finished file's duration, output-collected",
-	"internal/api": "two short output-collected runs -- the playout poster frame and the " +
-		"expert dry-run, the latter bounded by both a context deadline and WaitDelay. " +
-		"Neither can survive the handler, so neither can survive the shutdown",
+	"internal/ffmpeg": "Exec, Output and RunEnrolled enrol every encode, ffprobe and " +
+		"upload probe, and the packages that run one go through them. What is left are " +
+		"the startup capability probes (version, encoders, filters, GPU): each collects " +
+		"its output and returns, is bounded by a context deadline, and cannot outlive " +
+		"the call that made it, let alone the process",
+	"internal/clipper": "builds the *exec.Cmd (low priority where the OS needs telling) and " +
+		"runs it through ffmpeg.RunEnrolled, which enrols it in the census for as long as " +
+		"it runs and bounds the wait with KillGrace; the Enrol is in internal/ffmpeg",
+	"internal/highlights": "builds the *exec.Cmd (low priority where the OS needs telling) " +
+		"and runs it through ffmpeg.RunEnrolled, which enrols it in the census for as long " +
+		"as it runs and bounds the wait with KillGrace; the Enrol is in internal/ffmpeg",
 	"internal/testenv": "test scaffolding: netstat and lsof, to find a free UDP port",
 	"scripts/cmd/gotest": "a build-time wrapper that shells out to `go test`; it is not " +
 		"part of the server binary and its child is the test run itself",
@@ -113,12 +115,8 @@ var spawnGroupPolicy = map[string]struct {
 			"terminal Ctrl-C from truncating a recording mid-write. The crash-orphan cost " +
 			"is real and is covered by systemd KillMode=mixed on Unix and by the job " +
 			"object on Windows"},
-	"internal/media": {parentGroup,
-		"a transcode has no teardown protocol worth protecting, so the property worth " +
-			"having is that an abrupt death of polyemesis takes it too rather than leaving " +
-			"a #448 orphan holding CPU for days"},
 	"internal/transcribe": {parentGroup,
-		"same as media: the whisper and extract workers are killed by their context and " +
+		"same as ffmpeg.Exec: the whisper and extract workers are killed by their context and " +
 			"have nothing to finalise, so staying in this group is what makes a Ctrl-C or " +
 			"an OOM kill reach them"},
 	"internal/highlights": {parentGroup,
@@ -128,17 +126,12 @@ var spawnGroupPolicy = map[string]struct {
 	"internal/clipper": {parentGroup,
 		"an output-collected ffprobe that cannot outlive the call; a group of its own " +
 			"would buy nothing and cost the abrupt-death guarantee"},
-	"internal/playlistmedia": {parentGroup,
-		"the probe helper only; every encode in this package goes through media.Exec, " +
-			"which is listed above"},
-	"internal/recording": {parentGroup,
-		"a single ffprobe for a finished file's duration, output-collected"},
 	"internal/ffmpeg": {parentGroup,
-		"capability probes and duration counts, all bounded by a context deadline with " +
-			"WaitDelay set; none can outlive the call that made it"},
-	"internal/api": {parentGroup,
-		"the playout poster frame and the expert dry-run, both short and output-collected, " +
-			"and both bounded by the request they serve"},
+		"the one runner for every transcode and ffprobe outside the supervisor (Exec, " +
+			"Output, RunEnrolled): a transcode has no teardown protocol worth protecting, " +
+			"so the property worth having is that an abrupt death of polyemesis takes it " +
+			"too rather than leaving a #448 orphan holding CPU for days. Also the startup " +
+			"capability probes, all bounded by a context deadline"},
 	"internal/testenv": {parentGroup,
 		"test scaffolding: netstat and lsof, which exit on their own within milliseconds"},
 	"scripts": {parentGroup,

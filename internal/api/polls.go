@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/polls"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Chat polls (#14). The counting is internal/polls; this file is its REST
@@ -383,7 +383,7 @@ func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []p
 				status = polls.NativeSkipped
 			}
 			out = append(out, polls.Mirrored{Account: p.Account(), Result: polls.NativeResult{
-				Platform: string(db.PlatformYouTube), Status: status, Reason: alerts.Redact(err.Error())}})
+				Platform: string(db.PlatformYouTube), Status: status, Reason: redact.Redact(err.Error())}})
 			continue
 		}
 		out = append(out, polls.Mirrored{
@@ -431,7 +431,7 @@ func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []po
 		acct, err := m.s.tokenFor(ctx, a.ID)
 		if err != nil {
 			out = append(out, polls.Mirrored{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
-				Reason: alerts.Redact(err.Error())}})
+				Reason: redact.Redact(err.Error())}})
 			continue
 		}
 		p, err := tw.CreatePoll(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, spec.Question, spec.Options, spec.DurationSeconds)
@@ -439,7 +439,7 @@ func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []po
 			// A 403 is the ordinary answer for a channel that is not an
 			// Affiliate or Partner. Said once, on the poll.
 			out = append(out, polls.Mirrored{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
-				Reason: alerts.Redact(err.Error())}})
+				Reason: redact.Redact(err.Error())}})
 			continue
 		}
 		out = append(out, polls.Mirrored{

@@ -1,3 +1,4 @@
+import { platformName } from "@/lib/platforms";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Copy, KeyRound, Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
@@ -44,15 +45,6 @@ const FONT_LABEL: Record<OverlayFont, TranslationKey> = {
   serif: "overlay.fontSerif",
   mono: "overlay.fontMono",
   rounded: "overlay.fontRounded",
-};
-
-const PLATFORM_LABEL: Record<string, string> = {
-  twitch: "Twitch",
-  youtube: "YouTube",
-  kick: "Kick",
-  facebook: "Facebook",
-  rumble: "Rumble",
-  x: "X",
 };
 
 /** Sample chat for the live preview: one line per platform, so the platform
@@ -303,9 +295,9 @@ export function OverlayEditor({
               <Switch
                 checked={platforms.includes(p)}
                 onCheckedChange={(on) => togglePlatform(p, on)}
-                aria-label={PLATFORM_LABEL[p] ?? p}
+                aria-label={platformName(p)}
               />
-              {PLATFORM_LABEL[p] ?? p}
+              {platformName(p)}
             </label>
           ))}
           <span className="text-micro text-muted-foreground">

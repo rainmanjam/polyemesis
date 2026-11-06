@@ -248,7 +248,7 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 		cd["latencyPreference"] = v
 	}
 
-	if err := requestJSON(ctx, http.MethodPut,
+	if err := y.requestJSON(ctx, http.MethodPut,
 		y.apiEndpoint()+"/liveBroadcasts?part="+parts, accessToken, body, nil, nil); err != nil {
 		return broadcastWriteAdvice(err, b.Status.LifeCycleStatus, s)
 	}
@@ -278,7 +278,7 @@ func (y *YouTube) setTags(ctx context.Context, accessToken, videoID string, tags
 			Snippet ytVideoSnippet `json:"snippet"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
+	err := y.getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func (y *YouTube) setTags(ctx context.Context, accessToken, videoID string, tags
 		return fmt.Errorf("YouTube requires a category on every video update and this " +
 			"broadcast has none; set a category before pushing tags")
 	}
-	err = requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
+	err = y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
 		map[string]any{"id": videoID, "snippet": snip}, nil, nil)
 	if err != nil {
 		return scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)

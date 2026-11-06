@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { remedyFor, processLogHref } from "./failureRemedy";
+import { causeLabel, remedyFor, processLogHref } from "./failureRemedy";
 import { translate } from "./i18n";
 import type { FailureCause } from "./types";
+import { WIRE } from "./contract/wire";
 
 const ALL: FailureCause[] = [
   "key_rejected", "platform_not_ready", "dns", "connection_refused", "timeout",
@@ -51,5 +52,24 @@ describe("processLogHref", () => {
     expect(processLogHref("dest:3")).toBe("/monitoring?process=dest%3A3#process-log");
     expect(processLogHref("ingest", 2)).toBe("/monitoring?programme=2&process=ingest#process-log");
     expect(processLogHref("ingest", null)).toBe("/monitoring?process=ingest#process-log");
+  });
+});
+
+describe("causeLabel", () => {
+  const t = (key: Parameters<typeof translate>[1]) => translate("en", key);
+
+  it("names every cause the server can send", () => {
+    for (const cause of WIRE.failureCauses) {
+      expect(causeLabel(t, cause)).toBe(translate("en", `reason.cause.${cause}`));
+    }
+  });
+
+  // A cause newer than this build used to render as nothing at all: the
+  // catalogue lookup returns undefined for a key it does not have, and the
+  // label was passed straight through to the screen.
+  it("falls back to the unknown label for a cause newer than this UI", () => {
+    const label = causeLabel(t, "tls_handshake_stalled" as FailureCause);
+    expect(label).toBe(translate("en", "reason.cause.unknown"));
+    expect(label).not.toBe("");
   });
 });

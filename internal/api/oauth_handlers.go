@@ -30,7 +30,7 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			guides[i].RedirectPath = origin + guides[i].RedirectPath
 			// Preflight the URI we are about to tell them to register, rather
 			// than letting the platform reject it after the fact.
-			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
+			guides[i].RedirectWarnings = redirectWarnings(s.cfg, s.proxies, r, guides[i].RedirectPath)
 		}
 		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
 	}
@@ -67,13 +67,11 @@ func (s *Server) origin(r *http.Request) string {
 	if r.TLS != nil || s.cfg.ServesTLS() {
 		scheme = "https"
 	}
-	if s.cfg.TrustProxyHeaders {
+	host := r.Host
+	if s.proxies.Trusts(r) {
 		if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
 			scheme = p
 		}
-	}
-	host := r.Host
-	if s.cfg.TrustProxyHeaders {
 		if h := r.Header.Get("X-Forwarded-Host"); h != "" {
 			host = h
 		}
@@ -82,7 +80,7 @@ func (s *Server) origin(r *http.Request) string {
 }
 
 func (s *Server) redirectURI(r *http.Request, platform db.Platform) string {
-	return fmt.Sprintf("%s/api/v1/oauth/%s/callback", s.origin(r), platform)
+	return s.origin(r) + oauth.CallbackPath(platform)
 }
 
 func (s *Server) handleListCreds(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +223,10 @@ type accountView struct {
 	// Health is the last refresh's outcome and the token's own expiry, read
 	// per request (A5). See account_health.go.
 	Health AccountHealth `json:"health"`
+	// IsPage says a Facebook account is a Page, whose broadcasts are always
+	// public. The console reads this rather than knowing how the ref is spelled.
+	// Omitted for every other account.
+	IsPage bool `json:"isPage,omitempty"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -242,6 +244,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 			// The same derivation the Stream Deck's key reads, through
 			// accountHealthCache: see destsignals.go.
 			Health: s.accountHealthNow(a, now),
+			IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -484,13 +487,7 @@ func (s *Server) accountDestinations(accountID int64) ([]accountDestination, err
 		if d == nil || d.AccountID == nil || *d.AccountID != accountID {
 			continue
 		}
-		// The recorded id wins over the announcement mirror, exactly as the
-		// lifecycle coordinator resolves it: the mirror is rewritten whenever a
-		// schedule moves, so it can name a broadcast that is not the one on air.
-		broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
-		if broadcastID == "" {
-			broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
-		}
+		broadcastID := d.ActiveBroadcastID()
 		out = append(out, accountDestination{
 			ID:          d.ID,
 			Name:        d.Name,
@@ -713,7 +710,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 //
 // Returns "" for every platform without a gate, which is all of them but one.
 func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, clientID, accessToken string) string {
-	gated, ok := s.providers.EntitlementFor(platform)
+	gated, ok := oauth.As[oauth.EntitlementGated](s.providers, platform)
 	if !ok {
 		return ""
 	}
@@ -738,13 +735,11 @@ func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, c
 // string. The OAuth round trip is a full navigation, so there is no XHR to
 // return JSON to.
 func (s *Server) oauthDone(w http.ResponseWriter, r *http.Request, ok, errMsg string) {
-	target := "/settings?tab=platforms"
 	if errMsg != "" {
-		target += "&oauth_error=" + urlEscape(errMsg)
-	} else {
-		target += "&oauth_ok=" + urlEscape(ok)
+		http.Redirect(w, r, settingsRedirect([2]string{oauthErrorKey, urlEscape(errMsg)}), http.StatusFound)
+		return
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	http.Redirect(w, r, settingsRedirect([2]string{oauthOKKey, urlEscape(ok)}), http.StatusFound)
 }
 
 // oauthWarn is oauthDone with a third outcome: connected, AND there is
@@ -763,8 +758,8 @@ func (s *Server) oauthWarn(w http.ResponseWriter, r *http.Request, ok, warn stri
 		s.oauthDone(w, r, ok, "")
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=platforms&oauth_ok="+urlEscape(ok)+
-		"&oauth_warn="+urlEscape(warn), http.StatusFound)
+	http.Redirect(w, r, settingsRedirect(
+		[2]string{oauthOKKey, urlEscape(ok)}, [2]string{oauthWarnKey, urlEscape(warn)}), http.StatusFound)
 }
 
 func urlEscape(s string) string {
@@ -790,7 +785,7 @@ func urlEscape(s string) string {
 // The LiveStatter interface moved to internal/oauth (stats.go). It was declared
 // here because the API layer was the only consumer and Kick the only provider;
 // both stopped being true, and a capability interface outside the oauth package
-// cannot carry the Set twin endpoints.go requires.
+// cannot be resolved through oauth.As on a Set.
 
 // handleAccountStats reads the live viewer count for one connected account.
 //
@@ -817,10 +812,10 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
 		return
 	}
-	// Through the Set twin rather than a type assertion on a provider this
-	// handler resolved itself: a Server built with a stubbed Set must not fall
+	// Through oauth.As on the server's Set rather than a type assertion on a
+	// provider this handler resolved itself: a Server built with a stubbed Set must not fall
 	// through to a production provider for viewer numbers alone.
-	st, ok := s.providers.StatsFor(acct.Platform)
+	st, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"supported": false,
@@ -1135,7 +1130,7 @@ func (s *Server) ingestOptionsForRefresh(dest *db.Destination) oauth.IngestOptio
 	// Setting this unconditionally was measured doing exactly that -- the
 	// end-to-end refresh test caught a second destination being moved off its
 	// own perfectly good stream onto a freshly created one.
-	opts.RotateKey = s.keyIsSharedWithASibling(dest)
+	opts.RotateKey = s.keyIsSharedWithASibling(dest, nil)
 	// The operator pressed the button, so this is the one path that may give a
 	// caption destination its own stream when it has no URL yet. That is a key
 	// change, once, and the console says so beside the caption control.
@@ -1171,7 +1166,7 @@ func (s *Server) keepCaptionIngest(dest *db.Destination, b *oauth.Broadcast) err
 // distinguishes an upgraded install, where every YouTube destination holds the
 // same key, from one already provisioned correctly. A destination with a key
 // nobody else uses is already its own ingestion source and must be left alone.
-func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
+func (s *Server) keyIsSharedWithASibling(dest *db.Destination, going map[int64]bool) bool {
 	if dest == nil || dest.AccountID == nil || strings.TrimSpace(dest.StreamKey) == "" {
 		return false
 	}
@@ -1184,7 +1179,8 @@ func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
 		return false
 	}
 	for _, other := range rows {
-		if other.ID == dest.ID || other.AccountID == nil {
+		// A sibling being deleted in the same request is not still using it.
+		if other.ID == dest.ID || other.AccountID == nil || going[other.ID] {
 			continue
 		}
 		if *other.AccountID == *dest.AccountID && other.StreamKey == dest.StreamKey {
@@ -1364,8 +1360,8 @@ func (s *Server) needsOwnIngestStream(dest *db.Destination) bool {
 // THE KEY NEVER APPEARS. The stream is named by its TITLE, which is what an
 // operator actually reads in Studio and is derived from the destination's own
 // name, and titles are the one string about a stream that is safe to log.
-func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
-	if !s.leavesAnOrphanedIngestStream(dest) {
+func (s *Server) noteOrphanedIngestStream(dest *db.Destination, going map[int64]bool) {
+	if !s.leavesAnOrphanedIngestStream(dest, going) {
 		return
 	}
 	s.log.Warn("deleting this destination leaves its YouTube ingest stream on the channel. "+
@@ -1384,7 +1380,7 @@ func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
 // stream a sibling is publishing to, would point somebody at an object whose
 // removal breaks a working setup. So both of those answer false, and so does
 // every case where the row cannot support the claim at all.
-func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
+func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination, going map[int64]bool) bool {
 	if dest == nil || dest.Platform != db.PlatformYouTube || dest.AccountID == nil {
 		// No account means the key was typed in by hand: polyemesis provisioned
 		// nothing and has nothing to say about it.
@@ -1397,7 +1393,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
 	// A sibling publishing with the same key means the stream stays in use --
 	// this is what an upgraded install looks like, where every YouTube
 	// destination was handed the account's one shared key.
-	if s.keyIsSharedWithASibling(dest) {
+	if s.keyIsSharedWithASibling(dest, going) {
 		return false
 	}
 	// And a destination that was never given a stream of its own is holding the
@@ -1411,7 +1407,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
 //
 // Provider.Ingest always targets whatever the token's own identity is, which for
 // Facebook means a Page connection would silently stream to the operator's
-// personal profile. TargetsFor is the capability that knows better; it also
+// personal profile. As[TargetedProvider] is the capability that knows better; it also
 // returns the broadcast id, which is the handle the chat adapter needs and which
 // Provider.Ingest discards. Every other platform has no targets and falls
 // through to Ingest unchanged.
@@ -1421,7 +1417,7 @@ func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
 // which was being parsed by internal/oauth and discarded right here. A platform
 // with no broadcast object gets a synthetic one so every caller reads one shape.
 func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
-	if tp, ok := s.providers.TargetsFor(acct.Platform); ok {
+	if tp, ok := oauth.As[oauth.TargetedProvider](s.providers, acct.Platform); ok {
 		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
 	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)

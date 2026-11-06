@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // YouTube's planned rollover (#19): replace a live broadcast with a fresh one on the same ingest, before the
@@ -242,7 +240,7 @@ func (y *YouTube) rolloverSourceFor(ctx context.Context, accessToken, broadcastI
 	q := url.Values{}
 	q.Set("part", "id,snippet,status,contentDetails")
 	q.Set("id", broadcastID)
-	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
 		return rolloverSource{}, err
 	}
 	for _, it := range list.Items {
@@ -351,7 +349,7 @@ func (y *YouTube) createRolloverBroadcast(ctx context.Context, accessToken strin
 		}
 	}
 	var created ytBroadcast
-	err := requestJSON(ctx, http.MethodPost,
+	err := y.requestJSON(ctx, http.MethodPost,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status,contentDetails",
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -387,17 +385,6 @@ type BroadcastRollover interface {
 
 var _ BroadcastRollover = (*YouTube)(nil)
 
-// RolloverFor reports whether a platform has a broadcast rollover, and the bool is the whole answer the caller
-// branches on, as with LifecycleFor.
-func RolloverFor(p db.Platform) (BroadcastRollover, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	br, ok := prov.(BroadcastRollover)
-	return br, ok
-}
-
 // RolloverSessionStart reads the platform's own live start for a broadcast: snippet.actualStartTime. It is zero
 // when YouTube has not recorded one yet, and the caller then waits rather than counting from a guess.
 func (y *YouTube) RolloverSessionStart(ctx context.Context, accessToken, broadcastID string) (time.Time, error) {
@@ -416,7 +403,7 @@ func (y *YouTube) RolloverSessionStart(ctx context.Context, accessToken, broadca
 	q := url.Values{}
 	q.Set("part", "id,snippet")
 	q.Set("id", id)
-	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
 		return time.Time{}, err
 	}
 	for _, it := range list.Items {

@@ -92,7 +92,7 @@ step "2. Stage the audio features (via the API the UI uses)"
 # read "--" as its first argument and dial http://127.0.0.1:--. It is not
 # needed either -- only LEADING consecutive .go arguments are compiled, and
 # the first argument here is always a port number.
-go run "$SCRIPTS/acceptance_audio_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
+go run "$SCRIPTS/acceptance_audio_driver.go" "$SCRIPTS/driverhelpers.go" "$SCRIPTS/driverrelayport.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
 
 REC="data/recordings"
 

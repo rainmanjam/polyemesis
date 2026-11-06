@@ -50,8 +50,9 @@ type Config struct {
 	RecordingsDir string
 
 	// ArchiveEnabled is the first of the two switches on the destructive path.
-	// Off by default, and off means an archive job fails immediately with an
-	// explanation rather than sitting in the queue looking like it might run.
+	// Nothing sets it outside tests yet, so archive compression is hidden:
+	// submit refuses new jobs, and one stored by an earlier build fails
+	// immediately with an explanation rather than sitting in the queue.
 	ArchiveEnabled bool
 	// ArchiveMinAge is how old a recording must be before it may be
 	// re-encoded. Zero means DefaultArchiveMinAge.
@@ -89,7 +90,7 @@ type Prober func(ctx context.Context, path string) (FileSummary, error)
 type Processor struct {
 	log   *slog.Logger
 	cfg   Config
-	exec  Execer
+	exec  ffmpeg.Execer
 	probe Prober
 	now   func() time.Time
 }
@@ -99,7 +100,7 @@ type Option func(*Processor)
 
 // WithExecer replaces the subprocess runner, so the workers can be exercised
 // without FFmpeg on the machine.
-func WithExecer(e Execer) Option {
+func WithExecer(e ffmpeg.Execer) Option {
 	return func(p *Processor) { p.exec = e }
 }
 
@@ -113,9 +114,8 @@ func WithClock(fn func() time.Time) Option {
 	return func(p *Processor) { p.now = fn }
 }
 
-// New builds a Processor.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
-	p := &Processor{log: log, cfg: cfg.Normalized(), exec: Exec, now: time.Now}
+	p := &Processor{log: log, cfg: cfg.Normalized(), exec: ffmpeg.Exec, now: time.Now}
 	p.probe = p.summarize
 	for _, opt := range opts {
 		opt(p)
@@ -376,7 +376,7 @@ func newJob(kind jobs.Kind, recordingID int64, params any, verr error, pri jobs.
 // RunProxy generates the scrubbing proxy for one recording.
 func (p *Processor) RunProxy(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 	var params ProxyParams
-	if err := decodeParams(job, &params); err != nil {
+	if err := jobs.DecodeParams(job, &params); err != nil {
 		return err
 	}
 	if err := params.Validate(); err != nil {
@@ -402,12 +402,12 @@ func (p *Processor) RunProxy(ctx context.Context, job jobs.Job, rep jobs.Reporte
 	}
 
 	rep.Logf("encoding a %s proxy from audio track %d", proxySize(spec), track)
-	if err := p.run(ctx, rep, Command{Name: p.cfg.FFmpeg, Args: ProxyArgs(spec)},
+	if err := p.run(ctx, rep, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: ProxyArgs(spec)},
 		params.DurationMS, 0, 1); err != nil {
 		p.discard(spec.Output)
 		return err
 	}
-	if err := publish(spec.Output, layout.Proxy); err != nil {
+	if err := ffmpeg.Publish(spec.Output, layout.Proxy); err != nil {
 		return err
 	}
 
@@ -442,7 +442,7 @@ func proxySize(s ProxySpec) string {
 // single pass. See ThumbnailArgs for why it is one pass.
 func (p *Processor) RunThumbnails(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 	var params ThumbnailParams
-	if err := decodeParams(job, &params); err != nil {
+	if err := jobs.DecodeParams(job, &params); err != nil {
 		return err
 	}
 	if err := params.Validate(); err != nil {
@@ -480,20 +480,20 @@ func (p *Processor) RunThumbnails(ctx context.Context, job jobs.Job, rep jobs.Re
 		return nil
 	}
 
-	if err := p.run(ctx, rep, Command{Name: p.cfg.FFmpeg, Args: args}, params.DurationMS, 0, 0.95); err != nil {
+	if err := p.run(ctx, rep, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: args}, params.DurationMS, 0, 0.95); err != nil {
 		p.cleanupThumbs(spec)
 		return err
 	}
 
 	res := ThumbnailResult{}
 	if !params.SkipPoster {
-		if err := publish(spec.Poster.Output, layout.Poster); err != nil {
+		if err := ffmpeg.Publish(spec.Poster.Output, layout.Poster); err != nil {
 			return err
 		}
 		res.Poster = layout.Poster
 	}
 	if !params.SkipContactSheet {
-		if err := publish(spec.ContactSheet.Output, layout.ContactSheet); err != nil {
+		if err := ffmpeg.Publish(spec.ContactSheet.Output, layout.ContactSheet); err != nil {
 			return err
 		}
 		res.ContactSheet = layout.ContactSheet
@@ -591,7 +591,7 @@ func spriteAffixes() (prefix, suffix string) {
 // below is a refusal to destroy something.
 func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 	var params ArchiveParams
-	if err := decodeParams(job, &params); err != nil {
+	if err := jobs.DecodeParams(job, &params); err != nil {
 		return err
 	}
 	if err := params.Validate(); err != nil {
@@ -599,8 +599,9 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 	}
 	if !p.cfg.ArchiveEnabled {
 		return jobs.Permanent(errors.New(
-			"archive compression is switched off. It re-encodes recordings with a lossy codec " +
-				"and can replace the multitrack master, so it has to be enabled in Settings first"))
+			"archive compression is not available yet. It re-encodes recordings with a lossy codec " +
+				"and can replace the multitrack master, so it stays off until it can be enabled deliberately; " +
+				"this job was queued by an earlier version and will not run"))
 	}
 	if !params.AcknowledgeLossy {
 		return jobs.Permanent(errors.New(
@@ -652,7 +653,7 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 	}
 
 	rep.Logf("re-encoding with %s; every audio track is copied, not re-encoded", spec.Encoder)
-	if err := p.run(ctx, rep, Command{Name: p.cfg.FFmpeg, Args: ArchiveArgs(spec)},
+	if err := p.run(ctx, rep, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: ArchiveArgs(spec)},
 		params.DurationMS, 0, 0.75); err != nil {
 		p.discard(spec.Output)
 		return err
@@ -691,7 +692,7 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 			"the archive copy did not verify against the original, so nothing was changed: %s",
 			strings.Join(v.Reasons, "; ")))
 	}
-	if err := publish(spec.Output, layout.Archive); err != nil {
+	if err := ffmpeg.Publish(spec.Output, layout.Archive); err != nil {
 		return err
 	}
 	rep.Logf("verified: %.1f%% smaller, all %d audio track(s) present", v.SavedPercent, len(out.Audio))
@@ -735,7 +736,7 @@ func replaceOriginal(archive, original string) error {
 // decodeCheck runs the full decode pass and returns what it complained about.
 func (p *Processor) decodeCheck(ctx context.Context, rep jobs.Reporter, path string, durationMS int64) ([]string, error) {
 	var lines []string
-	sink := Sink{
+	sink := ffmpeg.Sink{
 		Line: func(l string) { lines = append(lines, l) },
 	}
 	if durationMS > 0 {
@@ -743,7 +744,7 @@ func (p *Processor) decodeCheck(ctx context.Context, rep jobs.Reporter, path str
 			rep.Progress(0.78 + 0.17*float64(pr.OutTimeMS)/float64(durationMS))
 		}
 	}
-	err := p.exec(ctx, Command{Name: p.cfg.FFmpeg, Args: DecodeCheckArgs(path)}, sink)
+	err := p.exec(ctx, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: DecodeCheckArgs(path)}, sink)
 	return DecodeErrors(strings.Join(lines, "\n")), err
 }
 
@@ -753,7 +754,7 @@ func (p *Processor) summarize(ctx context.Context, path string) (FileSummary, er
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()
 	}
-	raw, stderr, err := output(ctx, Command{Name: p.cfg.FFprobe, Args: ProbeArgs(path)})
+	raw, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: p.cfg.FFprobe, Args: ProbeArgs(path)})
 	if err != nil {
 		if s := strings.TrimSpace(stderr); s != "" {
 			return FileSummary{}, fmt.Errorf("ffprobe %s: %s", filepath.Base(path), s)
@@ -764,17 +765,6 @@ func (p *Processor) summarize(ctx context.Context, path string) (FileSummary, er
 }
 
 // ------------------------------------------------------------------- plumbing
-
-func decodeParams(job jobs.Job, into any) error {
-	if len(job.Params) == 0 {
-		return jobs.Permanent(fmt.Errorf("%s job %d has no parameters", job.Kind, job.ID))
-	}
-	if err := json.Unmarshal(job.Params, into); err != nil {
-		// Params that will not parse will not parse on the next attempt either.
-		return jobs.Permanent(fmt.Errorf("%s job %d has unreadable parameters: %w", job.Kind, job.ID, err))
-	}
-	return nil
-}
 
 // prepare resolves the master, checks it is there, and creates the derived
 // directory.
@@ -819,8 +809,8 @@ func (p *Processor) masterPath(name string) (string, error) {
 
 // run executes one command, mapping FFmpeg's progress onto the slice of the
 // job's bar between lo and hi.
-func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd Command, durationMS int64, lo, hi float64) error {
-	sink := Sink{
+func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd ffmpeg.Command, durationMS int64, lo, hi float64) error {
+	sink := ffmpeg.Sink{
 		Line: func(l string) { rep.Logf("%s", l) },
 	}
 	if durationMS > 0 {
@@ -835,18 +825,5 @@ func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd Command, dur
 		return err
 	}
 	rep.Progress(hi)
-	return nil
-}
-
-// publish renames a finished .partial file into place.
-//
-// Nothing in this package writes to a final path directly, so a half-written
-// proxy can never be served and a half-written archive can never be measured by
-// a verifier. Same convention as clips.Capture.
-func publish(partial, final string) error {
-	if err := os.Rename(partial, final); err != nil {
-		_ = os.Remove(partial)
-		return fmt.Errorf("publish %s: %w", filepath.Base(final), err)
-	}
 	return nil
 }

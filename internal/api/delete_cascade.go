@@ -8,6 +8,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -19,10 +20,16 @@ import (
 // is added in one place and reaches both:
 //
 //	beforeDestinationsRemoved  while the rows, their accounts and tokens exist:
-//	                           the platform events created for them.
+//	                           the note about a stranded YouTube stream, and the
+//	                           platform events created for them.
 //	(the store's delete)       schedules.destination_ids and the rollover row,
 //	                           in the delete's own transaction (db.SchedulePrune).
 //	afterDestinationsRemoved   once they are gone: the OBS bridge document.
+//
+// A buffered broadcast delay is cut by the destination delete itself
+// (CutOnStop, CutDelay). A programme delete needs neither: the engine treats a
+// destination whose row is gone as cut (rowsStillThere), pinned by
+// TestDeletingAProgrammeCutsItsDelayedDestinationsLikeDeletingThem.
 //
 // Every step is best-effort and none of them can refuse the delete: the
 // operator asked for the row to go, and a platform that is down or a token
@@ -37,6 +44,15 @@ const destinationEventsTimeout = 30 * time.Second
 
 // beforeDestinationsRemoved runs while the destinations still exist.
 func (s *Server) beforeDestinationsRemoved(ctx context.Context, ds []*db.Destination, now time.Time) []string {
+	// What goes in this request: a sibling that is also being deleted is not
+	// still using a shared key.
+	going := make(map[int64]bool, len(ds))
+	for _, d := range ds {
+		going[d.ID] = true
+	}
+	for _, d := range ds {
+		s.noteOrphanedIngestStream(d, going)
+	}
 	return s.cancelDestinationEvents(ctx, ds, now)
 }
 
@@ -172,7 +188,7 @@ var errNoCancelCall = fmt.Errorf("the platform offers no call to remove a schedu
 // deleted. The same rule as an occurrence: never while the destination is on
 // air, because the live broadcast may be this very event.
 func (s *Server) cancelMarker(ctx context.Context, d *db.Destination, broadcastID string) error {
-	sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
 	if !ok {
 		return errNoCancelCall
 	}
@@ -205,25 +221,8 @@ func eventLeftWarning(d *db.Destination, eventID, reason string) string {
 // platformTitle is a platform's name as its own site writes it, for a sentence
 // an operator reads.
 func platformTitle(p db.Platform) string {
-	switch p {
-	case db.PlatformYouTube:
-		return "YouTube"
-	case db.PlatformTwitch:
-		return "Twitch"
-	case db.PlatformFacebook:
-		return "Facebook"
-	case db.PlatformKick:
-		return "Kick"
-	case db.PlatformVimeo:
-		return "Vimeo"
-	case db.PlatformTikTok:
-		return "TikTok"
-	case db.PlatformX:
-		return "X"
-	case db.PlatformTrovo:
-		return "Trovo"
-	case db.PlatformRumble:
-		return "Rumble"
+	if row, ok := platform.ByEnum(string(p)); ok && p != db.PlatformCustom {
+		return row.ShortName
 	}
 	return "the platform"
 }

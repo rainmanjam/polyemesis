@@ -448,7 +448,7 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defaultID, _ := s.store.DefaultSourceID()
+	defaultID, _ := s.defaultSourceID()
 	out := make([]sourceView, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, s.viewSource(r, row, defaultID))
@@ -468,7 +468,7 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	defaultID, _ := s.store.DefaultSourceID()
+	defaultID, _ := s.defaultSourceID()
 	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
@@ -536,7 +536,7 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	// Through the manager: a new source needs an engine built for it, which
 	// only Sync does.
 	rw := s.reconcileNow("the programme")
-	defaultID, _ := s.store.DefaultSourceID()
+	defaultID, _ := s.defaultSourceID()
 	writeMutation(w, http.StatusCreated, rw, s.viewSource(r, &row, defaultID))
 }
 
@@ -579,7 +579,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw := s.reconcileNow("the programme")
-	defaultID, _ := s.store.DefaultSourceID()
+	defaultID, _ := s.defaultSourceID()
 	writeMutation(w, http.StatusOK, rw, s.viewSource(r, &row, defaultID))
 }
 
@@ -715,7 +715,7 @@ func (s *Server) handleRotateSourceToken(w http.ResponseWriter, r *http.Request)
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	defaultID, _ := s.store.DefaultSourceID()
+	defaultID, _ := s.defaultSourceID()
 	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 

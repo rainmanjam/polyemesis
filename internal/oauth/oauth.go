@@ -190,7 +190,7 @@ func Get(p db.Platform) (Provider, error) {
 
 // TargetedProvider is the optional capability for a platform where one
 // connected login can publish to more than one destination. Discover it with
-// TargetsFor; never type-assert Provider at a call site, because "absent" is
+// As[TargetedProvider]; never type-assert Provider at a call site, because "absent" is
 // the answer for every other platform and has to be handled once.
 //
 // FACEBOOK IS STILL THE ONLY IMPLEMENTATION AND THIS LIVES HERE ANYWAY, which
@@ -219,17 +219,6 @@ type TargetedProvider interface {
 	// broadcast object behind it. opts carries the create-time fields a stored
 	// destination may have chosen; its zero value sends none of them.
 	IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error)
-}
-
-// TargetsFor returns the multi-target capability for a platform, or false when
-// that platform has none. Mirrors MetadataFor.
-func TargetsFor(p db.Platform) (TargetedProvider, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	tp, ok := pr.(TargetedProvider)
-	return tp, ok
 }
 
 // BroadcastTarget is one place a single connected account may publish to.
@@ -434,7 +423,7 @@ type IngestOptions struct {
 // ScheduledBroadcaster is the optional capability for a platform that can
 // create a broadcast BEFORE the show and move it afterwards -- what gives a
 // scheduled show an event page people can subscribe to. Discover it with
-// ScheduledBroadcastsFor; never type-assert Provider at a call site, because
+// As[ScheduledBroadcaster]; never type-assert Provider at a call site, because
 // "absent" is the answer for every other platform and has to be handled once.
 //
 // It exists because that rule was being broken in the plainest possible way.
@@ -506,24 +495,6 @@ type ScheduledBroadcaster interface {
 // refuses still comes back as invalidScheduledStartTime from the create, which
 // is the right place for a bound only the platform knows to be enforced.
 const ScheduleHorizonUnbounded = time.Duration(math.MaxInt64)
-
-// ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
-// false when that platform has none. Mirrors TargetsFor and MetadataFor, both
-// in shape and in what false means: it covers "this platform cannot schedule"
-// and "there is no provider for this platform at all", because neither caller
-// does anything different about them.
-//
-// Named for the thing rather than shortened to SchedulesFor because the only
-// caller holds a scheduler.Schedule in the same function, and two unrelated
-// senses of "schedule" one line apart is how a reader loses the thread.
-func ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	sb, ok := pr.(ScheduledBroadcaster)
-	return sb, ok
-}
 
 // httpClient is shared; the timeout keeps a hung platform API from wedging a
 // request handler.
@@ -658,7 +629,7 @@ func decodeScope(raw json.RawMessage) string {
 }
 
 // getJSON performs an authenticated GET and decodes into out.
-func getJSON(ctx context.Context, endpoint, accessToken string, headers map[string]string, out any) error {
+func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, headers map[string]string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -669,7 +640,7 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -688,7 +659,7 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 	return json.Unmarshal(body, out)
 }
 
-func postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
+func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -703,7 +674,7 @@ func postJSON(ctx context.Context, endpoint, accessToken string, payload any, he
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -726,6 +697,14 @@ func snippet(b []byte) string {
 	return s
 }
 
+// CallbackPath is the server path a platform sends the browser back to after
+// consent, and what the operator registers (behind the server's origin) as the
+// redirect URI. internal/api registers the route and a test holds the two
+// spellings together.
+func CallbackPath(p db.Platform) string {
+	return "/api/v1/oauth/" + string(p) + "/callback"
+}
+
 // SetupGuide is the in-UI instructions for registering a developer app.
 type SetupGuide struct {
 	Platform db.Platform `json:"platform"`
@@ -741,12 +720,12 @@ type SetupGuide struct {
 	Supported bool `json:"supported"`
 	// ManualStreamKey reports that the account connects, but the key is pasted
 	// rather than fetched — the two are separate answers, and Kick is the reason
-	// they had to be. Read it from ManualKeyFor rather than hard-coding it.
+	// they had to be. Read it from As[ManualKey] rather than hard-coding it.
 	ManualStreamKey bool `json:"manualStreamKey,omitempty"`
 	// DeviceFlow reports that this platform can connect an account WITHOUT a
 	// redirect URI -- the operator types a code at the platform's own site and
-	// the box polls for the token. Read from DeviceFor for the same reason
-	// ManualStreamKey is read from ManualKeyFor: it is exactly one platform
+	// the box polls for the token. Read from As[DeviceFlower] for the same reason
+	// ManualStreamKey is read from As[ManualKey]: it is exactly one platform
 	// today (device.go says why the other three are absent, and the reasons
 	// differ), and a UI that hard-coded the name would go on offering the
 	// button for a platform that lost the capability and would never offer it
@@ -766,7 +745,7 @@ type SetupGuide struct {
 
 // Guides returns the setup instructions rendered on the credentials page.
 //
-// ManualStreamKey and DeviceFlow are filled in from ManualKeyFor and DeviceFor
+// ManualStreamKey and DeviceFlow are filled in from As[ManualKey] and As[DeviceFlower]
 // rather than written out per entry, so a provider that gains a key endpoint
 // stops advertising the paste step the moment it drops the ManualKey interface,
 // and a platform that gains or loses a device flow changes what the UI offers
@@ -774,10 +753,10 @@ type SetupGuide struct {
 func Guides() []SetupGuide {
 	guides := guides()
 	for i := range guides {
-		if _, manual := ManualKeyFor(guides[i].Platform); manual {
+		if _, manual := As[ManualKey](Set{}, guides[i].Platform); manual {
 			guides[i].ManualStreamKey = true
 		}
-		if _, device := DeviceFor(guides[i].Platform); device {
+		if _, device := As[DeviceFlower](Set{}, guides[i].Platform); device {
 			guides[i].DeviceFlow = true
 		}
 	}
@@ -790,7 +769,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformYouTube,
 			Name:         "YouTube (Google)",
 			ConsoleURL:   "https://console.cloud.google.com/apis/credentials",
-			RedirectPath: "/api/v1/oauth/youtube/callback",
+			RedirectPath: CallbackPath(db.PlatformYouTube),
 			Supported:    true,
 			Scopes:       (&YouTube{}).Scopes(),
 			Note: "Read this first: an app left in Testing disconnects itself every 7 days. " +
@@ -817,7 +796,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformTwitch,
 			Name:         "Twitch",
 			ConsoleURL:   "https://dev.twitch.tv/console/apps",
-			RedirectPath: "/api/v1/oauth/twitch/callback",
+			RedirectPath: CallbackPath(db.PlatformTwitch),
 			Supported:    true,
 			Scopes:       (&Twitch{}).Scopes(),
 			Steps: []string{
@@ -832,7 +811,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformFacebook,
 			Name:         "Facebook Live (Meta)",
 			ConsoleURL:   "https://developers.facebook.com/apps",
-			RedirectPath: "/api/v1/oauth/facebook/callback",
+			RedirectPath: CallbackPath(db.PlatformFacebook),
 			Supported:    true,
 			Scopes:       (&Facebook{}).Scopes(),
 			Note: "Read this first: Meta will not let anyone but you use this app until it passes App Review. " +
@@ -869,7 +848,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformKick,
 			Name:         "Kick",
 			ConsoleURL:   "https://kick.com/settings/developer",
-			RedirectPath: "/api/v1/oauth/kick/callback",
+			RedirectPath: CallbackPath(db.PlatformKick),
 			Supported:    true,
 			Scopes:       (&Kick{}).Scopes(),
 			Note: "Kick uses OAuth 2.1, so the consent step sends a PKCE challenge automatically — " +
@@ -890,7 +869,7 @@ func guides() []SetupGuide {
 			Platform:        db.PlatformX,
 			Name:            "X (Twitter) Live",
 			ConsoleURL:      "https://console.x.com",
-			RedirectPath:    "/api/v1/oauth/x/callback",
+			RedirectPath:    CallbackPath(db.PlatformX),
 			Supported:       true,
 			ManualStreamKey: true,
 			Scopes:          (&X{}).Scopes(),
@@ -914,7 +893,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformVimeo,
 			Name:         "Vimeo",
 			ConsoleURL:   "https://developer.vimeo.com/apps",
-			RedirectPath: "/api/v1/oauth/vimeo/callback",
+			RedirectPath: CallbackPath(db.PlatformVimeo),
 			Supported:    true,
 			Scopes:       (&Vimeo{}).Scopes(),
 			// FIRST, IN THE PLATFORM'S OWN WORDS, BECAUSE IT DECIDES WHETHER
@@ -952,7 +931,7 @@ func guides() []SetupGuide {
 			Platform:     db.PlatformTikTok,
 			Name:         "TikTok (clip publishing)",
 			ConsoleURL:   "https://developers.tiktok.com/apps/",
-			RedirectPath: "/api/v1/oauth/tiktok/callback",
+			RedirectPath: CallbackPath(db.PlatformTikTok),
 			Supported:    true,
 			Scopes:       (&TikTok{}).Scopes(),
 			Note: "Connect a TikTok account to publish finished clips and shorts from the clip editor. " +

@@ -442,12 +442,13 @@ func TestVimeoCheckCredentials(t *testing.T) {
 
 // ------------------------------------------------------------- registration
 
-// The Set twin, which endpoints.go asks for in prose. Without it a caller
-// holding a stubbed Set resolves the entitlement probe through the PACKAGE
-// lookup, which reads the production providers -- and the first thing it does
-// is send an operator's live access token to api.vimeo.com from a test that
-// believed the whole world was pointed at a stub.
-func TestEntitlementForResolvesTheSamePlatformsAsItsSetTwin(t *testing.T) {
+// A stubbed Set must resolve the entitlement capability exactly as the zero
+// Set (production) does, which endpoints.go asks for in prose. Otherwise a
+// caller holding the stubbed Set resolves the probe through different
+// providers -- and the first thing it does is send an operator's live access
+// token to api.vimeo.com from a test that believed the whole world was pointed
+// at a stub.
+func TestEntitlementGatedResolvesTheSamePlatformsThroughAStubbedSet(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 
@@ -456,12 +457,12 @@ func TestEntitlementForResolvesTheSamePlatformsAsItsSetTwin(t *testing.T) {
 		if row.Platform == "" {
 			continue
 		}
-		pkgOK := func() bool { _, ok := EntitlementFor(row.Platform); return ok }()
-		setEG, setOK := set.EntitlementFor(row.Platform)
-		if pkgOK != setOK {
-			t.Fatalf("EntitlementFor(%s) = %v but Set.EntitlementFor = %v. A caller holding a "+
-				"stubbed Set would fall through to the production provider for this one call",
-				row.Platform, pkgOK, setOK)
+		_, zeroOK := As[EntitlementGated](Set{}, row.Platform)
+		setEG, setOK := As[EntitlementGated](set, row.Platform)
+		if zeroOK != setOK {
+			t.Fatalf("%s: the zero Set says %v but the stubbed Set says %v. A caller holding the "+
+				"stubbed Set would resolve a different provider for this one call",
+				row.Platform, zeroOK, setOK)
 		}
 		if !setOK {
 			// False must be a usable answer rather than a nil interface that
@@ -486,13 +487,13 @@ func TestEntitlementForResolvesTheSamePlatformsAsItsSetTwin(t *testing.T) {
 // non-vacuous in the direction that matters: if the registration were dropped,
 // the loop would simply stop finding a gated platform.
 func TestVimeoIsTheRegisteredEntitlementGate(t *testing.T) {
-	if _, ok := EntitlementFor(db.PlatformVimeo); !ok {
+	if _, ok := As[EntitlementGated](Set{}, db.PlatformVimeo); !ok {
 		t.Fatal("Vimeo does not resolve as an EntitlementGated provider, so nothing asks " +
 			"Vimeo whether this account reaches the live API and the refusal arrives " +
 			"mid-broadcast instead")
 	}
 	for _, p := range []db.Platform{db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook, db.PlatformKick} {
-		if _, ok := EntitlementFor(p); ok {
+		if _, ok := As[EntitlementGated](Set{}, p); ok {
 			t.Errorf("%s reports a commercial gate. If that is now true, say so in "+
 				"capabilities.go and docs/PLATFORMS.md too; if it is not, the assertion "+
 				"is matching something it should not", p)

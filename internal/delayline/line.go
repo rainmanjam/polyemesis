@@ -166,7 +166,6 @@ func Listen(cfg Config, port int) (*Line, error) {
 // Port is where the line listens.
 func (l *Line) Port() int { return l.conn.LocalAddr().(*net.UDPAddr).Port }
 
-// Delay is the configured delay.
 func (l *Line) Delay() time.Duration { return l.cfg.Delay }
 
 // Ingested counts the datagrams the line has read from its socket and pushed

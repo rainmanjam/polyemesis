@@ -34,7 +34,7 @@ export interface Schema {
 
 export const GOLDENS: ReadonlyMap<string, Golden> = new Map(
   readdirSync(DIR)
-    .filter((f) => f.endsWith(".json") && f !== "schema.json")
+    .filter((f) => f.endsWith(".json") && f !== "schema.json" && f !== "wire.json")
     .map((f) => {
       const g = JSON.parse(readFileSync(new URL(f, DIR), "utf8")) as Golden;
       return [g.case, g] as const;

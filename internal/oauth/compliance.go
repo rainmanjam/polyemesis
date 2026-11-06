@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -65,17 +64,6 @@ type CompliancePusher interface {
 		tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error)
 }
 
-// ComplianceFor returns the capability, or false when a platform has none.
-// Discover it here; never type-assert at a call site.
-func ComplianceFor(p db.Platform) (CompliancePusher, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	cp, ok := pr.(CompliancePusher)
-	return cp, ok
-}
-
 // PushCompliance writes YouTube's privacy status and COPPA declaration.
 //
 // Two calls, to two different endpoints, because YouTube puts them in two
@@ -109,7 +97,7 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			"id":     b.ID,
 			"status": map[string]any{"privacyStatus": string(c.Privacy)},
 		}
-		if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=status",
+		if err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=status",
 			accessToken, body, nil, nil); err != nil {
 			return nil, scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
 		}
@@ -123,7 +111,7 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			"id":     b.ID,
 			"status": map[string]any{"selfDeclaredMadeForKids": *c.MadeForKids},
 		}
-		if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=status",
+		if err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=status",
 			accessToken, body, nil, nil); err != nil {
 			// Reported rather than fatal: the privacy change above may already
 			// have landed, and failing the whole push would send the operator
@@ -154,25 +142,9 @@ func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken strin
 
 	body := map[string]any{"content_classification_labels": payload}
 	endpoint := t.apiEndpoint() + "/channels?broadcaster_id=" + url.QueryEscape(tgt.AccountRef)
-	if err := requestJSON(ctx, http.MethodPatch, endpoint, accessToken, body,
+	if err := t.requestJSON(ctx, http.MethodPatch, endpoint, accessToken, body,
 		helixHeaders(clientID), nil); err != nil {
 		return nil, scopeAdvice(err, db.PlatformTwitch, t.MetadataCaps().Scope)
 	}
 	return &MetadataResult{Applied: []MetadataField{FieldLabels}}, nil
-}
-
-// firstNonEmptyLabel is a small helper for rendering, kept here so the UI and
-// the log describe a label set the same way.
-func LabelSummary(labels map[string]bool) string {
-	on := make([]string, 0, len(labels))
-	for id, enabled := range labels {
-		if enabled && db.ValidTwitchLabel(id) {
-			on = append(on, id)
-		}
-	}
-	sort.Strings(on)
-	if len(on) == 0 {
-		return "none"
-	}
-	return strings.Join(on, ", ")
 }

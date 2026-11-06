@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"github.com/rainmanjam/polyemesis/internal/procname"
+	"testing"
+)
 
 // The bug this exists for: both of a destination's outputs registered under one
 // name, so the primary silently receives nothing while looking entirely
@@ -12,8 +15,8 @@ import "testing"
 // -- two processes exist, their targets differ -- passes in that state, which
 // is what makes it worth its own guard.
 func TestEachOutputOfADestinationGetsItsOwnSubscriberName(t *testing.T) {
-	primary := destSubName(7, "")
-	backup := destSubName(7, destRoleBackup)
+	primary := procname.DestProcessName(7, "")
+	backup := procname.DestProcessName(7, procname.RoleBackup)
 
 	if primary == backup {
 		t.Fatalf("both outputs subscribe as %q; the second would replace the "+
@@ -34,8 +37,8 @@ func TestEachOutputOfADestinationGetsItsOwnSubscriberName(t *testing.T) {
 func TestSubscriberNamesAreDistinctAcrossDestinations(t *testing.T) {
 	seen := map[string]string{}
 	for _, id := range []int64{1, 2, 7} {
-		for _, role := range []string{"", destRoleBackup} {
-			n := destSubName(id, role)
+		for _, role := range []string{"", procname.RoleBackup} {
+			n := procname.DestProcessName(id, role)
 			if prev, dup := seen[n]; dup {
 				t.Fatalf("%q is produced by both %s and id=%d role=%q", n, prev, id, role)
 			}

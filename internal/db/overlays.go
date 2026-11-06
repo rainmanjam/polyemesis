@@ -117,7 +117,6 @@ func scanOverlay(row interface{ Scan(...any) error }) (*ChatOverlay, error) {
 	return &o, nil
 }
 
-// ChatOverlay returns one overlay.
 func (d *DB) ChatOverlay(id int64) (*ChatOverlay, error) {
 	return scanOverlay(d.sql.QueryRow(`SELECT `+overlayColumns+` FROM chat_overlays WHERE id = ?`, id))
 }

@@ -631,9 +631,12 @@ one.
 Five things matter:
 
 1. **Set `trustProxyHeaders: true`.** polyemesis then honours
-   `X-Forwarded-Proto` and `X-Forwarded-Host` when marking session cookies
-   `Secure` and when building OAuth redirect URIs. Leave it `false` when there is
-   no proxy — otherwise a client can forge those headers.
+   `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For` and `X-Real-IP`
+   when marking session cookies `Secure`, building OAuth redirect URIs and
+   keying the login throttle — but only from loopback and the addresses in
+   `trustedProxies`. A proxy that is not on this host must be listed there: in
+   Docker, nginx or Caddy on the host reaches the container as `172.17.0.1`, not
+   loopback. Leave the setting `false` when there is no proxy.
 2. **Bind polyemesis to loopback** (`addr: "127.0.0.1:8080"`). With a proxy in
    front there is no reason for the plaintext port to be reachable from anywhere
    else. **A `--addr` flag beats `addr` in `config.yaml`**, and

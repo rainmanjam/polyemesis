@@ -1,4 +1,4 @@
-import type { TranslationKey } from "@/lib/i18n";
+import type { TranslationKey, Translator } from "@/lib/i18n";
 import type { FailureCause } from "@/lib/types";
 
 /** What an operator can DO about a failure cause (A9).
@@ -27,6 +27,13 @@ const REMEDY: Record<FailureCause, Remedy> = {
   upload_too_slow: { text: "reason.remedy.upload_too_slow", action: "renditions" },
   unknown: { text: "reason.remedy.unknown", action: "log" },
 };
+
+/** A cause's label. A cause newer than this build has no catalogue entry, and
+ *  the lookup would return undefined and leave the row blank, so it reads as
+ *  the unknown label, the same fallback remedyFor takes. */
+export function causeLabel(t: Translator, cause: FailureCause): string {
+  return t(Object.hasOwn(REMEDY, cause) ? `reason.cause.${cause}` : "reason.cause.unknown");
+}
 
 /** The remedy for a cause. A cause newer than this UI reads the log: the one
  *  remedy that is never wrong. */

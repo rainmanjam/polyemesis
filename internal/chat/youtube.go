@@ -18,12 +18,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// YouTubeMaxMessage is the published limit on a live chat message, enforced by
+// Send and mirrored in the platform registry (see KickMaxMessage).
+const YouTubeMaxMessage = 200
+
 const (
-	// YouTubeMaxMessage is the published limit on a live chat message.
-	YouTubeMaxMessage = 200
 	// ytBroadcastPoll is how often we look for a broadcast to attach to when
 	// there is none, and ytBroadcastPollMax is where that backs off to. Each
 	// look costs a unit, so a machine left connected overnight must not spend
@@ -73,8 +78,6 @@ type YouTubeConfig struct {
 	// audience sampler and the request meter. QuotaUnits and QuotaReserve are
 	// then the pool's to apply, and only a test builds an adapter without one.
 	Quota *YouTubeQuota
-	// Backfill bounds the first poll's history.
-	Backfill time.Duration
 
 	APIBase string
 	HTTP    *http.Client
@@ -99,16 +102,13 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 		return nil, fmt.Errorf("youtube chat is not configured: no access token, so connect the YouTube account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://www.googleapis.com/youtube/v3"
+		cfg.APIBase = platform.YouTubeAPIRoot
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
-	}
-	if cfg.Backfill <= 0 {
-		cfg.Backfill = ytDefaultBackfill
+		cfg.Sleep = backoff.SleepCtx
 	}
 	// THE QUOTA PAIR IS NOT NORMALISED HERE. It used to be -- an unset
 	// allowance became DefaultQuotaUnits and an unset reserve became
@@ -300,7 +300,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 
 		cutoff := time.Time{}
 		if first {
-			cutoff = y.cfg.Now().Add(-y.cfg.Backfill)
+			cutoff = y.cfg.Now().Add(-ytDefaultBackfill)
 			first = false
 		}
 		delivered := y.deliverPage(resp.Items, cutoff, sink)
@@ -362,8 +362,8 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 // plain error, which the Hub retries with backoff — the fail-open direction,
 // since a status we have never seen is more likely transient than terminal.
 func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, retry bool, fatal error) {
-	switch reasonOf(err) {
-	case "quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg":
+	switch reason := reasonOf(err); {
+	case oauth.IsSpentQuotaReason(reason):
 		// The platform has corrected our estimate. Stop until the reset
 		// instead of spending the rest of the day collecting 403s.
 		y.budget.pause()
@@ -371,13 +371,13 @@ func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, 
 			return true, false, nil
 		}
 		return false, true, nil
-	case "rateLimitExceeded", "userRateLimitExceeded", "backendError":
+	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded", reason == "backendError":
 		// Transient. Wait out a poll interval and carry on.
 		if !y.cfg.Sleep(ctx, MinPollInterval*2) {
 			return true, false, nil
 		}
 		return false, true, nil
-	case "liveChatDisabled", "liveChatEnded", "liveChatNotFound", "forbidden":
+	case reason == "liveChatDisabled", reason == "liveChatEnded", reason == "liveChatNotFound", reason == "forbidden":
 		y.setHealth(StateStopped, "this YouTube broadcast has no live chat")
 		return true, false, nil
 	}
@@ -577,7 +577,7 @@ func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
 		// account is not the broadcaster and not a moderator of that chat.
 		// Saying so beats "forbidden", which sends people to reconnect an
 		// account that was never the problem.
-		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+		if statusOf(err) == http.StatusForbidden && !oauth.IsSpentQuotaReason(reasonOf(err)) {
 			return fmt.Errorf("YouTube refused the deletion. The connected account has to own the "+
 				"broadcast or be a moderator of its chat: %w", err)
 		}
@@ -629,7 +629,7 @@ func (y *YouTubeAdapter) Ban(ctx context.Context, userID string, d time.Duration
 		map[string]any{"snippet": snippet}, nil)
 	y.budget.spend(QuotaCostBan)
 	if err != nil {
-		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+		if statusOf(err) == http.StatusForbidden && !oauth.IsSpentQuotaReason(reasonOf(err)) {
 			return fmt.Errorf("YouTube refused the ban. The connected account has to own the broadcast "+
 				"or be a moderator of its chat: %w", err)
 		}
@@ -649,8 +649,7 @@ func (y *YouTubeAdapter) Unban(ctx context.Context, userID string) error {
 // classify turns an API error into the message an operator can act on, without
 // echoing anything that could carry a credential.
 func (y *YouTubeAdapter) classify(err error) error {
-	switch reasonOf(err) {
-	case "quotaExceeded", "dailyLimitExceeded":
+	if oauth.IsSpentQuotaReason(reasonOf(err)) {
 		y.budget.pause()
 		q := y.budget.status()
 		return fmt.Errorf("YouTube's daily API quota is spent; chat resumes at %s", q.ResetAt.Format(ytClockLayout))

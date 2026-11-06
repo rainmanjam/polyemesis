@@ -230,8 +230,7 @@ export function useTN(): NodeTranslator {
 }
 
 /** The catalogue key for a process state. Lives here rather than in lib/signal.ts
- *  so the state vocabulary and its translations cannot drift apart; signal.ts's
- *  labelForState stays as the English answer for non-React callers. */
+ *  so the state vocabulary and its translations cannot drift apart. */
 export function stateLabelKey(state?: ProcessState | null): TranslationKey {
   switch (state) {
     case "running":
@@ -255,8 +254,7 @@ export function stateLabelKey(state?: ProcessState | null): TranslationKey {
 
 export type StateLabeller = (state?: ProcessState | null) => string;
 
-/** Translated replacement for labelForState, for components that render a
- *  status pill. */
+/** For components that render a status pill. */
 export function useStateLabel(): StateLabeller {
   const t = useT();
   return useCallback<StateLabeller>((state) => t(stateLabelKey(state)), [t]);

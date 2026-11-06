@@ -178,8 +178,8 @@ func Run(ctx context.Context, p oauth.Provider, c Creds, opt Options, emit Emit)
 // prove the decoder matches the fixture and none prove the fixture matches the
 // platform. Liveness is reported, not asserted; the shape is.
 //
-// Asserted on p rather than resolved through oauth.StatsFor, which would look
-// up the PACKAGE singleton and ignore the provider this run was given.
+// Asserted on p rather than resolved through oauth.As[LiveStatter], which would look
+// the capability up in a Set and ignore the provider this run was given.
 func stats(ctx context.Context, p oauth.Provider, clientID, accessToken string, emit Emit) {
 	st, ok := p.(oauth.LiveStatter)
 	if !ok {

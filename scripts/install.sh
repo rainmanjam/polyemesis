@@ -639,7 +639,11 @@ FFMPEG_PINNED_PROBE=""
 # reviewed in a pull request; the server that serves the tarball has no say in
 # what it is checked against.
 #
-# TO BUMP: pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
+# TO BUMP: .github/ffmpeg-pin.env is the source (CI reads it through
+# .github/actions/install-ffmpeg) and internal/testenv/ffmpeg_pin_single_source_test.go
+# fails if this script or Dockerfile.cuda differs from it. Edit the pin file
+# first, then copy the 8.1 Linux values here.
+# Pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
 # then change the tag, both asset names and both hashes TOGETHER, in one PR:
 #   gh release download <tag> -R BtbN/FFmpeg-Builds -p checksums.sha256
 #   grep -E 'linux(arm)?64-gpl-8\.1\.tar\.xz' checksums.sha256
@@ -655,12 +659,8 @@ FFMPEG_PINNED_PROBE=""
 # internal/testenv/installer_ffmpeg_pin_test.go refuses `latest`, an undated
 # tag, a tag that is not the last day of its month, or a missing hash.
 #
-# The same release carries the 9.0 line, verified the same two ways, for when
-# the image moves to it (Dockerfile: no stable Alpine packages 9.x yet):
-#   ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
-#     68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269
-#   ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz
-#     91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46
+# The same release carries the 9.0 line (hashes in .github/ffmpeg-pin.env, the one
+# place they are written down; this script restates only the 8.1 Linux values).
 # Never 9.0.0 or 9.0.1: see FFmpeg commit 9d4ca2122 (a scheduler change that
 # misorders output and ends streams early, reverted in 9.0.2).
 FFMPEG_BTBN_TAG=autobuild-2026-09-30-13-08

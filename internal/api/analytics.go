@@ -15,10 +15,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // Cross-platform analytics (Wave 4 #4), the API half: the Source the sampler
@@ -26,7 +26,7 @@ import (
 // and the scrape's audience block. The math is internal/analytics; the
 // storage is internal/db/analytics.go.
 //
-// EVERY ROUTE HERE IS ON readScopeDeniedPatterns. The live picture is cheap
+// EVERY ROUTE HERE IS ON the readDenied flag. The live picture is cheap
 // and makes no outbound call -- it is the sampler's last tick -- but the
 // feature is admin-only by decision: the report names the stream's top
 // chatters, which is who said things in chat, and the per-account rows name
@@ -88,15 +88,6 @@ func (s *Server) YouTubeMeter() oauth.YouTubeMeter {
 	return func(cost int) { s.ytQuota().Spend(cost) }
 }
 
-// InstallYouTubeMeter is the wiring main uses: every YouTube Data API call
-// internal/oauth makes -- title push, compliance, the go-live lifecycle,
-// rollover -- is charged to this server's allowance. hosts are extra API
-// hosts to meter besides Google's, for a test that aims the providers at a
-// stub; production passes none.
-func InstallYouTubeMeter(s *Server, hosts ...string) {
-	oauth.SetYouTubeMeter(s.YouTubeMeter(), hosts...)
-}
-
 // ytLiveVideo is an account's live video, remembered so each tick is one
 // videos.list instead of a lookup and a read.
 type ytLiveVideo struct {
@@ -126,12 +117,17 @@ func (s *Server) runningDestinationIDs() map[int64]bool {
 	if s.analyticsRunning != nil {
 		return s.analyticsRunning()
 	}
-	out := map[int64]bool{}
 	if s.mgr == nil {
-		return out
+		return map[int64]bool{}
 	}
-	for _, ds := range s.mgr.DestinationStatuses() {
-		if ds.Process != nil && ds.Process.State == supervisor.StateRunning {
+	return upDestinationIDs(s.mgr.DestinationStatuses())
+}
+
+// upDestinationIDs is the ids of the destinations the engine judges up.
+func upDestinationIDs(statuses []engine.DestStatus) map[int64]bool {
+	out := map[int64]bool{}
+	for _, ds := range statuses {
+		if ds.IsUp() {
 			out[ds.ID] = true
 		}
 	}
@@ -192,7 +188,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 			continue
 		}
 		pasted[d.Platform] = true
-		if _, ok := s.providers.StatsFor(d.Platform); ok {
+		if _, ok := oauth.As[oauth.LiveStatter](s.providers, d.Platform); ok {
 			out = append(out, analytics.Target{Platform: string(d.Platform), Name: d.Name, Unlinked: true})
 		}
 	}
@@ -213,7 +209,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		}
 		// A platform with no viewer count still has chat, and the stream's
 		// chat is every running destination's account's (round 2, R2).
-		if _, ok := s.providers.StatsFor(acct.Platform); !ok {
+		if _, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform); !ok {
 			t.ChatOnly = true
 		}
 		out = append(out, t)
@@ -301,7 +297,7 @@ func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytic
 
 func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {
 	s := a.s
-	sf, ok := s.providers.StatsFor(acct.Platform)
+	sf, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform)
 	if !ok {
 		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", acct.Platform)
 	}
@@ -458,13 +454,8 @@ func (s *Server) AnalyticsLoop(ctx context.Context) {
 }
 
 func (s *Server) newAudienceSampler() *analytics.Sampler {
-	// Late-bound, so a test can set the clock seam after New.
-	now := func() time.Time {
-		if s.analyticsNow != nil {
-			return s.analyticsNow()
-		}
-		return time.Now()
-	}
+	// Late-bound, so a test can set the clock after New.
+	now := s.clock
 	var log *slog.Logger
 	if s.log != nil {
 		log = s.log.With("component", "analytics")

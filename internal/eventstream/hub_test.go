@@ -11,6 +11,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // fakeClock is a settable clock for the replay window.
@@ -418,7 +419,7 @@ func TestNoEnvelopeFieldIsNamedAfterASecret(t *testing.T) {
 		switch t2 := v.(type) {
 		case map[string]any:
 			for k, e := range t2 {
-				if alerts.SecretName(k) {
+				if redact.SecretName(k) {
 					t.Errorf("envelope field %q is named after a secret", k)
 				}
 				walk(e)

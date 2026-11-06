@@ -13,6 +13,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/eventstream/streamtest"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -36,7 +37,7 @@ func delayedRow(t *testing.T, e *Engine) *db.Destination {
 
 func delayPlan(row *db.Destination) destPlan {
 	compiled := routing.Result{FilterComplex: "[0:a:0]anull[out]", OutLabel: "[out]"}
-	return destPlan{row: row, compiled: compiled, spec: destSpec(row, compiled, "")}
+	return destPlan{row: row, compiled: compiled, spec: destSpec(row, compiled, "", false)}
 }
 
 // feed delivers n 1316-byte datagrams into a hub, paced like a relay.
@@ -112,10 +113,10 @@ func TestADelayedDestinationReadsItsPrivateHubAndItsFFmpegWaitsForTheDelayedData
 	if !slices.Contains(up, delayDestSubName(row.ID)) {
 		t.Fatalf("the delay line is not reading the upstream hub: %v", up)
 	}
-	if slices.Contains(up, destSubName(row.ID, "")) {
+	if slices.Contains(up, procname.DestProcessName(row.ID, "")) {
 		t.Fatalf("the FFmpeg is reading the UNDELAYED upstream hub: %v", up)
 	}
-	if !slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, "")) {
+	if !slices.Contains(d.delay.hub.Subscribers(), procname.DestProcessName(row.ID, "")) {
 		t.Fatal("the FFmpeg is not subscribed to the private delay hub")
 	}
 	if st := d.proc.Status().State; st != supervisor.StateStopped {
@@ -191,7 +192,7 @@ func TestStoppingADelayedDestinationPlaysTheTailOutBeforeItIsTornDown(t *testing
 		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
 			retiringOf(e, row.ID) == nil
 	})
-	if slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, "")) {
+	if slices.Contains(d.delay.hub.Subscribers(), procname.DestProcessName(row.ID, "")) {
 		t.Fatal("the teardown finished without releasing the private hub")
 	}
 	if got := d.delay.hub.Stats().RxPackets; got < 200 {
@@ -792,4 +793,26 @@ func TestAHeldReconcileDrainsAnEnabledDelayedDestinationRatherThanCuttingIt(t *t
 		t.Fatal("a held reconcile cut an enabled delayed destination's tail")
 	}
 	e.Stop()
+}
+
+// A drain that Shutdown took over is torn down by Shutdown, so finishDrain
+// finding the destination gone must not announce the teardown finished: a
+// CutDelay waiting on it would return while the child is still stopping.
+func TestFinishDrainDoesNotAnnounceATeardownItDoesNotOwn(t *testing.T) {
+	e := &Engine{draining: map[int64]*destination{}, retiring: map[int64]*destination{}}
+	d := &destination{row: &db.Destination{ID: 7}, delay: &destDelay{finished: make(chan struct{})}}
+
+	e.finishDrain(d) // not in e.draining: someone else owns the teardown
+	select {
+	case <-d.delay.finished:
+		t.Fatal("finishDrain closed `finished` for a destination it did not tear down")
+	default:
+	}
+	d.delay.finish()
+	d.delay.finish() // idempotent
+	select {
+	case <-d.delay.finished:
+	default:
+		t.Fatal("finish did not close the channel")
+	}
 }

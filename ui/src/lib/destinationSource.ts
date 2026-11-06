@@ -1,4 +1,11 @@
-import { asSourceId, type SourceId, type SourceView } from "@/lib/types";
+import { asSourceId, type SourceId } from "@/lib/types";
+
+/** What choosing a programme needs of one: the id and the name. A SourceView
+ *  and a LiveData programme both satisfy it. */
+export interface SourceName {
+  id: number;
+  name: string;
+}
 
 /** A programme a destination can be attached to. */
 export interface SourceChoice {
@@ -12,9 +19,9 @@ export interface SourceChoice {
  * A name is what the operator picks by, so a source with none gets a stable
  * stand-in rather than an empty row that cannot be told from its neighbour.
  */
-export function sourceChoices(sources: readonly SourceView[]): SourceChoice[] {
+export function sourceChoices(sources: readonly SourceName[]): SourceChoice[] {
   return sources.map((s) => ({
-    id: s.id,
+    id: asSourceId(s.id),
     name: s.name?.trim() ? s.name : `Source ${s.id}`,
   }));
 }
@@ -85,7 +92,7 @@ export function sourceIdForSave(value: string, sources: readonly SourceChoice[])
  * destination whose programme has just been deleted loses its badge rather
  * than rendering "undefined".
  */
-export function sourceNameById(sources: readonly SourceView[]): Map<SourceId, string> {
+export function sourceNameById(sources: readonly SourceName[]): Map<SourceId, string> {
   const choices = sourceChoices(sources);
   if (choices.length < 2) return new Map<SourceId, string>();
   return new Map(choices.map((c) => [c.id, c.name]));

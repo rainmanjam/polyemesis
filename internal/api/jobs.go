@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,37 +100,27 @@ type jobKindInfo struct {
 	Unavailable string `json:"unavailable,omitempty"`
 }
 
-// kindCatalogue names every kind this build can submit. It lives here rather
-// than in each processor because it is a UI concern: the queue itself never
-// interprets a kind, and a processor has no business owning the sentence shown
-// beside its switch.
-var kindCatalogue = []struct {
-	Kind        jobs.Kind
-	Label       string
-	Description string
-}{
-	{transcribe.KindTranscribe, "Transcription",
-		"Speech to text, one audio track at a time. Because each microphone is on its own track, this gives speaker attribution without a diarization model."},
-	{media.KindProxy, "Proxy encode",
-		"A small H.264/MP4 copy a browser can actually play. The MKV masters cannot be played in a browser; this is what the library's inline player uses."},
-	{media.KindThumbnails, "Thumbnails",
-		"Poster frame, contact sheet and the scrub sprites the timeline shows on hover."},
-	{media.KindArchive, "Archive compression",
-		"Re-encodes an old recording to HEVC to reclaim disk. Lossy, verified after the fact, and never applied to a recording younger than the configured age."},
-	{clipper.JobKind, "Clip export",
-		"A keyframe-accurate cut out of a finished recording, copied losslessly wherever the cut lands on a keyframe."},
-	{highlights.JobKind, "Highlight scan",
-		"Finds moments worth a short: chat bursts, loudness peaks and, if asked, the Automod model's opinion of what was said. It only suggests; nothing is clipped until somebody accepts a suggestion."},
-	{publish.JobKind, "Clip publish",
-		"Sends a finished clip or short to a platform, after somebody clicked Publish. It resumes an interrupted upload instead of starting a second post, and it waits while a broadcast is live so the upload does not compete with the stream."},
-	{playlistmedia.KindNormalise, "Playlist normalise",
-		"Transcodes one uploaded playlist item to the single fixed profile every item must share. A playlist will not go on air until every one of its items has been through this."},
-	{uploadverify.Kind, "Media re-check",
-		"Reads a stored upload again and records what it is. This is how a file the server never managed to inspect stops being \"Not checked\" without uploading it a second time. It records only what it establishes: an inspection that cannot run leaves the existing record exactly as it was."},
+// kindCatalogue names every kind this build can submit, in the order the jobs
+// page lists them. Each processor package owns its own entry (label and
+// description beside the registration); this list is only the order.
+var kindCatalogue = []jobs.KindInfo{
+	transcribe.Info,
+	media.ProxyInfo,
+	media.ThumbnailsInfo,
+	clipper.Info,
+	highlights.Info,
+	publish.Info,
+	playlistmedia.Info,
+	uploadverify.Info,
 }
 
+// hiddenKinds are registered, so a job already stored for one still runs to a
+// clean failure, but they are not offered: the catalogue above is what a user
+// can submit, and archive compression has no switch to turn it on yet.
+var hiddenKinds = []jobs.KindInfo{media.ArchiveInfo}
+
 func kindLabel(k jobs.Kind) string {
-	for _, c := range kindCatalogue {
+	for _, c := range slices.Concat(kindCatalogue, hiddenKinds) {
 		if c.Kind == k {
 			return c.Label
 		}
@@ -858,4 +849,14 @@ func (s *Server) handlePurgeJobs(w http.ResponseWriter, r *http.Request) {
 		s.removeClipExport(j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"purged": len(purged)})
+}
+
+// CataloguedKinds lists every kind the jobs page offers, so the wiring can
+// prove each one has a registered worker.
+func CataloguedKinds() []jobs.Kind {
+	out := make([]jobs.Kind, 0, len(kindCatalogue))
+	for _, c := range kindCatalogue {
+		out = append(out, c.Kind)
+	}
+	return out
 }

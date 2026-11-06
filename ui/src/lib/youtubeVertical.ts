@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import type { DestStatus, DestinationId } from "@/lib/types";
 
 /** The 9:16 tiers a YouTube vertical half may pick (#7). The keys are the
@@ -10,7 +11,7 @@ export type YouTubeVerticalTier = (typeof YOUTUBE_VERTICAL_TIERS)[number];
  *  The server enforces the same floor, so a faster client only gets the cached answer.
  *  YouTube's correction 6 sets the floor: liveStreams.list is paced against the daily
  *  quota, and a 10 s poll would spend about 8,640 units a day on one stream. */
-export const YOUTUBE_VERTICAL_POLL_MS = 60_000;
+export const YOUTUBE_VERTICAL_POLL_MS: number = WIRE.limits.youTubeVerticalPollMs;
 
 /** The rows the dashboard draws as cards: every destination except a vertical
  *  half, which is drawn as its horizontal card's sub-row (#7). The full list is

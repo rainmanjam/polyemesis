@@ -18,7 +18,7 @@ import (
 // Second: the hash must agree with the command line, which is the property that
 // was broken -- the hash said "restart" about an argv that had not moved.
 //
-// Mutation: in destSpecFor, change
+// Mutation: in DestSpecFor, change
 // `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
 // `ExtraInputArgs: []string{row.ExtraInputArgs}`, which is the pre-parse text
 // the hashes used to carry. Observed to fail: every reformatting case reports a
@@ -53,7 +53,7 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 					!sameArgv, tc.before, tc.after, tc.wantSig)
 			}
 
-			sameSpec := destSpec(before, compiled, "up") == destSpec(after, compiled, "up")
+			sameSpec := destSpec(before, compiled, "up", false) == destSpec(after, compiled, "up", false)
 			sameBackup := backupSpecOf(before, compiled, "up") == backupSpecOf(after, compiled, "up")
 			if sameSpec != sameArgv {
 				t.Errorf("destSpec same=%v for command lines that are same=%v: the hash "+
@@ -74,7 +74,7 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 // move the hash either, or the operator's stream is dropped to deliver a change
 // that was never applied.
 //
-// Mutation: in destSpecFor, change
+// Mutation: in DestSpecFor, change
 // `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
 // `ExtraInputArgs: []string{row.ExtraInputArgs}`. Observed to fail on both
 // hashes and on the command line.
@@ -96,7 +96,7 @@ func TestUnparseableExpertArgumentsDoNotMoveTheHash(t *testing.T) {
 		t.Error("text the parser refuses reached the command line")
 	}
 
-	if destSpec(clean, compiled, "up") != destSpec(broken, compiled, "up") {
+	if destSpec(clean, compiled, "up", false) != destSpec(broken, compiled, "up", false) {
 		t.Error("storing unparseable expert arguments restarted the primary to deliver " +
 			"a command line that does not contain them")
 	}

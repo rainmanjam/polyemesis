@@ -1,10 +1,14 @@
 package supervisor
 
-import "time"
+import (
+	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/procname"
+)
 
 // How long each kind of child gets to exit before it is killed.
 //
-// ONE CONSTANT WAS PAYING FOR THIRTEEN CONSTRUCTION SITES. shutdownGrace is
+// ONE CONSTANT WAS PAYING FOR THIRTEEN CONSTRUCTION SITES. ShutdownGrace is
 // sized for its most expensive member -- the recorder, writing a Matroska
 // trailer -- and until now every Spec got it unconditionally. A `meters`
 // process whose entire output is `-f null` waited the same eight seconds as a
@@ -36,7 +40,7 @@ import "time"
 //	            self-healing, so this is the marginal case -- but "writes a file"
 //	            is the line, and drawing it anywhere softer makes the next
 //	            judgement call easier to get wrong.
-//	recorder    the reason shutdownGrace is eight seconds.
+//	recorder    the reason ShutdownGrace is eight seconds.
 //	destination a file destination writes a file; the kind does not distinguish
 //	            them from RTMP, so all of them keep the full window.
 //	ingest      feeds every one of the above.
@@ -45,10 +49,10 @@ import "time"
 //
 // Adding a kind here requires reading its argv and saying what it writes. A
 // guess belongs in the default.
-var shortGraceKinds = map[string]time.Duration{
-	"meters":   fastGrace,
-	"loudness": fastGrace,
-	"silence":  fastGrace,
+var shortGraceKinds = map[procname.Kind]time.Duration{
+	procname.KindMeters:   fastGrace,
+	procname.KindLoudness: fastGrace,
+	procname.KindSilence:  fastGrace,
 }
 
 // fastGrace is what a child gets when it has nothing to flush.
@@ -95,10 +99,10 @@ const (
 )
 
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and
-// the empty string -- get shutdownGrace, which is the point.
-func graceFor(kind string) time.Duration {
+// the empty string -- get ShutdownGrace, which is the point.
+func graceFor(kind procname.Kind) time.Duration {
 	if g, ok := shortGraceKinds[kind]; ok {
 		return g
 	}
-	return shutdownGrace
+	return ShutdownGrace
 }

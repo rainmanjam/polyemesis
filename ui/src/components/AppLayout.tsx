@@ -60,8 +60,8 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
-import { useNavCollapsed } from "@/hooks/useNavCollapsed";
-import { toneForState } from "@/lib/signal";
+import { useNavCollapsed } from "@/features/shell/useNavCollapsed";
+import { ingestSignalTone } from "@/lib/liveness";
 import { duration, kbps } from "@/lib/format";
 import {
   LANGUAGES,
@@ -71,7 +71,7 @@ import {
   useT,
   type TranslationKey,
 } from "@/lib/i18n";
-import { NAV_SECTIONS } from "@/lib/navSections";
+import { NAV_SECTIONS } from "@/features/shell/navSections";
 import { cn } from "@/lib/utils";
 
 /** A nav entry names itself either through the catalogue or, for a page whose
@@ -86,7 +86,7 @@ type NavItem = {
    *
    *  Written out as a LITERAL rather than derived from `to`, and that is the
    *  whole point: ui/src/lib/tour-drift.test.ts asserts that the selector in
-   *  lib/tourSteps.ts appears in this file as an attribute, and a computed
+   *  features/tour/tourSteps.ts appears in this file as an attribute, and a computed
    *  `data-tour={`nav-${to}`}` would leave nothing for it to find — the guard
    *  would go vacuous while still passing. See the note on TOUR_STEPS. */
   tour?: string;
@@ -218,7 +218,7 @@ export function AppLayout({
   // The process's uptime where there is one; for a push on the shared SRT
   // listener, which has none, how long its stream has been arriving.
   const uptime = ingestUptimeSec(ingest, snapshot?.relay, ingestLive);
-  const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  const ingestTone = ingestSignalTone(ingest, ingestLive, onBackup);
   const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
   // app-council A81: the badge counts the selected programme and says whose
   // count it is ("Main: 3 live"), or "All programmes" where nothing is
@@ -312,6 +312,7 @@ export function AppLayout({
               const r = ingestChipReading(ingest, ingestLive, onBackup, ingestKnown);
               if (r.kind === "backup") return t("chrome.ingestBackup");
               if (r.kind === "pending") return t("common.loading");
+              if (r.kind === "waiting") return t("state.waiting");
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>

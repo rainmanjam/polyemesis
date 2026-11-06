@@ -184,6 +184,22 @@ func ParseRecordingTarget(target string) (id int64, ok bool) {
 	return n, true
 }
 
+// UploadTarget is the canonical Target for a job about one stored upload (a
+// playlist normalisation, an upload re-verification). It names the UPLOAD, so
+// the queue's Unique fold deduplicates on it, and it cannot collide with a
+// recording target because Unique folds on Kind AND Target.
+func UploadTarget(name string) string { return "upload:" + name }
+
+// ParseUploadTarget is the inverse. ok is false for a target that names
+// something other than an upload.
+func ParseUploadTarget(target string) (name string, ok bool) {
+	name, ok = strings.CutPrefix(target, "upload:")
+	if !ok || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // Job is one unit of durable background work.
 type Job struct {
 	ID   int64 `json:"id"`
@@ -356,6 +372,19 @@ func Permanent(err error) error {
 		return nil
 	}
 	return permanentError{err: err}
+}
+
+// DecodeParams reads a job's parameters into into. A job with none, or with
+// parameters that do not parse, is Permanent: they will not parse on the next
+// attempt either. Every processor that carries parameters decodes them here.
+func DecodeParams(job Job, into any) error {
+	if len(job.Params) == 0 {
+		return Permanent(fmt.Errorf("%s job %d has no parameters", job.Kind, job.ID))
+	}
+	if err := json.Unmarshal(job.Params, into); err != nil {
+		return Permanent(fmt.Errorf("%s job %d has unreadable parameters: %w", job.Kind, job.ID, err))
+	}
+	return nil
 }
 
 // IsPermanent reports whether err was marked by Permanent.

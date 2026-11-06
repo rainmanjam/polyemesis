@@ -3,7 +3,10 @@
 // destinations_stop_impact.go, handlers.go). Anything the plugin does not read
 // is left out on purpose: a model that mirrors the whole payload drifts silently.
 
-export type ProcessState = "stopped" | "starting" | "running" | "reconnecting" | "failed";
+/** The wire words below are checked against the server's own list: see
+ *  test/wireContract.test.ts and contract/wire.json, which Go generates. */
+export const PROCESS_STATES = ["stopped", "starting", "running", "reconnecting", "failed"] as const;
+export type ProcessState = (typeof PROCESS_STATES)[number];
 
 export interface ProcessStatus {
   state: ProcessState;
@@ -13,16 +16,18 @@ export interface ProcessStatus {
 
 /** The classified causes (internal/failreason). The same codes reach MQTT,
  *  webhooks and alerts. */
-export type FailureCause =
-  | "key_rejected"
-  | "platform_not_ready"
-  | "dns"
-  | "connection_refused"
-  | "timeout"
-  | "tls"
-  | "codec_rejected"
-  | "upload_too_slow"
-  | "unknown";
+export const FAILURE_CAUSES = [
+  "key_rejected",
+  "platform_not_ready",
+  "dns",
+  "connection_refused",
+  "timeout",
+  "tls",
+  "codec_rejected",
+  "upload_too_slow",
+  "unknown",
+] as const;
+export type FailureCause = (typeof FAILURE_CAUSES)[number];
 
 /** DestStatus.reason: only the fields a key face reads. */
 export interface FailureReason {
@@ -108,7 +113,9 @@ export interface DestStatus {
   platformHealth?: PlatformHealth | null;
 }
 
-export type AccountHealthState = "expiring" | "refreshFailing" | "expired";
+/** "ok" is absent: the field is only sent when the account is not healthy. */
+export const ACCOUNT_HEALTH_STATES = ["expiring", "refreshFailing", "expired"] as const;
+export type AccountHealthState = (typeof ACCOUNT_HEALTH_STATES)[number];
 
 /** DestStatus.platformHealth (internal/engine/destsignals.go). */
 export interface PlatformHealth {
@@ -135,7 +142,8 @@ export interface StatusPayload {
   source?: { id: number } | null;
 }
 
-export type SourceKind = "" | "primary" | "backup" | "playlist" | "slate";
+export const SOURCE_KINDS = ["", "primary", "backup", "playlist", "slate"] as const;
+export type SourceKind = (typeof SOURCE_KINDS)[number];
 
 export interface FailoverStatus {
   active: SourceKind;
@@ -153,7 +161,8 @@ export interface StopImpact {
 }
 
 /** GET /api/v1/recording. Install-wide: one switch for every programme. */
-export type RecordingStateWord = "off" | "recording" | "not_running" | "halted_disk";
+export const RECORDING_STATE_WORDS = ["off", "recording", "not_running", "halted_disk"] as const;
+export type RecordingStateWord = (typeof RECORDING_STATE_WORDS)[number];
 
 export interface RecordingState {
   enabled: boolean;
@@ -179,7 +188,7 @@ export interface PresetApplyRow {
   id: number;
   name: string;
   outcome: "saved" | "skipped" | "failed";
-  applied?: "live" | "restart";
+  applied?: LevelApplied;
   message?: string;
 }
 
@@ -236,7 +245,12 @@ export interface DestinationLevels {
 }
 
 /** How a track level reached the output: on the running process's command channel, or by a (re)start. */
-export type LevelApplied = "live" | "restart";
+export const LEVEL_APPLIED_WORDS = ["live", "restart"] as const;
+export type LevelApplied = (typeof LEVEL_APPLIED_WORDS)[number];
+
+export function isLevelApplied(v: unknown): v is LevelApplied {
+  return (LEVEL_APPLIED_WORDS as readonly unknown[]).includes(v);
+}
 
 /** The answer of POST /destinations/{id}/tracks/{track}/gain. */
 export interface TrackLevelResult {

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // NativePoller is the optional capability for running a platform's OWN poll in
@@ -100,8 +101,8 @@ func (h *Hub) SendEach(ctx context.Context, textFor func(p db.Platform, account 
 // liveChatMessages.transition to close it, 20 units each in Google's
 // published table.
 const (
-	QuotaCostPollCreate = 20
-	QuotaCostPollClose  = 20
+	QuotaCostPollCreate = platform.YouTubeCostPollCreate
+	QuotaCostPollClose  = platform.YouTubeCostPollClose
 )
 
 // YouTube's poll limits. The API reference sets 2 to 4 options and no text

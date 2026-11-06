@@ -65,10 +65,10 @@ package oauth
 //	         operator entering the code. That is a measurement, not a reading,
 //	         and it is the whole remaining cost.
 //
-// So DeviceFlower is discovered, never assumed. Resolve it with DeviceFor (or
-// Set.DeviceFor); "this platform has no device flow polyemesis can use" is the
+// So DeviceFlower is discovered, never assumed. Resolve it with As[DeviceFlower] (or
+// As[DeviceFlower]); "this platform has no device flow polyemesis can use" is the
 // answer for four of the five and has to be handled once, exactly like
-// TargetsFor and StatsFor.
+// As[TargetedProvider] and As[LiveStatter].
 //
 // ON THE CLIENT STAYING CONFIDENTIAL. Twitch, verbatim, on public clients:
 // they "are only limited to the usage of device authorization grant flow to
@@ -88,8 +88,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // DeviceAuth is the first half of a device-code flow: what to put in front of
@@ -112,21 +110,21 @@ type DeviceAuth struct {
 	// from memory publishes to nowhere and reads as our bug.
 	VerificationURI string `json:"verificationUri"`
 	// Interval is the minimum wait between polls, as the platform stated it,
-	// floored by deviceMinPollInterval.
+	// floored by DeviceMinPollInterval.
 	Interval time.Duration `json:"-"`
 	// ExpiresAt is when the device code dies and the operator has to start
 	// again. Zero if the platform said nothing.
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// deviceMinPollInterval is the floor under whatever the platform asks for.
+// DeviceMinPollInterval is the floor under whatever the platform asks for.
 //
 // A platform that omits `interval`, or sends 0, would otherwise leave a caller
 // polling a token endpoint as fast as the network allows -- which is how an
 // operator's app gets rate-limited for the whole box, mid-connect, for a
 // mistake nobody made. Twitch's own responses carry 5; this only ever applies
 // when the answer is missing or absurd.
-const deviceMinPollInterval = 5 * time.Second
+const DeviceMinPollInterval = 5 * time.Second
 
 // ErrDeviceAuthPending is the ordinary answer to nearly every poll: the
 // operator has not finished at the verification URI yet. A caller sleeps for
@@ -187,20 +185,6 @@ type DeviceFlower interface {
 	PollDeviceAuth(ctx context.Context, clientID, deviceCode string) (*Token, error)
 }
 
-// DeviceFor resolves the device-flow capability for a platform against the
-// production providers. False is a supported answer and means the platform has
-// no device flow polyemesis can use -- see the per-platform reasoning at the
-// top of this file. Prefer Set.DeviceFor wherever a Set is in hand, or the
-// lookup reaches the real platforms from a test that stubbed everything else.
-func DeviceFor(p db.Platform) (DeviceFlower, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	df, ok := pr.(DeviceFlower)
-	return df, ok
-}
-
 // postFormJSON is postForm's sibling for a response that is NOT a token.
 //
 // The device authorization endpoint answers with device_code/user_code/
@@ -242,11 +226,11 @@ func postFormJSON(ctx context.Context, endpoint string, form url.Values, out any
 }
 
 // devicePollInterval turns the platform's `interval` seconds into a duration
-// that cannot produce a hot loop. See deviceMinPollInterval.
+// that cannot produce a hot loop. See DeviceMinPollInterval.
 func devicePollInterval(seconds int) time.Duration {
 	d := time.Duration(seconds) * time.Second
-	if d < deviceMinPollInterval {
-		return deviceMinPollInterval
+	if d < DeviceMinPollInterval {
+		return DeviceMinPollInterval
 	}
 	return d
 }

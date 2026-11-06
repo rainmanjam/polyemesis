@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 )
 
 // N1. A SECOND DUMP'S CUT WINDOW IS WHERE ITS CUT PICTURE ARRIVED. The cut
@@ -55,12 +56,12 @@ func injectQuiet(t *testing.T, earlier bool) *delaytest.Stream {
 	var tm []time.Duration
 	injected := false
 	for i, p := range s.Pkts {
-		if !earlier && pktPID(p) == delaytest.QuietPIDNumber {
+		if !earlier && mpegts.PID(p) == delaytest.QuietPIDNumber {
 			continue
 		}
 		pk = append(pk, p)
 		tm = append(tm, s.Times[i])
-		if !injected && s.Times[i] >= 17500*time.Millisecond && pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+		if !injected && s.Times[i] >= 17500*time.Millisecond && mpegts.PID(p) == delaytest.AudioPID && mpegts.PUSI(p) {
 			q := append([]byte(nil), p...)
 			q[1] = q[1]&0xE0 | byte(uint16(delaytest.QuietPIDNumber)>>8)
 			q[2] = byte(uint16(delaytest.QuietPIDNumber) & 0xFF)
@@ -101,9 +102,9 @@ func TestAQuietPIDsDumpedWindowDataDoesNotAir(t *testing.T) {
 			k1 := r.b.ts.splice.pts
 			r.run(40 * time.Second)
 			<-tk.Done()
-			for i := 0; i+tsPacketSize <= len(r.out); i += tsPacketSize {
-				p := r.out[i : i+tsPacketSize]
-				if pktPID(p) != delaytest.QuietPIDNumber || !pktPUSI(p) {
+			for i := 0; i+mpegts.PacketSize <= len(r.out); i += mpegts.PacketSize {
+				p := r.out[i : i+mpegts.PacketSize]
+				if mpegts.PID(p) != delaytest.QuietPIDNumber || !mpegts.PUSI(p) {
 					continue
 				}
 				h, _ := parsePES(p, nil)
@@ -126,9 +127,9 @@ func TestAPIDOutsideThePMTKeepsItsCountersAcrossASplice(t *testing.T) {
 	for i, p := range s.Pkts {
 		pk, tm = append(pk, p), append(tm, s.Times[i])
 		if i%50 == 0 {
-			q := make([]byte, tsPacketSize)
-			q[0], q[1], q[2], q[3] = tsSyncByte, 0x40|0x1F, 0xFB, 0x10|byte(cc&0x0F)
-			for j := 5; j < tsPacketSize; j++ {
+			q := make([]byte, mpegts.PacketSize)
+			q[0], q[1], q[2], q[3] = mpegts.SyncByte, 0x40|0x1F, 0xFB, 0x10|byte(cc&0x0F)
+			for j := 5; j < mpegts.PacketSize; j++ {
 				q[j] = 0xFF
 			}
 			cc++
@@ -303,7 +304,7 @@ func TestSpliceableUsesDumpsAnchorWhenTheReleaseSideIsBehind(t *testing.T) {
 	// nothing is released meanwhile: the head stays at 6 s while the release
 	// horizon moves to 13 s.
 	for r.next < len(s.Pkts) && s.Times[r.next] < 25*time.Second {
-		if pktPID(s.Pkts[r.next]) == delaytest.AudioPID {
+		if mpegts.PID(s.Pkts[r.next]) == delaytest.AudioPID {
 			if err := r.b.Push(r.epoch.Add(s.Times[r.next]), s.Pkts[r.next]); err != nil {
 				t.Fatal(err)
 			}
@@ -328,8 +329,8 @@ func TestTheResyncAudioBudgetIsSharedAcrossPIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	pes := func(pid uint16, cc byte, first bool) []byte {
-		p := make([]byte, tsPacketSize)
-		p[0], p[1], p[2], p[3] = tsSyncByte, byte(pid>>8), byte(pid), 0x10|cc&0x0F
+		p := make([]byte, mpegts.PacketSize)
+		p[0], p[1], p[2], p[3] = mpegts.SyncByte, byte(pid>>8), byte(pid), 0x10|cc&0x0F
 		if first {
 			n := 300*184 - 6
 			p[1] |= 0x40

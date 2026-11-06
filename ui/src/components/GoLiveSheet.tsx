@@ -1,3 +1,5 @@
+import { WIRE } from "@/lib/contract/wire";
+import { causeLabel } from "@/lib/failureRemedy";
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { planStarts, runPacedStarts, type GoLiveRow } from "@/lib/goLive";
+import { destinationLanded, processRunning } from "@/lib/liveness";
 import { unconfirmedVerticalPairs } from "@/lib/youtubeVertical";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { StatusReason } from "@/components/signature/StatusReason";
@@ -82,10 +85,11 @@ export function GoLiveSheet({
   rows,
   live,
   youtubeAtRisk,
+  impactUnknown = false,
   onStart,
   onRetry,
   onFinished,
-  paceMs = 2000,
+  paceMs = WIRE.limits.bulkStartPacingMs,
 }: Readonly<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -94,6 +98,8 @@ export function GoLiveSheet({
   /** The current destination list, for what each row is doing right now. */
   live: readonly DestStatus[];
   youtubeAtRisk: number;
+  /** The stop-impact count could not be loaded: say so rather than show no warning. */
+  impactUnknown?: boolean;
   onStart: (id: DestinationId) => Promise<void>;
   /** Revives a destination whose PROCESS failed -- held after quick
    *  rejections, or out of restarts. The card's Retry, the same restart. A
@@ -168,14 +174,14 @@ export function GoLiveSheet({
     if (errors.has(id)) return "failed";
     const proc = liveOf(id)?.process;
     const state = proc?.state;
-    // Live means the process is running AND its output has moved, and it is
-    // not stalled. The supervisor says running the moment FFmpeg spawns, so a
+    // Live is lib/liveness's destinationLanded: running, media moved, not
+    // stalled. The supervisor says running the moment FFmpeg spawns, so a
     // start the platform is about to refuse reads running for a moment; until
     // media has gone out it is still starting. An enabled destination with no
     // process, or one that is retrying, is not live either.
-    if (state === "running" && !proc?.stalled && (proc?.progress?.outTimeMs ?? 0) > 0) return "live";
+    if (destinationLanded(proc)) return "live";
     if (state === "failed") return "failed";
-    if (attempted.has(id) || state === "starting" || state === "reconnecting" || state === "running") return "starting";
+    if (attempted.has(id) || state === "starting" || state === "reconnecting" || processRunning(proc)) return "starting";
     return "pending";
   };
 
@@ -359,6 +365,12 @@ export function GoLiveSheet({
           </p>
         )}
 
+        {impactUnknown && (
+          <p className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn" data-testid="golive-impact-unknown">
+            {t("golive.impactUnknown")}
+          </p>
+        )}
+
         {youtubeAtRisk > 0 && (
           <p className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn">
             {t(youtubeAtRisk === 1 ? "golive.youtubeWarnOne" : "golive.youtubeWarn", { count: youtubeAtRisk })}
@@ -444,7 +456,7 @@ export function GoLiveSheet({
                   liveOf(row.id as unknown as number)?.reason && (
                     <StatusReason
                       className="text-xs"
-                      reason={t(`reason.cause.${liveOf(row.id as unknown as number)!.reason!.cause}`)}
+                      reason={causeLabel(t, liveOf(row.id as unknown as number)!.reason!.cause)}
                       step={t("foundation.status.step.destination", { platform: row.platform })}
                       asOf={liveOf(row.id as unknown as number)!.reason!.at}
                     />

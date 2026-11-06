@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // fbGraphBase and fbDialogBase are Facebook's production hosts. They are
@@ -63,8 +64,8 @@ import (
 // differently on a Tuesday is not a failure mode worth having. v24.0 is also
 // the first version that removed overlay_url, which we deliberately never send.
 const (
-	fbGraphBase  = "https://graph.facebook.com/v24.0"
-	fbDialogBase = "https://www.facebook.com/v24.0/dialog/oauth"
+	fbGraphBase  = platform.GraphAPIRoot
+	fbDialogBase = platform.GraphDialogURL
 )
 
 // Facebook implements Facebook Login plus the Live Video API.
@@ -208,6 +209,15 @@ const (
 	fbKindPage
 	fbKindAuto
 )
+
+// IsPageRef reports whether an account or target ref names a Facebook Page, i.e.
+// is spelled "page:<id>". A legacy ref with no prefix resolves as "auto" at
+// request time, so it is not a Page here: the answer is only given where the ref
+// says so.
+func IsPageRef(ref string) bool {
+	kind, _ := parseTargetRef(ref)
+	return kind == fbKindPage
+}
 
 func parseTargetRef(ref string) (fbKind, string) {
 	ref = strings.TrimSpace(ref)
@@ -1436,7 +1446,7 @@ func (f *Facebook) get(ctx context.Context, accessToken, path string, q url.Valu
 	if len(q) > 0 {
 		endpoint += "?" + q.Encode()
 	}
-	return requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
+	return f.requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
 }
 
 // post sends its parameters in the query string, which is the form Meta's own
@@ -1447,7 +1457,7 @@ func (f *Facebook) post(ctx context.Context, accessToken, path string, params ur
 	if len(params) > 0 {
 		endpoint += "?" + params.Encode()
 	}
-	return requestJSON(ctx, http.MethodPost, endpoint, accessToken, nil, nil, out)
+	return f.requestJSON(ctx, http.MethodPost, endpoint, accessToken, nil, nil, out)
 }
 
 // graphError is Meta's error envelope. Every field here is server-authored

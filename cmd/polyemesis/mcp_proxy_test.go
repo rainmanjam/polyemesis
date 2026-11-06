@@ -411,3 +411,16 @@ func TestTheStdioRelaySaysWhenMCPIsOffOrTheTokenIsNotAnMCPToken(t *testing.T) {
 		t.Errorf("a non-MCP token's refusal was relayed as %q", got)
 	}
 }
+
+// Loopback is spelled the same way everywhere: the API treats http://LOCALHOST
+// as loopback, so the stdio relay must not refuse it as a remote host.
+func TestMCPEndpointURLAcceptsLoopbackInAnyCase(t *testing.T) {
+	for _, raw := range []string{"http://LOCALHOST:8080", "http://Localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+		if _, err := mcpEndpointURL(raw); err != nil {
+			t.Errorf("%s refused: %v", raw, err)
+		}
+	}
+	if _, err := mcpEndpointURL("http://example.com"); err == nil {
+		t.Error("a remote http host was accepted")
+	}
+}

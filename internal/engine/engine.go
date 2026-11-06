@@ -42,6 +42,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
 	"github.com/rainmanjam/polyemesis/internal/playout"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -55,27 +56,6 @@ import (
 const (
 	relayPortBase = 21000
 	relayPortSpan = 500
-	// stopTimeout bounds how long we wait for one child to exit.
-	//
-	// It must stay above supervisor.shutdownGrace (8s), which is the only thing
-	// that ends a child that does not heed the signal: a teardown that gives up
-	// first turns every unheeded stop into ErrStopDeadline and abandons a child
-	// the grace escalation would have reaped a moment later.
-	//
-	// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
-	// and with one exception. The teardowns below are all "this tier is going
-	// away": the port and the subscription are released whatever the answer, and
-	// there is no second thing to try, so ErrStopDeadline changes nothing they
-	// do. The exception is teardownDest, whose caller -- POST
-	// /destinations/{id}/stop -- reports the outcome to a human and therefore
-	// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
-	// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
-	// that a discard nobody thought about looks different from these (#196).
-	//
-	// It is a package var rather than a const for one reason: a test that needs
-	// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
-	// is not the property such a test is about. Nothing outside a test writes it.
-
 	// previewIdleDefault is how long the preview encoder outlives the last
 	// playlist request when settings do not say.
 	previewIdleDefault = 30 * time.Second
@@ -91,14 +71,32 @@ const (
 	// previewStartDebounce keeps a burst of requests against a down encoder,
 	// or a start that keeps failing, from turning into a burst of spawns.
 	previewStartDebounce = 2 * time.Second
-	// gpuDetectTimeout bounds the DRM enumeration. A wedged driver must not
-	// hold up starting an encode.
-	gpuDetectTimeout = 5 * time.Second
 )
 
-// stopTimeout bounds how long we wait for one child to exit. See the comment in
-// the const block above for why it is 12s and why it is a var.
-var stopTimeout = 12 * time.Second
+// stopTimeout bounds how long we wait for one child to exit.
+//
+// It is supervisor.ShutdownGrace plus a margin, because ShutdownGrace is the
+// only thing that ends a child that does not heed the signal: a teardown that
+// gives up first turns every unheeded stop into ErrStopDeadline and abandons
+// a child the grace escalation would have reaped a moment later.
+//
+// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
+// and with one exception. The teardowns below are all "this tier is going
+// away": the port and the subscription are released whatever the answer, and
+// there is no second thing to try, so ErrStopDeadline changes nothing they
+// do. The exception is teardownDest, whose caller -- POST
+// /destinations/{id}/stop -- reports the outcome to a human and therefore
+// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
+// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
+// that a discard nobody thought about looks different from these (#196).
+//
+// It is a package var rather than a const for one reason: a test that needs
+// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
+// is not the property such a test is about. Nothing outside a test writes it.
+var stopTimeout = supervisor.ShutdownGrace + stopMargin
+
+// stopMargin is what stopTimeout allows beyond supervisor.ShutdownGrace.
+const stopMargin = 4 * time.Second
 
 // Engine owns the whole streaming pipeline.
 //
@@ -257,11 +255,6 @@ type Engine struct {
 	// the stopDestinations pass that follows.
 	cutRequested map[int64]bool
 
-	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
-	// time a VAAPI rendition actually starts.
-	vaapiOnce sync.Once
-	vaapiDev  string
-
 	// reconcileMu serializes Reconcile end to end. It is NOT e.mu: e.mu is
 	// dropped and retaken a dozen times inside one reconcile so that Status()
 	// stays answerable while children are being spawned, which is exactly what
@@ -322,7 +315,11 @@ type Engine struct {
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
-	preview  *supervisor.Process
+	// recorderStopping counts recorder children taken out of the slot whose
+	// Stop has not returned yet: still alive, still holding a segment open.
+	// Under mu. See RecorderRunning.
+	recorderStopping int
+	preview          *supervisor.Process
 	// previewHub is the hub the running preview subscribed to, kept so the stop
 	// path unsubscribes from the one it actually joined and so a swap underneath
 	// it can be noticed. Nil while no preview is running.
@@ -493,6 +490,9 @@ type Engine struct {
 	// recording volume, which every engine measures. Under e.mu; nil on an
 	// engine assembled field by field, which admits everything.
 	alertGate *alerts.InstallGate
+	// facebookCaptions is the operator's provisional Facebook caption switch,
+	// handed in by the manager from the startup environment. Off unless set.
+	facebookCaptions atomic.Bool
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
 
@@ -704,6 +704,8 @@ type destination struct {
 	// graph is the graph the primary process is spawned from, shared with its
 	// NextArgs so respawns carry the last live level. See live_gains.go.
 	graph *graphHolder
+	// argv builds the primary's command lines. See destArgv.
+	argv *destArgv
 	// hub is where this destination reads from: the ingest hub for a
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
@@ -729,6 +731,10 @@ type destination struct {
 	// backupGraph is the graph the backup process is spawned from, for the same
 	// reason as graph.
 	backupGraph *graphHolder
+	// backupWatch is watch for the backup process: whether media has ever moved
+	// through it, so the #674 re-probe can restart a backup that characterised
+	// its input before the ingest carried audio, as it does the primary.
+	backupWatch *destWatch
 	// backupSpec is the backup's OWN restart hash, deliberately not derived
 	// from spec. The two must cycle independently: a rotated backup key has to
 	// restart only the backup, and nothing about the backup may ever restart
@@ -884,12 +890,11 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		// and the engine decides what a child is. That is what keeps a playout
 		// muxer on the same log sink, state callbacks and restart policy as
 		// every other process in the pipeline.
-		Spawn: func(name string, args []string) playout.Runner {
-			proc := supervisor.New(e.log, supervisor.Spec{
-				Name: name, Kind: "playout", Bin: e.tools.FFmpeg, Args: args,
-				AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
-			})
-			return &playoutProc{e: e, name: name, Process: proc}
+		Spawn: func(name string, args []string, wake func()) playout.Runner {
+			spec := e.relayConsumerSpec(relayConsumer{name: name, sub: name, kind: procname.KindPlayout, args: args})
+			// The manager owns the subscription, so it owns the wake.
+			spec.WakeOnStop = wake
+			return &playoutProc{e: e, name: name, Process: supervisor.New(e.log, spec)}
 		},
 	})
 	// Both read their configuration from the database on every pass, so a rule
@@ -1081,11 +1086,24 @@ func (e *Engine) IngestLive() bool {
 // setting still on, which is the case the setting cannot see. It is what the
 // shared recording manager's delete guard asks through Manager.RecorderRunning
 // -- see recording.WithRecorderProbe.
+//
+// A child that has left the slot but not yet exited still counts. The slot is
+// emptied before Stop is called, and the child goes on writing its segment
+// until it has finalised the file -- seconds normally, up to stopTimeout. A
+// delete guard told "no recorder" in that window unlinks a file being written.
 func (e *Engine) RecorderRunning() bool {
 	e.requireEngine("RecorderRunning")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.recorder != nil
+	return e.recorder != nil || e.recorderStopping > 0
+}
+
+// recorderStopped is the end of a recorder child's stop: the counterpart of
+// the recorderStopping increment made where it left the slot.
+func (e *Engine) recorderStopped() {
+	e.mu.Lock()
+	e.recorderStopping--
+	e.mu.Unlock()
 }
 
 // ingestLive is the decision on its own, so every boundary of it is a table
@@ -1266,6 +1284,9 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	silence := e.silence
 	sel, backup, playlist := e.sel, e.backup, e.playlist
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
+	if recorder != nil {
+		e.recorderStopping++
+	}
 	// THEIR PORTS AND HUBS TOO. #707. These three used to be collected as bare
 	// processes and stopped with a helper that only calls Stop, so their relay
 	// ports and hub subscriptions were never given back -- unlike every other
@@ -1276,9 +1297,9 @@ func (e *Engine) StopWithin(ctx context.Context) {
 		hub  *relay.Hub
 		name string
 	}{
-		{e.hub, "recorder"},
-		{hubOr(e.previewHub, e.hub), "preview"},
-		{hubOr(e.metersHub, e.hub), "meters"},
+		{e.hub, recorderSubName},
+		{hubOr(e.previewHub, e.hub), previewSubName},
+		{hubOr(e.metersHub, e.hub), metersSubName},
 	}
 	e.recorderPort, e.previewPort, e.metersPort = 0, 0, 0
 	e.previewHub, e.metersHub = nil, nil
@@ -1315,7 +1336,15 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	for _, d := range dests {
 		dest := d
 		wg.Add(1)
-		go func() { defer wg.Done(); e.teardownDest(dest) }()
+		go func() {
+			defer wg.Done()
+			e.teardownDest(dest)
+			// A drain this took over: whoever is waiting in CutDelay hears it
+			// only now that the child is down.
+			if dest.delay != nil {
+				dest.delay.finish()
+			}
+		}()
 	}
 	for _, m := range monitors {
 		mon := m
@@ -1329,8 +1358,13 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
 	e.closeCaptionPosters()
-	stop(recorder)
 	if recorder != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer e.recorderStopped()
+			_ = recorder.Stop(ctx)
+		}()
 		e.streamRecording(false, "the programme was stopped")
 	}
 	stop(preview)
@@ -1649,9 +1683,35 @@ func (e *Engine) Reconcile() error {
 
 	e.applyLogging(settings.Logging)
 	e.reconcileIngest(settings, prev)
+	if err := e.reconcileDownstream(settings); err != nil {
+		return err
+	}
+	e.publishStatus()
+	return nil
+}
+
+// reconcileDownstream reconciles everything that reads what the ingest delivers
+// and the outputs decide: the recorder and the meters, then the outputs, then
+// the preview, clips, captions and loudness monitors that read the hub the
+// outputs settled. The caller holds reconcileMu.
+//
+// ONE SEQUENCE, CALLED FROM TWO PLACES. Reconcile runs it after the ingest; the
+// probe loop runs it when a measurement changes the layout, which is the path
+// that starts destinations on every fresh install. The probe loop used to carry
+// a hand-copied subset and then a hand-copied whole, and the copy drifted twice:
+// it ran three steps and stopped, leaving #612 (a loudness monitor reported as
+// enabled that no analyser ever served), and then it ran the recorder and the
+// meters in the other order.
+//
+// An outputs error stops the sequence and is returned. The steps after it read
+// the hub the outputs failed to settle, so running them would act on a decision
+// that was never made; the next reconcile runs them. None of the others can fail
+// the sequence: a measurement that will not start and a capture buffer that will
+// not bind are both worth a log line and nothing more, and a destination must
+// never be held back by either.
+func (e *Engine) reconcileDownstream(settings db.Settings) error {
 	e.reconcileRecorder(settings)
 	e.reconcileMeters(settings)
-
 	if err := e.reconcileOutputs(); err != nil {
 		return err
 	}
@@ -1662,15 +1722,11 @@ func (e *Engine) Reconcile() error {
 	// Run before the outputs it compared its running encoder against the OLD
 	// upstream, decided nothing had changed, and then the hub was swapped
 	// underneath it -- leaving the preview subscribed to a tier that was no
-	// longer on air.
-	// Neither can fail the reconcile: a measurement that will not start and a
-	// capture buffer that will not bind are both worth a log line and nothing
-	// more, and a destination must never be held back by either.
+	// longer on air. Clips and captions read the same hub for the same reason.
 	e.reconcilePreview(settings)
 	e.reconcileClips()
 	e.reconcileCaptions()
 	e.reconcileLoudness(settings)
-	e.publishStatus()
 	return nil
 }
 
@@ -1799,7 +1855,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:        "ingest",
-		Kind:        "ingest",
+		Kind:        procname.KindIngest,
 		Bin:         e.tools.FFmpeg,
 		Args:        spec,
 		Secrets:     ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, e.ingestToken()),
@@ -1890,6 +1946,7 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 		PullReconnectDelayMax: s.Ingest.Pull.ReconnectDelayMaxSeconds,
 		PullRTSPTransport:     s.Ingest.Pull.RTSPTransport,
 		RelayURL:              e.hub.InputURL(),
+		CaptureTo:             e.tools.IngestCapture,
 	}
 	return ffmpeg.IngestArgs(spec)
 }
@@ -2103,7 +2160,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		e.log.Error("recorder: no relay port", "err", err)
 		return
 	}
-	url, err := e.hub.Subscribe("recorder", port)
+	url, err := e.hub.Subscribe(recorderSubName, port)
 	if err != nil {
 		// #711. Same release-and-bail as the port refusal above. An occupied
 		// name means another consumer is reading under it, and taking it would
@@ -2137,14 +2194,12 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 	}
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "recorder", Kind: "recorder", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
-		// The recorder is the consumer this exists for: stopped after the
-		// publisher has gone -- the ingest ending, recording.enabled=false,
-		// `docker stop` on an idle server -- it used to be SIGKILLed with its
-		// last segment unfinalised. See relay.Hub.Wake.
-		WakeOnStop: relayWaker(e.hub, "recorder"),
+	// The consumer the wake exists for: stopped after the publisher has gone --
+	// the ingest ending, recording.enabled=false, `docker stop` on an idle
+	// server -- it used to be SIGKILLed with its last segment unfinalised. See
+	// relay.Hub.Wake.
+	proc := e.newRelayConsumer(relayConsumer{
+		name: recorderSubName, sub: recorderSubName, kind: procname.KindRecorder, hub: e.hub, args: args,
 	})
 
 	e.mu.Lock()
@@ -2154,7 +2209,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// what keeps a late start from becoming an orphan.
 	if e.stopped {
 		e.mu.Unlock()
-		e.hub.Unsubscribe("recorder")
+		e.hub.Unsubscribe(recorderSubName)
 		e.releasePort(port)
 		return
 	}
@@ -2172,23 +2227,6 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		why = "restarted to apply changed recording settings"
 	}
 	e.streamRecording(true, why)
-}
-
-// relayWaker is the Spec.WakeOnStop for a consumer subscribed to hub as name.
-//
-// Safe after the fact by construction: Wake does nothing for a name the hub no
-// longer holds, and every teardown here stops the process BEFORE it
-// unsubscribes, so the subscription is still there for as long as the wake can
-// be needed. The one overlap: a Stop whose context expires before its child is
-// reaped returns while the escalator is still running, and a successor that
-// subscribes under the same name in that window can be sent a wake too. That
-// costs it nothing it would notice -- a wake only ever reaches a feed that is
-// already silent, and the empty PES it opens carries no payload.
-func relayWaker(hub *relay.Hub, name string) func() {
-	if hub == nil {
-		return nil
-	}
-	return func() { hub.Wake(name) }
 }
 
 // reconcilePreview applies settings changes to the preview encoder, but never
@@ -2477,7 +2515,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	e.mu.Lock()
 	e.previewHub = hub
 	e.mu.Unlock()
-	url, err := hub.Subscribe("preview", port)
+	url, err := hub.Subscribe(previewSubName, port)
 	if err != nil {
 		// #711. previewHub is cleared with it, or a later sweep unsubscribes a
 		// name this preview never took -- cutting off whoever actually holds it.
@@ -2497,9 +2535,8 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		VideoKbps:      s.Preview.VideoKbps,
 	})
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "preview", Kind: "preview", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newRelayConsumer(relayConsumer{
+		name: previewSubName, sub: previewSubName, kind: procname.KindPreview, hub: hub, args: args,
 	})
 
 	if e.beforePublish != nil {
@@ -2514,7 +2551,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// least synchronised with a shutdown of any of them.
 	if e.stopped {
 		e.mu.Unlock()
-		hub.Unsubscribe("preview")
+		hub.Unsubscribe(previewSubName)
 		e.releasePort(port)
 		return
 	}
@@ -2564,7 +2601,7 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // to survive until they come back, or the operator has to make it twice.
 func (e *Engine) applyMeterInterval(m db.MeterSettings) {
 	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
-	e.noteReload("meters", "meters", reloadLive, "metering interval applied without a respawn")
+	e.noteReload("meters", "meters", AppliedLive, "metering interval applied without a respawn")
 }
 
 // meterThrottle rate-limits metering frames on their way to the WebSocket.
@@ -2639,7 +2676,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		return
 	}
 	meterHub := e.downstreamHub()
-	url, err := meterHub.Subscribe("meters", port)
+	url, err := meterHub.Subscribe(metersSubName, port)
 	if err != nil {
 		e.releasePort(port)
 		e.log.Error("meters: relay subscription refused", "err", err)
@@ -2648,38 +2685,27 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 
-	// Declared ahead of the Spec so the stdout handler can reach it: see the
-	// NoteMedia call below.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "meters", Kind: "meters", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true,
-		// astats prints far faster than any UI can draw; throttle here rather
-		// than flooding every WebSocket client with 50 frames a second. The
-		// rate is read per frame from the engine, so lowering it applies to
-		// this sidecar without respawning it.
-		StdoutHandler: func(r io.Reader) error {
-			th := &meterThrottle{e: e}
-			return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
-				// Levels arriving is media flowing. This stdout is not the
-				// -progress parser, so without it the supervisor never learns
-				// that, and the meters' uptime reads --:--:-- for ever.
-				proc.NoteMedia()
-				now := time.Now()
-				if !th.allow(now) {
-					return
-				}
-				e.mu.Lock()
-				e.levels = l
-				e.levelsAt = now
-				frame := LevelsFrame{Levels: l, Source: ProgrammeRef{ID: e.sourceID, Name: e.sourceName}}
-				e.mu.Unlock()
-				e.bus.Publish(events.TypeLevels, frame)
-			})
-		},
-		OnLog:   e.onLog,
-		OnState: e.onState,
-		LogSink: logSink{e},
+	// astats prints far faster than any UI can draw; throttle here rather than
+	// flooding every WebSocket client with 50 frames a second. The rate is read
+	// per frame from the engine, so lowering it applies to this sidecar without
+	// respawning it.
+	proc := e.newMeterConsumer(relayConsumer{
+		name: metersSubName, sub: metersSubName, kind: procname.KindMeters, hub: meterHub, args: args,
+	}, func(r io.Reader, noteMedia func()) error {
+		th := &meterThrottle{e: e}
+		return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
+			noteMedia()
+			now := time.Now()
+			if !th.allow(now) {
+				return
+			}
+			e.mu.Lock()
+			e.levels = l
+			e.levelsAt = now
+			frame := LevelsFrame{Levels: l, Source: ProgrammeRef{ID: e.sourceID, Name: e.sourceName}}
+			e.mu.Unlock()
+			e.bus.Publish(events.TypeLevels, frame)
+		})
 	})
 
 	e.mu.Lock()
@@ -2692,7 +2718,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	// Same guard, same reason, as reconcileRecorder's.
 	if e.stopped {
 		e.mu.Unlock()
-		meterHub.Unsubscribe("meters")
+		meterHub.Unsubscribe(metersSubName)
 		e.releasePort(port)
 		return
 	}
@@ -2878,11 +2904,11 @@ func (e *Engine) reconcileOutputs() error {
 	e.destHold.Store(hold)
 	switch {
 	case holdDests:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"held: the ingest layout has not been probed yet, and a routing graph "+
 				"compiled against the placeholder would map tracks that may not exist")
 	case unmeasurable:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"the ingest layout cannot be measured, so each track is downmixed by "+
 				"FFmpeg at runtime rather than by its profile's matrix")
 	}
@@ -3380,14 +3406,17 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 // and an unprobed encoder both mean "we do not know", and detection that could
 // not answer must never be the thing that stops a stream.
 func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error {
-	if tools == nil {
-		return nil
-	}
-	if len(tools.VideoEncoders) > 0 && !tools.HasEncoder(string(encoder)) {
+	return renditionEncoderProblemIn(tools.Probed(context.Background(), false), encoder)
+}
+
+// renditionEncoderProblemIn is renditionEncoderProblem against one generation
+// of detection, so a caller that also needs the GPU from it reads both at once.
+func renditionEncoderProblemIn(snap ffmpeg.Probed, encoder db.VideoEncoder) error {
+	if snap.Listed() && !snap.HasEncoder(string(encoder)) {
 		return fmt.Errorf("this FFmpeg build has no %s encoder", encoder)
 	}
-	works, reason := tools.EncoderWorks(string(encoder))
-	if works || notProbed(reason) {
+	works, reason := snap.EncoderWorks(string(encoder))
+	if works || ffmpeg.IsNotProbed(reason) {
 		return nil
 	}
 	if reason == "" {
@@ -3396,17 +3425,6 @@ func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error
 	return fmt.Errorf("%s did not pass its test encode on this machine: %s. "+
 		"Choose a different encoder, or fix the driver and re-detect hardware from the rendition editor",
 		encoder, reason)
-}
-
-// notProbed distinguishes "the encoder failed" from "we never got to ask it".
-//
-// Detection marks a probe it could not run — a cancelled scan, an expired
-// budget — as not working, with a reason that says so. Read literally, one
-// cancelled detection would refuse every rendition on the box. That is the
-// exact shape of the SRT check that used to stop the server from starting, and
-// the lesson from it was the same one: a capability check must fail open.
-func notProbed(reason string) bool {
-	return strings.HasPrefix(reason, "not probed:")
 }
 
 // startRendition brings up one shared encode: a hub of its own, a subscription
@@ -3427,7 +3445,11 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		e.log.Error("start rendition", "rendition", row.Name, "err", err)
 	}
 
-	if err := renditionEncoderProblem(e.tools, row.Encoder); err != nil {
+	// ONE GENERATION of detection for the whole start: the verdict that lets
+	// this encoder run and the render node it is told to use must come from the
+	// same probe, or a re-detect in between starts it on a node nobody proved.
+	snap := e.tools.Probed(context.Background(), isVAAPIEncoder(row.Encoder))
+	if err := renditionEncoderProblemIn(snap, row.Encoder); err != nil {
 		fail(err)
 		return
 	}
@@ -3475,7 +3497,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		fail(err)
 		return
 	}
-	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row, snap), e.cfg.DataDir)
 	// An FFmpeg with no drawtext filter must not be handed one.
 	//
 	// This is not a cosmetic guard. Found by running the renditions acceptance
@@ -3520,9 +3542,8 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	}
 	args := ffmpeg.RenditionArgs(rspec)
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newRelayConsumer(relayConsumer{
+		name: subName, sub: subName, kind: procname.KindRendition, hub: upstream, args: args,
 	})
 
 	e.mu.Lock()
@@ -3545,14 +3566,14 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	proc.Start()
 	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
 		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
-	e.noteReload("rendition", row.Name, reloadRestart, "started")
+	e.noteReload("rendition", row.Name, AppliedRestart, "started")
 }
 
 func (e *Engine) teardownRendition(r *rendition) {
 	if r == nil {
 		return
 	}
-	e.noteReload("rendition", r.row.Name, reloadRestart,
+	e.noteReload("rendition", r.row.Name, AppliedRestart,
 		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
@@ -3615,20 +3636,20 @@ type auxSlot struct {
 
 var (
 	auxRecorder = auxSlot{
-		name: "recorder",
+		name: recorderSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.recorder },
 		port: func(e *Engine) *int { return &e.recorderPort },
 		sig:  func(e *Engine) *string { return &e.recorderSig },
 	}
 	auxPreview = auxSlot{
-		name: "preview",
+		name: previewSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.preview },
 		port: func(e *Engine) *int { return &e.previewPort },
 		sig:  func(e *Engine) *string { return &e.previewSig },
 		hub:  func(e *Engine) **relay.Hub { return &e.previewHub },
 	}
 	auxMeters = auxSlot{
-		name: "meters",
+		name: metersSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.meters },
 		port: func(e *Engine) *int { return &e.metersPort },
 		sig:  func(e *Engine) *string { return &e.metersSig },
@@ -3731,6 +3752,10 @@ func (e *Engine) stopAux(a auxSlot) {
 	slot := a.proc(e)
 	proc := *slot
 	*slot = nil
+	recorder := proc != nil && slot == &e.recorder
+	if recorder {
+		e.recorderStopping++
+	}
 	var port int
 	// The ingest hub unless this consumer says otherwise. The meters sidecar and
 	// the preview both read whichever tier is on air, so both unsubscribe from
@@ -3750,9 +3775,14 @@ func (e *Engine) stopAux(a auxSlot) {
 	e.mu.Unlock()
 
 	if proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		_ = proc.Stop(ctx)
-		cancel()
+		func() {
+			if recorder {
+				defer e.recorderStopped()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+			defer cancel()
+			_ = proc.Stop(ctx)
+		}()
 	}
 	hub.Unsubscribe(a.name)
 	if port != 0 {
@@ -3829,39 +3859,16 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				//
 				// Taken HERE, not inside reconcileOutputs: Reconcile already
 				// holds it when it calls that, and the mutex is not reentrant.
-				// AND THE CONSUMERS OF WHAT reconcileOutputs JUST STARTED.
-				//
-				// This used to run three of Reconcile's steps and stop, which is
-				// the hazard the paragraph above describes arriving from the
-				// other direction: a hand-copied subset of a sequence drifts the
-				// moment the sequence grows. It had already drifted. The
-				// analyser tier is reconciled ONLY by reconcileLoudness, this is
-				// the path that starts destinations on every fresh install --
-				// they are held until a probe lands -- and Reconcile is
-				// event-driven with no ticker, so nothing ran it again.
-				//
-				// The result was #612: an install reporting the loudness monitor
-				// enabled with no analyser ever having run. GET /loudness said
-				// so, the Meters page drew the switch on, and nothing measured.
-				// Only toggling the switch off and on recovered it, because that
-				// was one of the few things that reached a real Reconcile.
-				//
-				// Preview, clips and captions are here for the same reason and
-				// were wrong in the same way: each reads a hub that
-				// reconcileOutputs may have just replaced. Their own comment in
-				// Reconcile says they must run "after the outputs, because these
-				// read the hub that the silence and selector tiers decide" --
-				// and this path settles exactly that and then skipped them.
+				// The whole downstream sequence, not a subset of it: see
+				// reconcileDownstream for what a hand-copied subset cost (#612).
 				settings := e.Settings()
 				e.reconcileMu.Lock()
-				e.reconcileMeters(settings)
-				e.reconcileRecorder(settings)
-				_ = e.reconcileOutputs()
-				e.reconcilePreview(settings)
-				e.reconcileClips()
-				e.reconcileCaptions()
-				e.reconcileLoudness(settings)
+				err := e.reconcileDownstream(settings)
 				e.reconcileMu.Unlock()
+				if err != nil {
+					e.log.Warn("ingest layout changed but the outputs could not be reconciled; "+
+						"the next reconcile will", "err", err)
+				}
 				e.publishStatus()
 			}
 			e.mu.RLock()
@@ -4526,27 +4533,22 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	})
 
 	id, name, target, mix := p.id, p.name, p.target, p.key.mix
-	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: "loudness", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true,
-		StdoutHandler: func(r io.Reader) error {
-			var last time.Time
-			return meters.Parse(r, func(f meters.Frame) {
-				proc.NoteMedia() // as the meters do: a frame is media flowing
-				rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
-				// Stored on every frame, published on a throttle: a browser
-				// that connects between pushes still gets the current number.
-				e.loudStore.Put(rep)
-				if time.Since(last) < loudnessPublishInterval {
-					return
-				}
-				last = time.Now()
-				e.bus.Publish(events.TypeLoudness, rep)
-			})
-		},
-		OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newMeterConsumer(relayConsumer{
+		name: subName, sub: subName, kind: procname.KindLoudness, hub: p.hub, args: args,
+	}, func(r io.Reader, noteMedia func()) error {
+		var last time.Time
+		return meters.Parse(r, func(f meters.Frame) {
+			noteMedia()
+			rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
+			// Stored on every frame, published on a throttle: a browser
+			// that connects between pushes still gets the current number.
+			e.loudStore.Put(rep)
+			if time.Since(last) < loudnessPublishInterval {
+				return
+			}
+			last = time.Now()
+			e.bus.Publish(events.TypeLoudness, rep)
+		})
 	})
 
 	e.mu.Lock()
@@ -5910,6 +5912,11 @@ func (e *Engine) releaseAlertGate() {
 	gate.Release(e)
 }
 
+// SetFacebookCaptions opens or closes the provisional facebook_sei caption path
+// for this engine. The manager sets it on every engine from the one value main
+// read at startup.
+func (e *Engine) SetFacebookCaptions(open bool) { e.facebookCaptions.Store(open) }
+
 // SetAlertGate attaches the install's shared gate. A setter for the reason
 // SetHooks is one: engines are built whenever a source is added.
 func (e *Engine) SetAlertGate(g *alerts.InstallGate) {
@@ -5930,37 +5937,7 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		snap.IngestError = st.Ingest.LastError
 	}
 	for _, d := range st.Destinations {
-		ds := alerts.DestState{
-			// A stopped destination playing its delayed tail out is still on
-			// the air, so it is still ENABLED to every watcher until the tail
-			// ends: the down edge -- and the YouTube end it triggers -- waits
-			// for the last delayed second. See delayStillPublishing.
-			ID: d.ID, Name: d.Name, Enabled: d.Enabled || delayStillPublishing(d),
-			// Filling its delay: enabled, not running, and not down either.
-			Buffering:    delayHoldsBack(d),
-			DelaySeconds: d.DelaySeconds,
-			// A destination whose graph would not compile has no process at
-			// all, and that is as down as a failed one.
-			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
-			Platform: string(d.Platform),
-			Error:    d.Error,
-			// The classified failure, for the down alert's text (and so the
-			// timeline) and the webhook's cause.
-			Reason: d.Reason,
-		}
-		// FFmpeg has been reporting all three of these once a second per
-		// destination since -progress was wired up, and nothing has ever read
-		// them. Left at their zero values the watcher treats the rate as
-		// unknown and says nothing, which is what happens for a destination
-		// with no process.
-		if d.Process != nil {
-			ds.OutTimeMS = d.Process.Progress.OutTimeMS
-			ds.DropFrames = d.Process.Progress.DropFrames
-			ds.DupFrames = d.Process.Progress.DupFrames
-			ds.Restarts = d.Process.Restarts
-			ds.RestartCause = string(d.Process.RestartCause)
-		}
-		snap.Destinations = append(snap.Destinations, ds)
+		snap.Destinations = append(snap.Destinations, d.AlertState())
 	}
 	if st.Failover != nil {
 		snap.Failover = &alerts.FailoverState{
@@ -6152,36 +6129,30 @@ func clearDir(dir string) {
 	}
 }
 
-// vaapiDevice resolves the render node a VAAPI rendition should use.
-//
-// Detection is deferred and done once: enumerating DRM nodes touches sysfs and
-// opens devices, which is not work to repeat on every rendition restart, and is
-// pointless on the overwhelming majority of installs that never run a VAAPI
-// encoder at all. Anything other than a VAAPI encoder returns empty
-// immediately, without detecting.
+// vaapiDevice is the render node a VAAPI rendition should use, from the
+// detection generation the start already read (Tools.Probed at every start, so
+// a hardware re-detect reaches a running engine).
+// Anything other than a VAAPI encoder returns empty without asking.
 //
 // An empty result is the safe answer, not a failure: FFmpeg then uses its own
 // default node, which is exactly the behaviour every install had before this
 // existed. Being wrong in the restrictive direction here -- refusing to start a
 // rendition because a device string could not be resolved -- would be worse
 // than the software fallback it is meant to avoid.
-func (e *Engine) vaapiDevice(r *db.Rendition) string {
-	if !strings.HasSuffix(string(r.Encoder), "_vaapi") {
+func (e *Engine) vaapiDevice(r *db.Rendition, snap ffmpeg.Probed) string {
+	if !isVAAPIEncoder(r.Encoder) {
 		return ""
 	}
-	e.vaapiOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), gpuDetectTimeout)
-		defer cancel()
-		info := ffmpeg.DetectGPUs(ctx)
-		e.vaapiDev = info.VAAPIDevice
-		if e.vaapiDev == "" {
-			e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
-		} else {
-			e.log.Info("VAAPI render node selected", "device", e.vaapiDev)
-		}
-	})
-	return e.vaapiDev
+	dev := snap.GPU.VAAPIDevice
+	if dev == "" {
+		e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
+	} else {
+		e.log.Info("VAAPI render node selected", "device", dev)
+	}
+	return dev
 }
+
+func isVAAPIEncoder(e db.VideoEncoder) bool { return strings.HasSuffix(string(e), "_vaapi") }
 
 // reconcileCount is how many times Reconcile has been entered. Test-only; see
 // the field's comment for why it is a field.

@@ -6,8 +6,8 @@
  * and sessions last seven days, so on a console left open this is a weekly
  * event rather than an edge case.
  *
- * IN THE TRANSPORT, NOT AT THE CALL SITES: both HTTP clients (lib/api.ts and
- * lib/autoApi.ts) report every response status here, and this decides. A
+ * IN THE TRANSPORT, NOT AT THE CALL SITES: the one HTTP transport (lib/api.ts
+ * requestRaw) reports every response status here, and this decides. A
  * page added tomorrow is covered without being told, the same argument
  * reportReconcileFailure makes.
  *
@@ -25,7 +25,7 @@ const EVENT = "polyemesis:session-ended";
  *  session. Paths as the clients write them, relative to /api/v1. */
 const TYPED_CREDENTIAL_ROUTES: ReadonlySet<string> = new Set(["/auth/login", "/auth/password"]);
 
-/** Called by both HTTP clients with every response they receive. */
+/** Called by requestRaw with every response they receive. */
 export function noteResponseStatus(path: string, status: number): void {
   if (status !== 401) return;
   const route = path.split("?")[0];

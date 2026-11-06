@@ -91,14 +91,7 @@ func (t *Tools) probeTwoAudioFLV(ctx context.Context) FLVTwoAudioResult {
 
 	ctx, cancel := context.WithTimeout(ctx, flvProbeTimeout)
 	defer cancel()
-	mux := []string{
-		"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-f", "lavfi", "-i", "sine=frequency=440:duration=0.5:sample_rate=48000",
-		"-f", "lavfi", "-i", "sine=frequency=1000:duration=0.5:sample_rate=48000",
-		"-map", "0:a", "-map", "1:a",
-		"-c:a", "aac", "-b:a", "64k", "-ar", "48000",
-		"-f", "flv", out,
-	}
+	mux := flvProbeMuxArgs(out)
 	if b, err := exec.CommandContext(ctx, t.FFmpeg, mux...).CombinedOutput(); err != nil {
 		return classifyMuxFailure(ctx, err, b)
 	}
@@ -155,4 +148,17 @@ func (t *Tools) TwoAudioFLV() (ok, probed bool, reason string) {
 		return true, false, ""
 	}
 	return t.flvTwoAudio.OK, true, t.flvTwoAudio.Reason
+}
+
+// flvProbeMuxArgs is the command that writes the two-audio-track FLV the probe
+// then reads back.
+func flvProbeMuxArgs(out string) []string {
+	return []string{
+		"-hide_banner", "-loglevel", LogLevel(LogError), "-nostdin",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=0.5:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=1000:duration=0.5:sample_rate=48000",
+		"-map", "0:a", "-map", "1:a",
+		"-c:a", "aac", "-b:a", "64k", "-ar", "48000",
+		"-f", "flv", out,
+	}
 }

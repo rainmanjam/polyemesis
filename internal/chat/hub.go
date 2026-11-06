@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -145,7 +146,6 @@ func WithStore(s Store) Option { return func(h *Hub) { h.store = s } }
 // WithPublisher wires the WebSocket bus.
 func WithPublisher(p Publisher) Option { return func(h *Hub) { h.bus = p } }
 
-// WithLogger replaces the logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(h *Hub) {
 		if l != nil {
@@ -302,7 +302,7 @@ func New(opts ...Option) *Hub {
 		seen:        map[string]struct{}{},
 		log:         slog.Default(),
 		now:         time.Now,
-		sleep:       sleepCtx,
+		sleep:       backoff.SleepCtx,
 		histCap:     DefaultHistory,
 		dedupeCap:   DefaultDedupe,
 		pendingCap:  DefaultPendingCap,
@@ -382,7 +382,7 @@ func (h *Hub) Attach(ctx context.Context, a Adapter) error {
 // built for a test or a demo) would have been offered for a platform the
 // rest of the product says cannot take one.
 //
-// Only an explicit No refuses. Unknown (X, gated behind Livestream access)
+// Only an explicit No refuses. Unknown (a platform nobody has checked)
 // keeps working, because the matrix's own rule is that a No must trace to
 // something checked.
 func canPost(a Adapter) bool {
@@ -1129,34 +1129,11 @@ func (h *Hub) purge() {
 
 // defaultBackoff doubles up to the ceiling, with jitter.
 func (h *Hub) defaultBackoff(attempt int) time.Duration {
-	if attempt < 0 {
-		attempt = 0
-	}
-	if attempt > 5 {
-		attempt = 5
-	}
-	d := DefaultBackoff << attempt
-	if d > DefaultMaxBackoff {
-		d = DefaultMaxBackoff
-	}
+	d := backoff.Exponential(attempt, DefaultBackoff, DefaultMaxBackoff)
 	// Jitter only ever subtracts, so the ceiling stays a ceiling. Spreading the
 	// reconnects matters because four adapters knocked off the network together
 	// would otherwise retry in lockstep for the rest of the broadcast.
 	return d - time.Duration(rand.Int63n(int64(d/5)+1))
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
 }
 
 func runnerKey(p db.Platform, account string) string {

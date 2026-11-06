@@ -29,9 +29,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -130,7 +130,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 		s.log.Warn("recurring: the title pattern cannot be rendered for go-live", "schedule", sc.Name, "err", redactErr(err))
 		return
 	}
-	mp, ok := s.providers.MetadataFor(d.Platform)
+	mp, ok := oauth.As[oauth.MetadataPusher](s.providers, d.Platform)
 	if !ok {
 		return
 	}
@@ -184,7 +184,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	}
 	for _, w := range res.Warnings {
 		s.log.Warn("recurring: the platform did not take part of the go-live metadata",
-			"destination", d.Name, "schedule", sc.Name, "detail", alerts.Redact(w))
+			"destination", d.Name, "schedule", sc.Name, "detail", redact.Redact(w))
 	}
 	s.log.Info("recurring: wrote the show's title and category at go-live",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "applied", len(res.Applied))

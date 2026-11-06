@@ -3,12 +3,14 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // A STREAM PER DESTINATION, AND THE TESTS THAT SAY WHOSE KEY MUST NOT MOVE.
@@ -544,5 +546,22 @@ func TestYouTubeFindsAHeldStreamOnALaterPageOfTheChannelsStreams(t *testing.T) {
 		if c.Method == http.MethodPost && c.Path == ytStreamsPath {
 			t.Errorf("a stream was created although the held stream exists on page two: POST %s", c.Path)
 		}
+	}
+}
+
+// The stream title's 128 limit is counted in UTF-16 units like every other
+// YouTube title, and the cut never splits an emoji: 70 emoji are 140 units and
+// are cut to the 59 that fit after "polyemesis - " (13 units), not half of one.
+func TestYouTubeStreamTitlesAreCutInUTF16WithoutSplittingACharacter(t *testing.T) {
+	got := ytStreamTitle(strings.Repeat("😀", 70))
+	if n := platform.UTF16Len(got); n > 128 || n < 126 {
+		t.Errorf("stream title is %d UTF-16 units: %q", n, got)
+	}
+	if strings.ContainsRune(got, '�') || !utf8.ValidString(got) {
+		t.Errorf("the cut split a character: %q", got)
+	}
+	v := ytVerticalStreamTitle(strings.Repeat("😀", 70))
+	if n := platform.UTF16Len(v); n > 128 || !strings.HasSuffix(v, ytVerticalMarker) || !utf8.ValidString(v) {
+		t.Errorf("vertical title %d units, marker kept=%v: %q", n, strings.HasSuffix(v, ytVerticalMarker), v)
 	}
 }

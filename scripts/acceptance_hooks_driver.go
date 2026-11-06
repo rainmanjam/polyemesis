@@ -63,8 +63,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 func main() {
@@ -609,7 +609,7 @@ func transportTimeout() {
 	emit("timeoutErrHasSecret", strings.Contains(rec.Error, pathSecret))
 	// The diagnostic has to SURVIVE the scrub. Blanking the whole error would
 	// pass a "no secret" check and turn every support conversation into "it says
-	// delivery failed" -- which is the trade alerts.ClientErrorText's own doc
+	// delivery failed" -- which is the trade redact.ClientErrorText's own doc
 	// comment refuses to make.
 	emit("timeoutErrNamesHost", strings.Contains(rec.Error, hostOf(endpoint)))
 
@@ -702,7 +702,7 @@ func transportRefused() {
 // echoBack is the credential class the transport scrub cannot reach: one the
 // ENDPOINT chose to quote back in its own body.
 //
-// The body below is JSON, which is the shape alerts.Redact is worst at -- its
+// The body below is JSON, which is the shape redact.Redact is worst at -- its
 // own doc records that it cannot see inside one -- so anything that survives
 // here survived because the per-hook SecretSet ran, not because the generic
 // redactor got lucky. It quotes both credentials, since an endpoint that
@@ -897,8 +897,8 @@ func remote() {
 		text += " " + err.Error()
 	}
 	disclosed := false
-	for _, lit := range alerts.EndpointSecrets(raw) {
-		if len(lit) >= alerts.MinSecretLen && strings.Contains(text, lit) {
+	for _, lit := range redact.EndpointSecrets(raw) {
+		if len(lit) >= redact.MinSecretLen && strings.Contains(text, lit) {
 			disclosed = true
 		}
 	}

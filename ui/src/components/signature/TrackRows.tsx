@@ -15,10 +15,10 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AudioMeter } from "./AudioMeter";
 import { channelLabels } from "@/lib/channels";
-import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
+import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/features/routing/trackSignal";
 import { useT } from "@/lib/i18n";
 import { formatPeakDb } from "@/lib/meterScale";
-import { gainPct } from "@/lib/format";
+import { clockTime, gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { trackChipCount, trackChipTitle } from "@/lib/trackLabels";
 import {
@@ -400,11 +400,7 @@ export function TrackRows({
                     <div className="font-mono text-xs text-muted-foreground">
                       {translate("routing.meters.lastPeak", {
                         db: formatPeakDb(last.db),
-                        time: new Date(last.at).toLocaleTimeString(undefined, {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        }),
+                        time: clockTime(new Date(last.at).toISOString()),
                       })}
                     </div>
                   )}

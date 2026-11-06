@@ -42,11 +42,11 @@ func fakeVersionOnlyFFmpeg(t *testing.T, banner string) string {
 // accepts every argument this package writes and then fails hours later, on
 // air, on multi-track mapping.
 func TestAnUnreadableVersionIsRefusedAndNamed(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "")
+	assume := ""
 	const banner = "ffmpeg version SOMEVENDOR-BUILD Copyright (c) 2000-2019 the FFmpeg developers"
 	bin := fakeVersionOnlyFFmpeg(t, banner)
 
-	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err == nil {
 		t.Fatalf("Detect admitted a build of unknown version: %+v", tools)
 	}
@@ -67,9 +67,9 @@ func TestAnUnreadableVersionIsRefusedAndNamed(t *testing.T) {
 // A version string with no "ffmpeg version" line at all still has to name
 // something an operator can look at, rather than quoting the empty string.
 func TestAnUnrecognisableBannerIsQuotedAsWhatWasActuallyPrinted(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "")
+	assume := ""
 	bin := fakeVersionOnlyFFmpeg(t, "this is not an ffmpeg banner at all")
-	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err == nil {
 		t.Fatal("Detect admitted a binary that printed no version line")
 	}
@@ -82,9 +82,9 @@ func TestAnUnrecognisableBannerIsQuotedAsWhatWasActuallyPrinted(t *testing.T) {
 // operator cannot fix from inside the product, and a master nightly really is
 // newer than the floor.
 func TestTheOperatorCanStateTheVersionThemselves(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "8")
+	assume := "8"
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version N-113518-gd6a4b1e Copyright (c) 2000-2026 the FFmpeg developers")
-	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err != nil {
 		t.Fatalf("Detect refused a build the operator vouched for: %v", err)
 	}
@@ -104,9 +104,9 @@ func TestTheOperatorCanStateTheVersionThemselves(t *testing.T) {
 // floor was in force. 7 is the newest major the floor exists to keep out, and
 // it is the one an operator on Debian 13's 7.1.5 would reach for.
 func TestTheEscapeHatchCannotBeUsedToRunAnOldBuild(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "7")
+	assume := "7"
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
-	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err == nil {
 		t.Fatal("POLYEMESIS_FFMPEG_ASSUME_MAJOR=7 got past a floor of 8")
 	}
@@ -119,9 +119,9 @@ func TestTheEscapeHatchCannotBeUsedToRunAnOldBuild(t *testing.T) {
 // And the floor itself is admitted through the same hatch: 8 is a claim the
 // operator is allowed to make.
 func TestTheEscapeHatchAdmitsAClaimOfExactlyTheFloor(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "8")
+	assume := "8"
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
-	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err != nil {
 		t.Fatalf("POLYEMESIS_FFMPEG_ASSUME_MAJOR=8 was refused: %v", err)
 	}
@@ -133,9 +133,9 @@ func TestTheEscapeHatchAdmitsAClaimOfExactlyTheFloor(t *testing.T) {
 // A typo must not read as "unset" and drop the operator back at the original
 // refusal with no idea why their answer was ignored.
 func TestATypoInTheEscapeHatchSaysSo(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "8.1")
+	assume := "8.1"
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
-	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 	if err == nil {
 		t.Fatal("a malformed value was accepted")
 	}
@@ -152,7 +152,7 @@ func TestATypoInTheEscapeHatchSaysSo(t *testing.T) {
 // 6.1.1 and Debian 13's 7.1.5. Both cleared the old 6.0 floor and neither can
 // carry Enhanced RTMP multitrack (two-track FLV), which is why the floor is 8.
 func TestAReadableVersionStillDecidesOnItsOwnNumber(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "")
+	assume := ""
 	for _, banner := range []string{
 		"ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021",
 		"ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023",
@@ -160,7 +160,7 @@ func TestAReadableVersionStillDecidesOnItsOwnNumber(t *testing.T) {
 		"ffmpeg version n7.1.3 Copyright (c) 2000-2025",
 	} {
 		bin := fakeVersionOnlyFFmpeg(t, banner)
-		_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+		_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 		if err == nil {
 			t.Errorf("%q was admitted below the 8.0 floor", banner)
 			continue
@@ -189,7 +189,7 @@ func TestAReadableVersionStillDecidesOnItsOwnNumber(t *testing.T) {
 		{"ffmpeg version 9.0.2 Copyright (c) 2000-2026", 9, 0},
 	} {
 		bin := fakeVersionOnlyFFmpeg(t, c.banner)
-		tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+		tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"), assume)
 		if err != nil {
 			t.Errorf("%q was refused: %v", c.banner, err)
 			continue

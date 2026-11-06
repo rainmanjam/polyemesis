@@ -26,10 +26,10 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 119 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 120 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 2 |
-| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 11 |
+| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 10 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
@@ -160,7 +160,7 @@ This is how a destination's per-track gain and mute are applied live:
   (`internal/routing/filtergraph.go`). Gain and mute are only its level. Mute
   sets the level to `0` and keeps the track in the graph.
 - A destination's restart signature is taken over the graph with those levels
-  masked (`ffmpeg.MaskLiveVolumes`). A level-only change therefore does not
+  masked (`livevolume.Mask`). A level-only change therefore does not
   restart it, and the engine sends the moved levels as commands instead
   (`applyLiveLevels`, `internal/engine/live_gains.go`).
 - The stored profile is written **first**. Every spawn of the process, including

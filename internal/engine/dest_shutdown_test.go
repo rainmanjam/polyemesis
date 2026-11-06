@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -83,7 +84,7 @@ func TestStartingABackupAfterShutdownLeavesNothingBehind(t *testing.T) {
 		t.Error("a backup spawned after shutdown was published onto the destination; " +
 			"it restarts for ever and no path can reach it to stop it")
 	}
-	if subs := hub.Subscribers(); slices.Contains(subs, destSubName(d.row.ID, destRoleBackup)) {
+	if subs := hub.Subscribers(); slices.Contains(subs, procname.DestProcessName(d.row.ID, procname.RoleBackup)) {
 		t.Errorf("the hub still forwards to the backup's subscription: %v", subs)
 	}
 	if _, err := e.alloc.Allocate(); err != nil {
@@ -189,7 +190,7 @@ func TestAReconciledBackupPublishedIntoAShutdownStartsNothing(t *testing.T) {
 	if backup == nil {
 		t.Fatal("the seam never ran, so the window was never exercised")
 	}
-	if subs := e.hub.Subscribers(); slices.Contains(subs, destSubName(d.row.ID, destRoleBackup)) {
+	if subs := e.hub.Subscribers(); slices.Contains(subs, procname.DestProcessName(d.row.ID, procname.RoleBackup)) {
 		t.Errorf("the shutdown left the backup subscribed: %v", subs)
 	}
 	assertNeverRuns(t, backup, "the backup")

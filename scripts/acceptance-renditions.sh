@@ -110,7 +110,7 @@ FACTS="$WORK/facts.env"
 # read "--" as its first argument and dial http://127.0.0.1:--. It is not
 # needed either -- only LEADING consecutive .go arguments are compiled, and
 # the first argument here is always a port number.
-go run "$SCRIPTS/acceptance_renditions_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$RELAY" "$FACTS" 2>&1 | sed 's/^/  /'
+go run "$SCRIPTS/acceptance_renditions_driver.go" "$SCRIPTS/driverhelpers.go" "$SCRIPTS/driverrelayport.go" "$PORT" "$RELAY" "$FACTS" 2>&1 | sed 's/^/  /'
 
 [ -s "$FACTS" ] || { bad "driver wrote no facts"; step "Summary"; printf "  %d passed, %d failed\n\n" "$pass" "$fail"; exit 1; }
 # shellcheck disable=SC1090

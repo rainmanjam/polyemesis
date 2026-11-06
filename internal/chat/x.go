@@ -37,13 +37,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // XMaxMessage is X's chat limit. SendBroadcastChatRequest.text carries maxLength
 // 140 in the served spec.
 const XMaxMessage = 140
 
-const xAPIBaseDefault = "https://api.x.com"
+const xAPIBaseDefault = platform.XAPIHost
 
 // xNumericID is the shape X uses for message and user ids: digits only, 1 to 19
 // characters (the spec's ^[0-9]{1,19}$).

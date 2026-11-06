@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -381,7 +382,7 @@ func quoteArgv(bin string, args []string) string {
 // caller.
 //
 // What those four do is NOT what the previous version of this comment implied.
-// They do not run alerts.Redact and call it masked -- that is what shipped, and
+// They do not run redact.Redact and call it masked -- that is what shipped, and
 // it left `-rtmp_conn S:<key>` and `Authorization:Bearer\ <key>` in the clear on
 // three read-reachable egresses. They remove the destination's EXACT credential
 // literals first, declared on the Spec, and run Redact only as a residual pass
@@ -402,7 +403,7 @@ func quoteArgv(bin string, args []string) string {
 // is now a lower-privileged principal inside the same requireAuth boundary, and
 // it is refused both streamKey on /destinations and these routes outright --
 // GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
-// in readScopeDeniedPatterns. Since the poka-yoke audit of 2026-11-04 no
+// in the readDenied flag. Since the poka-yoke audit of 2026-11-04 no
 // token of either scope reaches these routes at all (they are session-only);
 // the signed-in operator, who can rotate the key anyway, gets the exact
 // command.
@@ -433,28 +434,11 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		return bin, nil, false, "", errNoSource
 	}
 
-	want := fmt.Sprintf("dest:%d", row.ID)
-	for _, p := range e.Processes() {
-		if p.Name() != want {
-			continue
-		}
-		argv := p.Args()
-		if len(argv) <= 1 {
-			continue
-		}
-		// The running process was started WITH whatever was saved at the time,
-		// because the engine splices them. Peeling those back off is what makes
-		// a preview of a candidate edit show the candidate instead of the
-		// candidate stacked on top of the previous one.
-		//
-		// Parse errors are ignored deliberately: arguments that no longer parse
-		// cannot be the ones this process was started with, so there is nothing
-		// to strip, and refusing to show the operator their live command line is
-		// the worst possible answer to "what is running right now".
-		applied := expertArgsOf(row)
-		oldIn, _ := splitExpertArgs(applied.InputArgs, "input args")
-		oldOut, _ := splitExpertArgs(applied.OutputArgs, "output args")
-		return argv[0], ffmpeg.StripExtraArgs(argv[1:], oldIn, oldOut), true, "", nil
+	// A RUNNING destination is previewed from the command it is running, which the
+	// engine builds without the expert arguments the row carries: a preview of a
+	// candidate edit shows the candidate, not the candidate stacked on the last.
+	if runBin, argv, ok := e.DestinationBaseArgv(row.ID); ok {
+		return runBin, argv, true, "", nil
 	}
 
 	compiled, cerr := routing.Compile(row.Profile, e.Source())
@@ -478,27 +462,14 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 			"recordings directory at start."
 	}
 
-	// This is the SECOND place a ffmpeg.DestSpec is built -- the engine's
-	// destSpecFor is the other -- and it has always omitted Audio and Transport,
-	// so the preview of a destination using either already differs from the
-	// command that runs. CopyAudio is added here anyway, because the difference
-	// it makes is not a missing flag but a whole shape: without it the operator
-	// previewing a copy destination is shown a filter graph and an encoder that
-	// will not be there. Unifying the two construction sites is a separate
-	// change and has its own follow-up issue.
-	base = ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-		Kind:          ffmpeg.DestKind(row.Kind),
-		Target:        target,
-		RelayURL:      placeholderRelayURL,
-		FilterComplex: compiled.FilterComplex,
-		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
-		VideoDelayMS:  compiled.VideoDelayMS,
-		CopyAudio:     row.Audio.Copy,
-		AudioTracks:   compiled.Tracks,
-	})
+	// The engine's own description of the command, so the preview cannot differ
+	// from what runs. It is the BASE: the row's saved expert arguments are left
+	// out, because the caller splices the candidate's in (resolveExpertCommand)
+	// and the preview is of that edit, not of it stacked on the last one -- which
+	// is also why there is no log to warn about their text.
+	spec := engine.DestSpecFor(nil, row, compiled, placeholderRelayURL, target)
+	spec.ExtraInputArgs, spec.ExtraOutputArgs = nil, nil
+	base = ffmpeg.DestinationArgs(spec)
 	return bin, base, false, note, nil
 }
 
@@ -648,12 +619,12 @@ func runDryRun(ctx context.Context, bin string, argv []string) dryRunResult {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dryRunTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, bin, res.Argv...)
-	// Killing FFmpeg is not the same as getting its output pipe back — a child
-	// inherits it and CombinedOutput blocks until every holder is gone. Without
-	// WaitDelay the timeout above is a suggestion. Learned in probe_encoders.go.
-	cmd.WaitDelay = time.Second
-	output, err := cmd.CombinedOutput()
+	// Killing FFmpeg is not the same as getting its output pipe back -- a child
+	// inherits it -- so the wait after the kill is bounded at one second, not
+	// the shared KillGrace: the timeout above must stay close to a promise for
+	// the person waiting on this answer.
+	output, err := ffmpeg.CombinedOutput(runCtx, ffmpeg.Command{Name: bin, Args: res.Argv},
+		ffmpeg.WithWaitDelay(time.Second))
 	res.Output = truncateOutput(string(output), 4000)
 
 	switch {
@@ -790,7 +761,7 @@ func parseExpertRequest(req expertRequest, row *db.Destination) (in, out []strin
 func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
 	// THIS RESPONSE CONTAINS THE STREAM KEY, AND IT DIVERGES BY PRINCIPAL.
 	//
-	// readScopeDeniedPatterns lists this route precisely because, in redact.go's
+	// the readDenied flag lists this route precisely because, in redact.go's
 	// words, "its response is the resolved FFmpeg argv, and the argv contains the
 	// destination's stream key". So the same URL answers 200-with-the-key for a
 	// session or admin token and 403 for a read-scoped one — the exact shape

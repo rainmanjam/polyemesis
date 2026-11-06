@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube publishes a clip as a YouTube Short with the Data API's resumable
@@ -34,24 +35,23 @@ type YouTube struct {
 	// Base is the API origin; tests aim it at a fake server.
 	Base   string
 	Client *http.Client
+	// Meter is told the quota cost of the upload, which is billed against the
+	// same daily allowance as every other YouTube Data API call. Nil means
+	// uncounted (tests).
+	Meter func(units int)
 }
 
 // AcceptedYouTubeScopes are the scopes videos.insert documents as sufficient:
 // https://developers.google.com/youtube/v3/docs/videos/insert. The existing
 // "youtube" scope is one of them, which is why an account connected before this
 // feature does not need reconnecting.
-var AcceptedYouTubeScopes = []string{
-	"https://www.googleapis.com/auth/youtube.upload",
-	"https://www.googleapis.com/auth/youtube",
-	"https://www.googleapis.com/auth/youtube.force-ssl",
-	"https://www.googleapis.com/auth/youtubepartner",
-}
+var AcceptedYouTubeScopes = platform.Must(platform.YouTube).PublishAnyScope
 
 const (
-	youTubeBase = "https://www.googleapis.com"
+	youTubeBase = platform.YouTubeAPIHost
 	// youTubeUploadCost is videos.insert in quota units, from the same daily
 	// allowance live chat polling spends.
-	youTubeUploadCost = 1600
+	youTubeUploadCost = platform.YouTubeCostUploadVideo
 )
 
 func (y *YouTube) base() string {
@@ -119,23 +119,27 @@ func ytFailure(code int, body []byte) *Failure {
 		reason = e.Error.Errors[0].Reason
 	}
 	msg := oneLine(e.Error.Message)
-	switch reason {
+	switch {
 	// THREE DIFFERENT LIMITS, which used to share the daily-quota answer
 	// (poka-yoke audit 2026-11-04). A short-window rateLimitExceeded was
 	// reported as "used up until midnight Pacific" and never retried, so a
 	// clip that a minute's backoff would have published was dropped.
-	case "quotaExceeded", "dailyLimitExceeded":
+	case reason == "dailyLimitExceededUnreg":
+		// Unauthenticated use, not a spent allowance: the request went out without
+		// usable credentials, and waiting for midnight will not change that.
+		return fail(CauseNeedsReconnect, false, "YouTube treated this upload as unauthenticated (%s); reconnect the YouTube account and publish again", reason)
+	case oauth.IsSpentQuotaReason(reason):
 		return fail(CauseQuota, false, "YouTube's daily allowance is used up (%s). It resets at midnight Pacific; publish again then", reason)
-	case "rateLimitExceeded", "userRateLimitExceeded":
+	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded":
 		return fail(CauseRateLimited, true, "YouTube asked to slow down (%s); this will be retried", reason)
-	case "uploadLimitExceeded":
+	case reason == "uploadLimitExceeded":
 		return fail(CauseUploadLimited, false, "this channel has reached YouTube's limit on how many videos it may upload for now (%s). "+
 			"It is a per-channel limit, not the API allowance; publish again later", reason)
-	case "insufficientPermissions", "forbidden":
+	case reason == "insufficientPermissions", reason == "forbidden":
 		if code == http.StatusForbidden {
 			return fail(CauseNeedsReconnect, false, "YouTube says this connection may not upload; reconnect it to allow uploads")
 		}
-	case "youtubeSignupRequired":
+	case reason == "youtubeSignupRequired":
 		return fail(CauseRefused, false, "this Google account has no YouTube channel to upload to")
 	}
 	if code == http.StatusBadRequest && strings.Contains(strings.ToLower(msg), "video") {
@@ -298,7 +302,9 @@ func (y *YouTube) open(ctx context.Context, r Run, total int64) (string, error) 
 	req.Header.Set("X-Upload-Content-Length", strconv.FormatInt(total, 10))
 	req.Header.Set("X-Upload-Content-Type", "video/mp4")
 	// Charged here, because videos.insert is billed when the session opens.
-	oauth.ChargeYouTubeQuota(youTubeUploadCost)
+	if y.Meter != nil {
+		y.Meter(youTubeUploadCost)
+	}
 	resp, err := y.client().Do(req)
 	if err != nil {
 		return "", netFailure(err)

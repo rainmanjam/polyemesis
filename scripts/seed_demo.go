@@ -166,7 +166,7 @@ func main() {
 	// configuration rather than the product.
 	//
 	// Turning it on is not hiding the notice. The notice is tested in
-	// lib/failoverNotice.test.ts, where its behaviour belongs; a screenshot is
+	// features/dashboard/failoverNotice.test.ts, where its behaviour belongs; a screenshot is
 	// not the place to prove a warning renders, and an install that has taken
 	// the advice is the honest thing to photograph.
 	if fo, ok := settings["failover"].(map[string]any); ok {

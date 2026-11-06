@@ -269,7 +269,7 @@ done
 # Not a constant, and not omitted. A fixed literal would be indistinguishable
 # from a leak of somebody else's; omitting it would leave steps 8a-8d with
 # nothing to search for, so the leak guards would report SAFE having looked for
-# nothing. 32 hex characters is longer than alerts.MinSecretLen and shaped like
+# nothing. 32 hex characters is longer than redact.MinSecretLen and shaped like
 # a real platform key.
 #
 # `export` rather than an argument, for the same reason the real ones are: the

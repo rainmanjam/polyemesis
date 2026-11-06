@@ -1,12 +1,35 @@
-/** Types mirroring the Go API. Kept hand-written and small rather than
- *  generated, so the shapes the UI actually consumes stay obvious. */
+/** Types mirroring the Go API. Hand-written and small, so the shapes the UI
+ *  actually consumes stay obvious, except for the words and numbers the server
+ *  owns (state words, event types, routing bounds, platform names): those come
+ *  from contract/wire.ts, which Go generates, and are only re-exported here. */
 
 import type { TranslationKey } from "./i18n";
+import { WIRE } from "./contract/wire";
+import type {
+  ChatState,
+  EventType,
+  FailureCause,
+  JobState,
+  ObsConnState,
+  OffloadState,
+  Platform,
+  ChatPlatform,
+  ProcessState,
+  TokenScope,
+} from "./contract/wire";
 
-/** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
- *  its capabilities response — prefer that where it is to hand, and treat this
- *  as the fallback for code that renders before capabilities have loaded. */
-export const MAX_TRACKS = 32;
+export type {
+  ChatState,
+  EventType,
+  FailureCause,
+  JobState,
+  ObsConnState,
+  OffloadState,
+  Platform,
+  ChatPlatform,
+  ProcessState,
+  TokenScope,
+};
 
 // ------------------------------------------------------------------ ids
 //
@@ -104,8 +127,8 @@ export const ROLE_LABEL_KEY: Record<Exclude<TrackRole, "">, TranslationKey> = {
 };
 
 /** Matches routing.MaxLabelLen / MaxLangTagLen. */
-export const MAX_LABEL_LEN = 64;
-export const MAX_LANG_TAG_LEN = 35;
+export const MAX_LABEL_LEN: number = WIRE.routing.maxLabelLen;
+export const MAX_LANG_TAG_LEN: number = WIRE.routing.maxLangTagLen;
 
 /** The operator's description of one ingest track. Keyed by index rather than
  *  by position, so it survives a track vanishing and coming back. */
@@ -134,24 +157,24 @@ export interface Loudness {
   rangeLu?: number;
 }
 
-export const LUFS_STREAMING = -14;
-export const LUFS_PODCAST = -16;
-export const LUFS_BROADCAST = -23;
-export const DEFAULT_TRUE_PEAK_DB = -1;
-export const DEFAULT_LOUDNESS_LRA = 11;
+export const LUFS_STREAMING: number = WIRE.routing.lufsStreaming;
+export const LUFS_PODCAST: number = WIRE.routing.lufsPodcast;
+export const LUFS_BROADCAST: number = WIRE.routing.lufsBroadcast;
+export const DEFAULT_TRUE_PEAK_DB: number = WIRE.routing.defaultTruePeakDb;
+export const DEFAULT_LOUDNESS_LRA: number = WIRE.routing.defaultLoudnessLra;
 
-export const MIN_TARGET_LUFS = -70;
-export const MAX_TARGET_LUFS = -5;
-export const MIN_TRUE_PEAK_DB = -9;
-export const MAX_TRUE_PEAK_DB = 0;
-export const MIN_LOUDNESS_LRA = 1;
-export const MAX_LOUDNESS_LRA = 50;
+export const MIN_TARGET_LUFS: number = WIRE.routing.minTargetLufs;
+export const MAX_TARGET_LUFS: number = WIRE.routing.maxTargetLufs;
+export const MIN_TRUE_PEAK_DB: number = WIRE.routing.minTruePeakDb;
+export const MAX_TRUE_PEAK_DB: number = WIRE.routing.maxTruePeakDb;
+export const MIN_LOUDNESS_LRA: number = WIRE.routing.minLoudnessLra;
+export const MAX_LOUDNESS_LRA: number = WIRE.routing.maxLoudnessLra;
 
 /** Audio against video, in ms. Positive holds AUDIO back (lip-sync repair, a
  *  moderation delay); negative pulls it ahead, which the compiler pays for by
  *  holding the VIDEO back instead. The bounds are asymmetric for that reason. */
-export const MIN_DELAY_MS = -2000;
-export const MAX_DELAY_MS = 30000;
+export const MIN_DELAY_MS: number = WIRE.routing.minDelayMs;
+export const MAX_DELAY_MS: number = WIRE.routing.maxDelayMs;
 
 /** Pull one group of tracks down whenever another is speaking. `trigger` is
  *  what causes the duck (the mic), `target` is what gets pushed down (the
@@ -166,15 +189,15 @@ export interface Ducking {
   releaseMs?: number;
 }
 
-export const DEFAULT_DUCK_THRESHOLD_DB = -24;
-export const DEFAULT_DUCK_RATIO = 8;
-export const DEFAULT_DUCK_ATTACK_MS = 20;
-export const DEFAULT_DUCK_RELEASE_MS = 300;
+export const DEFAULT_DUCK_THRESHOLD_DB: number = WIRE.routing.defaultDuckThresholdDb;
+export const DEFAULT_DUCK_RATIO: number = WIRE.routing.defaultDuckRatio;
+export const DEFAULT_DUCK_ATTACK_MS: number = WIRE.routing.defaultDuckAttackMs;
+export const DEFAULT_DUCK_RELEASE_MS: number = WIRE.routing.defaultDuckReleaseMs;
 
-export const MIN_DUCK_THRESHOLD_DB = -60;
-export const MAX_DUCK_THRESHOLD_DB = 0;
-export const MIN_DUCK_RATIO = 1;
-export const MAX_DUCK_RATIO = 20;
+export const MIN_DUCK_THRESHOLD_DB: number = WIRE.routing.minDuckThresholdDb;
+export const MAX_DUCK_THRESHOLD_DB: number = WIRE.routing.maxDuckThresholdDb;
+export const MIN_DUCK_RATIO: number = WIRE.routing.minDuckRatio;
+export const MAX_DUCK_RATIO: number = WIRE.routing.maxDuckRatio;
 
 export interface RoutingProfile {
   mode: RoutingMode;
@@ -262,23 +285,6 @@ export type DestKind = "rtmp" | "srt" | "file";
 
 /** How captions reach one destination. Mirrors internal/captions Mode. */
 export type CaptionMode = "off" | "sei" | "youtube_post" | "facebook_sei";
-/*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
- *  its destination preset deliberately does not carry it, so no destination row
- *  ever arrives with it. "vimeo" IS here because its preset does carry it —
- *  Vimeo signs in, and a saved Vimeo destination is stamped with the platform
- *  even though its key is still pasted by hand. "trovo" is RETIRED (Trovo shut
- *  down on 30 June 2026): nothing offers it any more, and it stays here only
- *  because rows saved before the shutdown still carry it. */
-export type Platform =
-  | "custom"
-  | "youtube"
-  | "twitch"
-  | "kick"
-  | "facebook"
-  | "trovo"
-  | "vimeo"
-  | "x";
-
 export interface Destination {
   id: DestinationId;
   name: string;
@@ -386,6 +392,12 @@ export interface Destination {
    *  app is whitelisted. "" is the default too, and is what a save sends for
    *  a destination that is not X. */
   xGoLiveTweet?: XGoLiveTweet | "";
+  /** The catalogue preset this destination was created from (a DestinationPreset
+   *  id), absent for one typed in by hand. Platform is "custom" for every preset
+   *  that is only a URL and a note, so this is what lets the platform's own
+   *  encoder guidance be found for Instagram, LinkedIn, Dailymotion, Owncast and
+   *  Rumble. Optional on a save: left out, the stored value is kept. */
+  presetId?: string;
   /** Read-only. True when a YouTube caption ingestion URL is stored for this
    *  destination's current stream key, which "youtube_post" needs before the
    *  destination may start. The URL itself is a credential and never leaves
@@ -786,12 +798,6 @@ export interface EncoderList {
   gpu: GpuInfo;
 }
 
-export type ProcessState =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "reconnecting"
-  | "failed";
 
 export interface Progress {
   frame: number;
@@ -829,16 +835,6 @@ export interface ProcessStatus {
 
 /** The classified cause of a failure. The codes are a published contract:
  *  the same strings reach MQTT, webhooks and alert payloads. */
-export type FailureCause =
-  | "key_rejected"
-  | "platform_not_ready"
-  | "dns"
-  | "connection_refused"
-  | "timeout"
-  | "tls"
-  | "codec_rejected"
-  | "upload_too_slow"
-  | "unknown";
 
 /** failreason.Reason, field for field. */
 export interface FailureReason {
@@ -905,20 +901,6 @@ export interface DelayDumpResult {
   delayAfterSeconds: number;
   configuredSeconds: number;
   restoresOnNextStart: true;
-}
-
-/** One row of POST /destinations/delay/dump-all. A skipped or failed row
- *  carries a `message` and may lack the dump figures. */
-export interface DelayDumpAllResult extends Partial<Omit<DelayDumpResult, "id" | "name">> {
-  id: DestinationId;
-  name: string;
-  outcome: "dumped" | "skipped" | "failed";
-  message?: string;
-}
-
-export interface DelayDumpAllReport {
-  action: "dump";
-  results: DelayDumpAllResult[];
 }
 
 export interface DestStatus {
@@ -1164,14 +1146,7 @@ export interface StreamHealthView {
  *
  *  A published floor may be encoded; an unpublished one may not. Mirrors
  *  oauth.FacebookStreamHealthInterval, which carries the same quote. */
-export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS = 2000;
-
-/** How long Facebook itself waits before reporting a stream as timed out —
- *  the second sentence of the quote above. It is here so that a pane deciding
- *  "how long may this stay empty before the encoder is gone" reads Facebook's
- *  four seconds instead of inventing a number. Mirrors
- *  oauth.FacebookStreamTimeout. */
-export const FACEBOOK_STREAM_TIMEOUT_MS = 4000;
+export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS: number = WIRE.limits.facebookStreamHealthIntervalMs;
 
 /** One shared video encode's live state.
  *
@@ -2123,7 +2098,6 @@ export interface StorageState {
  *  because narrowing a credential a running script is holding would break it
  *  without anyone being told.
  */
-export type TokenScope = "read" | "admin" | "obs" | "mcp-read" | "mcp-admin";
 
 /** An MCP capability level. The tools in each are fixed by the server
  *  (GET /mcp/access lists them); Content and Control are only ever reachable
@@ -2304,10 +2278,6 @@ export interface MusicDecision {
   summary: string;
 }
 
-/** The `platform:` prefix routing.PlatformPresetID() puts on the presets
- *  generated from the music-rights table. */
-export const PLATFORM_PRESET_PREFIX = "platform:";
-
 export interface Preset {
   id: string;
   name: string;
@@ -2379,6 +2349,8 @@ export interface PlatformAccount {
    *  per request; see internal/api/account_health.go. Absent on an older
    *  server, which the UI reads as "no news" rather than as healthy. */
   health?: AccountHealth;
+  /** A Facebook account that is a Page, whose broadcasts are always public. */
+  isPage?: boolean;
 }
 
 /** internal/api/account_health.go's AccountHealth. */
@@ -2408,7 +2380,7 @@ export interface DeviceAuth {
   /** When the code dies and the flow has to be restarted. */
   expiresAt: string;
   /** The minimum wait between polls, as the platform stated it and already
-   *  floored at five seconds by the server. Honour it; see lib/deviceFlow.ts. */
+   *  floored at five seconds by the server. Honour it; see features/accounts/deviceFlow.ts. */
   intervalSeconds: number;
 }
 
@@ -2455,7 +2427,7 @@ export interface ReconnectReason {
  *  type. Typing it `number` here would compile, and would then let any caller
  *  write `{stats.viewerCount}` or `count || 0` and tell a streamer with an
  *  audience that nobody is watching. `number | undefined` is what forces the
- *  branch, and viewerReadout() in lib/viewerCount.ts is where that branch is
+ *  branch, and viewerReadout() in features/accounts/viewerCount.ts is where that branch is
  *  taken once for the whole app. */
 export interface LiveStats {
   live: boolean;
@@ -2484,7 +2456,7 @@ export interface LiveStats {
  *  different fields: "polyemesis cannot ask this platform" is a capability
  *  answer with a reason to show, not an error and not an absent count. The union
  *  makes reaching for `stats` without checking `supported` a type error, which
- *  is the branch oauth.StatsFor's doc comment asks every caller to take. */
+ *  is the branch oauth.As[LiveStatter]'s doc comment asks every caller to take. */
 export type AccountStats =
   | {
       supported: false;
@@ -2513,7 +2485,7 @@ export interface SetupGuide {
    *  the token.
    *
    *  READ THIS RATHER THAN CHECKING FOR "twitch". The server derives it from
-   *  oauth.DeviceFor, so a build that gains or loses the capability changes what
+   *  oauth.As[DeviceFlower], so a build that gains or loses the capability changes what
    *  this UI offers with no edit here — which is the whole reason it is a field
    *  and not a constant. */
   deviceFlow?: boolean;
@@ -2649,25 +2621,6 @@ export interface AcmePreflight {
   checks: AcmeCheck[];
 }
 
-export type EventType =
-  | "status"
-  | "levels"
-  | "log"
-  | "stats"
-  | "source"
-  | "recordings"
-  /** One chat message, one event. See ChatMessage. */
-  | "chat"
-  /** The whole per-platform connection table, whenever any part of it moves. */
-  | "chatState"
-  /** Messages that were delivered and are now gone — deleted here, or deleted
-   *  on the platform's own dashboard and reported back to us. See ChatRetraction.
-   *
-   *  The one event in this union that must not be dropped on the floor. Missing
-   *  a "chat" costs a line of conversation; missing this one leaves a message on
-   *  screen that a moderator deliberately removed. */
-  | "chatRetract";
-
 export interface WsEvent {
   type: EventType;
   time: string;
@@ -2680,41 +2633,15 @@ export interface WsEvent {
 // internal/chat exactly; nothing here re-derives a fact the server already
 // stated, because two answers to "is YouTube connected" is one answer too many.
 
-/** The platforms the chat pane can show. An alias of `Platform`, kept as a
- *  separate name because chat and destinations gain platforms at different
- *  times — the next chat-only platform widens this without touching the
- *  destination picker.
- *
- *  IT IS NOW WIDER THAN THE SET OF PLATFORMS WITH A CHAT ADAPTER, and the
- *  alias is what makes that possible: "trovo" is a retired destination
- *  platform (Trovo shut down on 30 June 2026), so it is nameable here and no
- *  message will ever arrive carrying it. Read this as the union a message
- *  COULD be tagged with, not as a list of what works — the capability matrix
- *  in lib/capabilities.ts is the answer to that, per platform and per column. */
-/** The platforms the chat pane can show. Kept as a separate name because chat
- *  and destinations gain platforms at different times, and the two newest
- *  platforms came apart in OPPOSITE directions.
- *
- *  "trovo" IS here: it is a retired platform (Trovo shut down on 30 June
- *  2026) that old destination rows still name, and no message will ever
- *  arrive carrying it. "vimeo" is NOT:
- *  it has no chat adapter in internal/chat at all, so no message can ever carry
- *  it and the accent map has nothing to say about it. Vimeo's own live-event
- *  chat, if it exists, sits behind the same Enterprise gate as the rest of its
- *  live API — see internal/oauth/vimeo.go.
- *
- *  Read this as the union a message COULD be tagged with, not as a list of what
- *  works — lib/capabilities.ts answers that, per platform and per column. */
-export type ChatPlatform = Exclude<Platform, "vimeo">;
+/** The platforms the chat pane can show: those the server has a chat adapter for
+ *  (internal/chat), derived from the platform registry in contract/wire.ts. Not
+ *  an alias of `Platform`: Rumble is here, and Vimeo and the retired Trovo are
+ *  not. Read this as the set a message can come from, not as a list of what
+ *  works — the capability matrix in lib/capabilities.ts answers that, per
+ *  platform and per column. */
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */
-export type ChatState =
-  | "connecting"
-  | "live"
-  | "degraded"
-  | "failed"
-  | "stopped";
 
 /** One badge the platform put next to a name. Deliberately loose: Twitch has
  *  id/version pairs, Kick has labels, YouTube has boolean roles. */
@@ -3210,13 +3137,6 @@ export interface DryRunResult {
 // broadcast is unrecoverable while a transcript arriving an hour later costs
 // nothing. These types are how the operator sees and steers that tradeoff.
 
-export type JobState =
-  | "queued"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled"
-  | "deferred";
 
 /** How one kind of work is allowed to take the machine.
  *  - realtime:  never held back
@@ -3309,7 +3229,7 @@ export interface JobWindow {
  *  not a string, so a mistyped or renamed kind fails to compile instead of
  *  failing as a 400 at runtime (poka-yoke audit 2026-11-04). Mirrors buildJob
  *  in internal/api/library.go; library_job_kinds_test.go holds the two equal. */
-export type RecordingJobKind = "transcribe" | "media.proxy" | "media.thumbnails" | "media.archive";
+export type RecordingJobKind = "transcribe" | "media.proxy" | "media.thumbnails";
 
 export interface JobKindInfo {
   kind: string;
@@ -4032,7 +3952,6 @@ export interface ObsConfig {
   scenes: ObsSceneRule[];
 }
 
-export type ObsConnState = "off" | "connecting" | "connected" | "unreachable" | "refused" | "incompatible";
 
 /** What one bridge action did to one destination. */
 export interface ObsOutcome {
@@ -4250,7 +4169,6 @@ export interface AnalyticsReport {
 
 export type StorageProvider = "s3" | "r2" | "b2" | "minio" | "wasabi";
 /** stuck: offload stopped retrying on its own; nothing moves until Retry now. */
-export type OffloadState = "pending" | "uploading" | "verified" | "failed" | "stuck";
 
 /** One S3-compatible bucket finished recordings are offloaded to. The secret
  *  access key is write-only: the server reports hasSecret and never the key. */

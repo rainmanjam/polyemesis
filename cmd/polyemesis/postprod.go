@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -24,6 +23,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 	"github.com/rainmanjam/polyemesis/internal/uploadverify"
@@ -91,14 +91,7 @@ func (p postProd) waitWithin(ctx context.Context) bool {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
-	settings, err := store.GetSettings()
-	if err != nil {
-		// Falling back to defaults rather than giving up: the stored policy is
-		// how strictly this tier yields, and the default is the strictest one.
-		log.Warn("cannot read the post-production policy; using defaults", "error", err)
-		settings = db.DefaultSettings()
-	}
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, settings db.Settings, env startupenv.Env, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 
 	// Whisper is detected once, at startup, and a machine without it is an
 	// ordinary machine. Every method on *Tools is nil-receiver safe precisely so
@@ -143,7 +136,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// Clip publishing (Wave 4 #5c). The token source is filled in by main once
 	// the API server exists: the refresh path lives on it.
 	publishTokens := &publish.TokenGate{}
-	registerPublish(log, cfg, store, box, q, publishTokens, publish.GatesFromEnv())
+	registerPublish(log, cfg, store, box, q, publishTokens, publish.Gates{XPublish: env.XPublish})
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -218,9 +211,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 		log.Info("transcription default model set by settings", "model", m)
 	}
 	tp := transcribe.NewProcessor(log, tools, whisper, cfg.RecordingsDir(), cfg.ModelsDir(), tpOpts...)
-	// Concurrency 1: whisper saturates every core it is given, so a second
-	// transcription buys nothing and costs the first one half the machine.
-	reg(transcribe.KindTranscribe, q.Register(transcribe.KindTranscribe, 1, tp))
+	reg(transcribe.KindTranscribe, tp.Register(q))
 
 	mp := media.New(log, media.Config{
 		FFmpeg:        tools.FFmpeg,
@@ -237,8 +228,8 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 
 	cutter := newCutter(log, tools, gov)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
-	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve,
-		clipper.WithTranscript(api.ClipTranscriptSource(store)),
+	reg(clipper.JobKind, clipper.Register(q, clipper.NewWorker(cutter, resolve,
+		clipper.WithTranscript(clipper.StoreTranscript(store)),
 		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
 		clipper.WithCaptionBurn(tools.HasFilter("subtitles")))))
 
@@ -246,7 +237,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 	// child: measuring loudness decodes the whole recording's audio. The
 	// model, when a scan asks for it, is the Automod primary connector on a
 	// budget of its OWN, so a post-pass never spends live moderation's.
-	reg(highlights.JobKind, q.Register(highlights.JobKind, 1, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
+	reg(highlights.JobKind, highlights.Register(q, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
 
 	// Playlist normalisation. THIS IS THE PRODUCER OF THE FILE THE PLAYLIST
 	// TIER REFUSES TO START WITHOUT: engine.playlistItemsReady requires a
@@ -403,10 +394,10 @@ func niceWrapper(gov *jobs.Governor) func(string, []string) (string, []string) {
 // child PID is still FFmpeg's and the supervisor's process-group kill is
 // unaffected; both binaries are optional and absent means the command is
 // returned untouched.
-func niceExecer(gov *jobs.Governor) media.Execer {
-	return func(ctx context.Context, cmd media.Command, sink media.Sink) error {
+func niceExecer(gov *jobs.Governor) ffmpeg.Execer {
+	return func(ctx context.Context, cmd ffmpeg.Command, sink ffmpeg.Sink) error {
 		name, args := gov.NiceCommand(cmd.Name, cmd.Args...)
-		return media.Exec(ctx, media.Command{Name: name, Args: args}, sink)
+		return ffmpeg.Exec(ctx, ffmpeg.Command{Name: name, Args: args}, sink)
 	}
 }
 
@@ -562,7 +553,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 		// The same adapter the clip worker reads captions through: a missing
 		// transcript is none, and a store that cannot be read is an error.
 		Transcript: func(recordingID int64) ([]highlights.Line, error) {
-			lines, err := api.ClipTranscriptSource(store)(recordingID)
+			lines, err := clipper.StoreTranscript(store)(recordingID)
 			if err != nil {
 				return nil, err
 			}
@@ -584,7 +575,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 			}
 			return store.ReplacePendingHighlights(recordingID, rows)
 		},
-		Model: api.HighlightModel(store, box, automod.NewBudget(), log),
+		Model: highlights.ModelFrom(store, box, automod.NewBudget(), log),
 	}
 }
 
@@ -635,16 +626,16 @@ func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *sec
 		Tokens: tokens.Source(),
 		Clips:  publish.ClipsFrom(store, exportDir),
 		Adapters: map[string]publish.Adapter{
-			publish.PlatformYouTube: &publish.YouTube{},
+			publish.PlatformYouTube: &publish.YouTube{Meter: tokens.Charge},
 			publish.PlatformTikTok:  &publish.TikTok{},
 			publish.PlatformX:       &publish.X{Enabled: gates.XPublish},
 		},
 		Gates: gates,
 	})
-	if err := q.Register(publish.JobKind, 1, w); err != nil {
+	if err := publish.Register(q, w); err != nil {
 		log.Error("cannot register the clip publish job kind", "error", err)
 	}
 	if gates.XPublish {
-		log.Warn("X publishing is switched ON by " + publish.XPublishEnv)
+		log.Warn("X publishing is switched ON by " + startupenv.XPublishVar)
 	}
 }

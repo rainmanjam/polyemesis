@@ -364,7 +364,7 @@ func TestTheRestartHashDoesNotMoveWhenTheSourceDoes(t *testing.T) {
 	if on != afterProbeCleared {
 		t.Fatal("the selector's signature moved with the silence tier; every destination would restart on a failover")
 	}
-	if destSpec(row, compiled, on) != destSpec(row, compiled, afterProbeCleared) {
+	if destSpec(row, compiled, on, false) != destSpec(row, compiled, afterProbeCleared, false) {
 		t.Error("a destination's restart hash moved across a source switch")
 	}
 	if renditionSig(rend, 60, on, "") != renditionSig(rend, 60, afterProbeCleared, "") {
@@ -392,7 +392,7 @@ func TestFailoverOffLeavesEveryRestartHashExactlyAsItWas(t *testing.T) {
 // The offset is the only thing standing between a switch and a timestamp that
 // jumps into the past, which platforms answer by dropping the connection.
 func TestRelayFeedArgsCopyEverythingAndCarryTheTimelineForward(t *testing.T) {
-	args := relayFeedArgs("udp://127.0.0.1:21001", "udp://127.0.0.1:21002", 12.5)
+	args := ffmpeg.RelayFeedArgs("udp://127.0.0.1:21001", "udp://127.0.0.1:21002", 12.5)
 
 	joined := args
 	want := [][2]string{

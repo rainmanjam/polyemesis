@@ -1,7 +1,8 @@
 import type { TranslationKey } from "./i18n";
 import type { ProcessState } from "./types";
 
-/** The single mapping from process state to the theme's signal language.
+/** The single mapping from process state to the theme's signal language;
+ *  status.ts's StatusTone is derived from it, not a second table.
  *  Every status pill, dot and border colour in the app resolves through here,
  *  so "green means live" is enforced in one place rather than per component. */
 export type SignalTone = "live" | "warn" | "down" | "armed" | "idle";
@@ -22,37 +23,12 @@ export function toneForState(state?: ProcessState | null): SignalTone {
   }
 }
 
-export function labelForState(state?: ProcessState | null): string {
-  switch (state) {
-    case "running":
-      return "Live";
-    case "reconnecting":
-      return "Reconnecting";
-    case "starting":
-      return "Starting";
-    case "failed":
-      return "Failed";
-    // An absent process reads Stopped, as stateLabelKey does (app-council A91).
-    case "stopped":
-    default:
-      return "Stopped";
-  }
-}
-
 export const toneText: Record<SignalTone, string> = {
   live: "text-ok",
   warn: "text-warn",
   down: "text-down",
   armed: "text-idle",
   idle: "text-muted-foreground",
-};
-
-export const toneBg: Record<SignalTone, string> = {
-  live: "bg-ok",
-  warn: "bg-warn",
-  down: "bg-down",
-  armed: "bg-idle",
-  idle: "bg-subtle-foreground",
 };
 
 export const toneBadge: Record<SignalTone, "live" | "warn" | "down" | "armed" | "outline"> = {

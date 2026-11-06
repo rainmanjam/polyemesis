@@ -1,3 +1,4 @@
+import { causeLabel } from "@/lib/failureRemedy";
 import { useState } from "react";
 import { Square, Tv } from "lucide-react";
 
@@ -5,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { AcrossTheRoom } from "@/components/AcrossTheRoom";
 import { attention, onAir } from "@/lib/attention";
+import { ingestProcessUp, onAirSeconds } from "@/lib/liveness";
 import type { SignalTone } from "@/lib/signal";
 import type { FailoverStatus, Status } from "@/lib/types";
 import { useStateLabel, useT, type TranslationKey } from "@/lib/i18n";
-import { healthVerdict } from "@/lib/healthVerdict";
+import { healthVerdict } from "@/features/shell/healthVerdict";
 import { duration } from "@/lib/format";
 
 /* ===========================================================================
@@ -81,15 +83,13 @@ export function OnAirBar({
   // The ingest's uptime only means something while it is running. SRT has no
   // ingest process at all (#514), so on a healthy SRT install this is null and
   // the verdict simply omits the stability clause rather than inventing one.
-  const ingestUptime = status?.ingest?.state === "running" ? status.ingest.uptimeSec : null;
+  const ingestUptime = ingestProcessUp(status?.ingest) ? status?.ingest?.uptimeSec ?? null : null;
   const offPrimary = !!failover && failover.active !== "primary" && failover.active !== "";
   const verdict = healthVerdict(air, items, ingestUptime, offPrimary, ingestReceiving);
   // How long the broadcast has been on air: the longest-running destination,
   // since the first one up is when the audience could first see it.
-  const onAirSec = (status?.destinations ?? []).reduce(
-    (max, d) => (d.process?.state === "running" ? Math.max(max, d.process.uptimeSec ?? 0) : max),
-    0,
-  );
+  const onAirSec = onAirSeconds(status?.destinations);
+
 
   /* Follow a row to the card it describes.
    *
@@ -165,7 +165,7 @@ export function OnAirBar({
 
         {/* THE ANSWER TO "IS EVERYTHING FINE, AND WHAT NEEDS ME?" in one line.
             Healthy says so and how long the ingest has held; attention says how
-            many and gives a way to the first one. Derived in lib/healthVerdict,
+            many and gives a way to the first one. Derived in features/shell/healthVerdict,
             from the same rows the list below is drawn from. */}
         {verdict?.kind === "healthy" && (
           <span className="flex items-center gap-1.5 text-[12px] text-foreground">
@@ -243,7 +243,7 @@ export function OnAirBar({
                       leads to the card, where its remedy is (A9). */}
                   {item.cause && (
                     <span className="block text-tiny text-foreground">
-                      {t(`reason.cause.${item.cause}`)}
+                      {causeLabel(t, item.cause)}
                     </span>
                   )}
                   {/* The server's own sentence, never a summary of it. */}

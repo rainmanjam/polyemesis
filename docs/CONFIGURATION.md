@@ -39,7 +39,7 @@ The keys, in brief:
 | `tls.certFile` / `tls.keyFile` | `""` | `manual` mode only |
 | `tls.hsts` | `false` | Opt-in on purpose — see below |
 | `trustProxyHeaders` | `false` | Set **only** behind a reverse proxy you control |
-| `trustedProxies` | `[]` | With `trustProxyHeaders`, the proxies besides loopback whose `X-Forwarded-For` / `X-Real-IP` are believed: addresses or CIDRs, e.g. `["172.17.0.1"]` for nginx on the Docker host. From any other peer the headers are ignored. A malformed entry stops startup |
+| `trustedProxies` | `[]` | With `trustProxyHeaders`, the proxies besides loopback whose `X-Forwarded-Proto` / `X-Forwarded-Host` / `X-Forwarded-For` / `X-Real-IP` are believed (a proxy that is not listed here leaves the session cookie without its `Secure` flag and the OAuth redirect URI at the internal address): addresses or CIDRs, e.g. `["172.17.0.1"]` for nginx on the Docker host. From any other peer the headers are ignored. A malformed entry stops startup |
 | `ffmpeg.binary` / `ffmpeg.probe` | `""` | Pin specific binaries instead of searching `$PATH` |
 | `transcription.binary` | `""` | Pin the whisper.cpp CLI (`whisper-cli`, or the older `main`) instead of searching `$PATH`. Deliberately not validated — an unusable path degrades transcription and never stops the server serving a live stream |
 
@@ -519,6 +519,13 @@ overlays, and turns a restore into a re-download of every speech model. Check
 what you have with `-verify-backup`, which reads `polyemesis.db` and
 `secret.key` and says nothing about the rest.
 
+**If the server refuses to start because the stored settings cannot be read**,
+stop it and restore `polyemesis.db` from a backup (check the copy with
+`-verify-backup`), or reset only the settings to their defaults, which keeps
+sources, destinations and credentials:
+`sqlite3 <dataDir>/polyemesis.db "DELETE FROM settings WHERE id = 1"`. The next
+start writes the defaults; re-enter the settings you had changed.
+
 Nothing outside this directory is written at runtime, which is also what makes
 the container's single volume mount sufficient.
 
@@ -541,10 +548,10 @@ standing at a terminal reading an error.
 
 | Variable | What it does |
 |---|---|
-| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read by `internal/chat/rumble.go`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
+| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read once at startup by `internal/startupenv`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
 | `RUMBLE_CHAT_CHANNEL` | Which channel to read, when the key alone does not say |
 
-Both are read at startup by `internal/api/chat_wiring.go`. See
+Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and `Env.RumbleChatChannel`) and handed to the chat wiring in `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
 ### FFmpeg
@@ -552,7 +559,7 @@ Both are read at startup by `internal/api/chat_wiring.go`. See
 | Variable | What it does |
 |---|---|
 | `POLYEMESIS_FFMPEG_ASSUME_MAJOR` | States the major version of an FFmpeg build whose own `-version` output does not carry a readable one — a master nightly reporting `N-113518-gd6a4b1e` being the honest case. Set it to the leading number: `POLYEMESIS_FFMPEG_ASSUME_MAJOR=8` |
-| `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets. Default `warning`; takes any value FFmpeg's own `-loglevel` takes |
+| `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets, the live ones and the one-shot post-production passes (proxies, thumbnails, clips, transcription) alike. Unset, a child keeps its own default: `warning` for the live children and for the proxy, thumbnail, archive, playlist-transcode and clip jobs, `error` for the transcription extract, highlight loudness pass, poster frames, duration counts and the two-audio capability probe (the encoder probe uses `warning`); the override applies to all of them. ffprobe is not an FFmpeg child in this sense: it stays at `error`, because its stderr is only quoted back in an error. Takes any value FFmpeg's own `-loglevel` takes. Read once at startup |
 
 `POLYEMESIS_FFMPEG_ASSUME_MAJOR` is the answer to a server that refuses to
 start because it cannot read a version number. polyemesis requires FFmpeg 8.0

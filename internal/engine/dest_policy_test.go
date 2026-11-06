@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -13,15 +14,15 @@ import (
 // backupSpecOf deliberately excludes Resilience, so reconcileBackup
 // short-circuits on an unchanged spec. Between them, nothing in the file
 // delivered a changed reconnect policy to the redundant feed, while
-// noteReload(..., reloadLive, "reconnect policy retuned...") told the operator
+// noteReload(..., AppliedLive, "reconnect policy retuned...") told the operator
 // it had been.
 //
 // Mutation: in applyDestPolicy, delete the line
-// `e.retunePolicy(d.backup, row, want, destRoleBackup)`. Observed to fail --
+// `e.retunePolicy(d.backup, row, want, procname.RoleBackup)`. Observed to fail --
 // the backup kept the policy it was built with.
 func TestRetuningTheReconnectPolicyReachesTheBackupToo(t *testing.T) {
-	primary := supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, "")})
-	backup := supervisor.New(testLogger(), supervisor.Spec{Name: destSubName(7, destRoleBackup)})
+	primary := supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, "")})
+	backup := supervisor.New(testLogger(), supervisor.Spec{Name: procname.DestProcessName(7, procname.RoleBackup)})
 	d := &destination{row: backupRow(), proc: primary, backup: backup}
 	e := &Engine{log: testLogger()}
 
@@ -46,13 +47,13 @@ func TestRetuningTheReconnectPolicyReachesTheBackupToo(t *testing.T) {
 // card the only thing that knew.
 //
 // Mutation: in applyDestPolicy, delete the line
-// `e.retunePolicy(d.backup, row, want, destRoleBackup)`. Observed to fail --
+// `e.retunePolicy(d.backup, row, want, procname.RoleBackup)`. Observed to fail --
 // the backup was still StateFailed at the timeout.
 func TestABackupThatGaveUpIsRevivedWhenTheLimitIsRaised(t *testing.T) {
 	// A binary that cannot be executed fails every spawn, so one restart is
 	// enough to exhaust the limit.
 	backup := supervisor.New(testLogger(), supervisor.Spec{
-		Name: destSubName(7, destRoleBackup), Bin: t.TempDir() + "/no-such-ffmpeg",
+		Name: procname.DestProcessName(7, procname.RoleBackup), Bin: t.TempDir() + "/no-such-ffmpeg",
 		AutoRestart: true,
 		MinBackoff:  time.Millisecond, MaxBackoff: time.Millisecond, MaxRestarts: 1,
 	})

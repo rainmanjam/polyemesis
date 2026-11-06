@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // MinMajorVersion is the oldest FFmpeg we accept, and it is 8.0.
@@ -68,14 +69,16 @@ const floorFix = "Install FFmpeg 8.0 or newer (macOS: brew install ffmpeg; Ubunt
 // It is a claim, not an override: a value below MinMajorVersion is refused
 // rather than honoured, so it cannot be used to run a build this floor exists
 // to keep out.
-const AssumeMajorEnv = "POLYEMESIS_FFMPEG_ASSUME_MAJOR"
+//
+// The value is read once, at startup (startupenv), and handed to Detect.
+const AssumeMajorEnv = startupenv.FFmpegAssumeMajorVar
 
-// assumedMajor reads AssumeMajorEnv. It returns 0 when unset, an error when set
-// to something that is not a usable major version -- never a silent zero for a
-// value the operator did set, because a typo that reads as "unset" would put
-// them back at the refusal with no idea why their answer was ignored.
-func assumedMajor() (int, error) {
-	raw := strings.TrimSpace(os.Getenv(AssumeMajorEnv))
+// assumedMajor parses the operator's claim. It returns 0 when unset, an error
+// when set to something that is not a usable major version -- never a silent
+// zero for a value the operator did set, because a typo that reads as "unset"
+// would put them back at the refusal with no idea why their answer was ignored.
+func assumedMajor(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, nil
 	}
@@ -94,6 +97,11 @@ func assumedMajor() (int, error) {
 
 // Tools is a validated pair of binaries.
 type Tools struct {
+	// IngestCapture is startupenv.Env.IngestCapture, carried here because Tools
+	// is what every ingest builder already holds. Not a capability, so never
+	// serialised.
+	IngestCapture string `json:"-"`
+
 	FFmpeg     string `json:"ffmpeg"`
 	FFprobe    string `json:"ffprobe"`
 	Version    string `json:"version"`
@@ -134,6 +142,21 @@ type Tools struct {
 	// a second audio track into FLV. Nil until the probe runs; see TwoAudioFLV.
 	flvTwoAudio *FLVTwoAudioResult
 
+	// GPUDetect replaces DetectGPUs as the enumeration, so a test can move the
+	// "hardware" under a running Tools. Nil in production.
+	GPUDetect func(context.Context) GPUInfo `json:"-"`
+
+	// gpu is the one answer to "what GPUs does this machine have, and which
+	// render node does VAAPI use". Written by RefreshEncoderCapabilities and by
+	// the first GPUs call; read by the encoders route, /system and the engine,
+	// so a re-detect reaches every one of them.
+	gpu     GPUInfo
+	gpuDone bool
+	// gpuMu is the single-flight over enumeration plus the probe run: a user
+	// leaning on the re-detect button must not spawn one set of test encodes
+	// per click. Readers of a cached answer never take it.
+	gpuMu sync.Mutex
+
 	// mu guards the fields the encoder probe writes. Detection is a startup
 	// snapshot that RefreshEncoderCapabilities can replace underneath a
 	// running server, so readers cannot assume they are the only ones here.
@@ -143,10 +166,14 @@ type Tools struct {
 // MarshalJSON serialises Tools under the read lock, so the /api/v1/system
 // handler cannot race a refresh that is rewriting the probe results.
 func (t *Tools) MarshalJSON() ([]byte, error) {
-	// The local type sheds the method set; without it this recurses forever.
-	type alias Tools
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	return t.marshalLocked()
+}
+
+func (t *Tools) marshalLocked() ([]byte, error) {
+	// The local type sheds the method set; without it this recurses forever.
+	type alias Tools
 	return json.Marshal((*alias)(t))
 }
 
@@ -159,10 +186,11 @@ var numRe = regexp.MustCompile(`^n?(\d+)\.(\d+)`)
 // Detect locates ffmpeg and ffprobe and verifies they are new enough.
 //
 // ffmpegPath/ffprobePath may be empty, in which case $PATH is searched.
-// Failure messages name the actual problem and the actual fix, because this
+// assumeMajor is the operator's claim about a version string this cannot read
+// (AssumeMajorEnv); empty means none. Failure messages name the actual problem and the actual fix, because this
 // is the first thing a new user hits and a vague error here costs them an
 // afternoon.
-func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error) {
+func Detect(ctx context.Context, ffmpegPath, ffprobePath, assumeMajor string) (*Tools, error) {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
@@ -251,7 +279,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 		// really is newer than the floor. They just have to say so themselves,
 		// which turns an unverifiable assumption made by us into a claim made
 		// by the person who installed the binary.
-		assumed, err := assumedMajor()
+		assumed, err := assumedMajor(assumeMajor)
 		if err != nil {
 			return nil, err
 		}
@@ -457,15 +485,36 @@ func parseFilters(out string) []string {
 // It never fails. A probe that errors, times out or finds nothing leaves the
 // product on software encoding.
 func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapability {
-	caps := ProbeEncoders(ctx, t.FFmpeg, t.candidateEncoders())
+	t.gpuMu.Lock()
+	defer t.gpuMu.Unlock()
+
+	names := t.candidateEncoders()
+
+	// One enumeration serves both the cached answer and the VAAPI probe, so
+	// the node the probe proved is the node a rendition is told to use. It is
+	// paid for only when a VAAPI candidate needs it; otherwise the cached
+	// answer is dropped and the next GPUs call scans lazily, so hardware that
+	// appeared since the last scan is not hidden.
+	var (
+		info    GPUInfo
+		scanned bool
+	)
+	if anyVAAPI(names) {
+		info, scanned = t.detectGPUs(ctx), true
+	}
+	caps := probeEncodersOn(ctx, t.FFmpeg, names, probeTimeout, probeBudget, probeVAAPIDevice(names, info))
+
+	// GPU and capabilities are published together, under one lock and only
+	// after the probes have finished: a reader never sees a new render node
+	// beside the capability verdicts of the old one.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.gpu, t.gpuDone = info, scanned
 	if len(caps) == 0 {
 		// Nothing to probe, or no binary to probe with. Keep whatever the
 		// build list told us rather than downgrading to "nothing works".
-		return t.Capabilities()
+		return append([]EncoderCapability(nil), t.EncoderCaps...)
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.EncoderCaps = caps
 	t.HWEncoders = nil
 	// Preference order rather than probe order, so the first entry is the one
@@ -480,6 +529,43 @@ func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapabil
 	// encodes on this machine is EncoderWorks' question, and conflating the
 	// two would let a cancelled probe read as a build without x264.
 	return append([]EncoderCapability(nil), t.EncoderCaps...)
+}
+
+// GPUs returns the machine's GPU enumeration, scanning on first ask and
+// whenever RefreshEncoderCapabilities re-runs it. A nil Tools scans each time.
+//
+// The scan is capped (gpuDetectTimeout) and cannot fail, so a wedged driver
+// costs a slow first request rather than a broken page.
+func (t *Tools) GPUs(ctx context.Context) GPUInfo {
+	if t == nil {
+		return DetectGPUs(ctx)
+	}
+	t.mu.RLock()
+	info, done := t.gpu, t.gpuDone
+	t.mu.RUnlock()
+	if done {
+		return info
+	}
+	t.gpuMu.Lock()
+	defer t.gpuMu.Unlock()
+	t.mu.RLock()
+	info, done = t.gpu, t.gpuDone
+	t.mu.RUnlock()
+	if done {
+		return info
+	}
+	info = t.detectGPUs(ctx)
+	t.mu.Lock()
+	t.gpu, t.gpuDone = info, true
+	t.mu.Unlock()
+	return info
+}
+
+func (t *Tools) detectGPUs(ctx context.Context) GPUInfo {
+	if t.GPUDetect != nil {
+		return t.GPUDetect(ctx)
+	}
+	return DetectGPUs(ctx)
 }
 
 // candidateEncoders is what is worth probing: the known candidates the build
@@ -662,7 +748,9 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// scanLines is a small shared helper for reading process output line by line.
+// scanLines reads r line by line with a buffer large enough for FFmpeg's
+// longest diagnostics, which run well past bufio's default 64 KiB when a filter
+// graph is quoted back at you.
 func scanLines(r interface{ Read([]byte) (int, error) }, fn func(string)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

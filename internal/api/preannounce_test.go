@@ -317,9 +317,9 @@ func TestAGraphFailureLeavesTheDestinationUntouched(t *testing.T) {
 
 // The gate is the CAPABILITY, not the platform name.
 //
-// Mutation: replace the `sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)`
+// Mutation: replace the `sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)`
 // lookup and its `if !ok { continue }` with
-// `sb, _ := s.providers.ScheduledBroadcastsFor(db.PlatformFacebook)`. Observed
+// `sb, _ := oauth.As[oauth.ScheduledBroadcaster](s.providers, db.PlatformFacebook)`. Observed
 // FAIL ("created 1 broadcasts for a non-Facebook destination").
 func TestANonFacebookDestinationOnTheSameScheduleIsUntouched(t *testing.T) {
 	s, _, store, stub := stubbedServer(t, config.Config{})

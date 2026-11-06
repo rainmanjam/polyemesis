@@ -10,10 +10,12 @@ import (
 	"testing"
 )
 
-// secretsExempt lists the supervisor.New call sites in this package that
-// deliberately declare no Secrets, with the reason.
+// secretsExempt lists the child-construction sites in this package that
+// deliberately declare no Secrets, with the reason. A site is a hand-written
+// supervisor.Spec passed to supervisor.New, or a relayConsumer description,
+// which relayConsumerSpec turns into the Spec every relay consumer runs.
 //
-// Keyed by the Spec's Kind and Name expressions exactly as they appear in the
+// Keyed by the Kind and Name expressions exactly as they appear in the
 // source. Kind alone is not unique -- two sites build destinations and two build
 // sources -- and Name alone is not either, because several sites name themselves
 // from the same `subName` variable. The pair is. The value is the argument, not a note: a site with no
@@ -25,31 +27,31 @@ import (
 var secretsExempt = map[string]string{
 	// ffmpeg.SilenceArgs: two loopback relay URLs and a synthetic source. No
 	// operator input reaches it.
-	`"silence" silenceSubName`: "relay URLs only; the slate is generated, not fetched",
+	`procname.KindSilence silenceSubName`: "relay URLs only; the slate is generated, not fetched",
 
-	// relayFeedArgs / conformedFeedArgs / SlateArgs / playlistFeedArgs: a
+	// ffmpeg.RelayFeedArgs / ffmpeg.ConformedFeedArgs / SlateArgs / ffmpeg.PlaylistFeedArgs: a
 	// loopback relay URL, a timestamp offset, the probed audio format the
 	// standby is conformed to and, for the playlist tier, a concat list PATH that the
 	// server wrote itself. The pull URL is consumed by the ingest child, which
 	// is a different process and does declare its secrets.
-	`"source" "source:" + string(kind)`: "a loopback relay URL and a PTS offset; the " +
+	`procname.KindSource "source:" + string(kind)`: "a loopback relay URL and a PTS offset; the " +
 		"pull URL belongs to the ingest child, which declares it",
-	`"source" "playlist"`: "a concat list path this server wrote; media filenames, no credential",
+	`procname.KindSource "playlist"`: "a concat list path this server wrote; media filenames, no credential",
 
 	// The remaining sidecars all read a loopback relay and write either a
 	// loopback relay, a local file, or nothing.
-	`"recorder" "recorder"`: "an output path under the recordings directory",
-	`"preview" "preview"`:   "a relay URL in, HLS segments out under the data directory",
-	`"meters" "meters"`:     "a relay URL in, astats on stdout, no output URL at all",
-	`"rendition" subName`: "relay in, relay out. A rendition carries operator TEXT for " +
+	`procname.KindRecorder recorderSubName`: "an output path under the recordings directory",
+	`procname.KindPreview previewSubName`:   "a relay URL in, HLS segments out under the data directory",
+	`procname.KindMeters metersSubName`:     "a relay URL in, astats on stdout, no output URL at all",
+	`procname.KindRendition subName`: "relay in, relay out. A rendition carries operator TEXT for " +
 		"drawtext, which is a caption rather than a credential and is drawn on the " +
 		"picture anyway",
-	`"loudness" subName`: "relay in, null out; meters.Parse on stdout",
+	`procname.KindLoudness subName`: "relay in, null out; meters.Parse on stdout",
 
 	// playout's muxer. The spawn callback receives an argv the playout manager
 	// built from segment paths under the data directory; the watch token is a
 	// URL query parameter checked by the HTTP handler and never reaches an argv.
-	`"playout" name`: "the playout muxer: HLS segment paths under the data directory. " +
+	`procname.KindPlayout name`: "the playout muxer: HLS segment paths under the data directory. " +
 		"The watch token gates the HTTP route and is not a command-line argument",
 }
 
@@ -85,43 +87,61 @@ func TestEverySupervisorSpecDeclaresItsSecrets(t *testing.T) {
 			t.Fatalf("parse %s: %v", name, err)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || !isSupervisorNew(call) {
-				return true
-			}
-			lit := specLiteral(call)
-			if lit == nil {
-				t.Errorf("%s: supervisor.New is called with a Spec this guard cannot read. "+
-					"Build the Spec as a composite literal at the call so its Secrets field "+
-					"is visible here; a Spec assembled elsewhere is exactly the shape that "+
-					"lets a credential-bearing site go unclassified.",
-					fset.Position(call.Pos()))
+			var (
+				lit  *ast.CompositeLit
+				what string
+			)
+			switch n := n.(type) {
+			case *ast.CallExpr:
+				if !isSupervisorNew(n) {
+					return true
+				}
+				lit = specLiteral(n)
+				if lit == nil {
+					// A Spec that came from relayConsumerSpec: the relayConsumer
+					// literal that fed it is walked on its own, and a Spec literal
+					// assembled anywhere else fails TestEveryRelayConsumerSpecComes
+					// FromTheSharedConstructor.
+					return true
+				}
+				what = "supervisor.Spec"
+			case *ast.CompositeLit:
+				id, ok := n.Type.(*ast.Ident)
+				if !ok || id.Name != "relayConsumer" {
+					return true
+				}
+				lit, what = n, "relayConsumer"
+			default:
 				return true
 			}
 			sites++
-			key := fieldSource(fset, lit, "Kind") + " " + fieldSource(fset, lit, "Name")
-			if hasField(lit, "Secrets") {
+			kindField, nameField, secretsField := "Kind", "Name", "Secrets"
+			if what == "relayConsumer" {
+				kindField, nameField, secretsField = "kind", "name", "secrets"
+			}
+			key := fieldSource(fset, lit, kindField) + " " + fieldSource(fset, lit, nameField)
+			if hasField(lit, secretsField) {
 				if reason, excused := secretsExempt[key]; excused {
-					t.Errorf("%s: the Spec named %s populates Secrets AND is listed in "+
+					t.Errorf("%s: the %s named %s populates Secrets AND is listed in "+
 						"secretsExempt (%q). Delete the exemption -- an excuse that is no "+
 						"longer true is how the list becomes a place to silence this test.",
-						fset.Position(call.Pos()), key, reason)
+						fset.Position(lit.Pos()), what, key, reason)
 				}
 				return true
 			}
 			seen[key] = true
 			if secretsExempt[key] == "" {
-				t.Errorf("%s: supervisor.Spec{Name: %s} sets no Secrets and has no entry in "+
+				t.Errorf("%s: the %s named %s sets no Secrets and has no entry in "+
 					"secretsExempt.\n"+
 					"Everything the supervisor renders for a reader -- the command line on "+
 					"GET /processes, the log ring, the on-disk process.log, the /ws log "+
 					"frames and Status.LastError -- removes ONLY the exact literals this "+
-					"field declares. A site that omits it is masked by alerts.Redact alone, "+
+					"field declares. A site that omits it is masked by redact.Redact alone, "+
 					"which is a grammar over FFmpeg's open flag namespace and provably does "+
 					"not hold: that is #150's argv disclosure, verbatim.\n"+
 					"Either populate Secrets, or add an entry here saying which arguments "+
 					"this site builds and why none of them is a credential.",
-					fset.Position(call.Pos()), key)
+					fset.Position(lit.Pos()), what, key)
 			}
 			return true
 		})
@@ -134,7 +154,7 @@ func TestEverySupervisorSpecDeclaresItsSecrets(t *testing.T) {
 	}
 	for key, reason := range secretsExempt {
 		if !seen[key] {
-			t.Errorf("secretsExempt names the Spec %s (%q), which no supervisor.New call in "+
+			t.Errorf("secretsExempt names the site %s (%q), which nothing in "+
 				"this package builds. Delete the entry rather than leaving a dead excuse.",
 				key, reason)
 		}

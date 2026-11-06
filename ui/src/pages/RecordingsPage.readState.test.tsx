@@ -34,6 +34,7 @@ let recordings: () => Promise<unknown> = () => Promise.resolve([]);
 let stems: () => Promise<unknown> = () => Promise.resolve([]);
 
 vi.mock("@/lib/api", () => ({
+  http: { get: () => stems() },
   api: {
     listRecordings: () => recordings(),
     recordingUsage: () =>
@@ -47,10 +48,6 @@ vi.mock("@/lib/api", () => ({
     deleteRecording: () => Promise.resolve({}),
     downloadUrl: (id: number) => `/dl/${id}`,
   },
-}));
-
-vi.mock("@/lib/autoApi", () => ({
-  autoApi: { get: () => stems() },
 }));
 
 vi.mock("@/hooks/useLiveData", () => ({

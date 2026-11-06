@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // StreamKeyReader is the optional capability to READ the stream keys a
@@ -32,28 +30,6 @@ type StreamKeyReader interface {
 	StreamKeys(ctx context.Context, clientID, accessToken string) ([]string, error)
 }
 
-// StreamKeysFor reports whether a platform's keys can be read without side
-// effects.
-func StreamKeysFor(p db.Platform) (StreamKeyReader, bool) {
-	prov, err := Get(p)
-	if err != nil {
-		return nil, false
-	}
-	r, ok := prov.(StreamKeyReader)
-	return r, ok
-}
-
-// StreamKeysFor is the Set twin; see the note above MetadataFor for why every
-// capability needs one.
-func (s Set) StreamKeysFor(p db.Platform) (StreamKeyReader, bool) {
-	pr, ok := s.All()[p]
-	if !ok {
-		return nil, false
-	}
-	r, ok := pr.(StreamKeyReader)
-	return r, ok
-}
-
 // StreamKeys lists every liveStream key on the channel. liveStreams.list and
 // nothing else: a channel holds one stream per destination that asked for its
 // own, so "the" current key is any of them, and a held key absent from all of
@@ -76,7 +52,7 @@ func (y *YouTube) StreamKeys(ctx context.Context, _, accessToken string) ([]stri
 		if token != "" {
 			u += "&pageToken=" + url.QueryEscape(token)
 		}
-		if err := getJSON(ctx, u, accessToken, nil, &list); err != nil {
+		if err := y.getJSON(ctx, u, accessToken, nil, &list); err != nil {
 			return nil, err
 		}
 		for _, s := range list.Items {

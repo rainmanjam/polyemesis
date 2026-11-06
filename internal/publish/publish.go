@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/platform"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // JobKind is what a publish is registered as on the queue.
@@ -49,7 +49,7 @@ const (
 // XPublishEnv is the operator's switch for publishing to X. It is separate from
 // POLYEMESIS_X_LIVESTREAM on purpose: that one says X has whitelisted the app
 // for Livestream, and nothing about it says posting is wanted.
-const XPublishEnv = "POLYEMESIS_X_PUBLISH"
+const XPublishEnv = startupenv.XPublishVar
 
 // XGateCopy is the sentence shown while X publishing is off.
 const XGateCopy = "X publishing is switched off. It stays off until an operator turns it on in the server's environment."
@@ -57,15 +57,6 @@ const XGateCopy = "X publishing is switched off. It stays off until an operator 
 // Gates are the operator switches. The zero value has everything gated off.
 type Gates struct {
 	XPublish bool
-}
-
-// GatesFromEnv reads the switches. Anything other than 1 or true leaves X off.
-func GatesFromEnv() Gates {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(XPublishEnv))) {
-	case "1", "true":
-		return Gates{XPublish: true}
-	}
-	return Gates{}
 }
 
 // Meta is what the human reviews and confirms.
@@ -78,11 +69,11 @@ type Meta struct {
 
 // Limits, in the platform's own units.
 const (
-	maxYouTubeTitle       = 100
-	maxYouTubeDescription = 5000
+	maxYouTubeTitle       = platform.YouTubeTitleMax
+	maxYouTubeDescription = platform.YouTubeDescriptionMax
 	maxYouTubeTagsChars   = 450 // YouTube allows 500; leave room for the quoting it adds
-	maxTikTokCaption      = 2200
-	maxXPost              = 280
+	maxTikTokCaption      = platform.TikTokCaptionMax
+	maxXPost              = platform.XPostMax
 	maxTags               = 30
 )
 
@@ -157,7 +148,7 @@ func Normalize(platform string, m Meta) (Meta, error) {
 	return m, nil
 }
 
-func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
+func utf16Len(s string) int { return platform.UTF16Len(s) }
 
 // hashtags renders tags as "#a #b".
 func hashtags(tags []string) string {
@@ -283,27 +274,44 @@ var ErrReconnectRequired = errors.New("the platform no longer accepts this accou
 // and its workers start before the API server exists, and the token refresh
 // path lives on the server; until Set is called the source answers with a
 // retryable "starting up".
+//
+// It carries the YouTube quota meter too: the clip upload is charged to the
+// server's shared allowance. The two are installed by ONE call, and the source
+// refuses until both are in, so a recovered job can never be handed a
+// credential and then upload uncounted.
 type TokenGate struct {
-	mu sync.RWMutex
-	fn TokenSource
+	mu    sync.RWMutex
+	fn    TokenSource
+	meter func(units int)
 }
 
 // Source is the TokenSource to give the worker.
 func (g *TokenGate) Source() TokenSource {
 	return func(ctx context.Context, accountID int64) (Credential, error) {
 		g.mu.RLock()
-		fn := g.fn
+		fn, meter := g.fn, g.meter
 		g.mu.RUnlock()
-		if fn == nil {
+		if fn == nil || meter == nil {
 			return Credential{}, errors.New("the server is still starting; this will be retried")
 		}
 		return fn(ctx, accountID)
 	}
 }
 
-// Set installs the real source.
-func (g *TokenGate) Set(fn TokenSource) {
+// Charge spends units from the installed meter; a no-op until one is set.
+func (g *TokenGate) Charge(units int) {
+	g.mu.RLock()
+	fn := g.meter
+	g.mu.RUnlock()
+	if fn != nil && units > 0 {
+		fn(units)
+	}
+}
+
+// Set installs the real source and the meter together. A nil of either leaves
+// the gate closed.
+func (g *TokenGate) Set(fn TokenSource, meter func(units int)) {
 	g.mu.Lock()
-	g.fn = fn
+	g.fn, g.meter = fn, meter
 	g.mu.Unlock()
 }

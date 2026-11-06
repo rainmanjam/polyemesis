@@ -20,7 +20,7 @@ import (
  * journalctl. Nothing caught it because nothing was watching WHO CALLS IT --
  * the rendering was correct, the caller was not.
  *
- * SO THIS IS AN ALLOWLIST, in the shape internal/alerts already uses for Redact:
+ * SO THIS IS AN ALLOWLIST, in the shape internal/redact already uses for Redact:
  * TestRedactIsCalledOnlyFromTheAllowlist fails the build on a bare caller
  * outside a path-to-reason table, on the reasoning that "the declared secrets
  * are already gone; this is the best-effort pass over what is left" is a claim

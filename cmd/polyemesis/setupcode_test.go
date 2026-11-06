@@ -14,10 +14,9 @@ import (
 // The boot path end to end: a fresh data directory gets a code on disk and in
 // the banner, and the same directory with an admin in it gets neither.
 func TestBootPrintsTheSetupCodeOnlyWhileNoAdminExists(t *testing.T) {
-	t.Setenv(auth.SetupCodeEnv, "")
 	cfg, store := resetFixture(t)
 
-	code, err := prepareSetupCode(cfg, store)
+	code, err := prepareSetupCode(cfg, store, "")
 	if err != nil {
 		t.Fatalf("prepareSetupCode: %v", err)
 	}
@@ -34,7 +33,7 @@ func TestBootPrintsTheSetupCodeOnlyWhileNoAdminExists(t *testing.T) {
 	}
 
 	// A restart before setup says so rather than looking like a new code.
-	again, err := prepareSetupCode(cfg, store)
+	again, err := prepareSetupCode(cfg, store, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +46,7 @@ func TestBootPrintsTheSetupCodeOnlyWhileNoAdminExists(t *testing.T) {
 	if _, err := store.CreateUser("admin", "a-long-enough-password"); err != nil {
 		t.Fatal(err)
 	}
-	after, err := prepareSetupCode(cfg, store)
+	after, err := prepareSetupCode(cfg, store, "")
 	if err != nil || after != nil {
 		t.Fatalf("with an admin: code %v, err %v; want none", after, err)
 	}
@@ -62,10 +61,9 @@ func TestBootPrintsTheSetupCodeOnlyWhileNoAdminExists(t *testing.T) {
 }
 
 func TestBootNamesAPresetSetupCode(t *testing.T) {
-	t.Setenv(auth.SetupCodeEnv, "readable-placeholder-code")
 	cfg, store := resetFixture(t)
 
-	code, err := prepareSetupCode(cfg, store)
+	code, err := prepareSetupCode(cfg, store, "readable-placeholder-code")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +77,7 @@ func TestBootNamesAPresetSetupCode(t *testing.T) {
 func TestBootReportsAStoreThatCannotSayWhetherAnAdminExists(t *testing.T) {
 	cfg, store := resetFixture(t)
 	store.Close()
-	if _, err := prepareSetupCode(cfg, store); err == nil {
+	if _, err := prepareSetupCode(cfg, store, ""); err == nil {
 		t.Fatal("no error from a closed store")
 	}
 }

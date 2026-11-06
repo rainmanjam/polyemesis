@@ -47,7 +47,8 @@ vi.mock("@/lib/api", async () => {
             destinationCount: 1,
           },
         ]),
-      renditionConcerns: (id: number, platform: string) => renditionConcerns(id, platform),
+      renditionConcerns: (id: number, platform: string, preset?: string) =>
+        renditionConcerns(id, platform, preset),
     },
   };
 });
@@ -98,12 +99,18 @@ function open(destination: unknown) {
 }
 
 describe("the rendition warning", () => {
+  it("sends the destination's stored preset, which finds guidance for a platform that saves as custom", async () => {
+    renditionConcerns.mockResolvedValue([]);
+    open({ ...onX, platform: "custom", presetId: "instagram" });
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "custom", "instagram"));
+  });
+
   it("asks the server about the chosen rendition AND the chosen platform", async () => {
     renditionConcerns.mockResolvedValue([]);
     open(onX);
     // The pair is what is being judged: a platform switch with the rendition
     // unchanged is exactly the case this exists for, so both must be sent.
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", ""));
   });
 
   it("shows the objection, and the date the figure was checked", async () => {
@@ -135,7 +142,7 @@ describe("the rendition warning", () => {
     // array broke nothing until it was written.
     renditionConcerns.mockResolvedValue([]);
     const { rerender } = open(onX);
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", ""));
 
     rerender(
       <DestinationDialog
@@ -145,7 +152,7 @@ describe("the rendition warning", () => {
         onSaved={() => {}}
       />,
     );
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "youtube"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "youtube", ""));
   });
 
   it("says nothing when the rendition suits the platform", async () => {

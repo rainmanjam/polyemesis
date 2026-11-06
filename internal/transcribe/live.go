@@ -933,7 +933,7 @@ type LiveExtractSpec struct {
 // cosmetic default would look exactly like a machine too slow to caption.
 func LiveExtractArgs(s LiveExtractSpec) []string {
 	args := []string{
-		"-nostdin", "-hide_banner", "-loglevel", "error",
+		"-nostdin", "-hide_banner", "-loglevel", ffmpeg.LogLevel(ffmpeg.LogError),
 		"-fflags", "nobuffer", "-flags", "low_delay",
 		"-i", s.Input,
 		"-map", "0:a:" + strconv.Itoa(s.Track),

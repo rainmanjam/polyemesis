@@ -79,6 +79,19 @@
     ]
   },
   {
+    "platform": "x",
+    "scopeVersion": 2,
+    "scopes": [
+      "broadcast.read",
+      "broadcast.write",
+      "media.write",
+      "offline.access",
+      "tweet.read",
+      "tweet.write",
+      "users.read"
+    ]
+  },
+  {
     "platform": "youtube",
     "scopeVersion": 1,
     "scopes": [

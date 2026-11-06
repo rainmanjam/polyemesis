@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"log/slog"
 	"sort"
 	"sync"
@@ -496,17 +497,7 @@ func (q *Queue) finish(parent context.Context, ex *execution, runErr error) {
 // a handful of heavy jobs, so there is no herd to spread out and a
 // deterministic schedule is testable.
 func (q *Queue) backoffFor(attempt int) time.Duration {
-	d := q.backoff
-	for i := 1; i < attempt; i++ {
-		d *= 2
-		if d >= q.maxBackoff {
-			return q.maxBackoff
-		}
-	}
-	if d > q.maxBackoff {
-		return q.maxBackoff
-	}
-	return d
+	return backoff.Exponential(attempt-1, q.backoff, q.maxBackoff)
 }
 
 // Cancel stops a job. A running job has its context cancelled — the worker is
@@ -595,7 +586,6 @@ func (q *Queue) Paused() bool {
 	return q.paused
 }
 
-// Get loads one job.
 func (q *Queue) Get(id int64) (*Job, error) { return q.store.GetJob(id) }
 
 // List returns jobs matching f.

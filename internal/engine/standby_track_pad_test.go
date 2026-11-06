@@ -39,10 +39,10 @@ import (
 // one pad per primary track after the standby's own tracks, so that whatever the
 // standby carries, the relay's audio slots 0..N-1 always exist.
 //
-// MUTATION: return relayFeedArgs unchanged from conformedFeedArgs when pads are
+// MUTATION: return ffmpeg.RelayFeedArgs unchanged from ffmpeg.ConformedFeedArgs when pads are
 // wanted. Observed: FAIL, no pad maps in the argv.
 func TestAStandbyFeedWithFewerAudioTracksThanThePrimaryStillCarriesEveryTrackAPrimaryMixReads(t *testing.T) {
-	args := conformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, primaryMono441)
+	args := ffmpeg.ConformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, primaryMono441)
 	fc := ""
 	if i := slices.Index(args, "-filter_complex"); i >= 0 && i+1 < len(args) {
 		fc = args[i+1]
@@ -68,12 +68,12 @@ func TestAStandbyFeedWithFewerAudioTracksThanThePrimaryStillCarriesEveryTrackAPr
 		t.Errorf("the padded hop still blankets -c copy over audio the pads re-encode: %q", args)
 	}
 	// The primary and the no-primary case are unchanged.
-	if got, want := conformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, nil),
-		relayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5); !slices.Equal(got, want) {
+	if got, want := ffmpeg.ConformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, nil),
+		ffmpeg.RelayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5); !slices.Equal(got, want) {
 		t.Errorf("with no measured primary the standby feed changed:\n%q\nwant\n%q", got, want)
 	}
 	mono := []ffmpeg.AudioStream{{Index: 0, Codec: "aac", Channels: 2, Layout: "stereo", SampleRate: 48000, Bitrate: 128000}}
-	if got := conformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, mono); slices.Contains(got, "-filter_complex") {
+	if got := ffmpeg.ConformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 7.5, mono); slices.Contains(got, "-filter_complex") {
 		t.Errorf("a one-track primary needs no pads, and the single-track path must stay as it was: %q", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestAStandbyFeedWithFewerAudioTracksThanThePrimaryStillCarriesEveryTrackAPr
 // fix FFmpeg exits 234 at bind time; after it, the destination publishes the
 // standby's track 0 on the video's timeline, with track 1 silent.
 //
-// MUTATION: drop the pad maps from conformedFeedArgs. Observed: FAIL, the
+// MUTATION: drop the pad maps from ffmpeg.ConformedFeedArgs. Observed: FAIL, the
 // destination exits with "Stream specifier ':a:1' ... matches no streams".
 func TestAMultiTrackDestinationStartedWhileAOneTrackStandbyIsOnAirStillPublishesItsAudio(t *testing.T) {
 	ffmpegBin, ffprobeBin := offsetBenchTools(t)
@@ -106,7 +106,7 @@ func TestAMultiTrackDestinationStartedWhileAOneTrackStandbyIsOnAirStillPublishes
 	backupIn := filepath.Join(dir, "backup.ts")
 	formatFixture(t, ffmpegBin, backupIn, 10, 1, 48000, 2)
 	relayBytes := runHop(t, ffmpegBin,
-		conformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 23, primary), backupIn,
+		ffmpeg.ConformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 23, primary), backupIn,
 		filepath.Join(dir, "standby-hop.ts"), 0)
 	relayPath := filepath.Join(dir, "relay.ts")
 	if err := os.WriteFile(relayPath, relayBytes, 0o600); err != nil {

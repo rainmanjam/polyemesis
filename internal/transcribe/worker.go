@@ -56,7 +56,7 @@ const childKillDelay = 5 * time.Second
 
 // Params is the JSON a caller attaches to a transcribe job.
 type Params struct {
-	// Recording is the segment filename, e.g. "rec-20240115-143000.mkv". It is
+	// Recording is the segment filename, e.g. "rec-s3-20240115-143000.mkv". It is
 	// resolved inside the recordings directory; a path is refused.
 	Recording string `json:"recording"`
 	// RecordingID is carried through to the result so a UI can link back.

@@ -76,7 +76,7 @@ describe("platformConnectControls", () => {
 });
 
 describe("platformSupportsDeviceCode", () => {
-  // The capability is the SERVER'S answer, derived from oauth.DeviceFor. A
+  // The capability is the SERVER'S answer, derived from oauth.As[DeviceFlower]. A
   // `platform === "twitch"` written in the page would be a second, private copy
   // of that registry, and the day it disagreed the symptom would be a button
   // that starts a flow the server has no provider for.

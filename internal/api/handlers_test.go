@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -24,7 +24,7 @@ import (
 // processDetail exist so that is no longer true.
 //
 // Proven able to fail against the committed tree by deleting the line
-// `a = alerts.Redact(a)` from CommandString in internal/supervisor/supervisor.go
+// `a = redact.Redact(a)` from CommandString in internal/supervisor/supervisor.go
 // -- the tree built, and both endpoint payloads below carried both keys.
 func TestProcessEndpointsSerialiseNoStreamKey(t *testing.T) {
 	const (
@@ -63,7 +63,7 @@ func TestProcessEndpointsSerialiseNoStreamKey(t *testing.T) {
 					route, secret, body)
 			}
 		}
-		if !strings.Contains(body, alerts.Mask) {
+		if !strings.Contains(body, redact.Mask) {
 			t.Errorf("%s: neither key is present and nothing is masked either, so the "+
 				"command is being rendered some third way this test no longer "+
 				"describes.\nbody: %s", route, body)

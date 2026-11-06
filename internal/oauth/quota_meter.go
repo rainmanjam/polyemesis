@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // The YouTube quota meter (PR #950 review, item 2).
@@ -18,35 +20,31 @@ import (
 // rollover, scheduling. None of them used to tell the pacer, so the chat poll
 // paced itself against a budget that the rest of polyemesis was quietly
 // spending. The meter charges every Data API request this package sends, at
-// the published unit costs, to whatever the server installs with
-// SetYouTubeMeter (internal/chat's shared YouTubeQuota). A caller that
+// the published unit costs, to the meter the provider set was built
+// with (WithYouTubeMeter; the server passes internal/chat's shared YouTubeQuota). A caller that
 // charged its read up front -- the audience sampler, the vertical status read
 // -- marks its context with WithQuotaCharged so the call is not counted twice.
 
 // YouTubeMeter is told the unit cost of each YouTube Data API call made.
 type YouTubeMeter func(cost int)
 
-type installedMeter struct {
-	m YouTubeMeter
-	// hosts are extra API hosts metered on every path, for a test that aims
-	// the providers at a stub. Production installs none.
-	hosts map[string]bool
+// WithYouTubeMeter hands a provider set the meter every YouTube Data API call
+// is charged to. It is a construction option rather than a package global, so
+// a provider can only be built metered or deliberately unmetered; there is no
+// moment after construction at which a call could go uncounted.
+func WithYouTubeMeter(m YouTubeMeter) ProviderOption {
+	return func(e *endpoints) { e.meter = m }
 }
 
-var youTubeMeter atomic.Pointer[installedMeter]
-
-// SetYouTubeMeter installs the meter. Nil removes it. hosts are extra hosts
-// to meter besides Google's (tests only).
-func SetYouTubeMeter(m YouTubeMeter, hosts ...string) {
-	if m == nil {
-		youTubeMeter.Store(nil)
-		return
+// WithMeteredHosts meters every request to the given extra hosts, on every
+// path, besides Google's. For a test that aims the providers at a stub.
+func WithMeteredHosts(hosts ...string) ProviderOption {
+	return func(e *endpoints) {
+		e.meterHosts = map[string]bool{}
+		for _, h := range hosts {
+			e.meterHosts[h] = true
+		}
 	}
-	im := &installedMeter{m: m, hosts: map[string]bool{}}
-	for _, h := range hosts {
-		im.hosts[h] = true
-	}
-	youTubeMeter.Store(im)
 }
 
 type quotaChargedKey struct{}
@@ -60,10 +58,10 @@ func WithQuotaCharged(ctx context.Context) context.Context {
 // every write this package makes -- insert, update, delete, bind,
 // transition, thumbnails.set, playlistItems.insert -- is 50.
 const (
-	ytCostList  = 1
-	ytCostWrite = 50
+	ytCostList  = platform.YouTubeCostList
+	ytCostWrite = platform.YouTubeCostWrite
 	// ytCostUploadVideo is videos.insert.
-	ytCostUploadVideo = 1600
+	ytCostUploadVideo = platform.YouTubeCostUploadVideo
 )
 
 // youTubeCost is the unit cost of a request, and whether it is a YouTube
@@ -72,7 +70,7 @@ const (
 //
 // /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
 // 50, and videos.insert is 1,600. The clip publisher (internal/publish) makes
-// that call itself and charges it with ChargeYouTubeQuota.
+// that call itself and charges it through its own Meter field.
 func youTubeCost(r *http.Request) (int, bool) {
 	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
@@ -95,24 +93,15 @@ func costByMethod(method string) int {
 	return ytCostWrite
 }
 
-// ChargeYouTubeQuota spends units from the installed meter, for a YouTube call
-// made outside this package's own HTTP client (the clip upload). A missing
-// meter is a no-op.
-func ChargeYouTubeQuota(units int) {
-	if m := youTubeMeter.Load(); m != nil && units > 0 {
-		m.m(units)
-	}
-}
-
 // doRequest sends a request through the shared client, charging the meter
 // for a YouTube Data API call that was not charged by its caller.
-func doRequest(r *http.Request) (*http.Response, error) {
-	if m := youTubeMeter.Load(); m != nil {
+func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
+	if m := e.meter; m != nil {
 		if charged, _ := r.Context().Value(quotaChargedKey{}).(bool); !charged {
 			if cost, ok := youTubeCost(r); ok {
-				m.m(cost)
-			} else if m.hosts[r.URL.Host] {
-				m.m(costByMethod(r.Method))
+				m(cost)
+			} else if e.meterHosts[r.URL.Host] {
+				m(costByMethod(r.Method))
 			}
 		}
 	}
@@ -126,7 +115,7 @@ type StatusError struct {
 	Status int
 	// RetryAfter is the platform's Retry-After, zero when it sent none.
 	RetryAfter time.Duration
-	// QuotaExceeded is YouTube's quotaExceeded (or dailyLimitExceeded): the
+	// QuotaExceeded is any of the reasons IsSpentQuotaReason names: the
 	// project's allowance is spent until the reset.
 	QuotaExceeded bool
 	msg           string
@@ -143,7 +132,27 @@ func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
 			e.RetryAfter = max(0, time.Until(at))
 		}
 	}
-	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden &&
-		(bytes.Contains(body, []byte(`"quotaExceeded"`)) || bytes.Contains(body, []byte(`"dailyLimitExceeded"`)))
+	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
+}
+
+// spentQuotaReasons are the reasons YouTube gives for a spent daily API
+// allowance. It spells the same condition more than one way, and chat, publish
+// and the meter must all recognise the same set.
+var spentQuotaReasons = []string{"quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg"}
+
+// IsSpentQuotaReason reports whether a YouTube error reason means the daily
+// allowance is used up. rateLimitExceeded and userRateLimitExceeded are not
+// that: they are short windows a retry clears.
+func IsSpentQuotaReason(reason string) bool {
+	return slices.Contains(spentQuotaReasons, reason)
+}
+
+func bodyNamesSpentQuota(body []byte) bool {
+	for _, r := range spentQuotaReasons {
+		if bytes.Contains(body, []byte(`"`+r+`"`)) {
+			return true
+		}
+	}
+	return false
 }

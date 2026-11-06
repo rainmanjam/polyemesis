@@ -5,11 +5,13 @@
  *  page's chunk stays small: OBS loads it in a browser source that should cost
  *  next to nothing. */
 
+import { WIRE } from "./contract/wire";
+
 /** The overlay key travels in this header, never in a URL the server sees. */
 export const OVERLAY_KEY_HEADER = "X-Overlay-Key";
 
 export type OverlayPreset = "classic" | "bubble" | "outline" | "compact";
-export type OverlayFont = "sans" | "serif" | "mono" | "rounded";
+export type OverlayFont = (typeof WIRE.overlay.fonts)[number];
 
 /** Mirrors internal/overlay.Style; the server validates every field. */
 export interface OverlayStyle {
@@ -26,14 +28,15 @@ export interface OverlayStyle {
   showBadges: boolean;
 }
 
-export const OVERLAY_FONTS: readonly OverlayFont[] = ["sans", "serif", "mono", "rounded"];
+/** The closed font set and the bounds internal/overlay validates, from the wire
+ *  contract. */
+export const OVERLAY_FONTS: readonly OverlayFont[] = WIRE.overlay.fonts;
 
-/** Bounds, matching internal/overlay. */
 export const OVERLAY_LIMITS = {
-  fontSize: { min: 10, max: 72 },
-  fadeSeconds: { min: 0, max: 600 },
-  maxLines: { min: 1, max: 50 },
-  backgroundOpacity: { min: 0, max: 100 },
+  fontSize: WIRE.overlay.fontSize,
+  fadeSeconds: WIRE.overlay.fadeSeconds,
+  maxLines: WIRE.overlay.maxLines,
+  backgroundOpacity: WIRE.overlay.backgroundOpacity,
 } as const;
 
 /** One line as the display stream delivers it (eventstream.DisplayLine). There
@@ -221,6 +224,7 @@ export const PLATFORM_MARK: Record<string, { label: string; color: string }> = {
   kick: { label: "KICK", color: "#53fc18" },
   facebook: { label: "FB", color: "#1877f2" },
   rumble: { label: "RMBL", color: "#85c742" },
+  x: { label: "X", color: "#ffffff" },
 };
 
 // ---------------------------------------------------------- the poll widget

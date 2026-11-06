@@ -96,15 +96,27 @@ func probeEncodersWith(ctx context.Context, ffmpegBin string, names []string, pe
 	if ffmpegBin == "" || len(names) == 0 {
 		return nil
 	}
+	return probeEncodersOn(ctx, ffmpegBin, names, perProbe, budget,
+		probeVAAPIDevice(names, detectIfVAAPI(ctx, names)))
+}
+
+// detectIfVAAPI enumerates GPUs only when a VAAPI candidate is in the list.
+func detectIfVAAPI(ctx context.Context, names []string) GPUInfo {
+	if !anyVAAPI(names) {
+		return GPUInfo{}
+	}
+	return DetectGPUs(ctx)
+}
+
+// probeEncodersOn probes with the VAAPI render node already resolved, so the
+// caller decides which enumeration the probe trusts.
+func probeEncodersOn(ctx context.Context, ffmpegBin string, names []string, perProbe, budget time.Duration, vaapiDevice string) []EncoderCapability {
+	if ffmpegBin == "" || len(names) == 0 {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-
-	// Resolved once for the whole run, BEFORE the probes fan out: every VAAPI
-	// candidate wants the same node, and detection reads the same /dev/dri for
-	// each of them. Inside the goroutine it would be one detection per encoder,
-	// racing, against a budget the probes themselves need.
-	vaapiDevice := probeVAAPIDevice(ctx, names)
 
 	// Sequentially, five probes at a few hundred milliseconds each is a second
 	// added to every startup; concurrently it is one probe's latency. They are
@@ -127,6 +139,16 @@ func probeEncodersWith(ctx context.Context, ffmpegBin string, names []string, pe
 // and the API test for it before withholding anything, so a result carrying it
 // can never be the reason a rendition is refused or a choice is hidden.
 const notProbedPrefix = "not probed: "
+
+// IsNotProbed reports whether a capability reason says the probe never ran --
+// a cancelled scan, an expired budget -- as opposed to the encoder failing.
+// Detection marks such a probe as not working with a reason that says so; read
+// literally, one interrupted scan would take every encoder out of the editor
+// and refuse every rendition. Nothing was demonstrated, so nothing may be
+// withheld on it: a capability check must fail open.
+func IsNotProbed(reason string) bool {
+	return strings.HasPrefix(reason, strings.TrimSpace(notProbedPrefix))
+}
 
 // discardVerdictsIfHarnessIsBroken throws away every failure in a run where the
 // software encoder also failed.
@@ -235,28 +257,24 @@ func anyVAAPI(names []string) bool {
 	return false
 }
 
-// probeVAAPIDevice resolves the render node the VAAPI probe should name.
+// probeVAAPIDevice resolves the render node the VAAPI probe should name, from
+// the enumeration the caller already holds.
 //
 // Detection already chooses this node correctly for the real encode
 // (chooseVAAPIDevice ranks render nodes by vendor and usability), and the probe
-// ignored it, naming renderD128 unconditionally. On a multi-GPU host whose
-// first render node is display-only, or on a container passed renderD129, that
-// probed a device the encode would never use, failed, and VAAPI was withheld on
-// the strength of a test of the wrong hardware.
-//
-// NOT cached, deliberately. RefreshEncoderCapabilities exists because this
-// answer changes under a running server -- a driver package upgrades, a GPU is
-// passed through -- so a sync.Once here would pin the pre-GPU answer forever,
-// which is this same bug wearing a different hat.
+// used to ignore it, naming renderD128 unconditionally. On a multi-GPU host
+// whose first render node is display-only, or on a container passed renderD129,
+// that probed a device the encode would never use, failed, and VAAPI was
+// withheld on the strength of a test of the wrong hardware.
 //
 // Falls back to the constant rather than returning empty when detection finds
 // nothing, because probeArgs must still name SOMETHING; see the note there.
-func probeVAAPIDevice(ctx context.Context, names []string) string {
+func probeVAAPIDevice(names []string, gpu GPUInfo) string {
 	if !anyVAAPI(names) {
 		return ""
 	}
-	if dev := DetectGPUs(ctx).VAAPIDevice; dev != "" {
-		return dev
+	if gpu.VAAPIDevice != "" {
+		return gpu.VAAPIDevice
 	}
 	return defaultVAAPIDevice
 }
@@ -275,7 +293,7 @@ func probeVAAPIDevice(ctx context.Context, names []string) string {
 func probeArgs(name, vaapiDevice string) []string {
 	prof := encoderProfiles[name]
 
-	args := []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
+	args := []string{"-hide_banner", "-nostdin", "-loglevel", LogLevel(LogWarning)}
 	if prof.vaapi {
 		if vaapiDevice == "" {
 			vaapiDevice = defaultVAAPIDevice

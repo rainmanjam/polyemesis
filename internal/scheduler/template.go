@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // Recurring broadcast templates (#18).
@@ -32,9 +34,9 @@ const (
 	// rail, not a tuning knob.
 	MaxLookahead = 10
 	// MaxTitleLen is YouTube's title limit, applied to the RENDERED title.
-	MaxTitleLen = 100
+	MaxTitleLen = platform.YouTubeTitleMax
 	// MaxDescriptionLen is YouTube's description limit.
-	MaxDescriptionLen = 5000
+	MaxDescriptionLen = platform.YouTubeDescriptionMax
 	// MaxThumbnailBytes is YouTube's thumbnail upload limit (2 MB).
 	MaxThumbnailBytes = 2 << 20
 )
@@ -117,7 +119,7 @@ func (t BroadcastTemplate) Validate() error {
 	if err != nil {
 		return err
 	}
-	if len([]rune(sample)) > MaxTitleLen {
+	if platform.UTF16Len(sample) > MaxTitleLen {
 		return fmt.Errorf("the title pattern renders to more than %d characters once the date is "+
 			"filled in; shorten it", MaxTitleLen)
 	}

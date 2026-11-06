@@ -16,16 +16,16 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/procname"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // State is a process's lifecycle state. These map directly onto the UI's
@@ -40,6 +40,12 @@ const (
 	StateFailed       State = "failed"
 )
 
+// States is every lifecycle state, in lifecycle order. A consumer that emits a
+// series per state ranges over this instead of copying the list.
+func States() []State {
+	return []State{StateStopped, StateStarting, StateRunning, StateReconnecting, StateFailed}
+}
+
 const (
 	defaultMinBackoff = time.Second
 	defaultMaxBackoff = 30 * time.Second
@@ -48,14 +54,19 @@ const (
 	// every few minutes would eventually crawl to the 30s ceiling and stay
 	// there for the rest of the session.
 	stableAfter = 60 * time.Second
-	// shutdownGrace is how long a child gets to exit after SIGTERM before it
+	// ShutdownGrace is how long a child gets to exit after SIGTERM before it
 	// is killed. FFmpeg uses this window to flush and finalise its output,
 	// which is what keeps a recording playable.
 	//
 	// It is contracted from OUTSIDE this package: acceptance-recording-stop.sh
 	// measures elapsed wall-clock across a stop and asserts it is under 8s. The
 	// number may not be changed without changing that assertion.
-	shutdownGrace = 8 * time.Second
+	//
+	// Exported because the callers that wait for a Stop derive their own
+	// deadline from it (engine stopTimeout, playout stopTimeout): a wait that is
+	// shorter than this gives up on a child the escalation would have reaped a
+	// moment later.
+	ShutdownGrace = 8 * time.Second
 	// drainGrace is how long the stdout/stderr drain gets to finish AFTER the
 	// child has been reaped, before the supervisor closes the read ends out from
 	// under it.
@@ -101,9 +112,9 @@ type Spec struct {
 	// Name is the stable identifier used in the API and logs,
 	// e.g. "ingest", "dest:3", "recorder".
 	Name string
-	// Kind groups processes in the UI: ingest | destination | recorder |
-	// preview | meters.
-	Kind string
+	// Kind groups processes in the UI, the census and the teardown tallies, and
+	// picks the kill grace (graceFor). The kinds are procname's.
+	Kind procname.Kind
 	Bin  string
 	Args []string
 
@@ -115,7 +126,7 @@ type Spec struct {
 	// Status.LastError -- removes these by exact substring match before anything
 	// else looks at the text. See (*Process).scrub.
 	//
-	// It exists because alerts.Redact, which was the only masking on those
+	// It exists because redact.Redact, which was the only masking on those
 	// egresses, is a GRAMMAR over an open namespace. FFmpeg takes arbitrary
 	// `-flag value` pairs, so `-rtmp_conn S:<key>` is invisible to it and
 	// `Authorization:Bearer\ <key>` splits into argv entries where it masks the
@@ -384,7 +395,7 @@ type Process struct {
 	// secrets is spec.Secrets compiled once at construction. Immutable after
 	// New, so scrub needs no lock and can be called from the stderr scan
 	// goroutine and an HTTP handler at the same time.
-	secrets *alerts.SecretSet
+	secrets *redact.SecretSet
 
 	mu    sync.RWMutex
 	state State
@@ -481,7 +492,7 @@ type Process struct {
 	// that they have finished; without this the only proof was wall-clock.
 	escalators sync.WaitGroup
 
-	// grace and drain are shutdownGrace and drainGrace as this Process will
+	// grace and drain are ShutdownGrace and drainGrace as this Process will
 	// actually use them. Fields rather than the constants directly so a test can
 	// separate "the escalation fired" from "the escalation fired at 8 seconds"
 	// without the suite paying 8 seconds per case, and without mutating package
@@ -560,7 +571,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		log:        log.With("process", spec.Name),
 		state:      StateStopped,
 		logs:       newRing(logRingSize),
-		secrets:    alerts.NewSecretSet(log, spec.Secrets...),
+		secrets:    redact.NewSecretSet(log, spec.Secrets...),
 		grace:      graceFor(spec.Kind),
 		drain:      drainGrace,
 		stallAfter: StallAfter,
@@ -577,7 +588,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 //  1. The exact literals from Spec.Secrets. This is the boundary. It cannot be
 //     defeated by how the credential was spelled onto the command line, because
 //     it does not read the spelling at all.
-//  2. alerts.Redact, as a RESIDUAL best-effort pass, for credentials this
+//  2. redact.Redact, as a RESIDUAL best-effort pass, for credentials this
 //     process was never told about: a token an endpoint echoed back in an error
 //     string, a URL FFmpeg synthesised from parts. It is not the boundary and
 //     the four callers below must not be read as though it were.
@@ -590,7 +601,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 // the raw argv has GET /destinations/{id}/expert, which is admin-only and reads
 // Args() rather than anything on this path.
 func (p *Process) scrub(s string) string {
-	return alerts.Redact(p.secrets.Scrub(s))
+	return redact.Redact(p.secrets.Scrub(s))
 }
 
 // Normalised fills a Policy's zero fields with the defaults a running process
@@ -691,7 +702,6 @@ func (p *Process) waitBackoff(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// Name returns the process name.
 func (p *Process) Name() string { return p.spec.Name }
 
 // currentArgs is the argv of the running child, falling back to the configured
@@ -732,7 +742,7 @@ func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.curren
 // the unit the credential arrives in and a substring match does not care what
 // is glued to it.
 //
-// alerts.Redact then runs ONCE over the JOINED string, because applying it per
+// redact.Redact then runs ONCE over the JOINED string, because applying it per
 // argument is itself a leaking shape. `-headers Authorization: Bearer <key>` is
 // fully masked as one string -- the bearerToken rule spans the space -- and
 // leaks the key when each argv element is redacted alone, since "Bearer" and
@@ -754,7 +764,7 @@ func (p *Process) CommandString() string {
 		}
 		parts = append(parts, a)
 	}
-	return alerts.Redact(strings.Join(parts, " "))
+	return redact.Redact(strings.Join(parts, " "))
 }
 
 // Start begins supervising. Calling it on an already-running process is a
@@ -1253,7 +1263,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	// (see live.go), so there it is simply not made and every live command is
 	// refused, which sends the caller to a restart.
 	var liveStdin io.WriteCloser
-	if p.spec.LiveCommands && runtime.GOOS != "windows" {
+	if p.spec.LiveCommands && ffmpeg.LiveCommandsSupported() {
 		w, err := cmd.StdinPipe()
 		if err != nil {
 			return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -1305,7 +1315,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 		// entry keyed on a pid survives its Process being dropped on the floor,
 		// and an entry keyed on the Process would not. This line and the
 		// discharge after cmd.Wait() are the census's only two writers.
-		childcensus.Enrol(cmd.Process.Pid, p.spec.Name, p.spec.Kind)
+		childcensus.Enrol(cmd.Process.Pid, p.spec.Name, string(p.spec.Kind))
 	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
@@ -1804,17 +1814,12 @@ func (p *Process) terminate() {
 			defer wt.Stop()
 			wake = wt.C
 		}
-		// BOTH OUTCOMES ARE COUNTED HERE, in the one select that decides which
-		// happened. Counting them at separate call sites is how a denominator
-		// quietly stops matching its numerator -- and an absent denominator is
-		// why this escalation ran unnoticed for weeks. See teardown_stats.go.
 		for {
 			select {
 			case <-exited:
 				// Reaped inside the grace period. There is nothing to escalate to,
 				// and killGroup on a reaped pid is a signal to whoever holds that
 				// number now.
-				noteTeardown(p.spec.Kind, false)
 				return
 			case <-wake:
 				wakeFn()
@@ -1825,7 +1830,6 @@ func (p *Process) terminate() {
 				// compile time -- rewording it silently disarms that check.
 				// grace_string_test.go pins it.
 				p.log.Warn("process did not exit after grace period; killing group")
-				noteTeardown(p.spec.Kind, true)
 				killGroup(cmd)
 				return
 			}
@@ -2033,7 +2037,7 @@ func (p *Process) Status() Status {
 	// the broker, with no session behind it.
 	st := Status{
 		Name:      p.spec.Name,
-		Kind:      p.spec.Kind,
+		Kind:      string(p.spec.Kind),
 		State:     p.state,
 		PID:       p.pid,
 		Restarts:  p.restarts,
@@ -2112,7 +2116,7 @@ func (p *Process) Status() Status {
 // a future writer to the ring forgets. Redact is idempotent, so running it over
 // already-clean text costs a scan and changes nothing.
 //
-// What "masked" means here is scrub, NOT alerts.Redact. The process's exact
+// What "masked" means here is scrub, NOT redact.Redact. The process's exact
 // declared credential literals are removed first and Redact runs afterwards only
 // as a residual pass over whatever it can recognise. The distinction is the
 // whole of #150's argv finding: Redact alone left `-rtmp_conn S:<key>` and the

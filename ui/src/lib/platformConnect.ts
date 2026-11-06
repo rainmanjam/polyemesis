@@ -38,7 +38,7 @@ export type ConnectControl =
 /** Whether this build may offer the device code flow for this platform.
  *
  *  READ OFF THE GUIDE, NEVER MATCHED AGAINST A PLATFORM NAME. The server
- *  derives the field from oauth.DeviceFor, so a build that gains or loses the
+ *  derives the field from oauth.As[DeviceFlower], so a build that gains or loses the
  *  capability changes what this UI offers with no edit here -- which is the
  *  whole reason it is a field and not a constant. A `platform === "twitch"`
  *  written in the page would be a second, private copy of that registry, and

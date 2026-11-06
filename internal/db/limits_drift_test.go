@@ -37,11 +37,6 @@ func TestUIBoundsMatchTheGoValidators(t *testing.T) {
 	want := map[string][2]int{
 		"port":                     {1, 65535},
 		"srtLatencyMs":             {20, 8000},
-		"srtPassphrase":            {10, 79},
-		"renditionDimension":       {MinRenditionDimension, MaxRenditionDimension},
-		"renditionFPS":             {1, MaxRenditionFPS},
-		"renditionBitrateKbps":     {MinRenditionBitrate, MaxRenditionBitrate},
-		"renditionGOPSeconds":      {int(MinRenditionGOP), int(MaxRenditionGOP)},
 		"audioBitrateKbps":         {32, 512},
 		"recordingSegmentSeconds":  {10, 86400},
 		"chatHistoryMessages":      {MinChatHistoryMessages, MaxChatHistoryMessages},

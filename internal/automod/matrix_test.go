@@ -248,3 +248,61 @@ func TestUnknownPartsAreRecognisableAsUnknown(t *testing.T) {
 		}
 	}
 }
+
+// The platform list and its order are served to the console, so they are a
+// contract; the registry is where they now come from.
+func TestPlatformsAreTheRegistrysModeratedRowsInOrder(t *testing.T) {
+	want := []db.Platform{db.PlatformYouTube, db.PlatformTwitch, db.PlatformKick, db.PlatformFacebook, db.PlatformX, db.PlatformRumble}
+	if len(Platforms) != len(want) {
+		t.Fatalf("Platforms = %v, want %v", Platforms, want)
+	}
+	for i := range want {
+		if Platforms[i] != want[i] {
+			t.Fatalf("Platforms = %v, want %v", Platforms, want)
+		}
+	}
+	if !KnownPlatform(db.PlatformRumble) {
+		t.Error("rumble is listed: its flag and local-hide rows exist")
+	}
+}
+
+// Rumble gets its rows: flag and local hide available, everything upstream
+// shown inert with a reason, and nothing about another platform's cells moves.
+func TestRumbleHasCellsWithItsUpstreamActionsInert(t *testing.T) {
+	var got int
+	for _, c := range DefaultMatrix().Cells(PlatformCaps{}) {
+		if c.Platform != db.PlatformRumble {
+			continue
+		}
+		got++
+		local := c.Action == ActionFlag || c.Action == ActionHideLocal
+		if c.Available != local {
+			t.Errorf("rumble %s/%s available=%v, want %v", c.Action, c.Checker, c.Available, local)
+		}
+		if !c.Available && c.Reason == "" {
+			t.Errorf("rumble %s/%s is inert with no reason", c.Action, c.Checker)
+		}
+	}
+	if want := len(Actions) * len(Checkers); got != want {
+		t.Errorf("rumble has %d cells, want %d", got, want)
+	}
+}
+
+// Rumble's chat is read-only: nothing upstream can be acted on, and the table
+// and the (absent) adapter methods agree. Flag and local hide still work.
+func TestRumbleCanOnlyBeFlaggedAndHiddenLocally(t *testing.T) {
+	caps := PlatformCaps{}
+	for _, a := range []Action{ActionDelete, ActionTimeout, ActionBan, ActionHide} {
+		if ok, reason := caps.Can(db.PlatformRumble, a); ok || reason == "" {
+			t.Errorf("rumble %s: ok=%v reason=%q, want unavailable with a reason", a, ok, reason)
+		}
+	}
+	for _, a := range []Action{ActionFlag, ActionHideLocal} {
+		if ok, _ := caps.Can(db.PlatformRumble, a); !ok {
+			t.Errorf("rumble %s is local and must stay available", a)
+		}
+	}
+	if ok, _ := caps.Can(db.Platform("no-such"), ActionBan); !ok {
+		t.Error("a name with no registry row keeps the old default")
+	}
+}

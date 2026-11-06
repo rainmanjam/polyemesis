@@ -1,11 +1,13 @@
 package highlights
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,6 +41,17 @@ func TestHighlightsHelperProcess(t *testing.T) {
 		for time.Now().Before(deadline) {
 			fmt.Println("reading 0.0")
 		}
+		os.Exit(0)
+	case "grandchild":
+		// A parent that leaves a child holding its stdout, the way x265 and
+		// SVT-AV1 leave their workers, and then waits to be killed.
+		gc := exec.Command(os.Args[0], helperArgs("sleeper")...)
+		gc.Stdout, gc.Stderr = os.Stdout, os.Stderr
+		_ = gc.Start()
+		time.Sleep(20 * time.Second)
+		os.Exit(0)
+	case "sleeper":
+		time.Sleep(20 * time.Second)
 		os.Exit(0)
 	case "fail":
 		fmt.Fprintln(os.Stderr, "Input #0, wav")
@@ -79,12 +92,14 @@ func TestTheLoudnessPassIsInTheCensusWhileItRuns(t *testing.T) {
 	var pid int
 	var lines []string
 	err := RunStreaming(context.Background(), os.Args[0], helperArgs("readings"), func(r io.Reader) error {
+		br := bufio.NewReader(r)
+		_, _ = br.Peek(1) // the child has written, so it has been enrolled
 		p, ok := censusKind("highlights")
 		if !ok {
 			t.Error("the scan's child is not in the census while running")
 		}
 		pid = p
-		b, err := io.ReadAll(r)
+		b, err := io.ReadAll(br)
 		lines = strings.Fields(string(b))
 		return err
 	})
@@ -130,7 +145,8 @@ func TestAPassTheParserRejectsIsKilledNotDrained(t *testing.T) {
 	var pid int
 	done := make(chan error, 1)
 	go func() {
-		done <- RunStreaming(ctx, os.Args[0], helperArgs("forever"), func(io.Reader) error {
+		done <- RunStreaming(ctx, os.Args[0], helperArgs("forever"), func(r io.Reader) error {
+			_, _ = bufio.NewReader(r).Peek(1)
 			pid, _ = censusKind("highlights")
 			return parse
 		})
@@ -156,5 +172,33 @@ func TestAPassTheParserRejectsIsKilledNotDrained(t *testing.T) {
 		if p, ferr := os.FindProcess(pid); ferr == nil && p.Signal(syscall.Signal(0)) == nil {
 			t.Errorf("pid %d still exists after the runner returned", pid)
 		}
+	}
+}
+
+// A CANCELLED PASS RETURNS. The scan's child can leave a grandchild holding its
+// stdout; without the shared KillGrace bound the runner would sit in Wait until
+// that grandchild exited and the queue's cancellation would be a lie.
+//
+// MUTATION: start the child without ffmpeg.RunEnrolled's WaitDelay.
+// Observed: FAIL, still blocked after 9 s (the grandchild sleeps 20 s).
+func TestACancelledPassReturnsPromptlyEvenWithAGrandchildHoldingThePipe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- RunStreaming(ctx, os.Args[0], helperArgs("grandchild"), func(r io.Reader) error {
+			_, err := io.Copy(io.Discard, r)
+			return err
+		})
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a cancelled pass reported success")
+		}
+	case <-time.After(9 * time.Second):
+		t.Fatal("the cancelled pass was still waiting 9 s later")
 	}
 }

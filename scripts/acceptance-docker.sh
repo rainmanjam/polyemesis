@@ -649,7 +649,7 @@ else
   #
   # THEY NEED -loglevel verbose. Measured: warning and info emit nothing,
   # verbose and debug emit them. The shipped default is warning
-  # (ffmpeg.commonArgs), so they are NOT free -- an earlier version of this
+  # (ffmpeg.CommonArgs), so they are NOT free -- an earlier version of this
   # block claimed they were and printed an empty section, which reads exactly
   # like "looked, found nothing wrong". Say which level is missing instead.
   printf "        --- per-stream packets read (each destination, at exit) ---\n"

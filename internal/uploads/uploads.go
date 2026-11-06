@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/freedisk"
 	// For ffmpeg.PullFilePath ONLY -- see UploadFromPullURL. The dependency is
 	// the point: the gate has to key on the engine's own normalisation of a
 	// pull URL, and internal/ffmpeg imports no other package of this module, so
@@ -73,7 +74,7 @@ func New(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create uploads dir: %w", err)
 	}
-	return &Store{dir: dir, freeBytes: freeBytes}, nil
+	return &Store{dir: dir, freeBytes: FreeBytes}, nil
 }
 
 // WithFreeBytes replaces how this Store measures free space and returns the
@@ -95,10 +96,11 @@ func (s *Store) Dir() string { return s.dir }
 //
 // Exported for internal/playlistmedia, whose normalised derivatives are
 // additional copies of operator media on this same volume and must be measured
-// the same way. The alternative was a FOURTH copy of statfs in this repo, and
-// the three that exist are already one more than the comment in disk_unix.go is
-// comfortable with.
-func FreeBytes(path string) (uint64, error) { return freeBytes(path) }
+// the same way.
+func FreeBytes(path string) (uint64, error) {
+	free, _, err := freedisk.Space(path)
+	return free, err
+}
 
 // Resolve turns a stored name into an absolute path, refusing anything that is
 // not a bare filename inside the uploads directory.
@@ -1055,7 +1057,7 @@ func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uin
 // PROCESS-WIDE AND KEYED BY PATH, not a field on Store, and that is the load-
 // bearing part of the fix rather than an implementation detail.
 // api.Server.uploadStore builds a NEW *Store on every request BY DESIGN
-// (media.go:616 -- "it owns no state beyond a path"), so a mutex and a counter
+// (api.Server.uploadStore -- "it owns no state beyond a path"), so a mutex and a counter
 // living on the struct would be a fresh mutex and a zero counter per request:
 // the guard would read correctly, test green against a single injected Store,
 // and bound absolutely nothing in production. That is this repository's
@@ -1391,7 +1393,6 @@ func (s *Store) Sweep(olderThan time.Duration) (SweepResult, error) {
 	return res, nil
 }
 
-// Delete removes one stored upload.
 func (s *Store) Delete(name string) error {
 	full, err := s.Resolve(name)
 	if err != nil {

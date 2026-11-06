@@ -1,3 +1,4 @@
+import { X_GO_LIVE_TITLE_MAX } from "@/lib/platforms";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,11 +11,6 @@ const TWEET_KEY: Record<XGoLiveTweet, TranslationKey> = {
   every: "wave3.x.tweet.every",
   never: "wave3.x.tweet.never",
 };
-
-/** X's limit on the go-live title. X documents the publish title as "subject to
- *  X post length limits" with no number, so the post limit is used; the server
- *  enforces the same bound (db.XGoLiveTitleMax). */
-export const X_GO_LIVE_TITLE_MAX = 280;
 
 /** The status key for the phase the lifecycle coordinator recorded. The server
  *  stores its own words for X's six states (created, prepublished, live,

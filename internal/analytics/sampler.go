@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"errors"
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"log/slog"
 	"sort"
 	"sync"
@@ -265,6 +266,11 @@ func (s *Sampler) Wake() {
 	default:
 	}
 }
+
+// WakePending reports whether a Wake is queued that no loop has taken yet. A
+// queued wake makes Run skip its initial delay, so a caller that must not
+// start sampling early (boot) can check it left none behind.
+func (s *Sampler) WakePending() bool { return len(s.wake) > 0 }
 
 // New builds a sampler. now may be nil for time.Now.
 func New(src Source, store Store, cfg func() Config, now func() time.Time, log *slog.Logger) *Sampler {
@@ -536,11 +542,7 @@ func backoffFor(n int, retry *RetryAfterError) time.Duration {
 	if n <= 1 {
 		return 0
 	}
-	d := time.Minute
-	for i := 2; i < n && d < maxBackoff; i++ {
-		d *= 2
-	}
-	return min(d, maxBackoff)
+	return backoff.Exponential(n-2, time.Minute, maxBackoff)
 }
 
 func targetKey(t Target) string { return t.Platform + "/" + t.Account }

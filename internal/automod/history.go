@@ -122,7 +122,6 @@ type History struct {
 	now     func() time.Time
 }
 
-// NewHistory returns a tracker.
 func NewHistory(limits HistoryLimits) *History {
 	return &History{
 		limits:  limits,

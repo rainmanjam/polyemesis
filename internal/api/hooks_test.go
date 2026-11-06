@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // A hook endpoint holds two secrets where an alert rule holds one: the URL
@@ -54,7 +54,7 @@ func TestCreateReturnsThePlaintextSecretExactlyOnce(t *testing.T) {
 		if strings.Contains(body, "XXXXsecretXXXX") {
 			t.Errorf("%s echoed the endpoint path:\n%s", p, body)
 		}
-		if !strings.Contains(body, alerts.Mask) {
+		if !strings.Contains(body, redact.Mask) {
 			t.Errorf("%s returned no masked endpoint; the UI has nothing to show:\n%s", p, body)
 		}
 		if !strings.Contains(body, `"hasSecret":true`) {
@@ -91,12 +91,12 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	//
 	// THE DISCRIMINATOR CHANGED, and the reason is worth reading before
 	// changing it back. This test used to fire a test delivery at an
-	// unresolvable host and assert that alerts.Mask did NOT appear in the 502
+	// unresolvable host and assert that redact.Mask did NOT appear in the 502
 	// body: a hook whose URL had become "https://ci.example.com/[redacted]"
 	// produced a *url.Error quoting that string, mask and all.
 	//
 	// #160 made that proxy blind. Dispatcher.Test now returns the error through
-	// alerts.ClientErrorText, which masks the endpoint PATH on purpose --
+	// redact.ClientErrorText, which masks the endpoint PATH on purpose --
 	// because net/http's wrapper quotes the whole URL and a Slack-shaped hook
 	// keeps its entire credential there. So the masked-URL case and the
 	// real-URL case now render IDENTICALLY, both as
@@ -131,7 +131,7 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	var shown map[string]any
 	decodeInto(t, send(t, h, sign, http.MethodGet, path, nil, http.StatusOK), &shown)
 	masked, _ := shown["url"].(string)
-	if !strings.Contains(masked, alerts.Mask) {
+	if !strings.Contains(masked, redact.Mask) {
 		t.Fatalf("url = %q, expected a masked one", masked)
 	}
 	if strings.Contains(masked, secretPath) {

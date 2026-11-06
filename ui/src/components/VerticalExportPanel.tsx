@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { autoApi } from "@/lib/autoApi";
+import { http } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -115,7 +115,7 @@ export function VerticalExportPanel({
   const saveTemplate = async () => {
     setSaving(true);
     try {
-      await autoApi.post("/clipper/templates", { name: templateName.trim(), vertical: verticalBody(spec) });
+      await http.post("/clipper/templates", { name: templateName.trim(), vertical: verticalBody(spec) });
       toast.success(t("clipedit.vertical.templateSaved"));
       setTemplateName("");
       onTemplatesChanged();
@@ -128,7 +128,7 @@ export function VerticalExportPanel({
 
   const deleteTemplate = async (tpl: ClipTemplate) => {
     try {
-      await autoApi.del(`/clipper/templates/${tpl.id}`);
+      await http.del(`/clipper/templates/${tpl.id}`);
       toast.success(t("clipedit.vertical.templateDeleted"));
       onTemplatesChanged();
     } catch (err) {

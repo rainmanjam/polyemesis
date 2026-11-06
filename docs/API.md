@@ -148,7 +148,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
-| `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against `readScopeDeniedPatterns`, and a row missing from one side tells the reader nothing about which side is right |
+| `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against the routes flagged `readDenied`, and a row missing from one side tells the reader nothing about which side is right |
 | `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token. Paced to one YouTube call a minute per pair, and made only while one of the two halves is live (`live` in the response says which); the call is charged to the chat quota budget |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
@@ -1059,6 +1059,17 @@ destination: the fields above plus `"outcome": "dumped"`, or `"skipped"` or
 need an admin token. Each dump raises the `delay.dumped` audit alert
 ([MONITORING.md](MONITORING.md)).
 
+**`presetId`** is the destination-preset id (an `id` from `GET /platforms/presets`)
+the destination was created from, and is absent for one typed in by hand. It is
+optional on `POST` and `PUT`. A `POST` or a `PUT` that **sets** it checks that the
+catalogue has the preset and that the preset saves as the destination's
+`platform` (every preset that is only a URL and a note saves as `custom`), and
+answers `400` otherwise. A `PUT` that leaves it out keeps the stored value; one
+that sends `"presetId": ""` clears it. It exists so the platform's own encoder
+guidance can be found for Instagram, LinkedIn, Dailymotion, Owncast and Rumble,
+whose destinations have `platform: "custom"`. It is advisory and gates nothing.
+A stored id the catalogue no longer has is ignored, never an error.
+
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
@@ -1236,12 +1247,16 @@ log, dump or stats. Anything else is refused rather than guessed at. `dry-run` t
 | `GET` | `/renditions/{id}/concerns` |
 | `GET` | `/encoders` |
 
-`GET /renditions/{id}/concerns?platform=<id>` compares a rendition against that
-platform's published figures from `internal/db/platforms.go` and returns one
+`GET /renditions/{id}/concerns?platform=<id>[&preset=<presetId>]` compares a
+rendition against that platform's published figures and returns one
 entry per concern, each carrying the `detail`, the documentation `source` and the
 date it was `checked`. An unknown or empty platform is an empty list, not an
 error: a custom RTMP destination has nothing published to be outside of, and the
-console asks the same question either way.
+console asks the same question either way. The optional `preset` is a
+destination's `presetId`: it is tried first and finds the figures for a platform
+that saves as `custom` (`platform=custom&preset=instagram`). A preset that saves
+as a different platform than `platform`, or one the catalogue does not have, is
+ignored and the platform's own figures are used.
 
 `DELETE /renditions/{id}` answers `{"status", "destinations",
 "enabledDestinations", "playoutVariants", "enabledPlayoutVariants"}` and a
@@ -1277,7 +1292,11 @@ It and `POST /routing/presets/{preset}` are programme-scoped and need
 `POST /routing/presets/{preset}` **compiles** a preset against the programme's
 ingest and answers `{profile, routing}`. It saves nothing and restarts
 nothing. The routing editor puts that profile in a draft, and Save is a
-`PUT /destinations/{id}`.
+`PUT /destinations/{id}`. Without a body the compile uses the same role-derived
+pickers as apply (below). `GET /routing/presets` serves them as `roleDefaults`,
+beside the generic `defaults`, for the programme named by `?source=<id>` (or the
+only programme of a single-source install; absent when several make that
+ambiguous).
 The routing editor is where the scoping was written: with programme 2 open, a
 debounced track-label edit rewrote programme 1's ingest and restarted its live
 destinations, and the compile preview beside it was reading the same default
@@ -1903,7 +1922,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 
 | Method | Path |
 |---|---|
-| `GET` | `/platforms/presets`, `/capabilities`, `/guides` |
+| `GET` | `/platforms/presets`, `/platforms/capabilities`, `/platforms/guides`, `/platforms/registry` (the platform registry: names, stored value, which carry destinations and chat, the IVS and X title rules) |
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
 | `POST` | `/platforms/credentials/{platform}/check` |

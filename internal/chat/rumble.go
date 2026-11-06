@@ -54,7 +54,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // RumbleAPIBase is Rumble's live-stream API. Overridden in tests.
@@ -73,7 +75,7 @@ const RumbleAPIBase = "https://rumble.com/-livestream-api"
 // Named here rather than in internal/api because the adapter's own "not
 // configured" message has to name it, and internal/chat cannot import the
 // package that wires it up.
-const RumbleChatKeyEnv = "RUMBLE_CHAT_API_KEY"
+const RumbleChatKeyEnv = startupenv.RumbleChatKeyVar
 
 const (
 	// rumbleDefaultPoll is how often a live chat is read. Rumble publishes no
@@ -123,8 +125,6 @@ type RumbleConfig struct {
 	Key string
 	// Poll overrides the base interval. Clamped to [rumbleMinPoll, rumbleMaxPoll].
 	Poll time.Duration
-	// Backfill bounds the first poll's history.
-	Backfill time.Duration
 
 	APIBase string
 	HTTP    *http.Client
@@ -164,10 +164,7 @@ func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
-	}
-	if cfg.Backfill <= 0 {
-		cfg.Backfill = rumbleDefaultBackfill
+		cfg.Sleep = backoff.SleepCtx
 	}
 	return &RumbleAdapter{
 		cfg:    cfg,
@@ -346,7 +343,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 
 		cutoff := time.Time{}
 		if first {
-			cutoff = r.cfg.Now().Add(-r.cfg.Backfill)
+			cutoff = r.cfg.Now().Add(-rumbleDefaultBackfill)
 			first = false
 		}
 

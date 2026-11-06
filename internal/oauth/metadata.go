@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // MetadataField names one thing a platform may accept.
@@ -151,7 +152,7 @@ type MetadataResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// MetadataPusher is the optional capability. Discover it with MetadataFor;
+// MetadataPusher is the optional capability. Discover it with As[MetadataPusher];
 // never type-assert Provider to it at a call site, because "absent" is a
 // supported answer and has to be handled once.
 type MetadataPusher interface {
@@ -165,17 +166,6 @@ type MetadataPusher interface {
 	// platform that identifies the channel by id — Twitch — down to the writes
 	// themselves, on a code path the operator is running seconds before air.
 	PushMetadata(ctx context.Context, clientID, accessToken, accountRef string, m Metadata) (*MetadataResult, error)
-}
-
-// MetadataFor returns the metadata capability for a platform, or false when
-// that platform has none.
-func MetadataFor(p db.Platform) (MetadataPusher, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	mp, ok := pr.(MetadataPusher)
-	return mp, ok
 }
 
 // ------------------------------------------------------------------ transport
@@ -243,7 +233,7 @@ func adviceBody(err error) string {
 // requestJSON performs an authenticated request with an arbitrary method.
 // getJSON and postJSON cover the read and create paths; metadata writes are
 // PUT and PATCH, and they need the status back rather than a flattened string.
-func requestJSON(ctx context.Context, method, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
+func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -265,7 +255,7 @@ func requestJSON(ctx context.Context, method, endpoint, accessToken string, payl
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -315,7 +305,7 @@ func firstNonEmpty(a, b string) string {
 // instance. It used to be a var whose comment claimed it pointed "the whole
 // provider" at a stub, and that claim was false -- Account and Ingest wrote
 // googleapis.com inline and ignored it.
-const ytAPIBase = "https://www.googleapis.com/youtube/v3"
+const ytAPIBase = platform.YouTubeAPIRoot
 
 // ytCategoryRegion decides which localised category list we match names
 // against. YouTube's assignable categories are the same set worldwide; the
@@ -337,8 +327,8 @@ func (y *YouTube) MetadataCaps() MetadataCaps {
 		CategoryLabel: "Category",
 		CategoryHint:  "A YouTube video category, e.g. Gaming, Music, Science & Technology.",
 		// YouTube's documented snippet limits.
-		TitleMax:       100,
-		DescriptionMax: 5000,
+		TitleMax:       platform.YouTubeTitleMax,
+		DescriptionMax: platform.YouTubeDescriptionMax,
 		Scope:          "https://www.googleapis.com/auth/youtube",
 	}
 }
@@ -407,7 +397,7 @@ func (y *YouTube) liveBroadcast(ctx context.Context, accessToken string) (*ytBro
 	var list struct {
 		Items []ytBroadcast `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+"/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=all&broadcastType=all&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
@@ -463,7 +453,7 @@ func (y *YouTube) PushMetadata(ctx context.Context, clientID, accessToken, accou
 		if b.Snippet.ScheduledStartTime != "" {
 			snip["scheduledStartTime"] = b.Snippet.ScheduledStartTime
 		}
-		err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=snippet",
+		err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=snippet",
 			accessToken, map[string]any{"id": b.ID, "snippet": snip}, nil, nil)
 		if err != nil {
 			return nil, scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -519,7 +509,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 			Snippet ytVideoSnippet `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
+	err = y.getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
 	if err != nil {
 		return "", err
 	}
@@ -529,7 +519,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 	snip := current.Items[0].Snippet
 	snip.CategoryID = id
 
-	err = requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
+	err = y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
 		map[string]any{"id": videoID, "snippet": snip}, nil, nil)
 	if err != nil {
 		return "", scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -550,7 +540,7 @@ func (y *YouTube) categoryID(ctx context.Context, accessToken, name string) (id,
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, y.apiEndpoint()+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
+	err = y.getJSON(ctx, y.apiEndpoint()+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
 	if err != nil {
 		return "", "", err
 	}
@@ -584,7 +574,7 @@ func normaliseCategory(s string) string {
 
 // twitchHelixBase is the production Helix API; see ytAPIBase above for why this
 // is a const. Reach it through (*Twitch).apiEndpoint, never directly.
-const twitchHelixBase = "https://api.twitch.tv/helix"
+const twitchHelixBase = platform.TwitchAPIRoot
 
 func (t *Twitch) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
@@ -594,7 +584,7 @@ func (t *Twitch) MetadataCaps() MetadataCaps {
 		Fields:        []MetadataField{FieldTitle, FieldCategory},
 		CategoryLabel: "Category",
 		CategoryHint:  "A Twitch category or game, e.g. Just Chatting, Software and Game Development.",
-		TitleMax:      140,
+		TitleMax:      platform.TwitchTitleMax,
 		Scope:         "channel:manage:broadcast",
 	}
 }
@@ -632,7 +622,7 @@ func (t *Twitch) PushMetadata(ctx context.Context, clientID, accessToken, accoun
 	if len(body) == 0 {
 		return res, nil
 	}
-	err := requestJSON(ctx, http.MethodPatch,
+	err := t.requestJSON(ctx, http.MethodPatch,
 		t.apiEndpoint()+"/channels?broadcaster_id="+url.QueryEscape(accountRef),
 		accessToken, body, helixHeaders(clientID), nil)
 	if err != nil {
@@ -661,7 +651,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var exact struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, t.apiEndpoint()+"/games?name="+url.QueryEscape(name),
+	err = t.getJSON(ctx, t.apiEndpoint()+"/games?name="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &exact)
 	if err != nil {
 		return "", "", err
@@ -673,7 +663,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var found struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, t.apiEndpoint()+"/search/categories?first=20&query="+url.QueryEscape(name),
+	err = t.getJSON(ctx, t.apiEndpoint()+"/search/categories?first=20&query="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &found)
 	if err != nil {
 		return "", "", err

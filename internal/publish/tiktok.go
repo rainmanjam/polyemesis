@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // TikTokPrivacy IS THE ONLY PRIVACY LEVEL THIS PACKAGE EVER SENDS TO TIKTOK.
@@ -24,10 +26,10 @@ import (
 // app is audited, on purpose.
 const TikTokPrivacy = "SELF_ONLY"
 
-const tikTokBase = "https://open.tiktokapis.com"
+const tikTokBase = platform.TikTokAPIHost
 
 // TikTokScope is the permission Direct Post needs.
-const TikTokScope = "video.publish"
+const TikTokScope = platform.TikTokPublishScope
 
 const (
 	tikTokChunk     = 10 << 20

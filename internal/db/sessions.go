@@ -195,7 +195,6 @@ func (d *DB) SessionTags() ([]string, error) {
 	return out, nil
 }
 
-// GetSession loads one session.
 func (d *DB) GetSession(id int64) (*Session, error) {
 	s, err := scanSession(d.sql.QueryRow(sessionByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -437,7 +436,6 @@ func (d *DB) AddRecordingToSession(sessionID, recordingID int64) error {
 	return tx.Commit()
 }
 
-// RemoveRecordingFromSession ungroups one recording.
 func (d *DB) RemoveRecordingFromSession(recordingID int64) error {
 	tx, err := d.sql.Begin()
 	if err != nil {

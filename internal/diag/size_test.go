@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 /* THE RING BOUNDS HOW MANY RECORDS IT KEEPS AND, UNTIL NOW, NOTHING ABOUT HOW
@@ -35,7 +35,7 @@ import (
 
 func sizeRecorder(t *testing.T) *Recorder {
 	t.Helper()
-	r := NewRecorder(8, alerts.NewSecretSet(nil))
+	r := NewRecorder(8, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	return r
 }
@@ -143,7 +143,7 @@ func TestTruncationCannotStrandHalfOfACredential(t *testing.T) {
 		if pad < 0 {
 			continue
 		}
-		r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+		r := NewRecorder(8, redact.NewSecretSet(nil, sentinelKey))
 		r.SetRecording(true)
 		r.Observe(Record{
 			Message: strings.Repeat("x", pad) + sentinelKey + filler,
@@ -185,7 +185,7 @@ func TestTheCaptureReportsHowManyRecordsWereCut(t *testing.T) {
 // ever grows would tell an operator their capture is enormous when the ring
 // had long since dropped the records that made it so.
 func TestTheReportedSizeFallsWhenRecordsAreEvicted(t *testing.T) {
-	r := NewRecorder(4, alerts.NewSecretSet(nil))
+	r := NewRecorder(4, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	for range 4 {
 		r.Observe(Record{Message: strings.Repeat("D", 2000), Level: "INFO"})
@@ -329,7 +329,7 @@ func TestADroppedArgvElementIsAnnounced(t *testing.T) {
 // on main. scrubValue handled string, []string, map[string]any, error and
 // Stringer, and passed everything else through untouched. slog.Any("detail",
 // map[string]string{...}) is everything else. The declared secret set never saw
-// it, alerts.Redact never saw it, and it reached the bundle verbatim.
+// it, redact.Redact never saw it, and it reached the bundle verbatim.
 //
 // The same gap is why the size cap was not binding: a value nobody could price
 // was charged a flat 8 bytes, so a 1 MiB []byte measured as 16 and the record
@@ -347,7 +347,7 @@ func TestAnUnrecognisedAttributeShapeIsStillScrubbedAndPriced(t *testing.T) {
 		{"a map of slices", map[string][]string{"argv": {"--key", sentinelKey}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := NewRecorder(4, alerts.NewSecretSet(nil, sentinelKey))
+			r := NewRecorder(4, redact.NewSecretSet(nil, sentinelKey))
 			r.SetRecording(true)
 			r.Observe(Record{Level: "INFO", Message: "publishing",
 				Attrs: map[string]any{"detail": tc.val}})
@@ -368,7 +368,7 @@ func TestAnUnrecognisedAttributeShapeIsStillScrubbedAndPriced(t *testing.T) {
 
 // AND A LARGE UNRECOGNISED VALUE IS PRICED, so the cap actually engages.
 func TestALargeUnrecognisedValueCannotEvadeTheCap(t *testing.T) {
-	r := NewRecorder(4, alerts.NewSecretSet(nil))
+	r := NewRecorder(4, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	// A []byte JSON-encodes to base64 — over a megabyte of it — while the old
 	// flat 8-byte price made the whole record measure at about sixteen.
@@ -409,7 +409,7 @@ func TestAnOversizedLevelCannotBreakTheCap(t *testing.T) {
 // stated size belonged to a different ring state than its records. The number
 // shown to an operator before they send the file has to be that file's number.
 func TestTheCaptureAndTheRecordsAreOneSnapshot(t *testing.T) {
-	r := NewRecorder(64, alerts.NewSecretSet(nil))
+	r := NewRecorder(64, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 
 	stop := make(chan struct{})
@@ -446,7 +446,7 @@ func TestTheCaptureAndTheRecordsAreOneSnapshot(t *testing.T) {
 // Records() must not hand out the ring's own attribute maps: a caller mutating
 // one changes a retained record while its recorded size does not move.
 func TestRecordsDoesNotAliasTheRingsAttributes(t *testing.T) {
-	r := NewRecorder(4, alerts.NewSecretSet(nil))
+	r := NewRecorder(4, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	r.Observe(Record{Level: "INFO", Message: "m", Attrs: map[string]any{"k": "v"}})
 
@@ -462,7 +462,7 @@ func TestRecordsDoesNotAliasTheRingsAttributes(t *testing.T) {
 // THE WHOLE POINT, END TO END: the encoded bundle has a stateable ceiling.
 func TestTheEncodedBundleIsBoundedByCapacityTimesTheCap(t *testing.T) {
 	const capacity = 16
-	r := NewRecorder(capacity, alerts.NewSecretSet(nil))
+	r := NewRecorder(capacity, redact.NewSecretSet(nil))
 	r.SetRecording(true)
 	for i := range capacity * 3 {
 		r.Observe(Record{

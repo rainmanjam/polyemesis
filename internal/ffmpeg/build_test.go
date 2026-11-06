@@ -829,20 +829,6 @@ func TestMetersArgsSingleTrackSkipsAmerge(t *testing.T) {
 	}
 }
 
-func TestMetersChannelOffsets(t *testing.T) {
-	s := MetersSpec{TrackChannels: []int{2, 6, 1}}
-	if got := s.TotalChannels(); got != 9 {
-		t.Errorf("total = %d, want 9", got)
-	}
-	// astats numbers the merged channels 1..9; these offsets are what maps
-	// them back onto tracks.
-	for track, want := range map[int]int{0: 0, 1: 2, 2: 8} {
-		if got := s.ChannelOffset(track); got != want {
-			t.Errorf("ChannelOffset(%d) = %d, want %d", track, got, want)
-		}
-	}
-}
-
 // ---------------------------------------------------------------- probe
 
 func TestParseProbe(t *testing.T) {
@@ -1237,37 +1223,6 @@ func TestSpliceExtraArgsPutsArgumentsWhereFFmpegReadsThem(t *testing.T) {
 				t.Errorf("SpliceExtraArgs mutated the caller's slice: %v", base)
 			}
 		})
-	}
-}
-
-// StripExtraArgs is what lets the editor preview a candidate edit against a
-// destination that is already running with a previous one. Without it the
-// preview would show the new arguments stacked on top of the old.
-func TestStripExtraArgsIsTheInverseOfSplice(t *testing.T) {
-	base := []string{"-hide_banner", "-i", "udp://x", "-f", "flv", "rtmp://y"}
-
-	cases := [][2][]string{
-		{nil, nil},
-		{{"-re"}, nil},
-		{nil, {"-muxdelay", "0"}},
-		{{"-analyzeduration", "10M"}, {"-metadata", "title=x"}},
-	}
-	for _, c := range cases {
-		in, out := c[0], c[1]
-		got := StripExtraArgs(SpliceExtraArgs(slices.Clone(base), in, out), in, out)
-		if !slices.Equal(got, base) {
-			t.Errorf("strip(splice(base, %v, %v)) = %v\nwant %v", in, out, got, base)
-		}
-	}
-}
-
-// Anything that was not built by SpliceExtraArgs comes back untouched. Showing
-// the operator the real argv beats showing them a guess at what it should be.
-func TestStripExtraArgsLeavesACommandItDoesNotRecognise(t *testing.T) {
-	argv := []string{"-i", "udp://x", "-f", "flv", "rtmp://y"}
-	got := StripExtraArgs(slices.Clone(argv), []string{"-re"}, []string{"-muxdelay", "0"})
-	if !slices.Equal(got, argv) {
-		t.Errorf("StripExtraArgs() = %v, want it unchanged: %v", got, argv)
 	}
 }
 

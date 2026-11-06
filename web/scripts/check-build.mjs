@@ -1052,43 +1052,27 @@ if (sitemapXml) {
  * "ADVISORY, ALWAYS", and no Go outside the catalogue and one range-sanity test
  * reads KbpsMin or KbpsMax at all. The check pins the transcription; it does
  * not endorse a reading of it. */
-const PLATFORMS_GO = new URL("../../internal/db/platforms.go", import.meta.url).pathname;
-let platformsGo = "";
-try {
-  platformsGo = readFileSync(PLATFORMS_GO, "utf8");
-} catch {
-  fail.push(
-    `could not read ${PLATFORMS_GO}. The calculator's platform figures are transcribed ` +
-    "from that file and this build cannot confirm they still match it.",
-  );
-}
-
-/** One entry per catalogue preset, parsed out of the Go literal.
+/** One entry per catalogue preset, from src/data/preset-figures.json, which the Go test
+ * TestWireContract writes from db.DestinationPresets(). It replaced a regexp over
+ * internal/db/platforms.go that found no guidance once the figures moved into the platform
+ * registry, and so reported every platform as unpublished.
  * @type {Map<string, {integrated: boolean, transport: string, min?: number, max?: number, checked?: string}>} */
 const goPresets = new Map();
-if (platformsGo) {
-  const start = platformsGo.indexOf("var destinationPresets");
-  // Entries start at one tab of indentation inside the slice literal.
-  for (const chunk of platformsGo.slice(start).split("\n\t{\n").slice(1)) {
-    const id = /ID: "([^"]+)"/.exec(chunk);
-    if (!id) continue;
-    const kbps = /KbpsMin: (\d+), KbpsMax: (\d+)/.exec(chunk);
-    const checked = /Checked: "([^"]+)"/.exec(chunk);
-    const transport = /Transport: Preset(\w+)/.exec(chunk);
-    goPresets.set(id[1], {
-      integrated: /\bPlatform: Platform\w+/.test(chunk),
-      transport: transport ? transport[1] : "",
-      min: kbps ? Number(kbps[1]) : undefined,
-      max: kbps ? Number(kbps[2]) : undefined,
-      checked: checked ? checked[1] : undefined,
-    });
-  }
-  if (goPresets.size < 20) {
-    fail.push(
-      `parsed only ${goPresets.size} presets out of internal/db/platforms.go, which means ` +
-      "the literal's shape changed and every check below it is passing without looking.",
-    );
-  }
+for (const p of JSON.parse(readFileSync(new URL("../src/data/preset-figures.json", import.meta.url), "utf8")).presets) {
+  goPresets.set(p.id, {
+    integrated: p.integrated,
+    transport: p.transport.toUpperCase(),
+    min: p.kbpsMin,
+    max: p.kbpsMax,
+    checked: p.checked,
+  });
+}
+if (goPresets.size < 20) {
+  fail.push(
+    `src/data/preset-figures.json has only ${goPresets.size} presets, which means it was not ` +
+    "regenerated (go test ./internal/api/ -run TestWireContract -update-wire-contract) and " +
+    "every check below it is passing without looking.",
+  );
 }
 
 const calcPath = "calculator.html";
@@ -1164,7 +1148,7 @@ function compareIso(a, b) {
 const NUMBER_WORDS = {
   20: "twenty", 21: "twenty-one", 22: "twenty-two", 23: "twenty-three",
   24: "twenty-four", 25: "twenty-five", 26: "twenty-six", 27: "twenty-seven",
-  28: "twenty-eight", 29: "twenty-nine", 30: "thirty",
+  28: "twenty-eight", 29: "twenty-nine", 30: "thirty", 31: "thirty-one", 32: "thirty-two",
 };
 if (goPresets.size && pages.includes("features.html")) {
   const pasteable = [...goPresets].filter(
@@ -1324,6 +1308,97 @@ for (const { rel, page, factsDate } of sourcedPages) {
           `words run together: ${glued.slice(0, 6).join(", ")}${glued.length > 6 ? ", …" : ""}. ` +
           `End the source line with {" "} before the element (or after it).`,
       );
+    }
+  }
+}
+
+/* SITE FACTS: the numbers the site states about the server.
+ *
+ * src/data/facts.json is written by the Go test TestWireContract from routing.MaxTracks,
+ * ffmpeg.MinMajorVersion, go.mod and ui/package.json. This check does not trust that the
+ * test was run: it reads the same sources again, then reads every sentence of the site and
+ * the README that restates one ("up to 32 tracks", "FFmpeg 8.0 or later", "Go 1.27.0+",
+ * "Node 20.19+/22.12+") and fails on any that disagrees.
+ *
+ * Two Node floors are deliberately NOT compared: web/package.json (the site's own build)
+ * and the Stream Deck plugin's engines (its build) are different consumers. The one a
+ * reader meets is "build from a clone", which is the UI's engines range. */
+{
+  const ROOT = new URL("../../", import.meta.url).pathname;
+  const read = (rel) => {
+    try {
+      return readFileSync(join(ROOT, rel), "utf8");
+    } catch {
+      fail.push(`could not read ${rel}; the site's facts cannot be checked against it.`);
+      return "";
+    }
+  };
+  const facts = JSON.parse(readFileSync(new URL("../src/data/facts.json", import.meta.url), "utf8"));
+  const num = (src, re, what) => {
+    const m = re.exec(src);
+    if (!m) fail.push(`could not find ${what}; the facts check passes without looking.`);
+    return m ? m[1] : null;
+  };
+  const truth = {
+    maxTracks: num(read("internal/routing/profile.go"), /\bMaxTracks\s*=\s*(\d+)/, "routing.MaxTracks"),
+    ffmpegMinMajor: num(read("internal/ffmpeg/detect.go"), /\bMinMajorVersion\s*=\s*(\d+)/, "ffmpeg.MinMajorVersion"),
+    goMinVersion: num(read("go.mod"), /^go (\d+\.\d+(?:\.\d+)?)$/m, "go.mod's go directive"),
+    uiNodeEngines: JSON.parse(read("ui/package.json") || "{}").engines?.node ?? null,
+  };
+  for (const [k, v] of Object.entries(truth)) {
+    if (v !== null && String(facts[k]) !== v) {
+      fail.push(
+        `src/data/facts.json says ${k} is ${JSON.stringify(facts[k])} but the source says ${JSON.stringify(v)}. ` +
+          "Regenerate it: go test ./internal/api/ -run TestWireContract -update-wire-contract",
+      );
+    }
+  }
+
+  // The Stream Deck plugin runs on the Node the Elgato runtime ships: the manifest asks for it
+  // and the plugin README and package.json engines say it. Three words for one number.
+  const manifestNode = JSON.parse(
+    read("integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/manifest.json") || "{}",
+  ).Nodejs?.Version;
+  const readmeNode = /runs on Node (\d+)/.exec(read("integrations/streamdeck/README.md"))?.[1];
+  const pluginEngines = /^>=(\d+)\./.exec(JSON.parse(read("integrations/streamdeck/package.json") || "{}").engines?.node ?? "")?.[1];
+  if (!manifestNode || manifestNode !== readmeNode || manifestNode !== pluginEngines) {
+    fail.push(
+      `the Stream Deck manifest asks for Node ${manifestNode}, its README says Node ${readmeNode} and its package.json engines floor is ${pluginEngines}; ` +
+        "they are the same requirement and must be the same number.",
+    );
+  }
+
+  const nodeWords = /^\^(\d+\.\d+)\.\d+ \|\| >=(\d+\.\d+)\.\d+$/.exec(facts.uiNodeEngines);
+  const states = [
+    [/up to (\d+) (?:AAC )?tracks/gi, (m) => m[1] === String(facts.maxTracks), "the track limit"],
+    [/FFmpeg (\d+(?:\.\d+)?)\+? or later/g, (m) => m[1] === `${facts.ffmpegMinMajor}.0` || m[1] === String(facts.ffmpegMinMajor), "the FFmpeg floor"],
+    [/\bGo (\d+\.\d+(?:\.\d+)?)\+/g, (m) => m[1] === facts.goMinVersion || `${m[1]}.0` === facts.goMinVersion, "the Go floor"],
+    [/\bNode (\d+\.\d+)\+\/(\d+\.\d+)\+/g, (m) => !!nodeWords && m[1] === nodeWords[1] && m[2] === nodeWords[2], "the Node build floor"],
+  ];
+  const files = [["README.md", read("README.md")]];
+  const walk = (dir) => {
+    for (const e of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name !== "vendor" && e.name !== "node_modules") walk(rel);
+      } else if (/\.(astro|mjs|ts|md)$/.test(e.name)) {
+        files.push([rel, read(rel)]);
+      }
+    }
+  };
+  walk("web/src");
+  // The operator docs are published as site pages. STATUS.md is a dated log of what was true
+  // when it was written, so it keeps old figures on purpose.
+  for (const e of readdirSync(join(ROOT, "docs"), { withFileTypes: true })) {
+    if (e.isFile() && e.name.endsWith(".md") && e.name !== "STATUS.md") files.push([`docs/${e.name}`, read(`docs/${e.name}`)]);
+  }
+  for (const [file, src] of files) {
+    for (const [re, ok, what] of states) {
+      for (const m of src.matchAll(re)) {
+        if (!ok(m)) {
+          fail.push(`${file} says "${m[0]}", which is not ${what} (see src/data/facts.json, from the Go source).`);
+        }
+      }
     }
   }
 }

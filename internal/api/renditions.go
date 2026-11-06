@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -495,7 +494,10 @@ type encoderInfo struct {
 func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 	tools := s.tools()
 
-	gpu := machineGPUs(r.Context())
+	// One generation of detection for the whole answer: the GPU and the
+	// verdicts beside it come from the same probe even if a re-detect runs
+	// meanwhile.
+	snap := tools.Probed(r.Context(), true)
 	if r.URL.Query().Get("redetect") != "" {
 		// The plain listing is a read and stays reachable by a read-scoped
 		// token. This is not: it spawns a test encode per candidate encoder,
@@ -514,15 +516,15 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 					"encoder capabilities; that needs a token with the \"admin\" scope")
 			return
 		}
-		gpu = redetectHardware(r.Context(), tools)
+		snap = redetectHardware(r.Context(), tools)
 	}
 
 	// An empty list means `ffmpeg -encoders` did not run or failed, not that the
 	// binary encodes nothing. Detection treats that as "assume the best" and so
 	// must this: claiming every encoder is unavailable would leave the user
 	// unable to create any rendition at all.
-	listed := len(tools.VideoEncoders) > 0
-	def := tools.DefaultVideoEncoder()
+	listed := snap.Listed()
+	def := snap.DefaultVideoEncoder()
 
 	out := make([]encoderInfo, 0, len(db.KnownEncoders))
 	// Derived from the same pass that builds the list rather than read off
@@ -538,10 +540,10 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 			Codec:     e.Codec(),
 			Vendor:    ffmpeg.EncoderVendorOf(string(e)),
 			Hardware:  isHardwareEncoder(e),
-			Available: !listed || tools.HasEncoder(string(e)),
+			Available: !listed || snap.HasEncoder(string(e)),
 			Default:   string(e) == def,
 		}
-		info.Works, info.Measured, info.Reason, info.DurationMS = encoderVerdict(tools, e)
+		info.Works, info.Measured, info.Reason, info.DurationMS = encoderVerdict(snap, e)
 		// An encoder the build does not contain cannot work regardless of what
 		// the machine has, and saying so in one field keeps the UI from having
 		// to reason about the combination.
@@ -572,7 +574,7 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 		// matters: it is the machine saying there is nothing to offload onto, and
 		// the editor stops telling the user to "choose a hardware encoder".
 		"hardware": working,
-		"gpu":      gpu,
+		"gpu":      snap.GPU,
 	})
 }
 
@@ -583,26 +585,16 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 // its H.264 sibling was and failed; nothing was probed at all. The last is
 // reported as working, because an encoder nobody asked about is not an encoder
 // that was found wanting.
-func encoderVerdict(tools *ffmpeg.Tools, e db.VideoEncoder) (works, measured bool, reason string, ms int64) {
-	if c, ok := tools.Capability(string(e)); ok && !notProbed(c.Reason) {
+func encoderVerdict(tools ffmpeg.Probed, e db.VideoEncoder) (works, measured bool, reason string, ms int64) {
+	if c, ok := tools.Capability(string(e)); ok && !ffmpeg.IsNotProbed(c.Reason) {
 		return c.Works, true, c.Reason, c.DurationMS
 	}
 	if sib := h264SiblingOf(e); sib != "" {
-		if c, ok := tools.Capability(sib); ok && !c.Works && !notProbed(c.Reason) {
+		if c, ok := tools.Capability(sib); ok && !c.Works && !ffmpeg.IsNotProbed(c.Reason) {
 			return false, false, fmt.Sprintf("%s opens the same device through the same driver and failed: %s", sib, c.Reason), 0
 		}
 	}
 	return true, false, "", 0
-}
-
-// notProbed distinguishes "the encoder failed" from "we never got to ask it".
-//
-// Detection marks a probe it could not run — a cancelled scan, an expired
-// budget — as not working, with a reason that says so. Read literally, that
-// would take every encoder out of the editor because one scan was interrupted.
-// Nothing was demonstrated in that case, so nothing may be withheld on it.
-func notProbed(reason string) bool {
-	return strings.HasPrefix(reason, "not probed:")
 }
 
 // h264SiblingOf names the encoder whose test encode stands in for one that was
@@ -680,39 +672,13 @@ func hardwareFallbackOrder(tools *ffmpeg.Tools) []string {
 
 // ------------------------------------------------------------ hardware scan
 
-// hardware caches the GPU enumeration.
-//
-// It is package scope rather than a Server field because it describes the
-// machine, not a server instance — there is one of each per process, and a
-// second Server in a test is still looking at the same PCI bus. The mutex is
-// also the single-flight: a user leaning on the re-detect button must not spawn
-// one set of test encodes per click.
-var hardware struct {
-	mu   sync.Mutex
-	info ffmpeg.GPUInfo
-	done bool
-}
-
-// machineGPUs returns the cached enumeration, scanning once on first ask.
-//
-// The scan is capped at three seconds and cannot fail, so a wedged driver costs
-// a slow first request rather than a broken page.
-func machineGPUs(ctx context.Context) ffmpeg.GPUInfo {
-	hardware.mu.Lock()
-	defer hardware.mu.Unlock()
-	if !hardware.done {
-		hardware.info = ffmpeg.DetectGPUs(ctx)
-		hardware.done = true
-	}
-	return hardware.info
-}
-
 // redetectHardware re-enumerates the GPUs and re-runs every test encode.
 //
 // This is the answer to hardware that moved after launch: a driver package
 // upgraded, a card passed into the container after the fact, a laptop back from
 // suspend with a render node that now opens. Neither half can fail, so there is
-// nothing to return but the new answer.
+// nothing to return but the new answer. Tools owns the enumeration, so the
+// engines read the new render node on their next rendition start.
 //
 // The request's cancellation is deliberately dropped. A probe that is cancelled
 // reports every encoder as not working, and that verdict is cached — so a user
@@ -720,16 +686,12 @@ func machineGPUs(ctx context.Context) ffmpeg.GPUInfo {
 // encoders at all, and every rendition would then be refused. The scan is
 // self-limiting (three seconds for the devices, ten for the probes together),
 // so there is nothing here that needs the client to stay to bound it.
-func redetectHardware(ctx context.Context, tools *ffmpeg.Tools) ffmpeg.GPUInfo {
+func redetectHardware(ctx context.Context, tools *ffmpeg.Tools) ffmpeg.Probed {
 	scan, cancel := context.WithTimeout(context.WithoutCancel(ctx), redetectCeiling)
 	defer cancel()
 
-	hardware.mu.Lock()
-	defer hardware.mu.Unlock()
-	hardware.info = ffmpeg.DetectGPUs(scan)
-	hardware.done = true
 	tools.RefreshEncoderCapabilities(scan)
-	return hardware.info
+	return tools.Probed(scan, true)
 }
 
 // redetectCeiling is a backstop, not the real bound — the GPU scan and the
@@ -806,7 +768,9 @@ func (s *Server) handleRenditionConcerns(w http.ResponseWriter, r *http.Request)
 	// asks BEFORE the destination is saved: the operator is choosing a platform
 	// and a rendition together, and neither exists in the database yet.
 	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
-	concerns := db.RenditionConcerns(row, platform)
+	// The preset the destination was made from, when the caller knows it: it is
+	// what finds the guidance for a platform that saves as "custom".
+	concerns := db.RenditionConcerns(row, platform, strings.TrimSpace(r.URL.Query().Get("preset")))
 	if concerns == nil {
 		// A JSON null here would make the browser check for one; an empty list
 		// says "compared, nothing to say" in the same shape as "compared, here

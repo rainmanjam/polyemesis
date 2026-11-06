@@ -114,7 +114,7 @@ func TestTikTokNeverOffersAStreamKey(t *testing.T) {
 	if NewTikTok().ManualKeyReason() == "" {
 		t.Fatal("no manual key reason")
 	}
-	if _, ok := ManualKeyFor(db.PlatformTikTok); !ok {
+	if _, ok := As[ManualKey](Set{}, db.PlatformTikTok); !ok {
 		t.Fatal("TikTok is not advertised as manual-key")
 	}
 }

@@ -20,18 +20,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // ContentType is what a scrape expects back. Prometheus sniffs the version
 // parameter, so it is not merely text/plain.
 const ContentType = "text/plain; version=0.0.4; charset=utf-8"
 
-// processStates mirrors supervisor.State. Every state is emitted for every
-// process, not just the current one, so that `state="failed"` is a series that
-// sits at 0 rather than one that blinks in and out of existence — an alert on
-// a series that does not exist yet never fires.
-var processStates = []string{"stopped", "starting", "running", "reconnecting", "failed"}
+// processStates is supervisor.States as label values. Every state is emitted
+// for every process, not just the current one, so that `state="failed"` is a
+// series that sits at 0 rather than one that blinks in and out of existence --
+// an alert on a series that does not exist yet never fires.
+var processStates = func() []string {
+	var out []string
+	for _, st := range supervisor.States() {
+		out = append(out, string(st))
+	}
+	return out
+}()
 
 const stateRunning = "running"
 
@@ -227,7 +235,7 @@ type Failover struct {
 // failoverSources is every kind the selector can put on air, emitted for every
 // programme with a tier so that `source="slate"` sits at 0 rather than
 // appearing only once the slate has been used.
-var failoverSources = []string{"primary", "backup", "playlist", "slate"}
+var failoverSources = engine.FailoverSources()
 
 // Destination is one output, plus the labels identifying it.
 type Destination struct {
@@ -908,7 +916,11 @@ func formatValue(v float64) string {
 }
 
 // delivering is what polyemesis_destination_up reports: running, and not
-// stalled.
+// stalled. It differs from engine.DestStatus.IsUp on purpose: a stalled
+// destination is down to an alert even though the engine (and the console's
+// on-air count) still calls it up. This package cannot import the engine; State
+// is "running" only for a destination with a live process, so an errored one
+// (no process) is already stopped here.
 func delivering(dest Destination) bool {
 	return dest.State == stateRunning && !dest.Stalled
 }

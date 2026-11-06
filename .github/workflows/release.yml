@@ -211,18 +211,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: install.sh parses and its argument validator refuses bad input
-        run: |
-          set -euo pipefail
-          bash -n scripts/install.sh
-          bash -n scripts/acceptance-install.sh
-          for bad in "--mode wat" "--tls wat" "--http-port abc" "--http-port 70000" "--srt-port 0" "--rtmp-port 70000" "--version latest" "--version 0.10.0" "--version v0.10" "--mode docker --version v0.10.0" "--unknown"; do
-            # shellcheck disable=SC2086
-            if bash scripts/install.sh $bad >/dev/null 2>&1; then
-              echo "::error::install.sh accepted '${bad}'. The argument validator is what stands between an operator's typo and a half-configured host."
-              exit 1
-            fi
-            echo "refused: ${bad}"
-          done
+        run: scripts/check-installer-flags.sh
 
       - name: Installer acceptance
         run: ./scripts/acceptance-install.sh

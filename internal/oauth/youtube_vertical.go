@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast.
@@ -36,10 +38,8 @@ func ytVerticalStreamTitle(label string) string {
 	if l := strings.TrimSpace(label); l != "" {
 		body = ytStreamTitleBase + " - " + l
 	}
-	room := ytStreamTitleMax - len([]rune(ytVerticalMarker))
-	if r := []rune(body); len(r) > room {
-		body = string(r[:room])
-	}
+	room := ytStreamTitleMax - platform.UTF16Len(ytVerticalMarker)
+	body = platform.UTF16Truncate(body, room)
 	return body + ytVerticalMarker
 }
 
@@ -80,7 +80,7 @@ func (y *YouTube) CreateVerticalStream(ctx context.Context, accessToken, label s
 			"frameRate":     "variable",
 		},
 	}
-	err := postJSON(ctx,
+	err := y.postJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -130,7 +130,7 @@ func (y *YouTube) VerticalStreamHealth(ctx context.Context, accessToken, streamI
 			} `json:"status"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx, y.apiEndpoint()+ytStreamsPath+"?part=id,status&id="+url.QueryEscape(id),
+	err := y.getJSON(ctx, y.apiEndpoint()+ytStreamsPath+"?part=id,status&id="+url.QueryEscape(id),
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err

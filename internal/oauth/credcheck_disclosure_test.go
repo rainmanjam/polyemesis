@@ -21,7 +21,7 @@ import (
  * into the message an operator sees and the logs keep. A DNS outage, a
  * timeout, a TLS failure: any of them printed the app secret.
  *
- * alerts.ClientErrorText exists for exactly this. It unwraps *url.Error and
+ * redact.ClientErrorText exists for exactly this. It unwraps *url.Error and
  * keeps the cause without the URL.
  */
 

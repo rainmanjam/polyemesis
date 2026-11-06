@@ -1,6 +1,9 @@
 package clips
 
-import "testing"
+import (
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
+	"testing"
+)
 
 // Synthetic transport stream, built to the same shapes FFmpeg's mpegts muxer
 // emits: a PAT naming one program, a PMT naming an H.264 video PID and an AAC
@@ -15,11 +18,11 @@ const (
 
 // tsPacket lays out one 188-byte packet.
 func tsPacket(pid uint16, pusi bool, adaptation []byte, payload []byte) []byte {
-	p := make([]byte, tsPacketSize)
+	p := make([]byte, mpegts.PacketSize)
 	for i := range p {
 		p[i] = 0xFF // stuffing, so an under-filled packet is still 188 bytes
 	}
-	p[0] = tsSyncByte
+	p[0] = mpegts.SyncByte
 	p[1] = byte(pid >> 8 & 0x1F)
 	if pusi {
 		p[1] |= 0x40
@@ -47,7 +50,7 @@ func patPacket() []byte {
 		byte(0xE0 | testPMTPID>>8), byte(testPMTPID & 0xFF),
 		0x00, 0x00, 0x00, 0x00, // CRC
 	}
-	return tsPacket(pidPAT, true, nil, append([]byte{0x00}, sec...))
+	return tsPacket(mpegts.PIDPAT, true, nil, append([]byte{0x00}, sec...))
 }
 
 func pmtPacket() []byte {
@@ -138,7 +141,7 @@ func TestRandomAccessFindsOnlyFlaggedVideoPackets(t *testing.T) {
 		{
 			name:    "a flagged video packet is found at its own offset",
 			dgram:   datagram(audioPacket(), videoPacket(false), videoPacket(true), audioPacket()),
-			wantOff: 2 * tsPacketSize, wantOK: true,
+			wantOff: 2 * mpegts.PacketSize, wantOK: true,
 		},
 		{
 			name:    "the first flagged packet wins",
@@ -176,10 +179,10 @@ func TestPSIIsReEmittedAtTheHeadOfACut(t *testing.T) {
 	}
 	d.observe(datagram(patPacket(), pmtPacket()))
 	psi := d.psi()
-	if len(psi) != 2*tsPacketSize {
+	if len(psi) != 2*mpegts.PacketSize {
 		t.Fatalf("psi = %d bytes, want the PAT and the PMT", len(psi))
 	}
-	if packetPID(psi[:tsPacketSize]) != pidPAT || packetPID(psi[tsPacketSize:]) != testPMTPID {
+	if mpegts.PID(psi[:mpegts.PacketSize]) != mpegts.PIDPAT || mpegts.PID(psi[mpegts.PacketSize:]) != testPMTPID {
 		t.Fatal("the PAT must come before the PMT, or a player cannot follow the pointer")
 	}
 }

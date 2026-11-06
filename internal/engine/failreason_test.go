@@ -10,6 +10,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -156,7 +157,7 @@ func TestAHeldDestinationIsNotRevivedByAMoreForgivingPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	proc := supervisor.New(testLogger(), supervisor.Spec{
-		Name: destSubName(7, ""), Bin: self, Args: []string{"rtmp://ingest.example/live/k"},
+		Name: procname.DestProcessName(7, ""), Bin: self, Args: []string{"rtmp://ingest.example/live/k"},
 		AutoRestart: true, MinBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
 		MaxRestarts:              2,
 		HoldAfterQuickRejections: destHoldAfterQuickRejections,

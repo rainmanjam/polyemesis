@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The recurrence guard for #229: a pull source's mid-path and non-table query
@@ -46,14 +46,14 @@ const (
 	// the half urlSecrets' last-segment-only rule inverted: it masked
 	// `stream1` and rendered this one.
 	pullMidPathSentinel = "SENTINEL-pull-midpath-2f8c"
-	// A query value under a name outside alerts.secretParam's twenty. `hdnts`
+	// A query value under a name outside redact.secretParam's twenty. `hdnts`
 	// is Akamai's; `authcode` and `policy` are two more that already exist in
 	// the wild. SecretName is an exact lookup with no fallback, so all three
 	// were rendered.
 	pullQuerySentinel = "SENTINEL-pull-hdnts-2f8c"
 	// SIX CHARACTERS, and that is the whole point of this one.
 	//
-	// alerts.NewSecretSet REFUSES any literal shorter than alerts.MinSecretLen
+	// redact.NewSecretSet REFUSES any literal shorter than redact.MinSecretLen
 	// (8). So the fix the issue suggests first -- add every path segment to the
 	// set -- drops this on the floor, and because the neighbouring filename IS
 	// long enough the mask relocates there and the output still reads as
@@ -69,12 +69,12 @@ const pullURLUnderTest = "rtsp://cam.example/live/" + pullMidPathSentinel + "/" 
 	pullShortSentinel + "/stream1?hdnts=" + pullQuerySentinel + "&format=ts"
 
 func TestPullSourceCredentialsAreNotRenderedToAReadScopedToken(t *testing.T) {
-	if len(pullShortSentinel) >= alerts.MinSecretLen {
+	if len(pullShortSentinel) >= redact.MinSecretLen {
 		t.Fatalf("the short-segment fixture is %d characters, at or above "+
-			"alerts.MinSecretLen (%d). It exists to be BELOW that floor -- above it "+
+			"redact.MinSecretLen (%d). It exists to be BELOW that floor -- above it "+
 			"the segment enters the secret set on its own and this test no longer "+
 			"distinguishes the shipped fix from the one that leaks.",
-			len(pullShortSentinel), alerts.MinSecretLen)
+			len(pullShortSentinel), redact.MinSecretLen)
 	}
 
 	h, store, sign := pullSourceServer(t)

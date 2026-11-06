@@ -27,6 +27,7 @@ import {
   THUMBNAIL_TYPES,
 } from "@/lib/recurringApi";
 import type { BroadcastTemplate } from "@/lib/types";
+import { timestamp } from "@/lib/format";
 
 /** The server's own bound on look-ahead (scheduler.MaxLookahead). The form enforces it too, so an
  *  out-of-range number is caught before the request. */
@@ -177,7 +178,7 @@ export function BroadcastTemplateEditor({ scheduleId }: { scheduleId: number }) 
           <p>{tpl.lastError}</p>
           {tpl.lastErrorAt ? (
             <p className="text-xs">
-              {t("wave3.recurring.lastErrorAt", { time: new Date(tpl.lastErrorAt).toLocaleString() })}
+              {t("wave3.recurring.lastErrorAt", { time: timestamp(tpl.lastErrorAt) })}
             </p>
           ) : null}
         </div>

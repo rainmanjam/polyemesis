@@ -2,7 +2,7 @@ package routing
 
 import "testing"
 
-// The same cases as ui/src/lib/presetTrackDefaults.test.ts presetOptsFromRoles,
+// The same cases as ui/src/features/routing/presetTrackDefaults.test.ts presetOptsFromRoles,
 // less the operator's hand picks (a bodyless apply has none: a body replaces
 // the options outright). If the console's rule moves, this is the twin that has
 // to move with it.

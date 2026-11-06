@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // #229's residual: THE SPELLING OF THE SECRET HAS TO MATCH THE SPELLING IN THE
@@ -29,7 +29,7 @@ import (
 // the password does not survive the scrub, so that is what is asserted.
 
 // encodedCreds are passwords that url.URL will decode into something other than
-// what the command line carries. Each is at least alerts.MinSecretLen (8) long
+// what the command line carries. Each is at least redact.MinSecretLen (8) long
 // once encoded AND once decoded, because SecretSet drops anything shorter and a
 // case that was dropped for length would prove nothing about spelling.
 var encodedCreds = []struct {
@@ -49,7 +49,7 @@ func TestAPercentEncodedPullPasswordDoesNotSurviveInArgv(t *testing.T) {
 			raw := "rtsp://operator:" + c.rawPass + "@cam.example.com/stream/1"
 			pull := db.PullSettings{URL: raw}
 
-			set := alerts.NewSecretSet(slog.New(slog.NewTextHandler(discard{}, nil)),
+			set := redact.NewSecretSet(slog.New(slog.NewTextHandler(discard{}, nil)),
 				ingestSecrets(db.SRTSettings{}, db.RTMPSettings{}, pull, "")...)
 
 			// The argv an ingest child is actually handed carries the URL
@@ -88,7 +88,7 @@ func TestAPercentEncodedDestinationPasswordDoesNotSurviveInArgv(t *testing.T) {
 			raw := "rtmp://publisher:" + c.rawPass + "@ingest.example.com/live"
 			row := &db.Destination{URL: raw}
 
-			set := alerts.NewSecretSet(slog.New(slog.NewTextHandler(discard{}, nil)),
+			set := redact.NewSecretSet(slog.New(slog.NewTextHandler(discard{}, nil)),
 				destSecrets(row)...)
 
 			argv := []string{"ffmpeg", "-i", "-", "-c", "copy", "-f", "flv", raw}

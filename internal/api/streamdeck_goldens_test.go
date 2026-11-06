@@ -548,6 +548,11 @@ func deckJSON(t *testing.T, v any) []byte {
 	return buf.Bytes()
 }
 
+// deckWireFile lives in the goldens' directory but is not a recorded answer: it
+// is the server's wire words and limits, written by TestWireContract
+// (wire_contract_test.go) and read by test/wireContract.test.ts.
+const deckWireFile = "wire.json"
+
 func writeDeckGoldens(t *testing.T, files map[string][]byte) {
 	t.Helper()
 	if err := os.MkdirAll(deckGoldenDir, 0o755); err != nil {
@@ -555,7 +560,7 @@ func writeDeckGoldens(t *testing.T, files map[string][]byte) {
 	}
 	old, _ := filepath.Glob(filepath.Join(deckGoldenDir, "*.json"))
 	for _, p := range old {
-		if _, keep := files[filepath.Base(p)]; !keep {
+		if _, keep := files[filepath.Base(p)]; !keep && filepath.Base(p) != deckWireFile {
 			if err := os.Remove(p); err != nil {
 				t.Fatal(err)
 			}
@@ -576,7 +581,7 @@ func compareDeckGoldens(t *testing.T, files map[string][]byte) {
 	const regen = "go test ./internal/api/ -run TestTheStreamDeckContract -update-streamdeck-contract"
 	on, _ := filepath.Glob(filepath.Join(deckGoldenDir, "*.json"))
 	for _, p := range on {
-		if _, ok := files[filepath.Base(p)]; !ok {
+		if _, ok := files[filepath.Base(p)]; !ok && filepath.Base(p) != deckWireFile {
 			t.Errorf("%s is committed but no case records it; delete it or regenerate: %s", p, regen)
 		}
 	}

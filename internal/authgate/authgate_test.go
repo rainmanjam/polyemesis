@@ -148,3 +148,18 @@ type fakeAddr string
 
 func (a fakeAddr) Network() string { return "fake" }
 func (a fakeAddr) String() string  { return string(a) }
+
+// An IPv6 client is its /64, as in the web login throttle: rotating the low
+// bits of the address must not mint a fresh budget.
+func TestARotatingIPv6AddressInOneSlash64SharesOneBudget(t *testing.T) {
+	g := New()
+	for i := 0; i < Threshold; i++ {
+		g.Fail("2001:db8:1:2::" + string(rune('a'+i)))
+	}
+	if !g.Blocked("2001:db8:1:2::ffff") {
+		t.Fatal("a sixth address in the same /64 was not blocked")
+	}
+	if g.Blocked("2001:db8:1:3::1") {
+		t.Fatal("a different /64 was blocked")
+	}
+}

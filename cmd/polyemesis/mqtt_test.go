@@ -53,7 +53,7 @@ func TestEveryConnectionChangingFieldIsInTheMQTTSignature(t *testing.T) {
 func TestAnUnrelatedSettingDoesNotCycleTheConnection(t *testing.T) {
 	c := mqttCfg()
 	before := mqttSig(c, "hunter22")
-	// The publish interval changes the loop's ticker, not the link.
+	// The publish interval moves the loop's ticker (see reconcile), not the link.
 	c.IntervalSecond = 30
 	if mqttSig(c, "hunter22") != before {
 		t.Error("changing the publish interval reconnects to the broker, which drops " +

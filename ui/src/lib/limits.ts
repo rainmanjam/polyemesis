@@ -15,8 +15,7 @@
  *  Source of truth, for anyone updating these:
  *    port            internal/db/settings.go, IngestSettings.problems
  *    srtLatencyMs    same
- *    srtPassphrase   same (SRT's own 10..79 constraint)
- *    rendition*      internal/db/renditions.go, the Min/Max consts
+ *    rendition       not here: WIRE.renditionBounds, generated from internal/db
  *    audioBitrate    internal/db/destinations.go, Validate
  */
 export interface Bound {
@@ -33,14 +32,6 @@ export const LIMITS = {
   /** SRT receive buffer. Below ~20ms the protocol cannot recover anything;
    *  above 8s the glass-to-glass delay stops being live. */
   srtLatencyMs: { min: 20, max: 8000 } as Bound,
-
-  /** SRT's own constraint on passphrase length, not ours. */
-  srtPassphrase: { min: 10, max: 79 } as Bound,
-
-  renditionDimension: { min: 128, max: 7680 } as Bound,
-  renditionFPS: { min: 1, max: 240 } as Bound,
-  renditionBitrateKbps: { min: 100, max: 100_000 } as Bound,
-  renditionGOPSeconds: { min: 1, max: 10 } as Bound,
 
   audioBitrateKbps: { min: 32, max: 512 } as Bound,
 

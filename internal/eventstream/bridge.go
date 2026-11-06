@@ -45,3 +45,19 @@ func BridgeBus(ctx context.Context, bus *events.Broker, hub *Hub) {
 		}
 	}
 }
+
+// BusReadAccess is what a read-scoped token gets of an in-process bus type this
+// stream carries, from the same catalogue row /events applies. ok is false for
+// a bus type the stream does not carry. /ws asks it for those types so the two
+// surfaces cannot classify one event two ways.
+func BusReadAccess(t events.Type) (Access, bool) {
+	st, ok := busTypes[t]
+	if !ok {
+		return Withheld, false
+	}
+	spec, found := Lookup(st)
+	if !found {
+		return Withheld, true
+	}
+	return spec.ReadScope, true
+}

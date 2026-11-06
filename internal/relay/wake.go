@@ -1,5 +1,7 @@
 package relay
 
+import "github.com/rainmanjam/polyemesis/internal/mpegts"
+
 // maxPESPIDs bounds the table Hub.Wake draws on. A multitrack OBS publish is
 // one video and up to six audio PIDs; a publisher that changes its PIDs between
 // sessions adds a few more. Past the bound the oldest is forgotten, which costs
@@ -24,9 +26,9 @@ type pesStarts struct {
 // every datagram beside continuity.inspect: a few branches per packet, and a
 // store only when a PID or its stream_id is new.
 func (t *pesStarts) learn(dgram []byte) {
-	for off := 0; off+tsPacketSize <= len(dgram); off += tsPacketSize {
-		p := dgram[off : off+tsPacketSize]
-		if p[0] != tsSyncByte {
+	for off := 0; off+mpegts.PacketSize <= len(dgram); off += mpegts.PacketSize {
+		p := dgram[off : off+mpegts.PacketSize]
+		if p[0] != mpegts.SyncByte {
 			return
 		}
 		// payload_unit_start_indicator, with a payload present.
@@ -40,7 +42,7 @@ func (t *pesStarts) learn(dgram []byte) {
 		// A PES begins with the 00 00 01 start code. PSI sections -- the PAT and
 		// PMT -- set the same bit and do not, and opening a "PES" on one would
 		// hand the section parser garbage.
-		if start+4 > tsPacketSize || p[start] != 0 || p[start+1] != 0 || p[start+2] != 1 {
+		if start+4 > mpegts.PacketSize || p[start] != 0 || p[start+1] != 0 || p[start+2] != 1 {
 			continue
 		}
 		pid := uint16(p[1]&0x1F)<<8 | uint16(p[2])
@@ -71,8 +73,8 @@ func (t *pesStarts) wake(cc *continuity, seq uint8) [][]byte {
 	var out [][]byte
 	var cur []byte
 	for _, pid := range t.pids {
-		p := make([]byte, tsPacketSize)
-		p[0] = tsSyncByte
+		p := make([]byte, mpegts.PacketSize)
+		p[0] = mpegts.SyncByte
 		p[1] = 0x40 | byte(pid>>8)&0x1F
 		p[2] = byte(pid)
 		// adaptation_field_control 11: an adaptation field, then the payload.
@@ -87,19 +89,19 @@ func (t *pesStarts) wake(cc *continuity, seq uint8) [][]byte {
 		// the adaptation field instead, the payload is the header alone: the PES
 		// it opens is empty, and an empty PES is never emitted however many
 		// wakes follow.
-		p[4] = byte(tsPacketSize - 5 - len(emptyPES))
+		p[4] = byte(mpegts.PacketSize - 5 - len(emptyPES))
 		p[5] = 0 // no adaptation flags
-		for i := 6; i < tsPacketSize-len(emptyPES); i++ {
+		for i := 6; i < mpegts.PacketSize-len(emptyPES); i++ {
 			p[i] = 0xFF
 		}
 		// An empty PES header: start code, stream_id, PES_packet_length 0 (legal
 		// for video, and harmless for audio since this PES carries nothing),
 		// then the '10' marker bits, no flags and a zero header length.
-		h := p[tsPacketSize-len(emptyPES):]
+		h := p[mpegts.PacketSize-len(emptyPES):]
 		copy(h, emptyPES[:])
 		h[3] = t.streamID[pid]
 		cur = append(cur, p...)
-		if len(cur) == 7*tsPacketSize {
+		if len(cur) == 7*mpegts.PacketSize {
 			out = append(out, cur)
 			cur = nil
 		}

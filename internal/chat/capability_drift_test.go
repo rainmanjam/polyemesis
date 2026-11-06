@@ -5,6 +5,8 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 /* THE GUARD TEST automod.PlatformCaps SAYS IT ALREADY HAS.
@@ -28,18 +30,6 @@ import (
  * adapter satisfies Banner, which is a property of the TYPE. Constructing live
  * adapters would need credentials and would test the constructor instead.
  */
-
-// adapterTypes is one nil-valued pointer per platform adapter, purely so the
-// interface assertions below have something to assert against.
-var adapterTypes = map[db.Platform]any{
-	db.PlatformKick:     (*KickAdapter)(nil),
-	db.PlatformTwitch:   (*TwitchAdapter)(nil),
-	db.PlatformYouTube:  (*YouTubeAdapter)(nil),
-	db.PlatformFacebook: (*FacebookAdapter)(nil),
-	// X has Deleter (DELETE .../chat/{id}) and Banner (mute and unmute). It has
-	// no Hider, because X offers no hide action.
-	db.PlatformX: (*XAdapter)(nil),
-}
 
 // implements reports what the platform's adapter can actually do.
 func implements(t *testing.T, p db.Platform, a automod.Action) bool {
@@ -90,6 +80,79 @@ func TestTheCapabilityTableMatchesWhatTheAdaptersImplement(t *testing.T) {
 					"  unavailable cell be \"inert and explained\", and the reason is shown\n"+
 					"  to the operator.", p, a)
 			}
+		}
+	}
+}
+
+// The platform registry describes the same platforms the adapters implement, in
+// a package that cannot import chat. This is the join: every adapter's profile
+// must equal what the registry says, and the registry must not describe an
+// adapter that does not exist.
+func TestRegistryAgreesWithTheChatAdapters(t *testing.T) {
+	// The other direction: an adapter with no registry row is a platform chat
+	// can talk to that the registry has never heard of.
+	for p := range adapterTypes {
+		if _, ok := platform.ByEnum(string(p)); !ok {
+			t.Errorf("chat has an adapter for %s and the platform registry has no row for it", p)
+		}
+	}
+	for _, row := range platform.All() {
+		if row.Enum == "" {
+			continue
+		}
+		pr, hasAdapter := ProfileOf(db.Platform(row.Enum))
+		if !hasAdapter {
+			if row.Chat.SendMax != 0 || row.Moderation != nil {
+				t.Errorf("%s: the registry describes chat for a platform with no adapter", row.Key)
+			}
+			continue
+		}
+		if sends := row.Chat.SendMax > 0; sends != pr.Send {
+			t.Errorf("%s: registry send=%v, adapter send=%v", row.Key, sends, pr.Send)
+		}
+		if row.Chat.SendMax != pr.SendMax {
+			t.Errorf("%s: registry send max %d, adapter enforces %d", row.Key, row.Chat.SendMax, pr.SendMax)
+		}
+		var m platform.Moderation
+		if row.Moderation != nil {
+			m = *row.Moderation
+		}
+		if m.Delete != pr.Delete || m.TimeoutBan != pr.Ban || m.Hide != pr.Hide {
+			t.Errorf("%s: registry delete/ban/hide = %v/%v/%v, adapter = %v/%v/%v",
+				row.Key, m.Delete, m.TimeoutBan, m.Hide, pr.Delete, pr.Ban, pr.Hide)
+		}
+	}
+}
+
+// The oauth capability matrix is what the console and docs/PLATFORMS.md show an
+// operator; the profile is what the adapter's type can actually do. oauth
+// cannot import chat, so this is the join: a platform whose adapter sends must
+// not read as unable to (or unverified), and the reverse.
+func TestTheCapabilityMatrixAgreesWithTheChatProfiles(t *testing.T) {
+	for p := range adapterTypes {
+		row, ok := oauth.CapabilityForPlatform(p)
+		if !ok {
+			t.Errorf("%s has a chat adapter and no capability row", p)
+			continue
+		}
+		pr, _ := ProfileOf(p)
+		moderates := pr.Delete || pr.Ban || pr.Hide
+		// X's adapter is built but only attached behind POLYEMESIS_X_LIVESTREAM
+		// and never run against a whitelisted app, so its cells may say
+		// Unverified; the rule for it is only that they must not say No. Every
+		// other platform's cell is Yes exactly when the adapter can do it.
+		liveGated := p == db.PlatformX
+		agrees := func(cell oauth.Support, can bool) bool {
+			if liveGated {
+				return !can || cell != oauth.SupportNo
+			}
+			return (cell == oauth.SupportYes) == can
+		}
+		if cell := row.Get(oauth.CapChatSend); !agrees(cell, pr.Send) {
+			t.Errorf("%s: matrix chat send = %q, adapter sends=%v", p, cell, pr.Send)
+		}
+		if cell := row.Get(oauth.CapModeration); !agrees(cell, moderates) {
+			t.Errorf("%s: matrix moderation = %q, adapter moderates=%v", p, cell, moderates)
 		}
 	}
 }

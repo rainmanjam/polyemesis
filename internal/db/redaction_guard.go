@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // A CREDENTIAL CARRYING THE REDACTION PLACEHOLDER IS REFUSED ON THE WAY IN.
 //
 // Readiness review row 16. A read-scoped token sees these fields blanked or
 // masked -- backupStreamKey and the two expert-argument fields come back as the
-// literal alerts.Mask, a URL with its credential part replaced by it (see
+// literal redact.Mask, a URL with its credential part replaced by it (see
 // internal/api/redact.go) -- and docs/API.md says, deliberately, that the
 // document keeps its shape so a client can read it, edit it and PUT it back.
 // That round-trip is the hazard. The response a read token was handed, replayed
@@ -27,7 +27,7 @@ import (
 // by the placeholder" after the decode. Refused instead, naming the field, so
 // the caller learns which value it has to send for real.
 //
-// THE SAME CONSTANT THE REDACTION WRITES. alerts.Mask is what redact.go puts in
+// THE SAME CONSTANT THE REDACTION WRITES. redact.Mask is what redact.go puts in
 // these fields, so the spelling this refuses cannot drift from the spelling a
 // read token is shown. A value CONTAINING it is refused, not only one equal to
 // it, because a URL is masked in part ("rtmp://host/app/[redacted]"). No real
@@ -47,11 +47,11 @@ type credentialField struct {
 func redactionPlaceholderProblems(fields ...credentialField) []string {
 	var probs []string
 	for _, f := range fields {
-		if strings.Contains(f.value, alerts.Mask) {
+		if strings.Contains(f.value, redact.Mask) {
 			probs = append(probs, fmt.Sprintf(
 				"%s carries the redaction placeholder %q, which is what a read-only "+
 					"view shows in place of the real value -- send the real value, or leave "+
-					"the field as it is stored", f.path, alerts.Mask))
+					"the field as it is stored", f.path, redact.Mask))
 		}
 	}
 	return probs

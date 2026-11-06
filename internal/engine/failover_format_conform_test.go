@@ -40,8 +40,8 @@ import (
 // copied). Across a switch the destination then decodes one format throughout,
 // and the graph is never rebuilt.
 //
-// These tests drive the production command lines -- relayFeedArgs for the
-// primary, conformedFeedArgs for the backup, SlateArgs over the engine's
+// These tests drive the production command lines -- ffmpeg.RelayFeedArgs for the
+// primary, ffmpeg.ConformedFeedArgs for the backup, SlateArgs over the engine's
 // slateSpec for the slate -- with only their URLs pointed at files, through the
 // production DestinationArgs, against a two-track compiled profile. The
 // measurement is #931's: "hidden audio", how much longer the decoded samples
@@ -102,7 +102,7 @@ func TestTheSlateIsBuiltAtThePrimarysMeasuredSampleRateAndChannelCount(t *testin
 // the plain copy hop.
 func TestAStandbyFeedReencodesEachTrackToThePrimarysFormatAndStillCopiesTheVideo(t *testing.T) {
 	in, out := "udp://127.0.0.1:21001", "udp://127.0.0.1:21002"
-	args := conformedFeedArgs(in, out, 12.5, append(primaryMono441,
+	args := ffmpeg.ConformedFeedArgs(in, out, 12.5, append(primaryMono441,
 		ffmpeg.AudioStream{Index: 2, Codec: "aac", Channels: 6, Layout: "5.1", SampleRate: 48000}))
 
 	for _, pair := range [][2]string{
@@ -129,16 +129,16 @@ func TestAStandbyFeedReencodesEachTrackToThePrimarysFormatAndStillCopiesTheVideo
 		t.Errorf("the standby feed does not copy video: %q", args)
 	}
 
-	if got, want := conformedFeedArgs(in, out, 12.5, nil), relayFeedArgs(in, out, 12.5); !slices.Equal(got, want) {
+	if got, want := ffmpeg.ConformedFeedArgs(in, out, 12.5, nil), ffmpeg.RelayFeedArgs(in, out, 12.5); !slices.Equal(got, want) {
 		t.Errorf("with no measured primary the standby feed is\n%q\nwant the plain copy hop\n%q", got, want)
 	}
 }
 
 // The wiring, through startFeed itself: the backup's process is conformed and
 // the primary's is the untouched copy hop. Without this the two argv tests
-// above would pass against a startFeed that never called conformedFeedArgs.
+// above would pass against a startFeed that never called ffmpeg.ConformedFeedArgs.
 //
-// MUTATION: build the backup with relayFeedArgs in startFeed. Observed: FAIL.
+// MUTATION: build the backup with ffmpeg.RelayFeedArgs in startFeed. Observed: FAIL.
 func TestStartFeedConformsTheBackupsAudioAndLeavesThePrimaryACopy(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
@@ -271,7 +271,7 @@ func hiddenSeconds(t *testing.T, ffmpegBin, ffprobeBin, path string) float64 {
 // backup encoder, or the slate -- then the primary back. Routed 0+1, so the
 // destination's graph is the multi-track one with trackAlign on each leg.
 //
-// MUTATION: make conformedFeedArgs return relayFeedArgs unchanged, and drop the
+// MUTATION: make ffmpeg.ConformedFeedArgs return ffmpeg.RelayFeedArgs unchanged, and drop the
 // audio lines from slateSpec -- which is origin/main. Observed: FAIL, backup
 // 39.89 s hidden and slate 39.98 s hidden: two rebuilds, onto the standby at
 // 23 s and back onto the primary at 33 s, each padding from zero to where it
@@ -305,14 +305,14 @@ func TestAMultiTrackDestinationKeepsItsAudioOnTheVideoAcrossAFailoverOntoAStandb
 
 			p1 := filepath.Join(dir, "primary.ts")
 			formatFixture(t, ffmpegBin, p1, 20, 2, 44100, 1)
-			relay = append(relay, hop("primary", relayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 0), p1, 0)...)
+			relay = append(relay, hop("primary", ffmpeg.RelayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 0), p1, 0)...)
 
 			switch standby {
 			case "backup":
 				b := filepath.Join(dir, "backup.ts")
 				formatFixture(t, ffmpegBin, b, 10, 1, 48000, 2)
 				relay = append(relay, hop("backup",
-					conformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 23, primary), b, 0)...)
+					ffmpeg.ConformedFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 23, primary), b, 0)...)
 			case "slate":
 				spec, _ := e.slateSpec(db.DefaultSettings(), "udp://127.0.0.1:2", 23)
 				spec.Preset = "ultrafast"
@@ -321,7 +321,7 @@ func TestAMultiTrackDestinationKeepsItsAudioOnTheVideoAcrossAFailoverOntoAStandb
 
 			p2 := filepath.Join(dir, "primary-again.ts")
 			formatFixture(t, ffmpegBin, p2, 10, 2, 44100, 1)
-			relay = append(relay, hop("primary-again", relayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 33), p2, 0)...)
+			relay = append(relay, hop("primary-again", ffmpeg.RelayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", 33), p2, 0)...)
 
 			relayPath := filepath.Join(dir, "relay.ts")
 			if err := os.WriteFile(relayPath, relay, 0o600); err != nil {

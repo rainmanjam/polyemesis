@@ -32,7 +32,7 @@ import (
 // working, and nothing in the logs blames the thing that did it.
 func TestEditingBroadcastLifecycleBookkeepingWouldNotRestartALiveDestination(t *testing.T) {
 	compiled := routing.Result{FilterComplex: "[0:a:0]anull[out]", OutLabel: "[out]"}
-	basePrimary := destSpec(testDestination(7, nil), compiled, "")
+	basePrimary := destSpec(testDestination(7, nil), compiled, "", false)
 	baseBackup := backupSpecOf(testDestination(7, nil), compiled, "")
 
 	// One case per field, plus the whole block at once. Per field because a
@@ -68,7 +68,7 @@ func TestEditingBroadcastLifecycleBookkeepingWouldNotRestartALiveDestination(t *
 		t.Run(tc.name, func(t *testing.T) {
 			row := testDestination(7, nil)
 			tc.mutate(row)
-			if got := destSpec(row, compiled, ""); got != basePrimary {
+			if got := destSpec(row, compiled, "", false); got != basePrimary {
 				t.Errorf("the primary spec changed: %s would restart a live destination, "+
 					"and the operator's stream drops at the moment their broadcast starts "+
 					"working", tc.name)

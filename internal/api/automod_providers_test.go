@@ -17,6 +17,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/diag"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -198,7 +199,7 @@ func TestTheMatrixServesThePresetTable(t *testing.T) {
 func TestTheDefaultCheckerSettingsMatchThePresetTable(t *testing.T) {
 	d := db.DefaultSettings().Automod
 	for _, m := range []db.AutomodModel{d.Model, d.Secondary} {
-		p := automod.ResolvePreset(protocolOf(m), m.Preset)
+		p := automod.ResolvePreset(automod.ProtocolOf(m), m.Preset)
 		if p.ID != m.Preset || p.Endpoint != m.Endpoint || p.Model != m.Model {
 			t.Errorf("default %+v disagrees with preset %+v", m, p)
 		}
@@ -206,7 +207,7 @@ func TestTheDefaultCheckerSettingsMatchThePresetTable(t *testing.T) {
 	if string(automod.ProtocolJev) != db.AutomodProtocolJev || string(automod.ProtocolOpenAI) != db.AutomodProtocolOpenAI {
 		t.Fatal("db's protocol names drifted from automod's")
 	}
-	if protocolOf(d.Model) != automod.ProtocolJev {
+	if automod.ProtocolOf(d.Model) != automod.ProtocolJev {
 		t.Fatal("the primary does not default to Jev")
 	}
 }
@@ -251,7 +252,7 @@ func TestApplyAutomodBuildsBothCheckersAndKeepsTheirBudgets(t *testing.T) {
 // events, and an exported debug bundle.
 func TestNeitherModelKeyLeaksIntoSettingsResponsesLogsEventsOrTheDebugBundle(t *testing.T) {
 	var logBuf bytes.Buffer
-	rec := diag.NewRecorder(256, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(256, redact.NewSecretSet(nil))
 	store := dbtest.OpenCheap(t)
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatal(err)

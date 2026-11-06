@@ -65,13 +65,11 @@ func (s *Server) recordingStateFor(enabled bool) recordingState {
 		return out
 	}
 	out.State = recordingStateNotRunning
-	if s.mgr != nil {
-		for _, e := range s.mgr.Engines() {
-			if e.RecorderRunning() {
-				out.State = recordingStateRecording
-				break
-			}
-		}
+	// The same view Delete's live-segment guard asks, so this never reads
+	// not_running while a delete is refused for a recorder that is still
+	// finalising: an engine being stopped is in no map but still counts.
+	if s.mgr != nil && s.mgr.RecorderRunning() {
+		out.State = recordingStateRecording
 	}
 	return out
 }

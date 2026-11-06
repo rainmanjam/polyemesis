@@ -31,10 +31,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -140,13 +140,10 @@ func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rollover
 		log = slog.Default()
 	}
 	if host.youtube == nil {
-		host.youtube = func() (youtubeRollover, bool) {
-			br, ok := oauth.RolloverFor(db.PlatformYouTube)
-			if !ok {
-				return nil, false
-			}
-			return br, true
-		}
+		// No provider set was handed in: there is no rollover to run, rather
+		// than one built from the package-level providers, which carry no quota
+		// meter.
+		host.youtube = func() (youtubeRollover, bool) { return nil, false }
 	}
 	return &rolloverCoordinator{log: log, store: store, host: host, now: time.Now, scenes: map[string]time.Time{},
 		rollSem: make(chan struct{}, 1)}
@@ -170,25 +167,29 @@ func (c *rolloverCoordinator) sceneSwitchedAt(scene string) time.Time {
 	return c.scenes[scene]
 }
 
-// rolloverBroadcastID is the broadcast a destination is publishing to. It is the lifecycle's record first, and the
-// announcement mirror second, in the same order the lifecycle coordinator reads it.
-func rolloverBroadcastID(d *db.Destination) string {
-	if id := strings.TrimSpace(d.Lifecycle.BroadcastID); id != "" {
-		return id
+// rolloverAction is the action behind a rollover on a platform: replace the
+// broadcast on YouTube, reconnect the output on Twitch. ok is false for every
+// other platform, which is countdown only, and for YouTube in a build without
+// the broadcast client. actsOn and the dispatch below both read it, so the
+// platforms that may be gated and the platforms that act are one list.
+func (c *rolloverCoordinator) rolloverAction(p db.Platform) (act func(ctx context.Context, d *db.Destination, bid string, now time.Time) (result, reason string, err error), ok bool) {
+	switch p {
+	case db.PlatformTwitch:
+		return func(_ context.Context, d *db.Destination, _ string, now time.Time) (string, string, error) {
+			return c.reconnectTwitch(d, now)
+		}, true
+	case db.PlatformYouTube:
+		if _, ok := c.host.youtube(); ok {
+			return c.rollYouTube, true
+		}
 	}
-	return strings.TrimSpace(d.Facebook.BroadcastID)
+	return nil, false
 }
 
 // actsOn reports whether a platform has an action behind a rollover. Every other platform is countdown only.
 func (c *rolloverCoordinator) actsOn(p db.Platform) bool {
-	switch p {
-	case db.PlatformTwitch:
-		return true
-	case db.PlatformYouTube:
-		_, ok := c.host.youtube()
-		return ok
-	}
-	return false
+	_, ok := c.rolloverAction(p)
+	return ok
 }
 
 // sweepOnce looks at every enabled rollover once. A failure on one destination is logged and does not stop the rest.
@@ -239,7 +240,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		}
 		return false, nil
 	}
-	bid := rolloverBroadcastID(d)
+	bid := d.ActiveBroadcastID()
 	if !c.actsOn(d.Platform) {
 		// Countdown only. The planner is not consulted, because a due trigger would have nothing to do. The session
 		// is still recorded, once per broadcast, because the countdown card counts from it: without it a Facebook
@@ -264,7 +265,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
 		start, err := c.sessionStart(ctx, d, bid, cfg.LastRolloverAt, now)
 		if err != nil {
-			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", alerts.Redact(err.Error()))
+			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", redact.Redact(err.Error()))
 			return false, err
 		}
 		if start.IsZero() && !force {
@@ -374,18 +375,15 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 	if cfg.ChatNotice && c.host.chatNotice != nil {
 		c.sendChatNotice(ctx, d)
 	}
-	switch d.Platform {
-	case db.PlatformYouTube:
-		result, reason, err = c.rollYouTube(ctx, d, bid, now)
-	case db.PlatformTwitch:
-		result, reason, err = c.reconnectTwitch(d, now)
-	default:
+	if act, ok := c.rolloverAction(d.Platform); ok {
+		result, reason, err = act(ctx, d, bid, now)
+	} else {
 		err = fmt.Errorf("%s has no rollover action", d.Platform)
 	}
 
 	if err != nil {
 		// Redacted before it is clipped: a clip can cut a credential in half, and the pattern then misses it.
-		msg := clipDetail(alerts.Redact(err.Error()))
+		msg := clipDetail(redact.Redact(err.Error()))
 		if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), rolloverFailedPrefix+msg, now); rerr != nil {
 			c.log.Warn("planned rollover: could not record the failure", "destination", d.Name, "err", rerr)
 		}
@@ -415,7 +413,7 @@ func (c *rolloverCoordinator) sendChatNotice(ctx context.Context, d *db.Destinat
 	}
 	if err != nil {
 		c.log.Warn("planned rollover: the chat notice was not sent; the rollover goes ahead",
-			"destination", d.Name, "platform", d.Platform, "err", alerts.Redact(err.Error()))
+			"destination", d.Name, "platform", d.Platform, "err", redact.Redact(err.Error()))
 	}
 }
 
@@ -470,7 +468,7 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 	}
 	// Platform text, so it is redacted before it reaches the fault, the result, the webhook or the timeline, the same
 	// as a failure's reason is.
-	warnings := alerts.Redact(strings.Join(out.Warnings, "; "))
+	warnings := redact.Redact(strings.Join(out.Warnings, "; "))
 	if _, err := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
 		cur.Lifecycle.BroadcastID = out.NewBroadcastID
 		cur.Lifecycle.Phase = phaseLive
@@ -674,4 +672,16 @@ func clipDetail(s string) string {
 		cut--
 	}
 	return s[:cut] + "…"
+}
+
+// youtubeRolloverFrom resolves the YouTube rollover capability from the
+// server's own provider set, the metered one.
+func youtubeRolloverFrom(set oauth.Set) func() (youtubeRollover, bool) {
+	return func() (youtubeRollover, bool) {
+		br, ok := oauth.As[oauth.BroadcastRollover](set, db.PlatformYouTube)
+		if !ok {
+			return nil, false
+		}
+		return br, true
+	}
 }

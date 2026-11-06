@@ -777,7 +777,7 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/library/search": denied(),
 	// Staging-readiness row 32: what viewers wrote is content, and a read
 	// token is metadata. These four were swept -- a read token reached them
-	// and got the scrollback -- until readScopeDeniedPatterns listed them.
+	// and got the scrollback -- until the readDenied flag listed them.
 	"GET /api/v1/chat":          denied(),
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
@@ -1330,7 +1330,7 @@ func proveWebsocketFrames(t *testing.T) proofResult {
 
 // proveHookDeliveries writes the fixture the old excuse deferred.
 //
-// Written now rather than filed because it is alerts.Redact consumer #5 and
+// Written now rather than filed because it is redact.Redact consumer #5 and
 // therefore the one deferred excuse that shares the argv leak's dependency
 // class: a delivery record's request and response bodies are free text scrubbed
 // by the same best-effort matcher that provably failed on the command line.
@@ -2529,7 +2529,7 @@ func inspectProcessLog(t *testing.T, _ shapeRig) shapeObservation {
 	}
 }
 
-// readScopeWriteSweep is the non-GET value sweep: the routes readScopeWritePatterns
+// readScopeWriteSweep is the non-GET value sweep: the routes the readWrite flag
 // admits a read-scoped token to, which therefore build a real body for it.
 func readScopeWriteSweep() []struct {
 	method, pattern, path string
@@ -2566,7 +2566,7 @@ func readScopeWriteSweep() []struct {
 // TestReadScopeWriteRoutesCarryNoCredential is the value half for the non-GET
 // routes a read token can actually reach.
 //
-// readScopeWritePatterns is a hand-built allowlist of POSTs "that answer a
+// the readWrite flag is a hand-built allowlist of POSTs "that answer a
 // question rather than change anything" -- and its own comment records that the
 // last audit found a route on it whose ANSWER was the destination's stream key.
 // A list reasoned about in prose is exactly the thing that needs its bytes read.
@@ -2584,7 +2584,7 @@ func TestReadScopeWriteRoutesCarryNoCredential(t *testing.T) {
 		bearer(read)(r)
 		w := do(t, h, r)
 		if w.Code == http.StatusForbidden {
-			t.Errorf("%s %s returned 403 to a read token, but readScopeWritePatterns "+
+			t.Errorf("%s %s returned 403 to a read token, but the readWrite flag "+
 				"lists it. Either the list or this sweep is out of date.", c.method, c.path)
 			continue
 		}
@@ -2661,7 +2661,7 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 		swept["GET "+patternOf(t, s, path)] = true
 	}
 	// The NON-GET routes a read scope may still reach. They are swept for
-	// values, not excused: readScopeWritePatterns lets a read token POST to them
+	// values, not excused: the readWrite flag lets a read token POST to them
 	// and they return a body, so the method rule that covers every other non-GET
 	// does not cover these.
 	for _, c := range readScopeWriteSweep() {
@@ -2694,7 +2694,7 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 			readScopeIsRefused(t, h, method, pattern):
 			// DENIED BY METHOD, and PROVEN by driving it rather than asserted
 			// from the middleware's source. requireScope refuses every non-GET
-			// to a read scope unless the pattern is in readScopeWritePatterns,
+			// to a read scope unless the pattern is in the readWrite flag,
 			// so the handler never runs and no body is ever built -- but "the
 			// middleware says so" is exactly the kind of claim that was true of
 			// three other things in this PR and wrong about the fourth. The
@@ -3845,9 +3845,9 @@ func ledgerNoteWith(regen string) string {
 		"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
 		"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
 		"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
-		"MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter " +
+		"MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter " +
 		"credential, which is a real permanent residual on the stderr path for very short " +
-		"secrets, covered only by the best-effort alerts.Redact pass. Every credential this " +
+		"secrets, covered only by the best-effort redact.Redact pass. Every credential this " +
 		"system mints or accepts is longer (SRT refuses a passphrase under 10, publish " +
 		"tokens are 24), and the failure direction of the floor itself is over-masking, " +
 		"never disclosure."
@@ -4066,7 +4066,7 @@ func deferredWithReasons() []coverageDefer {
 		},
 		{
 			ID: "redact-per-argument",
-			What: "alerts.Redact remains available to future callers now that " +
+			What: "redact.Redact remains available to future callers now that " +
 				"CommandString has stopped applying it per argument.",
 			WhySafe: "no caller loops it over tokens today; its doc comment now says " +
 				"whole-text-only and that it is never a boundary.",
@@ -4077,7 +4077,7 @@ func deferredWithReasons() []coverageDefer {
 		},
 		{
 			ID: "redact-consumers",
-			What: "the remaining best-effort alerts.Redact consumers with no " +
+			What: "the remaining best-effort redact.Redact consumers with no " +
 				"principal-varying counterpart: the retained MQTT IngestError topic, and " +
 				"the server's own slog output.",
 			WhySafe: "both are scrubbed at source now by supervisor.scrub, which removes " +
@@ -4130,7 +4130,7 @@ func deferredWithReasons() []coverageDefer {
 				"left, the claim is no longer a 404 at all -- it is the ordinary sweep, " +
 				"which is strictly stronger, and two of them (the alert rule and the " +
 				"hook) carry a planted webhook secret in the URL path so that " +
-				"alerts.RedactWebhookURL is under the sweep rather than merely under " +
+				"redact.RedactWebhookURL is under the sweep rather than merely under " +
 				"review.",
 			WhatWouldMakeItUnsafe: "a fixture row being deleted. That is not silent " +
 				"either: leakRoutes() requires a 200 from every path it names, so losing " +

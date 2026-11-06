@@ -66,22 +66,23 @@ func TestSettingTheLoudnessMonitorToItsCurrentValueStillReconciles(t *testing.T)
 // THE PROBE PATH RUNS THE SAME TAIL AS Reconcile.
 //
 // #612's root cause. Destinations are HELD on a fresh install until the ingest
-// probe lands, and the probe-landed path at engine.go ran three of Reconcile's
-// steps -- meters, recorder, outputs -- and stopped. reconcileOutputs is what
-// starts the destinations; reconcileLoudness is the only thing that starts
-// analysers; and Reconcile is event-driven with no ticker, so nothing ran the
-// rest. The analyser tier was reconciled exactly once, at the only moment it
-// was guaranteed to have nothing to do.
+// probe lands, and the probe-landed path ran three of Reconcile's steps --
+// meters, recorder, outputs -- and stopped. reconcileOutputs is what starts the
+// destinations; reconcileLoudness is the only thing that starts analysers; and
+// Reconcile is event-driven with no ticker, so nothing ran the rest. The analyser
+// tier was reconciled exactly once, at the only moment it was guaranteed to have
+// nothing to do.
 //
-// Asserted as SOURCE SHAPE rather than behaviour, deliberately. Reproducing it
-// needs a real probe against a real ingest, which this package's fixtures do
-// not have -- it took a container, a synthetic stream and four rounds of
-// instrumentation to see it live. What can be pinned cheaply is the property
-// that actually broke: the probe path calls the same consumer steps Reconcile
-// does. A subset copied by hand drifts the moment the sequence grows, which is
-// precisely what happened here.
+// The sequence now lives in reconcileDownstream, which Reconcile and the probe
+// path both call. Asserted as SOURCE SHAPE rather than behaviour, deliberately.
+// Reproducing #612 needs a real probe against a real ingest, which this
+// package's fixtures do not have -- it took a container, a synthetic stream and
+// four rounds of instrumentation to see it live. What can be pinned cheaply is
+// the property that actually broke: the probe path reaches every consumer step
+// Reconcile does, by calling the one function that holds them (see
+// TestEachDownstreamStepIsCalledFromTheOneSequence for the other half).
 //
-// Mutation: delete the reconcileLoudness call from the probe path. Observed to
+// Mutation: delete the reconcileDownstream call from the probe path. Observed to
 // fail naming it.
 func TestTheProbePathReconcilesEverythingReconcileDoes(t *testing.T) {
 	src, err := os.ReadFile("engine.go")
@@ -91,33 +92,28 @@ func TestTheProbePathReconcilesEverythingReconcileDoes(t *testing.T) {
 	body := string(src)
 
 	// The probe path is the only other place that takes reconcileMu itself.
-	const marker = "_ = e.reconcileOutputs()"
+	const marker = "\n\t\t\t\terr := e.reconcileDownstream(settings)\n"
 	at := strings.Index(body, marker)
 	if at < 0 {
-		t.Fatal("cannot find the probe path's reconcileOutputs call; this guard is " +
+		t.Fatal("cannot find the probe path's reconcileDownstream call; this guard is " +
 			"comparing nothing")
 	}
-	// Everything between that call and the unlock that closes the section.
-	rest := body[at:]
-	end := strings.Index(rest, "e.reconcileMu.Unlock()")
-	if end < 0 {
-		t.Fatal("the probe path's reconcileMu section has no Unlock; shape changed")
+	// It must be inside the reconcileMu section the probe path takes, which is
+	// what keeps it from interleaving with a Reconcile.
+	if lock := strings.LastIndex(body[:at], "e.reconcileMu.Lock()"); lock < 0 || at-lock > 120 {
+		t.Error("the probe path calls reconcileDownstream outside reconcileMu. Reconcile holds " +
+			"it end to end, so an unserialised second pass can start every destination while " +
+			"the first is still holding an empty plan -- and then tear them down")
 	}
-	section := rest[:end]
-
-	// The consumers Reconcile runs after the outputs, and why each is here:
-	// every one reads a hub reconcileOutputs may have just replaced.
-	for _, step := range []string{
-		"e.reconcilePreview(",
-		"e.reconcileClips()",
-		"e.reconcileCaptions()",
-		"e.reconcileLoudness(",
-	} {
-		if !strings.Contains(section, step) {
-			t.Errorf("the probe path starts destinations and then does not call %s. "+
-				"That is #612: on a fresh install destinations are held until the probe "+
-				"lands, this path starts them, and nothing runs Reconcile again -- so "+
-				"whatever this skips is never reconciled at all.", step)
-		}
+	if !strings.Contains(body[at:at+200], "e.reconcileMu.Unlock()") {
+		t.Error("the probe path's reconcileMu section no longer closes right after the " +
+			"sequence; shape changed")
+	}
+	// And Reconcile itself reaches the same function, or the two are not one
+	// sequence at all.
+	recon := funcBody(t, body, "func (e *Engine) Reconcile() error {")
+	if !strings.Contains(recon, "e.reconcileDownstream(settings)") {
+		t.Error("Reconcile no longer calls reconcileDownstream, so the probe path and Reconcile " +
+			"are two sequences again and the next step added to one is missing from the other (#612)")
 	}
 }

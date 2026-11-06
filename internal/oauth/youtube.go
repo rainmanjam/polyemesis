@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube implements Google OAuth 2.0 plus the Live Streaming API lookup that
@@ -128,7 +129,7 @@ func (y *YouTube) Account(ctx context.Context, clientID, accessToken string) (*A
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+"/channels?part=snippet&mine=true",
 		accessToken, nil, &out)
 	if err != nil {
@@ -374,7 +375,7 @@ func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLive
 		if pageToken != "" {
 			target += "&pageToken=" + url.QueryEscape(pageToken)
 		}
-		if err := getJSON(ctx, target, accessToken, nil, &list); err != nil {
+		if err := y.getJSON(ctx, target, accessToken, nil, &list); err != nil {
 			return nil, err
 		}
 		all = append(all, list.Items...)
@@ -401,7 +402,7 @@ const (
 	// It is CHARACTERS, so the cut is by rune. Cutting 128 bytes out of a
 	// destination named in Japanese would send a title ending in half a
 	// character.
-	ytStreamTitleMax = 128
+	ytStreamTitleMax = platform.YouTubeStreamTitleMax
 )
 
 // ytStreamTitle names a created stream after the destination that will publish
@@ -436,9 +437,8 @@ func ytStreamTitle(label string) string {
 		return ytStreamTitleBase
 	}
 	title := ytStreamTitleBase + " - " + label
-	if r := []rune(title); len(r) > ytStreamTitleMax {
-		title = string(r[:ytStreamTitleMax])
-	}
+	// YouTube counts a title in UTF-16 units, like every other title here.
+	title = platform.UTF16Truncate(title, ytStreamTitleMax)
 	return title
 }
 
@@ -468,7 +468,7 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string, w
 	if withCaptions {
 		part += ",contentDetails"
 	}
-	err := postJSON(ctx,
+	err := y.postJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part="+part,
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -482,7 +482,7 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string, w
 
 // --------------------------------------------------------------------- stats
 
-// The capability is resolved by type assertion in StatsFor, so a drifting
+// The capability is resolved by type assertion in As[LiveStatter], so a drifting
 // signature would make YouTube silently stop reporting viewers rather than fail
 // to build. See twitch.go for the same guard and the drift test that catches
 // the other direction.
@@ -586,7 +586,7 @@ func (y *YouTube) Stats(ctx context.Context, clientID, accessToken string) (*Liv
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx,
+	err = y.getJSON(ctx,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=id,snippet&broadcastStatus=active&broadcastType=all",
 		accessToken, nil, &broadcasts)
 	if err != nil {
@@ -626,7 +626,7 @@ func (y *YouTube) Stats(ctx context.Context, clientID, accessToken string) (*Liv
 			} `json:"liveStreamingDetails"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx,
+	err = y.getJSON(ctx,
 		y.apiEndpoint()+ytVideosPath+"?part=liveStreamingDetails&id="+url.QueryEscape(id),
 		accessToken, nil, &videos)
 	if err != nil {

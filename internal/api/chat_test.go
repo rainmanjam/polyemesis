@@ -9,6 +9,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // storeChat writes scrollback straight into the table, which is what a hub that
@@ -319,13 +320,14 @@ func TestChatLimitParamClamps(t *testing.T) {
 }
 
 func TestChatSendLimitsMatchTheAdapters(t *testing.T) {
-	want := map[db.Platform]int{
-		db.PlatformKick:    chat.KickMaxMessage,
-		db.PlatformTwitch:  chat.TwitchMaxMessage,
-		db.PlatformYouTube: chat.YouTubeMaxMessage,
-		// X's spec caps a chat message at 140 characters (maxLength on
-		// SendBroadcastChatRequest.text), so the composer warns before a send.
-		db.PlatformX: chat.XMaxMessage,
+	// One entry per adapter that can send, with the limit it enforces. Built
+	// from chat's own per-adapter profile so a new Sender cannot be missing from
+	// the list and a stale entry cannot linger.
+	want := map[db.Platform]int{}
+	for _, row := range platform.All() {
+		if pr, ok := chat.ProfileOf(db.Platform(row.Enum)); ok && pr.Send {
+			want[pr.Platform] = pr.SendMax
+		}
 	}
 	got := chatSendLimits()
 	if len(got) != len(want) {
@@ -334,6 +336,13 @@ func TestChatSendLimitsMatchTheAdapters(t *testing.T) {
 	for _, l := range got {
 		if want[l.Platform] != l.MaxChars {
 			t.Errorf("%s max = %d, want %d", l.Platform, l.MaxChars, want[l.Platform])
+		}
+	}
+	// The list's order is part of the response: kick, twitch, youtube, x.
+	order := []db.Platform{db.PlatformKick, db.PlatformTwitch, db.PlatformYouTube, db.PlatformX}
+	for i, l := range got {
+		if l.Platform != order[i] {
+			t.Errorf("limit %d is %s, want %s", i, l.Platform, order[i])
 		}
 	}
 	// Facebook is receive-only, so it has no send limit to publish. Listing it

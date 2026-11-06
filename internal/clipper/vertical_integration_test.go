@@ -85,8 +85,7 @@ func pixel(f []byte, x, y int) (r, g, b int) {
 	return int(f[i]), int(f[i+1]), int(f[i+2])
 }
 
-func isRed(r, g, b int) bool  { return r > 170 && g < 90 && b < 90 }
-func isBlue(r, g, b int) bool { return b > 170 && r < 90 && g < 90 }
+func isRed(r, g, b int) bool { return r > 170 && g < 90 && b < 90 }
 
 // whiteIn counts near-white pixels in a horizontal band: the caption.
 func whiteIn(f []byte, y0, y1 int) int {

@@ -16,8 +16,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // fakeLiveStats stands in for Twitch Helix and the YouTube Data API: the
@@ -132,7 +134,7 @@ func newAnalyticsFixture(t *testing.T) *analyticsFixture {
 	s, h, store := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(fake.srv.URL))})
 	f := &analyticsFixture{s: s, h: h, store: store, fake: fake, now: time.Unix(1_800_043_200, 0), // midday Pacific: no test races the quota reset (R13)
 		running: map[int64]bool{}, dest: map[string]int64{}}
-	s.analyticsNow = func() time.Time { return f.now }
+	s.now = func() time.Time { return f.now }
 	s.analyticsRunning = func() map[int64]bool { return f.running }
 	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformYouTube} {
 		if err := store.PutPlatformCreds(s.box, p, "cid", "client-pass"); err != nil {
@@ -658,39 +660,58 @@ func TestAPartialTickHasNoTotalOnTheScrapeOrMQTT(t *testing.T) {
 }
 
 // TestTitlePushAndGoLiveChargeTheServersAllowance (R13): through the same
-// helper main uses, a title push and a go-live transition made by the oauth
+// meter api.New builds into the provider set, a title push and a go-live transition made by the oauth
 // providers are charged to this server's one YouTube allowance.
 func TestTitlePushAndGoLiveChargeTheServersAllowance(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/liveBroadcasts" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"title":"Old","channelId":"ch"},"status":{"lifeCycleStatus":"testing"}}]}`))
+			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"title":"Old","channelId":"ch","actualStartTime":"2026-11-06T10:00:00Z"},"status":{"lifeCycleStatus":"testing"}}]}`))
 		default:
 			_, _ = w.Write([]byte(`{"id":"bc1","status":{"lifeCycleStatus":"live"},"snippet":{"title":"New"}}`))
 		}
 	}))
 	t.Cleanup(stub.Close)
-	s, _, store := testServer(t, config.Config{})
+	u, _ := url.Parse(stub.URL)
+	// No Providers: api.New builds the set itself, and that is the wiring under
+	// test. The options only aim it at the stub.
+	s, _, store := testServerWith(t, Options{ProviderOptions: []oauth.ProviderOption{
+		oauth.WithBaseURL(stub.URL), oauth.WithMeteredHosts(u.Host)}})
 	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "client-pass"); err != nil {
 		t.Fatal(err)
 	}
-	u, _ := url.Parse(stub.URL)
-	InstallYouTubeMeter(s, u.Host)
-	t.Cleanup(func() { oauth.SetYouTubeMeter(nil) })
-
-	y := oauth.NewYouTube(oauth.WithBaseURL(stub.URL))
 	q := s.ytQuota()
-	before := q.Status().Used
-	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})
-	pushed := q.Status().Used - before
-	if pushed < 50 {
-		t.Fatalf("a title push charged %d units, want at least the 50 of its write", pushed)
+	used := func() int { return q.Status().Used }
+
+	y, ok := oauth.As[oauth.MetadataPusher](s.providers, db.PlatformYouTube)
+	if !ok {
+		t.Fatal("the server's provider set has no YouTube metadata pusher")
 	}
-	before = q.Status().Used
-	_, _ = y.TransitionBroadcast(context.Background(), "tok", "bc1", oauth.PhaseLive)
-	if went := q.Status().Used - before; went < 50 {
+	before := used()
+	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})
+	if pushed := used() - before; pushed < 50 {
+		t.Fatalf("a title push through api.New's providers charged %d units, want at least the 50 of its write", pushed)
+	}
+	lc, ok := oauth.As[oauth.BroadcastLifecycler](s.providers, db.PlatformYouTube)
+	if !ok {
+		t.Fatal("no lifecycler")
+	}
+	before = used()
+	_, _ = lc.TransitionBroadcast(context.Background(), "tok", "bc1", oauth.PhaseLive)
+	if went := used() - before; went < 50 {
 		t.Fatalf("a go-live transition charged %d units, want at least 50", went)
+	}
+	// The production rollover coordinator resolves YouTube through the same set,
+	// so the sweep's reads are counted too.
+	br, ok := s.rollover.host.youtube()
+	if !ok {
+		t.Fatal("the rollover coordinator has no YouTube provider")
+	}
+	before = used()
+	_, _ = br.RolloverSessionStart(context.Background(), "tok", "bc1")
+	if went := used() - before; went < 1 {
+		t.Fatalf("a rollover read charged %d units; the rollover coordinator is unmetered", went)
 	}
 }
 
@@ -854,5 +875,22 @@ func TestDeletingYouTubeCredentialsUnbindsTheAllowance(t *testing.T) {
 	call(http.MethodPut, map[string]string{"clientId": "project-two", "clientSecret": "client-pass"})
 	if q.ClientID() != "project-two" || q.Status().Used != 0 {
 		t.Fatalf("after a new client: %q used %d, want a fresh tally", q.ClientID(), q.Status().Used)
+	}
+}
+
+// The production predicate behind runningDestinationIDs, which every other test
+// replaces through analyticsRunning: a destination that carries an error is not
+// running whatever its process says. Reverting upDestinationIDs to a raw
+// process-state check makes this fail.
+func TestUpDestinationIDsExcludesErroredDestinations(t *testing.T) {
+	running := &supervisor.Status{State: supervisor.StateRunning}
+	got := upDestinationIDs([]engine.DestStatus{
+		{ID: 1, Process: running},
+		{ID: 2, Error: "graph", Process: running},
+		{ID: 3, Process: &supervisor.Status{State: supervisor.StateStopped}},
+		{ID: 4},
+	})
+	if len(got) != 1 || !got[1] {
+		t.Fatalf("up ids = %v, want only 1", got)
 	}
 }

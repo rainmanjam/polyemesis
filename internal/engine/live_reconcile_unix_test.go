@@ -2,7 +2,7 @@
 
 // The live path itself, which needs the command channel. Unix only by design:
 // on Windows a destination has no stdin pipe and every level change restarts
-// (liveGainsSupported); live_reconcile_windows_test.go proves that restart.
+// (ffmpeg.LiveCommandsSupported); live_reconcile_windows_test.go proves that restart.
 
 package engine
 
@@ -38,7 +38,7 @@ func TestALevelOnlyChangeGoesToTheRunningProcess(t *testing.T) {
 	if !ok {
 		t.Fatal("no outcome recorded for a level change")
 	}
-	if applied != liveApplied {
+	if applied != AppliedLive {
 		t.Fatalf("applied = %q (%s), want live", applied, reason)
 	}
 	e.mu.RLock()

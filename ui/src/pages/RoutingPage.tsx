@@ -46,10 +46,10 @@ import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
-import { duckSeed } from "@/lib/duckSeed";
-import { storedMixes } from "@/lib/storedMixes";
-import { readVodStash, writeVodStash } from "@/lib/vodStash";
+import { musicRailMark, musicRailReason, railTextClass } from "@/features/routing/musicRail";
+import { duckSeed } from "@/features/routing/duckSeed";
+import { storedMixes } from "@/features/routing/storedMixes";
+import { readVodStash, writeVodStash } from "@/features/routing/vodStash";
 import { saveImpact, savedToastKey } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
 import { isLiveMix, outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
@@ -61,6 +61,7 @@ import {
 } from "@/lib/liveTrackLevel";
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
+import { destinationShownState } from "@/lib/liveness";
 import { toneForState } from "@/lib/signal";
 import {
   layoutTrackIndices,
@@ -68,7 +69,7 @@ import {
   presetPicks,
   roleLayoutFor,
   type RoleLayout,
-} from "@/lib/presetTrackDefaults";
+} from "@/features/routing/presetTrackDefaults";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -181,7 +182,7 @@ export function RoutingPage() {
   });
   // The pickers the operator set by hand. Kept apart from presetOpts (the
   // server's defaults) so neither a re-read of the defaults nor a later
-  // annotation can move them. See lib/presetTrackDefaults.ts.
+  // annotation can move them. See features/routing/presetTrackDefaults.ts.
   const [presetPicked, setPresetPicked] = useState<Partial<PresetOpts>>({});
   const [annotations, setAnnotations] = useState<TrackAnnotation[]>([]);
   // The programme `annotations` was seeded from, so the preset role defaults
@@ -556,7 +557,7 @@ export function RoutingPage() {
   // What each preset picker shows and a preset is applied with: the server's
   // defaults, replaced by the track annotated with the picker's role ON THE
   // EDITED DESTINATION'S PROGRAMME, with the operator's own picks over both.
-  // lib/presetTrackDefaults.ts.
+  // features/routing/presetTrackDefaults.ts.
   const shownPresetOpts = useMemo(() => {
     const local: RoleLayout | null =
       source && annotationsFrom === source.id
@@ -857,7 +858,7 @@ export function RoutingPage() {
           id: d.id,
           name: d.name,
           tone: d.enabled
-            ? toneForState(status?.destinations?.find((x) => x.id === d.id)?.process?.state)
+            ? toneForState(destinationShownState(status?.destinations?.find((x) => x.id === d.id)?.process))
             : "idle",
           kind: !isSel ? "select" : live.mode === "matrix" ? "matrix" : "editable",
           routed: routedTracks(live),
@@ -980,7 +981,7 @@ export function RoutingPage() {
             {list.map(({ destination: d, routing }) => {
               const pol = policyFor(d)?.policy;
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
-              // A word, not a colour. See lib/musicRail.ts.
+              // A word, not a colour. See features/routing/musicRail.ts.
               const mark = musicRailMark(guarded, pol?.exclude ?? false);
               // The reason behind the word, on hover and to a screen reader (B1).
               const markReason = musicRailReason(guarded, pol?.exclude ?? false);
@@ -1202,7 +1203,7 @@ interface EditorContext {
    *  necessarily sourceId. TrackRows keeps its last-peak history per programme. */
   meterProgramme: number | null;
   probed: boolean;
-  /** Whether the socket carrying `levels` is up. See lib/trackSignal. */
+  /** Whether the socket carrying `levels` is up. See features/routing/trackSignal. */
   meterFeedLive: boolean;
   annotations: TrackAnnotation[];
   onAnnotate: (track: number, next: Partial<TrackAnnotation>) => void;
@@ -2366,7 +2367,7 @@ export function DuckingCard({
 }) {
   const t = useT();
   // What turning this on would create, or null when nothing valid can be.
-  // See lib/duckSeed.ts, which is also where the old "< 2 tracks in the mix"
+  // See features/routing/duckSeed.ts, which is also where the old "< 2 tracks in the mix"
   // guard is argued down: it hid the card, and with it the Off switch, from
   // destinations whose stored duck was still compiling and still ducking.
   const seed = duckSeed(mixedTracks, allTracks, annotations);

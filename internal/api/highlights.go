@@ -10,78 +10,14 @@ package api
 // one-shot pending -> accepted transition, so a double click makes one clip.
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
-	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/highlights"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
-	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
-
-// highlightModelTimeout bounds the one scoring call a scan makes. Longer than
-// moderation's four seconds: it is a dozen excerpts, not one message, and
-// nobody is waiting on it in chat.
-const highlightModelTimeout = 60 * time.Second
-
-// HighlightModel returns the scan's model factory: the operator's PRIMARY
-// automod connector -- its endpoint, model and key -- when the separate
-// "Use AI for highlight scoring" switch is on and the connector speaks the
-// OpenAI-compatible protocol, charged to budget -- the scan's own, so a post-pass over a
-// recording can never spend the allowance live moderation runs on.
-//
-// Exported because the scan worker is wired in cmd/polyemesis, and the
-// settings-to-connector translation must not exist twice.
-func HighlightModel(store *db.DB, box *secrets.Box, budget *automod.Budget, log *slog.Logger) func() (highlights.Completer, string) {
-	return func() (highlights.Completer, string) {
-		cfg, why := highlightModelConfig(store, box, log)
-		if why != "" {
-			return nil, why
-		}
-		return func(ctx context.Context, system, user string) (string, error) {
-			return automod.Complete(ctx, cfg, budget, system, user)
-		}, ""
-	}
-}
-
-// highlightModelConfig is the connector the scan would use, or why there is
-// none. The reason is fixed text: it reaches the review queue, and the
-// endpoint (which may carry a key in its query string) never does.
-func highlightModelConfig(store *db.DB, box *secrets.Box, log *slog.Logger) (automod.ModelConfig, string) {
-	if store == nil {
-		return automod.ModelConfig{}, "there is no settings store"
-	}
-	settings, err := store.GetSettings()
-	if err != nil {
-		return automod.ModelConfig{}, "the automod settings could not be read"
-	}
-	conn := settings.Automod.Model
-	switch {
-	case !settings.Automod.HighlightScoring:
-		// Its own consent (owner decision D): the Automod model block being on
-		// for chat says nothing about sending what was said on stream.
-		return automod.ModelConfig{}, "AI highlight scoring is switched off in Automod settings"
-	case protocolOf(conn) == automod.ProtocolJev:
-		return automod.ModelConfig{}, "the Automod model uses the Jev protocol, which answers moderation questions only"
-	case conn.Endpoint == "":
-		return automod.ModelConfig{}, "the Automod model has no endpoint"
-	}
-	cfg, _ := modelConfigFor(conn, settings.Automod.Model)
-	key, binding, err := store.GetAutomodKeyBound(box, string(automod.SlotPrimary))
-	if err != nil {
-		if log != nil {
-			log.Warn("highlight scoring: automod key unreadable; scoring without it", "err", err)
-		}
-	}
-	cfg.APIKey, cfg.KeyBinding = key, binding
-	cfg.Timeout = highlightModelTimeout
-	return cfg, ""
-}
 
 // ---------------------------------------------------------------- the scan
 
@@ -193,7 +129,7 @@ func (s *Server) handleListHighlights(w http.ResponseWriter, r *http.Request) {
 	for _, h := range list {
 		view.Suggestions = append(view.Suggestions, viewOfHighlight(h))
 	}
-	_, why := highlightModelConfig(s.store, s.box, s.log)
+	_, why := highlights.ModelConfig(s.store, s.box, s.log)
 	view.ModelAvailable, view.ModelReason = why == "", why
 	writeJSON(w, http.StatusOK, view)
 }

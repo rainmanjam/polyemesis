@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 //go:embed services.json
@@ -86,6 +88,26 @@ func load() (registry, error) {
 	loadOnce.Do(func() {
 		if err := json.Unmarshal(registryJSON, &loaded); err != nil {
 			loadErr = fmt.Errorf("services registry is malformed: %w", err)
+			return
+		}
+		// The ingest servers are this file's; every other fact about the
+		// platform is internal/platform's, merged in here so the wire shape of
+		// a Service does not change.
+		for i := range loaded.Services {
+			s := &loaded.Services[i]
+			row, ok := platform.ByEnum(s.ID)
+			if !ok {
+				continue
+			}
+			s.PerChannelIngest = row.PerChannelIngest
+			s.VideoCodecs = row.VideoCodecs
+			s.AudioCodecs = row.AudioCodecs
+			if c := row.Ceilings; c != nil {
+				s.Recommended = Recommended{
+					KeyintSeconds: c.KeyintSeconds, MaxVideoKbps: c.MaxVideoKbps,
+					MaxAudioKbps: c.MaxAudioKbps, MaxFps: c.MaxFps, X264Opts: c.X264Opts,
+				}
+			}
 		}
 	})
 	return loaded, loadErr
@@ -196,21 +218,9 @@ func AnalyseURL(raw string) []URLProblem {
 	return probs
 }
 
-// ivsIngestHostSuffix is Amazon IVS's contribute domain, which Kick and Twitch
-// both publish through. THE LEADING DOT IS LOAD-BEARING, as it is in
-// internal/multitrack: without it "evilglobal-contribute.live-video.net", a
-// different registrable domain, would match too.
-const ivsIngestHostSuffix = ".global-contribute.live-video.net"
-
-// ivsApp is the one RTMP application an IVS ingest accepts.
-const ivsApp = "app"
-
 // IsIVSIngestHost reports whether host -- a hostname, without a port -- is an
 // Amazon IVS contribute endpoint.
-func IsIVSIngestHost(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	return len(h) > len(ivsIngestHostSuffix) && strings.HasSuffix(h, ivsIngestHostSuffix)
-}
+func IsIVSIngestHost(host string) bool { return platform.IsIVSIngestHost(host) }
 
 // IVSAppPathFix reports whether raw is an RTMP(S) URL to an Amazon IVS ingest
 // whose application path is not /app, and if so the server URL that works.
@@ -246,14 +256,14 @@ func ivsAppPathProblem(u *url.URL) (URLProblem, bool) {
 	}
 	path := strings.Trim(u.Path, "/")
 	first, _, _ := strings.Cut(path, "/")
-	if first == ivsApp {
+	if first == platform.IVSApp {
 		return URLProblem{}, false
 	}
 	host := u.Host
 	if u.Port() == "" && u.Scheme == "rtmps" {
 		host += ":443"
 	}
-	fix := u.Scheme + "://" + host + "/" + ivsApp
+	fix := u.Scheme + "://" + host + "/" + platform.IVSApp
 	detail := "this is an Amazon IVS ingest (Kick and Twitch both use them), and IVS " +
 		"only accepts the application path /app. "
 	if path == "" {
@@ -267,24 +277,15 @@ func ivsAppPathProblem(u *url.URL) (URLProblem, bool) {
 	return URLProblem{Field: "url", Detail: detail, Fix: fix}, true
 }
 
-// CheckEncoder reports where a destination's settings exceed what the platform
-// accepts. Zero ceilings mean "no published figure" and are skipped, so a
-// service we know little about produces no noise.
-func CheckEncoder(svc Service, audioKbps, videoKbps, fps int) []URLProblem {
-	var probs []URLProblem
-	add := func(field, f string, a ...any) {
-		probs = append(probs, URLProblem{Field: field, Detail: fmt.Sprintf(f, a...)})
-	}
+// CheckEncoder reports where a destination's audio bitrate exceeds what the
+// platform accepts. A zero ceiling means "no published figure" and is skipped,
+// so a service we know little about produces no noise. Video bitrate and fps
+// are the rendition ladder's business, not a destination's.
+func CheckEncoder(svc Service, audioKbps int) []URLProblem {
 	if m := svc.Recommended.MaxAudioKbps; m > 0 && audioKbps > m {
-		add("audioBitrate", "%s accepts at most %d kbps of audio; this destination sends %d. "+
-			"The platform will re-encode or reject it.", svc.Name, m, audioKbps)
+		return []URLProblem{{Field: "audioBitrate", Detail: fmt.Sprintf(
+			"%s accepts at most %d kbps of audio; this destination sends %d. "+
+				"The platform will re-encode or reject it.", svc.Name, m, audioKbps)}}
 	}
-	if m := svc.Recommended.MaxVideoKbps; m > 0 && videoKbps > m {
-		add("videoBitrate", "%s accepts at most %d kbps of video; this destination sends %d.",
-			svc.Name, m, videoKbps)
-	}
-	if m := svc.Recommended.MaxFps; m > 0 && fps > m {
-		add("fps", "%s accepts at most %d fps; this destination sends %d.", svc.Name, m, fps)
-	}
-	return probs
+	return nil
 }

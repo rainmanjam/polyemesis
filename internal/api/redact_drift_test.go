@@ -25,7 +25,7 @@ import (
 // whole mechanism: the classification is the work, and the test only enforces
 // that it was done.
 //
-// NOT A NAME HEURISTIC, deliberately and by measurement. alerts.SecretName --
+// NOT A NAME HEURISTIC, deliberately and by measurement. redact.SecretName --
 // the obvious candidate, and one this repository already ships -- returns FALSE
 // for "backupStreamKey", so a guard built on it would have shipped two of the
 // three destination leaks while reporting success. A table is more typing and
@@ -39,7 +39,7 @@ const (
 	sPublic sensitivity = iota
 	// sSecret is a credential. readSafe* must remove it outright -- by blanking
 	// it, or, for a field tagged `omitempty` where a blank would delete the key
-	// and change the response's shape, by putting alerts.Mask in it. See
+	// and change the response's shape, by putting redact.Mask in it. See
 	// redactInPlace.
 	sSecret
 	// sMasked carries a credential INSIDE a larger useful string -- a URL whose
@@ -148,6 +148,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
 	"destination.goLiveTitle":                        sPublic, // the X broadcast title, published to viewers by design
 	"destination.xGoLiveTweet":                       sPublic, // first / every / never: when X posts its go-live announcement
+	"destination.presetId":                           sPublic, // a catalogue preset id ("instagram"); names no account and holds no secret
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,
@@ -532,7 +533,7 @@ func TestReadSafeViewsScrubEverySecretLeaf(t *testing.T) {
 			}
 			// A masked leaf is a URL, so the sentinel goes where a credential
 			// actually lives in one: the userinfo. Planting a bare word would
-			// exercise alerts.RedactURL's unparseable path instead of the
+			// exercise redact.RedactURL's unparseable path instead of the
 			// userinfo path, and prove the wrong thing.
 			value := planted
 			if class == sMasked {
@@ -698,7 +699,7 @@ func TestScrubbingIsNotAWholesaleWipe(t *testing.T) {
 				t.Errorf("%s: the JSON path %q is present for an admin and ABSENT for a "+
 					"read token.\nThat is a field REMOVED, not a value blanked. Almost "+
 					"always the field carries `omitempty` and the scrubber set it to the "+
-					"zero value; redact it IN PLACE instead -- put alerts.Mask in it, or "+
+					"zero value; redact it IN PLACE instead -- put redact.Mask in it, or "+
 					"mask the URL -- so the key survives with its content gone. "+
 					"If the removal is genuinely intended, add it to this case's "+
 					"exceptions with the argument.", c.name, p)

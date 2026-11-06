@@ -10,7 +10,7 @@ import (
 // TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns: docs/API.md lists the
 // routes a read token is refused outright, says how many there are in words,
 // and says how many of them are GETs. All three were hand-kept against
-// readScopeDeniedPatterns, and staging-readiness row 33 found the reader could
+// the readDenied flag, and staging-readiness row 33 found the reader could
 // not tell "thirteen" (the GETs) from "fifteen" (the rows) -- nothing tied either
 // number to the map. This does: the table's rows are the map's keys, and both
 // counts are computed from it.
@@ -33,10 +33,10 @@ func TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns(t *testing.T) {
 		27: "twenty-seven",
 		28: "twenty-eight",
 	}
-	total := len(readScopeDeniedPatterns)
+	total := len(readDeniedPatterns(t))
 	totalWord, ok := words[total]
 	if !ok {
-		t.Fatalf("readScopeDeniedPatterns has %d entries; extend the number words in this test", total)
+		t.Fatalf("the readDenied flag has %d entries; extend the number words in this test", total)
 	}
 
 	i := strings.Index(doc, "routes are refused outright**")
@@ -45,7 +45,7 @@ func TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns(t *testing.T) {
 	}
 	head := strings.ToLower(doc[max(0, i-20):i])
 	if !strings.Contains(head, totalWord) {
-		t.Errorf("docs/API.md says %q routes are refused outright; readScopeDeniedPatterns has %d (%s)",
+		t.Errorf("docs/API.md says %q routes are refused outright; the readDenied flag has %d (%s)",
 			strings.TrimSpace(doc[max(0, i-20):i]), total, totalWord)
 	}
 
@@ -66,15 +66,15 @@ func TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns(t *testing.T) {
 			gets++
 		}
 	}
-	for p := range readScopeDeniedPatterns {
+	for p := range readDeniedPatterns(t) {
 		if _, ok := documented[p]; !ok {
-			t.Errorf("readScopeDeniedPatterns refuses %s to read tokens and docs/API.md's table "+
+			t.Errorf("the readDenied flag refuses %s to read tokens and docs/API.md's table "+
 				"does not list it", p)
 		}
 	}
 	for p := range documented {
-		if !readScopeDeniedPatterns[p] {
-			t.Errorf("docs/API.md's refused-route table lists %s, which readScopeDeniedPatterns "+
+		if !readDeniedPatterns(t)[p] {
+			t.Errorf("docs/API.md's refused-route table lists %s, which the readDenied flag "+
 				"does not refuse", p)
 		}
 	}

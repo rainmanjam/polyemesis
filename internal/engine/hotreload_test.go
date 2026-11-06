@@ -32,7 +32,7 @@ func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 // with this platform" was to drop the connection to it.
 func TestChangingOnlyTheResiliencePolicyDoesNotChangeTheDestinationSpec(t *testing.T) {
 	compiled := routing.Result{FilterComplex: "[0:a:0]anull[out]", OutLabel: "[out]"}
-	base := destSpec(testDestination(7, nil), compiled, "")
+	base := destSpec(testDestination(7, nil), compiled, "", false)
 
 	tests := []struct {
 		name   string
@@ -50,7 +50,7 @@ func TestChangingOnlyTheResiliencePolicyDoesNotChangeTheDestinationSpec(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			row := testDestination(7, nil)
 			tc.mutate(row)
-			if got := destSpec(row, compiled, ""); got != base {
+			if got := destSpec(row, compiled, "", false); got != base {
 				t.Errorf("spec changed; the destination would be torn down to apply a " +
 					"value that never reaches its command line")
 			}

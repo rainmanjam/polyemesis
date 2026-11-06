@@ -2,6 +2,8 @@
  *  dashboard panel draws with. Counts only -- the server's Result has no field
  *  that could carry a voter, and neither does anything here. */
 
+import { WIRE } from "./contract/wire";
+
 export type PollState = "open" | "closing" | "ended" | "interrupted";
 
 export interface PollOption {
@@ -56,15 +58,16 @@ export interface PollSpec {
   mirrorYouTube?: boolean;
 }
 
-/** The server's limits (internal/polls), checked here too so the form can say
- *  what is wrong before it is sent. The server still decides. */
+/** The server's limits (internal/polls, from the wire contract), checked here
+ *  too so the form can say what is wrong before it is sent. The server still
+ *  decides. Durations are in seconds. */
 export const POLL_LIMITS = {
-  minOptions: 2,
-  maxOptions: 6,
-  maxQuestion: 100,
-  maxOption: 30,
-  minDuration: 15,
-  maxDuration: 3600,
+  minOptions: WIRE.polls.minOptions,
+  maxOptions: WIRE.polls.maxOptions,
+  maxQuestion: WIRE.polls.maxQuestion,
+  maxOption: WIRE.polls.maxOption,
+  minDuration: WIRE.polls.minDurationSeconds,
+  maxDuration: WIRE.polls.maxDurationSeconds,
 } as const;
 
 /** What is wrong with a spec, as a translation key, or null when it is fine. */

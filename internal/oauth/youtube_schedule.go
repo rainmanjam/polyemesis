@@ -138,7 +138,7 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 //
 // THE ZERO ScheduledFor PATH CREATES NOTHING, and that is deliberate to the
 // point of being the reason this method can exist at all. internal/api routes
-// EVERY go-live through TargetsFor/IngestFor when a platform has the capability,
+// EVERY go-live through As[TargetedProvider]/IngestFor when a platform has the capability,
 // so making YouTube a TargetedProvider re-points the existing go-live path at
 // this function. Live-now therefore does exactly what Provider.Ingest did: it
 // returns the channel's reusable stream with no broadcast id, which is the same
@@ -316,7 +316,7 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 	// advice was dead on the real path: an operator whose channel is not enabled
 	// for live streaming got the raw truncated body instead of the sentence
 	// telling them which button to press.
-	err := requestJSON(ctx, http.MethodPost,
+	err := y.requestJSON(ctx, http.MethodPost,
 		y.apiEndpoint()+ytBroadcastsPath+"?part="+parts,
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -361,7 +361,7 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 	q.Set("part", "id")
 	// requestJSON with a nil payload sends no body and no Content-Type, which is
 	// what a method whose whole input is in the query string should send.
-	return requestJSON(ctx, http.MethodPost,
+	return y.requestJSON(ctx, http.MethodPost,
 		y.apiEndpoint()+ytBindPath+"?"+q.Encode(), accessToken, nil, nil, nil)
 }
 
@@ -471,7 +471,7 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 	// carry through unchanged, status for the lifecycle its refusal advice names.
 	q.Set("part", "id,snippet,status,contentDetails")
 	q.Set("id", broadcastID)
-	err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list)
+	err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +556,7 @@ func (y *YouTube) deleteBroadcast(ctx context.Context, accessToken, broadcastID 
 	}
 	q := url.Values{}
 	q.Set("id", broadcastID)
-	err := requestJSON(ctx, http.MethodDelete,
+	err := y.requestJSON(ctx, http.MethodDelete,
 		y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, nil, nil)
 	if err == nil {
 		return nil

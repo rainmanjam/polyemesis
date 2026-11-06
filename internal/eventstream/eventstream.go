@@ -179,7 +179,7 @@ var catalogue = []Spec{
 
 	// Chat is content a viewer wrote, under their name, and a moderation action
 	// names the viewer it was taken against. A read token is refused the REST
-	// scrollback (readScopeDeniedPatterns) and the live /ws copy (wsDrop); this
+	// scrollback (the readDenied flag) and the live /ws copy (wsDrop); this
 	// is a third door to the same content and gets the same answer.
 	{TypeChatMessage, TopicChat, Withheld, "A chat message arrived from any connected platform.", nil},
 	{TypeChatRetract, TopicChat, Withheld, "Chat messages that were delivered are gone: deleted, hidden, or swept by a ban.", nil},

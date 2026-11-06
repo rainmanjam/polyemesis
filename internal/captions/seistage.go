@@ -3,6 +3,7 @@ package captions
 import (
 	"context"
 	"errors"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 	"net"
 	"os"
 	"sync/atomic"
@@ -60,7 +61,7 @@ const (
 	// datagramBytes is the largest datagram the stage hands back: seven 188-byte
 	// TS packets, the same shape the relay carries. relay.Hub reads into a larger
 	// buffer, so it is never truncated.
-	datagramBytes = 7 * tsPacketSize
+	datagramBytes = 7 * mpegts.PacketSize
 	// seiCueQueue bounds the captions waiting for the stream. A caption that
 	// finds the queue full is refused and counted, never waited for.
 	seiCueQueue = 32

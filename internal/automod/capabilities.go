@@ -1,6 +1,9 @@
 package automod
 
-import "github.com/rainmanjam/polyemesis/internal/db"
+import (
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
+)
 
 // Capabilities answers what a platform can actually be made to do.
 //
@@ -19,8 +22,8 @@ type Capabilities interface {
 // PlatformCaps is the built-in capability table.
 //
 // It mirrors what internal/chat's adapters actually implement. The pairing is
-// asserted by a guard test rather than trusted: two tables describing the same
-// four platforms is exactly the drift this repo already writes guards for
+// asserted by a guard test rather than trusted: two tables describing
+// the same platforms is exactly the drift this repo already writes guards for
 // elsewhere, and here the failure mode is an operator believing a channel is
 // moderated when nothing is wired to it.
 //
@@ -42,15 +45,18 @@ func (PlatformCaps) Can(p db.Platform, a Action) (bool, string) {
 		return true, ""
 
 	case ActionHide:
-		// Upstream, reversible hide. Facebook is the only one of the four with
-		// an API for it; everywhere else the honest answer is the local hide
-		// above, and pretending otherwise would be the silent-failure case.
-		if p == db.PlatformFacebook {
+		// Upstream, reversible hide. Facebook is the only platform with an API
+		// for it; everywhere else the honest answer is the local hide above, and
+		// pretending otherwise would be the silent-failure case.
+		if moderationOf(p).Hide {
 			return true, ""
 		}
 		return false, "only Facebook can hide a message upstream; use the local hide instead"
 
 	case ActionDelete:
+		if !moderationOf(p).Delete {
+			return false, noModeration(p, "delete a message")
+		}
 		return true, ""
 
 	case ActionTimeout, ActionBan:
@@ -65,13 +71,41 @@ func (PlatformCaps) Can(p db.Platform, a Action) (bool, string) {
 		// TestTheCapabilityTableMatchesWhatTheAdaptersImplement in
 		// internal/chat, which is the guard this comment claimed to have and
 		// did not.
-		if p == db.PlatformFacebook {
-			return false, "Facebook has no chat ban API. Delete or hide the comment " +
-				"instead, or ban the person from the Facebook page itself"
+		if !moderationOf(p).TimeoutBan {
+			if p == db.PlatformFacebook {
+				return false, "Facebook has no chat ban API. Delete or hide the comment " +
+					"instead, or ban the person from the Facebook page itself"
+			}
+			return false, noModeration(p, "time out or ban a person")
 		}
 		return true, ""
 	}
 	return false, "unknown action"
+}
+
+// moderationOf is the registry's moderation profile for p. A platform the
+// registry knows and gives no profile (Rumble: chat is read, nothing can be
+// acted on) can do nothing upstream. A name with no row at all keeps the old
+// answer -- able to delete, timeout and ban, unable to hide.
+func moderationOf(p db.Platform) platform.Moderation {
+	row, ok := platform.ByEnum(string(p))
+	if !ok {
+		return platform.Moderation{Delete: true, TimeoutBan: true}
+	}
+	if row.Moderation == nil {
+		return platform.Moderation{}
+	}
+	return *row.Moderation
+}
+
+// noModeration is the operator-facing reason for an action the platform has no
+// way to perform. The local hide is always there instead.
+func noModeration(p db.Platform, what string) string {
+	name := string(p)
+	if row, ok := platform.ByEnum(string(p)); ok {
+		name = row.Name
+	}
+	return name + " has no chat API polyemesis can use to " + what + "; use the local hide instead"
 }
 
 // KnownActions reports whether an action is one this package understands, so a

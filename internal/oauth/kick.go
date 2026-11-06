@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // ErrNoStreamKeyAPI marks the ingest lookup as impossible rather than failed.
@@ -35,7 +36,7 @@ import (
 var ErrNoStreamKeyAPI = errors.New("this platform publishes no stream-key endpoint, so the key must be pasted by hand")
 
 // ManualKey is the negative capability that goes with ErrNoStreamKeyAPI.
-// Discover it with ManualKeyFor; like MetadataPusher it is a second interface
+// Discover it with As[ManualKey]; like MetadataPusher it is a second interface
 // rather than a method on Provider, so the three platforms that can fetch a key
 // stay unaware of it and the UI has exactly one place to ask.
 type ManualKey interface {
@@ -43,18 +44,6 @@ type ManualKey interface {
 	// ManualKeyReason is shown next to the stream-key field. It says where the
 	// key lives and what still works without it, in the operator's words.
 	ManualKeyReason() string
-}
-
-// ManualKeyFor reports whether a platform authenticates but cannot supply an
-// ingest. False covers both "fetches its key fine" and "has no provider at
-// all", because neither needs the paste-it-yourself hint.
-func ManualKeyFor(p db.Platform) (ManualKey, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	mk, ok := pr.(ManualKey)
-	return mk, ok
 }
 
 // Kick implements Kick's OAuth 2.1 flow plus the parts of its public API that
@@ -75,7 +64,7 @@ func (k *Kick) apiEndpoint() string { return k.apiBase(kickAPIBase) }
 // the package.
 const (
 	kickIDBase  = "https://id.kick.com"
-	kickAPIBase = "https://api.kick.com"
+	kickAPIBase = platform.KickAPIHost
 )
 
 func (k *Kick) Platform() db.Platform { return db.PlatformKick }
@@ -209,7 +198,7 @@ func (k *Kick) channel(ctx context.Context, accessToken string) (*kickChannel, e
 		Data []kickChannel `json:"data"`
 	}
 	// No parameters: Kick reads the channel belonging to the token.
-	if err := getJSON(ctx, k.apiEndpoint()+kickChannelsPath, accessToken, nil, &out); err != nil {
+	if err := k.getJSON(ctx, k.apiEndpoint()+kickChannelsPath, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -302,7 +291,7 @@ func (k *Kick) SearchCategories(ctx context.Context, clientID, accessToken, quer
 	var out struct {
 		Data []KickCategory `json:"data"`
 	}
-	err := getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
+	err := k.getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +368,7 @@ func (k *Kick) UpdateChannel(ctx context.Context, accessToken string, u KickChan
 	if u.CustomTags != nil {
 		body["custom_tags"] = u.CustomTags
 	}
-	return requestJSON(ctx, http.MethodPatch, k.apiEndpoint()+"/public/v1/channels", accessToken, body, nil, nil)
+	return k.requestJSON(ctx, http.MethodPatch, k.apiEndpoint()+"/public/v1/channels", accessToken, body, nil, nil)
 }
 
 // PushBroadcastSettings writes the one field of BroadcastSettings that Kick
@@ -550,7 +539,7 @@ func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([
 	var out struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if err := getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
+	if err := k.getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	return decodeKickData(out.Data), nil

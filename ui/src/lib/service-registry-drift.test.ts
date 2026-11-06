@@ -20,25 +20,26 @@ import { join } from "node:path";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 
+/** The json field names of a Go struct in internal/services/services.go, read as
+ *  text from its tags. Since the platform registry took over the ceilings,
+ *  codecs and the per-channel flag, services.json carries only ids, names,
+ *  servers and notes, and the shape the API serves is the Go struct's. */
+function goJsonTags(structName: string): string[] {
+  const src = readFileSync(join(ROOT, "internal/services/services.go"), "utf8");
+  const start = src.indexOf(`type ${structName} struct {`);
+  expect(start, `no struct ${structName} in services.go`).toBeGreaterThan(-1);
+  const end = src.indexOf("\n}", start);
+  return [...src.slice(start, end).matchAll(/`json:"(\w+)[,"]/g)].map((m) => m[1]);
+}
+
 function registryKeys(): { service: string[]; recommended: string[]; server: string[] } {
   const raw = readFileSync(join(ROOT, "internal/services/services.json"), "utf8");
-  const doc = JSON.parse(raw) as {
-    services: Array<Record<string, unknown> & { recommended: Record<string, unknown> }>;
-  };
-  const service = new Set<string>();
-  const recommended = new Set<string>();
-  const server = new Set<string>();
-  for (const s of doc.services) {
-    for (const k of Object.keys(s)) service.add(k);
-    for (const k of Object.keys(s.recommended ?? {})) recommended.add(k);
-    for (const sv of (s.servers ?? []) as Array<Record<string, unknown>>) {
-      for (const k of Object.keys(sv)) server.add(k);
-    }
-  }
+  const doc = JSON.parse(raw) as { services: Array<Record<string, unknown>> };
+  expect(doc.services.length, "no services parsed — services.json did not load").toBeGreaterThan(3);
   return {
-    service: [...service],
-    recommended: [...recommended],
-    server: [...server],
+    service: goJsonTags("Service"),
+    recommended: goJsonTags("Recommended"),
+    server: goJsonTags("Server"),
   };
 }
 
@@ -76,18 +77,11 @@ describe("the service registry and the type the UI reads it through", () => {
   });
 
   it("keeps the ceiling the audio hint depends on", () => {
-    // Named on its own because the hint is the only place a number from this
-    // file reaches the operator, and a rename would just stop rendering it.
-    const raw = readFileSync(join(ROOT, "internal/services/services.json"), "utf8");
-    const doc = JSON.parse(raw) as {
-      services: Array<{ name: string; recommended: { maxAudioKbps?: number } }>;
-    };
-    for (const s of doc.services) {
-      expect(
-        s.recommended.maxAudioKbps,
-        `${s.name} has no maxAudioKbps, so the dialog's audio ceiling hint ` +
-          `renders nothing for it`,
-      ).toBeGreaterThan(0);
-    }
+    // Named on its own because the hint is the only place a number from the
+    // registry reaches the operator, and a rename would just stop rendering it.
+    // The numbers live in internal/platform (Kick has no audio ceiling, so its
+    // hint renders nothing by design); this pins the field the hint reads.
+    expect(goJsonTags("Recommended")).toContain("maxAudioKbps");
+    expect(declaredFields("ServiceRecommended")).toContain("maxAudioKbps");
   });
 });

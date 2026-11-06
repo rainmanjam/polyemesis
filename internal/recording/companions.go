@@ -3,10 +3,10 @@ package recording
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -31,26 +31,6 @@ import (
 // THE ONE IRREVERSIBLE MISTAKE is deleting a NEIGHBOUR's audio or transcript,
 // so every rule here errs toward keeping a file.
 // ============================================================================
-
-// masterNameRE splits a master's extension-less name into the prefix it
-// shares with its stems (rec, or rec-s3 for a tagged programme) and its start.
-// The prefix is non-greedy for the same reason stemFilenameRE's is.
-var masterNameRE = regexp.MustCompile(`^(.+?)-(\d{8}-\d{6})$`)
-
-// splitMasterName returns a master's stem prefix and its start, read from the
-// name exactly as ParseStemFilename reads a stem's.
-func splitMasterName(filename string) (string, time.Time, bool) {
-	base := filepath.Base(filename)
-	mm := masterNameRE.FindStringSubmatch(strings.TrimSuffix(base, filepath.Ext(base)))
-	if mm == nil {
-		return "", time.Time{}, false
-	}
-	t, err := time.ParseInLocation("20060102-150405", mm[2], time.Local)
-	if err != nil {
-		return "", time.Time{}, false
-	}
-	return mm[1], t, true
-}
 
 // removeCompanions deletes the stems and transcript files that belonged to
 // deleted, a recording whose row and master are already gone. survivors is
@@ -87,13 +67,13 @@ func (m *Manager) removeCompanions(deleted string, survivors []string) {
 // tie keeps the stem. Correct for any segment length, where a "from this start
 // to the next" window would wrongly keep stems of segments under a minute.
 func (m *Manager) removeOwnStems(deleted string, survivors []string) {
-	prefix, start, ok := splitMasterName(deleted)
+	prefix, start, ok := segname.SplitMaster(deleted)
 	if !ok {
 		return
 	}
 	var others []time.Time
 	for _, name := range survivors {
-		if p, at, ok := splitMasterName(name); ok && p == prefix {
+		if p, at, ok := segname.SplitMaster(name); ok && p == prefix {
 			others = append(others, at)
 		}
 	}
@@ -114,7 +94,7 @@ func (m *Manager) removeOwnStems(deleted string, survivors []string) {
 			continue
 		}
 		base, _ := StemMasterBase(e.Name())
-		if p, _, ok := splitMasterName(base); !ok || p != prefix {
+		if p, _, ok := segname.SplitMaster(base); !ok || p != prefix {
 			continue
 		}
 		gap := absDuration(at.Sub(start))

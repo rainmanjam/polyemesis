@@ -256,24 +256,6 @@ func Bytes(recordingsDir string) (int64, error) {
 
 // ---------------------------------------------------------------- arg helpers
 
-// commonArgs are the flags every child process here gets.
-//
-// It mirrors internal/ffmpeg's unexported commonArgs deliberately rather than
-// importing it, because that one is not exported; the -y is the addition. Every
-// output in this package is written to a .partial path, and a .partial left
-// behind by a killed process must not make the retry hang on FFmpeg's
-// interactive overwrite prompt.
-func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-y"}
-}
-
-// progressArgs routes machine-readable stats to stdout, leaving stderr as a
-// pure human log — the same split internal/ffmpeg uses, so ffmpeg.ParseProgress
-// reads our children too.
-func progressArgs() []string {
-	return []string{"-nostats", "-progress", "pipe:1"}
-}
-
 // evenExpr wraps an FFmpeg expression so its value lands on an even number of
 // pixels, which 4:2:0 chroma subsampling requires of every dimension.
 func evenExpr(expr string) string { return "2*floor(" + expr + "/2)" }

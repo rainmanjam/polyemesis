@@ -98,7 +98,7 @@ func liveTools(t *testing.T) *ffmpeg.Tools {
 
 // The sentinels this fixture plants on the destination's COMMAND LINE. Distinct
 // from the ones in read_scope_leak_test.go so a failure says which shape
-// escaped, and each is the exact FFmpeg idiom that defeated alerts.Redact:
+// escaped, and each is the exact FFmpeg idiom that defeated redact.Redact:
 //
 //	argvBackslashBearer  `-headers Authorization:Bearer\ X` -- SplitArgs makes
 //	                     "Bearer\" and "X" separate argv entries, so the
@@ -151,7 +151,7 @@ func runningDestServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request))
 		Name: "live-dest", Kind: db.DestRTMP,
 		URL:       "rtmp://ingest.example/app",
 		StreamKey: argvDestCredential,
-		// The two shapes alerts.Redact provably cannot mask, spliced into the
+		// The two shapes redact.Redact provably cannot mask, spliced into the
 		// argv exactly as an operator would type them into expert mode.
 		ExtraInputArgs:  "-headers Authorization:Bearer\\ " + argvBackslashBearer,
 		ExtraOutputArgs: "-rtmp_conn S:" + argvRTMPConn + " -passphrase " + argvPassphrase,

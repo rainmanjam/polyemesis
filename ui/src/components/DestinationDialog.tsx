@@ -1,4 +1,5 @@
 import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
+import { settingsHref } from "@/lib/settingsSearch";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -27,16 +28,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, isNoSource } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import {
   initialSourceValue,
   sourceChoices,
   sourceIdForSave,
   sourceIsChosen,
 } from "@/lib/destinationSource";
-import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
-import { ivsAppPathFix } from "@/lib/ivsIngest";
+import { FACEBOOK_PRIVACIES } from "@/features/destinations/facebookPrivacy";
+import { ivsAppPathFix } from "@/features/destinations/ivsIngest";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
-import { DEST_STEPS, stepForError, type DestStep } from "@/lib/destinationSteps";
+import { DEST_STEPS, stepForError, type DestStep } from "@/features/destinations/destinationSteps";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { InfoHint } from "@/components/InfoHint";
@@ -49,7 +51,7 @@ import {
   rowsOf,
   type ReadState,
 } from "@/lib/readState";
-import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
+import { computeLeaving, joinConsequence, leaveConsequence } from "@/features/destinations/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -89,6 +91,7 @@ import type {
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
 import { useDismissGuard } from "@/hooks/useDismissGuard";
+import { timestamp } from "@/lib/format";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -608,6 +611,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
   const [presetId, setPresetId] = useState("");
+  // The preset the operator actually picked in this dialog session, or null when
+  // they have not. presetId above also holds a best-effort GUESS used only to
+  // label the picker for a destination that predates the catalogue; the guess
+  // is never sent. What travels is the picked preset, else the stored one.
+  const [pickedPresetId, setPickedPresetId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<DestKind>("rtmp");
@@ -827,7 +835,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     if (destination) {
       setName(destination.name);
       setPlatform(destination.platform);
-      setPresetId(presetIdFor(destination));
+      setPresetId(destination.presetId || presetIdFor(destination));
+      setPickedPresetId(null);
       setKind(destination.kind);
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
@@ -871,6 +880,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setName("");
       setPlatform("custom");
       setPresetId("");
+      setPickedPresetId(null);
       setKind("rtmp");
       setUrl("");
       setStreamKey("");
@@ -929,13 +939,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // the control is hidden rather than shown-and-ignored -- offering a setting
   // that silently does nothing is the defect roadmap item 0 exists for.
   //
-  // Only a ref that SAYS page: counts. A legacy ref carrying no prefix resolves
+  // Only an account the server says is a Page counts (its ref says "page:"). A legacy ref carrying no prefix resolves
   // as "auto" server-side, trying Pages first and falling back to the profile,
   // so which it is cannot be known here. Those keep the control and its hint,
   // because hiding it on a guess would take away a setting that does work.
   const facebookTargetsAPage = useMemo(() => {
     const acct = accounts.find((a) => String(a.id) === accountId);
-    return acct?.accountRef?.startsWith("page:") ?? false;
+    return acct?.isPage ?? false;
   }, [accounts, accountId]);
 
   /** What this destination's platform says it wants. Null when the operator has
@@ -968,6 +978,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // Mutation-tested: with the object in the deps, deleting `platform` from them
   // broke no test, because identity churn was doing the work by accident.
   const concernRenditionId = selectedRendition?.id ?? 0;
+  // The preset that will be saved: picked now, else already stored. Never the
+  // label guess.
+  const sentPresetId = pickedPresetId ?? destination?.presetId ?? "";
   useEffect(() => {
     if (!concernRenditionId) {
       setConcerns([]);
@@ -975,7 +988,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     }
     let live = true;
     api
-      .renditionConcerns(concernRenditionId, platform)
+      .renditionConcerns(concernRenditionId, platform, sentPresetId)
       .then((c) => {
         if (live) setConcerns(c ?? []);
       })
@@ -985,7 +998,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     return () => {
       live = false;
     };
-  }, [concernRenditionId, platform]);
+  }, [concernRenditionId, platform, sentPresetId]);
 
   /** What the encode this destination is LEAVING will do once it has gone.
    *
@@ -1049,6 +1062,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     // the operator was configuring a moment ago would be stranded exactly the
     // same way. See keyAfterKindChange.
     changeKind(p.kind);
+    // Recorded only now that the preset really configured the form: one that
+    // returned early above left the form alone and is not what this is.
+    setPickedPresetId(p.id);
     // Only the presets with integration code behind them carry a platform;
     // every other one is an ordinary custom endpoint. That is what keeps this
     // catalogue additive — it never widens what the API will accept.
@@ -1132,6 +1148,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // Only X reads the announcement setting; any other platform clears it,
         // as the server would.
         xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
+        // The preset the operator picked in this dialog, so platforms that save as
+        // "custom" can still be found for their own encoder guidance. Omitted
+        // when none was picked (never a guess): the server decodes over the
+        // stored row and keeps what it has. An empty string clears it.
+        ...(pickedPresetId !== null ? { presetId: pickedPresetId } : {}),
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -2062,8 +2083,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               <Input
                 id="dest-bitrate"
                 type="number"
-                min={32}
-                max={512}
+                min={LIMITS.audioBitrateKbps.min}
+                max={LIMITS.audioBitrateKbps.max}
                 value={bitrate}
                 onChange={(e) => setBitrate(Number(e.target.value))}
                 className="w-24"
@@ -2280,7 +2301,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unset">{t("dest.leaveOnFacebook")}</SelectItem>
-                      {/* Rendered FROM lib/facebookPrivacy, not typed out here.
+                      {/* Rendered FROM features/destinations/facebookPrivacy, not typed out here.
                           That array is pinned to db.FacebookPrivacies by
                           internal/db/compliance_drift_test.go, and the pin only
                           means something while this select is the array's one
@@ -2837,7 +2858,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
       )}
       {health?.state !== "ok" && expires && (
         <span className="tnum font-mono text-sm text-muted-foreground">
-          {t("addDest.expiresAt", { date: expires.toLocaleString() })}
+          {t("addDest.expiresAt", { date: timestamp(expires.toISOString()) })}
         </span>
       )}
       {health?.state === "refreshFailing" && health.lastError && (
@@ -2848,7 +2869,7 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
           {t("addDest.unlink")}
         </Button>
         <Button type="button" variant="ghost" size="sm" asChild>
-          <Link to="/settings?tab=platforms">{t("addDest.manageAccounts")}</Link>
+          <Link to={settingsHref("platforms")}>{t("addDest.manageAccounts")}</Link>
         </Button>
       </span>
     </div>

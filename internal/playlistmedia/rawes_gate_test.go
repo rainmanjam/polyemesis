@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
-	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -68,7 +68,7 @@ func TestTheNormaliseGateCountsARawElementaryStreamRatherThanRefusingIt(t *testi
 		FFmpeg: ffmpegBin, FFprobe: ffprobe, DataDir: dir, Uploads: mustStore(t, dir),
 	},
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			ran = true
 			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o600)
 		}))

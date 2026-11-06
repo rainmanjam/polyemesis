@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -20,8 +21,8 @@ import (
 // Mutation: in Processes, delete the `if d.backup != nil { out = append(out,
 // d.backup) }` block. Observed to fail -- dest:9:backup was absent.
 func TestTheMonitoringPageListsTheBackupOutput(t *testing.T) {
-	primary := destSubName(9, "")
-	backup := destSubName(9, destRoleBackup)
+	primary := procname.DestProcessName(9, "")
+	backup := procname.DestProcessName(9, procname.RoleBackup)
 	e := &Engine{
 		dests: map[int64]*destination{9: {
 			row:    backupRow(),

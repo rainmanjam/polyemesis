@@ -96,7 +96,7 @@ func (t *Twitch) CreatePoll(ctx context.Context, clientID, accessToken, broadcas
 	var out struct {
 		Data []twitchPollJSON `json:"data"`
 	}
-	if err := requestJSON(ctx, http.MethodPost, t.apiEndpoint()+twitchPollsPath, accessToken, body,
+	if err := t.requestJSON(ctx, http.MethodPost, t.apiEndpoint()+twitchPollsPath, accessToken, body,
 		helixHeaders(clientID), &out); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (t *Twitch) GetPoll(ctx context.Context, clientID, accessToken, broadcaster
 	var out struct {
 		Data []twitchPollJSON `json:"data"`
 	}
-	if err := requestJSON(ctx, http.MethodGet, t.apiEndpoint()+twitchPollsPath+"?"+q.Encode(), accessToken, nil,
+	if err := t.requestJSON(ctx, http.MethodGet, t.apiEndpoint()+twitchPollsPath+"?"+q.Encode(), accessToken, nil,
 		helixHeaders(clientID), &out); err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (t *Twitch) EndPoll(ctx context.Context, clientID, accessToken, broadcaster
 	var out struct {
 		Data []twitchPollJSON `json:"data"`
 	}
-	if err := requestJSON(ctx, http.MethodPatch, t.apiEndpoint()+twitchPollsPath, accessToken, body,
+	if err := t.requestJSON(ctx, http.MethodPatch, t.apiEndpoint()+twitchPollsPath, accessToken, body,
 		helixHeaders(clientID), &out); err != nil {
 		return nil, err
 	}

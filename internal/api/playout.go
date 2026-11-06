@@ -7,9 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,7 +20,9 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playout"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
@@ -100,10 +102,12 @@ const posterTimeout = 8 * time.Second
 // playoutPublish is the operator-facing half of the public origin: who may
 // watch, and what the player page says about the stream.
 //
-// It is stored beside the database rather than inside db.PlayoutSettings only
-// because this change does not own that file. It belongs there, and moving it
-// is a schema addition plus a one-time read of this file; nothing outside this
-// file depends on where it lives.
+// It is stored in playout.json beside the database, not in the database: the
+// schema stays at version 1, and a file the operator can read is the contract
+// this has shipped under. The playback Token is the one secret in it, so the
+// file holds it sealed with the key the database seals stream keys with
+// (playoutOnDisk), and a plaintext token from an older install is read and
+// rewritten sealed.
 type playoutPublish struct {
 	Protection playoutProtection `json:"protection"`
 	// Token is the shared playback secret. Absent from every response except
@@ -164,6 +168,8 @@ func newPlayoutToken() string {
 // rebuilt per request.
 type playoutStore struct {
 	path string
+	box  *secrets.Box
+	log  *slog.Logger
 
 	mu     sync.Mutex
 	cfg    *playoutPublish
@@ -184,12 +190,16 @@ type playoutStore struct {
 // there is exactly one entry.
 var playoutStores sync.Map
 
-func playoutStoreFor(path string) *playoutStore {
-	if v, ok := playoutStores.Load(path); ok {
-		return v.(*playoutStore)
+func playoutStoreFor(path string, box *secrets.Box, log *slog.Logger) *playoutStore {
+	v, ok := playoutStores.Load(path)
+	if !ok {
+		v, _ = playoutStores.LoadOrStore(path, &playoutStore{path: path})
 	}
-	v, _ := playoutStores.LoadOrStore(path, &playoutStore{path: path})
-	return v.(*playoutStore)
+	st := v.(*playoutStore)
+	st.mu.Lock()
+	st.box, st.log = box, log
+	st.mu.Unlock()
+	return st
 }
 
 // playoutConfigPath is the sidecar's location: beside polyemesis.db, in the one
@@ -198,7 +208,18 @@ func (s *Server) playoutConfigPath() string {
 	return filepath.Join(s.cfg.DataDir, "playout.json")
 }
 
-func (s *Server) playoutStore() *playoutStore { return playoutStoreFor(s.playoutConfigPath()) }
+func (s *Server) playoutStore() *playoutStore {
+	return playoutStoreFor(s.playoutConfigPath(), s.box, s.log)
+}
+
+// playoutOnDisk is playout.json. The embedded config's Token is shadowed by
+// the outer one, which is only ever read (a plaintext file written before the
+// token was sealed) and never written; TokenEnc is the sealed token, base64.
+type playoutOnDisk struct {
+	playoutPublish
+	Token    string `json:"token,omitempty"`
+	TokenEnc string `json:"tokenEnc,omitempty"`
+}
 
 // load returns the publish config, reading it from disk once and seeding a
 // protected default the first time.
@@ -208,21 +229,82 @@ func (st *playoutStore) load() playoutPublish {
 	return *st.loadLocked()
 }
 
+func (st *playoutStore) warn(msg string, args ...any) {
+	if st.log != nil {
+		st.log.Warn(msg, args...)
+	}
+}
+
 func (st *playoutStore) loadLocked() *playoutPublish {
 	if st.cfg != nil {
 		return st.cfg
 	}
-	cfg := &playoutPublish{}
-	if b, err := os.ReadFile(st.path); err == nil {
-		// A corrupt file is not a reason to serve the stream to everyone, and
-		// normalize below turns the zero value into the protected default.
-		_ = json.Unmarshal(b, cfg)
-	}
-	if cfg.normalize() {
-		_ = writePlayoutConfig(st.path, cfg)
+	cfg, rewrite := st.readFile()
+	if cfg.normalize() || rewrite {
+		if err := st.writeFile(cfg); err != nil {
+			st.warn("playout: could not write playout.json; the playback token will not survive a restart",
+				"path", st.path, "err", err)
+		}
 	}
 	st.cfg = cfg
 	return cfg
+}
+
+// readFile reads playout.json. rewrite reports that the file should be written
+// back: it held a plaintext token, or it could not be used.
+//
+// A file that cannot be read is not a reason to serve the stream to everyone:
+// the zero config comes back, and normalize turns it into the protected
+// default. It is a reason to say so, because the operator's title, offline card
+// and token are what is being replaced.
+func (st *playoutStore) readFile() (cfg *playoutPublish, rewrite bool) {
+	cfg = &playoutPublish{}
+	b, err := os.ReadFile(st.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return cfg, true
+	}
+	if err != nil {
+		st.warn("playout: playout.json is unreadable and is being replaced with protected defaults",
+			"path", st.path, "err", err)
+		return cfg, true
+	}
+	var disk playoutOnDisk
+	if err := json.Unmarshal(b, &disk); err != nil {
+		st.warn("playout: playout.json is corrupt and is being replaced with protected defaults; "+
+			"the title, offline card and playback token are lost",
+			"path", st.path, "err", err)
+		return cfg, true
+	}
+	*cfg = disk.playoutPublish
+	switch {
+	case disk.TokenEnc != "":
+		cfg.Token = st.openToken(disk.TokenEnc)
+		if cfg.Token == "" {
+			st.warn("playout: the playback token in playout.json cannot be decrypted with this install's "+
+				"secret key; a new token is being minted and existing watch links stop working",
+				"path", st.path)
+			return cfg, true
+		}
+	case disk.Token != "":
+		cfg.Token = disk.Token
+		rewrite = st.box != nil
+	}
+	return cfg, rewrite
+}
+
+func (st *playoutStore) openToken(enc string) string {
+	if st.box == nil {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return ""
+	}
+	tok, err := st.box.Open(raw)
+	if err != nil {
+		return ""
+	}
+	return tok
 }
 
 // save replaces the config, normalising first so nothing unrepresentable is
@@ -232,26 +314,36 @@ func (st *playoutStore) save(cfg playoutPublish) (playoutPublish, error) {
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if err := writePlayoutConfig(st.path, &cfg); err != nil {
+	if err := st.writeFile(&cfg); err != nil {
 		return cfg, err
 	}
 	st.cfg = &cfg
 	return cfg, nil
 }
 
-// writePlayoutConfig writes through a temp file so a crash mid-write cannot
-// leave a truncated config that the next start would read as "no token".
-func writePlayoutConfig(path string, cfg *playoutPublish) error {
-	b, err := json.MarshalIndent(cfg, "", "  ")
+// writeFile writes through a temp file so a crash mid-write cannot leave a
+// truncated config that the next start would read as "no token".
+func (st *playoutStore) writeFile(cfg *playoutPublish) error {
+	disk := playoutOnDisk{playoutPublish: *cfg}
+	if st.box != nil {
+		sealed, err := st.box.Seal(cfg.Token)
+		if err != nil {
+			return err
+		}
+		disk.TokenEnc = base64.StdEncoding.EncodeToString(sealed)
+	} else {
+		disk.Token = cfg.Token
+	}
+	b, err := json.MarshalIndent(&disk, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
+	tmp := st.path + ".tmp"
 	// 0600: this file holds a bearer credential.
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return os.Rename(tmp, st.path)
 }
 
 // ------------------------------------------------------------------- plumbing
@@ -920,19 +1012,7 @@ func renderPoster(ffmpegPath, segment string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), posterTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
-		"-hide_banner", "-nostdin", "-loglevel", "error",
-		"-i", segment,
-		"-frames:v", "1",
-		// Scaled down: this is a poster behind a play button, and a full-size
-		// still off a 1080p ladder is a quarter-megabyte nobody looks at.
-		"-vf", "scale=854:-2",
-		"-q:v", "5",
-		"-f", "image2",
-		"-c:v", "mjpeg",
-		"-",
-	)
-	out, err := cmd.Output()
+	out, _, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffmpegPath, Args: posterArgs(segment)})
 	if err != nil {
 		return nil, err
 	}
@@ -1002,7 +1082,7 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 		VODURL:         cfg.VODURL,
 
 		Exposed: set.Enabled && set.Public && cfg.Protection == PlayoutProtectOpen,
-		URLs:    playoutURLsFor(r, set, cfg),
+		URLs:    playoutURLsFor(r, s.proxies, set, cfg),
 	}
 	if m := s.playoutManager(); m != nil {
 		view.Status = m.Status()
@@ -1055,8 +1135,8 @@ func readSafePlayoutView(v playoutAdminView) playoutAdminView {
 // going to paste them somewhere this server cannot see. The Host header is what
 // they typed to get here, which is the best available guess at what a viewer
 // should type too.
-func playoutURLsFor(r *http.Request, set db.PlayoutSettings, cfg playoutPublish) playoutURLs {
-	base := requestOrigin(r)
+func playoutURLsFor(r *http.Request, proxies *auth.Proxies, set db.PlayoutSettings, cfg playoutPublish) playoutURLs {
+	base := requestOrigin(r, proxies)
 	q := ""
 	// The token is only useful in a link when the stream is actually protected;
 	// appending it to an open stream's URL would teach the operator to paste a
@@ -1078,14 +1158,14 @@ func playoutURLsFor(r *http.Request, set db.PlayoutSettings, cfg playoutPublish)
 }
 
 // requestOrigin reconstructs the scheme and host the client used.
-func requestOrigin(r *http.Request) string {
+func requestOrigin(r *http.Request, proxies *auth.Proxies) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
 	// Behind a terminating proxy r.TLS is nil even though the viewer is on
 	// https, and a link that downgrades them is worse than one that guesses.
-	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" && (proxies == nil || proxies.Trusts(r)) {
 		if i := strings.IndexByte(p, ','); i > 0 {
 			p = p[:i]
 		}
@@ -1201,7 +1281,7 @@ func (s *Server) handleRotatePlayoutToken(w http.ResponseWriter, r *http.Request
 	s.log.Info("playout: playback token rotated; existing links no longer work")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": saved.Token,
-		"urls":  playoutURLsFor(r, s.playoutSettings(), saved),
+		"urls":  playoutURLsFor(r, s.proxies, s.playoutSettings(), saved),
 	})
 }
 
@@ -1367,4 +1447,21 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// posterArgs is the command that renders one frame of a segment as a JPEG on
+// stdout. Its level is the one setting every FFmpeg child honours.
+func posterArgs(segment string) []string {
+	return []string{
+		"-hide_banner", "-nostdin", "-loglevel", ffmpeg.LogLevel(ffmpeg.LogError),
+		"-i", segment,
+		"-frames:v", "1",
+		// Scaled down: this is a poster behind a play button, and a full-size
+		// still off a 1080p ladder is a quarter-megabyte nobody looks at.
+		"-vf", "scale=854:-2",
+		"-q:v", "5",
+		"-f", "image2",
+		"-c:v", "mjpeg",
+		"-",
+	}
 }

@@ -30,11 +30,12 @@ package api
 // be testing with.
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -161,6 +162,11 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 	return true
 }
 
+// chatFromEnv reports whether a platform's chat hangs off an environment
+// variable rather than a connected account, so no account route attaches or
+// detaches it.
+func chatFromEnv(p db.Platform) bool { return p == db.PlatformRumble }
+
 // attachAccountChat starts the chat of an account that has just been
 // connected, or restarts it for one connected again. The OAuth callback and the
 // device-code poll call it once the row is stored. Nothing here fails the
@@ -187,7 +193,7 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
 	// Rumble's chat hangs off an environment variable, not an account (see
 	// attachRumble), and no connect has any claim on it.
-	if s.chat == nil || s.store == nil || p == db.PlatformRumble {
+	if s.chat == nil || s.store == nil || chatFromEnv(p) {
 		return
 	}
 	if s.beforeChatAttach != nil {
@@ -344,7 +350,7 @@ func (s *Server) detachChat(p db.Platform, account string) {
 // app or an account (see attachRumble), so no credentials route has any claim
 // on it, and a DELETE that names it -- which deletes nothing -- must not end it.
 func (s *Server) detachPlatformChat(p db.Platform) {
-	if s.chat == nil || p == db.PlatformRumble {
+	if s.chat == nil || chatFromEnv(p) {
 		return
 	}
 	// Under chatWire, so a connect that read the credentials just before they
@@ -374,10 +380,10 @@ func (s *Server) detachPlatformChat(p db.Platform) {
 // install that has not set the variable would otherwise get a startup warning
 // about a platform they have never heard of.
 func (s *Server) attachRumble(ctx context.Context) bool {
-	// os.Getenv is the ONLY path that touches this value. Never a flag: argv is
-	// world-readable in ps, and a key every local user can read has leaked. See
-	// chat.RumbleChatKeyEnv.
-	key := strings.TrimSpace(os.Getenv(chat.RumbleChatKeyEnv))
+	// The key comes from the environment only, read once at startup
+	// (startupenv). Never a flag: argv is world-readable in ps, and a key every
+	// local user can read has leaked. See chat.RumbleChatKeyEnv.
+	key := s.env.RumbleChatKey
 	if key == "" {
 		return false
 	}
@@ -387,7 +393,7 @@ func (s *Server) attachRumble(ctx context.Context) bool {
 		// to keep two accounts on one platform distinguishable. Rumble can only
 		// ever have one here, because there is only one environment variable.
 		AccountRef: "rumble",
-		Channel:    strings.TrimSpace(os.Getenv("RUMBLE_CHAT_CHANNEL")),
+		Channel:    s.env.RumbleChatChannel,
 		Key:        key,
 	})
 	if err != nil {
@@ -500,6 +506,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:             s.chatToken(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
+			CallbackPath:      kickWebhookPath,
 			// The signature check. Without this line the adapter refuses every
 			// delivery — which is the point: the previous version of this
 			// construction site simply omitted it, and the handler's nil guard
@@ -513,7 +520,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// the operator's Livestream gate is open (POLYEMESIS_X_LIVESTREAM). With
 		// the gate closed the account stays connected for sign-in and nothing
 		// reads or posts chat for it.
-		if !oauth.NewX().LivestreamAccess() {
+		if s.livestreamGate(db.PlatformX) != "open" {
 			return nil, fmt.Errorf("X chat needs X Livestream access (app must be whitelisted by X)")
 		}
 		return chat.NewX(chat.XConfig{
@@ -524,7 +531,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			// which the operator supplies from the X developer console. Nothing
 			// here mints it. Empty makes the adapter's Run refuse with a Fatal
 			// error that says so.
-			AppBearer: strings.TrimSpace(os.Getenv("POLYEMESIS_X_APP_BEARER")),
+			AppBearer: s.env.XAppBearer,
 		})
 
 	case db.PlatformFacebook:
@@ -763,7 +770,7 @@ func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	h, ok := s.kickChatHandler()
+	h, ok := s.kickChatHandler(r)
 	if !ok {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -771,8 +778,16 @@ func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTP(w, r)
 }
 
-// kickChatHandler finds the attached Kick adapter's receiver.
-func (s *Server) kickChatHandler() (http.Handler, bool) {
+// kickChatHandler finds the receiver of the Kick adapter a delivery belongs to.
+//
+// Kick posts every connected channel to one callback URL and the adapter stamps
+// its own account on what it ingests, so a delivery has to reach the adapter for
+// the broadcaster it names. A delivery for a channel with no adapter here is
+// dropped after its signature is checked; one that names no channel at all goes to the
+// first adapter, which counts it as unreadable. GET probes carry no body and go
+// to the first adapter, as before.
+func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
+	var kicks []*chat.KickAdapter
 	for _, st := range s.chat.Statuses() {
 		if st.Platform != db.PlatformKick {
 			continue
@@ -782,20 +797,36 @@ func (s *Server) kickChatHandler() (http.Handler, bool) {
 			continue
 		}
 		if k, ok := a.(*chat.KickAdapter); ok {
+			kicks = append(kicks, k)
+		}
+	}
+	if len(kicks) == 0 {
+		return nil, false
+	}
+	if r.Method != http.MethodPost {
+		return kicks[0].Handler(), true
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return kicks[0].Handler(), true
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	id := chat.KickDeliveryBroadcaster(body)
+	if id == 0 {
+		return kicks[0].Handler(), true
+	}
+	for _, k := range kicks {
+		if k.BroadcasterUserID() == id {
 			return k.Handler(), true
 		}
 	}
-	return nil, false
-}
-
-// KickChatCallbackURL is what the operator pastes into their Kick app. Empty
-// when this server does not know its own public URL, which the setup page says
-// in words rather than showing a URL that would not work.
-func (s *Server) KickChatCallbackURL() string {
-	base := publicBaseURL(s.cfg)
-	secret := s.kickCallbackSecret()
-	if base == "" || secret == "" {
-		return ""
-	}
-	return base + "/api/v1/chat/kick/" + secret
+	// Nobody here listens to that channel. It is still checked, so a forged
+	// delivery earns the same 401 it would for a connected one.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := kicks[0].VerifyDelivery(r, body); err != nil {
+			http.Error(w, "signature rejected", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}), true
 }

@@ -1,8 +1,9 @@
 package api
 
 import (
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The WebSocket's redaction policy: what a read-scoped subscriber may see, per
@@ -33,7 +34,7 @@ const (
 	// carries no stored credential at all, or where every leaf that could was
 	// already scrubbed at the point the copy was made.
 	wsPassthrough wsPolicy = iota
-	// wsRedactText runs alerts.Redact over the payload's string leaves as a
+	// wsRedactText runs redact.Redact over the payload's string leaves as a
 	// RESIDUAL pass, preserving the wire shape. For payloads carrying text
 	// somebody else authored. Best-effort, and claimed as nothing more.
 	wsRedactText
@@ -80,25 +81,22 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 	// to chat.
 	events.TypeSource: wsRedactText,
 
-	// A chat message is what a viewer wrote, under their name: content, which
-	// a read token does not get (staging-readiness row 32). The REST
-	// scrollback is denied in readScopeDeniedPatterns; this is the live copy
-	// of the same messages, and redacting it would still have sent every
-	// word.
-	events.TypeChat: wsDrop,
+	// events.TypeChat, TypeChatRetract and TypeChatModeration are NOT here: the
+	// stream's catalogue (internal/eventstream) classifies them, and eventView
+	// asks it. Chat is content a viewer wrote and the other two name the viewer
+	// an action was taken against, so a read token gets none of them on either
+	// surface (staging-readiness row 32); the REST half is
+	// the readDenied flag.
 	// Text authored elsewhere and passed through. A caption can contain
 	// anything that was said, including a key read out loud.
 	events.TypeCaption: wsRedactText,
 
-	// A platform name, a state word, a reason string, and message ids.
-	events.TypeChatState:   wsPassthrough,
-	events.TypeChatRetract: wsPassthrough,
-
-	// Names the viewer an action was taken against, and the reason a moderator
-	// gave: moderation of chat content, which a read token does not get, for
-	// the reason TypeChat is dropped above.
-	events.TypeChatModeration: wsDrop,
+	// A platform name and a state word.
+	events.TypeChatState: wsPassthrough,
 }
+
+// busReadAccess is the catalogue lookup; a variable so a test can stub a type.
+var busReadAccess = eventstream.BusReadAccess
 
 // eventView renders one event for one principal, returning ok=false when
 // nothing may be sent.
@@ -112,6 +110,13 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 func eventView(ev events.Event, readOnly bool) (events.Event, bool) {
 	if !readOnly {
 		return ev, true
+	}
+	// One classification for the types both surfaces carry: the catalogue's.
+	// A bridged type the catalogue does not Grant is withheld. One it Grants
+	// still needs an entry in wsEventPolicy: unlisted means withheld, so a type
+	// is never sent to a read token by the absence of a rule.
+	if access, bridged := busReadAccess(ev.Type); bridged && access != eventstream.Granted {
+		return events.Event{}, false
 	}
 	policy, classified := wsEventPolicy[ev.Type]
 	if !classified {
@@ -156,6 +161,6 @@ func eventView(ev events.Event, readOnly bool) (events.Event, bool) {
 
 // redactEventText applies the residual pass to every string leaf of a payload
 // while PRESERVING ITS WIRE SHAPE. The implementation, and the reasoning for
-// every rule in it (#162's argv arrays above all), is alerts.RedactTree; it
+// every rule in it (#162's argv arrays above all), is redact.RedactTree; it
 // moved there when internal/eventstream became its second caller.
-func redactEventText(data any) any { return alerts.RedactTree(data) }
+func redactEventText(data any) any { return redact.RedactTree(data) }

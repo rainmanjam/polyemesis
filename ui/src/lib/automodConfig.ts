@@ -19,7 +19,7 @@ import type {
    two places that need it — the matrix, which decides whether a cell is a
    switch at all, and the editor, which decides whether a field is complete —
    must not drift apart. They already did once, between the server's summary
-   and the operator's draft, and lib/automodArmed.ts exists because of it.
+   and the operator's draft, and features/automod/automodArmed.ts exists because of it.
    =========================================================================== */
 
 /** The vocabulary, once.
@@ -87,7 +87,7 @@ export function checkerReady(
       (m): m is AutomodModel => m?.enabled === true,
     );
     if (on.length === 0) return { ready: false, reason: "automod.modelOff" };
-    // modelConfigFrom copies the stored endpoint over DefaultModelConfig's,
+    // modelConfigFor copies the stored endpoint over DefaultModelConfig's,
     // including an empty one, so a blank field is a POST to "" — an error on
     // every call, and the model path fails open. The checker exists and can
     // never find anything, which is worth saying differently from "off".

@@ -18,6 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/polls"
 )
@@ -44,7 +45,7 @@ const (
 	mcpRead mcpTier = iota
 	// mcpContent tools read, but what they read is what viewers wrote or said.
 	// REST denies those routes to read tokens (#154, staging-readiness row 32,
-	// readScopeDeniedPatterns), so they are on the admin server only.
+	// the readDenied flag), so they are on the admin server only.
 	mcpContent
 	// mcpWrite tools change something. Admin server only, and audited.
 	mcpWrite
@@ -393,7 +394,7 @@ var (
 		"description": "Must be true to act. Without it nothing happens and the tool answers with what the action would end.",
 	}
 	schemaDumpSeconds = map[string]any{
-		"type": "number", "minimum": 0, "maximum": 900,
+		"type": "number", "minimum": 0, "maximum": int(engine.MaxDumpRequest.Seconds()),
 		"description": "Drop at least this many seconds of the newest programme. 0 or absent: everything since the last dump.",
 	}
 	schemaStopNow = map[string]any{

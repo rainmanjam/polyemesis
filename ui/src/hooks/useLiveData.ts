@@ -25,6 +25,18 @@ import type {
    connection on every keystroke is a bad way to develop a live dashboard.
    =========================================================================== */
 
+/** One programme as /sources lists it: what the Dashboard and the switcher
+ *  need, with the publish addresses for the checklist.
+ *
+ *  publishUrls CARRY THE SOURCE'S TOKEN where the protocol puts it in the
+ *  address (the SRT streamid, the RTMP stream key). Hold them in memory only:
+ *  never log, persist or send them anywhere but the clipboard on a copy. */
+export interface Programme {
+  id: number;
+  name: string;
+  publishUrls: Record<string, string>;
+}
+
 export interface LiveData {
   /** WHICH PROGRAMME the console is looking at, resolved once by
    *  LiveDataProvider from what the operator last looked at, else the server's
@@ -71,6 +83,10 @@ export interface LiveData {
    *  the label carries information — on the single-source install that is the
    *  overwhelming majority, a name that never varies is furniture. */
   sourceCount: number;
+  /** Whether `sourceCount` was read from a successful /sources answer. Until
+   *  then it is a placeholder 0, and a page must not draw "no programme yet"
+   *  from it. */
+  sourceCountKnown: boolean;
   /** Every programme the server lists, id and name, in the server's display
    *  order — which is the order resolveProgramme's fallback picks from.
    *
@@ -81,7 +97,7 @@ export interface LiveData {
    *
    *  Empty on a fresh install, and empty is not the same as "not yet read" —
    *  gate on programmeKnown for that, exactly as with programme itself. */
-  programmes: { id: number; name: string }[];
+  programmes: Programme[];
   /** Follow a different programme, and remember it across reloads.
    *
    *  #638: rememberProgramme existed and was called from exactly one place,
@@ -96,8 +112,9 @@ export interface LiveData {
    *  Call after creating or deleting a source. The provider also re-resolves
    *  on its own when the status socket names a programme it has not seen --
    *  that covers the changes this tab did not make; this is the fast path for
-   *  the ones it did. #646. */
-  refreshSources: () => Promise<void>;
+   *  the ones it did. #646. Resolves with the source count it read, or null
+   *  when the list could not be read. */
+  refreshSources: () => Promise<number | null>;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;

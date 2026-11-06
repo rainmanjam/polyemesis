@@ -3,8 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ApiError, NO_SOURCE, api, isNoSource } from "./api";
-import { autoApi } from "./autoApi";
+import { ApiError, NO_SOURCE, api, isNoSource, http } from "./api";
 
 /* The refusal an install with no source answers with, and the ONE thing about
  * it a screen is allowed to branch on.
@@ -21,11 +20,10 @@ import { autoApi } from "./autoApi";
  * request() actually lifts the field off the body, and that the string the UI
  * will compare against is the one Go emits.
  *
- * BOTH CLIENTS, and that is the third half. This app has two: lib/api.ts and
- * lib/autoApi.ts, and the second is not a legacy corner -- POST /clips, PUT
- * /clips/buffer, DELETE /clips/{name} and PUT /loudness are reachable from the
- * UI through it and no other way. A contract that holds on one client and not
- * the other reads as satisfied, because the test only ever asked the one.
+ * BOTH ENTRY POINTS, and that is the third half. Routes with no named wrapper go
+ * through `http`, and the programme-scoped clip and loudness routes through
+ * lib/autoApi.ts; both sit on api.ts's one transport. A contract checked on one
+ * entry point reads as satisfied, because the test only ever asked the one.
  */
 
 afterEach(() => {
@@ -76,14 +74,14 @@ describe("the no-source refusal", () => {
       error: "this install has no source yet, so there is no programme to act on.",
       code: "no_source",
     });
-    await expect(autoApi.post("/clips", { seconds: 30 })).rejects.toSatisfy(
+    await expect(http.post("/clips", { seconds: 30 })).rejects.toSatisfy(
       (e: unknown) => e instanceof ApiError && e.status === 503 && e.code === "no_source",
     );
   });
 
   it("leaves code empty on the automation client for the errors that carry none", async () => {
     respondWith(400, { error: "invalid id" });
-    await expect(autoApi.get("/clips")).rejects.toSatisfy(
+    await expect(http.get("/clips")).rejects.toSatisfy(
       (e: unknown) => e instanceof ApiError && e.status === 400 && e.code === "",
     );
   });

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Hub bounds.
@@ -72,7 +73,6 @@ type Hub struct {
 	kicked    atomic.Int64
 }
 
-// NewHub builds a hub.
 func NewHub(opts ...Option) *Hub {
 	h := &Hub{
 		now:    time.Now,
@@ -418,21 +418,21 @@ func (h *Hub) Gap(lastID string) Envelope {
 // same function -- and then the residual pass over the free-form payload that
 // the read-scoped WebSocket applies to text somebody else authored.
 func (e Envelope) redacted() Envelope {
-	e.Reason = alerts.Redact(e.Reason)
-	e.Error = alerts.Redact(e.Error)
+	e.Reason = redact.Redact(e.Reason)
+	e.Error = redact.Redact(e.Error)
 	if e.Source != nil {
 		s := *e.Source
-		s.Name = alerts.Redact(s.Name)
+		s.Name = redact.Redact(s.Name)
 		e.Source = &s
 	}
 	if e.Destination != nil {
 		d := *e.Destination
-		d.Name = alerts.Redact(d.Name)
+		d.Name = redact.Redact(d.Name)
 		e.Destination = &d
 	}
 	if e.Failure != nil {
 		f := *e.Failure
-		f.Line = alerts.Redact(f.Line)
+		f.Line = redact.Redact(f.Line)
 		e.Failure = &f
 	}
 	// An alert is redacted by ITS OWN rules and NOT by the tree pass. Its
@@ -449,7 +449,7 @@ func (e Envelope) redacted() Envelope {
 	// the same rule rather than trusted to have remembered it.
 	if a, ok := e.Data.(alerts.Event); ok {
 		a = a.Redacted()
-		a.Key = alerts.Redact(a.Key)
+		a.Key = redact.Redact(a.Key)
 		e.Data = a
 		return e
 	}
@@ -459,24 +459,24 @@ func (e Envelope) redacted() Envelope {
 	// no field named after a secret for the tree pass to mask.
 	switch d := e.Data.(type) {
 	case DisplayLine:
-		d.Name = alerts.Redact(d.Name)
-		d.Text = alerts.Redact(d.Text)
+		d.Name = redact.Redact(d.Name)
+		d.Text = redact.Redact(d.Text)
 		e.Data = d
 		return e
 	case DisplayRemoval:
 		return e
 	case PollDisplay:
-		d.Question = alerts.Redact(d.Question)
+		d.Question = redact.Redact(d.Question)
 		opts := make([]PollDisplayOption, len(d.Options))
 		for i, o := range d.Options {
-			opts[i] = PollDisplayOption{Label: alerts.Redact(o.Label), Votes: o.Votes}
+			opts[i] = PollDisplayOption{Label: redact.Redact(o.Label), Votes: o.Votes}
 		}
 		d.Options = opts
 		e.Data = d
 		return e
 	}
 	if e.Data != nil {
-		e.Data = alerts.RedactTree(e.Data)
+		e.Data = redact.RedactTree(e.Data)
 	}
 	return e
 }

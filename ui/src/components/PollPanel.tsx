@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { accentFor } from "@/lib/chat";
+import { platformName } from "@/lib/platforms";
 import { useT, type Translator } from "@/lib/i18n";
 import {
   POLL_LIMITS,
@@ -35,10 +36,6 @@ import type { ChatPlatform } from "@/lib/types";
 
 const LIVE_EVERY_MS = 1500;
 const HISTORY = 10;
-
-function platformLabel(p: string): string {
-  return accentFor(p as ChatPlatform).label || p;
-}
 
 export function PollPanel({ twitchAvailable = false }: { twitchAvailable?: boolean }) {
   const t = useT();
@@ -313,7 +310,7 @@ function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged
               <div className="flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
                 {platformsByVotes(o.byPlatform).map(([p, n]) => (
                   <span key={p} className={accentFor(p as ChatPlatform).text}>
-                    {t("polls.platformCount", { platform: platformLabel(p), count: n })}
+                    {t("polls.platformCount", { platform: platformName(p), count: n })}
                   </span>
                 ))}
               </div>
@@ -324,7 +321,7 @@ function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged
       <div className="flex flex-wrap gap-x-2 text-sm text-muted-foreground" data-testid="poll-total">
         <span>{t(poll.total === 1 ? "polls.totalOne" : "polls.total", { count: poll.total })}</span>
         {platformsByVotes(poll.byPlatform).map(([p, n]) => (
-          <span key={p}>{t("polls.platformCount", { platform: platformLabel(p), count: n })}</span>
+          <span key={p}>{t("polls.platformCount", { platform: platformName(p), count: n })}</span>
         ))}
       </div>
       <Delivery poll={poll} />
@@ -346,21 +343,21 @@ function Delivery({ poll }: { poll: Poll }) {
       {announced.map((a, i) => (
         <li key={`a-${i}`} className={a.ok ? undefined : "text-warn"}>
           {a.ok
-            ? t("polls.announcedOk", { platform: platformLabel(a.platform) })
+            ? t("polls.announcedOk", { platform: platformName(a.platform) })
             : a.skipped
-              ? t("polls.announcedSkipped", { platform: platformLabel(a.platform) })
-              : t("polls.announcedFailed", { platform: platformLabel(a.platform || "?"), detail: a.detail ?? "" })}
+              ? t("polls.announcedSkipped", { platform: platformName(a.platform) })
+              : t("polls.announcedFailed", { platform: platformName(a.platform || "?"), detail: a.detail ?? "" })}
         </li>
       ))}
       {native.map((n, i) => (
         <li key={`n-${i}`} className={n.status === "failed" ? "text-warn" : undefined}>
           {n.status === "mirrored"
             ? n.reason
-              ? t("polls.nativeMirroredWhy", { platform: platformLabel(n.platform), reason: n.reason })
-              : t("polls.nativeMirrored", { platform: platformLabel(n.platform) })
+              ? t("polls.nativeMirroredWhy", { platform: platformName(n.platform), reason: n.reason })
+              : t("polls.nativeMirrored", { platform: platformName(n.platform) })
             : n.status === "stopped"
-              ? t("polls.nativeStopped", { platform: platformLabel(n.platform) })
-              : t("polls.nativeNot", { platform: platformLabel(n.platform), reason: n.reason ?? "" })}
+              ? t("polls.nativeStopped", { platform: platformName(n.platform) })
+              : t("polls.nativeNot", { platform: platformName(n.platform), reason: n.reason ?? "" })}
         </li>
       ))}
     </ul>

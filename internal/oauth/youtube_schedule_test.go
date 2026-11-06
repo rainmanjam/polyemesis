@@ -417,7 +417,7 @@ func TestYouTubeCreateAdviceExplainsTheRefusalWithoutInventingALimit(t *testing.
 // rather than an error, so the show would simply never have been announced and
 // nothing anywhere would have said why.
 func TestYouTubesScheduleHorizonAssertsNoBoundYouTubeNeverPublished(t *testing.T) {
-	sb, ok := ScheduledBroadcastsFor(db.PlatformYouTube)
+	sb, ok := As[ScheduledBroadcaster](Set{}, db.PlatformYouTube)
 	if !ok {
 		t.Fatal("YouTube has no scheduled-broadcast capability")
 	}

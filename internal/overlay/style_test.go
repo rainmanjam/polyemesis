@@ -2,7 +2,12 @@ package overlay
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 func TestEveryPresetIsValidAndNamed(t *testing.T) {
@@ -73,5 +78,42 @@ func TestAPlatformFilterNamesOnlyChatPlatforms(t *testing.T) {
 		if err := ValidPlatforms(p); err == nil {
 			t.Errorf("%v accepted", p)
 		}
+	}
+}
+
+// A NEW CHAT PLATFORM IS NOT REJECTED. Platforms is derived from the platform
+// registry, so a platform chat has an adapter for is offered by the overlay
+// filter and accepted by ValidPlatforms without anyone editing a list here.
+func TestEveryPlatformChatHasAnAdapterForIsAnOverlayFilter(t *testing.T) {
+	offered := map[string]bool{}
+	for _, name := range Platforms {
+		offered[name] = true
+	}
+	adapters := 0
+	for _, row := range platform.All() {
+		if row.Enum == "" {
+			continue
+		}
+		if _, ok := chat.ProfileOf(db.Platform(row.Enum)); !ok {
+			continue
+		}
+		adapters++
+		if !offered[row.Enum] {
+			t.Errorf("chat has an adapter for %s and Platforms does not offer it", row.Enum)
+		}
+		if err := ValidPlatforms([]string{row.Enum}); err != nil {
+			t.Errorf("an overlay filtered to %s is rejected: %v", row.Enum, err)
+		}
+	}
+	if adapters == 0 || len(offered) != adapters {
+		t.Errorf("Platforms offers %d, chat has %d adapters", len(offered), adapters)
+	}
+}
+
+// The order is part of GET /overlays.
+func TestOverlayPlatformsKeepTheirListedOrder(t *testing.T) {
+	want := []string{"twitch", "youtube", "kick", "facebook", "rumble", "x"}
+	if !slices.Equal(Platforms, want) {
+		t.Errorf("Platforms = %v, want %v", Platforms, want)
 	}
 }

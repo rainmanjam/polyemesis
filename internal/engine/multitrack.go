@@ -38,6 +38,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // mtDecision is what one destination's go-live decided about Enhanced
@@ -116,7 +117,11 @@ func wantsMultitrack(row *db.Destination) bool {
 // non-Twitch target -- see routing.CompilePair and ffmpeg.secondAudioMap, which
 // this must not break.
 func twitchOneAudioTrack(row *db.Destination) bool {
-	return row != nil && row.Kind == db.DestRTMP && row.Platform == db.PlatformTwitch
+	if row == nil || row.Kind != db.DestRTMP {
+		return false
+	}
+	p, ok := platform.ByEnum(string(row.Platform))
+	return ok && p.AudioTracksMax == 1
 }
 
 // vodNeedsNegotiation reports that this destination's second audio mix is

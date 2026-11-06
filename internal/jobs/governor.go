@@ -194,7 +194,6 @@ const (
 	ReasonGPUBusy       = "the gpu is busy with the live stream"
 	ReasonOnBattery     = "the machine is on battery"
 	ReasonTooHot        = "the machine is too hot to take on more work"
-	ReasonGovernorOff   = "the governor is switched off"
 	ReasonReleased      = "a human released this job"
 )
 

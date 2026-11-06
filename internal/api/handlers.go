@@ -25,7 +25,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
-	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -33,8 +32,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/logtz"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -465,9 +466,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------- system
 
-// storeSettingsWithDefaultIngest is what an unscoped endpoint means by "the
-// settings": the stored document, with the DEFAULT SOURCE's ingest block laid
-// over the singleton one.
+// storeSettingsForSource is what an endpoint means by "the settings": the
+// stored document, with a source's ingest block laid over the singleton one.
+// id names the programme the caller means; nil is the default source. It
+// returns the source it used, nil on an install with none.
 //
 // It reproduces engine.effectiveSettings (engine.go, `settings.Ingest =
 // src.Ingest`) deliberately, because that overlay is the whole difference
@@ -480,17 +482,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // snapshot is whatever its last reconcile installed, so GET /system described
 // the previous listener ports until something reconciled.
 //
-// A source that cannot be read leaves the singleton block in place, which is
-// the same fallback the engine takes and for the same reason: describing the
-// stale thing beats failing the whole endpoint.
-func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
-	settings, _, err := s.storeSettingsForSource(nil)
-	return settings, err
-}
-
-// storeSettingsForSource is storeSettingsWithDefaultIngest for a caller that
-// KNOWS which programme it means, and it returns the source it used.
-//
 // The returned row is not a convenience: /system renders an ingest URL and an
 // SRT passphrase out of that block, and an operator who copies it has no way to
 // tell which programme's encoder it configures. Handing the caller the source
@@ -500,19 +491,8 @@ func (s *Server) storeSettingsForSource(id *int64) (db.Settings, *db.Source, err
 	if err != nil {
 		return settings, nil, err
 	}
-	if id == nil {
-		def, err := s.defaultSourceID()
-		if err != nil {
-			return settings, nil, nil
-		}
-		id = &def
-	}
-	src, err := s.store.GetSource(*id)
-	if err != nil {
-		return settings, nil, nil
-	}
-	settings.Ingest = src.Ingest
-	return settings, src, nil
+	src, err := s.overlaySourceIngest(&settings, id)
+	return settings, src, err
 }
 
 // defaultSourceID is which source an unscoped endpoint speaks for: the one the
@@ -609,7 +589,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	// CONSTRUCTED one, which is why struct tags could never have covered it:
 	// PublicIngestURL renders srt://host:port?...&passphrase=<cleartext> in SRT
 	// mode and returns the pull URL verbatim, userinfo and all, in pull mode.
-	// alerts.RedactURL masks both shapes, and it is the same function
+	// redact.RedactURL masks both shapes, and it is the same function
 	// supervisor already runs over every FFmpeg argv -- which is exactly why
 	// GET /processes was clean through this whole review and this route was
 	// not.
@@ -619,15 +599,22 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	principalVaryingResponse(w)
+	// The FFmpeg document and the GPU beside it are one generation of
+	// detection, so a re-detect cannot serve a new node with the old verdicts.
+	snap := s.tools().Probed(r.Context(), true)
+	var ffmpegDoc any = s.tools()
+	if s.tools() != nil {
+		ffmpegDoc = snap.ToolsJSON()
+	}
 	out := map[string]any{
 		"version": s.version,
-		"ffmpeg":  s.tools(),
+		"ffmpeg":  ffmpegDoc,
 		// What the machine has, as opposed to what the FFmpeg build lists. It
 		// rides on /system because the two are only meaningful together: an
 		// encoder list without the hardware behind it is what made the rendition
 		// editor offer NVENC on an AMD box in the first place. Cached after the
 		// first scan, so this stays a cheap endpoint.
-		"gpu":        machineGPUs(r.Context()),
+		"gpu":        snap.GPU,
 		"ingestUrl":  ingestURL,
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,
@@ -659,15 +646,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 // a different one is the whole defect; silently ignoring the parameter would be
 // that defect with the operator's own request as the evidence they were heard.
 func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int64, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw == "" {
-		return nil, true
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-			`"`+sourceParam+`" must be a source id.`+s.availableSources())
-		return nil, false
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok || !named {
+		return nil, ok
 	}
 	if _, err := s.store.GetSource(id); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
@@ -681,7 +662,7 @@ func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int6
 
 // updateFeedURL is the release feed consulted. A var so a test can point it at
 // a local server; nothing reads it until an operator asks for a check.
-var updateFeedURL = "https://api.github.com/repos/rainmanjam/polyemesis/releases/latest"
+var updateFeedURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
 
 const (
 	// updateCheckTTL keeps a bored operator clicking Check from spending the 60
@@ -1286,39 +1267,6 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 	return md
 }
 
-// childlessIngestState is the scrape's ingest state for a programme whose
-// engine has no ingest process.
-//
-// AN SRT PROGRAMME NEVER HAS ONE. The manager's shared SRT listener hands
-// datagrams straight to the programme's relay hub, so reading the state off
-// the child alone reported every SRT programme stopped for its whole life:
-// polyemesis_ingest_up 0 while its encoder was pushing, and the "failed" half
-// of PolyemesisIngestDown unable to fire whatever happened to the port.
-//
-// The listener is that programme's ingest, so it carries the state, with the
-// same meaning an RTMP or pull child's state has: running while it is able to
-// receive -- waiting for the encoder or receiving it, which only the bitrate
-// tells apart -- failed when a port is configured and nothing is bound to it,
-// and stopped when the operator has turned the port off (port 0) or disabled
-// the source (the listener refuses a disabled source's encoder). Those two are
-// decisions rather than faults and must not page.
-//
-// Every other mode's ingest IS its child, so with none it is stopped, as
-// before.
-func childlessIngestState(mode db.IngestMode, enabled bool, srtPort int, srtBound bool) supervisor.State {
-	if mode != db.IngestSRT || !enabled {
-		return supervisor.StateStopped
-	}
-	switch {
-	case srtBound:
-		return supervisor.StateRunning
-	case srtPort == 0:
-		return supervisor.StateStopped
-	default:
-		return supervisor.StateFailed
-	}
-}
-
 // ingestSnapshots is one ingest-and-relay reading per running programme.
 //
 // Walked off the manager rather than read off the default engine, which is the
@@ -1356,16 +1304,9 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 				Dropped:     st.Relay.Dropped,
 			},
 		}
+		in.State = string(s.mgr.IngestState(e, st.Ingest))
 		if st.Ingest != nil {
-			in.State = string(st.Ingest.State)
 			in.Restarts = st.Ingest.Restarts
-		} else {
-			// No ingest process. For an SRT programme that is by design --
-			// the shared listener feeds the hub directly -- and the listener
-			// is then what carries the state. See childlessIngestState.
-			set := e.Settings()
-			in.State = string(childlessIngestState(set.Ingest.Mode, e.SourceEnabled(),
-				set.Listeners.SRTPort, s.mgr.ListenerBound(db.IngestSRT)))
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps
@@ -1424,7 +1365,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	// The ingest the server is USING, not the blob's copy of it. Before the
 	// redaction below, so a read-scoped token is blanked on the served block.
-	if err := s.overlayDefaultSourceIngest(&settings); err != nil {
+	if _, err := s.overlaySourceIngest(&settings, nil); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -1548,8 +1489,10 @@ const settingsConflictMsg = "these settings were changed by someone else after t
 // the interleaving this exists to stop.
 var errSettingsConflict = errors.New("settings conflict")
 
-// overlayDefaultSourceIngest makes settings.ingest a VIEW of the default
-// source's ingest rather than a second copy of it.
+// overlaySourceIngest makes settings.ingest a VIEW of a source's ingest (the
+// default one when id is nil) rather than a second copy of it. Only "no such
+// source" leaves the blob in place; any other store error is returned, so every
+// caller fails the same way instead of describing a stale block.
 //
 // The engine reads its ingest from the source row, and the Sources page writes
 // that row directly without touching the settings blob. So the blob's ingest
@@ -1569,23 +1512,26 @@ var errSettingsConflict = errors.New("settings conflict")
 //
 // With no source there is nothing to view, and the blob stays authoritative;
 // that is the install handlePutSettings refuses ingest changes on anyway.
-func (s *Server) overlayDefaultSourceIngest(settings *db.Settings) error {
-	id, err := s.store.DefaultSourceID()
+func (s *Server) overlaySourceIngest(settings *db.Settings, id *int64) (*db.Source, error) {
+	if id == nil {
+		def, err := s.defaultSourceID()
+		if errors.Is(err, db.ErrSourceNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		id = &def
+	}
+	src, err := s.store.GetSource(*id)
 	if errors.Is(err, db.ErrSourceNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
-	}
-	src, err := s.store.GetSource(id)
-	if errors.Is(err, db.ErrSourceNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
+		return nil, err
 	}
 	settings.Ingest = src.Ingest
-	return nil
+	return src, nil
 }
 
 // handlePutMQTTPassword sets or clears the broker password.
@@ -1706,10 +1652,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		// The merge base for ingest is the SOURCE, not the blob -- before
 		// anything below snapshots "what was stored". See
-		// overlayDefaultSourceIngest: with the blob as the base, a client that
+		// overlaySourceIngest: with the blob as the base, a client that
 		// PUT back exactly what it GOT wrote the blob's stale ingest over the
 		// live source.
-		if err := s.overlayDefaultSourceIngest(settings); err != nil {
+		if _, err := s.overlaySourceIngest(settings, nil); err != nil {
 			return err
 		}
 		// A SAVE FROM A STALE READ IS REFUSED, not merged.
@@ -1939,7 +1885,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// refusing that would make every unrelated setting unreachable until a
 		// source exists.
 		if !ingestEqual(storedIngest, settings.Ingest) {
-			switch _, err := s.store.DefaultSourceID(); {
+			switch _, err := s.defaultSourceID(); {
 			case err == nil:
 			case errors.Is(err, db.ErrSourceNotFound):
 				settings.Ingest = storedIngest
@@ -2040,7 +1986,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	//                   answered 200 for a save that silently never reached the
 	//                   pipeline, which is the failure this whole block exists
 	//                   to have stopped happening.
-	switch id, err := s.store.DefaultSourceID(); {
+	switch id, err := s.defaultSourceID(); {
 	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			// What GET will serve if the write-through fails: the blob as
@@ -2073,35 +2019,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		failStored(http.StatusInternalServerError, "", rw, settingsVersion(settings))
 		return
 	}
-	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
-	// it has to be applied HERE rather than at the next restart. A retention
-	// setting that stores, returns 200 and keeps sweeping on the old numbers is
-	// the same silent no-op the ingest block above documents.
-	// The LOG follows the display zone from the next line, not the next
-	// restart. Same argument as the two below: a setting that stores, returns
-	// 200 and changes nothing until somebody reboots the box is the silent
-	// no-op this file warns about twice already -- and here it is the operator
-	// still doing timezone arithmetic in their head while reading the log they
-	// just reconfigured.
-	logtz.Set(displayLocation(settings.Display.TimeZone))
-	ApplyChatRetention(s.chat, settings.Chat)
-	ApplyYouTubeQuota(s.chat, settings.Chat)
-	// The shared allowance the sampler, the vertical read and the request
-	// meter draw on, and the sampler's own interval: both applied now, not at
-	// the next tick (PR #950 review, #2 and #15).
-	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
+	// Everything the document configures in a running process goes through the
+	// one function boot uses too, so the two cannot drift apart.
+	s.ApplySettings(settings)
+	// The sampler re-times its wait from the new interval at once. Only a save
+	// does this: at boot nothing is running to tell.
 	if s.audience != nil {
 		s.audience.Wake()
 	}
-	// Same argument for automod: a matrix that stores, returns 200 and keeps
-	// deciding on the old cells is the silent no-op this file already warns
-	// about twice. Rebuilding the engine here is also what recompiles a changed
-	// rule -- without it a new pattern would not apply until the next restart.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
-	// And the same for alert delivery: a retry budget that stores, returns 200
-	// and keeps chasing on the old count is the third instance of the silent
-	// no-op this handler now guards against three times.
-	ApplyAlertSettings(s.mgr, settings.Alerts)
 
 	// The refusal, LAST, after everything the same document asked for has
 	// actually been applied.
@@ -2170,6 +2095,34 @@ type storedSettingsError struct {
 	Version string `json:"version,omitempty"`
 }
 
+// ApplySettings pushes the stored settings into the running process: the log's
+// time zone, chat retention and history, the YouTube allowance, automod and
+// alert delivery. Boot calls it once after the server is built and the save
+// handler calls it after every commit, so a setting that needs applying is
+// listed here and nowhere else.
+//
+// A save that stores, returns 200 and changes nothing until somebody reboots
+// the box is the silent no-op this list exists to prevent; the same goes for a
+// boot that forgets what the last save applied.
+func (s *Server) ApplySettings(settings db.Settings) {
+	loc, err := resolveDisplayZone(settings.Display.TimeZone)
+	if err != nil {
+		s.log.Warn("display time zone does not resolve; logging in UTC",
+			"zone", settings.Display.TimeZone, "err", err)
+	}
+	logtz.Set(loc)
+	ApplyChatRetention(s.chat, settings.Chat)
+	ApplyYouTubeQuota(s.chat, settings.Chat)
+	// The shared allowance the sampler, the vertical read and the request
+	// meter draw on: applied now, not at the next tick. The sampler itself is
+	// NOT woken here -- a wake queued before AnalyticsLoop starts makes its first
+	// sample skip the initial delay. handlePutSettings wakes it after a save.
+	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
+	// Rebuilding the automod engine is also what recompiles a changed rule.
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
+	ApplyAlertSettings(s.mgr, settings.Alerts)
+}
+
 // ApplyChatRetention pushes the stored bounds into a running Hub.
 //
 // Shared by the settings handler and startup so the two cannot disagree about
@@ -2196,14 +2149,9 @@ func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
 // ApplyYouTubeQuota pushes the operator's stated daily allowance into every
 // chat connection that paces against one.
 //
-// NOT SHARED WITH STARTUP, which is where it differs from ApplyChatRetention
-// next door. That one configures the Hub itself, which exists before anything
-// is attached to it; this one pushes into adapters, and at the point main
-// applies chat settings there are none -- StartChat runs sixty-odd lines later.
-// A call there would read as though it did something and would apply to zero
-// connections every time. The startup path is already covered, by chatAdapter
-// reading the stored allowance when it constructs the adapter; this method is
-// what the SAVE path needs, and only that.
+// At startup it is a no-op by construction -- no adapter is attached yet, and
+// chatAdapter reads the stored allowance when it builds one -- but it is called
+// from ApplySettings at boot all the same, so boot and save stay one list.
 //
 // WHY THIS IS NOT SIMPLY READ WHEN NEEDED. The allowance is the denominator of
 // the pacing calculation, and the thing that spends against it is a budget that
@@ -2286,6 +2234,23 @@ func (s *Server) sourceForDestination(sourceID *int64) (routing.Source, bool) {
 // once so that six routes cannot drift into six spellings of it.
 const sourceParam = "source"
 
+// parseSourceParam is the one reader of `?source=<id>`: named reports whether
+// the request carried one, and a malformed or non-positive id is answered 400
+// here, for every route that accepts the parameter.
+func (s *Server) parseSourceParam(w http.ResponseWriter, r *http.Request) (id int64, named, ok bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
+	if raw == "" {
+		return 0, false, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			`"`+sourceParam+`" must be a source id.`+s.availableSources())
+		return 0, false, false
+	}
+	return id, true, true
+}
+
 // scopedEngine is the engine a request NAMES, and the point of it is what it
 // refuses.
 //
@@ -2316,14 +2281,11 @@ const sourceParam = "source"
 // purpose and must keep doing so, which is why the count of zero takes the
 // same branch as the count of one rather than being refused here.
 func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.Engine, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-				`"`+sourceParam+`" must be a source id.`+s.availableSources())
-			return nil, false
-		}
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok {
+		return nil, false
+	}
+	if named {
 		eng := s.engineForSource(&id)
 		if eng == nil {
 			// Named a programme that is not running: deleted under this
@@ -2355,6 +2317,9 @@ func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.E
 	// clip listing, the loudness read -- where eng() panics inside
 	// Manager.Default before there is an engine to test. The answer is
 	// identical everywhere else.
+	if e := resolvedEngine(r); e != nil {
+		return e, true
+	}
 	return s.engOrNil(), true
 }
 
@@ -2554,7 +2519,7 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, sourceID *int64, profile 
 // no control in the dialog to clear a field it does not show.
 //
 // The reason this matters beyond tidiness is REACTIVATION. Compliance stored
-// against a Kick destination is inert, because ComplianceFor(kick) is absent
+// against a Kick destination is inert, because As[CompliancePusher](kick) is absent
 // and the push skips it. Point that same destination back at YouTube and the
 // declaration is live again -- a legal statement about who a programme is for,
 // sent on behalf of an operator who last saw it in a form they abandoned.
@@ -2588,7 +2553,7 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.PlatformAccount) []string {
 	var warnings []string
 
-	// Discovered through ComplianceFor, never a list of platform names: the
+	// Discovered through As[CompliancePusher], never a list of platform names: the
 	// capability is what decides whether a value can be sent, and a second copy
 	// of that knowledge here would be the copy that goes stale.
 	//
@@ -2596,7 +2561,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// capability has to be resolved through the SAME provider set the push
 	// resolves it through, or a test can aim the push at a stub and leave this
 	// answering for production.
-	if _, ok := s.providers.ComplianceFor(row.Platform); !ok && !row.Compliance.Empty() {
+	if _, ok := oauth.As[oauth.CompliancePusher](s.providers, row.Platform); !ok && !row.Compliance.Empty() {
 		row.Compliance = db.Compliance{}
 		warnings = append(warnings, fmt.Sprintf(
 			"Compliance settings were removed: %s has no compliance surface, so a "+
@@ -2637,7 +2602,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// account_id and platform are two independent columns and nothing compared
 	// them. The pairing is not decorative: the consumers pick the API off the
 	// DESTINATION's platform and the credential off the destination's account.
-	// preannounce.go resolves ScheduledBroadcastsFor(d.Platform) and then calls
+	// preannounce.go resolves As[ScheduledBroadcaster](d.Platform) and then calls
 	// it with tokenFor(*d.AccountID).AccessToken; lifecycle.go tracks the same
 	// two fields side by side and does the same thing. So a row saying
 	// "platform: facebook, account: <a YouTube account>" sends a Google OAuth
@@ -2719,8 +2684,8 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 			//
 			// Nothing resolves a platform API off a custom destination. Every
 			// capability lookup in oauth.Set keys on the platform and there is
-			// no custom entry -- ScheduledBroadcastsFor, LifecycleFor and Get
-			// all answer false -- so preannounce.go:107 and lifecycle.go:539
+			// no custom entry -- As[ScheduledBroadcaster], As[BroadcastLifecycler] and Get
+			// all answer false -- so the pre-announce and lifecycle sweeps
 			// skip the row entirely and no token is ever sent anywhere on its
 			// behalf. The leak this clause exists to stop cannot happen here.
 			//
@@ -2752,44 +2717,116 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	return warnings
 }
 
+// destinationWrite is the stored state of a destination that a save is checked
+// against, taken before a PUT's body is decoded over the row.
+type destinationWrite struct {
+	id          int64
+	url         string
+	captionMode string
+	sourceID    *int64
+	profileJSON []byte
+}
+
+func destinationBeforeWrite(d *db.Destination) destinationWrite {
+	// Serialised rather than copied: decoding over a row reuses its slices'
+	// backing arrays, so a shallow copy would change under the decode.
+	p, _ := json.Marshal(d.Profile)
+	var src *int64
+	if d.SourceID != nil {
+		v := *d.SourceID
+		src = &v
+	}
+	return destinationWrite{id: d.ID, url: d.URL, captionMode: d.CaptionMode, sourceID: src, profileJSON: p}
+}
+
+// refuseBadDestinationWrite is the refusal list every save of a destination row
+// goes through -- POST (prev nil) and PUT -- in one order, and it answers the
+// refusal itself. A PUT is refused only for what it CHANGES: a row already
+// holding a URL or profile these reject must stay renameable and switch-off-able.
+//
+//	captions   Facebook captions need the switch open; and are decided before a
+//	           broadcast goes live, so a change while delivering is refused.
+//	IVS        an Amazon IVS URL without /app cannot publish (refuseIVSWithoutApp).
+//	silence    a profile that would carry no audio against its own programme's
+//	           tracks (refuseIfSilent), which PUT did not run before.
+func (s *Server) refuseBadDestinationWrite(w http.ResponseWriter, next *db.Destination, prev *destinationWrite) bool {
+	stored := ""
+	if prev != nil {
+		stored = prev.captionMode
+	}
+	if prev == nil || next.CaptionMode != stored {
+		if prev != nil && s.destinationLive(prev.id) {
+			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
+			return true
+		}
+		if !captionModeAllowedNow(next.CaptionMode, stored, s.env.FacebookCaptions) {
+			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
+			return true
+		}
+	}
+	if (prev == nil || next.URL != prev.url) && refuseIVSWithoutApp(w, next.URL) {
+		return true
+	}
+	if prev == nil || prev.silenceInputsChanged(next) {
+		return s.refuseIfSilent(w, next.SourceID, next.Profile)
+	}
+	return false
+}
+
+// silenceInputsChanged reports whether the profile, or the programme it is
+// compiled against, differs from what was stored.
+func (p destinationWrite) silenceInputsChanged(next *db.Destination) bool {
+	now, _ := json.Marshal(next.Profile)
+	if !bytes.Equal(now, p.profileJSON) {
+		return true
+	}
+	if (p.sourceID == nil) != (next.SourceID == nil) {
+		return true
+	}
+	return p.sourceID != nil && *p.sourceID != *next.SourceID
+}
+
+// destinationWriteWarnings repairs what the platform cannot send
+// (dropUnsendableSettings) and adds what its registry knows the destination
+// contradicts -- most often an RTMP URL with no application path, which the far
+// end refuses by dropping the connection rather than by saying anything. Advice
+// only: Validate owns refusal. An edit is the likelier place for a URL to
+// acquire the problem, since editing is where somebody pastes a fresh address.
+func (s *Server) destinationWriteWarnings(row *db.Destination) ([]string, error) {
+	warnings, err := s.dropUnsendableSettings(row)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range row.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
+	return warnings, nil
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
 		return
 	}
 	row.ID = 0
+	if p := row.PresetProblem(); p != "" {
+		writeError(w, http.StatusBadRequest, p)
+		return
+	}
 	if !s.requireNamedSource(w, row.SourceID) {
-		return
-	}
-	// Facebook captions stay behind their switch. The switch is checked here,
-	// on the save that turns the mode on, and never by Validate (see there).
-	if !captionModeAllowedNow(row.CaptionMode, "", captions.FacebookSEIEnabled()) {
-		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-		return
-	}
-	if refuseIVSWithoutApp(w, row.URL) {
 		return
 	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
-	// row.SourceID, which requireNamedSource has just proved is present. The
-	// owner is known here and used to be thrown away one line later.
-	if s.refuseIfSilent(w, row.SourceID, row.Profile) {
+	if s.refuseBadDestinationWrite(w, &row, nil) {
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
-	warnings, err := s.dropUnsendableSettings(&row)
+	warnings, err := s.destinationWriteWarnings(&row)
 	if err != nil {
 		writeStoreError(w, err)
 		return
-	}
-	// What the platform registry knows and this destination contradicts --
-	// most often an RTMP URL with no application path, which the far end
-	// refuses by dropping the connection rather than by saying anything. The
-	// destination is still created: this is advice, and Validate owns refusal.
-	for _, w := range row.Warnings() {
-		warnings = append(warnings, w.Detail)
 	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
@@ -2875,15 +2912,16 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
-	// The stored caption mode, read BEFORE the decode below writes over it, so
-	// a save that changes it can be told apart from one that leaves it alone.
-	storedCaptionMode := existing.CaptionMode
-	// The stored URL, so the IVS check below refuses only a save that CHANGES
-	// the URL into one that cannot publish -- see refuseIVSWithoutApp.
-	storedURL := existing.URL
+	// The stored values the write checks compare against, read BEFORE the decode
+	// below writes over them, so a save that changes one can be told apart from
+	// one that leaves it alone. See refuseBadDestinationWrite.
+	before := destinationBeforeWrite(existing)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
+	// The stored preset, so only a save that CHANGES it is checked: an id the
+	// catalogue no longer has must not make the row unsaveable.
+	storedPresetID := existing.PresetID
 	// PRE_PUBLISHED counts as live here: the PUBLISH has already gone to X with
 	// the title it carried, so a change now could not reach X either.
 	xBroadcastLive := existing.Platform == db.PlatformX &&
@@ -2894,22 +2932,14 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	existing.ID = id
-	if existing.URL != storedURL && refuseIVSWithoutApp(w, existing.URL) {
-		return
+	if existing.PresetID != storedPresetID {
+		if p := existing.PresetProblem(); p != "" {
+			writeError(w, http.StatusBadRequest, p)
+			return
+		}
 	}
-	// Captions are decided before a YouTube broadcast goes live: the delay and
-	// the caption route must be set while the broadcast is still in its first
-	// state. A change while the destination is delivering is refused, and a
-	// change to Facebook captions needs the switch open.
-	if existing.CaptionMode != storedCaptionMode {
-		if s.destinationLive(id) {
-			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
-			return
-		}
-		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, captions.FacebookSEIEnabled()) {
-			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
-			return
-		}
+	if s.refuseBadDestinationWrite(w, existing, &before) {
+		return
 	}
 	// X takes a title only when the broadcast is published, and has no write
 	// that changes a running one, so a change saved now would never reach X.
@@ -2932,21 +2962,15 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// ends up on a platform that cannot send what it is holding without the
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
-	warnings, err := s.dropUnsendableSettings(existing)
+	warnings, err := s.destinationWriteWarnings(existing)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	// Same registry check create does. An edit is the more likely place for a
-	// URL to acquire this problem, not the less: creation usually starts from
-	// a preset, and editing is where somebody pastes a fresh address in.
-	for _, w := range existing.Warnings() {
-		warnings = append(warnings, w.Detail)
-	}
 
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
-	before := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
+	runBefore := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
@@ -2979,7 +3003,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	rw := s.reconcileNow("the destination")
 
 	resp := map[string]any{"destination": updated}
-	if applied, reason := s.destinationApplied(id, updated.SourceID, before, rw); applied != "" {
+	if applied, reason := s.destinationApplied(id, updated.SourceID, runBefore, rw); applied != "" {
 		resp["applied"] = applied
 		if reason != "" {
 			resp["reason"] = reason
@@ -3045,8 +3069,11 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// READ BEFORE THE DELETE, because the question is about the row and about its
 	// siblings, and after DeleteDestination neither the key nor the id ordering
-	// that answers it exists any more. A failed read is not worth a failed
-	// delete: the notice is a courtesy and the deletion is what was asked for.
+	// that answers it exists any more. A row that does not exist falls through
+	// to the delete's own 404. Any other failed read means the row's broadcast
+	// state is unknown, so the delete needs the same confirmation a live row
+	// does -- refused outright it would leave a row with unreadable JSON
+	// undeletable, and deleting it is the remedy for that.
 	//
 	// It does NOT remove the platform's ingest stream, and the long comment at
 	// noteOrphanedIngestStream says why that is the answer rather than a gap.
@@ -3068,7 +3095,19 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// What the delete could not take with it, said in the response. Empty in
 	// the ordinary case, and then the body is exactly {"status":"deleted"}.
 	var leftovers []string
-	if dest, err := s.store.GetDestination(id); err == nil {
+	dest, err := s.store.GetDestination(id)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		if !req.Confirm {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"destination %d could not be read (%v), so whether it is carrying a broadcast "+
+					"is unknown, and deleting a live one ends that broadcast on the platform. "+
+					`Repeat this request with a JSON body of {"confirm": true} once that is intended.`,
+				id, err))
+			return
+		}
+		dest, err = nil, nil
+	}
+	if dest != nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
 		// "live" that could drift from what the coordinator then does.
@@ -3081,9 +3120,9 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 				dest.Name, dest.Lifecycle.Phase))
 			return
 		}
-		s.noteOrphanedIngestStream(dest)
-		// Its scheduled platform events, while the row, its account and its
-		// token still exist to cancel them with. See delete_cascade.go.
+		// The teardown shared with a programme delete: the note about a stranded
+		// YouTube stream, and the platform events, while the row, its account
+		// and its token still exist. See delete_cascade.go.
 		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
 	}
 	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
@@ -3354,11 +3393,42 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"routing": res, "profile": req.Profile})
 }
 
+// handleListPresets serves the catalogue and the generic OBS-convention
+// defaults. For a programme it also serves "roleDefaults": the defaults moved
+// onto the tracks that programme's annotations name (routing.DefaultPresetOptsFor),
+// which is what a bodyless apply uses. Named by ?source=; unnamed it is the one
+// programme of a single-source install, and absent when several make the
+// choice ambiguous -- the route has never refused for lack of one, and a
+// malformed or unknown ?source= leaves the field out rather than refusing.
 func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"presets":  routing.Presets(),
 		"defaults": routing.DefaultPresetOpts(),
-	})
+	}
+	// Never a refusal: this route has always ignored ?source=, so a malformed
+	// or unknown one only leaves the derived field out.
+	var id int64
+	if raw := strings.TrimSpace(r.URL.Query().Get(sourceParam)); raw != "" {
+		id, _ = strconv.ParseInt(raw, 10, 64)
+	} else if n, err := s.store.CountSources(); err == nil && n == 1 {
+		id, _ = s.defaultSourceID()
+	}
+	if id > 0 {
+		if row, err := s.store.GetSource(id); err == nil {
+			out["roleDefaults"] = routing.DefaultPresetOptsFor(s.sourceOfRow(row))
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceOfRow is the track layout and annotations a programme's presets are
+// derived from: the running engine's when there is one, otherwise the
+// placeholder layout carrying the annotations stored on the source row.
+func (s *Server) sourceOfRow(row *db.Source) routing.Source {
+	if e := s.engineForSource(&row.ID); e != nil {
+		return e.Source()
+	}
+	return routing.DefaultSource().WithAnnotations(row.Ingest.Annotations)
 }
 
 // handleApplyPreset compiles one of the catalogue's mixes against this
@@ -3374,17 +3444,19 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A body is optional: without one the OBS-convention defaults apply --
-	// which is what GET /routing/presets advertises under "defaults", and what
-	// this handler's own comment has always claimed.
+	// A body is optional: without one the defaults apply, derived from this
+	// programme's track roles (routing.DefaultPresetOptsFor) exactly as /apply
+	// and the OBS bridge derive them; GET /routing/presets?source= serves them
+	// under "roleDefaults".
 	//
-	// It was not true. The old code started from `var opts routing.PresetOpts`,
+	// Raw OBS-convention defaults used to apply here, and before that nothing.
+	// The old code started from `var opts routing.PresetOpts`,
 	// so a bodyless apply ran with every track index at Go's zero value, and
 	// "mic only" compiled [0:a:0] -- the full mix -- while the catalogue two
 	// routes away advertised micTrack 2. The advertised value and the applied
 	// value disagreed, and only a client that sent a body ever got the one it
 	// was promised.
-	opts := routing.DefaultPresetOpts()
+	opts := routing.DefaultPresetOptsFor(eng.Source())
 
 	// Read the body unconditionally rather than gating on Content-Length.
 	// A chunked request has ContentLength -1 WHATEVER it is carrying, so the
@@ -3464,6 +3536,16 @@ func (s *Server) handlePlatformCapabilities(w http.ResponseWriter, r *http.Reque
 		"support":   oauth.SupportLegend(),
 		"tiers":     oauth.TierLegend(),
 	})
+}
+
+// handlePlatformRegistry serves the platform registry (internal/platform) as
+// clients read it: the names, the stored value, which platforms carry
+// destinations and chat, and the ingest and title rules a client applies to what
+// an operator types. It is the same description the console is built against
+// (ui/src/lib/contract/wire.generated.ts), so a scripted client does not need a
+// table of its own either. Public facts only: nothing here is per install.
+func (s *Server) handlePlatformRegistry(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, platform.Describe())
 }
 
 // ---------------------------------------------------------------- recordings
@@ -3730,21 +3812,21 @@ func (s *Server) requireNamedSource(w http.ResponseWriter, id *int64) bool {
 	return false
 }
 
-// displayLocation resolves the configured display zone, falling back to UTC.
+// resolveDisplayZone resolves the configured display zone. An empty zone is
+// UTC; a zone that does not load is UTC plus the error, for the caller to say.
 //
 // Settings.Validate has already refused a zone that cannot be loaded, so the
-// error path here is only reachable if the two disagree -- and UTC is the
-// honest answer then, rather than a log with no timestamps at all.
-func displayLocation(tz string) *time.Location {
+// error is only reachable if the two disagree (a host without tzdata, say).
+func resolveDisplayZone(tz string) (*time.Location, error) {
 	tz = strings.TrimSpace(tz)
 	if tz == "" {
-		return time.UTC
+		return time.UTC, nil
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return time.UTC
+		return time.UTC, err
 	}
-	return loc
+	return loc, nil
 }
 
 // sameAutomodRules reports whether two rule lists are identical.
@@ -3789,7 +3871,7 @@ func checkSentAutomodFields(body []byte) error {
 // captionFacebookRefusal is what the operator reads when a Facebook caption mode
 // is asked for while its switch is closed. It names the switch, because "not
 // allowed" alone sends the operator looking in the wrong place.
-const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set POLYEMESIS_CAPTIONS_FACEBOOK=1 on the server to turn them on"
+const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set " + startupenv.FacebookCaptionsVar + "=1 on the server to turn them on"
 
 // captionModeAllowedNow reports whether a save may store the caption mode it
 // names. Only a save that turns Facebook captions ON (the mode is facebook_sei
@@ -3797,8 +3879,8 @@ const captionFacebookRefusal = "Facebook captions are behind a provisional switc
 // already had it keeps saving, so closing the switch never strands an edit.
 //
 // The switch is passed as a parameter rather than read here, so the decision is
-// testable without the process environment; the handlers pass
-// captions.FacebookSEIEnabled().
+// testable without the process environment; the handlers pass the startup
+// environment's FacebookCaptions.
 func captionModeAllowedNow(mode, stored string, switchOpen bool) bool {
 	if mode != "facebook_sei" || mode == stored {
 		return true

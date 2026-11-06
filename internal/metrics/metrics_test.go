@@ -261,9 +261,8 @@ func TestEveryFamilyIsDeclaredOnceAndItsSamplesAreContiguous(t *testing.T) {
 	}
 }
 
-// processStates is a hand-copied list, and a state it does not know about
-// would silently report every state series as 0. Test-only import: the package
-// itself stays a pure formatter.
+// processStates is supervisor.States, so a state States forgets would silently
+// report its series as 0. This holds States to the constants.
 func TestEverySupervisorStateHasASeries(t *testing.T) {
 	tests := []supervisor.State{
 		supervisor.StateStopped,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -145,7 +146,7 @@ func TestTheAnalyserKeysNameTheirMix(t *testing.T) {
 // verdict became a loudness alert".
 func TestAVODMixVerdictIsNotAnAlertOnItsDestination(t *testing.T) {
 	e, _ := storeEngine(t)
-	target := meters.TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.PlatformYouTube)
+	target := meters.TargetFor(&routing.Loudness{TargetLUFS: -14}, routing.Platform(platform.YouTube))
 	now := time.Now()
 	e.loudStore.Put(meters.Observe(9, "yt", target, meters.Frame{IntegratedLUFS: -30, Seconds: 60, Integrated: true}, now).ForMix(meters.MixVOD))
 

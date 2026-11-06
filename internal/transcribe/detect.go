@@ -84,11 +84,6 @@ const (
 	BackendCoreML Backend = "coreml"
 )
 
-// Backends is the catalogue a UI offers.
-func Backends() []Backend {
-	return []Backend{BackendAuto, BackendCPU, BackendMetal, BackendCUDA, BackendVulkan, BackendBLAS, BackendCoreML}
-}
-
 // GPU reports whether this backend runs on a GPU, which is what decides whether
 // the governor should treat the job as contending with the encoder.
 func (b Backend) GPU() bool {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 )
 
 // audioLead is how far ahead of its timestamp the A1 fixture muxes audio.
@@ -115,7 +116,7 @@ func TestAForcedResumeTakesASplitHeaderPESStart(t *testing.T) {
 	s := g.Mux(90 * time.Second)
 	video := &delaytest.Stream{}
 	for i, p := range s.Pkts {
-		if pktPID(p) != delaytest.AudioPID {
+		if mpegts.PID(p) != delaytest.AudioPID {
 			video.Pkts = append(video.Pkts, p)
 			video.Times = append(video.Times, s.Times[i])
 		}
@@ -167,11 +168,11 @@ func TestAPIDNewAfterASecondDumpIsCutAgainstThatDump(t *testing.T) {
 	var old []byte
 	injected := false
 	for i, p := range s.Pkts {
-		if old == nil && s.Times[i] >= 54500*time.Millisecond && pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+		if old == nil && s.Times[i] >= 54500*time.Millisecond && mpegts.PID(p) == delaytest.AudioPID && mpegts.PUSI(p) {
 			old = p
 		}
 		pk, tm = append(pk, p), append(tm, s.Times[i])
-		if !injected && s.Times[i] >= 65*time.Second && pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+		if !injected && s.Times[i] >= 65*time.Second && mpegts.PID(p) == delaytest.AudioPID && mpegts.PUSI(p) {
 			pk = append(pk, retag(old, stale), retag(p, fresh))
 			tm = append(tm, s.Times[i], s.Times[i])
 			injected = true
@@ -199,9 +200,9 @@ func TestAPIDNewAfterASecondDumpIsCutAgainstThatDump(t *testing.T) {
 	}
 	r.run(100 * time.Second)
 	saw := map[uint16]bool{}
-	for off := 0; off+tsPacketSize <= len(r.out); off += tsPacketSize {
-		if p := r.out[off : off+tsPacketSize]; pktPUSI(p) {
-			saw[pktPID(p)] = true
+	for off := 0; off+mpegts.PacketSize <= len(r.out); off += mpegts.PacketSize {
+		if p := r.out[off : off+mpegts.PacketSize]; mpegts.PUSI(p) {
+			saw[mpegts.PID(p)] = true
 		}
 	}
 	if !saw[fresh] {
@@ -229,7 +230,7 @@ func TestAPIDNewLongAfterASpliceIsNotCutAgainstIt(t *testing.T) {
 	injected := false
 	for i, p := range s.Pkts {
 		pk, tm = append(pk, p), append(tm, s.Times[i])
-		if !injected && s.Times[i] >= 50*time.Second && pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+		if !injected && s.Times[i] >= 50*time.Second && mpegts.PID(p) == delaytest.AudioPID && mpegts.PUSI(p) {
 			pk, tm = append(pk, retag(p, late)), append(tm, s.Times[i])
 			injected = true
 		}
@@ -245,8 +246,8 @@ func TestAPIDNewLongAfterASpliceIsNotCutAgainstIt(t *testing.T) {
 	if !tk.Result().Complete {
 		t.Fatal("did not resume")
 	}
-	for off := 0; off+tsPacketSize <= len(r.out); off += tsPacketSize {
-		if p := r.out[off : off+tsPacketSize]; pktPUSI(p) && pktPID(p) == late {
+	for off := 0; off+mpegts.PacketSize <= len(r.out); off += mpegts.PacketSize {
+		if p := r.out[off : off+mpegts.PacketSize]; mpegts.PUSI(p) && mpegts.PID(p) == late {
 			return
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
+	"github.com/rainmanjam/polyemesis/internal/mpegts"
 )
 
 // The dump's contract, against a synthetic MPEG-TS whose every picture says
@@ -42,11 +43,11 @@ func newRig(t *testing.T, delay time.Duration, lim Limits, s *delaytest.Stream) 
 
 func (r *rig) pop(at time.Duration) {
 	for _, p := range r.b.Pop(r.epoch.Add(at), nil) {
-		if len(p)%tsPacketSize != 0 {
+		if len(p)%mpegts.PacketSize != 0 {
 			r.t.Fatalf("released a %d-byte record, not whole TS packets", len(p))
 		}
 		r.out = append(r.out, p...)
-		for i := 0; i < len(p); i += tsPacketSize {
+		for i := 0; i < len(p); i += mpegts.PacketSize {
 			r.outAt = append(r.outAt, at)
 		}
 	}
@@ -151,13 +152,13 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 			rep.audio = append(rep.audio, u)
 		}
 	}
-	for i := 0; i+tsPacketSize <= len(out); i += tsPacketSize {
-		p := out[i : i+tsPacketSize]
-		if p[0] != tsSyncByte {
+	for i := 0; i+mpegts.PacketSize <= len(out); i += mpegts.PacketSize {
+		p := out[i : i+mpegts.PacketSize]
+		if p[0] != mpegts.SyncByte {
 			t.Fatalf("lost sync at byte %d", i)
 		}
-		pid := pktPID(p)
-		if pktHasPayload(p) && pid != tsNullPID {
+		pid := mpegts.PID(p)
+		if mpegts.HasPayload(p) && pid != mpegts.NullPID {
 			cc := int(p[3] & 0x0F)
 			if prev, ok := lastCC[pid]; ok && cc != (prev+1)&0x0F {
 				rep.ccBreaks++
@@ -170,15 +171,15 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 		if pid != delaytest.VideoPID && pid != delaytest.AudioPID {
 			continue
 		}
-		if pktPUSI(p) {
+		if mpegts.PUSI(p) {
 			finish(cur[pid])
-			o := &open{u: esUnit{pid: pid, pts: -1, dts: -1, release: outAt[i/tsPacketSize]}}
-			o.es = append(o.es, p[payloadStart(p):]...)
+			o := &open{u: esUnit{pid: pid, pts: -1, dts: -1, release: outAt[i/mpegts.PacketSize]}}
+			o.es = append(o.es, p[mpegts.PayloadStart(p):]...)
 			cur[pid] = o
 			continue
 		}
 		if o := cur[pid]; o != nil {
-			o.es = append(o.es, p[payloadStart(p):]...)
+			o.es = append(o.es, p[mpegts.PayloadStart(p):]...)
 		}
 	}
 	for _, o := range cur {
@@ -606,7 +607,7 @@ func TestADiscardWhileADumpWaitsForItsKeyframeLeavesAUsableBuffer(t *testing.T) 
 	// Audio that arrived during the resync is held for the resume.
 	var audioPkt []byte
 	for _, p := range g.Mux(15 * time.Second).Pkts {
-		if pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+		if mpegts.PID(p) == delaytest.AudioPID && mpegts.PUSI(p) {
 			audioPkt = p
 			break
 		}
@@ -760,7 +761,7 @@ func TestAResumeDropsTheRestOfAPESThatBeganBeforeIt(t *testing.T) {
 	// resume keyframe at 16 s) to just after that picture's first packet.
 	k2 := -1
 	for i, p := range s.Pkts {
-		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && s.Times[i] == 16*time.Second {
+		if mpegts.PID(p) == delaytest.VideoPID && mpegts.PUSI(p) && s.Times[i] == 16*time.Second {
 			k2 = i
 			break
 		}
@@ -770,12 +771,12 @@ func TestAResumeDropsTheRestOfAPESThatBeganBeforeIt(t *testing.T) {
 	}
 	tail := -1
 	for i := k2 - 1; i >= 0; i-- {
-		if pktPID(s.Pkts[i]) == delaytest.AudioPID {
+		if mpegts.PID(s.Pkts[i]) == delaytest.AudioPID {
 			tail = i
 			break
 		}
 	}
-	if tail < 0 || pktPUSI(s.Pkts[tail]) {
+	if tail < 0 || mpegts.PUSI(s.Pkts[tail]) {
 		t.Fatal("the audio frame before the keyframe is not a multi-packet PES")
 	}
 	moved := s.Pkts[tail]
@@ -1004,7 +1005,7 @@ func moveAfterKey(t *testing.T, s *delaytest.Stream, at time.Duration) {
 	t.Helper()
 	k := -1
 	for i, p := range s.Pkts {
-		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && s.Times[i] == at {
+		if mpegts.PID(p) == delaytest.VideoPID && mpegts.PUSI(p) && s.Times[i] == at {
 			k = i
 			break
 		}
@@ -1014,12 +1015,12 @@ func moveAfterKey(t *testing.T, s *delaytest.Stream, at time.Duration) {
 	}
 	tail := -1
 	for i := k - 1; i >= 0; i-- {
-		if pktPID(s.Pkts[i]) == delaytest.AudioPID {
+		if mpegts.PID(s.Pkts[i]) == delaytest.AudioPID {
 			tail = i
 			break
 		}
 	}
-	if tail < 0 || pktPUSI(s.Pkts[tail]) {
+	if tail < 0 || mpegts.PUSI(s.Pkts[tail]) {
 		t.Fatal("the audio frame before the keyframe is not a multi-packet PES")
 	}
 	moved, mt := s.Pkts[tail], s.Times[k]
@@ -1322,8 +1323,8 @@ func TestTheResyncAudioCacheStaysBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkt := func(pusi bool, length int, cc byte) []byte {
-		p := make([]byte, tsPacketSize)
-		p[0], p[1], p[2], p[3] = tsSyncByte, byte(delaytest.AudioPID>>8), byte(delaytest.AudioPID&0xFF), 0x10|cc&0x0F
+		p := make([]byte, mpegts.PacketSize)
+		p[0], p[1], p[2], p[3] = mpegts.SyncByte, byte(delaytest.AudioPID>>8), byte(delaytest.AudioPID&0xFF), 0x10|cc&0x0F
 		if pusi {
 			p[1] |= 0x40
 			copy(p[4:], []byte{0, 0, 1, 0xC0, byte(length >> 8), byte(length), 0x80, 0x80, 5, 0x21, 0, 1, 0, 1})
@@ -1364,7 +1365,7 @@ func TestTheResyncAudioCacheStaysBounded(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		push(pkt(false, 0, byte(i+1)))
 	}
-	if partial, _ := size(); partial > 7*tsPacketSize {
+	if partial, _ := size(); partial > 7*mpegts.PacketSize {
 		t.Fatalf("a 1000-byte PES holds %d bytes: packets past its length were appended", partial)
 	}
 	// Many large complete PESs: about 55 KB each, far past the budget in all.
@@ -1416,14 +1417,14 @@ func TestAfterAResumeANewPIDWaitsForItsStartAndThePSIComesFirst(t *testing.T) {
 	}
 	r.run(21 * time.Second)
 	mark := len(r.out)
-	stray := make([]byte, tsPacketSize)
-	stray[0], stray[1], stray[2], stray[3] = tsSyncByte, 0x03, 0x50, 0x15 // PID 0x350, payload, no PUSI
+	stray := make([]byte, mpegts.PacketSize)
+	stray[0], stray[1], stray[2], stray[3] = mpegts.SyncByte, 0x03, 0x50, 0x15 // PID 0x350, payload, no PUSI
 	if err := r.b.Push(r.epoch.Add(21*time.Second), stray); err != nil {
 		t.Fatal(err)
 	}
 	r.run(30 * time.Second)
-	for off := mark; off+tsPacketSize <= len(r.out); off += tsPacketSize {
-		if pktPID(r.out[off:off+tsPacketSize]) == 0x350 {
+	for off := mark; off+mpegts.PacketSize <= len(r.out); off += mpegts.PacketSize {
+		if mpegts.PID(r.out[off:off+mpegts.PacketSize]) == 0x350 {
 			t.Fatal("a continuation on a PID new since the cut reached the output")
 		}
 	}
@@ -1431,18 +1432,18 @@ func TestAfterAResumeANewPIDWaitsForItsStartAndThePSIComesFirst(t *testing.T) {
 	rep := readOut(t, r.out, r.outAt, false)
 	at := spliceAt(t, rep.video)
 	sawPMT := false
-	for off := 0; off+tsPacketSize <= len(r.out); off += tsPacketSize {
-		p := r.out[off : off+tsPacketSize]
-		if pktPID(p) == delaytest.PMTPID {
+	for off := 0; off+mpegts.PacketSize <= len(r.out); off += mpegts.PacketSize {
+		p := r.out[off : off+mpegts.PacketSize]
+		if mpegts.PID(p) == delaytest.PMTPID {
 			sawPMT = true
 		}
-		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && r.outAt[off/tsPacketSize] == rep.video[at].release {
+		if mpegts.PID(p) == delaytest.VideoPID && mpegts.PUSI(p) && r.outAt[off/mpegts.PacketSize] == rep.video[at].release {
 			if !sawPMT {
 				t.Fatal("no PMT before the resume picture")
 			}
 			break
 		}
-		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) {
+		if mpegts.PID(p) == delaytest.VideoPID && mpegts.PUSI(p) {
 			sawPMT = false
 		}
 	}

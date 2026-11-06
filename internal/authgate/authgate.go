@@ -16,6 +16,10 @@
 // recurring mistake the audit was about. Each caller supplies its own wording
 // ("stream keys", "tokens") in its own log lines; the gate itself is neutral.
 //
+// Peers are keyed by auth.PeerKey, the web login throttle's key: an IPv6
+// peer is its /64, so rotating addresses inside one allocation does not mint
+// a fresh budget.
+//
 // Scoped PER PEER ADDRESS, deliberately not one shared counter for the whole
 // listener: a global limiter would let one attacker's flood against ONE
 // credential throttle every OTHER encoder's legitimate reconnect too, which
@@ -36,6 +40,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/auth"
 )
 
 // Gate is one listener's per-peer backoff state.
@@ -78,6 +84,7 @@ func New() *Gate {
 
 // Blocked reports whether peer is currently inside its penalty window.
 func (g *Gate) Blocked(peer string) bool {
+	peer = auth.PeerKey(peer)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	e, ok := g.state[peer]
@@ -91,6 +98,7 @@ func (g *Gate) Blocked(peer string) bool {
 // whether this call is what just crossed Threshold, so the caller can log
 // the event once rather than on every attempt made while already blocked.
 func (g *Gate) Fail(peer string) (justBlocked bool) {
+	peer = auth.PeerKey(peer)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := time.Now()
@@ -118,6 +126,7 @@ func (g *Gate) Fail(peer string) (justBlocked bool) {
 // authenticates must never carry a lingering penalty from an earlier
 // unrelated bad guess on the same address.
 func (g *Gate) Succeed(peer string) {
+	peer = auth.PeerKey(peer)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.state, peer)

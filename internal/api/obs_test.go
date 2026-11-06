@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -239,6 +241,53 @@ func TestTheOBSScriptsPostDrivesTheBridgeAndReachesTheEventStream(t *testing.T) 
 		t.Fatalf("scene.changed: %d", w.Code)
 	}
 	streamtest.ExpectSSE(t, r, eventstream.TypeOBSScene)
+}
+
+// THE SCRIPT'S VOCABULARY IS THE ROUTER'S. integrations/obs/polyemesis_obs.py
+// types its path and its three event names; this reads them out of the script
+// and replays each against the real router with an obs-scoped token, so a
+// rename on either side fails here instead of in an operator's OBS. The names
+// are also held to obsbridge's constants.
+func TestTheOBSScriptsEventsAndPathAreTheRoutersOwn(t *testing.T) {
+	raw, err := os.ReadFile("../../integrations/obs/polyemesis_obs.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	pm := regexp.MustCompile(`_server \+ "(/api/v1/[^"]+)"`).FindStringSubmatch(src)
+	if pm == nil {
+		t.Fatal("no request path in polyemesis_obs.py; the pattern is looking at the wrong thing")
+	}
+	kinds := map[string]bool{}
+	for _, m := range regexp.MustCompile(`"event": "([^"]+)"`).FindAllStringSubmatch(src, -1) {
+		kinds[m[1]] = true
+	}
+	want := map[string]bool{
+		string(obsbridge.KindStreamStarted): true,
+		string(obsbridge.KindStreamStopped): true,
+		string(obsbridge.KindSceneChanged):  true,
+	}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("the script sends events %v; the bridge knows %v", kinds, want)
+	}
+
+	o := obsServer(t)
+	sel := o.createDest(t, "kick")
+	src0 := onlySourceID(t, o.h, o.sign)
+	obsTok := createScopedToken(t, o.h, o.sign, "obs script", db.ScopeOBS)
+	o.putConfig(t, map[string]any{
+		"enabled": true, "sourceId": src0, "destinations": []int64{sel}, "startOnStream": false,
+	}, http.StatusOK)
+	for kind := range kinds {
+		body := map[string]string{"event": kind}
+		if kind == string(obsbridge.KindSceneChanged) {
+			body["scene"] = "Just Chatting"
+		}
+		w := do(t, o.h, withBearer(jsonRequest(t, http.MethodPost, pm[1], body), obsTok))
+		if w.Code != http.StatusAccepted {
+			t.Errorf("the script's %s to %s answered %d %s; the router does not accept it", kind, pm[1], w.Code, w.Body.String())
+		}
+	}
 }
 
 // THE OBS SCOPE REACHES ONE ROUTE. Walked over the real router, every method
@@ -535,19 +584,16 @@ func TestASceneRuleIsExpressedAsMutesOnTheTracksAlreadyInTheMix(t *testing.T) {
 	}
 }
 
-// withLiveLevels pins liveLevelsSupported for one test and restores the real
-// one after. The default is false on Windows, so a test of the applied path
-// must say so rather than inherit the runner's OS.
-func withLiveLevels(t *testing.T, ok bool) {
-	t.Helper()
-	orig := liveLevelsSupported
-	liveLevelsSupported = func() bool { return ok }
-	t.Cleanup(func() { liveLevelsSupported = orig })
+// withLiveLevels pins the server's live-levels answer for one test. The default
+// is false on Windows, so a test of the applied path must say so rather than
+// inherit the runner's OS.
+func withLiveLevels(s *Server, ok bool) {
+	s.liveLevels = func() bool { return ok }
 }
 
 func TestASceneSwitchAppliesItsRuleThroughTheTrackLevelPath(t *testing.T) {
-	withLiveLevels(t, true)
 	o := obsServer(t)
+	withLiveLevels(o.s, true)
 	sel := o.createDest(t, "twitch")
 	src := onlySourceID(t, o.h, o.sign)
 	row, err := o.s.store.GetDestination(sel)
@@ -581,13 +627,13 @@ func TestASceneSwitchAppliesItsRuleThroughTheTrackLevelPath(t *testing.T) {
 
 func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 	o := obsServer(t)
+	withLiveLevels(o.s, false)
 	sel := o.createDest(t, "twitch")
 	row, _ := o.s.store.GetDestination(sel)
 	row.Profile = simpleProfile(0, 1, 2)
 	if _, err := o.s.store.UpdateDestination(row); err != nil {
 		t.Fatal(err)
 	}
-	withLiveLevels(t, false)
 	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetMicOnly})
 	if out.Outcome != string(bulkSkipped) || !strings.Contains(out.Message, "Windows") {
 		t.Fatalf("on a platform without live levels: %+v", out)
@@ -596,6 +642,38 @@ func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 	for _, tr := range row.Profile.Tracks {
 		if tr.Muted {
 			t.Fatal("a skipped scene rule still wrote a mute")
+		}
+	}
+}
+
+// A scene rule with no explicit options follows the programme's track roles,
+// like a bodyless preset apply: "no music" mutes the track annotated music,
+// not the generic OBS-convention slot (track 0).
+//
+// Mutation: start applySceneLevels from routing.DefaultPresetOpts() again.
+func TestASceneRuleWithNoOptionsFollowsTheProgrammesTrackRoles(t *testing.T) {
+	o := obsServer(t)
+	withLiveLevels(o.s, true)
+	sel := o.createDest(t, "twitch")
+	src := onlySourceID(t, o.h, o.sign)
+	send(t, o.h, o.sign, http.MethodPut, "/api/v1/source/annotations?source="+itoa(src),
+		map[string]any{"annotations": []map[string]any{{"track": 2, "role": "music"}}}, http.StatusOK)
+	row, err := o.s.store.GetDestination(sel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Profile = simpleProfile(0, 1, 2)
+	if _, err := o.s.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetNoMusic})
+	if out.Outcome != outcomeApplied {
+		t.Fatalf("outcome %+v", out)
+	}
+	row, _ = o.s.store.GetDestination(sel)
+	for i, want := range []bool{false, false, true} {
+		if row.Profile.Tracks[i].Muted != want {
+			t.Errorf("track %d muted=%v, want %v: music is annotated on track 3", i+1, row.Profile.Tracks[i].Muted, want)
 		}
 	}
 }

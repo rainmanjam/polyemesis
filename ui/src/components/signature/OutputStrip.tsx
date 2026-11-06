@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { LUFS_FLOOR, routingDropsSignal, type OutputState } from "@/lib/outputStrip";
+import { clockTime } from "@/lib/format";
 
 /* A10: where each reading on this destination is taken. The source meter reads
  * the ingest before routing; the output reading is this destination's loudness
@@ -38,11 +39,7 @@ export function OutputStrip({
       break;
     case "stale":
       output = t("route.strip.stale", {
-        time: new Date(state.report.at).toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
+        time: clockTime(state.report.at),
       });
       break;
     case "live":

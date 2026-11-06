@@ -112,9 +112,18 @@ func TestTokenGateRefusesUntilTheServerIsUp(t *testing.T) {
 	if _, err := g.Source()(context.Background(), 1); err == nil {
 		t.Fatal("the gate answered before it was set")
 	}
-	g.Set(func(context.Context, int64) (Credential, error) {
+	tok := func(context.Context, int64) (Credential, error) {
 		return Credential{AccessToken: "placeholder-token"}, nil
-	})
+	}
+	g.Set(tok, nil)
+	if _, err := g.Source()(context.Background(), 1); err == nil {
+		t.Fatal("the gate handed out a credential with no quota meter installed")
+	}
+	g.Set(nil, func(int) {})
+	if _, err := g.Source()(context.Background(), 1); err == nil {
+		t.Fatal("the gate answered with no token source")
+	}
+	g.Set(tok, func(int) {})
 	c, err := g.Source()(context.Background(), 1)
 	if err != nil || c.AccessToken != "placeholder-token" {
 		t.Fatalf("credential = %+v, %v", c, err)

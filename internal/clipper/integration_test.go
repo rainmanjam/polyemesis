@@ -304,7 +304,7 @@ func assertFirstFrameDecodes(t *testing.T, ffmpeg, path string) {
 	cmd := exec.Command(ffmpeg, "-hide_banner", "-v", "error",
 		"-i", path, "-frames:v", "1", "-f", "rawvideo", "-y", "-")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("the first frame of the clip did not decode: %v\n%s", err, truncate(string(out), 400))
+		t.Fatalf("the first frame of the clip did not decode: %v\n%s", err, shorten(string(out), 400))
 	}
 }
 
@@ -315,6 +315,14 @@ func assertDecodesThroughout(t *testing.T, ffmpeg, path string) {
 	cmd := exec.Command(ffmpeg, "-hide_banner", "-v", "error",
 		"-xerror", "-i", path, "-f", "null", "-")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("the clip did not decode end to end: %v\n%s", err, truncate(string(out), 600))
+		t.Fatalf("the clip did not decode end to end: %v\n%s", err, shorten(string(out), 600))
 	}
+}
+
+// shorten keeps a failure message readable when ffmpeg's output is long.
+func shorten(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

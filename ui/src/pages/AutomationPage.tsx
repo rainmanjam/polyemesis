@@ -54,7 +54,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
-import { autoApi } from "@/lib/autoApi";
+import { http } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 import {
@@ -64,7 +64,7 @@ import {
   scheduleActionLabel,
   type ScheduleAction,
 } from "@/lib/scheduleActions";
-import { formForAction, scheduleBlock } from "@/lib/scheduleCreate";
+import { formForAction, scheduleBlock } from "@/features/automation/scheduleCreate";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -334,10 +334,10 @@ export function AutomationPage() {
 
   const load = useCallback((quiet = false) => {
     Promise.all([
-      autoApi.get<AlertRule[]>("/alerts/rules"),
-      autoApi.get<AlertsMeta>("/alerts/meta"),
-      autoApi.get<Schedule[]>("/schedules"),
-      autoApi.get<ScheduleRun[]>("/schedules/runs"),
+      http.get<AlertRule[]>("/alerts/rules"),
+      http.get<AlertsMeta>("/alerts/meta"),
+      http.get<Schedule[]>("/schedules"),
+      http.get<ScheduleRun[]>("/schedules/runs"),
     ])
       .then(([r, m, s, runList]) => {
         setRules(r ?? []);
@@ -522,7 +522,7 @@ function AlertRules({
 
   const toggle = async (r: AlertRule, enabled: boolean) => {
     try {
-      await autoApi.put<AlertRule>(`/alerts/rules/${r.id}`, { enabled });
+      await http.put<AlertRule>(`/alerts/rules/${r.id}`, { enabled });
       onReload();
     } catch (err) {
       toast.error(errText(err, t("auto.couldNotChangeTheRule")));
@@ -533,7 +533,7 @@ function AlertRules({
 
   const remove = async (r: AlertRule) => {
     try {
-      await autoApi.del(`/alerts/rules/${r.id}`);
+      await http.del(`/alerts/rules/${r.id}`);
       toast.success(t("auto.ruleDeleted"));
       onReload();
     } catch (err) {
@@ -547,7 +547,7 @@ function AlertRules({
   const test = async (r: AlertRule) => {
     setTesting(r.id);
     try {
-      await autoApi.post(`/alerts/rules/${r.id}/test`, {});
+      await http.post(`/alerts/rules/${r.id}/test`, {});
       toast.success(t("auto.testDelivered", { name: r.name }));
     } catch (err) {
       toast.error(errText(err, t("auto.theEndpointDidNotAccept")));
@@ -780,8 +780,8 @@ function RuleDialog({
         // refusal.
         allowPrivateTarget: Boolean(form.allowPrivateTarget),
       };
-      if (editing) await autoApi.put(`/alerts/rules/${form.id}`, body);
-      else await autoApi.post("/alerts/rules", body);
+      if (editing) await http.put(`/alerts/rules/${form.id}`, body);
+      else await http.post("/alerts/rules", body);
       toast.success(editing ? t("auto.ruleSaved") : t("auto.ruleCreated"));
       onSaved();
     } catch (err) {
@@ -1005,7 +1005,7 @@ function Schedules({
 
   const toggle = async (s: Schedule, enabled: boolean) => {
     try {
-      const res = await autoApi.put<{ warnings?: string[] }>(`/schedules/${s.id}`, {
+      const res = await http.put<{ warnings?: string[] }>(`/schedules/${s.id}`, {
         name: s.name,
         enabled,
         action: s.action,
@@ -1033,7 +1033,7 @@ function Schedules({
 
   const remove = async (s: Schedule) => {
     try {
-      const res = await autoApi.del<{ status: string; warnings?: string[] }>(`/schedules/${s.id}`);
+      const res = await http.del<{ status: string; warnings?: string[] }>(`/schedules/${s.id}`);
       toast.success(t("auto.scheduleDeleted"));
       // What the delete could not withdraw -- a Facebook event page, which
       // has no cancel call -- in the server's words.
@@ -1261,8 +1261,8 @@ function ScheduleDialog({
         graceSeconds: form.graceSeconds,
       };
       const res = editing
-        ? await autoApi.put<{ warnings?: string[] }>(`/schedules/${form.id}`, body)
-        : await autoApi.post<{ warnings?: string[] }>("/schedules", body);
+        ? await http.put<{ warnings?: string[] }>(`/schedules/${form.id}`, body)
+        : await http.post<{ warnings?: string[] }>("/schedules", body);
       toast.success(editing ? t("auto.scheduleSaved") : t("auto.scheduleCreated"));
       sayScheduleWarnings(res);
       onSaved();

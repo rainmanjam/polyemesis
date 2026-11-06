@@ -38,8 +38,10 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { StatusPill } from "@/components/StatusPill";
+import { processRunning } from "@/lib/liveness";
 import { recorderStatus } from "@/lib/status";
-import { api } from "@/lib/api";
+import { api, http } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import { useT } from "@/lib/i18n";
 import {
   failedRead,
@@ -51,7 +53,6 @@ import {
   type ReadState,
 } from "@/lib/readState";
 import { InfoHint } from "@/components/InfoHint";
-import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { SaveStatus } from "@/components/SaveStatus";
@@ -62,7 +63,7 @@ import {
   savePolicyBody,
   switchPatchBody,
   type RetentionDraft,
-} from "@/lib/retentionDraft";
+} from "@/features/recordings/retentionDraft";
 import type { DiskUsage, Recording, Settings, StemCodec } from "@/lib/types";
 
 /** One per-track file the recorder wrote beside a master segment.
@@ -142,7 +143,7 @@ export function RecordingsPage() {
       // recordings list, which is why it resolves rather than rejecting -- but
       // it now resolves to a FAILED READ rather than to an empty list, so the
       // Stems column can say "unknown" instead of "none".
-      autoApi
+      http
         .get<StemFile[]>("/recordings/stems")
         .then((st) => okRead(st ?? []))
         .catch(() => failedRead<StemFile[]>()),
@@ -257,7 +258,6 @@ export function RecordingsPage() {
   };
   const dirty = retention.dirty;
 
-  const recorderState = status?.recorder?.state;
   // A broadcast is going out (A23): the one definition the app uses.
   const ingestLiveNow = useIngestLive();
   const confirmRecordingOff = useConfirm<boolean>();
@@ -366,7 +366,7 @@ export function RecordingsPage() {
                           <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
                             {r.durationMs > 0 ? (
                               shortDuration(r.durationMs)
-                            ) : recorderState === "running" ? (
+                            ) : processRunning(status?.recorder) ? (
                               // A24: the segment being written is named, not dashes.
                               <Badge variant="live">{t("rec.recordingNow")}</Badge>
                             ) : (
@@ -568,7 +568,8 @@ export function RecordingsPage() {
                   <Input
                     id="rec-seg"
                     type="number"
-                    min={10}
+                    min={LIMITS.recordingSegmentSeconds.min}
+                    max={LIMITS.recordingSegmentSeconds.max}
                     value={shownValue(draft?.segmentSeconds ?? settings.recording.segmentSeconds)}
                     onChange={(e) =>
                       setDraft((d) => ({ ...d, segmentSeconds: numberOrBlank(e.target.value) }))

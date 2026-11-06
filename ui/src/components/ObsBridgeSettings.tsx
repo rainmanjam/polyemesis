@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { clockTime } from "@/lib/format";
 
 /* THE OBS BRIDGE (#16). Settings for what OBS may drive, and the live state of
  * polyemesis's link to obs-websocket. The server does all of the deciding --
@@ -175,7 +176,7 @@ export function ObsBridgeSettings() {
             {status?.scene && <span className="text-muted-foreground">{t("obs.sceneNow", { scene: status.scene })}</span>}
             {status?.stopPendingUntil && (
               <Badge variant="warn">
-                {t("obs.stopPending", { time: new Date(status.stopPendingUntil).toLocaleTimeString() })}
+                {t("obs.stopPending", { time: clockTime(status.stopPendingUntil) })}
               </Badge>
             )}
           </div>
@@ -375,7 +376,7 @@ export function ObsBridgeSettings() {
           {status?.lastActions.map((a) => (
             <div key={a.at + a.action} className="flex flex-col gap-0.5">
               <span className="font-medium">
-                {new Date(a.at).toLocaleTimeString()} ·{" "}
+                {clockTime(a.at)} ·{" "}
                 {a.action === "scene"
                   ? t("obs.actionScene", { scene: a.scene ?? "" })
                   : a.action === "start"
