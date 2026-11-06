@@ -51,17 +51,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (themed) applyTheme(theme);
   }, [themed, theme]);
 
-  // Only while following the system: an explicit pick has no use for the OS's
-  // opinion, so it does not listen to it.
+  // ALWAYS, not only while following the system. prefersLight must be current
+  // the moment "System" is chosen: if it were only tracked while System was
+  // active, choosing it after an OS change under an explicit pick would apply
+  // the stale answer, and the correction would land after the paint -- a frame
+  // of the wrong theme. An explicit pick still wins in resolveTheme; this only
+  // keeps the OS's answer fresh underneath it.
   useEffect(() => {
-    if (!themed || choice !== "system" || typeof window.matchMedia !== "function") return;
+    if (!themed || typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = (e: { matches: boolean }) => setPrefersLight(e.matches);
     // The OS may have changed between the first read and this subscription.
     setPrefersLight(query.matches);
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
-  }, [themed, choice]);
+  }, [themed]);
 
   // Another tab picked a theme: this one follows, so two console tabs never
   // disagree about what the operator chose.

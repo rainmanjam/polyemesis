@@ -90,10 +90,20 @@ describe("AudioMeter", () => {
     });
   });
 
-  it("stops watching the theme when it unmounts", () => {
+  it("releases its theme subscription when it unmounts, so nothing repaints a gone canvas", async () => {
+    const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
     const { unmount } = render(<AudioMeter rms={[-20]} peak={[-20]} />);
+    expect(disconnect).not.toHaveBeenCalled();
     unmount();
-    expect(() => applyTheme("light")).not.toThrow();
+    // The shared observer goes when its LAST subscriber does.
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    frame = null;
+    await act(async () => {
+      applyTheme("light");
+      await Promise.resolve();
+    });
+    // No draw loop is scheduled by a flip after unmount.
+    expect(frame).toBeNull();
   });
 });
 

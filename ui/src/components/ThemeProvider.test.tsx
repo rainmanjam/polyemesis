@@ -32,8 +32,12 @@ function stubSystem(initialLight: boolean) {
   };
 }
 
+/** Every theme the provider rendered, in order: a render IS a candidate frame. */
+const rendered: string[] = [];
+
 function Probe() {
   const { choice, theme, setChoice } = useTheme();
+  rendered.push(theme);
   return (
     <div>
       <span data-testid="choice">{choice}</span>
@@ -54,6 +58,7 @@ const mount = () =>
   );
 
 beforeEach(() => {
+  rendered.length = 0;
   localStorage.clear();
   html().removeAttribute("data-theme");
   history.replaceState(null, "", "/");
@@ -118,14 +123,29 @@ describe("ThemeProvider", () => {
     expect(html().dataset.theme).toBe("dark");
   });
 
-  it("ignores the OS once the operator has picked a theme", () => {
+  it("keeps tracking the OS while a theme is picked, without letting it override the pick", () => {
     const sys = stubSystem(false);
     mount();
     act(() => screen.getByTestId("pick-dark").click());
     sys.set(true);
     expect(html().dataset.theme).toBe("dark");
-    // ...and is not listening at all, rather than listening and discarding.
-    expect(sys.listeners()).toBe(0);
+    expect(sys.listeners()).toBe(1);
+  });
+
+  it("choosing System after the OS changed under an explicit pick shows the OS theme in the FIRST frame", () => {
+    const sys = stubSystem(false);
+    mount();
+    act(() => screen.getByTestId("pick-dark").click());
+    sys.set(true); // the OS goes light while Dark is chosen
+
+    // Every theme rendered from the click on. A stale "dark" in any of them is
+    // a committed frame of the wrong theme, even if a later pass corrects it.
+    rendered.length = 0;
+    act(() => screen.getByTestId("pick-system").click());
+
+    expect(html().dataset.theme).toBe("light");
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered).not.toContain("dark");
   });
 
   it("stops listening to the OS when it unmounts", () => {
