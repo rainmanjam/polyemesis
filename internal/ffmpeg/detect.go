@@ -484,23 +484,33 @@ func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapabil
 	t.gpuMu.Lock()
 	defer t.gpuMu.Unlock()
 
-	// One enumeration serves both the cached answer and the VAAPI probe, so
-	// the node the probe proved is the node a rendition is told to use.
-	info := t.detectGPUs(ctx)
-	t.mu.Lock()
-	t.gpu, t.gpuDone = info, true
-	t.mu.Unlock()
-
 	names := t.candidateEncoders()
+
+	// One enumeration serves both the cached answer and the VAAPI probe, so
+	// the node the probe proved is the node a rendition is told to use. It is
+	// paid for only when a VAAPI candidate needs it; otherwise the cached
+	// answer is dropped and the next GPUs call scans lazily, so hardware that
+	// appeared since the last scan is not hidden.
+	var (
+		info    GPUInfo
+		scanned bool
+	)
+	if anyVAAPI(names) {
+		info, scanned = t.detectGPUs(ctx), true
+	}
 	caps := probeEncodersOn(ctx, t.FFmpeg, names, probeTimeout, probeBudget, probeVAAPIDevice(names, info))
+
+	// GPU and capabilities are published together, under one lock and only
+	// after the probes have finished: a reader never sees a new render node
+	// beside the capability verdicts of the old one.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.gpu, t.gpuDone = info, scanned
 	if len(caps) == 0 {
 		// Nothing to probe, or no binary to probe with. Keep whatever the
 		// build list told us rather than downgrading to "nothing works".
-		return t.Capabilities()
+		return append([]EncoderCapability(nil), t.EncoderCaps...)
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.EncoderCaps = caps
 	t.HWEncoders = nil
 	// Preference order rather than probe order, so the first entry is the one

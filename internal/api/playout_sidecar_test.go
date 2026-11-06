@@ -107,3 +107,22 @@ func TestPlayoutConfigWithAnUnopenableTokenMintsANewOne(t *testing.T) {
 		t.Errorf("no WARN for the lost token:\n%s", logs.String())
 	}
 }
+
+// An upgraded install that nobody visits still gets its plaintext token sealed:
+// building the server migrates the sidecar, no request needed.
+func TestNewMigratesAPlaintextPlayoutTokenAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/playout.json"
+	if err := os.WriteFile(path, []byte(`{"protection":"token","token":"legacy-startup-token"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testServer(t, config.Config{DataDir: dir})
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("legacy-startup-token")) || !bytes.Contains(raw, []byte("tokenEnc")) {
+		t.Errorf("the token was not sealed at startup:\n%s", raw)
+	}
+}
