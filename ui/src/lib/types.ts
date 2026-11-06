@@ -2663,17 +2663,12 @@ export interface WsEvent {
 // internal/chat exactly; nothing here re-derives a fact the server already
 // stated, because two answers to "is YouTube connected" is one answer too many.
 
-/** The platforms the chat pane can show. An alias of `Platform`, kept as a
- *  separate name because chat and destinations gain platforms at different
- *  times — the next chat-only platform widens this without touching the
- *  destination picker.
- *
- *  IT IS NOW WIDER THAN THE SET OF PLATFORMS WITH A CHAT ADAPTER, and the
- *  alias is what makes that possible: "trovo" is a retired destination
- *  platform (Trovo shut down on 30 June 2026), so it is nameable here and no
- *  message will ever arrive carrying it. Read this as the union a message
- *  COULD be tagged with, not as a list of what works — the capability matrix
- *  in lib/capabilities.ts is the answer to that, per platform and per column. */
+/** The platforms the chat pane can show: those the server has a chat adapter for
+ *  (internal/chat), derived from the platform registry in contract/wire.ts. Not
+ *  an alias of `Platform`: Rumble is here, and Vimeo and the retired Trovo are
+ *  not. Read this as the set a message can come from, not as a list of what
+ *  works — the capability matrix in lib/capabilities.ts answers that, per
+ *  platform and per column. */
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */

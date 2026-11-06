@@ -76,13 +76,13 @@ const english: Translator = (key, params) => translate("en", key, params);
 
 /** What each platform's chat adapter actually implements.
  *
- *  Keyed by the raw platform string rather than ChatPlatform because RUMBLE IS
- *  NOT IN THAT UNION and still arrives at runtime: types.ts:234 says so out
- *  loud — "rumble is absent on purpose: its Platform value exists in Go for
- *  CHAT and its destination preset deliberately does not carry it". A message
- *  from Rumble is therefore a value the type system believes cannot exist,
- *  which is precisely why the ungated Delete button survived review. A lookup
- *  on `string` cannot be fooled by that.
+ *  Keyed by the raw platform string rather than ChatPlatform because a message
+ *  can carry a platform value this build has no row for (a platform newer than
+ *  the UI, or a retired one such as Trovo), and a lookup on `string` answers
+ *  "nothing implemented" for it instead of the type system promising it cannot
+ *  occur. Rumble is a ChatPlatform with an adapter that implements no moderation
+ *  API; its row says so, which is how an ungated Delete button once survived
+ *  review.
  *
  *  `hideUpstream` is Facebook-only for a structural reason rather than a
  *  missing feature: Facebook's live chat is a comment thread, and a comment has

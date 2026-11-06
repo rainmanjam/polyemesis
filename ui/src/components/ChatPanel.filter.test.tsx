@@ -276,14 +276,14 @@ describe("what an empty timeline says", () => {
  * and adding the confirmation dialog made it worse — the operator now got a
  * dialog promising removal, clicked through it, and then met a server error.
  *
- * Two specimens, because there are two ways to be unable to delete and the
- * dangerous one is invisible to the compiler:
+ * Two specimens, because there are two ways to be unable to delete:
  *
- *   rumble  is OUTSIDE the ChatPlatform union (types.ts) and still arrives at
- *           runtime. ChatMessageMenu.reason.test.tsx says why that matters --
- *           "the type system believes this message cannot exist" -- and it is
- *           exactly how an ungated Delete survived review the first time.
- *   trovo   is INSIDE the union with no row in the adapter table.
+ *   rumble  is a ChatPlatform whose adapter implements no moderation API.
+ *           ChatMessageMenu.reason.test.tsx says why that matters: it is exactly
+ *           how an ungated Delete survived review the first time.
+ *   trovo   is retired and OUTSIDE the ChatPlatform union (no chat adapter, no
+ *           row in the adapter table) and could still arrive from a stored row,
+ *           so it is cast in; the gate must treat it like any unknown platform.
  *
  * Twitch is the control: if the gate were wired backwards, or to a constant,
  * one of these three would say so.
@@ -296,8 +296,8 @@ describe("the row delete icon is gated on what the platform can do", () => {
     feed.messages = [
       // The cast is the point, not a workaround: this platform reaches the
       // renderer and the union says it cannot.
-      message("1", "rumble" as unknown as ChatPlatform, "rumbler", "no moderation API at all"),
-      message("2", "trovo" as unknown as ChatPlatform, "trovan", "in the union, absent from the adapter table"),
+      message("1", "rumble", "rumbler", "no moderation API at all"),
+      message("2", "trovo" as unknown as ChatPlatform, "trovan", "outside the union, absent from the adapter table"),
       message("3", "twitch", "twitcher", "can be deleted upstream"),
     ];
     feed.statuses = [status("trovo" as unknown as ChatPlatform), status("twitch")];
