@@ -82,3 +82,33 @@ func TestRelayReadersAndWritersCarryTheSharedOptions(t *testing.T) {
 		argvgold.RequireRelayProducer(t, name, kids[name])
 	}
 }
+
+// The one-shot probes honour the override too, each keeping its own default
+// when it is unset. (The poster frame in internal/api/playout.go does the same.)
+func TestOneShotProbesHonourTheLogLevelOverride(t *testing.T) {
+	level := func(argv []string) string {
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == "-loglevel" {
+				return argv[i+1]
+			}
+		}
+		return ""
+	}
+	cases := map[string]struct {
+		argv func() []string
+		def  string
+	}{
+		"duration count": {func() []string { return CountDurationArgs("mpegts", "/x.ts") }, "error"},
+	}
+	for name, c := range cases {
+		SetLogLevel("")
+		if got := level(c.argv()); got != c.def {
+			t.Errorf("%s: default level %q, want %q", name, got, c.def)
+		}
+		SetLogLevel("debug")
+		if got := level(c.argv()); got != "debug" {
+			t.Errorf("%s ignores the override: %q", name, got)
+		}
+	}
+	SetLogLevel("")
+}

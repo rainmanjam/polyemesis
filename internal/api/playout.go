@@ -20,6 +20,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
@@ -920,18 +921,7 @@ func renderPoster(ffmpegPath, segment string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), posterTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
-		"-hide_banner", "-nostdin", "-loglevel", "error",
-		"-i", segment,
-		"-frames:v", "1",
-		// Scaled down: this is a poster behind a play button, and a full-size
-		// still off a 1080p ladder is a quarter-megabyte nobody looks at.
-		"-vf", "scale=854:-2",
-		"-q:v", "5",
-		"-f", "image2",
-		"-c:v", "mjpeg",
-		"-",
-	)
+	cmd := exec.CommandContext(ctx, ffmpegPath, posterArgs(segment)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -1367,4 +1357,21 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// posterArgs is the command that renders one frame of a segment as a JPEG on
+// stdout. Its level is the one setting every FFmpeg child honours.
+func posterArgs(segment string) []string {
+	return []string{
+		"-hide_banner", "-nostdin", "-loglevel", ffmpeg.LogLevel(ffmpeg.LogError),
+		"-i", segment,
+		"-frames:v", "1",
+		// Scaled down: this is a poster behind a play button, and a full-size
+		// still off a 1080p ladder is a quarter-megabyte nobody looks at.
+		"-vf", "scale=854:-2",
+		"-q:v", "5",
+		"-f", "image2",
+		"-c:v", "mjpeg",
+		"-",
+	}
 }

@@ -72,10 +72,10 @@ func contains(s, sub string) bool {
 func TestFFmpegSettingsAreReadOnceAndTrimmed(t *testing.T) {
 	e := FromLookup(lookup(map[string]string{
 		FFmpegLogLevelVar:    " debug\n",
-		IngestCaptureVar:     " /tmp/capture.ts ",
+		IngestCaptureVar:     " /tmp/capture dir/x.ts ",
 		FFmpegAssumeMajorVar: " 8 ",
 	}))
-	if e.FFmpegLogLevel != "debug" || e.IngestCapture != "/tmp/capture.ts" || e.FFmpegAssumeMajor != "8" {
+	if e.FFmpegLogLevel != "debug" || e.IngestCapture != " /tmp/capture dir/x.ts " || e.FFmpegAssumeMajor != "8" {
 		t.Errorf("FFmpeg settings not read: %+v", e)
 	}
 	if z := FromLookup(lookup(nil)); z.FFmpegLogLevel != "" || z.IngestCapture != "" || z.FFmpegAssumeMajor != "" {

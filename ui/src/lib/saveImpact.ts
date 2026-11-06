@@ -5,7 +5,7 @@
  * destArgvSig), and that signature masks the level of every named volume stage
  * (ffmpeg.MaskLiveVolumes): a change of level alone goes to the running FFmpeg
  * on its command channel. Of what a routing save can change, the argv reads
- * exactly these (engine destSpecFor): the compile's filterComplex, outLabel,
+ * exactly these (engine.DestSpecFor): the compile's filterComplex, outLabel,
  * secondOutLabel, tracks and videoDelayMs, and the profile's sampleRate -- and
  * on an audio-copy destination only the tracks, since its argv forwards them
  * untouched and never takes the graph (ffmpeg copyAudioArgs). So the same

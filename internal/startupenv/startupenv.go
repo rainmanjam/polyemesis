@@ -62,7 +62,8 @@ type Env struct {
 	// default. Empty leaves each child's default alone.
 	FFmpegLogLevel string
 	// IngestCapture names a file the ingest child also writes the identical
-	// stream to, for examining what the relay fans out. Empty is off.
+	// stream to, for examining what the relay fans out. Empty is off. Exactly as
+	// set, never trimmed: it is a path, and a path may begin or end in a space.
 	IngestCapture string
 	// FFmpegAssumeMajor states the major version of a build whose own version
 	// string cannot be read. It is passed on as set: internal/ffmpeg parses it
@@ -84,7 +85,7 @@ func FromLookup(get func(string) string) Env {
 		RumbleChatChannel: strings.TrimSpace(get(RumbleChatChannelVar)),
 		SetupCode:         get(SetupCodeVar),
 		FFmpegLogLevel:    strings.TrimSpace(get(FFmpegLogLevelVar)),
-		IngestCapture:     strings.TrimSpace(get(IngestCaptureVar)),
+		IngestCapture:     get(IngestCaptureVar),
 		FFmpegAssumeMajor: strings.TrimSpace(get(FFmpegAssumeMajorVar)),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -47,4 +48,14 @@ func containsPair(argv []string, flag, val string) bool {
 		}
 	}
 	return false
+}
+
+func TestThePosterFrameHonoursTheLogLevelOverride(t *testing.T) {
+	t.Cleanup(func() { ffmpeg.SetLogLevel("") })
+	for lvl, want := range map[string]string{"": "error", "debug": "debug"} {
+		ffmpeg.SetLogLevel(lvl)
+		if !containsPair(posterArgs("/s.ts"), "-loglevel", want) {
+			t.Errorf("override %q: want -loglevel %s in %q", lvl, want, posterArgs("/s.ts"))
+		}
+	}
 }

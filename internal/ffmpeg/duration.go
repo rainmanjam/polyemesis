@@ -184,7 +184,7 @@ func CountDurationArgs(format, path string) []string {
 	return []string{
 		"-hide_banner",
 		"-nostdin",
-		"-loglevel", "error",
+		"-loglevel", LogLevel(LogError),
 		"-protocol_whitelist", "file",
 		"-nostats",
 		"-progress", "pipe:1",
