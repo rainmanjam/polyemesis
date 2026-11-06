@@ -47,11 +47,62 @@ func TestADestinationWithNoPresetStoresNull(t *testing.T) {
 	}
 }
 
-func TestAnUnknownPresetIsRefused(t *testing.T) {
+// SETTING an unknown preset, or one for another platform, is refused; a stored
+// one the catalogue no longer has is not, or it would make the row unwritable.
+func TestOnlyANewUnknownOrMismatchedPresetIsRefused(t *testing.T) {
 	in := validDest()
 	in.PresetID = "no-such-preset"
-	if err := in.Validate(); err == nil || !strings.Contains(err.Error(), "unknown preset") {
-		t.Fatalf("Validate = %v, want an unknown preset refusal", err)
+	if p := in.PresetProblem(); !strings.Contains(p, "unknown preset") {
+		t.Fatalf("PresetProblem = %q, want an unknown preset refusal", p)
+	}
+	if _, err := testDB(t).CreateDestination(in); err == nil || !strings.Contains(err.Error(), "unknown preset") {
+		t.Fatalf("create with an unknown preset = %v", err)
+	}
+	yt := validDest()
+	yt.Platform, yt.PresetID = PlatformYouTube, "instagram"
+	if p := yt.PresetProblem(); !strings.Contains(p, "saves as platform") {
+		t.Fatalf("a youtube destination from the instagram preset: %q", p)
+	}
+	ok := validDest() // platform custom
+	ok.PresetID = "instagram"
+	if p := ok.PresetProblem(); p != "" {
+		t.Fatalf("instagram saves as custom: %q", p)
+	}
+	// Validate and every write path leave a STORED unknown id alone.
+	stored := validDest()
+	stored.PresetID = "removed-in-a-later-release"
+	if err := stored.Validate(); err != nil {
+		t.Fatalf("Validate refused a stored unknown preset: %v", err)
+	}
+	d := testDB(t)
+	created, err := d.CreateDestination(validDest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.sql.Exec(`UPDATE destinations SET preset_id = 'removed-in-a-later-release' WHERE id = ?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := d.GetDestination(created.ID)
+	row.Name = "renamed"
+	if _, err := d.UpdateDestination(row); err != nil {
+		t.Fatalf("a stored unknown preset blocked an update: %v", err)
+	}
+	if got := RenditionConcerns(&Rendition{Width: 3840, Height: 2160, VideoBitrate: 40000}, PlatformCustom, row.PresetID); len(got) != 0 {
+		t.Errorf("an unknown stored preset gave guidance: %+v", got)
+	}
+}
+
+// A preset only names guidance for the platform it saves as.
+func TestAPresetForAnotherPlatformGivesNoGuidance(t *testing.T) {
+	r := &Rendition{Width: 3840, Height: 2160, FPS: 60, VideoBitrate: 40000}
+	got := RenditionConcerns(r, PlatformYouTube, "instagram")
+	for _, c := range got {
+		if strings.Contains(c.Detail, "Instagram") {
+			t.Errorf("youtube with preset=instagram got Instagram's guidance: %+v", c)
+		}
+	}
+	if len(got) == 0 {
+		t.Error("youtube should still fall back to its own guidance")
 	}
 }
 
@@ -123,5 +174,94 @@ func TestTheMigrationBackfillsOnceFromTheIngestUrl(t *testing.T) {
 	}
 	if got, _ := d.GetDestination(a.ID); got.PresetID != "" {
 		t.Errorf("the backfill ran again and set %q", got.PresetID)
+	}
+}
+
+// A failure in the backfill must not leave the column behind as "done". The
+// whole step is one transaction, so the ALTER rolls back with it and the next
+// boot runs the backfill again from the start.
+func TestAFailedBackfillRollsTheColumnBackAndTheNextBootRetries(t *testing.T) {
+	d := testDB(t)
+	yt := validDest()
+	yt.Name, yt.Platform, yt.URL = "yt", PlatformYouTube, "rtmps://a.rtmps.youtube.com:443/live2"
+	a, err := d.CreateDestination(yt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE destinations DROP COLUMN preset_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.sql.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON destinations BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MigrateDestinationPresetID(); err == nil {
+		t.Fatal("the backfill was made to fail and the migration reported success")
+	}
+	if has, _ := columnExists(d.sql, "destinations", "preset_id"); has {
+		t.Fatal("the ALTER survived a failed backfill, so the next boot would skip it for good")
+	}
+	if _, err := d.sql.Exec(`DROP TRIGGER boom`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MigrateDestinationPresetID(); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got, _ := d.GetDestination(a.ID); got.PresetID != "youtube-rtmps" {
+		t.Errorf("after the retry the destination has preset %q, want youtube-rtmps", got.PresetID)
+	}
+}
+
+// The release fixtures carry no destination rows, so the backfill is run here
+// over a realistic spread of them: matched, ambiguous-by-scheme, a hand-typed
+// host, a platform that does not fit the preset, a non-RTMP kind and an
+// untouched row with no URL.
+func TestTheBackfillOverARealisticSetOfDestinations(t *testing.T) {
+	d := testDB(t)
+	cases := []struct {
+		name     string
+		kind     DestKind
+		platform Platform
+		url      string
+		want     string
+	}{
+		{"yt rtmp", DestRTMP, PlatformYouTube, "rtmp://a.rtmp.youtube.com/live2", "youtube"},
+		{"yt rtmps", DestRTMP, PlatformYouTube, "rtmps://a.rtmps.youtube.com:443/live2", "youtube-rtmps"},
+		{"twitch rtmp", DestRTMP, PlatformTwitch, "rtmp://live.twitch.tv/app", "twitch"},
+		{"twitch rtmps", DestRTMP, PlatformTwitch, "rtmps://live.twitch.tv/app", "twitch-rtmps"},
+		{"twitch regional", DestRTMP, PlatformTwitch, "rtmp://live-sfo.twitch.tv/app", ""},
+		{"facebook", DestRTMP, PlatformFacebook, "rtmps://live-api-s.facebook.com:443/rtmp/", "facebook"},
+		{"cloudflare", DestRTMP, PlatformCustom, "rtmps://live.cloudflare.com:443/live/", "cloudflare-stream"},
+		{"mux", DestRTMP, PlatformCustom, "rtmps://global-live.mux.com:443/app", "mux"},
+		{"youtube host on a custom row", DestRTMP, PlatformCustom, "rtmp://a.rtmp.youtube.com/live2", ""},
+		{"own server", DestRTMP, PlatformCustom, "rtmp://ingest.example/app", ""},
+		{"srt", DestSRT, PlatformCustom, "srt://ingest.example:9000", ""},
+	}
+	ids := make([]int64, len(cases))
+	for i, c := range cases {
+		in := validDest()
+		in.Name, in.Kind, in.Platform, in.URL = c.name, c.kind, c.platform, c.url
+		if c.kind != DestRTMP {
+			in.StreamKey = ""
+		}
+		created, err := d.CreateDestination(in)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		ids[i] = created.ID
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE destinations DROP COLUMN preset_id`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MigrateDestinationPresetID(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for i, c := range cases {
+		got, err := d.GetDestination(ids[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PresetID != c.want {
+			t.Errorf("%s: preset %q, want %q", c.name, got.PresetID, c.want)
+		}
 	}
 }

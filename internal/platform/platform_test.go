@@ -175,7 +175,7 @@ func TestYouTubeRecommendationAndMaximumAreDifferentFacts(t *testing.T) {
 	if Must(Kick).Ceilings.MaxAudioKbps != 0 {
 		t.Error("kick has no audio ceiling")
 	}
-	if Must(Rumble).Moderation != nil {
-		t.Error("rumble has no moderation")
+	if m := Must(Rumble).Moderation; m == nil || m.Hide || m.Delete || m.TimeoutBan {
+		t.Errorf("rumble is listed for moderation with no upstream action, got %+v", m)
 	}
 }

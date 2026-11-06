@@ -60,7 +60,7 @@ func AccountNeedsReconnect(a db.PlatformAccount) ReconnectReason {
 			Needed: true,
 			Reason: fmt.Sprintf("this %s account was connected when polyemesis asked for fewer "+
 				"permissions than it does now. Granting a scope never upgrades a token that "+
-				"already exists, so it has to be reconnected once.", a.Platform),
+				"already exists, so it has to be reconnected once.", a.Platform) + reconnectScope(a.Platform),
 		}
 	}
 
@@ -73,7 +73,7 @@ func AccountNeedsReconnect(a db.PlatformAccount) ReconnectReason {
 		Needed: true,
 		Reason: fmt.Sprintf("this %s account is missing %d permission(s) polyemesis now needs. "+
 			"Granting a scope never upgrades a token that already exists, so it has to be "+
-			"reconnected once.", a.Platform, len(missing)),
+			"reconnected once.", a.Platform, len(missing)) + reconnectScope(a.Platform),
 		Missing: missing,
 	}
 }
@@ -111,4 +111,15 @@ func missingScopes(granted string, want []string) []string {
 		}
 	}
 	return missing
+}
+
+// reconnectScope says what a reconnect is for, where it is for one thing only.
+// X's scope version 2 added the two permissions that post clips; livestream and
+// chat work on the older grant, and a livestream-only operator should not read
+// the prompt as a fault.
+func reconnectScope(p db.Platform) string {
+	if p == db.PlatformX {
+		return " Reconnecting only matters for posting clips to X; livestreaming and chat are unaffected."
+	}
+	return ""
 }

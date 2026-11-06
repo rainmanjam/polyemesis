@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"net/url"
 	"strings"
@@ -10,7 +11,7 @@ import (
 // destination was created from, NULL for one made by hand. Nullable and
 // defaultless, so an upgrade changes nothing a running install can see.
 //
-// THE BACKFILL RUNS ONCE, in the same step that adds the column, and never
+// THE BACKFILL RUNS ONCE, in the same transaction that adds the column, and never
 // again: afterwards a NULL is an operator's own choice (a destination typed in
 // by hand) and not something to second-guess on every boot. A row is given a
 // preset only when its ingest URL names exactly one: same scheme and host as a
@@ -26,14 +27,29 @@ func (d *DB) MigrateDestinationPresetID() error {
 	if has {
 		return nil
 	}
-	if _, err := d.sql.Exec(`ALTER TABLE destinations ADD COLUMN preset_id TEXT`); err != nil {
+	// ONE TRANSACTION, because the column's existence is what says "done". SQLite
+	// DDL is transactional, so a failure in the backfill rolls the ALTER back and
+	// the next boot starts again from the top, rather than finding the column
+	// and skipping a backfill that never finished.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin preset_id migration: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE destinations ADD COLUMN preset_id TEXT`); err != nil {
 		return fmt.Errorf("add destinations.preset_id: %w", err)
 	}
-	return d.backfillDestinationPresetIDs()
+	if err := backfillDestinationPresetIDs(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit preset_id migration: %w", err)
+	}
+	return nil
 }
 
-func (d *DB) backfillDestinationPresetIDs() error {
-	rows, err := d.sql.Query(`SELECT id, platform, url FROM destinations WHERE kind = ? AND url <> ''`, string(DestRTMP))
+func backfillDestinationPresetIDs(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id, platform, url FROM destinations WHERE kind = ? AND url <> ''`, string(DestRTMP))
 	if err != nil {
 		return fmt.Errorf("read destinations for preset backfill: %w", err)
 	}
@@ -62,7 +78,7 @@ func (d *DB) backfillDestinationPresetIDs() error {
 	}
 	rows.Close()
 	for _, m := range found {
-		if _, err := d.sql.Exec(`UPDATE destinations SET preset_id = ? WHERE id = ? AND preset_id IS NULL`, m.preset, m.id); err != nil {
+		if _, err := tx.Exec(`UPDATE destinations SET preset_id = ? WHERE id = ? AND preset_id IS NULL`, m.preset, m.id); err != nil {
 			return fmt.Errorf("backfill destinations.preset_id: %w", err)
 		}
 	}
@@ -85,15 +101,7 @@ func presetForIngest(plat Platform, raw string) (string, bool) {
 		if !pok || pscheme != scheme || phost != host {
 			continue
 		}
-		// A preset that saves as "custom" has Platform "".
-		want := p.Platform
-		if want == "" {
-			want = PlatformCustom
-		}
-		if plat == "" {
-			plat = PlatformCustom
-		}
-		if want != plat {
+		if !presetFitsPlatform(p, plat) {
 			continue
 		}
 		if hit != "" {

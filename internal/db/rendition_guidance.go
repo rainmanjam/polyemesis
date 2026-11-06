@@ -55,7 +55,10 @@ func RenditionConcerns(r *Rendition, plat Platform, presetID string) []Rendition
 	// A preset that publishes none ("twitch-rtmps") falls through to the platform.
 	// The figures on the preset come from the platform registry.
 	preset, ok := DestinationPresetByID(presetID)
-	if !ok || preset.Video == nil {
+	// A preset names guidance only for the platform it saves as: youtube with
+	// preset=instagram is a mismatch and is ignored, like an id the catalogue
+	// no longer has.
+	if !ok || preset.Video == nil || !presetFitsPlatform(preset, plat) {
 		preset, ok = DestinationPresetByID(string(plat))
 	}
 	if !ok || preset.Video == nil {

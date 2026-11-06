@@ -216,7 +216,10 @@ type Destination struct {
 	// every preset that is only a URL and a note, so without this the platform's
 	// own figures (Instagram, LinkedIn, Dailymotion, Owncast, Rumble) could never
 	// be found from a stored destination. Advisory: it selects guidance and gates
-	// nothing. Validate refuses an id the catalogue does not have.
+	// nothing, so Validate does not look at it and an id the catalogue no longer
+	// has (a preset removed later, a row written by a newer release) is ignored
+	// rather than blocking every write to the row. An explicit write that SETS
+	// an id is checked by PresetProblem.
 	PresetID string `json:"presetId,omitempty"`
 	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
 	// for this destination's CURRENT stream key, which the "youtube_post" mode
@@ -775,12 +778,6 @@ func (d Destination) Validate() error {
 			add("a go-live title is sent only to X; %s takes its title from the go-live composer", d.Platform)
 		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
 			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
-		}
-	}
-
-	if d.PresetID != "" {
-		if _, ok := DestinationPresetByID(d.PresetID); !ok {
-			add("unknown preset %q", d.PresetID)
 		}
 	}
 
@@ -1543,6 +1540,9 @@ func (d *DB) GetDestination(id int64) (*Destination, error) {
 
 // CreateDestination inserts a destination, defaulting anything unset.
 func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
+	if p := dst.PresetProblem(); p != "" {
+		return nil, fmt.Errorf("invalid destination: %s", p)
+	}
 	if dst.Platform.RetiredReason() != "" {
 		return nil, retiredError(dst.Platform, "a destination can no longer be created for it")
 	}
@@ -2822,4 +2822,35 @@ func presetIDStored(id string) any {
 		return nil
 	}
 	return id
+}
+
+// presetFitsPlatform reports whether a destination saved as plat could have been
+// made from p: a preset that saves as "custom" has Platform "".
+func presetFitsPlatform(p DestinationPreset, plat Platform) bool {
+	want, have := p.Platform, plat
+	if want == "" {
+		want = PlatformCustom
+	}
+	if have == "" {
+		have = PlatformCustom
+	}
+	return want == have
+}
+
+// PresetProblem is why a PresetID being SET on this destination should be
+// refused, or "". It is checked on create and on an update that changes the id,
+// never on a write that leaves a stored id alone: a stored id the catalogue no
+// longer knows must not make the row unwritable.
+func (d Destination) PresetProblem() string {
+	if d.PresetID == "" {
+		return ""
+	}
+	p, ok := DestinationPresetByID(d.PresetID)
+	if !ok {
+		return fmt.Sprintf("unknown preset %q", d.PresetID)
+	}
+	if !presetFitsPlatform(p, d.Platform) {
+		return fmt.Sprintf("preset %q saves as platform %q, not %q", d.PresetID, p.Platform, d.Platform)
+	}
+	return ""
 }

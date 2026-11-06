@@ -437,9 +437,8 @@ func ytStreamTitle(label string) string {
 		return ytStreamTitleBase
 	}
 	title := ytStreamTitleBase + " - " + label
-	if r := []rune(title); len(r) > ytStreamTitleMax {
-		title = string(r[:ytStreamTitleMax])
-	}
+	// YouTube counts a title in UTF-16 units, like every other title here.
+	title = platform.UTF16Truncate(title, ytStreamTitleMax)
 	return title
 }
 

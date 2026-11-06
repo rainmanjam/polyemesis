@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube's scheduled-broadcast editor (#18): the writes a recurring template makes to ONE upcoming
@@ -27,7 +29,7 @@ var _ ScheduledEditor = (*YouTube)(nil)
 
 // ytUploadBase is the upload host for thumbnails.set. Production uses it; a WithBaseURL stub replaces
 // it, the same as every other call site.
-const ytUploadBase = "https://www.googleapis.com/upload/youtube/v3"
+const ytUploadBase = platform.YouTubeAPIHost + "/upload/youtube/v3"
 
 // ytThumbnailsPath is thumbnails.set, relative to the upload base.
 const ytThumbnailsPath = "/thumbnails/set"

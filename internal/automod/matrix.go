@@ -71,9 +71,10 @@ const (
 // Checkers is every checker, cheapest first.
 var Checkers = []Checker{CheckerRules, CheckerHistory, CheckerModel}
 
-// Platforms is every platform automod can act on: the registry rows that carry
-// a Moderation profile. Rumble is absent because its row has none: the hub
-// carries Rumble chat, but nothing was ever declared for moderating it.
+// Platforms is every platform automod lists: the registry rows that carry a
+// Moderation profile. Rumble is listed with every upstream action unavailable
+// (its chat is read-only), so its flag and local-hide rows exist and the rest
+// are shown inert with the reason.
 var Platforms = platformsOf(platform.Moderated())
 
 func platformsOf(rows []platform.Row) []db.Platform {

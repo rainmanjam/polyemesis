@@ -29,8 +29,8 @@ const (
 
 // Text limits, as constants for the callers that declare their own constants
 // from them. The unit is each consumer's, and they differ: the YouTube title is
-// counted in runes by the metadata API and the scheduler, in UTF-16 units by the
-// clip publisher and the web UI; the YouTube description in runes by the
+// counted in UTF-16 units everywhere (the metadata API, recurring broadcasts, the
+// clip publisher and the web UI); the YouTube description in runes by the
 // metadata API and in BYTES (len) by the publisher and the scheduler; Twitch's
 // title and the X post in runes at the API, TikTok's caption in UTF-16 units.
 const (
@@ -161,6 +161,9 @@ func buildRows() []Row {
 			// Rumble's enum exists for chat only; the preset saves as custom.
 			Key: Rumble, Enum: Rumble, Name: "Rumble", ShortName: "Rumble",
 			Presets: []string{"rumble"}, AcceptsDestinations: true,
+			// Listed for moderation with every action false: automod shows Rumble's
+			// rows, flag and local hide work, and nothing is claimed upstream.
+			Moderation: &Moderation{Order: 6},
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
 				Source: "https://rumble.support/help/livestream-settings", Checked: "2026-08-06",

@@ -29,3 +29,24 @@ func IsIVSIngestHost(host string) bool {
 // title check -- the metadata API, clip publishing, recurring broadcasts -- uses
 // it, so a title cannot pass one check and fail another.
 func UTF16Len(s string) int { return len(utf16.Encode([]rune(s))) }
+
+// UTF16Truncate cuts s to at most max UTF-16 units without splitting a
+// character: a code point outside the BMP is two units and is kept or dropped
+// whole. It is how a title is cut to a limit UTF16Len counts.
+func UTF16Truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	n := 0
+	for i, r := range s {
+		w := 1
+		if r >= 0x10000 {
+			w = 2
+		}
+		if n+w > max {
+			return s[:i]
+		}
+		n += w
+	}
+	return s
+}

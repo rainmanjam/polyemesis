@@ -608,6 +608,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
   const [presetId, setPresetId] = useState("");
+  // The preset the operator actually picked in this dialog session, or null when
+  // they have not. presetId above also holds a best-effort GUESS used only to
+  // label the picker for a destination that predates the catalogue; the guess
+  // is never sent. What travels is the picked preset, else the stored one.
+  const [pickedPresetId, setPickedPresetId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<DestKind>("rtmp");
@@ -828,6 +833,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setName(destination.name);
       setPlatform(destination.platform);
       setPresetId(destination.presetId || presetIdFor(destination));
+      setPickedPresetId(null);
       setKind(destination.kind);
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
@@ -871,6 +877,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setName("");
       setPlatform("custom");
       setPresetId("");
+      setPickedPresetId(null);
       setKind("rtmp");
       setUrl("");
       setStreamKey("");
@@ -968,6 +975,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // Mutation-tested: with the object in the deps, deleting `platform` from them
   // broke no test, because identity churn was doing the work by accident.
   const concernRenditionId = selectedRendition?.id ?? 0;
+  // The preset that will be saved: picked now, else already stored. Never the
+  // label guess.
+  const sentPresetId = pickedPresetId ?? destination?.presetId ?? "";
   useEffect(() => {
     if (!concernRenditionId) {
       setConcerns([]);
@@ -975,7 +985,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     }
     let live = true;
     api
-      .renditionConcerns(concernRenditionId, platform, presetId)
+      .renditionConcerns(concernRenditionId, platform, sentPresetId)
       .then((c) => {
         if (live) setConcerns(c ?? []);
       })
@@ -985,7 +995,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     return () => {
       live = false;
     };
-  }, [concernRenditionId, platform, presetId]);
+  }, [concernRenditionId, platform, sentPresetId]);
 
   /** What the encode this destination is LEAVING will do once it has gone.
    *
@@ -1049,6 +1059,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     // the operator was configuring a moment ago would be stranded exactly the
     // same way. See keyAfterKindChange.
     changeKind(p.kind);
+    // Recorded only now that the preset really configured the form: one that
+    // returned early above left the form alone and is not what this is.
+    setPickedPresetId(p.id);
     // Only the presets with integration code behind them carry a platform;
     // every other one is an ordinary custom endpoint. That is what keeps this
     // catalogue additive — it never widens what the API will accept.
@@ -1132,10 +1145,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // Only X reads the announcement setting; any other platform clears it,
         // as the server would.
         xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
-        // The preset this was made from, so platforms that save as "custom" can
-        // still be found for their own encoder guidance. Omitted when none was
-        // picked: the server decodes over the stored row and keeps what it has.
-        presetId: presetId || undefined,
+        // The preset the operator picked in this dialog, so platforms that save as
+        // "custom" can still be found for their own encoder guidance. Omitted
+        // when none was picked (never a guess): the server decodes over the
+        // stored row and keeps what it has. An empty string clears it.
+        ...(pickedPresetId !== null ? { presetId: pickedPresetId } : {}),
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //

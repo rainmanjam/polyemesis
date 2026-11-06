@@ -110,7 +110,7 @@ describe("the rendition warning", () => {
     open(onX);
     // The pair is what is being judged: a platform switch with the rendition
     // unchanged is exactly the case this exists for, so both must be sent.
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", "x"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", ""));
   });
 
   it("shows the objection, and the date the figure was checked", async () => {
@@ -142,7 +142,7 @@ describe("the rendition warning", () => {
     // array broke nothing until it was written.
     renditionConcerns.mockResolvedValue([]);
     const { rerender } = open(onX);
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", "x"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "x", ""));
 
     rerender(
       <DestinationDialog
@@ -152,7 +152,7 @@ describe("the rendition warning", () => {
         onSaved={() => {}}
       />,
     );
-    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "youtube", "youtube"));
+    await waitFor(() => expect(renditionConcerns).toHaveBeenCalledWith(7, "youtube", ""));
   });
 
   it("says nothing when the rendition suits the platform", async () => {

@@ -145,8 +145,9 @@ type Row struct {
 	HealthAPI bool
 
 	// PublishScopes are the OAuth scopes clip publishing needs on top of
-	// sign-in. For X they are NOT the ones the sign-in asks for, which is why X
-	// publishing cannot be enabled by reconnecting.
+	// sign-in. Sign-in reads them from here (X: tweet.write and media.write, from
+	// scope version 2), so an account that reconnects holds them; one connected
+	// earlier has to reconnect once.
 	PublishScopes []string
 	// PublishAnyScope is the other shape: any ONE of these is enough (YouTube's
 	// videos.insert documents four sufficient scopes, one of which the sign-in

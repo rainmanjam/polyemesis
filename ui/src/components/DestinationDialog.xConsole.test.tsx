@@ -102,17 +102,6 @@ describe("the X console in the destination editor", () => {
     expect(trigger.textContent).toContain(en["wave3.x.tweet.every"]);
   });
 
-  // The preset a destination was made from travels with the save, so a platform
-  // that saves as "custom" can still be found for its own encoder guidance.
-  it("saves the preset the destination was made from", async () => {
-    open(stored({ presetId: "x" }));
-    await waitFor(() => document.getElementById("x-go-live-title"));
-    await waitFor(() => expect(screen.getByText(en["wave3.x.gateClosed"])).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: en["common.save"] }));
-    await waitFor(() => expect(updates.length).toBe(1));
-    expect(updates[0].presetId).toBe("x");
-  });
-
   it("shows no X console for another platform", async () => {
     open(stored({ platform: "twitch", url: "rtmp://live.twitch.tv/app", goLiveTitle: undefined }));
     await waitFor(() => expect(screen.getByRole("button", { name: en["common.save"] })).toBeTruthy());

@@ -56,19 +56,21 @@ its first tagged release.
 
 - **Poll announcements reach X.** The poll's start and end texts were sent unchanged to every chat, and
   X, which stops a chat message at 140 characters, refused any of 141 to 200. X's chat now gets a
-  shortened text (an ellipsis where a label or the question was cut, the voting instructions kept);
-  every other chat keeps the full text.
+  shortened text (an ellipsis where the question or a label was cut, the voting instructions kept; the
+  question is shortened before any option label, and a cut never splits an emoji or a flag); every other
+  chat keeps the full text.
 - **Instagram, LinkedIn, Dailymotion, Owncast and Rumble destinations now get their platform's encoder
   guidance.** Each of those saves as a custom destination, so the console and the engine never found the
   figures the catalogue holds for them and a rendition outside them raised no warning. A destination now
-  remembers the preset it was created from (`presetId`, optional on create and update), and the
-  guidance is looked up by it. Destinations that already exist are matched once, at upgrade, by their
+  remembers the preset the operator picked for it (`presetId`, optional on create and update, checked
+  against the destination's platform, and cleared by sending it empty), and the guidance is looked up by it.
+  The dialog sends the preset only when one was picked, never the guess it uses to label an older destination. Destinations that already exist are matched once, at upgrade, by their
   ingest URL where exactly one preset's fixed host fits; the rest stay unlabelled until they are edited
   and saved from a preset.
 - **YouTube titles are counted the same way everywhere.** The metadata push counted characters, the clip
   publisher and the console counted UTF-16 units (an emoji outside the Basic Multilingual Plane is
   two), so a title could pass one check and fail another. The metadata push and recurring-broadcast
-  titles now use UTF-16 units too.
+  titles now use UTF-16 units too, and so does the title polyemesis gives a YouTube stream it creates (128).
 - **Rumble chat cannot be moderated, and the moderation matrix now says so.** Delete, timeout, ban and
   upstream hide read as available on Rumble although it has no moderation API; they are now shown
   as unavailable with the reason. Flagging and the local hide still work.
@@ -81,7 +83,8 @@ its first tagged release.
   is gone. Twitch's 6000 kbps video figure is advice and no longer a ceiling. YouTube keeps 12000 kbps as
   the recommended figure and 51000 as the maximum. `GET /services` reflects these.
 - **Connecting X now asks for `tweet.write` and `media.write`** so clips can be posted to X. An X account
-  connected before this release shows as needing a reconnect, once, before it can publish clips.
+  connected before this release shows as needing a reconnect, once, before it can publish clips; the
+  prompt says that only posting clips needs it and that livestreaming and chat are unaffected.
 - **A destination's `presetId` appears in destination responses** when it has one, and
   `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
 
