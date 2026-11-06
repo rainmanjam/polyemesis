@@ -28,7 +28,7 @@ import (
 	"sort"
 )
 
-// Guidance is a platform's own published encoder advice, with where it was
+// Guidance is a platform's own published encoder advice (what it RECOMMENDS), with where it was
 // read and when. A zero field means the platform states no figure, which is not
 // the same as a limit of zero.
 type Guidance struct {
@@ -38,7 +38,7 @@ type Guidance struct {
 	Source, Checked    string
 }
 
-// Ceilings are the encoder limits seeded from OBS's rtmp-services data, which
+// Ceilings are the encoder MAXIMUMS the platform enforces seeded from OBS's rtmp-services data, which
 // CheckEncoder and the codec checks read. A different source from Guidance, and
 // not always the same number; see the package comment.
 type Ceilings struct {

@@ -24,7 +24,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/platform"
@@ -158,7 +157,7 @@ func Normalize(platform string, m Meta) (Meta, error) {
 	return m, nil
 }
 
-func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
+func utf16Len(s string) int { return platform.UTF16Len(s) }
 
 // hashtags renders tags as "#a #b".
 func hashtags(tags []string) string {

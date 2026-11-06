@@ -235,6 +235,8 @@ func TestAnOccurrenceTitleOverTheLimitIsRefusedBeforeAnyPlatformCall(t *testing.
 	path := "/api/v1/recurring/occurrences/" + strconv.FormatInt(id, 10) + "/title"
 	long := strings.Repeat("x", 101)
 	send(t, f.h, f.sign, http.MethodPost, path, map[string]any{"title": long}, http.StatusBadRequest)
+	// 51 emoji are 51 characters and 102 UTF-16 units; YouTube counts the latter.
+	send(t, f.h, f.sign, http.MethodPost, path, map[string]any{"title": strings.Repeat("😀", 51)}, http.StatusBadRequest)
 	if len(f.fake.edits) != 0 {
 		t.Fatalf("an over-long title reached the platform")
 	}

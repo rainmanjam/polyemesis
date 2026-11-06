@@ -119,7 +119,7 @@ func (t BroadcastTemplate) Validate() error {
 	if err != nil {
 		return err
 	}
-	if len([]rune(sample)) > MaxTitleLen {
+	if platform.UTF16Len(sample) > MaxTitleLen {
 		return fmt.Errorf("the title pattern renders to more than %d characters once the date is "+
 			"filled in; shorten it", MaxTitleLen)
 	}

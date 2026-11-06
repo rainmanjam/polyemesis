@@ -170,3 +170,14 @@ func TestTemplateLimitsAreYouTubes(t *testing.T) {
 		t.Error("5001-byte description accepted")
 	}
 }
+
+func TestTemplateTitleIsCountedInUTF16(t *testing.T) {
+	ok := BroadcastTemplate{ScheduleID: 7, TitlePattern: strings.Repeat("😀", 50)}.Normalized()
+	if err := ok.Validate(); err != nil {
+		t.Errorf("50 emoji (100 UTF-16 units) refused: %v", err)
+	}
+	bad := BroadcastTemplate{ScheduleID: 7, TitlePattern: strings.Repeat("😀", 51)}.Normalized()
+	if bad.Validate() == nil {
+		t.Error("51 emoji (102 UTF-16 units) accepted")
+	}
+}

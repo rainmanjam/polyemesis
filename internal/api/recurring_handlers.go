@@ -11,6 +11,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	pf "github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
@@ -273,7 +274,7 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a title is required")
 		return
 	}
-	if len([]rune(title)) > scheduler.MaxTitleLen {
+	if pf.UTF16Len(title) > scheduler.MaxTitleLen {
 		writeError(w, http.StatusBadRequest, "the title is longer than the platform allows")
 		return
 	}

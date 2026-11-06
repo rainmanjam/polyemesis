@@ -1,6 +1,9 @@
 package platform
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf16"
+)
 
 // IVSIngestHostSuffix is Amazon IVS's contribute domain, which Kick and Twitch
 // both publish through. THE LEADING DOT IS LOAD-BEARING: without it
@@ -20,3 +23,9 @@ func IsIVSIngestHost(host string) bool {
 	h := strings.ToLower(strings.TrimSuffix(host, "."))
 	return len(h) > len(IVSIngestHostSuffix) && strings.HasSuffix(h, IVSIngestHostSuffix)
 }
+
+// UTF16Len is a title's length the way YouTube and the web UI's String.length
+// count it: UTF-16 code units, so an emoji outside the BMP is two. Every YouTube
+// title check -- the metadata API, clip publishing, recurring broadcasts -- uses
+// it, so a title cannot pass one check and fail another.
+func UTF16Len(s string) int { return len(utf16.Encode([]rune(s))) }

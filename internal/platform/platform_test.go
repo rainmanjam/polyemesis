@@ -151,12 +151,31 @@ func TestRowsAreCopies(t *testing.T) {
 	r.Ceilings.MaxAudioKbps = 1
 	r.Music.Exclude = false
 	if again := Must(Twitch); again.VideoCodecs[0] != "h264" || again.Guidance.KbpsMax != 6000 ||
-		again.Ceilings.MaxAudioKbps != 320 || !again.Music.Exclude {
+		again.Ceilings.MaxAudioKbps != 160 || !again.Music.Exclude {
 		t.Errorf("editing a returned row reached the registry: %+v", again)
 	}
 	x := Must(X).PublishScopes
 	x[0] = "mutated"
 	if Must(X).PublishScopes[0] != "tweet.write" {
 		t.Error("editing PublishScopes reached the registry")
+	}
+}
+
+// The two YouTube video figures are different facts: the recommendation and the
+// maximum. Both stay.
+func TestYouTubeRecommendationAndMaximumAreDifferentFacts(t *testing.T) {
+	y := Must(YouTube)
+	if y.Guidance.KbpsMax != 12000 || y.Ceilings.MaxVideoKbps != 51000 {
+		t.Errorf("youtube recommends %d and allows %d, want 12000 and 51000", y.Guidance.KbpsMax, y.Ceilings.MaxVideoKbps)
+	}
+	x := Must(X).Guidance
+	if x.Width != 1920 || x.Height != 1080 || x.FPS != 60 || x.KbpsMin != 12000 || x.KbpsMax != 12000 {
+		t.Errorf("x guidance = %+v, want 1080p60 at 12000", x)
+	}
+	if Must(Kick).Ceilings.MaxAudioKbps != 0 {
+		t.Error("kick has no audio ceiling")
+	}
+	if Must(Rumble).Moderation != nil {
+		t.Error("rumble has no moderation")
 	}
 }

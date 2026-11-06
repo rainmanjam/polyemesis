@@ -265,3 +265,22 @@ func TestPlatformsAreTheRegistrysModeratedRowsInOrder(t *testing.T) {
 		t.Error("rumble has no moderation profile, so automod does not act on it")
 	}
 }
+
+// Rumble's chat is read-only: nothing upstream can be acted on, and the table
+// and the (absent) adapter methods agree. Flag and local hide still work.
+func TestRumbleCanOnlyBeFlaggedAndHiddenLocally(t *testing.T) {
+	caps := PlatformCaps{}
+	for _, a := range []Action{ActionDelete, ActionTimeout, ActionBan, ActionHide} {
+		if ok, reason := caps.Can(db.PlatformRumble, a); ok || reason == "" {
+			t.Errorf("rumble %s: ok=%v reason=%q, want unavailable with a reason", a, ok, reason)
+		}
+	}
+	for _, a := range []Action{ActionFlag, ActionHideLocal} {
+		if ok, _ := caps.Can(db.PlatformRumble, a); !ok {
+			t.Errorf("rumble %s is local and must stay available", a)
+		}
+	}
+	if ok, _ := caps.Can(db.Platform("no-such"), ActionBan); !ok {
+		t.Error("a name with no registry row keeps the old default")
+	}
+}

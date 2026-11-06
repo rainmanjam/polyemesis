@@ -2,10 +2,9 @@ package platform
 
 const (
 	obsSource = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
-	// kickSource covers Kick's video figures only. Kick's page gives no audio
-	// bitrate; the 160 kbps audio ceiling came in with the services.json seed
-	// and has no source of its own (the preset note says none is published).
-	kickSource = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13 (video bitrate, fps, keyframe interval); the 160 kbps audio ceiling is from the services.json seed, not from that page"
+	// kickSource is Kick's Stream Settings page. It states no audio bitrate and
+	// no source gives one, so Kick has no audio ceiling.
+	kickSource = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13 (video bitrate, fps, keyframe interval)"
 )
 
 // API roots. Constants, because callers declare their own constants from them
@@ -68,6 +67,10 @@ func buildRows() []Row {
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
 				Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
 			},
+			// 51000 is YouTube's MAXIMUM video bitrate (OBS's data); the 12000 in
+			// Guidance is its RECOMMENDED figure for 1080p60. Different facts, kept
+			// apart on purpose: warnings about a rendition use the recommendation,
+			// the encoder-ceiling check uses the maximum.
 			Ceilings:    &Ceilings{KeyintSeconds: 2, MaxVideoKbps: 51000, MaxAudioKbps: 160, Source: obsSource},
 			VideoCodecs: []string{"h264", "hevc", "av1"}, AudioCodecs: []string{"aac"},
 			HealthAPI: true,
@@ -92,8 +95,12 @@ func buildRows() []Row {
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 6000, KbpsMax: 6000, GOPSeconds: 2,
 				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: "2026-08-06",
 			},
+			// Audio 160 kbps is Twitch's own figure. 6000 kbps video is advice, the
+			// Guidance above, and Twitch states no maximum, so there is no video
+			// ceiling here. Keyframe interval and x264 options are from OBS.
 			Ceilings: &Ceilings{
-				KeyintSeconds: 2, MaxVideoKbps: 6000, MaxAudioKbps: 320, X264Opts: "scenecut=0", Source: obsSource,
+				KeyintSeconds: 2, MaxAudioKbps: 160, X264Opts: "scenecut=0",
+				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines (audio, checked 2026-08-06); " + obsSource + " (keyframe interval, x264 options)",
 			},
 			VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
 			AudioTracksMax: 1,
@@ -113,7 +120,7 @@ func buildRows() []Row {
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 1000, KbpsMax: 8000, GOPSeconds: 2,
 				Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
 			},
-			Ceilings:    &Ceilings{KeyintSeconds: 2, MaxVideoKbps: 8000, MaxAudioKbps: 160, MaxFps: 60, Source: kickSource},
+			Ceilings:    &Ceilings{KeyintSeconds: 2, MaxVideoKbps: 8000, MaxFps: 60, Source: kickSource},
 			VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
 			RefusesVideoCodecs: []string{"hevc"},
 			Music:              &Music{Exclude: true, Reason: "Kick DMCA policy", TargetLUFS: LUFSStreaming},

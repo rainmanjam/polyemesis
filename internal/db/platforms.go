@@ -655,7 +655,7 @@ var destinationPresets = withRegistry([]DestinationPreset{
 	{
 		ID: "twitch", Group: GroupMajor,
 		Video: guidance("twitch",
-			"Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published. The two sources disagree on audio: Twitch's help page says 160 kbps maximum, OBS's services.json says 320."),
+			"Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published; 6000 is advice, not a limit. Audio is 160 kbps maximum, from Twitch's help page."),
 		Transport: PresetRTMP, Kind: DestRTMP,
 		URL:         "rtmp://live.twitch.tv/app",
 		SeparateKey: true,
