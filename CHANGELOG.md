@@ -138,10 +138,12 @@ its first tagged release.
   Go live sheet and process table looked the cause up by name and showed nothing for one they had no
   label for; they now show "Unknown failure", as the remedy already did.
 - **Refresh stream key is offered where the platform can hand a key over.** It was hidden for Kick,
-  which can, and shown for Vimeo and X, where every press failed with a 400.
+  which can, and shown for Vimeo, X, Rumble and TikTok, which have no key API (Vimeo and X answered every press with a 400).
 - **Chat names X and Rumble properly.** The moderation menu printed "on x" in lower case, and Rumble
   chat was labelled "Custom", and X chat lines carried no platform mark on an overlay. Every place the console names a platform now reads one list, taken from
   the server's platform registry.
+- **The settings form's failover fallback matches the server.** Shown only when a server omits the
+  failover block, it read 10 s grace and 60 s stable return; it is now 5 s and 30 s, the server's defaults.
 - **The Go live sheet warns with the same YouTube count as the Stop dialog.** It counted every enabled
   YouTube destination, so it could promise a broadcast would end when the Stop dialog, which asks the
   server, said none would.

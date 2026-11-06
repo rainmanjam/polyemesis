@@ -9,6 +9,7 @@ describe("platformName", () => {
   it("names every platform the registry knows, and none by its raw id", () => {
     for (const p of WIRE.platforms.platforms) {
       if (!("enum" in p)) continue;
+      expect(p.shortName.trim()).not.toBe("");
       expect(platformName(p.enum)).toBe(p.shortName);
       expect(platformName(p.enum)).not.toBe(p.enum);
     }

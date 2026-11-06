@@ -29,6 +29,9 @@ function row(id: number, name: string, platform: string) {
   };
 }
 
+/** Set by a test that needs a destination that is off (a Go live press starts it). */
+let extraRows: ReturnType<typeof row>[] = [];
+
 /** An enabled YouTube row and an enabled Twitch row. A local count says one broadcast ends. */
 function status(): Status {
   return {
@@ -36,6 +39,7 @@ function status(): Status {
     destinations: [
       row(1, "YT main", "youtube"),
       row(2, "Twitch", "twitch"),
+      ...extraRows,
     ],
     relay: { port: 0, subscribers: [], rxPackets: 0, rxBytes: 0, txPackets: 0, dropped: 0, tsPackets: 0, tsLost: 0, discontinuities: 0, lossPercent: 0 },
     source: { id: 1, name: "Main", probed: true, tracks: [] },
@@ -74,6 +78,7 @@ let stopImpactCalls = 0;
 beforeEach(() => {
   if (!Element.prototype.scrollTo) Element.prototype.scrollTo = () => {};
   stopImpactCalls = 0;
+  extraRows = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(typeof input === "string" ? input : input.toString());
     const path = url.split("?")[0];
@@ -215,5 +220,20 @@ describe("Dashboard: the Go live sheet warns with the server's count", () => {
     stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 1 } });
     const dialog = await openGoLive();
     await within(dialog).findByText(translate("en", "golive.youtubeWarnOne", { count: 1 }));
+  });
+
+  it("says so when the count could not be loaded, instead of showing nothing", async () => {
+    stopImpact = async () => ({ status: 500, body: { error: "store locked" } });
+    const dialog = await openGoLive();
+    await within(dialog).findByTestId("golive-impact-unknown");
+  });
+
+  it("asks again after a destination is started", async () => {
+    extraRows = [{ ...row(3, "YT second", "youtube"), enabled: false }];
+    stopImpact = async () => ({ status: 200, body: { destinations: 3, youtubeBroadcasts: 0 } });
+    const dialog = await openGoLive();
+    await vi.waitFor(() => expect(stopImpactCalls).toBe(1));
+    fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(translate("en", "golive.goCountOne", { count: 1 })) }));
+    await vi.waitFor(() => expect(stopImpactCalls).toBe(2), { timeout: 3000 });
   });
 });

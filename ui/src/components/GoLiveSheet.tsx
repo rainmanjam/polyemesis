@@ -85,6 +85,7 @@ export function GoLiveSheet({
   rows,
   live,
   youtubeAtRisk,
+  impactUnknown = false,
   onStart,
   onRetry,
   onFinished,
@@ -97,6 +98,8 @@ export function GoLiveSheet({
   /** The current destination list, for what each row is doing right now. */
   live: readonly DestStatus[];
   youtubeAtRisk: number;
+  /** The stop-impact count could not be loaded: say so rather than show no warning. */
+  impactUnknown?: boolean;
   onStart: (id: DestinationId) => Promise<void>;
   /** Revives a destination whose PROCESS failed -- held after quick
    *  rejections, or out of restarts. The card's Retry, the same restart. A
@@ -359,6 +362,12 @@ export function GoLiveSheet({
             data-testid="golive-vertical-reminder"
           >
             {t(pendingPairs === 1 ? "wave3.vertical.goLiveReminderOne" : "wave3.vertical.goLiveReminder", { count: pendingPairs })}
+          </p>
+        )}
+
+        {impactUnknown && (
+          <p className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn" data-testid="golive-impact-unknown">
+            {t("golive.impactUnknown")}
           </p>
         )}
 
