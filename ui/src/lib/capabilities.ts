@@ -20,10 +20,14 @@ import type { TranslationKey } from "@/lib/i18n";
  *  also served from GET /api/v1/platforms/capabilities for scripted clients —
  *  the same arrangement the preset catalogue above already uses.
  *
- *  This is a description, never a gate. Nothing below is consulted to decide
- *  whether a save is allowed: an operator whose account can do something ours
- *  could not verify must be able to try it and read the platform's own error.
- *  See "unknown" below.
+ *  This is a description with ONE gate. No cell is consulted to decide whether a
+ *  save is allowed: an operator whose account can do something ours could not
+ *  verify must be able to try it and read the platform's own error (see
+ *  "unknown" below). The exception is `streamKey`: DestinationCard shows
+ *  "Refresh stream key" only where it is "yes", because the server answers a
+ *  refresh on a platform with no key API with a 400. Editing that cell changes
+ *  what the card offers, not only what the matrix says; the Go capability drift
+ *  tests keep the table honest.
  */
 
 export type Capability =
