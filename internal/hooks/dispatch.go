@@ -290,7 +290,7 @@ func NewDispatcher(log *slog.Logger, src Source, opts ...Option) *Dispatcher {
 		src:         src,
 		doer:        &http.Client{Transport: &http.Transport{DialContext: safeDialContext}},
 		now:         time.Now,
-		sleep:       sleepCtx,
+		sleep:       backoff.SleepCtx,
 		reloadEvery: reloadEvery,
 		intake:      make(chan Event, intakeDepth),
 		workers:     map[int64]*worker{},
@@ -763,14 +763,3 @@ func deliveryID() (string, error) {
 type statusError int
 
 func (e statusError) Error() string { return "endpoint returned HTTP " + strconv.Itoa(int(e)) }
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}

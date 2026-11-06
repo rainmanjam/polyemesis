@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -222,7 +223,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		flushKick:  make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
-	n.sleep = sleepCtx
+	n.sleep = backoff.SleepCtx
 	for _, o := range opts {
 		o(n)
 	}
@@ -734,17 +735,7 @@ func (n *Notifier) attempt(ctx context.Context, r Rule, body []byte, contentType
 // endpoint at a rate its own MinInterval already bounds, so there is no
 // thundering herd to spread out, and a deterministic schedule is testable.
 func (n *Notifier) backoffFor(attempt int) time.Duration {
-	d := n.backoff
-	for i := 1; i < attempt; i++ {
-		d *= 2
-		if d >= n.maxBackoff {
-			return n.maxBackoff
-		}
-	}
-	if d > n.maxBackoff {
-		return n.maxBackoff
-	}
-	return d
+	return backoff.Exponential(attempt-1, n.backoff, n.maxBackoff)
 }
 
 // retryAfter honours the header when it is a sane number of seconds.
@@ -776,14 +767,3 @@ func (e statusError) Error() string {
 func (e statusError) Status() int { return int(e) }
 
 func errStatus(code int) error { return statusError(code) }
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}

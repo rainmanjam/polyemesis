@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/platform"
@@ -107,7 +108,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
+		cfg.Sleep = backoff.SleepCtx
 	}
 	// THE QUOTA PAIR IS NOT NORMALISED HERE. It used to be -- an unset
 	// allowance became DefaultQuotaUnits and an unset reserve became
