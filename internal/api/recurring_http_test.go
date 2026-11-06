@@ -233,7 +233,7 @@ func TestAnOccurrenceTitleOverTheLimitIsRefusedBeforeAnyPlatformCall(t *testing.
 		t.Fatalf("resolve: %v", err)
 	}
 	path := "/api/v1/recurring/occurrences/" + strconv.FormatInt(id, 10) + "/title"
-	long := strings.Repeat("x", scheduler.MaxTitleLen+1)
+	long := strings.Repeat("x", 101)
 	send(t, f.h, f.sign, http.MethodPost, path, map[string]any{"title": long}, http.StatusBadRequest)
 	if len(f.fake.edits) != 0 {
 		t.Fatalf("an over-long title reached the platform")

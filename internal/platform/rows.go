@@ -35,7 +35,9 @@ const (
 	YouTubeChatMax   = 200
 	TwitchTitleMax   = 140
 	TikTokCaptionMax = 2200
-	XGoLiveTitleMax  = 280
+	// XPostMax is X's post length, which also bounds the go-live title.
+	XPostMax        = 280
+	XGoLiveTitleMax = XPostMax
 
 	// TikTokPublishScope is what Direct Post needs, and is also asked for at
 	// sign-in.

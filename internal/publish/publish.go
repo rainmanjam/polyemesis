@@ -83,7 +83,7 @@ const (
 	maxYouTubeDescription = platform.YouTubeDescriptionMax
 	maxYouTubeTagsChars   = 450 // YouTube allows 500; leave room for the quoting it adds
 	maxTikTokCaption      = platform.TikTokCaptionMax
-	maxXPost              = 280
+	maxXPost              = platform.XPostMax
 	maxTags               = 30
 )
 

@@ -88,6 +88,13 @@ func TestTheCapabilityTableMatchesWhatTheAdaptersImplement(t *testing.T) {
 // must equal what the registry says, and the registry must not describe an
 // adapter that does not exist.
 func TestRegistryAgreesWithTheChatAdapters(t *testing.T) {
+	// The other direction: an adapter with no registry row is a platform chat
+	// can talk to that the registry has never heard of.
+	for p := range adapterTypes {
+		if _, ok := platform.ByEnum(string(p)); !ok {
+			t.Errorf("chat has an adapter for %s and the platform registry has no row for it", p)
+		}
+	}
 	for _, row := range platform.All() {
 		if row.Enum == "" {
 			continue

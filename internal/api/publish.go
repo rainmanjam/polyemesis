@@ -37,6 +37,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/publish"
 )
 
@@ -370,7 +371,7 @@ func (s *Server) handlePublishTargets(w http.ResponseWriter, r *http.Request) {
 		case publish.PlatformYouTube:
 			pv.Privacy = publishPrivacyView{Default: publish.PrivacyPrivate,
 				Options: []string{publish.PrivacyPrivate, publish.PrivacyUnlisted, publish.PrivacyPublic}}
-			pv.QuotaUnits = 1600
+			pv.QuotaUnits = platform.YouTubeCostUploadVideo
 		case publish.PlatformTikTok:
 			pv.Privacy = publishPrivacyView{Default: publish.TikTokPrivacy, Options: []string{publish.TikTokPrivacy}, Forced: true}
 		case publish.PlatformX:
@@ -481,7 +482,7 @@ func (s *Server) handlePreparePublish(w http.ResponseWriter, r *http.Request) {
 		AccountName: plan.account.AccountName, Meta: plan.meta,
 		PrivacyForced: req.Platform == publish.PlatformTikTok || req.Platform == publish.PlatformX}
 	if req.Platform == publish.PlatformYouTube {
-		out.QuotaUnits = 1600
+		out.QuotaUnits = platform.YouTubeCostUploadVideo
 	}
 	if pubs, err := s.store.ListPublicationsForClip(req.ClipJobID); err == nil {
 		for _, ex := range pubs {

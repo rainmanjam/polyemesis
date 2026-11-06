@@ -13,6 +13,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/publish"
 )
 
@@ -535,4 +536,26 @@ func TestAnUnreadableJobDoesNotFailALivePublication(t *testing.T) {
 	if got, j := f.srv.reconcilePublication(row); got.State == db.PublicationFailed || j == nil {
 		t.Fatalf("a live job was reconciled away: %+v", got)
 	}
+}
+
+// The quota a YouTube upload will spend is shown to the operator before they
+// click. The literal is videos.insert's published price, and it must equal the
+// registry value the upload actually charges.
+func TestTargetsQuoteTheUploadCostTheRegistryCharges(t *testing.T) {
+	f := newPubFixture(t)
+	var targets publishTargetsView
+	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/targets?clip="+strconv.FormatInt(f.clip, 10), nil, http.StatusOK), &targets)
+	for _, p := range targets.Platforms {
+		if p.ID == "youtube" {
+			want := 1600
+			if p.QuotaUnits != want {
+				t.Fatalf("quotaUnits = %d, want %d", p.QuotaUnits, want)
+			}
+			if got := platform.YouTubeCostUploadVideo; got != want {
+				t.Fatalf("the registry charges %d for an upload and the API quotes %d", got, want)
+			}
+			return
+		}
+	}
+	t.Fatal("no youtube target")
 }
