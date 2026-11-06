@@ -139,7 +139,7 @@ func (in *Injector) packet(p []byte) []byte {
 	pusi := p[1]&0x40 != 0
 	switch {
 	case pid == mpegts.PIDPAT && pusi:
-		if pmt, ok := mpegts.PATProgram(mpegts.SectionOf(p)); ok {
+		if pmt, ok := mpegts.PATProgram(mpegts.SectionOf(p)); ok && pmt != 0 {
 			in.pmtPID = pmt
 		}
 		return p

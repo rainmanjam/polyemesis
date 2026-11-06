@@ -1,9 +1,9 @@
 // Package mpegts is the one place the MPEG-TS packet layout and PSI (PAT/PMT)
 // parsing live. The relay, the clip ring, the delay line and the caption
 // injector each used to carry their own copy of the constants and a PAT/PMT
-// reader, and the copies differed in how much of a packet they validated.
-// SectionOf is the strict one: it refuses an adaptation-only packet and an
-// adaptation field longer than the packet, which the others never checked.
+// reader. SectionOf is the strictest of those copies (the caption injector's):
+// it refuses an adaptation-only packet and an adaptation field longer than the
+// packet itself.
 package mpegts
 
 const (

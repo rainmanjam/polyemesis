@@ -39,7 +39,7 @@ The keys, in brief:
 | `tls.certFile` / `tls.keyFile` | `""` | `manual` mode only |
 | `tls.hsts` | `false` | Opt-in on purpose — see below |
 | `trustProxyHeaders` | `false` | Set **only** behind a reverse proxy you control |
-| `trustedProxies` | `[]` | With `trustProxyHeaders`, the proxies besides loopback whose `X-Forwarded-For` / `X-Real-IP` are believed: addresses or CIDRs, e.g. `["172.17.0.1"]` for nginx on the Docker host. From any other peer the headers are ignored. A malformed entry stops startup |
+| `trustedProxies` | `[]` | With `trustProxyHeaders`, the proxies besides loopback whose `X-Forwarded-Proto` / `X-Forwarded-For` / `X-Real-IP` are believed (a proxy that is not listed here leaves the session cookie without its `Secure` flag): addresses or CIDRs, e.g. `["172.17.0.1"]` for nginx on the Docker host. From any other peer the headers are ignored. A malformed entry stops startup |
 | `ffmpeg.binary` / `ffmpeg.probe` | `""` | Pin specific binaries instead of searching `$PATH` |
 | `transcription.binary` | `""` | Pin the whisper.cpp CLI (`whisper-cli`, or the older `main`) instead of searching `$PATH`. Deliberately not validated — an unusable path degrades transcription and never stops the server serving a live stream |
 
