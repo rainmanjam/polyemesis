@@ -1046,13 +1046,16 @@ func missingTokenColumns(sqldb *sql.DB, cols []tokenColumn) ([]tokenColumn, erro
 // hasSourcelessRows reports whether a destination or rendition has no source,
 // asking only the tables present says have the column.
 func hasSourcelessRows(sqldb *sql.DB, present map[string]bool) (bool, error) {
-	for _, table := range []string{"destinations", "renditions"} {
+	for _, q := range []struct{ table, query string }{
+		{"destinations", `SELECT COUNT(*) FROM destinations WHERE source_id IS NULL`},
+		{"renditions", `SELECT COUNT(*) FROM renditions WHERE source_id IS NULL`},
+	} {
+		table := q.table
 		if !present[table] {
 			continue
 		}
 		var orphaned int
-		if err := sqldb.QueryRow(
-			`SELECT COUNT(*) FROM ` + table + ` WHERE source_id IS NULL`).Scan(&orphaned); err != nil {
+		if err := sqldb.QueryRow(q.query).Scan(&orphaned); err != nil {
 			return false, fmt.Errorf("count orphan %s: %w", table, err)
 		}
 		if orphaned > 0 {
@@ -1138,6 +1141,14 @@ func (d *DB) existingBackfillTarget(n int) (int64, error) {
 	return id, nil
 }
 
+// backfillSourceIDSQL is the literal UPDATE for each table backfillSourceIDs
+// may be given; no SQL is assembled from a table name.
+var backfillSourceIDSQL = map[string]string{
+	"destinations": `UPDATE destinations SET source_id = ? WHERE source_id IS NULL`,
+	"renditions":   `UPDATE renditions SET source_id = ? WHERE source_id IS NULL`,
+	"recordings":   `UPDATE recordings SET source_id = ? WHERE source_id IS NULL`,
+}
+
 // backfillSourceIDs attaches every sourceless row of tables to source id. An id
 // of 0 means there is no source to attach them to, and nothing is done.
 func backfillSourceIDs(tx *sql.Tx, tables []string, id int64) error {
@@ -1145,8 +1156,7 @@ func backfillSourceIDs(tx *sql.Tx, tables []string, id int64) error {
 		return nil
 	}
 	for _, table := range tables {
-		if _, err := tx.Exec(
-			`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, id); err != nil {
+		if _, err := tx.Exec(backfillSourceIDSQL[table], id); err != nil {
 			return fmt.Errorf("backfill %s.source_id: %w", table, err)
 		}
 	}
