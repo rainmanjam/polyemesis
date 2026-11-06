@@ -73,7 +73,6 @@ type Hub struct {
 	kicked    atomic.Int64
 }
 
-// NewHub builds a hub.
 func NewHub(opts ...Option) *Hub {
 	h := &Hub{
 		now:    time.Now,

@@ -108,7 +108,6 @@ func (d *DB) querySchedules(query string) ([]scheduler.Schedule, error) {
 	return out, rows.Err()
 }
 
-// GetSchedule loads one schedule.
 func (d *DB) GetSchedule(id int64) (*scheduler.Schedule, error) {
 	sc, err := scanSchedule(d.sql.QueryRow(scheduleByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {

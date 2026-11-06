@@ -595,7 +595,6 @@ func (q *Queue) Paused() bool {
 	return q.paused
 }
 
-// Get loads one job.
 func (q *Queue) Get(id int64) (*Job, error) { return q.store.GetJob(id) }
 
 // List returns jobs matching f.

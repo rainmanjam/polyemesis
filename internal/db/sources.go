@@ -219,7 +219,6 @@ func (d *DB) CountSources() (int, error) {
 	return n, err
 }
 
-// GetSource returns one source.
 func (d *DB) GetSource(id int64) (*Source, error) {
 	row := d.sql.QueryRow(sourceByIDQuery, id)
 	s, err := scanSource(row)

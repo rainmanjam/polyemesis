@@ -149,7 +149,6 @@ type Subscription struct {
 	types map[Type]bool
 }
 
-// NewBroker creates a broker.
 func NewBroker() *Broker {
 	return &Broker{subs: map[int]*Subscription{}}
 }

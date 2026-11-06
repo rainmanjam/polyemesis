@@ -113,7 +113,6 @@ func WithClock(fn func() time.Time) Option {
 	return func(p *Processor) { p.now = fn }
 }
 
-// New builds a Processor.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg.Normalized(), exec: ffmpeg.Exec, now: time.Now}
 	p.probe = p.summarize

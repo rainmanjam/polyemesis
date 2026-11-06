@@ -119,7 +119,6 @@ func (d *DB) EnabledHooks(box *secrets.Box) ([]hooks.Hook, error) {
 	return d.queryHooks(box, hooksEnabledQuery)
 }
 
-// GetHook loads one hook.
 func (d *DB) GetHook(box *secrets.Box, id int64) (*hooks.Hook, error) {
 	h, err := scanHook(box, d.sql.QueryRow(hookByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -260,7 +259,6 @@ func (d *DB) UpdateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, error) {
 	return d.GetHook(box, norm.ID)
 }
 
-// DeleteHook removes a hook.
 func (d *DB) DeleteHook(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM hooks WHERE id = ?`, id)
 	if err != nil {

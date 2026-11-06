@@ -163,7 +163,6 @@ type Option func(*Processor)
 // WithProber replaces the inspection.
 func WithProber(p Prober) Option { return func(pr *Processor) { pr.probe = p } }
 
-// New builds the processor.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg}
 	for _, o := range opts {

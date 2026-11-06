@@ -72,7 +72,6 @@ type Spec struct {
 	MirrorYouTube bool `json:"mirrorYouTube,omitempty"`
 }
 
-// Duration is the spec's duration.
 func (s Spec) Duration() time.Duration { return time.Duration(s.DurationSeconds) * time.Second }
 
 // ErrInvalid wraps every validation failure, so the API can answer 400.

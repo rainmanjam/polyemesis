@@ -145,7 +145,6 @@ func WithStore(s Store) Option { return func(h *Hub) { h.store = s } }
 // WithPublisher wires the WebSocket bus.
 func WithPublisher(p Publisher) Option { return func(h *Hub) { h.bus = p } }
 
-// WithLogger replaces the logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(h *Hub) {
 		if l != nil {

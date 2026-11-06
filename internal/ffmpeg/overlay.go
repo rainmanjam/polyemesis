@@ -143,7 +143,6 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, out frameSize) string {
 	}
 	b.WriteString(labelOverlay + ";")
 
-	// The composite.
 	x, y := overlayPosition(o, out)
 	fmt.Fprintf(&b, "%s%soverlay=x=%s:y=%s:eof_action=repeat", labelBase, labelOverlay, x, y)
 	// Text after the composite, so it draws over the logo.

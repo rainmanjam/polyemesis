@@ -326,7 +326,6 @@ func (d *DB) PutClipTemplate(name string, body []byte) (ClipTemplate, error) {
 	return t, err
 }
 
-// DeleteClipTemplate removes one template.
 func (d *DB) DeleteClipTemplate(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM clip_templates WHERE id = ?`, id)
 	if err != nil {

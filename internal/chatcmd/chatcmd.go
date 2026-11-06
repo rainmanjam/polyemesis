@@ -90,7 +90,6 @@ type Handler struct {
 	last map[string]time.Time
 }
 
-// New builds a Handler.
 func New(o Options) *Handler {
 	if o.Now == nil {
 		o.Now = time.Now

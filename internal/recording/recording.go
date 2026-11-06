@@ -113,7 +113,6 @@ func WithRecorderProbe(fn func() bool) Option {
 // is silent, and the only symptom is the false 409 it exists to prevent.
 func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
-// New creates a Manager.
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
 	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: diskFree}
 	for _, opt := range opts {
@@ -122,7 +121,6 @@ func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Op
 	return m
 }
 
-// Dir is the recordings directory.
 func (m *Manager) Dir() string { return m.dir }
 
 // VolumeMarker is the file that proves the recordings directory is the volume

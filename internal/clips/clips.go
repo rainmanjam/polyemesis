@@ -436,7 +436,6 @@ func startTimeFromName(name string, fallback time.Time) time.Time {
 	return fallback
 }
 
-// Delete removes one clip.
 func (c *Capturer) Delete(name string) error {
 	path, err := c.Resolve(name)
 	if err != nil {

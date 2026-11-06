@@ -331,7 +331,6 @@ func (d *DB) DeleteTranscript(recordingID int64) error {
 	return err
 }
 
-// DeleteTranscriptTrack drops one track's transcript.
 func (d *DB) DeleteTranscriptTrack(recordingID int64, track int) error {
 	res, err := d.sql.Exec(`DELETE FROM transcript_tracks WHERE recording_id = ? AND track = ?`, recordingID, track)
 	if err != nil {

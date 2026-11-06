@@ -340,7 +340,6 @@ func supersededUniqueJobs(sqldb *sql.DB) ([]int64, error) {
 	return out, rows.Err()
 }
 
-// GetJob loads one job.
 func (d *DB) GetJob(id int64) (*jobs.Job, error) {
 	j, err := scanJob(d.sql.QueryRow(jobByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {

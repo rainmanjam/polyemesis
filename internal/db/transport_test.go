@@ -107,7 +107,6 @@ func TestTransportSurvivesTheDatabaseRoundTrip(t *testing.T) {
 }
 
 func TestAudioEncodingValidation(t *testing.T) {
-	// The positive case first.
 	d := validDest()
 	d.Kind = DestSRT
 	d.URL = "srt://a.example:9000"
