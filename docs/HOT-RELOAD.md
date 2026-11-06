@@ -160,7 +160,7 @@ This is how a destination's per-track gain and mute are applied live:
   (`internal/routing/filtergraph.go`). Gain and mute are only its level. Mute
   sets the level to `0` and keeps the track in the graph.
 - A destination's restart signature is taken over the graph with those levels
-  masked (`ffmpeg.MaskLiveVolumes`). A level-only change therefore does not
+  masked (`livevolume.Mask`). A level-only change therefore does not
   restart it, and the engine sends the moved levels as commands instead
   (`applyLiveLevels`, `internal/engine/live_gains.go`).
 - The stored profile is written **first**. Every spawn of the process, including

@@ -228,17 +228,19 @@ func TestEveryLineAChildWroteReachesTheSinkEvenWhenTheSinkIsSlow(t *testing.T) {
 // reported as nothing. Output (and RunEnrolled, for the callers that bring their
 // own pipes) enrol the child and discharge it when Wait returns.
 func TestOutputEnrolsTheProbeForAsLongAsItRuns(t *testing.T) {
-	enrolled := func() bool {
+	probes := func() int {
+		n := 0
 		for _, c := range childcensus.Live() {
 			if c.Kind == probeKind {
-				return true
+				n++
 			}
 		}
-		return false
+		return n
 	}
-	if enrolled() {
-		t.Skip("another probe is in flight; this test cannot tell its own child apart")
-	}
+	// Counted against what other tests have in flight, so this needs no skip when
+	// one of them is mid-probe.
+	before := probes()
+	enrolled := func() bool { return probes() > before }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

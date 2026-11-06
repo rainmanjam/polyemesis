@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,21 +89,18 @@ func TestAPreviewStoppedOnAQuietFeedIsWokenInsteadOfBeingKilled(t *testing.T) {
 // characterise (it probed before the audio existed) sat at "running" and
 // published nothing for ever, where the primary restarts to probe again.
 func TestABackupRestartsToReprobeWhenItsAudioCannotBeCharacterised(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake FFmpeg is a shell script")
-	}
 	e, _ := storeEngine(t)
 	dir := t.TempDir()
 	runs := filepath.Join(dir, "runs")
-	script := filepath.Join(dir, "ffmpeg")
-	body := "#!/bin/sh\n" +
-		"echo run >> " + runs + "\n" +
-		"echo '[in#0/mpegts @ 0x1] Could not find codec parameters for stream 1 (Audio: aac ([15][0][0][0] / 0x000F), 0 channels): unspecified sample format' >&2\n" +
-		"exec sleep 30\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	// This test binary re-executed as the child, so it runs on every platform:
+	// it appends to runs, prints what FFmpeg prints when it cannot characterise an
+	// audio track, and then waits (see TestMain's engineFakeChildReprobe branch).
+	self, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	e.tools.FFmpeg = script
+	t.Setenv(engineFakeChildReprobeRuns, runs)
+	e.tools.FFmpeg = self
 
 	d := &destination{row: backupRow(), hub: e.hub, spec: "spec"}
 	e.buildBackup(d, routing.Result{}, "spec")
