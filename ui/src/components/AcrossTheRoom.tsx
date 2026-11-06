@@ -87,13 +87,6 @@ export function AcrossTheRoom({
   );
 }
 
-/** The panel itself, split out so none of the reading below happens on the
- *  Dashboard renders where this is closed -- which is nearly all of them, since
- *  a live status feed re-renders the page several times a second.
- *
- *  It also means the content FREEZES during the fade out. AnimatePresence keeps
- *  rendering the element it was handed last, so a destination that changes
- *  state mid-dismissal does not flicker on a panel that is already leaving. */
 function airTone(live: boolean, failed: number): "live" | "down" | "idle" {
   if (live) return "live";
   return failed > 0 ? "down" : "idle";
@@ -104,6 +97,13 @@ function airHeadline(known: boolean, live: boolean, t: Translator): string {
   return live ? t("room.onAir") : t("room.offAir");
 }
 
+/** The panel itself, split out so none of the reading below happens on the
+ *  Dashboard renders where this is closed -- which is nearly all of them, since
+ *  a live status feed re-renders the page several times a second.
+ *
+ *  It also means the content FREEZES during the fade out. AnimatePresence keeps
+ *  rendering the element it was handed last, so a destination that changes
+ *  state mid-dismissal does not flicker on a panel that is already leaving. */
 function RoomPanel({
   onClose,
   status,

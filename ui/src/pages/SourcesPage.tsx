@@ -240,8 +240,15 @@ export function SourcesPage() {
     }
   };
 
-  const renderSources = (): ReactNode =>
-    sources.length === 0 ? (
+  const renderSources = (): ReactNode => {
+    if (loading) {
+      return (
+        <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
+        </div>
+      );
+    }
+    return sources.length === 0 ? (
       // THE END OF THE TRAIL. Every refusal on every other screen sends the
       // operator here, so a blank page under a heading is the worst possible
       // thing for this one to be -- it reads as "the thing you were sent to
@@ -271,14 +278,7 @@ export function SourcesPage() {
         ))}
       </div>
     );
-
-  const sourcesBody: ReactNode = loading ? (
-    <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
-    </div>
-  ) : (
-    renderSources()
-  );
+  };
 
   return (
     <div className="p-3">
@@ -302,7 +302,7 @@ export function SourcesPage() {
         }
       />
 
-      {sourcesBody}
+      {renderSources()}
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>

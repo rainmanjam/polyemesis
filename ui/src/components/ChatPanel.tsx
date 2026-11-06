@@ -150,6 +150,14 @@ function limitHint(
     : t("chatpage.strictestLimit");
 }
 
+type SearchArea = "error" | "empty" | "results";
+
+function searchAreaFor(error: string, count: number, loading: boolean): SearchArea {
+  if (error) return "error";
+  if (count === 0 && !loading) return "empty";
+  return "results";
+}
+
 function matchLabel(t: ReturnType<typeof useT>, loading: boolean, count: number): string {
   if (loading) return t("chatpage.searching");
   return t(count === 1 ? "chatpage.matchOne" : "chatpage.matchMany", { count });
@@ -812,6 +820,7 @@ export function ChatSearchResults({
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
 }>) {
   const t = useT();
+  const searchArea = searchAreaFor(search.error, search.results.length, search.loading);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-sm text-muted-foreground">
@@ -823,10 +832,10 @@ export function ChatSearchResults({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-1" role="log">
-        {Boolean(search.error) && (
+        {searchArea === "error" && (
           <p className="px-2 py-4 text-[12px] text-down">{search.error}</p>
         )}
-        {!search.error && search.results.length === 0 && !search.loading && (
+        {searchArea === "empty" && (
           // The caveat matters most exactly here. An empty result is the one
           // outcome an operator can misread as evidence, and "no matches" on
           // its own invites "then they never said it" — which is a conclusion
@@ -838,8 +847,7 @@ export function ChatSearchResults({
             )}
           </div>
         )}
-        {!search.error &&
-          !(search.results.length === 0 && !search.loading) &&
+        {searchArea === "results" &&
           search.results.map((m) => (
             <MessageRow
               key={messageKey(m)}
