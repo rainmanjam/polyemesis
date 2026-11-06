@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { autoApi } from "@/lib/autoApi";
+import { http } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { timecode } from "@/lib/timeline";
 import type { Highlight, HighlightSignal, HighlightsView } from "@/lib/vertical";
@@ -38,14 +38,14 @@ export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted
   const [busy, setBusy] = useState<number | null>(null);
 
   const load = useCallback(() => {
-    autoApi
+    http
       .get<HighlightsView>(`/clipper/recordings/${recordingId}/highlights`)
       .then(setView)
       .catch(() => undefined);
   }, [recordingId]);
 
   const checkScan = useCallback(() => {
-    autoApi
+    http
       .get<{ jobs: ScanJob[] | null }>(`/jobs?kind=highlights.scan&recordingId=${recordingId}&limit=1`)
       .then((r) => {
         const active = (r.jobs ?? []).some((j) => j.state === "queued" || j.state === "running" || j.state === "deferred");
@@ -70,7 +70,7 @@ export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted
 
   const scan = async () => {
     try {
-      await autoApi.post(`/clipper/recordings/${recordingId}/highlights/scan`, { useModel });
+      await http.post(`/clipper/recordings/${recordingId}/highlights/scan`, { useModel });
       setScanning(true);
       toast.success(t("clipedit.highlights.scanQueued"));
     } catch (err) {
@@ -81,7 +81,7 @@ export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted
   const accept = async (h: Highlight) => {
     setBusy(h.id);
     try {
-      await autoApi.post(`/clipper/highlights/${h.id}/accept`, { ...exportBody(), inMs: h.startMs, outMs: h.endMs });
+      await http.post(`/clipper/highlights/${h.id}/accept`, { ...exportBody(), inMs: h.startMs, outMs: h.endMs });
       toast.success(t("clipedit.highlights.acceptQueued"));
       load();
       onAccepted();
@@ -95,7 +95,7 @@ export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted
   const dismiss = async (h: Highlight) => {
     setBusy(h.id);
     try {
-      await autoApi.post(`/clipper/highlights/${h.id}/dismiss`);
+      await http.post(`/clipper/highlights/${h.id}/dismiss`);
       load();
     } catch (err) {
       toast.error(err instanceof Error && err.message ? err.message : t("clipedit.highlights.dismissFailed"));

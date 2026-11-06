@@ -1,3 +1,4 @@
+import { WIRE } from "@/lib/contract/wire";
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
 import type { SaveApplied } from "@/lib/saveImpact";
@@ -271,9 +272,9 @@ export function isAccountInUse(e: unknown): e is ApiError {
 }
 
 /** The cookie the server sets for the double-submit CSRF check, and the header
- *  that must echo it (internal/auth: csrfCookieName, csrfHeaderName). */
-const CSRF_COOKIE = "polyemesis_csrf";
-const CSRF_HEADER = "X-CSRF-Token";
+ *  that must echo it (auth.CSRFCookie, auth.CSRFHeader, via the wire contract). */
+const CSRF_COOKIE = WIRE.auth.csrfCookie;
+const CSRF_HEADER = WIRE.auth.csrfHeader;
 
 /** Read the double-submit CSRF token the server set as a readable cookie. */
 function csrfToken(): string {
@@ -986,7 +987,7 @@ export const api = {
   // renditions, recordings -- belongs to exactly one of them. Unscoped calls
   // act on the default source, which is what keeps every other page working
   // without knowing sources exist.
-  listSources: () => get<SourceView[]>("/sources"),
+  listSources: (signal?: AbortSignal) => request<SourceView[]>("/sources", { signal }),
   getSource: (id: SourceId) => get<SourceView>(`/sources/${id}`),
   createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
   updateSource: (id: SourceId, s: Partial<Source>) =>

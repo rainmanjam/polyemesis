@@ -167,7 +167,7 @@ describe("ChatMessageMenu on a platform that implements nothing", () => {
   });
 
   it("names the platform properly rather than echoing the lowercase id", () => {
-    // platformNoun passes an unknown platform straight through, which is how
+    // platformName passes an unknown platform straight through, which is how
     // the menu came to print "rumble publishes no moderation API".
     draw(rumble(), asks());
     expect(screen.queryByText(/^rumble /)).toBeNull();

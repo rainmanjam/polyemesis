@@ -51,9 +51,6 @@ const notAClaim: Record<string, string> = {
     "null is the unknown state and `if (targets === null) return null` hides the " +
     "metadata composer entirely; this was [] until #719, which rendered the composer " +
     "with zero platforms -- a claim that this broadcast has nowhere to push metadata",
-  "ui/src/pages/Dashboard.tsx:setSources":
-    "the programme badge is drawn only when there is MORE THAN ONE source, so an " +
-    "empty list hides a badge rather than asserting that no programmes exist",
   "ui/src/pages/Dashboard.tsx:setFeatureEnabled":
     "null is the unknown state and the recording/meters notice stays silent on it, " +
     "which the catch's own comment says: it must not claim an exposure it could not verify",

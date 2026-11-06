@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
+import { http } from "@/lib/api";
 import { autoApi } from "@/lib/autoApi";
 import { keyframeVerdict, windowOnBufferToggle } from "@/features/clips/clipBufferFacts";
 import { clipBufferStatus } from "@/lib/status";
@@ -213,7 +214,7 @@ export function ClipsPage() {
 
   const remove = async (c: Clip) => {
     try {
-      await autoApi.del(`/clips/${encodeURIComponent(c.name)}`);
+      await http.del(`/clips/${encodeURIComponent(c.name)}`);
       toast.success(t("clips.deleted"));
       await load();
     } catch (err) {

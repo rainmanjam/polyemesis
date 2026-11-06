@@ -105,7 +105,6 @@ describe("AutomationPage: one failed read, four empty lists", () => {
   it("refreshes all four reads, not the two that made the healthy half look healthy", () => {
     // The old refresher re-read only /schedules and /schedules/runs, so
     // Alerts stayed empty until a browser reload while Schedules repopulated.
-    expect(src()).not.toContain('autoApi.get<AlertRule[]>("/alerts/rules").then');
     expect(src()).toContain("const t = window.setInterval(() => load(true), 15000);");
   });
 });

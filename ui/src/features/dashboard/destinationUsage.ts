@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { autoApi } from "@/lib/autoApi";
+import { http } from "@/lib/api";
 import type { DestinationId } from "@/lib/types";
 
 /* What still points at a destination, for its delete confirmation (A18).
@@ -34,7 +34,7 @@ export function useDestinationUsage(id: DestinationId | null): DestinationUsage 
     // opened on the previous target's count would be the stale read this
     // exists to prevent.
     queueMicrotask(() => mine === seq.current && setUsage({ status: "loading" }));
-    autoApi.get<{ destinationIds: number[] | null }[]>("/schedules").then(
+    http.get<{ destinationIds: number[] | null }[]>("/schedules").then(
       // Anything but a list is a read that did not answer the question.
       (list) =>
         mine === seq.current &&

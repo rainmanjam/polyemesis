@@ -8,7 +8,6 @@ import {
 } from "./stream-health";
 import {
   FACEBOOK_STREAM_HEALTH_INTERVAL_MS,
-  FACEBOOK_STREAM_TIMEOUT_MS,
 } from "./types";
 
 /* The rule under test is one sentence and it is the reason the feature exists:
@@ -96,6 +95,5 @@ describe("Facebook's published timings", () => {
     // thing in this feature that a platform can rate-limit us for, and "someone
     // made it 1000 to feel snappier" is a change no other test would notice.
     expect(FACEBOOK_STREAM_HEALTH_INTERVAL_MS).toBe(2000);
-    expect(FACEBOOK_STREAM_TIMEOUT_MS).toBe(4000);
   });
 });

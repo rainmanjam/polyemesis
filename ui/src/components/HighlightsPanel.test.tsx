@@ -31,8 +31,9 @@ const HIGHLIGHTS = {
   ],
 };
 
-vi.mock("@/lib/autoApi", () => ({
-  autoApi: {
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  http: {
     get: (path: string) => {
       calls.push({ method: "GET", path });
       if (path.startsWith("/jobs")) return Promise.resolve({ jobs: [] });

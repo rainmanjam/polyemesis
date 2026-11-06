@@ -28,7 +28,7 @@ function ctx(over: Partial<LiveData>): LiveData {
     sourceCount: 2,
     programmes: [
       { id: 1, name: "Horizontal" },
-      { id: 2, name: "Vertical" },
+      { id: 2, name: "Vertical", publishUrls: {} },
     ],
     selectProgramme,
     refreshSources: async () => {},
@@ -84,8 +84,8 @@ describe("the programme switcher", () => {
   it("shows a short label on a phone and the full name from sm up", () => {
     show({
       programmes: [
-        { id: 1, name: "Main Programme — Studio A" },
-        { id: 2, name: "Vertical" },
+        { id: 1, name: "Main Programme — Studio A", publishUrls: {} },
+        { id: 2, name: "Vertical", publishUrls: {} },
       ],
     });
     const trigger = screen.getByTestId("programme-switcher");
@@ -106,7 +106,7 @@ describe("the programme switcher", () => {
   });
 
   it("renders nothing when there is only one programme", () => {
-    show({ programmes: [{ id: 1, name: "Main" }], sourceCount: 1 });
+    show({ programmes: [{ id: 1, name: "Main", publishUrls: {} }], sourceCount: 1 });
     // A control offering one option is furniture, and in the chrome it would
     // occupy a slot on every screen of every single-source install to say
     // nothing at all.

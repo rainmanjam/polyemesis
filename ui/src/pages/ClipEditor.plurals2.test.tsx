@@ -37,8 +37,9 @@ const source = {
 
 const never = () => new Promise(() => {});
 
-vi.mock("@/lib/autoApi", () => ({
-  autoApi: {
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  http: {
     get: (path: string) => {
       if (path === "/clipper/recordings/5") return Promise.resolve(source);
       if (path === "/clipper/recordings/5/transcript")

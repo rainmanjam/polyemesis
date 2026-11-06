@@ -1,4 +1,5 @@
-import type { DestStatus, SourceView } from "@/lib/types";
+import type { SourceName } from "@/lib/destinationSource";
+import type { DestStatus } from "@/lib/types";
 import type { PreviewTile } from "@/hooks/usePreviewTiles";
 import type { PreviewPane } from "@/lib/previewLayout";
 import { previewLayout } from "@/lib/previewLayout";
@@ -49,7 +50,7 @@ export interface LaneLayout {
 export function laneLayout(
   tiles: readonly PreviewTile[],
   destinations: readonly DestStatus[],
-  sources: readonly SourceView[],
+  sources: readonly SourceName[],
 ): LaneLayout {
   const dests = destinationLayout(destinations, sources);
   const preview = previewLayout(tiles);

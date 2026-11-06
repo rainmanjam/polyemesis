@@ -20,6 +20,9 @@ its first tagged release.
 - **The Dashboard and the header agree on how many programmes exist.** The Dashboard kept its own count
   and refreshed it on its own timer, so for up to ten seconds the two could scope the ingest figures
   differently. The count now has one owner and a console left open notices the last source going away.
+- **The Dashboard's lanes, Go live rows and setup checklist follow programmes added, renamed or deleted
+  elsewhere.** The page kept its own one-time read of the programme list, so they held the old list until
+  the page was reloaded. They now read the same list the header does, which refreshes every ten seconds.
 - **Saving a destination refuses a routing profile that would stream silence, as creating one
   does.** `PUT /destinations/{id}` skipped the check `POST` ran, so a save could store a profile that
   selected nothing the programme's tracks carry. A save that changes neither the profile nor the

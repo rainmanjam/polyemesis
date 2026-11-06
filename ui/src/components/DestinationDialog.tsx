@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, isNoSource } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import {
   initialSourceValue,
   sourceChoices,
@@ -2082,8 +2083,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               <Input
                 id="dest-bitrate"
                 type="number"
-                min={32}
-                max={512}
+                min={LIMITS.audioBitrateKbps.min}
+                max={LIMITS.audioBitrateKbps.max}
                 value={bitrate}
                 onChange={(e) => setBitrate(Number(e.target.value))}
                 className="w-24"

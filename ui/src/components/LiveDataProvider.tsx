@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
 import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
-import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
+import { LiveDataContext, type LiveData, type Programme } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
   Levels,
@@ -32,6 +32,9 @@ import type {
 /** How many log lines the client keeps. The server already bounds its own
  *  buffer; this bounds the browser's so a long session cannot grow forever. */
 const LOG_LIMIT = 600;
+
+/** How long one /sources read may take before it is abandoned, so the next poll can run. */
+const SOURCES_READ_TIMEOUT_MS = 10_000;
 
 export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
@@ -92,7 +95,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [sourceCountKnown, setSourceCountKnown] = useState(false);
   /* #638: the list, not just the count. A switcher needs names, and fetching
      them separately would mean a second copy of the resolution rule. */
-  const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
   /* The ids the last /sources answer carried, so the socket effect can tell
      "a programme we have never seen" from "the one we are already on". */
   const knownIds = useRef<number[]>([]);
@@ -299,8 +302,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
   const resolveOnce = useCallback(async (gen: number): Promise<number | null> => {
+    // A request that never settles would hold readInFlight, and with it every
+    // later poll, for ever: the Dashboard reads its programmes only from here.
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), SOURCES_READ_TIMEOUT_MS);
     try {
-      const rows = await api.listSources();
+      const rows = await api.listSources(abort.signal);
       const ids = rows.map((r) => r.id);
       // Superseded while in flight: answer with what the newer read applied,
       // not with this stale list.
@@ -311,9 +318,15 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       setSourceCount(ids.length);
       // Unchanged lists keep their identity: this runs on a timer, and a new
       // array every 10 s would re-render every consumer for nothing.
-      const next = rows.map((r) => ({ id: r.id, name: r.name }));
+      const next: Programme[] = rows.map((r) => ({ id: r.id, name: r.name, publishUrls: r.publishUrls }));
       setProgrammes((prev) =>
-        prev.length === next.length && prev.every((p, i) => p.id === next[i].id && p.name === next[i].name)
+        prev.length === next.length &&
+        prev.every(
+          (p, i) =>
+            p.id === next[i].id &&
+            p.name === next[i].name &&
+            JSON.stringify(p.publishUrls) === JSON.stringify(next[i].publishUrls),
+        )
           ? prev
           : next,
       );
@@ -336,6 +349,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (!resolvedOnce.current) setProgramme(null);
       return null;
     } finally {
+      window.clearTimeout(timeout);
       if (gen === resolveGen.current) readInFlight.current = false;
       setProgrammeKnown(true);
     }

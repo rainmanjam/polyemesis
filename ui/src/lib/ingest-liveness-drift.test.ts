@@ -97,25 +97,33 @@ describe("ingest liveness", () => {
     // single quotes or loose `==`. Narrower patterns were walked around by the
     // very sites they were written for.
     const RAW_RUNNING = /[!=]==?\s*["']running["']|["']running["']\s*[!=]==?/;
-    // Not process liveness, so they may spell it: background-job states and the
-    // rollover countdown's own kind both have a "running" of their own.
-    const NOT_LIVENESS: Record<string, string> = {
-      "ui/src/components/HighlightsPanel.tsx": "job state",
-      "ui/src/pages/ClipEditor.tsx": "job state",
-      "ui/src/pages/JobsPage.tsx": "job state",
-      "ui/src/pages/LibraryPage.tsx": "job state",
-      "ui/src/components/RolloverPanel.tsx": "rollover countdown kind",
+    // Not process liveness, so these files may spell it, and only for the
+    // receiver named. Any other comparison in them, or any comparison in another
+    // file, is still caught: a destination or ingest check added to one of these
+    // pages fails, and so does one that merely renames its variable `job`.
+    const jobState = [
+      /\b(?:j|job)\??\.state\s*[!=]==?\s*["']running["']/g,
+      /["']running["']\s*[!=]==?\s*(?:j|job)\??\.state\b/g,
+    ];
+    const NOT_LIVENESS: Record<string, RegExp[]> = {
+      "ui/src/components/HighlightsPanel.tsx": jobState,
+      "ui/src/pages/ClipEditor.tsx": jobState,
+      "ui/src/pages/JobsPage.tsx": jobState,
+      "ui/src/pages/LibraryPage.tsx": jobState,
+      "ui/src/components/RolloverPanel.tsx": [/\bcountdown\.kind\s*[!=]==?\s*["']running["']/g],
     };
+    // Whole-file text, so a comparison split across lines is seen, with the
+    // file's own allowed comparisons removed first.
+    const rawRunning = (rel: string, src: string) =>
+      RAW_RUNNING.test((NOT_LIVENESS[rel] ?? []).reduce((t, re) => t.replace(re, ""), withoutComments(src)));
     const RAW_INGEST_TONE = /toneForState\(\s*ingest\??\.state/;
 
     const files = () =>
-      sourceFiles(join(ROOT, "ui/src"), [".ts", ".tsx"]).filter(
-        (f) => f.slice(ROOT.length) !== MODULE && !(f.slice(ROOT.length) in NOT_LIVENESS),
-      );
+      sourceFiles(join(ROOT, "ui/src"), [".ts", ".tsx"]).filter((f) => f.slice(ROOT.length) !== MODULE);
 
     it('bans comparing anything to "running" outside the module', () => {
       const offenders = files()
-        .filter((f) => RAW_RUNNING.test(withoutComments(readFileSync(f, "utf8"))))
+        .filter((f) => rawRunning(f.slice(ROOT.length), readFileSync(f, "utf8")))
         .map((f) => f.slice(ROOT.length));
       expect(
         offenders,
@@ -140,6 +148,18 @@ describe("ingest liveness", () => {
       expect(RAW_RUNNING.test('// ingest?.state === "running"')).toBe(true);
       expect(withoutComments('// ingest?.state === "running"\nconst a = 1;')).not.toMatch(RAW_RUNNING);
       expect(RAW_INGEST_TONE.test("toneForState(ingest?.state)")).toBe(true);
+      // The allowances are narrow: a job's state passes in a job file, and
+      // nothing else does.
+      const jobs = "ui/src/pages/JobsPage.tsx";
+      expect(rawRunning(jobs, 'const a = j.state === "running";')).toBe(false);
+      expect(rawRunning(jobs, 'if (job?.state !== "running") return;')).toBe(false);
+      expect(rawRunning("ui/src/components/RolloverPanel.tsx", 'countdown.kind === "running" ? a : b')).toBe(false);
+      // Must fail: the same receiver name in a file that is not a job file,
+      // a process compared in a job file, and a comparison split over lines.
+      expect(rawRunning("ui/src/pages/Dashboard.tsx", 'const job = d.process; job?.state === "running"')).toBe(true);
+      expect(rawRunning(jobs, 'x = d.process?.state === "running"')).toBe(true);
+      expect(rawRunning(jobs, 'j.state === "running" && d.process.state === "running"')).toBe(true);
+      expect(rawRunning("ui/src/pages/Dashboard.tsx", 'const on = d.process?.state\n  === "running";')).toBe(true);
       expect(files().length).toBeGreaterThan(100);
     });
   });

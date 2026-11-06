@@ -125,10 +125,49 @@
     "maxThumbnailBytes": 2097152,
     "deviceMinPollMs": 5000,
     "facebookStreamHealthIntervalMs": 2000,
-    "facebookStreamTimeoutMs": 4000,
     "youTubeVerticalPollMs": 60000,
     "maxDumpSeconds": 900,
     "bulkStartPacingMs": 2000
+  },
+  "polls": {
+    "minOptions": 2,
+    "maxOptions": 6,
+    "maxQuestion": 100,
+    "maxOption": 30,
+    "minDurationSeconds": 15,
+    "maxDurationSeconds": 3600
+  },
+  "overlay": {
+    "fonts": [
+      "sans",
+      "serif",
+      "mono",
+      "rounded"
+    ],
+    "fontSize": {
+      "min": 10,
+      "max": 72
+    },
+    "fadeSeconds": {
+      "min": 0,
+      "max": 600
+    },
+    "maxLines": {
+      "min": 1,
+      "max": 50
+    },
+    "backgroundOpacity": {
+      "min": 0,
+      "max": 100
+    }
+  },
+  "auth": {
+    "csrfCookie": "polyemesis_csrf",
+    "csrfHeader": "X-CSRF-Token"
+  },
+  "captions": {
+    "noLocalDelayPlatform": "youtube",
+    "noLocalDelayMode": "youtube_post"
   },
   "defaults": {
     "srtPort": 6000,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WIRE } from "@/lib/contract/wire";
 import { accentFor } from "@/lib/chat";
-import { platformLabel } from "@/lib/audience";
 import { PLATFORM_MARK } from "@/lib/overlay";
 import { platformName, X_GO_LIVE_TITLE_MAX } from "./platforms";
 
@@ -24,7 +23,7 @@ describe("platformName", () => {
   });
 
   it("is the one list every caller reads", () => {
-    expect(platformLabel("x")).toBe("X");
+    expect(platformName("x")).toBe("X");
     expect(accentFor("rumble").label).toBe("Rumble");
     expect(accentFor("youtube").label).toBe("YouTube");
   });

@@ -5,7 +5,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { formatAverage, platformLabel, PLAYER } from "@/lib/audience";
+import { platformName } from "@/lib/platforms";
+import { formatAverage, PLAYER } from "@/lib/audience";
 import { shortDuration, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import type { AnalyticsReport, AnalyticsRow, AnalyticsStream } from "@/lib/types";
@@ -138,7 +139,7 @@ function Report({ report }: { report: AnalyticsReport }) {
           <span className="text-sm text-muted-foreground">{t("aud.noChat")}</span>
         ) : (
           <span className="text-sm text-foreground">
-            {report.chat.map((c) => `${platformLabel(c.platform)} ${c.messages}`).join(" · ")}
+            {report.chat.map((c) => `${platformName(c.platform)} ${c.messages}`).join(" · ")}
           </span>
         )}
       </div>
@@ -150,7 +151,7 @@ function Report({ report }: { report: AnalyticsReport }) {
             {report.topChatters.map((c, i) => (
               <li key={`${c.platform}-${c.name}-${i}`} className="flex justify-between gap-2">
                 <span className="min-w-0 truncate text-foreground">
-                  {c.name} <span className="text-muted-foreground">· {platformLabel(c.platform)}</span>
+                  {c.name} <span className="text-muted-foreground">· {platformName(c.platform)}</span>
                 </span>
                 <span className="tabular-nums text-muted-foreground">{c.messages}</span>
               </li>
@@ -206,7 +207,7 @@ function Report({ report }: { report: AnalyticsReport }) {
 
 function ReportRow({ r }: { r: AnalyticsRow }) {
   const t = useT();
-  const label = r.platform === PLAYER ? t("aud.player") : platformLabel(r.platform);
+  const label = r.platform === PLAYER ? t("aud.player") : platformName(r.platform);
   return (
     <tr data-testid={`report-row-${r.platform}`}>
       <td>

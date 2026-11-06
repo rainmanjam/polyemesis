@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
+	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -28,7 +30,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/platform"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
@@ -37,12 +41,16 @@ import (
 //
 // The console (ui/), the Stream Deck plugin and the site each restated words
 // and numbers the server owns: the failure causes, the state words, the event
-// types, the routing bounds, the poll floors, the platform names. Each copy was
+// types, the routing bounds, the poll and overlay limits, the platform names. Each copy was
 // either unguarded or guarded by a test that compared it to a literal typed in
 // the test, so a server change passed. This test builds one description from the
 // Go values themselves and writes it where each client reads it; the clients
 // derive from the file (the console's types are `typeof` the generated arrays)
 // or test against it, so none of them can move on its own.
+//
+// What it does NOT cover: the bounds in ui/src/lib/limits.ts (ports, SRT latency,
+// audio bitrate, recording segment, chat, quota, alert, analytics), which
+// internal/db's TestUIBoundsMatchTheGoValidators holds to the Go validators.
 //
 // Regenerate with: go test ./internal/api/ -run TestWireContract -update-wire-contract
 var updateWireContract = flag.Bool("update-wire-contract", false,
@@ -83,11 +91,51 @@ type wireRouting struct {
 	DefaultDuckReleaseMs   float64 `json:"defaultDuckReleaseMs"`
 }
 
+// wirePolls are internal/polls' limits on what a poll may be; the form checks
+// them before it sends.
+type wirePolls struct {
+	MinOptions         int `json:"minOptions"`
+	MaxOptions         int `json:"maxOptions"`
+	MaxQuestion        int `json:"maxQuestion"`
+	MaxOption          int `json:"maxOption"`
+	MinDurationSeconds int `json:"minDurationSeconds"`
+	MaxDurationSeconds int `json:"maxDurationSeconds"`
+}
+
+type wireRange struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+}
+
+// wireOverlay is internal/overlay's closed font set and style bounds.
+type wireOverlay struct {
+	Fonts             []string  `json:"fonts"`
+	FontSize          wireRange `json:"fontSize"`
+	FadeSeconds       wireRange `json:"fadeSeconds"`
+	MaxLines          wireRange `json:"maxLines"`
+	BackgroundOpacity wireRange `json:"backgroundOpacity"`
+}
+
+// wireAuth is the double-submit CSRF pair: the cookie the server sets and the
+// header the console must echo it in. A rename on one side alone would turn
+// every mutation into a 403.
+type wireAuth struct {
+	CSRFCookie string `json:"csrfCookie"`
+	CSRFHeader string `json:"csrfHeader"`
+}
+
+// wireCaptions is the one exception in db.(*Destination).OutputDelaySeconds: a
+// destination on this platform with this caption mode keeps its delay but
+// YouTube applies it, so polyemesis holds the output back by 0.
+type wireCaptions struct {
+	NoLocalDelayPlatform string `json:"noLocalDelayPlatform"`
+	NoLocalDelayMode     string `json:"noLocalDelayMode"`
+}
+
 type wireLimits struct {
 	MaxThumbnailBytes              int `json:"maxThumbnailBytes"`
 	DeviceMinPollMs                int `json:"deviceMinPollMs"`
 	FacebookStreamHealthIntervalMs int `json:"facebookStreamHealthIntervalMs"`
-	FacebookStreamTimeoutMs        int `json:"facebookStreamTimeoutMs"`
 	YouTubeVerticalPollMs          int `json:"youTubeVerticalPollMs"`
 	MaxDumpSeconds                 int `json:"maxDumpSeconds"`
 	BulkStartPacingMs              int `json:"bulkStartPacingMs"`
@@ -151,6 +199,10 @@ type wireContract struct {
 	ViewerPlatforms     []string            `json:"viewerPlatforms"`
 	Routing             wireRouting         `json:"routing"`
 	Limits              wireLimits          `json:"limits"`
+	Polls               wirePolls           `json:"polls"`
+	Overlay             wireOverlay         `json:"overlay"`
+	Auth                wireAuth            `json:"auth"`
+	Captions            wireCaptions        `json:"captions"`
 	Defaults            wireDefaults        `json:"defaults"`
 	RenditionBounds     wireRenditionBounds `json:"renditionBounds"`
 	Platforms           platform.Directory  `json:"platforms"`
@@ -222,6 +274,99 @@ func stringConsts(t *testing.T, dir string, keep func(typeName, constName string
 		t.Fatalf("no constants found in %s: the filter matches nothing, so the contract would silently be empty", dir)
 	}
 	return out
+}
+
+// mapKeys returns the keys of the package-level `var <name> = map[string]...{}`
+// in one package directory, in source order. A var cannot be read through the
+// package's API when it is unexported, and listing the keys here would be the
+// copy this file exists to remove.
+func mapKeys(t *testing.T, dir, name string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join("..", "..", dir, "*.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no Go files in %s", dir)
+	}
+	sort.Strings(files)
+	fset := token.NewFileSet()
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		af, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", f, err)
+		}
+		for _, d := range af.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, sp := range gd.Specs {
+				vs := sp.(*ast.ValueSpec)
+				if len(vs.Names) != 1 || vs.Names[0].Name != name || len(vs.Values) != 1 {
+					continue
+				}
+				cl, ok := vs.Values[0].(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				var keys []string
+				for _, el := range cl.Elts {
+					kv, ok := el.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					lit, ok := kv.Key.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						t.Fatalf("%s in %s has a key that is not a string literal: the contract would silently omit it", name, dir)
+					}
+					k, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatalf("%s: %v", name, err)
+					}
+					keys = append(keys, k)
+				}
+				if len(keys) == 0 {
+					t.Fatalf("%s in %s has no string keys", name, dir)
+				}
+				return keys
+			}
+		}
+	}
+	t.Fatalf("no `var %s = map...` in %s", name, dir)
+	return nil
+}
+
+// overlayOpacityRange is the one overlay bound with no constant behind it
+// (Style.Validate spells 0 and 100 inline), so it is read from the validator's
+// behaviour: the contract carries the edge that validator accepts, and fails
+// loudly if either edge or the step outside it moves.
+func overlayOpacityRange(t *testing.T) wireRange {
+	t.Helper()
+	accepts := func(v int) bool {
+		s := overlay.DefaultStyle()
+		s.BackgroundOpacity = v
+		return s.Validate() == nil
+	}
+	r := wireRange{Min: 0, Max: 100}
+	if !accepts(r.Min) || accepts(r.Min-1) || !accepts(r.Max) || accepts(r.Max+1) {
+		t.Fatalf("overlay.Style.Validate no longer accepts exactly %d..%d for backgroundOpacity", r.Min, r.Max)
+	}
+	return r
+}
+
+// overlayFadeMin is the same, for fadeSeconds' floor.
+func overlayFadeMin(t *testing.T) int {
+	t.Helper()
+	accepts := func(v int) bool {
+		s := overlay.DefaultStyle()
+		s.FadeSeconds = v
+		return s.Validate() == nil
+	}
+	if !accepts(0) || accepts(-1) {
+		t.Fatal("overlay.Style.Validate no longer accepts fadeSeconds from exactly 0")
+	}
+	return 0
 }
 
 func ofType(want string) func(string, string) bool {
@@ -327,10 +472,26 @@ func buildWireContract(t *testing.T) wireContract {
 			MaxThumbnailBytes:              scheduler.MaxThumbnailBytes,
 			DeviceMinPollMs:                ms(oauth.DeviceMinPollInterval),
 			FacebookStreamHealthIntervalMs: ms(oauth.FacebookStreamHealthInterval),
-			FacebookStreamTimeoutMs:        ms(oauth.FacebookStreamTimeout),
 			YouTubeVerticalPollMs:          ms(verticalHealthMinInterval),
 			MaxDumpSeconds:                 int(engine.MaxDumpRequest.Seconds()),
 			BulkStartPacingMs:              ms(bulkStartPacing),
+		},
+		Polls: wirePolls{
+			MinOptions: polls.MinOptions, MaxOptions: polls.MaxOptions,
+			MaxQuestion: polls.MaxQuestion, MaxOption: polls.MaxOption,
+			MinDurationSeconds: int(polls.MinDuration.Seconds()), MaxDurationSeconds: int(polls.MaxDuration.Seconds()),
+		},
+		Overlay: wireOverlay{
+			Fonts:             mapKeys(t, "internal/overlay", "fonts"),
+			FontSize:          wireRange{Min: overlay.MinFontSize, Max: overlay.MaxFontSize},
+			FadeSeconds:       wireRange{Min: overlayFadeMin(t), Max: overlay.MaxFade},
+			MaxLines:          wireRange{Min: overlay.MinLines, Max: overlay.MaxLines},
+			BackgroundOpacity: overlayOpacityRange(t),
+		},
+		Auth: wireAuth{CSRFCookie: auth.CSRFCookie, CSRFHeader: auth.CSRFHeader},
+		Captions: wireCaptions{
+			NoLocalDelayPlatform: string(db.PlatformYouTube),
+			NoLocalDelayMode:     string(captions.ModeYouTubePOST),
 		},
 		Defaults: wireDefaults{
 			SRTPort: def.Listeners.SRTPort, RTMPPort: def.Listeners.RTMPPort,
@@ -489,6 +650,24 @@ func TestThePlatformRegistryEndpointServesTheContract(t *testing.T) {
 	for _, internal := range []string{`"Order"`, `"SendMax"`, `"Guidance"`, `"Ceilings"`} {
 		if strings.Contains(rr.Body.String(), internal) {
 			t.Errorf("the registry endpoint exposes the internal field %s", internal)
+		}
+	}
+}
+
+// The captions block says what OutputDelaySeconds does: the contract's one
+// exception holds 0, and every other platform/mode pair holds the delay.
+func TestWireCaptionsRuleIsTheDestinationRule(t *testing.T) {
+	c := buildWireContract(t).Captions
+	exempt := &db.Destination{Platform: db.Platform(c.NoLocalDelayPlatform), CaptionMode: c.NoLocalDelayMode, DelaySeconds: 30}
+	if got := exempt.OutputDelaySeconds(); got != 0 {
+		t.Errorf("%s with %s holds %d s: the contract says it holds none", c.NoLocalDelayPlatform, c.NoLocalDelayMode, got)
+	}
+	for _, d := range []*db.Destination{
+		{Platform: db.Platform(c.NoLocalDelayPlatform), CaptionMode: string(captions.ModeOff), DelaySeconds: 30},
+		{Platform: db.PlatformTwitch, CaptionMode: c.NoLocalDelayMode, DelaySeconds: 30},
+	} {
+		if got := d.OutputDelaySeconds(); got != 30 {
+			t.Errorf("%s with %s holds %d s: only the contract's pair is exempt", d.Platform, d.CaptionMode, got)
 		}
 	}
 }

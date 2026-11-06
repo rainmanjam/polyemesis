@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { platformLinkFor, platformNoun } from "./platformLinks";
+import { platformLinkFor } from "./platformLinks";
 import type { ChatMessage, ChatPlatform } from "./types";
 
 function msg(over: Partial<ChatMessage> & { platform: ChatPlatform }): ChatMessage {
@@ -85,21 +85,5 @@ describe("platformLinkFor", () => {
   it("strips a leading @ that viewers often include in names", () => {
     const link = platformLinkFor(msg({ platform: "kick", author: { id: "u1", name: "@Viewer" } }));
     expect(link?.url).toBe("https://kick.com/viewer");
-  });
-});
-
-describe("platformNoun", () => {
-  it("uses each platform's own capitalisation", () => {
-    expect(platformNoun("youtube")).toBe("YouTube");
-    expect(platformNoun("twitch")).toBe("Twitch");
-    expect(platformNoun("kick")).toBe("Kick");
-    expect(platformNoun("facebook")).toBe("Facebook");
-  });
-
-  // X and Rumble are chat platforms with no case in the old switch, so the
-  // moderation menu printed "on x" in lower case.
-  it("names X and Rumble too", () => {
-    expect(platformNoun("x")).toBe("X");
-    expect(platformNoun("rumble")).toBe("Rumble");
   });
 });

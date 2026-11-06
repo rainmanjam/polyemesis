@@ -25,6 +25,18 @@ import type {
    connection on every keystroke is a bad way to develop a live dashboard.
    =========================================================================== */
 
+/** One programme as /sources lists it: what the Dashboard and the switcher
+ *  need, with the publish addresses for the checklist.
+ *
+ *  publishUrls CARRY THE SOURCE'S TOKEN where the protocol puts it in the
+ *  address (the SRT streamid, the RTMP stream key). Hold them in memory only:
+ *  never log, persist or send them anywhere but the clipboard on a copy. */
+export interface Programme {
+  id: number;
+  name: string;
+  publishUrls: Record<string, string>;
+}
+
 export interface LiveData {
   /** WHICH PROGRAMME the console is looking at, resolved once by
    *  LiveDataProvider from what the operator last looked at, else the server's
@@ -85,7 +97,7 @@ export interface LiveData {
    *
    *  Empty on a fresh install, and empty is not the same as "not yet read" —
    *  gate on programmeKnown for that, exactly as with programme itself. */
-  programmes: { id: number; name: string }[];
+  programmes: Programme[];
   /** Follow a different programme, and remember it across reloads.
    *
    *  #638: rememberProgramme existed and was called from exactly one place,

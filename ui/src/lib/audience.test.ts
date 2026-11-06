@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatAverage, orderReadings, platformLabel, readingCount, sparkPath, sumReported } from "@/lib/audience";
+import { formatAverage, orderReadings, readingCount, sparkPath, sumReported } from "@/lib/audience";
 
 describe("audience helpers", () => {
   it("never turns a missing count into a zero", () => {
@@ -25,9 +25,7 @@ describe("audience helpers", () => {
     expect(got).toEqual(["twitch", "youtube", "player"]);
   });
 
-  it("labels platforms and formats averages", () => {
-    expect(platformLabel("youtube")).toBe("YouTube");
-    expect(platformLabel("other")).toBe("other");
+  it("formats averages", () => {
     expect(formatAverage(20)).toBe("20");
     expect(formatAverage(38.66)).toBe("38.7");
   });

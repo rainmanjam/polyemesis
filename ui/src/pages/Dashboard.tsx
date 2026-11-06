@@ -85,9 +85,9 @@ import type {
   FailoverStatus,
   MetaField,
   SourceInfo,
-  SourceView,
   SystemInfo,
 } from "@/lib/types";
+import type { SourceName } from "@/lib/destinationSource";
 import { useT, useStateLabel, type TranslationKey } from "@/lib/i18n";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
@@ -696,7 +696,7 @@ function BulkDestinationControl({
   openStopAllRef,
 }: Readonly<{
   destinations: readonly DestStatus[];
-  sources: readonly SourceView[];
+  sources: readonly SourceName[];
   onFinished: () => void;
   /** Filled with this control's Stop all opener, so the on-air strip's End all
    *  (A8) reaches the same dialog rather than a second stop path. */
@@ -1216,7 +1216,7 @@ export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
   const narrow = useIsNarrow();
-  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, sourceCountKnown, refreshSources } =
+  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, sourceCountKnown, programmes: sources, refreshSources } =
     useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
@@ -1280,10 +1280,6 @@ export function Dashboard() {
   // The programmes, so a destination card can say which one it carries. Named
   // only when there is more than one: on a single-source install every card
   // would carry the same badge, which is noise that tells nobody anything.
-  const [sources, setSources] = useState<SourceView[]>([]);
-  useEffect(() => {
-    api.listSources().then(setSources).catch(() => setSources([]));
-  }, [refreshKey]);
 
   const [pending, setPending] = useState<DestinationId[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
