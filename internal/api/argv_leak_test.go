@@ -14,6 +14,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -293,6 +294,9 @@ func truncateForFailure(s string) string {
 // type and forgetting the list.
 func TestEveryEventTypeHasAWebSocketPolicy(t *testing.T) {
 	for _, typ := range events.AllTypes() {
+		if _, bridged := eventstream.BusReadAccess(typ); bridged {
+			continue // classified by the stream's catalogue, see eventView
+		}
 		if _, ok := wsEventPolicy[typ]; !ok {
 			t.Errorf("events.%s has no entry in wsEventPolicy. Classify it: what may a "+
 				"READ-scoped socket see of this payload? Until it is classified the socket "+
