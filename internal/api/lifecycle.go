@@ -687,12 +687,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 			return
 		}
 	}
-	broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
-	if broadcastID == "" && d.Platform != db.PlatformX {
-		// X never announces ahead, so its mirror is never written by a schedule.
-		// Seeding from it would bring back an ended broadcast after a second show.
-		broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
-	}
+	broadcastID := d.ActiveBroadcastID()
 	if broadcastID == "" {
 		// Taken BEFORE untrack, which clears it: an UP edge is the release of the
 		// open() hold below, and untrack would otherwise throw it away unread.

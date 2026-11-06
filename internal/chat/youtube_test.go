@@ -462,3 +462,32 @@ func TestNewYouTubeWithoutATokenIsAConfigurationState(t *testing.T) {
 		t.Fatalf("error %q does not read as a configuration state", err)
 	}
 }
+
+// YouTube spells a spent daily allowance more than one way. Delete and Ban used
+// to recognise only quotaExceeded, so the others read as "you are not a
+// moderator" and sent the operator to fix a permission that was never wrong.
+func TestYouTubeDeleteAndBanReadEverySpellingOfASpentQuota(t *testing.T) {
+	for _, reason := range []string{"quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg"} {
+		for _, act := range []string{"delete", "ban"} {
+			t.Run(reason+"/"+act, func(t *testing.T) {
+				stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprintf(w, `{"error":{"errors":[{"reason":%q}],"message":"x"}}`, reason)
+				})
+				a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) { c.LiveChatID = "chat-1" })
+				var err error
+				if act == "delete" {
+					err = a.Delete(context.Background(), "msg-42")
+				} else {
+					err = a.Ban(context.Background(), "UC123", 0, "")
+				}
+				if err == nil {
+					t.Fatal("a 403 was reported as success")
+				}
+				if strings.Contains(err.Error(), "moderator") || !strings.Contains(err.Error(), "quota is spent") {
+					t.Fatalf("error = %q, want the spent-quota message", err)
+				}
+			})
+		}
+	}
+}

@@ -119,23 +119,27 @@ func ytFailure(code int, body []byte) *Failure {
 		reason = e.Error.Errors[0].Reason
 	}
 	msg := oneLine(e.Error.Message)
-	switch reason {
+	switch {
 	// THREE DIFFERENT LIMITS, which used to share the daily-quota answer
 	// (poka-yoke audit 2026-11-04). A short-window rateLimitExceeded was
 	// reported as "used up until midnight Pacific" and never retried, so a
 	// clip that a minute's backoff would have published was dropped.
-	case "quotaExceeded", "dailyLimitExceeded":
+	case reason == "dailyLimitExceededUnreg":
+		// Unauthenticated use, not a spent allowance: the request went out without
+		// usable credentials, and waiting for midnight will not change that.
+		return fail(CauseNeedsReconnect, false, "YouTube treated this upload as unauthenticated (%s); reconnect the YouTube account and publish again", reason)
+	case oauth.IsSpentQuotaReason(reason):
 		return fail(CauseQuota, false, "YouTube's daily allowance is used up (%s). It resets at midnight Pacific; publish again then", reason)
-	case "rateLimitExceeded", "userRateLimitExceeded":
+	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded":
 		return fail(CauseRateLimited, true, "YouTube asked to slow down (%s); this will be retried", reason)
-	case "uploadLimitExceeded":
+	case reason == "uploadLimitExceeded":
 		return fail(CauseUploadLimited, false, "this channel has reached YouTube's limit on how many videos it may upload for now (%s). "+
 			"It is a per-channel limit, not the API allowance; publish again later", reason)
-	case "insufficientPermissions", "forbidden":
+	case reason == "insufficientPermissions", reason == "forbidden":
 		if code == http.StatusForbidden {
 			return fail(CauseNeedsReconnect, false, "YouTube says this connection may not upload; reconnect it to allow uploads")
 		}
-	case "youtubeSignupRequired":
+	case reason == "youtubeSignupRequired":
 		return fail(CauseRefused, false, "this Google account has no YouTube channel to upload to")
 	}
 	if code == http.StatusBadRequest && strings.Contains(strings.ToLower(msg), "video") {

@@ -218,9 +218,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 		log.Info("transcription default model set by settings", "model", m)
 	}
 	tp := transcribe.NewProcessor(log, tools, whisper, cfg.RecordingsDir(), cfg.ModelsDir(), tpOpts...)
-	// Concurrency 1: whisper saturates every core it is given, so a second
-	// transcription buys nothing and costs the first one half the machine.
-	reg(transcribe.KindTranscribe, q.Register(transcribe.KindTranscribe, 1, tp))
+	reg(transcribe.KindTranscribe, tp.Register(q))
 
 	mp := media.New(log, media.Config{
 		FFmpeg:        tools.FFmpeg,
@@ -237,7 +235,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 
 	cutter := newCutter(log, tools, gov)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
-	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve,
+	reg(clipper.JobKind, clipper.Register(q, clipper.NewWorker(cutter, resolve,
 		clipper.WithTranscript(api.ClipTranscriptSource(store)),
 		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
 		clipper.WithCaptionBurn(tools.HasFilter("subtitles")))))
@@ -246,7 +244,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 	// child: measuring loudness decodes the whole recording's audio. The
 	// model, when a scan asks for it, is the Automod primary connector on a
 	// budget of its OWN, so a post-pass never spends live moderation's.
-	reg(highlights.JobKind, q.Register(highlights.JobKind, 1, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
+	reg(highlights.JobKind, highlights.Register(q, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
 
 	// Playlist normalisation. THIS IS THE PRODUCER OF THE FILE THE PLAYLIST
 	// TIER REFUSES TO START WITHOUT: engine.playlistItemsReady requires a
@@ -641,7 +639,7 @@ func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *sec
 		},
 		Gates: gates,
 	})
-	if err := q.Register(publish.JobKind, 1, w); err != nil {
+	if err := publish.Register(q, w); err != nil {
 		log.Error("cannot register the clip publish job kind", "error", err)
 	}
 	if gates.XPublish {

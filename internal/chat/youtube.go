@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 const (
@@ -362,8 +363,8 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 // plain error, which the Hub retries with backoff — the fail-open direction,
 // since a status we have never seen is more likely transient than terminal.
 func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, retry bool, fatal error) {
-	switch reasonOf(err) {
-	case "quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg":
+	switch reason := reasonOf(err); {
+	case oauth.IsSpentQuotaReason(reason):
 		// The platform has corrected our estimate. Stop until the reset
 		// instead of spending the rest of the day collecting 403s.
 		y.budget.pause()
@@ -371,13 +372,13 @@ func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, 
 			return true, false, nil
 		}
 		return false, true, nil
-	case "rateLimitExceeded", "userRateLimitExceeded", "backendError":
+	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded", reason == "backendError":
 		// Transient. Wait out a poll interval and carry on.
 		if !y.cfg.Sleep(ctx, MinPollInterval*2) {
 			return true, false, nil
 		}
 		return false, true, nil
-	case "liveChatDisabled", "liveChatEnded", "liveChatNotFound", "forbidden":
+	case reason == "liveChatDisabled", reason == "liveChatEnded", reason == "liveChatNotFound", reason == "forbidden":
 		y.setHealth(StateStopped, "this YouTube broadcast has no live chat")
 		return true, false, nil
 	}
@@ -577,7 +578,7 @@ func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
 		// account is not the broadcaster and not a moderator of that chat.
 		// Saying so beats "forbidden", which sends people to reconnect an
 		// account that was never the problem.
-		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+		if statusOf(err) == http.StatusForbidden && !oauth.IsSpentQuotaReason(reasonOf(err)) {
 			return fmt.Errorf("YouTube refused the deletion. The connected account has to own the "+
 				"broadcast or be a moderator of its chat: %w", err)
 		}
@@ -629,7 +630,7 @@ func (y *YouTubeAdapter) Ban(ctx context.Context, userID string, d time.Duration
 		map[string]any{"snippet": snippet}, nil)
 	y.budget.spend(QuotaCostBan)
 	if err != nil {
-		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+		if statusOf(err) == http.StatusForbidden && !oauth.IsSpentQuotaReason(reasonOf(err)) {
 			return fmt.Errorf("YouTube refused the ban. The connected account has to own the broadcast "+
 				"or be a moderator of its chat: %w", err)
 		}
@@ -649,8 +650,7 @@ func (y *YouTubeAdapter) Unban(ctx context.Context, userID string) error {
 // classify turns an API error into the message an operator can act on, without
 // echoing anything that could carry a credential.
 func (y *YouTubeAdapter) classify(err error) error {
-	switch reasonOf(err) {
-	case "quotaExceeded", "dailyLimitExceeded":
+	if oauth.IsSpentQuotaReason(reasonOf(err)) {
 		y.budget.pause()
 		q := y.budget.status()
 		return fmt.Errorf("YouTube's daily API quota is spent; chat resumes at %s", q.ResetAt.Format(ytClockLayout))

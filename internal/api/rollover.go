@@ -170,15 +170,6 @@ func (c *rolloverCoordinator) sceneSwitchedAt(scene string) time.Time {
 	return c.scenes[scene]
 }
 
-// rolloverBroadcastID is the broadcast a destination is publishing to. It is the lifecycle's record first, and the
-// announcement mirror second, in the same order the lifecycle coordinator reads it.
-func rolloverBroadcastID(d *db.Destination) string {
-	if id := strings.TrimSpace(d.Lifecycle.BroadcastID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(d.Facebook.BroadcastID)
-}
-
 // actsOn reports whether a platform has an action behind a rollover. Every other platform is countdown only.
 func (c *rolloverCoordinator) actsOn(p db.Platform) bool {
 	switch p {
@@ -239,7 +230,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		}
 		return false, nil
 	}
-	bid := rolloverBroadcastID(d)
+	bid := d.ActiveBroadcastID()
 	if !c.actsOn(d.Platform) {
 		// Countdown only. The planner is not consulted, because a due trigger would have nothing to do. The session
 		// is still recorded, once per broadcast, because the countdown card counts from it: without it a Facebook
