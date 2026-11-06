@@ -3367,11 +3367,29 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"routing": res, "profile": req.Profile})
 }
 
+// handleListPresets serves the catalogue and the generic OBS-convention
+// defaults. For a programme it also serves "roleDefaults": the defaults moved
+// onto the tracks that programme's annotations name (routing.DefaultPresetOptsFor),
+// which is what a bodyless apply uses. Named by ?source=; unnamed it is the one
+// programme of a single-source install, and absent when several make the
+// choice ambiguous -- the route has never refused for lack of one.
 func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"presets":  routing.Presets(),
 		"defaults": routing.DefaultPresetOpts(),
-	})
+	}
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok {
+		return
+	}
+	if named {
+		src, _ := s.sourceForDestination(&id)
+		out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
+	} else if n, err := s.store.CountSources(); err == nil && n == 1 {
+		src, _ := s.sourceForDestination(nil)
+		out["roleDefaults"] = routing.DefaultPresetOptsFor(src)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleApplyPreset compiles one of the catalogue's mixes against this
@@ -3387,17 +3405,19 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A body is optional: without one the OBS-convention defaults apply --
-	// which is what GET /routing/presets advertises under "defaults", and what
-	// this handler's own comment has always claimed.
+	// A body is optional: without one the defaults apply, derived from this
+	// programme's track roles (routing.DefaultPresetOptsFor) exactly as /apply
+	// and the OBS bridge derive them; GET /routing/presets?source= serves them
+	// under "roleDefaults".
 	//
-	// It was not true. The old code started from `var opts routing.PresetOpts`,
+	// Raw OBS-convention defaults used to apply here, and before that nothing.
+	// The old code started from `var opts routing.PresetOpts` The old code started from `var opts routing.PresetOpts`,
 	// so a bodyless apply ran with every track index at Go's zero value, and
 	// "mic only" compiled [0:a:0] -- the full mix -- while the catalogue two
 	// routes away advertised micTrack 2. The advertised value and the applied
 	// value disagreed, and only a client that sent a body ever got the one it
 	// was promised.
-	opts := routing.DefaultPresetOpts()
+	opts := routing.DefaultPresetOptsFor(eng.Source())
 
 	// Read the body unconditionally rather than gating on Content-Length.
 	// A chunked request has ContentLength -1 WHATEVER it is carrying, so the

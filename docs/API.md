@@ -1277,7 +1277,11 @@ It and `POST /routing/presets/{preset}` are programme-scoped and need
 `POST /routing/presets/{preset}` **compiles** a preset against the programme's
 ingest and answers `{profile, routing}`. It saves nothing and restarts
 nothing. The routing editor puts that profile in a draft, and Save is a
-`PUT /destinations/{id}`.
+`PUT /destinations/{id}`. Without a body the compile uses the same role-derived
+pickers as apply (below). `GET /routing/presets` serves them as `roleDefaults`,
+beside the generic `defaults`, for the programme named by `?source=<id>` (or the
+only programme of a single-source install; absent when several make that
+ambiguous).
 The routing editor is where the scoping was written: with programme 2 open, a
 debounced track-label edit rewrote programme 1's ingest and restarted its live
 destinations, and the compile preview beside it was reading the same default

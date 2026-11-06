@@ -64,6 +64,14 @@ func PresetOptsFromRoles(base PresetOpts, src Source) PresetOpts {
 	return out
 }
 
+// DefaultPresetOptsFor is the options a preset is applied with when the caller
+// names none, for this ingest: the one answer the compile route, apply, the OBS
+// scene bridge and GET /routing/presets all use, so a preset previewed is the
+// preset applied.
+func DefaultPresetOptsFor(src Source) PresetOpts {
+	return PresetOptsFromRoles(DefaultPresetOpts(), src)
+}
+
 // Kept is what KeepOperatorDecisions carried from the stored mix into a preset:
 // the tracks that stay muted and the roles that stay excluded. Both nil when
 // nothing was carried.
