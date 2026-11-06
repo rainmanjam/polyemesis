@@ -5,6 +5,7 @@ import { destinationFace } from "../src/keyFace.js";
 import {
   ACCOUNT_HEALTH_STATES,
   FAILURE_CAUSES,
+  LEVEL_APPLIED_WORDS,
   PROCESS_STATES,
   RECORDING_STATE_WORDS,
   SOURCE_KINDS,
@@ -21,6 +22,10 @@ import wire from "./contract/wire.json" with { type: "json" };
 const sorted = (xs: readonly string[]) => [...xs].sort();
 
 describe("the plugin's wire words are the server's", () => {
+  it("how a level was applied", () => {
+    expect(sorted(LEVEL_APPLIED_WORDS)).toEqual(sorted(wire.appliedStates));
+  });
+
   it("process states", () => {
     expect(sorted(PROCESS_STATES)).toEqual(sorted(wire.processStates));
   });

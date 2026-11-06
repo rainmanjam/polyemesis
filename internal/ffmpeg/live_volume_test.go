@@ -43,3 +43,17 @@ func TestWindowsDestinationsKeepNostdin(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveCommandsSupportedIsOneAnswerForEveryCaller(t *testing.T) {
+	if liveCommandsSupportedOn("windows") {
+		t.Error("Windows must not claim live commands: the path is unverified there")
+	}
+	for _, goos := range []string{"linux", "darwin", "freebsd"} {
+		if !liveCommandsSupportedOn(goos) {
+			t.Errorf("%s must support live commands", goos)
+		}
+		if slices.Contains(commonArgsLiveFor(goos), "-nostdin") != !liveCommandsSupportedOn(goos) {
+			t.Errorf("%s: -nostdin disagrees with the predicate", goos)
+		}
+	}
+}

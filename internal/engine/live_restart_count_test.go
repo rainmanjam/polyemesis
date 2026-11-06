@@ -195,7 +195,7 @@ func TestARefusedLevelChangeCountsTheRestartItFallsBackTo(t *testing.T) {
 	muted.Profile.Tracks[0].Muted = true
 	after := planFor(t, e, &muted)
 	e.stopDestinations(map[int64]destPlan{row.ID: after})
-	if applied, _, _ := e.DestinationLive(row.ID); applied != liveRestart {
+	if applied, _, _ := e.DestinationLive(row.ID); applied != AppliedRestart {
 		t.Fatalf("setup: applied = %q, want the restart fallback", applied)
 	}
 	e.startDestinations(map[int64]destPlan{row.ID: after})

@@ -92,6 +92,10 @@ export const WIRE = {
     "refreshFailing",
     "expired"
   ],
+  "appliedStates": [
+    "live",
+    "restart"
+  ],
   "viewerPlatforms": [
     "youtube",
     "twitch",

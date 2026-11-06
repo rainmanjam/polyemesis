@@ -188,7 +188,7 @@ export interface PresetApplyRow {
   id: number;
   name: string;
   outcome: "saved" | "skipped" | "failed";
-  applied?: "live" | "restart";
+  applied?: LevelApplied;
   message?: string;
 }
 
@@ -245,7 +245,12 @@ export interface DestinationLevels {
 }
 
 /** How a track level reached the output: on the running process's command channel, or by a (re)start. */
-export type LevelApplied = "live" | "restart";
+export const LEVEL_APPLIED_WORDS = ["live", "restart"] as const;
+export type LevelApplied = (typeof LEVEL_APPLIED_WORDS)[number];
+
+export function isLevelApplied(v: unknown): v is LevelApplied {
+  return (LEVEL_APPLIED_WORDS as readonly unknown[]).includes(v);
+}
 
 /** The answer of POST /destinations/{id}/tracks/{track}/gain. */
 export interface TrackLevelResult {

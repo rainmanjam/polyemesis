@@ -39,6 +39,8 @@
  * "where supported", never as a promise; the server's answer after the save is
  * what the toast reports. */
 
+import { WIRE, type Member } from "@/lib/contract/wire";
+
 /** The spelling routing emits for a named volume stage, the same pattern
  *  internal/ffmpeg/live_volume.go's liveVolumeRE recognises. */
 const LIVE_VOLUME = /volume@([A-Za-z0-9_]+)=volume=([0-9.]+)/g;
@@ -109,7 +111,7 @@ export function saveImpact(input: {
  *  reconcile (PUT /destinations/{id}'s `applied`, Engine.AppliedSince): "live"
  *  when the running FFmpeg kept running, "restart" when this save replaced it.
  *  Absent when nothing was running to apply it to, or when the reconcile failed. */
-export type SaveApplied = "live" | "restart";
+export type SaveApplied = Member<typeof WIRE.appliedStates>;
 
 /** The toast after a routing save, from the SERVER's answer rather than the
  *  prediction above: E3's "is restarting with the new mix" came from the page's

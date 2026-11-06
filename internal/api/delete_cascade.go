@@ -8,6 +8,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -220,25 +221,8 @@ func eventLeftWarning(d *db.Destination, eventID, reason string) string {
 // platformTitle is a platform's name as its own site writes it, for a sentence
 // an operator reads.
 func platformTitle(p db.Platform) string {
-	switch p {
-	case db.PlatformYouTube:
-		return "YouTube"
-	case db.PlatformTwitch:
-		return "Twitch"
-	case db.PlatformFacebook:
-		return "Facebook"
-	case db.PlatformKick:
-		return "Kick"
-	case db.PlatformVimeo:
-		return "Vimeo"
-	case db.PlatformTikTok:
-		return "TikTok"
-	case db.PlatformX:
-		return "X"
-	case db.PlatformTrovo:
-		return "Trovo"
-	case db.PlatformRumble:
-		return "Rumble"
+	if row, ok := platform.ByEnum(string(p)); ok && p != db.PlatformCustom {
+		return row.ShortName
 	}
 	return "the platform"
 }

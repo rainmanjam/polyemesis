@@ -100,7 +100,7 @@ func TestARefusedLevelChangeRestartsAndSaysWhy(t *testing.T) {
 	e.stopDestinations(map[int64]destPlan{row.ID: planFor(t, e, &muted)})
 
 	applied, reason, _ := e.DestinationLive(row.ID)
-	if applied != liveRestart || reason == "" {
+	if applied != AppliedRestart || reason == "" {
 		t.Fatalf("applied = %q reason = %q, want restart with a reason", applied, reason)
 	}
 	e.mu.RLock()
@@ -210,7 +210,7 @@ func TestALevelChangeWithAStructuralOneRecordsTheRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("no outcome recorded for a level change that restarted")
 	}
-	if applied != liveRestart || reason == "" {
+	if applied != AppliedRestart || reason == "" {
 		t.Errorf("applied = %q reason = %q, want restart with a reason", applied, reason)
 	}
 }

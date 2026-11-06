@@ -31,7 +31,7 @@ import (
 //
 // terminate() arms a goroutine that kills the process group if the child has not
 // gone by the grace period. It used to do that with an unconditional
-// time.Sleep(shutdownGrace): every stop, including the ones over in thirty
+// time.Sleep(ShutdownGrace): every stop, including the ones over in thirty
 // milliseconds, left a goroutine parked for a full eight seconds, and a
 // supervisor stopping forty destinations paid it forty times. The only thing
 // keeping a stale one from killing an innocent successor was pointer identity on
@@ -129,7 +129,7 @@ func TestTheGraceEscalatorStopsWaitingOnceTheChildIsReaped(t *testing.T) {
 			"has: it is sleeping the grace period unconditionally rather than selecting on "+
 			"the child's exit. In production that is one goroutine per stop parked for %s, "+
 			"paid per destination, holding a reference to an exec.Cmd it intends to kill.",
-			waited.Round(time.Millisecond), grace, shutdownGrace)
+			waited.Round(time.Millisecond), grace, ShutdownGrace)
 	}
 }
 

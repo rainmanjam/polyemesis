@@ -33,8 +33,21 @@ func commonArgsLive() []string {
 	return commonArgsLiveFor(runtime.GOOS)
 }
 
+// LiveCommandsSupported reports whether a running FFmpeg can be sent live
+// commands on its stdin. It is the one answer: commonArgsLive drops -nostdin by
+// it, the supervisor opens the pipe by it, the engine tries a live level change
+// by it and the API reports it. On Windows the path is unverified, so every
+// level change restarts instead.
+func LiveCommandsSupported() bool {
+	return liveCommandsSupportedOn(runtime.GOOS)
+}
+
+func liveCommandsSupportedOn(goos string) bool {
+	return goos != "windows"
+}
+
 func commonArgsLiveFor(goos string) []string {
-	if goos == "windows" {
+	if !liveCommandsSupportedOn(goos) {
 		return CommonArgs(LogWarning, false)
 	}
 	return append([]string{"-hide_banner"}, "-loglevel", LogLevel(LogWarning))

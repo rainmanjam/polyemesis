@@ -103,7 +103,7 @@ func TestALevelChangeIsPublishedWithHowItWasApplied(t *testing.T) {
 	e, sub := streamEngine(t)
 	e.dests[3] = &destination{row: &db.Destination{ID: 3, Name: "Twitch", Platform: db.PlatformTwitch}}
 
-	e.setLiveNote(3, liveNote{applied: liveApplied})
+	e.setLiveNote(3, liveNote{applied: AppliedLive})
 	ev := streamtest.Expect(t, sub, eventstream.TypeDestinationLevel)
 	if got := ev.Data.(map[string]any)["applied"]; got != "live" {
 		t.Errorf("applied = %v, want live", got)
@@ -112,7 +112,7 @@ func TestALevelChangeIsPublishedWithHowItWasApplied(t *testing.T) {
 		t.Errorf("destination = %+v, want Twitch", ev.Destination)
 	}
 
-	e.setLiveNote(3, liveNote{applied: liveRestart, reason: "the process refused the live change"})
+	e.setLiveNote(3, liveNote{applied: AppliedRestart, reason: "the process refused the live change"})
 	ev = streamtest.Expect(t, sub, eventstream.TypeDestinationLevel)
 	if got := ev.Data.(map[string]any)["applied"]; got != "restart" || ev.Reason == "" {
 		t.Errorf("event = %+v, want applied restart with the reason", ev)

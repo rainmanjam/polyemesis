@@ -284,6 +284,31 @@ func TestOutputReturnsStdoutAndStderrSeparately(t *testing.T) {
 	}
 }
 
+func TestCombinedOutputReturnsBothStreamsInOne(t *testing.T) {
+	out, err := CombinedOutput(context.Background(), helper("progress"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "progress=end") || !strings.Contains(string(out), "a warning nobody minds") {
+		t.Errorf("combined output = %q, want stdout and stderr", out)
+	}
+}
+
+// A pipe held open by a surviving grandchild must not keep CombinedOutput past
+// the wait the caller asked for.
+func TestCombinedOutputHonoursAShorterWaitDelayWhenAPipeIsHeld(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := CombinedOutput(ctx, helper("grandchild"), WithWaitDelay(300*time.Millisecond))
+	if err == nil {
+		t.Fatal("a killed command reported success")
+	}
+	if elapsed := time.Since(start); elapsed > KillGrace-time.Second {
+		t.Errorf("returned after %s: the held pipe was waited on for KillGrace, not the 300ms asked for", elapsed)
+	}
+}
+
 func TestRunEnrolledReportsAStartFailure(t *testing.T) {
 	err := RunEnrolled(exec.Command("definitely-not-a-real-binary-xyz"), probeKind)
 	if err == nil {

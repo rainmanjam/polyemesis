@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -237,20 +238,20 @@ func (s *Server) persistTrackLevels(row *db.Destination, changed bool) (lw level
 	switch {
 	case noted:
 	case !changed:
-		applied, reason = "live", "no change to apply"
+		applied, reason = engine.AppliedLive, "no change to apply"
 	case rw != "":
 		// The reconcile failed before it could say anything about this
 		// destination. The level is stored but nothing confirmed it reached the
 		// running output, so it must not be reported as live.
-		applied, reason = "restart", "the level is stored but the running pipeline could not be updated; it takes effect on the next start"
+		applied, reason = engine.AppliedRestart, "the level is stored but the running pipeline could not be updated; it takes effect on the next start"
 	case eng == nil || !eng.DestinationRunning(id):
-		applied, reason = "restart", "the destination is not running; the level is stored and takes effect when it starts"
+		applied, reason = engine.AppliedRestart, "the destination is not running; the level is stored and takes effect when it starts"
 	default:
 		// Running, and the engine saw no level move: a level change it sent or
 		// restarted for would have left a note. The stored value reaches no
 		// stage of the running mix (a track that is selected but not enabled,
 		// or absent from the ingest), so nothing was restarted.
-		applied, reason = "live", "the track is not part of the running mix, so the level is stored and changes nothing on the output yet"
+		applied, reason = engine.AppliedLive, "the track is not part of the running mix, so the level is stored and changes nothing on the output yet"
 	}
 	return levelWrite{updated: updated, warnings: warnings, applied: applied, reason: reason, reconcileWarn: rw}, nil, nil
 }

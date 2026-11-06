@@ -30,7 +30,7 @@ func TestALevelChangeAppliedInPlaceIsNotCountedAsARestart(t *testing.T) {
 	muted.Profile.Tracks[0].Muted = true
 	e.stopDestinations(map[int64]destPlan{row.ID: planFor(t, e, &muted)})
 	e.startDestinations(map[int64]destPlan{row.ID: planFor(t, e, &muted)})
-	if applied, reason, _ := e.DestinationLive(row.ID); applied != liveApplied {
+	if applied, reason, _ := e.DestinationLive(row.ID); applied != AppliedLive {
 		t.Fatalf("setup: applied = %q (%s), want live", applied, reason)
 	}
 

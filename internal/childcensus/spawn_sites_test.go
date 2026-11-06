@@ -45,9 +45,6 @@ var spawnersThatNeedNoCensus = map[string]string{
 	"internal/highlights": "builds the *exec.Cmd (low priority where the OS needs telling) " +
 		"and runs it through ffmpeg.RunEnrolled, which enrols it in the census for as long " +
 		"as it runs and bounds the wait with KillGrace; the Enrol is in internal/ffmpeg",
-	"internal/api": "two short output-collected runs -- the playout poster frame and the " +
-		"expert dry-run, the latter bounded by both a context deadline and WaitDelay. " +
-		"Neither can survive the handler, so neither can survive the shutdown",
 	"internal/testenv": "test scaffolding: netstat and lsof, to find a free UDP port",
 	"scripts/cmd/gotest": "a build-time wrapper that shells out to `go test`; it is not " +
 		"part of the server binary and its child is the test run itself",
@@ -135,9 +132,6 @@ var spawnGroupPolicy = map[string]struct {
 			"so the property worth having is that an abrupt death of polyemesis takes it " +
 			"too rather than leaving a #448 orphan holding CPU for days. Also the startup " +
 			"capability probes, all bounded by a context deadline"},
-	"internal/api": {parentGroup,
-		"the playout poster frame and the expert dry-run, both short and output-collected, " +
-			"and both bounded by the request they serve"},
 	"internal/testenv": {parentGroup,
 		"test scaffolding: netstat and lsof, which exit on their own within milliseconds"},
 	"scripts": {parentGroup,

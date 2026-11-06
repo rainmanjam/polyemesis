@@ -47,7 +47,7 @@ func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 		e.stopDestinations(map[int64]destPlan{row.ID: after})
 
 		applied, reason := e.AppliedSince(row.ID, before)
-		if applied != liveApplied || reason != nothingToApply {
+		if applied != AppliedLive || reason != nothingToApply {
 			t.Fatalf("applied = %q reason = %q, want live, %q", applied, reason, nothingToApply)
 		}
 		if e.DestinationRunOf(row.ID) != before {
@@ -87,7 +87,7 @@ func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 		liveRunningDest(e, &limited, next, fresh)
 
 		applied, reason := e.AppliedSince(row.ID, before)
-		if applied != liveRestart || reason == "" {
+		if applied != AppliedRestart || reason == "" {
 			t.Fatalf("applied = %q reason = %q, want restart with a reason", applied, reason)
 		}
 	})
@@ -137,7 +137,7 @@ func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 	} {
 		t.Run(c.name+" is live, and says what the backup did", func(t *testing.T) {
 			applied, reason := backupCase(t, c.hadBackup, c.hasBackup)
-			if applied != liveApplied || reason != c.want {
+			if applied != AppliedLive || reason != c.want {
 				t.Fatalf("applied = %q reason = %q, want live, %q", applied, reason, c.want)
 			}
 		})
@@ -176,12 +176,12 @@ func TestAppliedSinceReadsTheProcessNotTheChange(t *testing.T) {
 		liveRunningDest(e, row, plan, proc)
 		before := e.DestinationRunOf(row.ID)
 
-		e.setLiveNote(row.ID, liveNote{applied: liveApplied})
+		e.setLiveNote(row.ID, liveNote{applied: AppliedLive})
 		fresh := replyChild(t, "Command reply for stream 0: ret:0 res:")
 		t.Cleanup(func() { _ = fresh.Stop(t.Context()) })
 		liveRunningDest(e, row, plan, fresh)
 
-		if applied, reason := e.AppliedSince(row.ID, before); applied != liveRestart {
+		if applied, reason := e.AppliedSince(row.ID, before); applied != AppliedRestart {
 			t.Fatalf("applied = %q (%s), want restart: the process was replaced", applied, reason)
 		}
 	})

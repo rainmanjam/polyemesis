@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -442,13 +443,26 @@ func TestProbeArgsFallBackRatherThanDropTheDevice(t *testing.T) {
 
 // Detection is not paid for when nothing in the candidate list would use it.
 func TestVAAPIDetectionIsSkippedWhenNoCandidateNeedsIt(t *testing.T) {
+	var calls atomic.Int32
+	tools := &Tools{
+		VideoEncoders: []string{EncoderX264},
+		GPUDetect:     func(context.Context) GPUInfo { calls.Add(1); return GPUInfo{} },
+	}
+	tools.RefreshEncoderCapabilities(context.Background())
+	if n := calls.Load(); n != 0 {
+		t.Errorf("refresh detected GPUs %d times with no VAAPI candidate", n)
+	}
+	tools.GPUs(context.Background())
+	if n := calls.Load(); n != 1 {
+		t.Errorf("the first GPUs read scanned %d times, want 1 (lazily)", n)
+	}
 	if anyVAAPI([]string{EncoderX264, EncoderNVENC, EncoderVideoToolbox}) {
 		t.Error("anyVAAPI said yes for a list with no vaapi encoder in it")
 	}
 	if !anyVAAPI([]string{EncoderX264, EncoderVAAPI}) {
 		t.Error("anyVAAPI missed a vaapi encoder in the list")
 	}
-	if got := probeVAAPIDevice(context.Background(), []string{EncoderX264}); got != "" {
+	if got := probeVAAPIDevice([]string{EncoderX264}, GPUInfo{VAAPIDevice: "/dev/dri/renderD129"}); got != "" {
 		t.Errorf("probeVAAPIDevice = %q for a non-vaapi list, want empty", got)
 	}
 }
@@ -921,5 +935,41 @@ func TestIsNotProbedRecognisesTheReasonsDetectionWrites(t *testing.T) {
 		if IsNotProbed(reason) {
 			t.Errorf("IsNotProbed(%q) = true", reason)
 		}
+	}
+}
+
+// A re-detect publishes the new render node and the new verdicts together:
+// while it is still enumerating or probing, a concurrent reader keeps the old
+// pair, and only after it returns does anyone see the new node.
+func TestRefreshPublishesTheGPUOnlyWhenItReturns(t *testing.T) {
+	node := "/dev/dri/renderD128"
+	entered, release := make(chan struct{}), make(chan struct{})
+	tools := &Tools{
+		GPUDetect: func(context.Context) GPUInfo {
+			if node == "/dev/dri/renderD129" {
+				close(entered)
+				<-release
+			}
+			return GPUInfo{VAAPIDevice: node}
+		},
+	}
+	if got := tools.GPUs(context.Background()).VAAPIDevice; got != "/dev/dri/renderD128" {
+		t.Fatalf("first read = %q", got)
+	}
+
+	node = "/dev/dri/renderD129"
+	done := make(chan struct{})
+	go func() { tools.RefreshEncoderCapabilities(context.Background()); close(done) }()
+	<-entered
+
+	for range 100 {
+		if got := tools.GPUs(context.Background()).VAAPIDevice; got != "/dev/dri/renderD128" {
+			t.Fatalf("a reader saw %q before the refresh finished", got)
+		}
+	}
+	close(release)
+	<-done
+	if got := tools.GPUs(context.Background()).VAAPIDevice; got != "/dev/dri/renderD129" {
+		t.Errorf("after the refresh the node is %q", got)
 	}
 }

@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime"
 	"slices"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/livevolume"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -370,15 +371,15 @@ func (a obsActions) ApplyScene(ctx context.Context, cfg obsbridge.Config, rule o
 	return out
 }
 
-// liveLevelsAvailable mirrors engine.liveGainsSupported: on Windows every
-// level change restarts the destination, so "applied live where I4 allows"
-// means not applied at all there. Server.liveLevels replaces the answer in a
+// liveLevelsAvailable is ffmpeg.LiveCommandsSupported: on Windows every level
+// change restarts the destination, so "applied live where I4 allows" means not
+// applied at all there. Server.liveLevels replaces the answer in a
 // test, so the applied path does not depend on the runner's OS.
 func (s *Server) liveLevelsAvailable() bool {
 	if s.liveLevels != nil {
 		return s.liveLevels()
 	}
-	return runtime.GOOS != "windows"
+	return ffmpeg.LiveCommandsSupported()
 }
 
 // applySceneLevels applies one scene rule to one destination.
@@ -462,7 +463,7 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 	case lw.reconcileWarn != "":
 		res.Outcome = string(bulkWarned)
 		msgs = append(msgs, lw.reconcileWarn)
-	case lw.applied == "live":
+	case lw.applied == engine.AppliedLive:
 		res.Outcome = outcomeApplied
 		msgs = append(msgs, "applied live")
 		if lw.reason != "" {

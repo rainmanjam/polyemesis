@@ -794,3 +794,25 @@ func TestAHeldReconcileDrainsAnEnabledDelayedDestinationRatherThanCuttingIt(t *t
 	}
 	e.Stop()
 }
+
+// A drain that Shutdown took over is torn down by Shutdown, so finishDrain
+// finding the destination gone must not announce the teardown finished: a
+// CutDelay waiting on it would return while the child is still stopping.
+func TestFinishDrainDoesNotAnnounceATeardownItDoesNotOwn(t *testing.T) {
+	e := &Engine{draining: map[int64]*destination{}, retiring: map[int64]*destination{}}
+	d := &destination{row: &db.Destination{ID: 7}, delay: &destDelay{finished: make(chan struct{})}}
+
+	e.finishDrain(d) // not in e.draining: someone else owns the teardown
+	select {
+	case <-d.delay.finished:
+		t.Fatal("finishDrain closed `finished` for a destination it did not tear down")
+	default:
+	}
+	d.delay.finish()
+	d.delay.finish() // idempotent
+	select {
+	case <-d.delay.finished:
+	default:
+		t.Fatal("finish did not close the channel")
+	}
+}

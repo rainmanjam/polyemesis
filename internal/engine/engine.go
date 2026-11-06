@@ -56,27 +56,6 @@ import (
 const (
 	relayPortBase = 21000
 	relayPortSpan = 500
-	// stopTimeout bounds how long we wait for one child to exit.
-	//
-	// It must stay above supervisor.shutdownGrace (8s), which is the only thing
-	// that ends a child that does not heed the signal: a teardown that gives up
-	// first turns every unheeded stop into ErrStopDeadline and abandons a child
-	// the grace escalation would have reaped a moment later.
-	//
-	// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
-	// and with one exception. The teardowns below are all "this tier is going
-	// away": the port and the subscription are released whatever the answer, and
-	// there is no second thing to try, so ErrStopDeadline changes nothing they
-	// do. The exception is teardownDest, whose caller -- POST
-	// /destinations/{id}/stop -- reports the outcome to a human and therefore
-	// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
-	// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
-	// that a discard nobody thought about looks different from these (#196).
-	//
-	// It is a package var rather than a const for one reason: a test that needs
-	// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
-	// is not the property such a test is about. Nothing outside a test writes it.
-
 	// previewIdleDefault is how long the preview encoder outlives the last
 	// playlist request when settings do not say.
 	previewIdleDefault = 30 * time.Second
@@ -92,14 +71,32 @@ const (
 	// previewStartDebounce keeps a burst of requests against a down encoder,
 	// or a start that keeps failing, from turning into a burst of spawns.
 	previewStartDebounce = 2 * time.Second
-	// gpuDetectTimeout bounds the DRM enumeration. A wedged driver must not
-	// hold up starting an encode.
-	gpuDetectTimeout = 5 * time.Second
 )
 
-// stopTimeout bounds how long we wait for one child to exit. See the comment in
-// the const block above for why it is 12s and why it is a var.
-var stopTimeout = 12 * time.Second
+// stopTimeout bounds how long we wait for one child to exit.
+//
+// It is supervisor.ShutdownGrace plus a margin, because ShutdownGrace is the
+// only thing that ends a child that does not heed the signal: a teardown that
+// gives up first turns every unheeded stop into ErrStopDeadline and abandons
+// a child the grace escalation would have reaped a moment later.
+//
+// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
+// and with one exception. The teardowns below are all "this tier is going
+// away": the port and the subscription are released whatever the answer, and
+// there is no second thing to try, so ErrStopDeadline changes nothing they
+// do. The exception is teardownDest, whose caller -- POST
+// /destinations/{id}/stop -- reports the outcome to a human and therefore
+// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
+// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
+// that a discard nobody thought about looks different from these (#196).
+//
+// It is a package var rather than a const for one reason: a test that needs
+// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
+// is not the property such a test is about. Nothing outside a test writes it.
+var stopTimeout = supervisor.ShutdownGrace + stopMargin
+
+// stopMargin is what stopTimeout allows beyond supervisor.ShutdownGrace.
+const stopMargin = 4 * time.Second
 
 // Engine owns the whole streaming pipeline.
 //
@@ -257,11 +254,6 @@ type Engine struct {
 	// Stop now, stop-all and delete (CutOnStop). Guarded by e.mu, consumed by
 	// the stopDestinations pass that follows.
 	cutRequested map[int64]bool
-
-	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
-	// time a VAAPI rendition actually starts.
-	vaapiOnce sync.Once
-	vaapiDev  string
 
 	// reconcileMu serializes Reconcile end to end. It is NOT e.mu: e.mu is
 	// dropped and retaken a dozen times inside one reconcile so that Status()
@@ -1344,7 +1336,15 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	for _, d := range dests {
 		dest := d
 		wg.Add(1)
-		go func() { defer wg.Done(); e.teardownDest(dest) }()
+		go func() {
+			defer wg.Done()
+			e.teardownDest(dest)
+			// A drain this took over: whoever is waiting in CutDelay hears it
+			// only now that the child is down.
+			if dest.delay != nil {
+				dest.delay.finish()
+			}
+		}()
 	}
 	for _, m := range monitors {
 		mon := m
@@ -2601,7 +2601,7 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // to survive until they come back, or the operator has to make it twice.
 func (e *Engine) applyMeterInterval(m db.MeterSettings) {
 	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
-	e.noteReload("meters", "meters", reloadLive, "metering interval applied without a respawn")
+	e.noteReload("meters", "meters", AppliedLive, "metering interval applied without a respawn")
 }
 
 // meterThrottle rate-limits metering frames on their way to the WebSocket.
@@ -2904,11 +2904,11 @@ func (e *Engine) reconcileOutputs() error {
 	e.destHold.Store(hold)
 	switch {
 	case holdDests:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"held: the ingest layout has not been probed yet, and a routing graph "+
 				"compiled against the placeholder would map tracks that may not exist")
 	case unmeasurable:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"the ingest layout cannot be measured, so each track is downmixed by "+
 				"FFmpeg at runtime rather than by its profile's matrix")
 	}
@@ -3406,13 +3406,16 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 // and an unprobed encoder both mean "we do not know", and detection that could
 // not answer must never be the thing that stops a stream.
 func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error {
-	if tools == nil {
-		return nil
-	}
-	if len(tools.VideoEncoders) > 0 && !tools.HasEncoder(string(encoder)) {
+	return renditionEncoderProblemIn(tools.Probed(context.Background(), false), encoder)
+}
+
+// renditionEncoderProblemIn is renditionEncoderProblem against one generation
+// of detection, so a caller that also needs the GPU from it reads both at once.
+func renditionEncoderProblemIn(snap ffmpeg.Probed, encoder db.VideoEncoder) error {
+	if snap.Listed() && !snap.HasEncoder(string(encoder)) {
 		return fmt.Errorf("this FFmpeg build has no %s encoder", encoder)
 	}
-	works, reason := tools.EncoderWorks(string(encoder))
+	works, reason := snap.EncoderWorks(string(encoder))
 	if works || ffmpeg.IsNotProbed(reason) {
 		return nil
 	}
@@ -3442,7 +3445,11 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		e.log.Error("start rendition", "rendition", row.Name, "err", err)
 	}
 
-	if err := renditionEncoderProblem(e.tools, row.Encoder); err != nil {
+	// ONE GENERATION of detection for the whole start: the verdict that lets
+	// this encoder run and the render node it is told to use must come from the
+	// same probe, or a re-detect in between starts it on a node nobody proved.
+	snap := e.tools.Probed(context.Background(), isVAAPIEncoder(row.Encoder))
+	if err := renditionEncoderProblemIn(snap, row.Encoder); err != nil {
 		fail(err)
 		return
 	}
@@ -3490,7 +3497,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		fail(err)
 		return
 	}
-	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row, snap), e.cfg.DataDir)
 	// An FFmpeg with no drawtext filter must not be handed one.
 	//
 	// This is not a cosmetic guard. Found by running the renditions acceptance
@@ -3559,14 +3566,14 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	proc.Start()
 	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
 		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
-	e.noteReload("rendition", row.Name, reloadRestart, "started")
+	e.noteReload("rendition", row.Name, AppliedRestart, "started")
 }
 
 func (e *Engine) teardownRendition(r *rendition) {
 	if r == nil {
 		return
 	}
-	e.noteReload("rendition", r.row.Name, reloadRestart,
+	e.noteReload("rendition", r.row.Name, AppliedRestart,
 		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
@@ -6122,36 +6129,30 @@ func clearDir(dir string) {
 	}
 }
 
-// vaapiDevice resolves the render node a VAAPI rendition should use.
-//
-// Detection is deferred and done once: enumerating DRM nodes touches sysfs and
-// opens devices, which is not work to repeat on every rendition restart, and is
-// pointless on the overwhelming majority of installs that never run a VAAPI
-// encoder at all. Anything other than a VAAPI encoder returns empty
-// immediately, without detecting.
+// vaapiDevice is the render node a VAAPI rendition should use, from the
+// detection generation the start already read (Tools.Probed at every start, so
+// a hardware re-detect reaches a running engine).
+// Anything other than a VAAPI encoder returns empty without asking.
 //
 // An empty result is the safe answer, not a failure: FFmpeg then uses its own
 // default node, which is exactly the behaviour every install had before this
 // existed. Being wrong in the restrictive direction here -- refusing to start a
 // rendition because a device string could not be resolved -- would be worse
 // than the software fallback it is meant to avoid.
-func (e *Engine) vaapiDevice(r *db.Rendition) string {
-	if !strings.HasSuffix(string(r.Encoder), "_vaapi") {
+func (e *Engine) vaapiDevice(r *db.Rendition, snap ffmpeg.Probed) string {
+	if !isVAAPIEncoder(r.Encoder) {
 		return ""
 	}
-	e.vaapiOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), gpuDetectTimeout)
-		defer cancel()
-		info := ffmpeg.DetectGPUs(ctx)
-		e.vaapiDev = info.VAAPIDevice
-		if e.vaapiDev == "" {
-			e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
-		} else {
-			e.log.Info("VAAPI render node selected", "device", e.vaapiDev)
-		}
-	})
-	return e.vaapiDev
+	dev := snap.GPU.VAAPIDevice
+	if dev == "" {
+		e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
+	} else {
+		e.log.Info("VAAPI render node selected", "device", dev)
+	}
+	return dev
 }
+
+func isVAAPIEncoder(e db.VideoEncoder) bool { return strings.HasSuffix(string(e), "_vaapi") }
 
 // reconcileCount is how many times Reconcile has been entered. Test-only; see
 // the field's comment for why it is a field.

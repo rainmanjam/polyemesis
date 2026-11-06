@@ -987,7 +987,7 @@ func (s *Server) transcribeJob(rec db.Recording, req submitRequest) (jobs.Job, e
 	// does not carry the column, so this stays on the default source: the same
 	// answer the default engine gave, minus the requirement that one be
 	// running to submit a transcript job for an archived session.
-	settings, err := s.storeSettingsWithDefaultIngest()
+	settings, _, err := s.storeSettingsForSource(nil)
 	if err != nil {
 		return jobs.Job{}, err
 	}

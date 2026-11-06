@@ -51,7 +51,7 @@ func TestHandlerBehindRequireSourceGetsTheEngineTheGuardResolved(t *testing.T) {
 // ingest while /system advertised another's.
 //
 // The decision (#551's): the default is the on-air programme, the first row
-// only when nothing runs. Mutation: overlayDefaultSourceIngest back to
+// only when nothing runs. Mutation: overlaySourceIngest back to
 // s.store.DefaultSourceID() fails the GET /settings assertion.
 func TestSettingsAndSystemAgreeOnTheDefaultProgramme(t *testing.T) {
 	s, h, _, auth := managerServer(t, defaultTools())

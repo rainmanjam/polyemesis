@@ -1020,6 +1020,12 @@ func New(o Options) *Server {
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
 	}
+	// Read (and, for a file from before the token was sealed, rewrite) the
+	// playout sidecar now rather than on the first request, so an install
+	// nobody visits still has no plaintext token on disk after an upgrade.
+	if s.cfg.DataDir != "" {
+		s.playoutStore().load()
+	}
 	return s
 }
 
