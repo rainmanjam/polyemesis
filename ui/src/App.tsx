@@ -9,6 +9,7 @@ import { onSessionEnded } from "@/lib/session";
 import { overlayLocation } from "@/lib/overlay";
 import { setDisplayTimeZone } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { ThemeProvider, useTheme } from "@/components/ThemeProvider";
 import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
 import { AutomationPage } from "@/pages/AutomationPage";
@@ -120,7 +121,7 @@ type Gate =
   | { phase: "login" }
   | { phase: "ready"; username: string };
 
-export default function App() {
+function AppRoutes() {
   const [gate, setGate] = useState<Gate>({ phase: "loading" });
   // Fixed for the life of the page: a viewer never navigates out of /watch, and
   // an admin never navigates into it without a full reload.
@@ -158,6 +159,9 @@ export default function App() {
   // to the login screen rather than a console whose every button now fails
   // with the same toast. lib/session.ts decides which 401s count.
   const t = useT();
+  // The toasts are the one third-party surface that takes a theme as a prop
+  // rather than reading our tokens.
+  const { theme } = useTheme();
   const signedIn = gate.phase === "ready";
   useEffect(() => {
     if (!signedIn) return;
@@ -208,7 +212,7 @@ export default function App() {
     return (
       <>
         <AuthScreen mode={gate.phase} onDone={resolveGate} />
-        <Toaster theme="dark" position="bottom-right" richColors closeButton />
+        <Toaster theme={theme} position="bottom-right" richColors closeButton />
       </>
     );
   }
@@ -279,8 +283,19 @@ export default function App() {
             </Route>
           </Routes>
         </LiveDataProvider>
-        <Toaster theme="dark" position="bottom-right" richColors closeButton />
+        <Toaster theme={theme} position="bottom-right" richColors closeButton />
       </TooltipProvider>
     </BrowserRouter>
+  );
+}
+
+/** The console. The theme provider sits above everything, including the
+ *  sign-in screen (which is themed too); it is inert on /watch and the overlay
+ *  pages, which never are. */
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppRoutes />
+    </ThemeProvider>
   );
 }

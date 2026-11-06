@@ -197,3 +197,26 @@ describe("the navigation is grouped by the job it serves (A11)", () => {
     expect(document.querySelector('[data-tour="nav-renditions"]')).not.toBeNull();
   });
 });
+
+describe("the chrome's theme control", () => {
+  it("puts the Light / Dark / System toggle in the header, ahead of the language and sign-out controls", async () => {
+    vi.spyOn(api, "version").mockResolvedValue(info);
+    const { container } = renderChrome();
+    const header = container.querySelector("header")!;
+    const toggle = within(header).getByTestId("theme-toggle");
+    const language = within(header).getByRole("button", { name: "Language" });
+    const signOut = within(header).getByRole("button", { name: "Sign out" });
+    // DOM order is visual order in this flex row: toggle, then language, then sign out.
+    expect(toggle.compareDocumentPosition(language) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(language.compareDocumentPosition(signOut) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(toggle).getAllByRole("radio")).toHaveLength(3);
+  });
+
+  it("also offers it in the nav drawer, which is where it lives on a phone", () => {
+    const { container } = renderChrome();
+    const nav = container.querySelector("nav")!;
+    expect(within(nav).getAllByRole("radio")).toHaveLength(3);
+    // And the header copy is the one that drops out below sm.
+    expect(container.querySelector("header [data-testid=theme-toggle]")!.className).toContain("hidden sm:inline-flex");
+  });
+});

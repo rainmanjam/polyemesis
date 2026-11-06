@@ -59,6 +59,7 @@ import { MobileOnAirChip } from "@/components/MobileOnAirChip";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
 import { useNavCollapsed } from "@/features/shell/useNavCollapsed";
 import { ingestSignalTone } from "@/lib/liveness";
@@ -381,6 +382,20 @@ export function AppLayout({
               layout density toggle vacated in c1c9c514. */}
           <VersionTag info={versionInfo} />
 
+          {/* Light / Dark / System. A per-browser preference that costs no
+              server round trip, so it lives in the chrome where the operator
+              who is squinting at a bright room can reach it from any page.
+              Icon-only segments (each carries its translated label as its
+              accessible name and tooltip) because three words would not fit
+              the 44px header beside the others. Not rendered on /watch or the
+              overlay pages: they never mount this layout.
+
+              BELOW sm IT MOVES INTO THE NAV DRAWER (see the end of the <nav>).
+              Roughly 90px does not fit a 360px header that already has to print
+              "Off air" whole; at 360 and 390 the chip fell back to "Off". The
+              drawer is one tap from the header's menu button. */}
+          <ThemeToggle className="hidden sm:inline-flex" />
+
           {/* Sits in the chrome rather than on Settings: the operator who needs
               it cannot necessarily read the nav item that would lead there. */}
           <DropdownMenu>
@@ -682,6 +697,11 @@ export function AppLayout({
                 })}
               </div>
             ))}
+
+            {/* The theme control on a phone, where the header has no room for it
+                (see the one up there). Its own mt-auto: the collapse button
+                below is hidden under md, so this is the bottom of the drawer. */}
+            <ThemeToggle className="mt-auto self-start md:hidden" />
 
             {/* Pinned to the bottom, so the target does not move as the width
                 changes. mt-auto rather than a spacer div. */}
