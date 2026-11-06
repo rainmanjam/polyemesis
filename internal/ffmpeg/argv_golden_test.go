@@ -1,11 +1,17 @@
 package ffmpeg_test
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/argvgold"
 	. "github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
+
+// previewDir is a slash path the preview builder joins onto, so Check reads it
+// the same on Windows.
+const previewDir = "/tmp/preview"
 
 // ffmpegChildren is one argv per kind of FFmpeg child this package builds.
 func ffmpegChildren() map[string][]string {
@@ -30,7 +36,7 @@ func ffmpegChildren() map[string][]string {
 
 		"recorder":      RecorderArgs(RecorderSpec{RelayURL: "udp://127.0.0.1:20002", SegmentSeconds: 600}),
 		"stem_recorder": StemRecorderArgs(StemRecorderSpec{RecorderSpec: RecorderSpec{RelayURL: "udp://127.0.0.1:20002"}, Codec: StemFLAC, Stems: []StemSpec{{Path: "/rec/stem0.flac", Track: 0}}}),
-		"preview":       PreviewArgs(PreviewSpec{RelayURL: "udp://127.0.0.1:20003", OutputDir: "/tmp/preview"}),
+		"preview":       PreviewArgs(PreviewSpec{RelayURL: "udp://127.0.0.1:20003", OutputDir: previewDir}),
 		"meters":        MetersArgs(MetersSpec{RelayURL: "udp://127.0.0.1:20004", TrackChannels: []int{2, 2}, SampleRate: 48000}),
 
 		"rendition": RenditionArgs(RenditionSpec{
@@ -46,6 +52,9 @@ func ffmpegChildren() map[string][]string {
 }
 
 func TestFFmpegChildArgvIsPinned(t *testing.T) {
+	// The goldens are the Linux argv: a destination there takes live commands, so
+	// it has no -nostdin. Windows keeps the flag (TestWindowsDestinationKeepsNostdin).
+	PinLiveCommandsGOOS(t, "linux")
 	for _, lvl := range []string{"", "debug"} {
 		argvgold.LogLevel(t, lvl)
 		suffix := ""
@@ -58,7 +67,7 @@ func TestFFmpegChildArgvIsPinned(t *testing.T) {
 			if lvl != "" && name == "probe_ingest" {
 				continue
 			}
-			t.Run(name+suffix, func(t *testing.T) { argvgold.Check(t, name+suffix, argv) })
+			t.Run(name+suffix, func(t *testing.T) { argvgold.Check(t, name+suffix, argv, previewDir) })
 		}
 	}
 }
@@ -104,4 +113,26 @@ func TestOneShotProbesHonourTheLogLevelOverride(t *testing.T) {
 		}
 	}
 	SetLogLevel("")
+}
+
+// The other half of the Linux pin above: on a platform without live commands the
+// destination keeps -nostdin and runs the command it always did, and the preview
+// child, which never takes commands, keeps it everywhere.
+func TestWindowsDestinationKeepsNostdin(t *testing.T) {
+	kids := ffmpegChildren()
+	if slices.Contains(kids["destination_rtmp"], "-nostdin") {
+		t.Fatal("the pinned Linux destination carries -nostdin")
+	}
+	PinLiveCommandsGOOS(t, "windows")
+	if LiveCommandsSupported() {
+		t.Fatal("a windows pin still claims live commands")
+	}
+	for name, argv := range ffmpegChildren() {
+		if strings.HasPrefix(name, "destination_") && !slices.Contains(argv, "-nostdin") {
+			t.Errorf("%s on windows lost -nostdin: %q", name, argv)
+		}
+	}
+	if !slices.Contains(PreviewArgs(PreviewSpec{RelayURL: "udp://127.0.0.1:20003", OutputDir: previewDir}), "-nostdin") {
+		t.Error("the preview child lost -nostdin")
+	}
 }

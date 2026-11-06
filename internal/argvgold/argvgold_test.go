@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,5 +145,20 @@ func TestRequireRelayProducerAcceptsTheSharedEpilogueAndNamesWhatIsMissing(t *te
 	RequireRelayProducer(empty, "empty", nil)
 	if len(empty.errs) == 0 {
 		t.Error("an empty argv was accepted")
+	}
+}
+
+func TestSlashUnderRewritesOnlyPathsUnderARoot(t *testing.T) {
+	argv := []string{`\tmp\o\seg_%05d.ts`, `\tmp\o\index.m3u8`, `rtmp://h/a`, `[0:a]aformat=a\\:b[x]`, `\other\x`}
+	got := slashUnder(argv, []string{"/tmp/o"}, `\`)
+	want := []string{"/tmp/o/seg_%05d.ts", "/tmp/o/index.m3u8", "rtmp://h/a", `[0:a]aformat=a\\:b[x]`, `\other\x`}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %q want %q", got, want)
+	}
+	if argv[0] != `\tmp\o\seg_%05d.ts` {
+		t.Error("the caller's argv was modified")
+	}
+	if got := slashUnder(argv, []string{"/tmp/o"}, "/"); !slices.Equal(got, argv) {
+		t.Error("a slash host must be left alone")
 	}
 }

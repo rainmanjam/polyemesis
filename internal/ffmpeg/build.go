@@ -30,8 +30,14 @@ import (
 // gives the child no pipe, and the engine restarts on every level change. So
 // the flag stays, and a Windows destination runs the same command as before.
 func commonArgsLive() []string {
-	return commonArgsLiveFor(runtime.GOOS)
+	return commonArgsLiveFor(liveCommandsGOOS)
 }
+
+// liveCommandsGOOS is the platform LiveCommandsSupported answers for. It is
+// runtime.GOOS and nothing in this package assigns it; export_test.go lets a
+// test pin another so the argv goldens, recorded on Linux, read the same on
+// every CI runner.
+var liveCommandsGOOS = runtime.GOOS
 
 // LiveCommandsSupported reports whether a running FFmpeg can be sent live
 // commands on its stdin. It is the one answer: commonArgsLive drops -nostdin by
@@ -39,7 +45,7 @@ func commonArgsLive() []string {
 // by it and the API reports it. On Windows the path is unverified, so every
 // level change restarts instead.
 func LiveCommandsSupported() bool {
-	return liveCommandsSupportedOn(runtime.GOOS)
+	return liveCommandsSupportedOn(liveCommandsGOOS)
 }
 
 func liveCommandsSupportedOn(goos string) bool {
