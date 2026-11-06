@@ -2072,10 +2072,6 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		failStored(http.StatusInternalServerError, "", rw, settingsVersion(settings))
 		return
 	}
-	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
-	// it has to be applied HERE rather than at the next restart. A retention
-	// setting that stores, returns 200 and keeps sweeping on the old numbers is
-	// the same silent no-op the ingest block above documents.
 	// Everything the document configures in a running process goes through the
 	// one function boot uses too, so the two cannot drift apart.
 	s.ApplySettings(settings)

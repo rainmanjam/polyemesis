@@ -19,6 +19,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // TestTellingTheXBroadcastReachesTheAccountsRunningAdapter: setXBroadcast is the coordinator's pointChat. It finds
@@ -204,6 +205,21 @@ func TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen(t *testing.T) {
 			}
 			if !seen {
 				t.Fatal("no X guide")
+			}
+		})
+	}
+}
+
+// The gate reaches X the way main hands it over: through Options.Env alone, with
+// no provider set of the test's own. The server builds the production set
+// itself and carries the switch into it.
+func TestTheStartupEnvironmentOpensTheXGateInTheServersOwnProviderSet(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		want := map[bool]string{false: "closed", true: "open"}[open]
+		t.Run(want, func(t *testing.T) {
+			s, _, _ := testServerWith(t, Options{Env: startupenv.Env{XLivestream: open}})
+			if got := s.livestreamGate(db.PlatformX); got != want {
+				t.Errorf("livestreamGate(X) = %q, want %q", got, want)
 			}
 		})
 	}
