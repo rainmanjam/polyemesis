@@ -23,6 +23,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/polls"
 )
 
+// routeStatus is the status route the MCP tools call.
+const routeStatus = "/status"
+
+// routePolls is the polls collection route the MCP tools call.
+const routePolls = "/polls"
+
 // The MCP tool catalogue. Every entry names the REST request(s) it makes; see
 // mcp.go for why a tool is a REST call and nothing else.
 //
@@ -564,7 +570,7 @@ func mcpCatalogue() []mcpTool {
 				if err != nil {
 					return nil, err
 				}
-				st, err := c.call(http.MethodGet, "/status", q, nil)
+				st, err := c.call(http.MethodGet, routeStatus, q, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -596,7 +602,7 @@ func mcpCatalogue() []mcpTool {
 				if err != nil {
 					return nil, err
 				}
-				st, err := c.call(http.MethodGet, "/status", q, nil)
+				st, err := c.call(http.MethodGet, routeStatus, q, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -653,7 +659,7 @@ func mcpCatalogue() []mcpTool {
 				if err != nil {
 					return nil, err
 				}
-				st, err := c.call(http.MethodGet, "/status", q, nil)
+				st, err := c.call(http.MethodGet, routeStatus, q, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -746,7 +752,7 @@ func mcpCatalogue() []mcpTool {
 				if a.Limit < 1 || a.Limit > 100 {
 					return nil, argErr("limit must be 1 to 100")
 				}
-				v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
+				v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -1335,7 +1341,7 @@ func mcpCatalogue() []mcpTool {
 					// The preview is a READ of GET /polls, which writes nothing
 					// and so is not audited: the poll as it stands, if it is the
 					// running one, so the user sees which question ends.
-					v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {"1"}}, nil)
+					v, err := c.call(http.MethodGet, routePolls, url.Values{"limit": {"1"}}, nil)
 					if err != nil {
 						return nil, err
 					}
@@ -1401,7 +1407,7 @@ func runStartPoll(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 			map[string]any{"announcement": polls.StartText(spec), "options": spec.Options,
 				"durationSeconds": spec.DurationSeconds})
 	}
-	v, err := c.call(http.MethodPost, "/polls", nil, spec)
+	v, err := c.call(http.MethodPost, routePolls, nil, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -1474,7 +1480,7 @@ func (c *mcpCtx) delays(src *int64, id int64) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := c.call(http.MethodGet, "/status", q, nil)
+	st, err := c.call(http.MethodGet, routeStatus, q, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1770,7 +1776,7 @@ func (c *mcpCtx) destinationHealth(id int64, src *int64) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	st, err := c.call(http.MethodGet, "/status", q, nil)
+	st, err := c.call(http.MethodGet, routeStatus, q, nil)
 	if err != nil {
 		return nil, err
 	}

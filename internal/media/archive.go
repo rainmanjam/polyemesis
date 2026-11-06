@@ -12,6 +12,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
+// encoderLibaomAV1 is the FFmpeg encoder name for libaom AV1.
+const encoderLibaomAV1 = "libaom-av1"
+
+// flagPreset is the encoder preset flag shared by every archive codec.
+const flagPreset = "-preset"
+
 // ------------------------------------------------------- archive compression
 //
 // This is the only job in polyemesis that DESTROYS DATA. Everything else adds a
@@ -106,7 +112,7 @@ var archiveProfiles = map[string]archiveProfile{
 	// is not x264's 28, which is noticeably worse.
 	"libx265": {
 		encoder: "libx265", qualityFlag: "-crf", defaultQuality: 28,
-		presetFlag: "-preset", defaultPreset: "medium",
+		presetFlag: flagPreset, defaultPreset: "medium",
 		// x265 prints a banner and a per-frame summary on stderr at any
 		// loglevel, which would drown the job log tail it shares with the
 		// errors that matter.
@@ -116,22 +122,22 @@ var archiveProfiles = map[string]archiveProfile{
 	// time grows much faster than the file shrinks.
 	"libsvtav1": {
 		encoder: "libsvtav1", qualityFlag: "-crf", defaultQuality: 32,
-		presetFlag: "-preset", defaultPreset: "6",
+		presetFlag: flagPreset, defaultPreset: "6",
 	},
 	// libaom needs -b:v 0 or its CRF is treated as a ceiling on a bitrate
 	// target rather than a quality target.
-	"libaom-av1": {
-		encoder: "libaom-av1", qualityFlag: "-crf", defaultQuality: 32,
+	encoderLibaomAV1: {
+		encoder: encoderLibaomAV1, qualityFlag: "-crf", defaultQuality: 32,
 		extra: []string{"-b:v", "0", "-cpu-used", "4", "-row-mt", "1"},
 	},
 	"hevc_nvenc": {
 		encoder: "hevc_nvenc", qualityFlag: "-cq", defaultQuality: 28,
-		presetFlag: "-preset", defaultPreset: "p5",
+		presetFlag: flagPreset, defaultPreset: "p5",
 		extra: []string{"-rc", "vbr", "-b:v", "0"},
 	},
 	"hevc_qsv": {
 		encoder: "hevc_qsv", qualityFlag: "-global_quality", defaultQuality: 28,
-		presetFlag: "-preset", defaultPreset: "medium",
+		presetFlag: flagPreset, defaultPreset: "medium",
 	},
 	"hevc_vaapi": {
 		encoder: "hevc_vaapi", qualityFlag: "-qp", defaultQuality: 28,
@@ -139,7 +145,7 @@ var archiveProfiles = map[string]archiveProfile{
 	},
 	"av1_nvenc": {
 		encoder: "av1_nvenc", qualityFlag: "-cq", defaultQuality: 32,
-		presetFlag: "-preset", defaultPreset: "p5",
+		presetFlag: flagPreset, defaultPreset: "p5",
 		extra: []string{"-rc", "vbr", "-b:v", "0"},
 	},
 }
@@ -154,7 +160,7 @@ var archiveProfiles = map[string]archiveProfile{
 // operator with a thousand hours to get through, not chosen for them.
 var archiveEncoders = map[ArchiveCodec][]string{
 	ArchiveHEVC: {"libx265", "hevc_nvenc", "hevc_qsv", "hevc_vaapi"},
-	ArchiveAV1:  {"libsvtav1", "libaom-av1", "av1_nvenc"},
+	ArchiveAV1:  {"libsvtav1", encoderLibaomAV1, "av1_nvenc"},
 }
 
 // ------------------------------------------------------------ quality bounds
@@ -392,7 +398,7 @@ func ArchiveArgs(s ArchiveSpec) []string {
 			args = append(args, prof.presetFlag, preset)
 		}
 	case !known && preset != "":
-		args = append(args, "-preset", preset)
+		args = append(args, flagPreset, preset)
 	}
 
 	args = append(args, prof.extra...)

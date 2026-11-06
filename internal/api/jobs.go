@@ -357,7 +357,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	j, err := s.jobq.Get(id)
@@ -684,7 +684,7 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if s.gov == nil {
@@ -782,7 +782,7 @@ func (s *Server) jobAction(w http.ResponseWriter, r *http.Request, act func(int6
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := act(id); err != nil {

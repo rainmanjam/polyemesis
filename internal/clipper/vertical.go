@@ -15,6 +15,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
+// colorBlack is the default outline, box and back colour.
+const colorBlack = "#000000"
+
 // A vertical export is a 9:16 short cut from a 16:9 recording: the same plan,
 // the same job kind, the same exports directory and the same download route as
 // every other clip -- only the last FFmpeg invocation differs. There is no
@@ -215,9 +218,9 @@ func DefaultCaptionStyle() CaptionStyle {
 		Font:         DefaultCaptionFont,
 		SizePct:      4.2,
 		Color:        "#ffffff",
-		OutlineColor: "#000000",
+		OutlineColor: colorBlack,
 		Outline:      6,
-		BoxColor:     "#000000",
+		BoxColor:     colorBlack,
 		BoxOpacity:   0.55,
 		PositionPct:  72,
 		MaxLines:     2,
@@ -725,7 +728,7 @@ func assScript(scr []captionScreen, style CaptionStyle, family string, bold bool
 		boldFlag = -1
 	}
 	borderStyle, outline := 1, 0
-	outlineColour, backColour := assColour(style.OutlineColor, 1), assColour("#000000", 0)
+	outlineColour, backColour := assColour(style.OutlineColor, 1), assColour(colorBlack, 0)
 	if style.Outline > 0 {
 		outline = style.Outline
 	}

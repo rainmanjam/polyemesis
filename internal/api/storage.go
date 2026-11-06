@@ -171,7 +171,7 @@ func locationChanged(saved, next db.StorageTarget) bool {
 }
 
 // msgInvalidID is the 400 every storage route gives a path id that is not one.
-const msgInvalidID = "invalid id"
+const msgInvalidID = errInvalidID
 
 // validateEndpoint refuses an endpoint that is not an http(s) URL with a
 // host, one that carries credentials, a query or a fragment, and a literal

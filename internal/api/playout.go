@@ -790,12 +790,12 @@ func (s *Server) playoutHandler() http.Handler {
 			w.Header().Set("WWW-Authenticate", `Basic realm="polyemesis playout", charset="UTF-8"`)
 			// Refusals are never stored: a CDN rule that makes /playout/
 			// cache-eligible must not hold a 401 or a pre-publish 404 at the edge.
-			w.Header().Set("Cache-Control", cacheNoStore)
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
 			return
 		default:
 			if !access.ok() {
-				w.Header().Set("Cache-Control", cacheNoStore)
+				w.Header().Set(headerCacheControl, cacheNoStore)
 				http.NotFound(w, r)
 				return
 			}
@@ -803,7 +803,7 @@ func (s *Server) playoutHandler() http.Handler {
 
 		h := resolve()
 		if h == nil {
-			w.Header().Set("Cache-Control", cacheNoStore)
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			writeError(w, http.StatusServiceUnavailable, "playout is not running")
 			return
 		}
@@ -882,7 +882,7 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	playoutVaryingResponse(w)
 	access := s.authorizePlayout(r)
 	if !access.ok() {
-		w.Header().Set("Cache-Control", cacheNoStore)
+		w.Header().Set(headerCacheControl, cacheNoStore)
 		// Deliberately no basic-auth challenge: a poster is decoration, and a
 		// password prompt fired by an <img> tag on somebody's blog would be a
 		// hostile thing to do. The player page prompts, the poster just 404s.
@@ -897,7 +897,7 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	// scope register could not see (#539/#550).
 	m := s.playoutManager()
 	if m == nil {
-		w.Header().Set("Cache-Control", cacheNoStore)
+		w.Header().Set(headerCacheControl, cacheNoStore)
 		http.NotFound(w, r)
 		return
 	}
@@ -912,19 +912,19 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 		// feeding, so this is a 404 rather than a 500 the operator would go
 		// looking for a cause for. Never stored: a poster appears as soon as
 		// the first segment does.
-		w.Header().Set("Cache-Control", cacheNoStore)
+		w.Header().Set(headerCacheControl, cacheNoStore)
 		http.NotFound(w, r)
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set(headerContentType, "image/jpeg")
 	// Shared caches only for an open stream, as on the media origin: a CDN that
 	// ignores Vary must not hand a token-gated stream's poster to a stranger.
 	scope := "private"
 	if access == playoutAllowOpen {
 		scope = "public"
 	}
-	w.Header().Set("Cache-Control", scope+", max-age="+strconv.Itoa(int(posterMaxAge.Seconds())))
+	w.Header().Set(headerCacheControl, scope+", max-age="+strconv.Itoa(int(posterMaxAge.Seconds())))
 	if s.playoutSettings().AllowCrossOrigin {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
@@ -1381,12 +1381,12 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		// No WWW-Authenticate here. The page's own fetch would trigger the
 		// browser's credential dialog on top of the React UI, which is a worse
 		// experience than the page explaining that the link needs a token.
-		w.Header().Set("Cache-Control", cacheNoStore)
+		w.Header().Set(headerCacheControl, cacheNoStore)
 		writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
 		return
 	default:
 		if !access.ok() {
-			w.Header().Set("Cache-Control", cacheNoStore)
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			http.NotFound(w, r)
 			return
 		}
@@ -1397,9 +1397,9 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 	// holder's (which sets a cookie) and an operator's are private and not
 	// stored.
 	if access == playoutAllowOpen {
-		w.Header().Set("Cache-Control", "public, max-age=5")
+		w.Header().Set(headerCacheControl, "public, max-age=5")
 	} else {
-		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set(headerCacheControl, "private, no-store")
 	}
 
 	cfg := s.playoutStore().load()

@@ -104,7 +104,7 @@ func (s *Server) facebookProvider() (*oauth.Facebook, bool) {
 func (s *Server) handleEndFacebookBroadcast(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -180,7 +180,7 @@ func (s *Server) handleEndFacebookBroadcast(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleFacebookStreamHealth(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)

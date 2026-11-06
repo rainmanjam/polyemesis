@@ -290,7 +290,7 @@ func (s *Server) mcpDispatch(ctx context.Context, root http.Handler, tool, metho
 	req.Host = "mcp.internal"
 	req.Header.Set("Authorization", outer.authz)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(headerContentType, "application/json")
 	}
 	for h, v := range outer.forwarded {
 		req.Header[h] = append([]string(nil), v...)

@@ -293,7 +293,7 @@ func probeVAAPIDevice(names []string, gpu GPUInfo) string {
 func probeArgs(name, vaapiDevice string) []string {
 	prof := encoderProfiles[name]
 
-	args := []string{"-hide_banner", "-nostdin", "-loglevel", LogLevel(LogWarning)}
+	args := []string{flagHideBanner, "-nostdin", "-loglevel", LogLevel(LogWarning)}
 	if prof.vaapi {
 		if vaapiDevice == "" {
 			vaapiDevice = defaultVAAPIDevice

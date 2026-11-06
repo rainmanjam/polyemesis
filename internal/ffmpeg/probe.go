@@ -322,7 +322,7 @@ type Bins struct {
 // Nothing else passes anything but probeStdoutCap.
 func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*ProbeResult, error) {
 	cmd := exec.CommandContext(ctx, bins.FFprobe,
-		"-hide_banner",
+		flagHideBanner,
 		"-loglevel", "error",
 		"-protocol_whitelist", "file",
 		"-print_format", "json",

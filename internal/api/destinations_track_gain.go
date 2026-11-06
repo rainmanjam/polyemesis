@@ -29,7 +29,7 @@ type trackGainBody struct {
 func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	track, err := strconv.Atoi(chi.URLParam(r, "track"))

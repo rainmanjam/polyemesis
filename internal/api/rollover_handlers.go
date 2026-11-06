@@ -68,7 +68,7 @@ func (s *Server) handleListRolloverLimits(w http.ResponseWriter, r *http.Request
 func (s *Server) handleGetRollover(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	d, err := s.store.GetDestination(id)
@@ -139,7 +139,7 @@ type rolloverSettingsBody struct {
 func (s *Server) handleSaveRollover(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if _, err := s.store.GetDestination(id); err != nil {
@@ -189,7 +189,7 @@ func (s *Server) handleGetRolloverAfterWrite(w http.ResponseWriter, id int64) {
 func (s *Server) handleRunRollover(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if s.rollover == nil {

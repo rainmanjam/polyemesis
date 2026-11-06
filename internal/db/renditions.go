@@ -11,6 +11,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
+// controlChars are the characters a rendition field must never contain: NUL and line breaks.
+const controlChars = "\x00\n\r"
+
 // VideoEncoder is the FFmpeg encoder a rendition drives. Software and the
 // three hardware families we can reasonably expect to meet: NVIDIA (nvenc),
 // Intel Quick Sync (qsv), Apple (videotoolbox), plus VA-API and AMD AMF on
@@ -361,7 +364,7 @@ func (t RenditionText) problems(width, height int) []string {
 	// string FFmpeg receives -- so both are rejected rather than escaped.
 	// drawtext can draw multiple lines, but that is a feature with its own
 	// line-spacing question and is not this one.
-	if strings.ContainsAny(t.Content, "\x00\n\r") {
+	if strings.ContainsAny(t.Content, controlChars) {
 		add("text contains a line break or control character; it must be a single line")
 	}
 
@@ -428,7 +431,7 @@ func textFontProblem(name string) string {
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
 		return fmt.Sprintf("font %q must be a bare filename in the fonts directory", name)
 	}
-	if strings.ContainsAny(name, "\x00\n\r") {
+	if strings.ContainsAny(name, controlChars) {
 		return "font name contains control characters"
 	}
 	return ""
@@ -480,7 +483,7 @@ func overlayPathProblem(p string) error {
 	if len(p) > MaxOverlayImagePath {
 		return fmt.Errorf("overlay image path is longer than %d characters", MaxOverlayImagePath)
 	}
-	if strings.ContainsAny(p, "\x00\n\r") {
+	if strings.ContainsAny(p, controlChars) {
 		return errors.New("overlay image path contains control characters")
 	}
 	// Backslashes are separators on Windows, so normalise before the traversal

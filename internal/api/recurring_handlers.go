@@ -41,7 +41,7 @@ type templateRequest struct {
 func (s *Server) handleGetBroadcastTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if _, err := s.store.GetSchedule(id); err != nil {
@@ -61,7 +61,7 @@ func (s *Server) handleGetBroadcastTemplate(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleSaveBroadcastTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	sc, err := s.store.GetSchedule(id)
@@ -107,7 +107,7 @@ func (s *Server) handleSaveBroadcastTemplate(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleDeleteBroadcastTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteBroadcastTemplate(id); err != nil {
@@ -123,14 +123,14 @@ func (s *Server) handleDeleteBroadcastTemplate(w http.ResponseWriter, r *http.Re
 func (s *Server) handleSetBroadcastThumbnail(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if _, err := s.store.GetBroadcastTemplate(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	mime := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+	mime := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get(headerContentType), ";")[0]))
 	if mime != "image/png" && mime != "image/jpeg" {
 		writeError(w, http.StatusBadRequest, "a thumbnail must be a PNG or a JPEG")
 		return
@@ -226,7 +226,7 @@ func (s *Server) handleListOccurrences(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.skipOccurrence(r.Context(), id, time.Now()); err != nil {
@@ -262,7 +262,7 @@ type occurrenceTitleRequest struct {
 func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req occurrenceTitleRequest

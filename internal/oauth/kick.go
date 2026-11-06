@@ -29,6 +29,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// kickTokenPath is Kick's OAuth 2.1 token endpoint path on the ID host.
+const kickTokenPath = "/oauth/token"
+
 // ErrNoStreamKeyAPI marks the ingest lookup as impossible rather than failed.
 // Callers should errors.Is against it and send the operator to the paste field:
 // a platform that never had a key endpoint is not a transport problem, and
@@ -145,11 +148,11 @@ func (k *Kick) Exchange(ctx context.Context, clientID, clientSecret, redirectURI
 	if verifier != "" {
 		form.Set("code_verifier", verifier)
 	}
-	return postForm(ctx, k.idEndpoint()+"/oauth/token", form, nil)
+	return postForm(ctx, k.idEndpoint()+kickTokenPath, form, nil)
 }
 
 func (k *Kick) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
-	tok, err := postForm(ctx, k.idEndpoint()+"/oauth/token", url.Values{
+	tok, err := postForm(ctx, k.idEndpoint()+kickTokenPath, url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
@@ -676,7 +679,7 @@ func parseKickTime(s string) *time.Time {
 // its OAuth 2.1 documentation exposes at POST /oauth/token with
 // grant_type=client_credentials and needs no user consent.
 func (k *Kick) CheckCredentials(ctx context.Context, clientID, clientSecret string) error {
-	_, err := postForm(ctx, k.idEndpoint()+"/oauth/token", url.Values{
+	_, err := postForm(ctx, k.idEndpoint()+kickTokenPath, url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"grant_type":    {"client_credentials"},

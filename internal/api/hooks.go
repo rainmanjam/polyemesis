@@ -86,7 +86,7 @@ func (s *Server) handleListHooks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetHook(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	h, err := s.store.GetHook(s.box, id)
@@ -134,7 +134,7 @@ func (s *Server) handleCreateHook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateHook(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	existing, err := s.store.GetHook(s.box, id)
@@ -171,7 +171,7 @@ func (s *Server) handleUpdateHook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteHook(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteHook(id); err != nil {
@@ -192,7 +192,7 @@ func (s *Server) handleDeleteHook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTestHook(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	h, err := s.store.GetHook(s.box, id)
@@ -220,7 +220,7 @@ func (s *Server) handleTestHook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHookDeliveries(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if s.hooks == nil {

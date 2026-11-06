@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// filterGraphFileNote is why each flag that reads a filter graph from disk is refused.
+const filterGraphFileNote = "reads a filter graph from a file on the server, past every check on this page"
+
 // The expert-argument file-access check lives here, beside SplitArgs, so the
 // API (on the way in) and the engine (at every spawn) run the same code: a row
 // stored before a rule existed is dropped at spawn exactly as the editor would
@@ -41,15 +44,15 @@ var fileOptions = map[string]string{
 	"-stats_enc_post":         "writes encoder statistics to the file it names",
 	"-stats_mux_pre":          "writes muxer statistics to the file it names",
 	"-fpre":                   "reads options from a preset file on the server, past every check on this page",
-	"-filter_script":          "reads a filter graph from a file on the server, past every check on this page",
-	"-filter_complex_script":  "reads a filter graph from a file on the server, past every check on this page",
+	"-filter_script":          filterGraphFileNote,
+	"-filter_complex_script":  filterGraphFileNote,
 	"-hls_segment_filename":   "writes HLS segments to the path it names",
 	"-hls_fmp4_init_filename": "writes an HLS init segment to the path it names",
 	"-hls_key_info_file":      "reads a key file from the server",
 	"-segment_list":           "writes a segment list to the file it names",
 	"-master_pl_name":         "writes a master playlist file on the server",
 	"-x265-stats":             "writes x265's two-pass statistics to the file it names",
-	"-graph_file":             "reads a filter graph from a file on the server, past every check on this page",
+	"-graph_file":             filterGraphFileNote,
 	"-dumpgraph":              "dumps the filter graph out of the process",
 }
 

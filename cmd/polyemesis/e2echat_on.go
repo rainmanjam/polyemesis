@@ -45,6 +45,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
+// mimeJSON is the JSON media type.
+const mimeJSON = "application/json"
+
+// headerContentType is the Content-Type header name.
+const headerContentType = "Content-Type"
+
 const (
 	e2eChatAddr    = "127.0.0.1:18299"
 	e2eYouTubeAddr = "127.0.0.1:18300"
@@ -89,7 +95,7 @@ type fakeYouTube struct {
 func (f *fakeYouTube) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	switch r.URL.Path {
 	case "/liveChatMessages":
 		if f.fail {
@@ -229,7 +235,7 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 			out[string(p)] = append([]string{}, a.sent...)
 			a.mu.Unlock()
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(headerContentType, mimeJSON)
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("POST /youtube-poll", func(w http.ResponseWriter, r *http.Request) {
@@ -258,7 +264,7 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 	mux.HandleFunc("GET /youtube-poll", func(w http.ResponseWriter, _ *http.Request) {
 		yt.mu.Lock()
 		defer yt.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(headerContentType, mimeJSON)
 		_ = json.NewEncoder(w).Encode(map[string]any{"created": yt.created, "closed": yt.closed})
 	})
 	srv := &http.Server{Addr: e2eChatAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

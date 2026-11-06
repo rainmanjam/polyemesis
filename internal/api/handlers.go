@@ -39,6 +39,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
+// reconcileDestination is the subject reconcileNow reports in its warning.
+const reconcileDestination = "the destination"
+
 // -------------------------------------------------------------- setup & auth
 
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -1209,7 +1212,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		NumCPU:         sys.NumCPU,
 	}
 
-	w.Header().Set("Content-Type", metrics.ContentType)
+	w.Header().Set(headerContentType, metrics.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.WriteString(w, metrics.Render(snap))
 }
@@ -2396,7 +2399,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	row, err := s.store.GetDestination(id)
@@ -2837,7 +2840,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeCreateError(w, err)
 		return
 	}
-	rw := s.reconcileNow("the destination")
+	rw := s.reconcileNow(reconcileDestination)
 	resp := map[string]any{"destination": created}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
@@ -2876,7 +2879,7 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// The body is read BEFORE the lock below, so a slow client holds nothing.
@@ -3000,7 +3003,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	rw := s.reconcileNow("the destination")
+	rw := s.reconcileNow(reconcileDestination)
 
 	resp := map[string]any{"destination": updated}
 	if applied, reason := s.destinationApplied(id, updated.SourceID, runBefore, rw); applied != "" {
@@ -3064,7 +3067,7 @@ type deleteDestinationRequest struct {
 func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// READ BEFORE THE DELETE, because the question is about the row and about its
@@ -3213,7 +3216,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
-	if rw := s.reconcileNow("the destination"); rw != "" {
+	if rw := s.reconcileNow(reconcileDestination); rw != "" {
 		return destControl{ReconcileErr: errors.New(rw)}
 	}
 	var wasCut bool
@@ -3267,7 +3270,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// ?now=true is "Stop now": a delayed destination's buffered tail is cut,
@@ -3327,7 +3330,7 @@ func (s *Server) handleStopDestination(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// THE OWNING ENGINE, NOT THE DEFAULT ONE. s.eng() is s.mgr.Default(), so a
@@ -3572,7 +3575,7 @@ func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.recordings().Delete(id); err != nil {
@@ -3585,7 +3588,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)
@@ -3612,7 +3615,7 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "video/x-matroska")
+	w.Header().Set(headerContentType, "video/x-matroska")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("attachment; filename=%q", filepath.Base(rec.Filename)))
 	// ServeContent gives us range requests, so a partially downloaded
@@ -3721,9 +3724,9 @@ func (s *Server) hlsSourceHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set(headerCacheControl, "no-store")
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			w.Header().Set(headerContentType, "application/vnd.apple.mpegurl")
 			e.PreviewRequested()
 		}
 		http.StripPrefix("/hls/"+strconv.FormatInt(id, 10)+"/",
@@ -3735,7 +3738,7 @@ func (s *Server) hlsHandler() http.Handler {
 	return http.StripPrefix("/hls/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The playlist is rewritten every segment; caching it would freeze the
 		// preview a few seconds after it starts.
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set(headerCacheControl, "no-store")
 
 		// READ ONCE. Two calls to engOrNil are two different engine sets -- the
 		// last source can be deleted between them -- so the playlist poke and
@@ -3750,7 +3753,7 @@ func (s *Server) hlsHandler() http.Handler {
 		e := s.engOrNil()
 
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			w.Header().Set(headerContentType, "application/vnd.apple.mpegurl")
 			// The encoder is on-demand, and playlist polling is what keeps it
 			// alive. Only the playlist counts: a player can keep pulling
 			// segments from a manifest it already holds, so segment requests

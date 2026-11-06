@@ -107,7 +107,7 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetAlertRule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rule, err := s.store.GetAlertRule(id)
@@ -142,7 +142,7 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	existing, err := s.store.GetAlertRule(id)
@@ -171,7 +171,7 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// Read first: the rule is about to stop existing, and both the log line
@@ -263,7 +263,7 @@ func (s *Server) farewell(rule alerts.Rule, ev alerts.Event) {
 func (s *Server) handleTestAlertRule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rule, err := s.store.GetAlertRule(id)
@@ -665,7 +665,7 @@ func (s *Server) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	sc, err := s.store.GetSchedule(id)
@@ -706,7 +706,7 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	existing, err := s.store.GetSchedule(id)
@@ -750,7 +750,7 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteSchedule(id); err != nil {
@@ -1159,7 +1159,7 @@ func serveFileDownload(w http.ResponseWriter, r *http.Request, path, filename, c
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set(headerContentType, contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(filename)))
 	http.ServeContent(w, r, filename, stat.ModTime(), f)
 }

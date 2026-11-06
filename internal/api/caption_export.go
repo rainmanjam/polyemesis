@@ -206,7 +206,7 @@ func toTranscribeSegments(in []db.TranscriptSegment) []transcribe.Segment {
 func (s *Server) handleExportTranscriptCaptions(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	f, ok := parseCaptionExportFormat(r.URL.Query().Get("format"))
@@ -291,8 +291,8 @@ func (s *Server) recordingCaptionPolicy(id int64) captions.TextPolicy {
 }
 
 func writeCaptionExport(w http.ResponseWriter, out captionExport, disposition string) {
-	w.Header().Set("Content-Type", out.contentType)
+	w.Header().Set(headerContentType, out.contentType)
 	w.Header().Set("Content-Disposition", disposition)
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set(headerCacheControl, "no-store")
 	_, _ = w.Write(out.body)
 }

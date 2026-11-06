@@ -56,6 +56,18 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
+// headerCacheControl is the Cache-Control header name the handlers set.
+const headerCacheControl = "Cache-Control"
+
+// routeDestinationExpert is the expert-override route registered for GET, PUT and DELETE.
+const routeDestinationExpert = "/destinations/{id}/expert"
+
+// headerContentType is the Content-Type header name the handlers set.
+const headerContentType = "Content-Type"
+
+// errInvalidID is the 400 body every {id} route returns for an unparseable path id.
+const errInvalidID = "invalid id"
+
 // eng is the engine an unscoped request operates on: the default source's.
 //
 // Every endpoint that predates sources goes through here, which is what keeps
@@ -1410,9 +1422,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// refusals still apply to the signed-in operator.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
-				api.Get(r, "/destinations/{id}/expert", s.handleGetExpert, readDenied)
-				api.Put(r, "/destinations/{id}/expert", s.handlePutExpert, needsSource)
-				api.Delete(r, "/destinations/{id}/expert", s.handleDeleteExpert, needsSource)
+				api.Get(r, routeDestinationExpert, s.handleGetExpert, readDenied)
+				api.Put(r, routeDestinationExpert, s.handlePutExpert, needsSource)
+				api.Delete(r, routeDestinationExpert, s.handleDeleteExpert, needsSource)
 				api.Post(r, "/destinations/{id}/expert/preview", s.handlePreviewExpert, readDenied)
 				r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
 			})
@@ -2343,7 +2355,7 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 // ------------------------------------------------------------------ helpers
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set(headerContentType, "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if v == nil {
 		w.WriteHeader(status)
@@ -2531,8 +2543,8 @@ func writeCreateError(w http.ResponseWriter, err error) {
 // /api/v1/chat/kick/{secret} has to be indistinguishable from a path that is
 // not mounted, and http.NotFound's text/plain body was not (#158).
 func writeNoSuchEndpoint(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set(headerContentType, "application/json; charset=utf-8")
+	w.Header().Set(headerCacheControl, "no-store")
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
 }

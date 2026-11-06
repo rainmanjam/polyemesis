@@ -258,7 +258,7 @@ func SlateArgs(s SlateSpec) []string {
 	// prevent.
 	prof, known := encoderProfiles[s.Encoder]
 	if !known {
-		prof.presetFlag = "-preset"
+		prof.presetFlag = flagPreset
 	}
 
 	args := CommonArgs(LogWarning, false)

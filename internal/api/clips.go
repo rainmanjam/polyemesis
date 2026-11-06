@@ -125,7 +125,7 @@ type clipTrackView struct {
 func (s *Server) handleClipSource(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	tl, err := s.clipTimeline(id)
@@ -466,7 +466,7 @@ type clipKeyframeView struct {
 func (s *Server) handleClipKeyframes(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	tl, err := s.clipTimeline(id)
@@ -628,7 +628,7 @@ func (s *Server) handleClipPlan(w http.ResponseWriter, r *http.Request) {
 func (s *Server) planClip(w http.ResponseWriter, r *http.Request) (clipper.Plan, clipTimeline, bool) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return clipper.Plan{}, clipTimeline{}, false
 	}
 	var body clipRequestBody
@@ -963,7 +963,7 @@ type clipTranscriptView struct {
 func (s *Server) handleClipTranscript(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	tl, err := s.clipTimeline(id)
@@ -1041,7 +1041,7 @@ func (s *Server) clipTranscriptSegments(tl clipTimeline) ([]clipTranscriptSegmen
 func (s *Server) handleDownloadClipExport(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	job, err := s.store.GetJob(id)

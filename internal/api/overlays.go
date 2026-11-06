@@ -242,7 +242,7 @@ func (s *Server) handleCreateOverlay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateOverlay(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req overlayRequest
@@ -272,7 +272,7 @@ func (s *Server) handleUpdateOverlay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRotateOverlayKey(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	o, err := s.store.RotateChatOverlayKey(id)
@@ -288,7 +288,7 @@ func (s *Server) handleRotateOverlayKey(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleRevokeOverlayKey(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	o, err := s.store.RevokeChatOverlayKey(id)
@@ -304,7 +304,7 @@ func (s *Server) handleRevokeOverlayKey(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteOverlay(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteChatOverlay(id); err != nil {
@@ -324,7 +324,7 @@ func (s *Server) handleDeleteOverlay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) overlayFromRequest(w http.ResponseWriter, r *http.Request) (*db.ChatOverlay, bool) {
 	// No caching anywhere between here and OBS, for a response about a
 	// credential.
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set(headerCacheControl, "no-store")
 	if s.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "overlays are not available in this build")
 		return nil, false
@@ -413,7 +413,7 @@ func (s *Server) overlayPageHandler() http.HandlerFunc {
 		// does not depend on a middleware nobody reading this file can see.
 		h := w.Header()
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Cache-Control", "no-store")
+		h.Set(headerCacheControl, "no-store")
 		if page, ok := transparentIndex(); ok {
 			// No Content-Type set here: net/http sniffs the doctype, the same
 			// type the SPA handler's file server sends for this file.

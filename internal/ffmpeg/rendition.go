@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// flagProfileV is the video profile flag.
+const flagProfileV = "-profile:v"
+
+// flagPreset is the encoder preset flag.
+const flagPreset = "-preset"
+
 // ------------------------------------------------------------------ renditions
 
 // Video encoder names, spelled the way FFmpeg spells them, because these
@@ -367,47 +373,47 @@ type encoderProfile struct {
 // the start gate already reports by name -- see RenditionArgs and #343.
 var encoderProfiles = map[string]encoderProfile{
 	EncoderX264: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "veryfast",
-		rateControl:   []string{"-profile:v", "high", "-pix_fmt", "yuv420p"},
+		rateControl:   []string{flagProfileV, "high", "-pix_fmt", "yuv420p"},
 	},
 	// x265 takes the same -preset names as x264. `main` is x265's spelling of
 	// what `high` is for x264: the 8-bit 4:2:0 profile, which is the one a
 	// platform will take.
 	EncoderX265: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "veryfast",
-		rateControl:   []string{"-profile:v", "main", "-pix_fmt", "yuv420p"},
+		rateControl:   []string{flagProfileV, "main", "-pix_fmt", "yuv420p"},
 	},
 	// NVENC's p1..p7 presets replaced the named ones; p4 is the middle,
 	// "medium" equivalent and the honest default for a live encode. Both
 	// NVENC encoders share one option table, so the preset list is the same.
 	EncoderNVENC: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "p4",
 		cbr:           []string{"-rc", "cbr"},
 		vbr:           []string{"-rc", "vbr"},
-		rateControl:   []string{"-profile:v", "high"},
+		rateControl:   []string{flagProfileV, "high"},
 	},
 	EncoderNVENCHEVC: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "p4",
 		cbr:           []string{"-rc", "cbr"},
 		vbr:           []string{"-rc", "vbr"},
 	},
 	EncoderQSV: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "veryfast",
-		rateControl:   []string{"-profile:v", "high"},
+		rateControl:   []string{flagProfileV, "high"},
 	},
 	EncoderQSVHEVC: {
-		presetFlag:    "-preset",
+		presetFlag:    flagPreset,
 		defaultPreset: "veryfast",
 	},
 	// VideoToolbox has no preset at all; -realtime is its equivalent lever,
 	// and it is spelled the same on both codecs.
 	EncoderVideoToolbox: {
-		rateControl: []string{"-realtime", "1", "-profile:v", "high"},
+		rateControl: []string{"-realtime", "1", flagProfileV, "high"},
 	},
 	EncoderVideoToolboxHEVC: {
 		rateControl: []string{"-realtime", "1"},
@@ -433,7 +439,7 @@ var encoderProfiles = map[string]encoderProfile{
 	EncoderAMF: {
 		presetFlag:    "-quality",
 		defaultPreset: "speed",
-		rateControl:   []string{"-usage", "transcoding", "-profile:v", "high"},
+		rateControl:   []string{"-usage", "transcoding", flagProfileV, "high"},
 	},
 	EncoderAMFHEVC: {
 		presetFlag:    "-quality",
@@ -482,7 +488,7 @@ func RenditionArgs(s RenditionSpec) []string {
 	// assuming a default preset would break the ones that have no such option.
 	prof, known := encoderProfiles[s.Encoder]
 	if !known {
-		prof.presetFlag = "-preset"
+		prof.presetFlag = flagPreset
 	}
 
 	args := CommonArgs(LogWarning, false)

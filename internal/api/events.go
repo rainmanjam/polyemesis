@@ -115,10 +115,10 @@ func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter
 
 	rc := http.NewResponseController(w)
 	h := w.Header()
-	h.Set("Content-Type", "text/event-stream; charset=utf-8")
+	h.Set(headerContentType, "text/event-stream; charset=utf-8")
 	// no-transform as well as no-cache: a compressing proxy that buffers to
 	// compress delivers nothing until its buffer fills.
-	h.Set("Cache-Control", "no-cache, no-transform")
+	h.Set(headerCacheControl, "no-cache, no-transform")
 	// nginx buffers proxied responses by default and honours this header to
 	// stop; docs/EVENTS.md also gives the proxy_buffering line for proxies
 	// that do not.

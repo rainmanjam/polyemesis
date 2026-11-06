@@ -505,7 +505,7 @@ func (s *Server) handleAnalyticsStreams(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleAnalyticsStream(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	format := r.URL.Query().Get("format")
@@ -529,13 +529,13 @@ func (s *Server) handleAnalyticsStream(w http.ResponseWriter, r *http.Request) {
 	}
 	// The filename is built from the id alone, never the title: a title is
 	// whatever the platform reported, and it does not belong in a header.
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set(headerContentType, "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition",
 		`attachment; filename="polyemesis-stream-`+strconv.FormatInt(id, 10)+`.csv"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// The report names chatters: kept out of every cache, as the caption
 	// export is.
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set(headerCacheControl, "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b.Bytes())
 }
