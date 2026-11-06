@@ -114,13 +114,11 @@ rather than appearance.
 | Package | Version | | Package | Version |
 |---|---|---|---|---|
 | `react-accordion` | 1.2.20 | | `react-select` | 2.3.7 |
-| `react-checkbox` | 1.3.11 | | `react-separator` | 1.1.15 |
-| `react-dialog` | 1.1.23 | | `react-slider` | 1.4.7 |
-| `react-dropdown-menu` | 2.1.24 | | `react-slot` | 1.3.3 |
-| `react-label` | 2.1.15 | | `react-switch` | 1.3.7 |
-| `react-progress` | 1.1.16 | | `react-tabs` | 1.1.21 |
-| `react-toast` | 1.2.23 | | `react-tooltip` | 1.2.16 |
-| `react-popover` | 1.1.23 | | | |
+| `react-checkbox` | 1.3.11 | | `react-slider` | 1.4.7 |
+| `react-dialog` | 1.1.23 | | `react-slot` | 1.3.3 |
+| `react-dropdown-menu` | 2.1.24 | | `react-switch` | 1.3.7 |
+| `react-label` | 2.1.15 | | `react-tabs` | 1.1.21 |
+| `react-popover` | 1.1.23 | | `react-tooltip` | 1.2.16 |
 
 ## Frontend — build and development
 
