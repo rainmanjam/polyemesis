@@ -41,7 +41,7 @@ func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
 			"there is nothing here for a hash to predict")
 	}
 
-	if (destSpec(row, a, "up") == destSpec(row, b, "up")) != (argvA == argvB) {
+	if (destSpec(row, a, "up", false) == destSpec(row, b, "up", false)) != (argvA == argvB) {
 		t.Error("the primary's hash disagrees with the argv about the graph's output " +
 			"label, so changing it is stored and never applied to the running process")
 	}
@@ -296,7 +296,7 @@ func TestTheSharedInputsDidNotMergeTheTwoVerdicts(t *testing.T) {
 	before, after := backupRow(), backupRow()
 	after.BackupStreamKey = "rotated"
 
-	if destSpec(before, compiled, "up") != destSpec(after, compiled, "up") {
+	if destSpec(before, compiled, "up", false) != destSpec(after, compiled, "up", false) {
 		t.Error("rotating the BACKUP key moved the primary's hash, so the primary " +
 			"would be dropped to deliver redundancy it already had")
 	}
@@ -304,7 +304,7 @@ func TestTheSharedInputsDidNotMergeTheTwoVerdicts(t *testing.T) {
 		t.Error("rotating the backup key did not move the backup's hash, so it would " +
 			"keep publishing to an endpoint that no longer exists")
 	}
-	if destSpec(before, compiled, "up") == backupSpecOf(before, compiled, "up") {
+	if destSpec(before, compiled, "up", false) == backupSpecOf(before, compiled, "up") {
 		t.Error("the two hashes are the same value; they are not two verdicts any more")
 	}
 }

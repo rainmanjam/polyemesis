@@ -27,8 +27,8 @@ func liveGraph(trk0, trk1 string) routing.Result {
 // than send the level.
 func TestGainAndMuteDoNotMoveTheRestartSignature(t *testing.T) {
 	row := backupRow()
-	before := destSpec(row, liveGraph("0.4", "0.5"), "")
-	after := destSpec(row, liveGraph("0.9", "0"), "")
+	before := destSpec(row, liveGraph("0.4", "0.5"), "", false)
+	after := destSpec(row, liveGraph("0.9", "0"), "", false)
 	if before != after {
 		t.Errorf("a level-only change moved the restart signature; the destination would restart instead of taking the level live")
 	}
@@ -40,7 +40,7 @@ func TestAStructuralChangeStillMovesTheSignature(t *testing.T) {
 	a := liveGraph("0.5", "0.5")
 	b := liveGraph("0.5", "0.5")
 	b.FilterComplex = strings.Replace(b.FilterComplex, "amix=inputs=2", "amix=inputs=2:weights=1 0.5", 1)
-	if destSpec(row, a, "") == destSpec(row, b, "") {
+	if destSpec(row, a, "", false) == destSpec(row, b, "", false) {
 		t.Error("a change to the mix itself did not move the signature; it would be applied live when it must restart")
 	}
 }

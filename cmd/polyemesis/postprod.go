@@ -24,6 +24,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 	"github.com/rainmanjam/polyemesis/internal/uploadverify"
@@ -91,7 +92,7 @@ func (p postProd) waitWithin(ctx context.Context) bool {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, settings db.Settings, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, settings db.Settings, env startupenv.Env, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 
 	// Whisper is detected once, at startup, and a machine without it is an
 	// ordinary machine. Every method on *Tools is nil-receiver safe precisely so
@@ -136,7 +137,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, set
 	// Clip publishing (Wave 4 #5c). The token source is filled in by main once
 	// the API server exists: the refresh path lives on it.
 	publishTokens := &publish.TokenGate{}
-	registerPublish(log, cfg, store, box, q, publishTokens, publish.GatesFromEnv())
+	registerPublish(log, cfg, store, box, q, publishTokens, publish.Gates{XPublish: env.XPublish})
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -636,6 +637,6 @@ func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *sec
 		log.Error("cannot register the clip publish job kind", "error", err)
 	}
 	if gates.XPublish {
-		log.Warn("X publishing is switched ON by " + publish.XPublishEnv)
+		log.Warn("X publishing is switched ON by " + startupenv.XPublishVar)
 	}
 }

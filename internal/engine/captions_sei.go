@@ -51,7 +51,7 @@ type destCaption struct {
 // wantsSEIStage reports whether a saved destination runs through an SEI stage.
 // It uses the same gate as the captioner's intent (captions.Allowed), so a
 // destination is never staged for a platform the captioner would not caption.
-func wantsSEIStage(row *db.Destination) bool {
+func wantsSEIStage(row *db.Destination, facebookOpen bool) bool {
 	if row == nil {
 		return false
 	}
@@ -59,7 +59,7 @@ func wantsSEIStage(row *db.Destination) bool {
 	if mode != captions.ModeSEI && mode != captions.ModeFacebookSEI {
 		return false
 	}
-	return captions.Allowed(string(row.Platform), mode, captions.FacebookSEIEnabled())
+	return captions.Allowed(string(row.Platform), mode, facebookOpen)
 }
 
 // startCaptionStage builds and starts a destination's SEI stage, reading the
@@ -67,7 +67,7 @@ func wantsSEIStage(row *db.Destination) bool {
 // On any error everything it took is released, so the caller only has to unwind
 // what it itself did.
 func (e *Engine) startCaptionStage(row *db.Destination, upstream *relay.Hub) (*destCaption, error) {
-	if !wantsSEIStage(row) {
+	if !wantsSEIStage(row, e.facebookCaptions.Load()) {
 		return nil, nil
 	}
 	outHub, err := relay.New(e.log, 0)

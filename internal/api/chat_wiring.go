@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -376,10 +375,10 @@ func (s *Server) detachPlatformChat(p db.Platform) {
 // install that has not set the variable would otherwise get a startup warning
 // about a platform they have never heard of.
 func (s *Server) attachRumble(ctx context.Context) bool {
-	// os.Getenv is the ONLY path that touches this value. Never a flag: argv is
-	// world-readable in ps, and a key every local user can read has leaked. See
-	// chat.RumbleChatKeyEnv.
-	key := strings.TrimSpace(os.Getenv(chat.RumbleChatKeyEnv))
+	// The key comes from the environment only, read once at startup
+	// (startupenv). Never a flag: argv is world-readable in ps, and a key every
+	// local user can read has leaked. See chat.RumbleChatKeyEnv.
+	key := s.env.RumbleChatKey
 	if key == "" {
 		return false
 	}
@@ -389,7 +388,7 @@ func (s *Server) attachRumble(ctx context.Context) bool {
 		// to keep two accounts on one platform distinguishable. Rumble can only
 		// ever have one here, because there is only one environment variable.
 		AccountRef: "rumble",
-		Channel:    strings.TrimSpace(os.Getenv("RUMBLE_CHAT_CHANNEL")),
+		Channel:    s.env.RumbleChatChannel,
 		Key:        key,
 	})
 	if err != nil {
@@ -515,7 +514,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// the operator's Livestream gate is open (POLYEMESIS_X_LIVESTREAM). With
 		// the gate closed the account stays connected for sign-in and nothing
 		// reads or posts chat for it.
-		if !oauth.NewX().LivestreamAccess() {
+		if s.livestreamGate(db.PlatformX) != "open" {
 			return nil, fmt.Errorf("X chat needs X Livestream access (app must be whitelisted by X)")
 		}
 		return chat.NewX(chat.XConfig{
@@ -526,7 +525,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			// which the operator supplies from the X developer console. Nothing
 			// here mints it. Empty makes the adapter's Run refuse with a Fatal
 			// error that says so.
-			AppBearer: strings.TrimSpace(os.Getenv("POLYEMESIS_X_APP_BEARER")),
+			AppBearer: s.env.XAppBearer,
 		})
 
 	case db.PlatformFacebook:

@@ -170,10 +170,12 @@ func TestTheGoLiveTitleCannotChangeWhileTheXBroadcastIsLive(t *testing.T) {
 //
 // MUTATION: the gate fill removed from handlePlatformGuides. Observed: FAIL, the X guide had no livestreamGate.
 func TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen(t *testing.T) {
-	for _, tc := range []struct{ env, want string }{{"", "closed"}, {"1", "open"}} {
+	for _, tc := range []struct {
+		open bool
+		want string
+	}{{false, "closed"}, {true, "open"}} {
 		t.Run(tc.want, func(t *testing.T) {
-			t.Setenv("POLYEMESIS_X_LIVESTREAM", tc.env)
-			_, h, _ := testServerWith(t, Options{Providers: oauth.NewSet()})
+			_, h, _ := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithXLivestream(tc.open))})
 			sign := login(t, h)
 			r := jsonRequest(t, http.MethodGet, "/api/v1/platforms/guides", nil)
 			sign(r)

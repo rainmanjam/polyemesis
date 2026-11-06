@@ -25,7 +25,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
-	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -2766,7 +2765,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Facebook captions stay behind their switch. The switch is checked here,
 	// on the save that turns the mode on, and never by Validate (see there).
-	if !captionModeAllowedNow(row.CaptionMode, "", captions.FacebookSEIEnabled()) {
+	if !captionModeAllowedNow(row.CaptionMode, "", s.env.FacebookCaptions) {
 		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
 		return
 	}
@@ -2909,7 +2908,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
 			return
 		}
-		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, captions.FacebookSEIEnabled()) {
+		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, s.env.FacebookCaptions) {
 			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
 			return
 		}
@@ -3800,8 +3799,8 @@ const captionFacebookRefusal = "Facebook captions are behind a provisional switc
 // already had it keeps saving, so closing the switch never strands an edit.
 //
 // The switch is passed as a parameter rather than read here, so the decision is
-// testable without the process environment; the handlers pass
-// captions.FacebookSEIEnabled().
+// testable without the process environment; the handlers pass the startup
+// environment's FacebookCaptions.
 func captionModeAllowedNow(mode, stored string, switchOpen bool) bool {
 	if mode != "facebook_sei" || mode == stored {
 		return true

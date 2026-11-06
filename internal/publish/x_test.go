@@ -39,9 +39,8 @@ func xEnv(t *testing.T, tweetStatus int) (*env, *counting) {
 
 // X IS GATED. With the switch closed, nothing is sent -- not even a token fetch.
 func TestXPublishingIsOffByDefaultAndSendsNothing(t *testing.T) {
-	t.Setenv(XPublishEnv, "")
 	e, cnt := xEnv(t, 200)
-	e.gates = GatesFromEnv()
+	e.gates = Gates{}
 	p, params := e.claim(PlatformX)
 	_, err := e.run(params, 1)
 	if !jobs.IsPermanent(err) {
@@ -52,27 +51,6 @@ func TestXPublishingIsOffByDefaultAndSendsNothing(t *testing.T) {
 	}
 	if row := e.row(p.ID); row.FailCause != string(CauseGated) {
 		t.Fatalf("cause = %q", row.FailCause)
-	}
-}
-
-func TestTheXGateReadsItsOwnSwitch(t *testing.T) {
-	t.Setenv(XPublishEnv, "")
-	if GatesFromEnv().XPublish {
-		t.Fatal("empty env opened the gate")
-	}
-	t.Setenv(XPublishEnv, "0")
-	if GatesFromEnv().XPublish {
-		t.Fatal("0 opened the gate")
-	}
-	// The Livestream switch is a different thing and must not open it.
-	t.Setenv(XPublishEnv, "")
-	t.Setenv("POLYEMESIS_X_LIVESTREAM", "1")
-	if GatesFromEnv().XPublish {
-		t.Fatal("the Livestream switch opened publishing")
-	}
-	t.Setenv(XPublishEnv, "true")
-	if !GatesFromEnv().XPublish {
-		t.Fatal("true did not open the gate")
 	}
 }
 

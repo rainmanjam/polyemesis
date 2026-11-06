@@ -10,6 +10,28 @@ its first tagged release.
 
 ### Fixed
 
+- **A saved MQTT publish interval takes effect without a restart.** The interval was read once when
+  the broker connection opened, and the "unchanged settings" check left it out on purpose, so a new
+  value did nothing until a restart or some other reconnect. The running loop now moves to it at
+  once, and the connection is not cycled to do so.
+- **`POLYEMESIS_CAPTIONS_FACEBOOK` accepts `true`, like the X switches.** It accepted only the exact
+  string `1`, so `=true` silently left Facebook captions off. Every on/off switch in the environment
+  (`POLYEMESIS_CAPTIONS_FACEBOOK`, `POLYEMESIS_X_PUBLISH`, `POLYEMESIS_X_LIVESTREAM`) now reads `1` or
+  `true`, ignoring case and surrounding space; anything else is off. The switches, the X app bearer
+  and the Rumble chat key and channel are read once at startup and handed to the parts that use them.
+- **Times on every page follow the display time zone from the first paint.** The zone was applied only
+  once a page that reads settings (Dashboard, Settings, Sources, Recordings, Playout) had loaded, so a
+  cold load onto Jobs, Clips, Monitoring, Automation or Library drew every time in UTC. The console
+  now reads it before it draws anything. The failover banner's "since" time and the other few places
+  that used the browser's own zone follow it too.
+- **A display time zone the server cannot load is reported on a settings save as well as at start-up.**
+  Start-up warned and a save silently logged in UTC. Both paths now run the same list of what stored
+  settings configure in a running process, so a setting added to it is applied at both.
+- **An unreadable settings row stops the server from starting.** Start-up handled it four ways
+  (built-in defaults for the job tier, skipping the chat, automod and alert settings, and an abort
+  after the engines and API were already running). It now stops once, before anything is built
+  from guessed values, with an error that names the settings.
+
 - **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
   Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
   adapter, which stamped its own account on it. Each delivery now goes to the adapter for the

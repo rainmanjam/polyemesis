@@ -364,7 +364,7 @@ func TestTheRestartHashDoesNotMoveWhenTheSourceDoes(t *testing.T) {
 	if on != afterProbeCleared {
 		t.Fatal("the selector's signature moved with the silence tier; every destination would restart on a failover")
 	}
-	if destSpec(row, compiled, on) != destSpec(row, compiled, afterProbeCleared) {
+	if destSpec(row, compiled, on, false) != destSpec(row, compiled, afterProbeCleared, false) {
 		t.Error("a destination's restart hash moved across a source switch")
 	}
 	if renditionSig(rend, 60, on, "") != renditionSig(rend, 60, afterProbeCleared, "") {

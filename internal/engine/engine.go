@@ -497,6 +497,9 @@ type Engine struct {
 	// recording volume, which every engine measures. Under e.mu; nil on an
 	// engine assembled field by field, which admits everything.
 	alertGate *alerts.InstallGate
+	// facebookCaptions is the operator's provisional Facebook caption switch,
+	// handed in by the manager from the startup environment. Off unless set.
+	facebookCaptions atomic.Bool
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
 
@@ -5943,6 +5946,11 @@ func (e *Engine) releaseAlertGate() {
 	e.mu.RUnlock()
 	gate.Release(e)
 }
+
+// SetFacebookCaptions opens or closes the provisional facebook_sei caption path
+// for this engine. The manager sets it on every engine from the one value main
+// read at startup.
+func (e *Engine) SetFacebookCaptions(open bool) { e.facebookCaptions.Store(open) }
 
 // SetAlertGate attaches the install's shared gate. A setter for the reason
 // SetHooks is one: engines are built whenever a source is added.

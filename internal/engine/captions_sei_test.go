@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"io"
 	"log/slog"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
@@ -29,17 +32,19 @@ func TestAnSEIStageIsWantedOnlyForAPlatformAndModeThatTakesSEICaptions(t *testin
 		name     string
 		platform db.Platform
 		mode     captions.Mode
+		facebook bool
 		want     bool
 	}{
-		{"twitch with SEI captions gets the stage", db.PlatformTwitch, captions.ModeSEI, true},
-		{"twitch with captions off gets no stage", db.PlatformTwitch, captions.ModeOff, false},
-		{"youtube with its POST path gets no SEI stage", db.PlatformYouTube, captions.ModeYouTubePOST, false},
-		{"kick with SEI is refused: no documented requirement", db.PlatformKick, captions.ModeSEI, false},
-		{"facebook SEI follows its provisional flag", db.PlatformFacebook, captions.ModeFacebookSEI, captions.FacebookSEIEnabled()},
+		{"twitch with SEI captions gets the stage", db.PlatformTwitch, captions.ModeSEI, false, true},
+		{"twitch with captions off gets no stage", db.PlatformTwitch, captions.ModeOff, false, false},
+		{"youtube with its POST path gets no SEI stage", db.PlatformYouTube, captions.ModeYouTubePOST, false, false},
+		{"kick with SEI is refused: no documented requirement", db.PlatformKick, captions.ModeSEI, false, false},
+		{"facebook SEI is refused while its provisional flag is closed", db.PlatformFacebook, captions.ModeFacebookSEI, false, false},
+		{"facebook SEI gets the stage once its provisional flag is open", db.PlatformFacebook, captions.ModeFacebookSEI, true, true},
 	}
 	for _, c := range cases {
 		row := &db.Destination{Platform: c.platform, CaptionMode: string(c.mode)}
-		got := wantsSEIStage(row)
+		got := wantsSEIStage(row, c.facebook)
 		if got != c.want {
 			t.Errorf("%s: wantsSEIStage = %v, want %v", c.name, got, c.want)
 		}
@@ -122,4 +127,23 @@ func seiHasSubscriber(h *relay.Hub, name string) bool {
 		}
 	}
 	return false
+}
+
+// The manager hands the one startup value to every engine it configures: a
+// destination on an engine that missed it would be staged (or not) differently
+// from the same destination on its neighbour.
+func TestTheManagerHandsTheFacebookCaptionSwitchToEveryEngine(t *testing.T) {
+	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)), config.Config{}, nil, nil, events.NewBroker())
+	m.SetFacebookCaptions(true)
+
+	e := &Engine{}
+	m.applyEngineSettings(e, m.engineSettingsSnapshot())
+	if !e.facebookCaptions.Load() {
+		t.Error("an engine configured through the manager did not get the Facebook caption switch")
+	}
+	m.SetFacebookCaptions(false)
+	m.applyEngineSettings(e, m.engineSettingsSnapshot())
+	if e.facebookCaptions.Load() {
+		t.Error("closing the switch did not reach the engine")
+	}
 }

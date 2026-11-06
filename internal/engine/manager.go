@@ -221,6 +221,9 @@ type engineSettings struct {
 	// configured through, and an engine that missed it would publish its own
 	// copy of every disk.low -- the duplicate the gate exists to remove.
 	alertGate *alerts.InstallGate
+	// facebookCaptions is the startup environment's caption switch, like
+	// alertGate not something anybody saves.
+	facebookCaptions bool
 }
 
 // engineSettingsSnapshot reads the settings block WHOLE, in one acquisition of
@@ -271,6 +274,7 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetAccountHealth(s.accountHealth)
 	eng.SetPlatformHealth(s.platHealth)
 	eng.SetAlertGate(s.alertGate)
+	eng.SetFacebookCaptions(s.facebookCaptions)
 }
 
 // applyEngineSettingsAll is the other half: every save ends here rather than
@@ -1593,6 +1597,12 @@ func (m *Manager) LastReload() []ReloadReport {
 // and to any created later.
 func (m *Manager) SetHooks(d *hooks.Dispatcher) {
 	m.saveEngineSetting(func(s *engineSettings) { s.hooks = d })
+}
+
+// SetFacebookCaptions opens the provisional facebook_sei caption path on every
+// engine, now and for any created later, through the same one path as SetHooks.
+func (m *Manager) SetFacebookCaptions(open bool) {
+	m.saveEngineSetting(func(s *engineSettings) { s.facebookCaptions = open })
 }
 
 // SetStream attaches the real-time events hub to every engine, now and to any

@@ -33,11 +33,11 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
-	"github.com/rainmanjam/polyemesis/internal/publish"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
 
@@ -324,6 +324,9 @@ func run(h *hooks) error {
 	if err != nil {
 		return err
 	}
+	// And the one read of the process environment's switches. Handed to the job
+	// tier, the engines and the API, so all three agree and none calls Getenv.
+	env := startupenv.FromEnv()
 
 	bus := events.NewBroker()
 
@@ -337,6 +340,7 @@ func run(h *hooks) error {
 	// up and serves the Sources page, which is the only screen that can get
 	// the operator out of this state.
 	eng := engine.NewManager(log, cfg, store, tools, bus)
+	eng.SetFacebookCaptions(env.FacebookCaptions)
 	h.progress("starting the streaming engine")
 	if err := eng.Start(ctx); err != nil {
 		return fmt.Errorf("starting the streaming engine: %w", err)
@@ -345,7 +349,7 @@ func run(h *hooks) error {
 	// After the engine, because the governor's sensors read from it, and before
 	// the API, which cannot be given a queue after its handlers are built.
 	h.progress("starting the background job queue")
-	pp := startPostProd(ctx, log, cfg, settings, store, box, eng, tools)
+	pp := startPostProd(ctx, log, cfg, settings, env, store, box, eng, tools)
 	guard.attach(cancel, pp.waitWithin)
 
 	// Retained MQTT telemetry. Started unconditionally and inert until an
@@ -467,8 +471,8 @@ func run(h *hooks) error {
 		// The post-production tier. Optional in the API's eyes; wired here so
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
-		// The same switches the publish worker was registered with.
-		PublishGates: publish.GatesFromEnv(),
+		// The very value the publish worker and the engines were given.
+		Env: env,
 	})
 	// The publish worker refreshes tokens through the server's own path.
 	pp.publishTokens.Set(srv.PublishTokens())
