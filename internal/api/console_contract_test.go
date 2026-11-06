@@ -272,8 +272,16 @@ func loadConsoleCalls(t *testing.T) []consoleCall {
 		if err != nil {
 			return err
 		}
-		rel := strings.TrimPrefix(p, uiSrcDir+"/")
-		calls, dyn, err := parseConsoleCalls(rel, string(raw), rel == "lib/api.ts")
+		// Slash-separated and LF-only on every OS: Windows checkouts carry
+		// backslash paths and may carry CRLF, and both keys and patterns here
+		// are written the way the files are named in the repository.
+		rel, err := filepath.Rel(uiSrcDir, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		src := strings.ReplaceAll(string(raw), "\r\n", "\n")
+		calls, dyn, err := parseConsoleCalls(rel, src, rel == "lib/api.ts")
 		out = append(out, calls...)
 		dynamic = append(dynamic, dyn...)
 		return err

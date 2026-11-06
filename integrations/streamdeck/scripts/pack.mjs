@@ -12,11 +12,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = join(root, "com.polyemesis.streamdeck.sdPlugin", "manifest.json");
 const before = readFileSync(manifest);
 
-const bin = join(root, "node_modules", ".bin", "streamdeck");
+// Run the CLI's own entry point with this Node, never through a shell: the
+// .bin shim is a .cmd on Windows, which needs one, and a shell would also
+// interpret the arguments passed through from the command line.
+const cliPkg = join(root, "node_modules", "@elgato", "cli", "package.json");
+const bin = join(dirname(cliPkg), JSON.parse(readFileSync(cliPkg, "utf8")).bin.streamdeck);
 const r = spawnSync(
-  bin,
-  ["pack", "com.polyemesis.streamdeck.sdPlugin", "--output", "dist", "--force", "--no-update-check", ...process.argv.slice(2)],
-  { cwd: root, stdio: "inherit", shell: process.platform === "win32" },
+  process.execPath,
+  [bin, "pack", "com.polyemesis.streamdeck.sdPlugin", "--output", "dist", "--force", "--no-update-check", ...process.argv.slice(2)],
+  { cwd: root, stdio: "inherit" },
 );
 
 if (!readFileSync(manifest).equals(before)) writeFileSync(manifest, before);
