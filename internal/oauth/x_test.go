@@ -111,7 +111,7 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 	if err != nil {
 		t.Fatalf("AuthURL produced an unparseable URL %q: %v", raw, err)
 	}
-	if got, want := u.Scheme+"://"+u.Host+u.Path, "https://api.x.com/2/oauth2/authorize"; got != want {
+	if got, want := u.Scheme+"://"+u.Host+u.Path, "https://x.com/i/oauth2/authorize"; got != want {
 		t.Errorf("AuthURL points at %q, want %q", got, want)
 	}
 	q := u.Query()
@@ -849,5 +849,13 @@ func TestXGoLiveReturnsXsErrorsOnASuccessfulStatusWithNoBroadcast(t *testing.T) 
 	if _, err := x.TransitionBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", PhaseComplete); err == nil ||
 		!strings.Contains(err.Error(), "source cannot go live") {
 		t.Errorf("end on a 200 with errors and no state = %v, want X's error", err)
+	}
+}
+
+// The consent page is x.com, but the token endpoint stays on api.x.com: a POST there
+// answers normally (confirmed live 2026-11-06). The two must not drift together.
+func TestXTokenEndpointStaysOnAPIHost(t *testing.T) {
+	if got, want := (&X{}).tokenEndpoint(), "https://api.x.com/2/oauth2/token"; got != want {
+		t.Errorf("tokenEndpoint() = %q, want %q", got, want)
 	}
 }

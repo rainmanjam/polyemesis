@@ -50,15 +50,14 @@ const xAPIBase = platform.XAPIHost
 // xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
 // token and data host so a change to one does not move the other.
 //
-// PROVISIONAL. X's two official sources disagree (docs-x section 1, VERDICTS
-// X#8): the OpenAPI spec's authorizationUrl is https://api.x.com/2/oauth2/authorize,
-// which is what this follows, and every example in the user-access-token guide
-// uses https://x.com/i/oauth2/authorize. If a live authorize request on the
-// spec's host does not show the consent page, set these two to the guide's
-// "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
+// X's OpenAPI spec lists https://api.x.com/2/oauth2/authorize, but that address
+// answers a browser with HTTP 403 "Access to api.x.com was denied". The consent
+// page is the user-access-token guide's https://x.com/i/oauth2/authorize.
+// Confirmed by a live request on 2026-11-06. The token endpoint stays on
+// api.x.com (/2/oauth2/token).
 const (
-	xAuthorizeBase = platform.XAPIHost
-	xAuthorizePath = "/2/oauth2/authorize"
+	xAuthorizeBase = "https://x.com"
+	xAuthorizePath = "/i/oauth2/authorize"
 )
 
 // xGateCopy is the copy shown when the Livestream family is switched off. It names
