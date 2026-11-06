@@ -162,13 +162,25 @@ type reprobeTarget struct {
 func destinationsNeedingReprobe(dests map[int64]*destination) []reprobeTarget {
 	var stuck []reprobeTarget
 	for _, d := range dests {
-		if d == nil || d.proc == nil || d.watch == nil || d.row == nil {
+		if d == nil || d.row == nil {
 			continue
 		}
-		if d.watch.publishedSinceRearm() {
-			continue // it is publishing; leave it alone
+		// The backup is a second FFmpeg reading the same relay, and can be
+		// holding the same stale characterisation, so it is judged on its own
+		// signal: a published primary says nothing about it.
+		for _, o := range []struct {
+			name string
+			proc *supervisor.Process
+			w    *destWatch
+		}{
+			{d.row.Name, d.proc, d.watch},
+			{d.row.Name + " (backup)", d.backup, d.backupWatch},
+		} {
+			if o.proc == nil || o.w == nil || o.w.publishedSinceRearm() {
+				continue // absent, or publishing: leave it alone
+			}
+			stuck = append(stuck, reprobeTarget{name: o.name, proc: o.proc, w: o.w})
 		}
-		stuck = append(stuck, reprobeTarget{name: d.row.Name, proc: d.proc, w: d.watch})
 	}
 	return stuck
 }

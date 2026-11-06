@@ -69,6 +69,9 @@ func DirIn(dataDir string) string { return filepath.Join(dataDir, DirName) }
 type Hub interface {
 	Subscribe(name string, port int) (string, error)
 	Unsubscribe(name string)
+	// Wake releases a stopping consumer that is blocked on a quiet feed. See
+	// relay.Hub.Wake.
+	Wake(name string) bool
 }
 
 // Ports is relay.PortAllocator's contract.
@@ -93,7 +96,12 @@ type Runner interface {
 // one that wires the process into the same log sink, state callbacks and
 // restart policy every other polyemesis child uses, which is why this package
 // never touches internal/supervisor itself.
-type Spawner func(name string, args []string) Runner
+//
+// wake is the child's stop-time wake (supervisor.Spec.WakeOnStop): a variant
+// stopped after its feed has gone quiet would otherwise ignore SIGTERM and be
+// killed at the end of the grace. It is the manager's to supply because only the
+// manager knows which hub the variant subscribed to, and under what name.
+type Spawner func(name string, args []string, wake func()) Runner
 
 // Upstream is what a variant reads, resolved by the engine because only the
 // engine knows which renditions are actually running.
@@ -446,7 +454,8 @@ func (m *Manager) start(s db.PlayoutSettings, v *variant) {
 		DASH:             s.Format == db.PlayoutHLSDASH,
 	})
 
-	proc := m.spawn(v.subName, args)
+	hub, sub := v.hub, v.subName
+	proc := m.spawn(sub, args, func() { hub.Wake(sub) })
 	v.proc = proc
 	v.port = port
 	v.startAt = m.now()

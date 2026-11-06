@@ -1176,61 +1176,26 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		nextArgs = func() []string { return buildArgs(target) }
 	}
 
-	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
-
-	// Declared before the Spec because OnLog's #674 re-probe handler closes
-	// over it: that handler is built inside the Spec that constructs this
-	// very child, so it can only resolve the process lazily.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name:     subName,
-		Kind:     procname.KindDestination,
-		Bin:      e.tools.FFmpeg,
-		Args:     buildArgs(target),
-		NextArgs: nextArgs,
-		// Stdin is the live command channel for gain and mute (see supervisor).
-		LiveCommands: true,
-		// The minted key is passed as an EXTRA literal rather than left to
-		// inherit the row's registration, because it cannot: SecretSet.Scrub is
-		// a substring replace and the minted key ENDS WITH the operator's
-		// original, so registering only the original masks the last segment and
-		// leaves the signature and the hex manifest standing in the log. Empty
-		// when nothing was minted, which destSecrets and redact.NewSecretSet
-		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
-		Secrets: destSecrets(row, mt.MintedKey),
-		// The only signal that says this destination is PUBLISHING rather than
-		// merely spawned. See firstMediaLogger and #675.
-		OnProgress:  onProgress,
-		AutoRestart: true,
-		// Per-destination reconnect policy. Zero values leave the supervisor's
-		// own defaults in place, which is what every destination ran on before
-		// this was configurable. The same three values are re-applied without a
-		// restart by applyDestPolicy when they change.
-		MinBackoff:  destPolicy(row).MinBackoff,
-		MaxBackoff:  destPolicy(row).MaxBackoff,
-		MaxRestarts: destPolicy(row).MaxRestarts,
-		// Stop retrying a key or codec the platform keeps refusing; see
-		// destHoldAfterQuickRejections. Retry (RestartDestination) lifts it.
-		HoldAfterQuickRejections: destHoldAfterQuickRejections,
-		// Spaced out so going live does not spawn every destination in the
-		// same tick. First spawn only -- a reconnect is never delayed.
-		StartDelay: startDelay,
-		// #674: a destination that probed before its audio existed can only be
-		// restarted. See reprobeOnUncharacterisedAudio -- the trigger is the
-		// demuxer's own "could not find codec parameters" rather than an
-		// absence of output, because absence of output is also what a
-		// mismatched publisher and a still-probing child look like.
-		OnLog: e.reprobeOnUncharacterisedAudio(row.Name, row.Kind,
-			func() *supervisor.Process { return proc }, e.onLog),
-		OnState: e.onState,
-		LogSink: logSink{e},
-		// Every kind, not only files. A file destination is where it showed --
-		// stopped after its publisher left, it sat out the grace and was
-		// SIGKILLed with no trailer -- but an RTMP or SRT output stopped on the
-		// same silent feed took the same 8s and ended its session unflushed.
-		// The wake only ever reaches a feed that has gone quiet. See
-		// relay.Hub.Wake.
-		WakeOnStop: relayWaker(readHub, subName),
+	// The minted key is passed as an EXTRA literal rather than left to inherit
+	// the row's registration, because it cannot: SecretSet.Scrub is a substring
+	// replace and the minted key ENDS WITH the operator's original, so
+	// registering only the original masks the last segment and leaves the
+	// signature and the hex manifest standing in the log. Empty when nothing was
+	// minted, which destSecrets drops. See
+	// TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
+	//
+	// startDelay spaces out the first spawn so going live does not start every
+	// destination in the same tick. First spawn only -- a reconnect is never
+	// delayed.
+	proc, watch := e.newDestinationProcess(destConsumer{
+		relayConsumer: relayConsumer{
+			name: subName, sub: subName, kind: procname.KindDestination, hub: readHub, args: buildArgs(target),
+			secrets: destSecrets(row, mt.MintedKey),
+		},
+		row:        row,
+		label:      row.Name,
+		nextArgs:   nextArgs,
+		startDelay: startDelay,
 	})
 
 	// A refused live level change tore the previous process down so that this
@@ -1620,30 +1585,23 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	}
 
 	graph := newGraphHolder(compiled)
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: sub,
-		Kind: procname.KindDestination,
-		Bin:  e.tools.FFmpeg,
-		Args: e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
-		// Respawns of the backup read the same holder, so a live level survives them.
-		NextArgs:     func() []string { return e.destArgs(d.row, graph.get(), url, backupTarget(d.row)) },
-		LiveCommands: true,
-		Secrets:      destSecrets(d.row),
-		AutoRestart:  true,
-		MinBackoff:   destPolicy(d.row).MinBackoff,
-		MaxBackoff:   destPolicy(d.row).MaxBackoff,
-		MaxRestarts:  destPolicy(d.row).MaxRestarts,
-		// The backup publishes the same key to the same platform, so it is
-		// refused for the same reason and held by the same rule.
-		HoldAfterQuickRejections: destHoldAfterQuickRejections,
-		OnLog:                    e.onLog,
-		OnState:                  e.onState,
-		LogSink:                  logSink{e},
-		// The redundant output stops on the same quiet feed as its primary.
-		WakeOnStop: relayWaker(hub, sub),
+	// Respawns of the backup read the same holder, so a live level survives them.
+	// No minted key (only the primary negotiates a multitrack mint) and no
+	// StartDelay: the backup starts from publishDest once the primary is already
+	// in the map, so there is no tick to spread.
+	proc, watch := e.newDestinationProcess(destConsumer{
+		relayConsumer: relayConsumer{
+			name: sub, sub: sub, kind: procname.KindDestination, hub: hub,
+			args:    e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
+			secrets: destSecrets(d.row),
+		},
+		row:      d.row,
+		label:    d.row.Name + " (backup)",
+		nextArgs: func() []string { return e.destArgs(d.row, graph.get(), url, backupTarget(d.row)) },
 	})
 
 	d.backup = proc
+	d.backupWatch = watch
 	d.backupGraph = graph
 	d.backupPort = port
 	d.backupSub = sub

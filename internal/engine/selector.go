@@ -1757,12 +1757,13 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		return fail(errNoFeedShape(kind))
 	}
 
-	feed.proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "source:" + string(kind), Kind: procname.KindSource, Bin: e.tools.FFmpeg, Args: args,
-		// Deliberately not AutoRestart: a respawn has to be rebuilt with a
-		// current timestamp offset, so the sweep owns it.
-		AutoRestart: false, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	spec := e.relayConsumerSpec(relayConsumer{
+		name: "source:" + string(kind), sub: selectorSubName, kind: procname.KindSource, hub: feed.in, args: args,
 	})
+	// Deliberately not AutoRestart: a respawn has to be rebuilt with a current
+	// timestamp offset, so the sweep owns it.
+	spec.AutoRestart = false
+	feed.proc = supervisor.New(e.log, spec)
 
 	e.mu.Lock()
 	// Shutdown may have run since this started; publishing under the same lock

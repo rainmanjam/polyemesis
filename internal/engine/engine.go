@@ -737,6 +737,10 @@ type destination struct {
 	// backupGraph is the graph the backup process is spawned from, for the same
 	// reason as graph.
 	backupGraph *graphHolder
+	// backupWatch is watch for the backup process: whether media has ever moved
+	// through it, so the #674 re-probe can restart a backup that characterised
+	// its input before the ingest carried audio, as it does the primary.
+	backupWatch *destWatch
 	// backupSpec is the backup's OWN restart hash, deliberately not derived
 	// from spec. The two must cycle independently: a rotated backup key has to
 	// restart only the backup, and nothing about the backup may ever restart
@@ -892,12 +896,11 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		// and the engine decides what a child is. That is what keeps a playout
 		// muxer on the same log sink, state callbacks and restart policy as
 		// every other process in the pipeline.
-		Spawn: func(name string, args []string) playout.Runner {
-			proc := supervisor.New(e.log, supervisor.Spec{
-				Name: name, Kind: procname.KindPlayout, Bin: e.tools.FFmpeg, Args: args,
-				AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
-			})
-			return &playoutProc{e: e, name: name, Process: proc}
+		Spawn: func(name string, args []string, wake func()) playout.Runner {
+			spec := e.relayConsumerSpec(relayConsumer{name: name, sub: name, kind: procname.KindPlayout, args: args})
+			// The manager owns the subscription, so it owns the wake.
+			spec.WakeOnStop = wake
+			return &playoutProc{e: e, name: name, Process: supervisor.New(e.log, spec)}
 		},
 	})
 	// Both read their configuration from the database on every pass, so a rule
@@ -1300,9 +1303,9 @@ func (e *Engine) StopWithin(ctx context.Context) {
 		hub  *relay.Hub
 		name string
 	}{
-		{e.hub, "recorder"},
-		{hubOr(e.previewHub, e.hub), "preview"},
-		{hubOr(e.metersHub, e.hub), "meters"},
+		{e.hub, recorderSubName},
+		{hubOr(e.previewHub, e.hub), previewSubName},
+		{hubOr(e.metersHub, e.hub), metersSubName},
 	}
 	e.recorderPort, e.previewPort, e.metersPort = 0, 0, 0
 	e.previewHub, e.metersHub = nil, nil
@@ -2133,7 +2136,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		e.log.Error("recorder: no relay port", "err", err)
 		return
 	}
-	url, err := e.hub.Subscribe("recorder", port)
+	url, err := e.hub.Subscribe(recorderSubName, port)
 	if err != nil {
 		// #711. Same release-and-bail as the port refusal above. An occupied
 		// name means another consumer is reading under it, and taking it would
@@ -2167,14 +2170,12 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 	}
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "recorder", Kind: procname.KindRecorder, Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
-		// The recorder is the consumer this exists for: stopped after the
-		// publisher has gone -- the ingest ending, recording.enabled=false,
-		// `docker stop` on an idle server -- it used to be SIGKILLed with its
-		// last segment unfinalised. See relay.Hub.Wake.
-		WakeOnStop: relayWaker(e.hub, "recorder"),
+	// The consumer the wake exists for: stopped after the publisher has gone --
+	// the ingest ending, recording.enabled=false, `docker stop` on an idle
+	// server -- it used to be SIGKILLed with its last segment unfinalised. See
+	// relay.Hub.Wake.
+	proc := e.newRelayConsumer(relayConsumer{
+		name: recorderSubName, sub: recorderSubName, kind: procname.KindRecorder, hub: e.hub, args: args,
 	})
 
 	e.mu.Lock()
@@ -2184,7 +2185,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// what keeps a late start from becoming an orphan.
 	if e.stopped {
 		e.mu.Unlock()
-		e.hub.Unsubscribe("recorder")
+		e.hub.Unsubscribe(recorderSubName)
 		e.releasePort(port)
 		return
 	}
@@ -2202,23 +2203,6 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		why = "restarted to apply changed recording settings"
 	}
 	e.streamRecording(true, why)
-}
-
-// relayWaker is the Spec.WakeOnStop for a consumer subscribed to hub as name.
-//
-// Safe after the fact by construction: Wake does nothing for a name the hub no
-// longer holds, and every teardown here stops the process BEFORE it
-// unsubscribes, so the subscription is still there for as long as the wake can
-// be needed. The one overlap: a Stop whose context expires before its child is
-// reaped returns while the escalator is still running, and a successor that
-// subscribes under the same name in that window can be sent a wake too. That
-// costs it nothing it would notice -- a wake only ever reaches a feed that is
-// already silent, and the empty PES it opens carries no payload.
-func relayWaker(hub *relay.Hub, name string) func() {
-	if hub == nil {
-		return nil
-	}
-	return func() { hub.Wake(name) }
 }
 
 // reconcilePreview applies settings changes to the preview encoder, but never
@@ -2507,7 +2491,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	e.mu.Lock()
 	e.previewHub = hub
 	e.mu.Unlock()
-	url, err := hub.Subscribe("preview", port)
+	url, err := hub.Subscribe(previewSubName, port)
 	if err != nil {
 		// #711. previewHub is cleared with it, or a later sweep unsubscribes a
 		// name this preview never took -- cutting off whoever actually holds it.
@@ -2527,9 +2511,8 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		VideoKbps:      s.Preview.VideoKbps,
 	})
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "preview", Kind: procname.KindPreview, Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newRelayConsumer(relayConsumer{
+		name: previewSubName, sub: previewSubName, kind: procname.KindPreview, hub: hub, args: args,
 	})
 
 	if e.beforePublish != nil {
@@ -2544,7 +2527,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// least synchronised with a shutdown of any of them.
 	if e.stopped {
 		e.mu.Unlock()
-		hub.Unsubscribe("preview")
+		hub.Unsubscribe(previewSubName)
 		e.releasePort(port)
 		return
 	}
@@ -2669,7 +2652,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		return
 	}
 	meterHub := e.downstreamHub()
-	url, err := meterHub.Subscribe("meters", port)
+	url, err := meterHub.Subscribe(metersSubName, port)
 	if err != nil {
 		e.releasePort(port)
 		e.log.Error("meters: relay subscription refused", "err", err)
@@ -2678,38 +2661,27 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 
-	// Declared ahead of the Spec so the stdout handler can reach it: see the
-	// NoteMedia call below.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "meters", Kind: procname.KindMeters, Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true,
-		// astats prints far faster than any UI can draw; throttle here rather
-		// than flooding every WebSocket client with 50 frames a second. The
-		// rate is read per frame from the engine, so lowering it applies to
-		// this sidecar without respawning it.
-		StdoutHandler: func(r io.Reader) error {
-			th := &meterThrottle{e: e}
-			return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
-				// Levels arriving is media flowing. This stdout is not the
-				// -progress parser, so without it the supervisor never learns
-				// that, and the meters' uptime reads --:--:-- for ever.
-				proc.NoteMedia()
-				now := time.Now()
-				if !th.allow(now) {
-					return
-				}
-				e.mu.Lock()
-				e.levels = l
-				e.levelsAt = now
-				frame := LevelsFrame{Levels: l, Source: ProgrammeRef{ID: e.sourceID, Name: e.sourceName}}
-				e.mu.Unlock()
-				e.bus.Publish(events.TypeLevels, frame)
-			})
-		},
-		OnLog:   e.onLog,
-		OnState: e.onState,
-		LogSink: logSink{e},
+	// astats prints far faster than any UI can draw; throttle here rather than
+	// flooding every WebSocket client with 50 frames a second. The rate is read
+	// per frame from the engine, so lowering it applies to this sidecar without
+	// respawning it.
+	proc := e.newMeterConsumer(relayConsumer{
+		name: metersSubName, sub: metersSubName, kind: procname.KindMeters, hub: meterHub, args: args,
+	}, func(r io.Reader, noteMedia func()) error {
+		th := &meterThrottle{e: e}
+		return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
+			noteMedia()
+			now := time.Now()
+			if !th.allow(now) {
+				return
+			}
+			e.mu.Lock()
+			e.levels = l
+			e.levelsAt = now
+			frame := LevelsFrame{Levels: l, Source: ProgrammeRef{ID: e.sourceID, Name: e.sourceName}}
+			e.mu.Unlock()
+			e.bus.Publish(events.TypeLevels, frame)
+		})
 	})
 
 	e.mu.Lock()
@@ -2722,7 +2694,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	// Same guard, same reason, as reconcileRecorder's.
 	if e.stopped {
 		e.mu.Unlock()
-		meterHub.Unsubscribe("meters")
+		meterHub.Unsubscribe(metersSubName)
 		e.releasePort(port)
 		return
 	}
@@ -3550,9 +3522,8 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	}
 	args := ffmpeg.RenditionArgs(rspec)
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: procname.KindRendition, Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newRelayConsumer(relayConsumer{
+		name: subName, sub: subName, kind: procname.KindRendition, hub: upstream, args: args,
 	})
 
 	e.mu.Lock()
@@ -3645,20 +3616,20 @@ type auxSlot struct {
 
 var (
 	auxRecorder = auxSlot{
-		name: "recorder",
+		name: recorderSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.recorder },
 		port: func(e *Engine) *int { return &e.recorderPort },
 		sig:  func(e *Engine) *string { return &e.recorderSig },
 	}
 	auxPreview = auxSlot{
-		name: "preview",
+		name: previewSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.preview },
 		port: func(e *Engine) *int { return &e.previewPort },
 		sig:  func(e *Engine) *string { return &e.previewSig },
 		hub:  func(e *Engine) **relay.Hub { return &e.previewHub },
 	}
 	auxMeters = auxSlot{
-		name: "meters",
+		name: metersSubName,
 		proc: func(e *Engine) **supervisor.Process { return &e.meters },
 		port: func(e *Engine) *int { return &e.metersPort },
 		sig:  func(e *Engine) *string { return &e.metersSig },
@@ -4565,27 +4536,22 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	})
 
 	id, name, target, mix := p.id, p.name, p.target, p.key.mix
-	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
-	var proc *supervisor.Process
-	proc = supervisor.New(e.log, supervisor.Spec{
-		Name: subName, Kind: procname.KindLoudness, Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true,
-		StdoutHandler: func(r io.Reader) error {
-			var last time.Time
-			return meters.Parse(r, func(f meters.Frame) {
-				proc.NoteMedia() // as the meters do: a frame is media flowing
-				rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
-				// Stored on every frame, published on a throttle: a browser
-				// that connects between pushes still gets the current number.
-				e.loudStore.Put(rep)
-				if time.Since(last) < loudnessPublishInterval {
-					return
-				}
-				last = time.Now()
-				e.bus.Publish(events.TypeLoudness, rep)
-			})
-		},
-		OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	proc := e.newMeterConsumer(relayConsumer{
+		name: subName, sub: subName, kind: procname.KindLoudness, hub: p.hub, args: args,
+	}, func(r io.Reader, noteMedia func()) error {
+		var last time.Time
+		return meters.Parse(r, func(f meters.Frame) {
+			noteMedia()
+			rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
+			// Stored on every frame, published on a throttle: a browser
+			// that connects between pushes still gets the current number.
+			e.loudStore.Put(rep)
+			if time.Since(last) < loudnessPublishInterval {
+				return
+			}
+			last = time.Now()
+			e.bus.Publish(events.TypeLoudness, rep)
+		})
 	})
 
 	e.mu.Lock()

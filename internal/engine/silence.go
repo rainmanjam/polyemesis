@@ -230,11 +230,10 @@ func (e *Engine) startSilence(spec string) {
 		OutRelayURL: hub.InputURL(),
 	})
 
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: silenceSubName, Kind: procname.KindSilence, Bin: e.tools.FFmpeg, Args: args,
-		// SilenceArgs passes -shortest, so this process exits with the ingest
-		// and the supervisor's normal respawn is the reconnect path.
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	// SilenceArgs passes -shortest, so this process exits with the ingest and the
+	// supervisor's normal respawn is the reconnect path.
+	proc := e.newRelayConsumer(relayConsumer{
+		name: silenceSubName, sub: silenceSubName, kind: procname.KindSilence, hub: e.hub, args: args,
 	})
 
 	e.mu.Lock()
