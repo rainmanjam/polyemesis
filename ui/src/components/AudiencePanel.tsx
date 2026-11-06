@@ -29,7 +29,7 @@ const REASON: Record<string, TranslationKey> = {
  *  THE TOTAL. It is never shown as 0: a hidden YouTube count on a stream with an
  *  audience is not an audience of none. When nothing reported, the total
  *  itself reads "not reported". */
-export function AudiencePanel({ className }: { className?: string }) {
+export function AudiencePanel({ className }: Readonly<{ className?: string }>) {
   const t = useT();
   const [live, setLive] = useState<AnalyticsLive | null>(null);
   const [failed, setFailed] = useState(false);
@@ -87,7 +87,7 @@ export function AudiencePanel({ className }: { className?: string }) {
   );
 }
 
-function OnAir({ live }: { live: AnalyticsLive }) {
+function OnAir({ live }: Readonly<{ live: AnalyticsLive }>) {
   const t = useT();
   const rows = orderReadings(live.readings);
   const path = sparkPath(live.points, 200, 32);
@@ -158,7 +158,7 @@ function OnAir({ live }: { live: AnalyticsLive }) {
   );
 }
 
-function ReadingRow({ r }: { r: AnalyticsReading }) {
+function ReadingRow({ r }: Readonly<{ r: AnalyticsReading }>) {
   const t = useT();
   const count = readingCount(r);
   const label = r.platform === PLAYER ? t("aud.player") : platformName(r.platform);

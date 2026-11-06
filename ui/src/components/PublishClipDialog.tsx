@@ -59,7 +59,7 @@ const PLATFORM_LABEL: Record<PublishPlatformId, "publish.platform.youtube" | "pu
   x: "publish.platform.x",
 };
 
-export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
+export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Props>) {
   const t = useT();
   const [targets, setTargets] = useState<PublishTargets | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -458,7 +458,7 @@ function privacyWord(t: Tr, level: string): string {
   }
 }
 
-function PreviousRow({ pub, t }: { pub: Publication; t: Tr }) {
+function PreviousRow({ pub, t }: Readonly<{ pub: Publication; t: Tr }>) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <Badge variant={pub.state === "posted" ? "live" : pub.state === "failed" ? "warn" : "outline"}>
@@ -481,12 +481,12 @@ function PublicationStatus({
   account,
   t,
   onAgain,
-}: {
+}: Readonly<{
   pub: Publication;
   account?: { connectPath?: string };
   t: Tr;
   onAgain: (acknowledgedOutcome: boolean) => void;
-}) {
+}>) {
   const [checked, setChecked] = useState(false);
   const pct = Math.round((pub.job?.progress ?? 0) * 100);
   if (pub.state === "posted") {

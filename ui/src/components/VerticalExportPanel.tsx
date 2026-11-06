@@ -57,7 +57,7 @@ export function VerticalExportPanel({
   durationMs,
   videoRef,
   poster,
-}: Props) {
+}: Readonly<Props>) {
   const t = useT();
   const [frame, setFrame] = useState<string | undefined>(undefined);
   const [srcAspect, setSrcAspect] = useState(16 / 9);
@@ -360,7 +360,7 @@ export function VerticalExportPanel({
   );
 }
 
-function OptionButton({ active, onClick, title, body }: { active: boolean; onClick: () => void; title: string; body: string }) {
+function OptionButton({ active, onClick, title, body }: Readonly<{ active: boolean; onClick: () => void; title: string; body: string }>) {
   return (
     <button
       type="button"

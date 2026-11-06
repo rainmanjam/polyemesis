@@ -1131,12 +1131,12 @@ function ModeButton({
   onClick,
   title,
   body,
-}: {
+}: Readonly<{
   active: boolean;
   onClick: () => void;
   title: string;
   body: string;
-}) {
+}>) {
   return (
     <button
       type="button"
@@ -1159,11 +1159,11 @@ function TimecodeField({
   label,
   valueMs,
   onCommit,
-}: {
+}: Readonly<{
   label: string;
   valueMs: number;
   onCommit: (ms: number) => void;
-}) {
+}>) {
   const t = useT();
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? timecode(valueMs);
@@ -1203,13 +1203,13 @@ function PlanPanel({
   error,
   tooLong,
   maxSeconds,
-}: {
+}: Readonly<{
   plan: ClipPlan | null;
   planning: boolean;
   error: string;
   tooLong: boolean;
   maxSeconds: number;
-}) {
+}>) {
   const t = useT();
   const drift = plan?.inDriftMs ?? 0;
   const moved = Boolean(plan?.driftKnown) && drift !== 0;
@@ -1304,12 +1304,12 @@ function TranscriptRow({
   selected,
   onSeek,
   onClip,
-}: {
+}: Readonly<{
   line: TranscriptLine;
   selected: boolean;
   onSeek: () => void;
   onClip: (e: ReactMouseEvent) => void;
-}) {
+}>) {
   const t = useT();
   return (
     <div
@@ -1370,7 +1370,7 @@ function TranscriptRow({
   );
 }
 
-function JobRow({ job }: { job: ClipJob }) {
+function JobRow({ job }: Readonly<{ job: ClipJob }>) {
   const t = useT();
   const [publishing, setPublishing] = useState(false);
   const done = job.state === "done";

@@ -197,7 +197,7 @@ export function AudioMeter({
   barGap = 3,
   className,
   range,
-}: AudioMeterProps) {
+}: Readonly<AudioMeterProps>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLSpanElement>(null);
   const t = useT();
@@ -442,7 +442,7 @@ export function AudioMeter({
  *  A zone break gets a brighter number and a tick, because the marks the bar
  *  itself now carries are useless if nothing overhead says what level they
  *  stand at — position is only a channel once it has a legend. */
-export function MeterScale({ className, range }: { className?: string; range?: DbRange }) {
+export function MeterScale({ className, range }: Readonly<{ className?: string; range?: DbRange }>) {
   const t = useT();
   const r = range ?? FIXED_RANGE;
   // A16: the -14 streaming reference is labelled, so the ruler carries the one

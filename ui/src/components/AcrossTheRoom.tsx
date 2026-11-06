@@ -39,11 +39,11 @@ export function AcrossTheRoom({
   open,
   onClose,
   status,
-}: {
+}: Readonly<{
   open: boolean;
   onClose: () => void;
   status: Status | null | undefined;
-}) {
+}>) {
   // Escape closes it, because every other dismissible layer in this UI answers
   // to Escape and one that does not is the one that feels stuck. Bound only
   // while open, so the console keeps Escape for its dialogs the rest of the
@@ -98,11 +98,11 @@ function RoomPanel({
   onClose,
   status,
   transition,
-}: {
+}: Readonly<{
   onClose: () => void;
   status: Status | null | undefined;
   transition: ReturnType<typeof useMotionTransition>;
-}) {
+}>) {
   const t = useT();
   const stateLabel = useStateLabel();
 

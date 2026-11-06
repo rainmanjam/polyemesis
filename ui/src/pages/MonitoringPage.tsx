@@ -486,12 +486,12 @@ function TileRemedy({
   label,
   to,
   onClick,
-}: {
+}: Readonly<{
   text: string;
   label: string;
   to?: string;
   onClick?: () => void;
-}) {
+}>) {
   return (
     <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-sm text-warn">
       <span>{text}</span>

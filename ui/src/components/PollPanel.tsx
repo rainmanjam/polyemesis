@@ -37,7 +37,7 @@ import type { ChatPlatform } from "@/lib/types";
 const LIVE_EVERY_MS = 1500;
 const HISTORY = 10;
 
-export function PollPanel({ twitchAvailable = false }: { twitchAvailable?: boolean }) {
+export function PollPanel({ twitchAvailable = false }: Readonly<{ twitchAvailable?: boolean }>) {
   const t = useT();
   const [data, setData] = useState<PollsResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -112,11 +112,11 @@ export function PollPanel({ twitchAvailable = false }: { twitchAvailable?: boole
 function StartForm({
   onStarted,
   twitchAvailable,
-}: {
+}: Readonly<{
   onStarted: () => Promise<void>;
   /** Whether a Twitch account is attached. Without one there is nothing to mirror to. */
   twitchAvailable: boolean;
-}) {
+}>) {
   const t = useT();
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState<string[]>(["", ""]);
@@ -270,7 +270,7 @@ function stateLine(t: Translator, p: Poll, now: number): string {
   return t("polls.timeLeft", { time: clock(secondsLeft(p, now)) });
 }
 
-function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged: () => Promise<void> }) {
+function LivePoll({ poll, now, onChanged }: Readonly<{ poll: Poll; now: number; onChanged: () => Promise<void> }>) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const pct = sharePercents(poll);
@@ -333,7 +333,7 @@ function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged
 }
 
 /** Where the poll was announced, and what became of the native mirror. */
-function Delivery({ poll }: { poll: Poll }) {
+function Delivery({ poll }: Readonly<{ poll: Poll }>) {
   const t = useT();
   const announced = poll.announced ?? [];
   const native = poll.native ?? [];
@@ -364,7 +364,7 @@ function Delivery({ poll }: { poll: Poll }) {
   );
 }
 
-function HistoryRow({ poll }: { poll: Poll }) {
+function HistoryRow({ poll }: Readonly<{ poll: Poll }>) {
   const t = useT();
   const best = Math.max(0, ...poll.options.map((o) => o.votes));
   const winners = best > 0 ? poll.options.filter((o) => o.votes === best).map((o) => o.label) : [];

@@ -260,7 +260,7 @@ export function DeviceCodeDialog({
 /** The code itself. See the header for why it is rendered like this. */
 /** Exported for test: the aria-label is the accessibility-critical part of this
  *  whole feature and deserves an assertion of its own. */
-export function UserCode({ code }: { code: string }) {
+export function UserCode({ code }: Readonly<{ code: string }>) {
   const t = useT();
   const { copy, copied } = useCopy();
   return (

@@ -62,7 +62,7 @@ import { useT } from "@/lib/i18n";
 
 /** The badge on its own, for a heading or a row that already carries the
  *  explanation somewhere the reader can see it. */
-export function ExperimentalBadge({ className }: { className?: string }) {
+export function ExperimentalBadge({ className }: Readonly<{ className?: string }>) {
   const t = useT();
   return (
     <Badge variant="outline" className={className}>
@@ -75,7 +75,7 @@ export function ExperimentalBadge({ className }: { className?: string }) {
  *
  *  `children` is that claim, and it is required rather than optional: the whole
  *  point of the convention is that the label is useless without it. */
-export function Experimental({ children }: { children: ReactNode }) {
+export function Experimental({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-card-raised p-2">
       <ExperimentalBadge className="self-start" />

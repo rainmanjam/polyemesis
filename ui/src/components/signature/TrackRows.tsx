@@ -135,10 +135,10 @@ interface TrackRowsProps {
 export function RoleBadge({
   role,
   excluded,
-}: {
+}: Readonly<{
   role: Exclude<TrackRole, "">;
   excluded: boolean;
-}) {
+}>) {
   const t = useT();
   const name = t(ROLE_LABEL_KEY[role]);
   return (
@@ -170,7 +170,7 @@ export function TrackRows({
   duckTarget = [],
   live,
   draftMute,
-}: TrackRowsProps) {
+}: Readonly<TrackRowsProps>) {
   const t = useT();
   const translate = useT();
   /* A10: the last measured peak per track, and when it was measured. Kept in a
@@ -622,14 +622,14 @@ export function TrackSummary({
   labels,
   count,
   className,
-}: {
+}: Readonly<{
   tracks: number[] | null;
   labels?: (string | undefined)[] | null;
   /** How many tracks the ingest carries, when known (lib/trackLabels.ts
    *  trackCount). One chip per track; see trackChipCount. */
   count?: number | null;
   className?: string;
-}) {
+}>) {
   const t = useT();
   const list = tracks ?? [];
   return (

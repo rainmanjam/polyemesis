@@ -23,12 +23,12 @@ export function NarrowDisclosure({
   label,
   className,
   children,
-}: {
+}: Readonly<{
   narrow: boolean;
   label: string;
   className?: string;
   children: ReactNode;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (

@@ -31,12 +31,12 @@ export function AnchorGrid({
   onChange,
   disabled,
   label,
-}: {
+}: Readonly<{
   value: OverlayAnchor;
   onChange: (v: OverlayAnchor) => void;
   disabled?: boolean;
   label?: string;
-}) {
+}>) {
   const t = useT();
   const groupLabel = label ?? t("anchor.position");
   const cells = useRef<(HTMLButtonElement | null)[]>([]);

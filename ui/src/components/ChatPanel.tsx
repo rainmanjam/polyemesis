@@ -85,7 +85,7 @@ function nameTone(name: string): string {
   return NAME_TONES[h % NAME_TONES.length];
 }
 
-function MessageBody({ m }: { m: ChatMessage }) {
+function MessageBody({ m }: Readonly<{ m: ChatMessage }>) {
   const pieces = useMemo(() => splitMessage(m), [m]);
   return (
     <>
@@ -120,7 +120,7 @@ function MessageRow({
   onOpenUser,
   onMenu,
   compact,
-}: {
+}: Readonly<{
   m: ChatMessage;
   onDelete?: Asks<ChatMessage>;
   /** Open the moderator's user card for whoever said this. */
@@ -128,7 +128,7 @@ function MessageRow({
   /** Open the quick-action menu at a point. */
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
-}) {
+}>) {
   const t = useT();
   const accent = accentFor(m.platform);
   const Icon = accent.icon;
@@ -294,14 +294,14 @@ export function ChatTimeline({
   onMenu,
   compact,
   empty,
-}: {
+}: Readonly<{
   messages: ChatMessage[];
   onDelete?: Asks<ChatMessage>;
   onOpenUser?: (m: ChatMessage) => void;
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
   empty?: React.ReactNode;
-}) {
+}>) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
@@ -384,12 +384,12 @@ export function PlatformFilter({
   hidden,
   onToggle,
   counts,
-}: {
+}: Readonly<{
   platforms: ChatPlatform[];
   hidden: Set<ChatPlatform>;
   onToggle: (p: ChatPlatform) => void;
   counts?: Map<ChatPlatform, number>;
-}) {
+}>) {
   if (platforms.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -426,7 +426,7 @@ export function PlatformFilter({
  *  "Sent" is never the whole story: partial delivery is the normal case, and an
  *  operator who typed something important needs to know that Twitch has it and
  *  YouTube does not — not that "sending failed". */
-function SendVerdict({ results }: { results: ChatSendResult[] }) {
+function SendVerdict({ results }: Readonly<{ results: ChatSendResult[] }>) {
   const t = useT();
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
@@ -457,12 +457,12 @@ export function ChatComposer({
   limits,
   configured,
   compact,
-}: {
+}: Readonly<{
   statuses: ChatStatus[];
   limits: ChatLimit[];
   configured: boolean;
   compact?: boolean;
-}) {
+}>) {
   const t = useT();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -633,10 +633,10 @@ export function ChatComposer({
 export function ChatStatusList({
   statuses,
   compact,
-}: {
+}: Readonly<{
   statuses: ChatStatus[];
   compact?: boolean;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   if (statuses.length === 0) return null;
@@ -719,10 +719,10 @@ export function ChatStatusList({
 export function ChatSearchBox({
   search,
   className,
-}: {
+}: Readonly<{
   search: ChatSearchState;
   className?: string;
-}) {
+}>) {
   const t = useT();
   return (
     <div
@@ -775,12 +775,12 @@ export function ChatSearchResults({
   onDelete,
   onOpenUser,
   onMenu,
-}: {
+}: Readonly<{
   search: ChatSearchState;
   onDelete?: Asks<ChatMessage>;
   onOpenUser?: (m: ChatMessage) => void;
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
-}) {
+}>) {
   const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -842,10 +842,10 @@ export function ChatSearchResults({
 export function ChatPanel({
   className,
   showComposer = true,
-}: {
+}: Readonly<{
   className?: string;
   showComposer?: boolean;
-}) {
+}>) {
   const t = useT();
   const {
     messages,
@@ -1002,7 +1002,7 @@ export function ChatEmpty({
   statuses,
   hiddenMessages = 0,
   onOpenCredentials,
-}: {
+}: Readonly<{
   loading: boolean;
   configured: boolean;
   error: string;
@@ -1023,7 +1023,7 @@ export function ChatEmpty({
    *  action on that empty state. Optional, because the Dashboard's chat card
    *  already sits beside its own connect prompt. */
   onOpenCredentials?: () => void;
-}) {
+}>) {
   const t = useT();
   // Loading is not empty: it is a wait, so it keeps the spinner and no title.
   if (loading) {

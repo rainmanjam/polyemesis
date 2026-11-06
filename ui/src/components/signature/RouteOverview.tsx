@@ -51,7 +51,7 @@ interface RouteOverviewProps {
   onFix: (id: number) => void;
 }
 
-export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }: RouteOverviewProps) {
+export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }: Readonly<RouteOverviewProps>) {
   const gridId = useId();
   const t = useT();
   const dests: OverviewDest[] = rows.map((r) => ({ ...r, enabled: true }));
@@ -177,7 +177,7 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
   );
 }
 
-function RightsChip({ state }: { state: MusicRights }) {
+function RightsChip({ state }: Readonly<{ state: MusicRights }>) {
   const t = useT();
   if (state === "reachesVod") {
     return (

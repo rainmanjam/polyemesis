@@ -30,13 +30,13 @@ const REVEAL_FRAMES = 20;
 export function SettingsSectionSearch({
   labels,
   onPick,
-}: {
+}: Readonly<{
   labels: Record<SettingsTab, string>;
   /** The section to open, and the field hit when the pick was a field, so the
    *  page can open a hidden advanced card before the hit is revealed
    *  (settings-council R7). */
   onPick: (tab: SettingsTab, hit?: SettingsHit) => void;
-}) {
+}>) {
   const t = useT();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);

@@ -53,7 +53,7 @@ export function OnAirBar({
   failover,
   onEndAll,
   ingestReceiving,
-}: {
+}: Readonly<{
   status: Status | null | undefined;
   /** The programme-scoped failover tier, from the Dashboard. Not read from
    *  `status`, which is install-wide and can be another programme's. */
@@ -64,7 +64,7 @@ export function OnAirBar({
   /** The selected programme's ingest, receiving or not: the same signal the
    *  header chip reads. Left undefined where it has not been read yet. */
   ingestReceiving?: boolean;
-}) {
+}>) {
   const stateLabel = useStateLabel();
   const t = useT();
   const [roomOpen, setRoomOpen] = useState(false);

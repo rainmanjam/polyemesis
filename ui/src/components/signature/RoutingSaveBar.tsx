@@ -80,7 +80,7 @@ export function RoutingSaveBar({
   reason = null,
   onSave,
   onDiscard,
-}: RoutingSaveBarProps) {
+}: Readonly<RoutingSaveBarProps>) {
   const t = useT();
   const reasonId = useId();
   const warnRestart = dirty && restarts && impact === "restart";

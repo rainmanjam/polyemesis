@@ -925,7 +925,7 @@ function BulkDestinationControl({
  *  heading carries data-lane-state for anything reading it without eyes. The
  *  bare "STUDIO A 9" it replaces said neither what was counted nor whether
  *  the lane was live. */
-export function LaneHeading({ name, destinations }: { name: string; destinations: readonly DestStatus[] }) {
+export function LaneHeading({ name, destinations }: Readonly<{ name: string; destinations: readonly DestStatus[] }>) {
   const t = useT();
   const live = destinations.filter(destinationOnAir).length;
   const onAir = live > 0;
@@ -954,7 +954,7 @@ export function LaneHeading({ name, destinations }: { name: string; destinations
 
 /** The failover exposure line. Renders nothing when there is nothing to say,
  *  which is the common case on a correctly configured install. */
-export function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+export function FailoverExposure({ notice }: Readonly<{ notice: FailoverNotice }>) {
   const t = useT();
   if (notice.kind === "none") return null;
 
@@ -1035,7 +1035,7 @@ export function FailoverControl({
   manualReturn,
   busy,
   onSwitch,
-}: {
+}: Readonly<{
   /** The tier's live state, or null when failover is not running -- which is
    *  the default on most installs, and draws nothing. */
   state: FailoverStatus | null;
@@ -1047,7 +1047,7 @@ export function FailoverControl({
   manualReturn: boolean;
   busy: boolean;
   onSwitch: (to: FailoverPin) => void | Promise<void>;
-}) {
+}>) {
   const t = useT();
   const confirm = useConfirm<FailoverPin>();
 
@@ -1159,7 +1159,7 @@ export function FailoverControl({
 /** The ticking "for 2m 14s" figure. Its own component so the one-second tick
  *  re-renders this span and nothing else: the Dashboard is 1800 lines and a
  *  tick in the parent would redraw all of them every second. */
-function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
+function FailoverElapsed({ switchedAt }: Readonly<{ switchedAt: string }>) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -1183,7 +1183,7 @@ function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
  *  which branch you see depends on how many programmes the install has, and so
  *  is not something the person editing it is likely to be toggling.
  */
-function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNode }) {
+function SideColumn({ stacked, children }: Readonly<{ stacked: boolean; children: ReactNode }>) {
   if (stacked) return <div className="flex min-w-0 flex-col gap-3">{children}</div>;
   return <>{children}</>;
 }

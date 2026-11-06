@@ -49,7 +49,7 @@ interface MixMatrixProps {
   onMute?: (track: number, muted: boolean) => void;
 }
 
-export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMatrixProps) {
+export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: Readonly<MixMatrixProps>) {
   const t = useT();
   // The header maps over tracks as `t`, so it speaks through this name.
   const say = t;
@@ -311,7 +311,7 @@ function MatrixCellInput({
   onChange,
   onNavigate,
   label,
-}: {
+}: Readonly<{
   value: number;
   inverted: boolean;
   onToggleInvert: () => void;
@@ -320,7 +320,7 @@ function MatrixCellInput({
   onChange: (v: number) => void;
   onNavigate: (out: number, col: number) => void;
   label: string;
-}) {
+}>) {
   const t = useT();
   const stateId = useId();
   const active = value > 0;
@@ -424,10 +424,10 @@ function MatrixCellInput({
 function MatrixQuickFills({
   tracks,
   onApply,
-}: {
+}: Readonly<{
   tracks: SourceTrack[];
   onApply: (cells: MatrixCell[]) => void;
-}) {
+}>) {
   // Loops below name each track `t`, so the translator gets its own name.
   const say = useT();
   const identity = () => {

@@ -57,7 +57,7 @@ function formFrom(s: Partial<RolloverSettings> | undefined): SettingsForm {
   };
 }
 
-export function RolloverPanel({ dest }: { dest: DestStatus }) {
+export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
   const t = useT();
   const [view, setView] = useState<RolloverView | null>(null);
   const [now, setNow] = useState(() => new Date());

@@ -1235,7 +1235,7 @@ function ProfileEditor({
   onCompiledGraph,
   advancedExtra,
   nested = false,
-}: {
+}: Readonly<{
   /** Namespaces every DOM id this editor emits. Must differ between instances. */
   idPrefix: string;
   ctx: EditorContext;
@@ -1266,7 +1266,7 @@ function ProfileEditor({
    *  (the second mix): its own advanced cards are shown inline rather than
    *  behind a second disclosure inside the first. */
   nested?: boolean;
-}) {
+}>) {
   const t = useT();
   const [compiled, setCompiled] = useState<RoutingResult | null>(null);
   const [compileError, setCompileError] = useState<string>("");
@@ -1644,7 +1644,7 @@ function ProfileEditor({
 /** What the operator is told about mute and gain (A26): that they wait for
  *  Save changes like every other edit, or, once for the whole destination, why
  *  no Mute can apply at all. */
-function MuteGainNote({ blocked }: { blocked: string | null }) {
+function MuteGainNote({ blocked }: Readonly<{ blocked: string | null }>) {
   const t = useT();
   if (blocked) {
     return (
@@ -1695,7 +1695,7 @@ function SecondMixCard({
   multitrack,
   blockedByToggle,
   probed,
-}: {
+}: Readonly<{
   profile: RoutingProfile | null;
   /** Seeds a newly enabled second mix when there is nothing to restore. */
   liveProfile: RoutingProfile;
@@ -1708,7 +1708,7 @@ function SecondMixCard({
   /** Whether the ingest has been probed. An unprobed one drops the second mix
    *  on every platform — see engine/destinations.go's provisional path. */
   probed: boolean;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const enable = (on: boolean) => {
@@ -1853,7 +1853,7 @@ function PresetRow({
   trackOptions,
   onApply,
   showMusicPolicy = false,
-}: PresetRowProps) {
+}: Readonly<PresetRowProps>) {
   const t = useT();
   return (
     <div className="flex flex-wrap items-start gap-2">
@@ -1945,12 +1945,12 @@ function TrackPick({
   value,
   options,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   value: number;
   options: { value: string; label: string }[];
   onChange: (v: number) => void;
-}) {
+}>) {
   const t = useT();
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
@@ -1983,13 +1983,13 @@ function MusicRightsCard({
   excludeRoles,
   musicTracks,
   onExcludeRoles,
-}: {
+}: Readonly<{
   platformName: string;
   decision?: MusicDecision;
   excludeRoles: TrackRole[];
   musicTracks: number[];
   onExcludeRoles: (roles: TrackRole[]) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const excluded = excludeRoles.includes("music");
@@ -2125,11 +2125,11 @@ export function LoudnessCard({
   loudness,
   normalize,
   onChange,
-}: {
+}: Readonly<{
   loudness: Loudness | null;
   normalize: NormalizeMode;
   onChange: (l: Loudness | null) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const named = loudness && LOUDNESS_PRESETS.some((p) => p.lufs === loudness.targetLufs);
@@ -2260,11 +2260,11 @@ export function DelayCard({
   delayMs,
   videoDelayMs,
   onChange,
-}: {
+}: Readonly<{
   delayMs: number;
   videoDelayMs: number;
   onChange: (ms: number) => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const direction: DelayDirection = delayMs < 0 ? "video" : "audio";
@@ -2358,13 +2358,13 @@ export function DuckingCard({
   allTracks,
   annotations,
   onChange,
-}: {
+}: Readonly<{
   ducking: Ducking | null;
   mixedTracks: number[];
   allTracks: number[];
   annotations: TrackAnnotation[];
   onChange: (d: Ducking | null) => void;
-}) {
+}>) {
   const t = useT();
   // What turning this on would create, or null when nothing valid can be.
   // See features/routing/duckSeed.ts, which is also where the old "< 2 tracks in the mix"
@@ -2528,13 +2528,13 @@ function TrackChip({
   active,
   tone,
   onClick,
-}: {
+}: Readonly<{
   track: number;
   annotation?: TrackAnnotation;
   active: boolean;
   tone: "armed" | "warn";
   onClick: () => void;
-}) {
+}>) {
   const t = useT();
   const name = annotation?.label || (annotation?.role ? t(ROLE_LABEL_KEY[annotation.role as Exclude<TrackRole, "">]) : "");
   return (
@@ -2574,7 +2574,7 @@ function NumberField({
   step,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   unit: string;
   value: number;
@@ -2584,7 +2584,7 @@ function NumberField({
   step: number;
   disabled?: boolean;
   onChange: (n: number) => void;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1">
       <span className="flex items-baseline justify-between text-sm uppercase tracking-wider text-muted-foreground">

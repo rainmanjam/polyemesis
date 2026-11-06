@@ -170,7 +170,7 @@ function readFailedText(state: ReadState<unknown>, t: (k: TranslationKey) => str
   return state.kind === "failed" ? t("settingsUx.tileCouldNotRead") : t("settingsUx.reading");
 }
 
-function OverviewTileCard({ tile, onOpen }: { tile: OverviewTile; onOpen: (tab: string) => void }) {
+function OverviewTileCard({ tile, onOpen }: Readonly<{ tile: OverviewTile; onOpen: (tab: string) => void }>) {
   const t = useT();
   return (
     <li>

@@ -401,7 +401,7 @@ export function SourceCard({
   onDelete,
   onAddDestination,
   previewOn = false,
-}: {
+}: Readonly<{
   source: SourceView;
   busy: boolean;
   onPatch: (changes: Partial<Source>) => void;
@@ -412,7 +412,7 @@ export function SourceCard({
   onAddDestination?: () => void;
   /** The preview encoder is on, so a receiving card can show a thumbnail. */
   previewOn?: boolean;
-}) {
+}>) {
   const t = useT();
   // Binds each ingest caption to its field. The captions were visible but not
   // programmatically tied to the inputs, so a screen reader announced three
@@ -989,14 +989,14 @@ function NumberField({
   min,
   max,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   hint?: TranslationKey;
   value: number;
   min: number;
   max: number;
   onChange: (n: number) => void;
-}) {
+}>) {
   const bad = value < min || value > max;
   // Bound to its caption and range; the InfoHint is beside the label, not in it.
   const id = useId();

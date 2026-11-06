@@ -36,7 +36,7 @@ export function Stat({
   unit,
   tone,
   className,
-}: {
+}: Readonly<{
   labelKey: StatLabelKey;
   /** Interpolation for labels that carry a count, e.g. "Stems ({count} files)". */
   labelParams?: TranslateParams;
@@ -44,7 +44,7 @@ export function Stat({
   unit?: string;
   tone?: "default" | "live" | "warn" | "down" | "muted";
   className?: string;
-}) {
+}>) {
   const t = useT();
   // Safe by the type above: StatLabelKey only admits keys whose `.hint` is in
   // the catalogue. The assertion is what tells TypeScript that the template

@@ -168,12 +168,12 @@ function LivePlayer({
   token,
   atMs,
   onPlayingChange,
-}: {
+}: Readonly<{
   view: PlayoutPublicView;
   token?: string;
   atMs?: number;
   onPlayingChange: (playing: boolean) => void;
-}) {
+}>) {
   const t = useT();
   const [playing, setPlayingState] = useState(false);
   const setPlaying = useCallback(
@@ -573,12 +573,12 @@ export function OfflineCard({
   view,
   token,
   now: nowProp,
-}: {
+}: Readonly<{
   view: PlayoutPublicView;
   token?: string;
   /** For tests: a fixed clock instead of a ticking one. */
   now?: number;
-}) {
+}>) {
   const t = useT();
   const [tick, setTick] = useState(() => Date.now());
   const ticking = nowProp === undefined && !!view.nextStartAt;
@@ -695,7 +695,7 @@ function formatWhen(iso: string): string {
 
 // --------------------------------------------------------------------- about
 
-function About({ view, live }: { view: PlayoutPublicView; live: boolean }) {
+function About({ view, live }: Readonly<{ view: PlayoutPublicView; live: boolean }>) {
   const t = useT();
   // The textarea below is always present, so a blocked clipboard (cross-origin iframe,
   // plain HTTP) is not reported: the snippet is still selectable by hand.
@@ -753,7 +753,7 @@ function About({ view, live }: { view: PlayoutPublicView; live: boolean }) {
 }
 
 /** Centred frame for the states that have no video to show. */
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-neutral-950 p-6 text-center text-neutral-100">
       {children}

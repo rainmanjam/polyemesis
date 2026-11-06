@@ -85,7 +85,7 @@ function useTransparentPage() {
  *  stream as the chat overlay, but it draws ONLY poll.display: the chat lines
  *  are not handed to it at all. Nothing is drawn while no poll is running, and
  *  a failure draws nothing -- an error on this page would be on stream. */
-function PollOverlay({ overlayKey: key }: { overlayKey: string }) {
+function PollOverlay({ overlayKey: key }: Readonly<{ overlayKey: string }>) {
   const [style, setStyle] = useState<OverlayStyle | null>(null);
   const [poll, setPoll] = useState<ShownPoll | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -134,7 +134,7 @@ function PollOverlay({ overlayKey: key }: { overlayKey: string }) {
   );
 }
 
-function ChatOverlay({ overlayKey: key, dock }: { overlayKey: string; dock: boolean }) {
+function ChatOverlay({ overlayKey: key, dock }: Readonly<{ overlayKey: string; dock: boolean }>) {
   const t = useT();
   // No key in the URL is decided at once, not in an effect.
   const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "missing" }));

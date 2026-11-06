@@ -14,12 +14,12 @@ const fmt = (v: number) => v.toFixed(1);
 export function OutputStrip({
   state,
   source,
-}: {
+}: Readonly<{
   state: OutputState;
   /** The loudest ingest peak among the tracks this destination sends, in dBFS,
    *  or null when no live meter covers them. */
   source: number | null;
-}) {
+}>) {
   const t = useT();
   const dropped = routingDropsSignal(state, source);
 

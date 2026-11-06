@@ -536,14 +536,14 @@ function HookDialog({
   onChange,
   onClose,
   onSave,
-}: {
+}: Readonly<{
   draft: HookDraft | null;
   meta: HookMeta | null;
   busy: boolean;
   onChange: (h: HookDraft) => void;
   onClose: () => void;
   onSave: () => void;
-}) {
+}>) {
   const t = useT();
   if (!draft) return null;
   const editing = Boolean(draft.id);

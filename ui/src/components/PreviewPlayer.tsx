@@ -19,7 +19,7 @@ export function PreviewPlayer({
   ingestLive,
   onAir,
   aspect,
-}: {
+}: Readonly<{
   active: boolean;
   className?: string;
   /** Which programme to show. Omitted means the default source's alias. */
@@ -36,7 +36,7 @@ export function PreviewPlayer({
   /** The source's measured geometry, so a vertical or 4:3 programme is not
    *  letterboxed into a 16:9 box it never filled. */
   aspect?: { width: number; height: number };
-}) {
+}>) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);

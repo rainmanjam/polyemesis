@@ -99,10 +99,10 @@ function useServerConnection(): Connection {
 export function AuthScreen({
   mode,
   onDone,
-}: {
+}: Readonly<{
   mode: "setup" | "login";
   onDone: () => void;
-}) {
+}>) {
   const t = useT();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");

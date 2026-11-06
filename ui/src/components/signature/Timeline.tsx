@@ -180,7 +180,7 @@ export function Timeline({
   onChangeOut,
   onMoveWindow,
   className,
-}: TimelineProps) {
+}: Readonly<TimelineProps>) {
   const t = useT();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -418,14 +418,14 @@ function Handle({
   leftPx,
   width,
   onNudge,
-}: {
+}: Readonly<{
   kind: "in" | "out";
   label: string;
   valueMs: number;
   leftPx: number;
   width: number;
   onNudge: (deltaMs: number) => void;
-}) {
+}>) {
   if (leftPx < -20 || leftPx > width + 20) return null;
   return (
     <div

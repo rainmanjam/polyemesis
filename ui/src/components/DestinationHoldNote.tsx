@@ -26,7 +26,7 @@ import type { Status } from "@/lib/types";
  *  nothing is wrong, and painting it amber would train an operator to read a
  *  normal pre-stream minute as a fault.
  */
-export function DestinationHoldNote({ hold }: { hold: Status["destinationHold"] }) {
+export function DestinationHoldNote({ hold }: Readonly<{ hold: Status["destinationHold"] }>) {
   const reason = hold?.reason?.trim();
   if (!reason) return null;
   return (

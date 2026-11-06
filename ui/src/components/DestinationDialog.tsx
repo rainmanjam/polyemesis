@@ -612,7 +612,7 @@ interface Props {
   initialSourceId?: string;
 }
 
-export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Props) {
+export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Readonly<Props>) {
   const editing = destination !== null;
   // Every operator-visible sentence here comes from the catalogue. The preset
   // table stores keys rather than English, so its notes and group labels are

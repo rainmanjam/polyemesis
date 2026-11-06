@@ -16,14 +16,14 @@ export function StatusDot({
   size = "md",
   className,
   title,
-}: {
+}: Readonly<{
   tone: SignalTone;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
   /** Overrides the tone's own wording, for a dot whose row can say something
    *  more specific than "Failed" -- a rendition nobody has enabled, say. */
   title?: string;
-}) {
+}>) {
   const dim =
     size === "sm"
       ? "h-1.5 w-1.5"

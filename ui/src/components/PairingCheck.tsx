@@ -71,7 +71,7 @@ function scopeLabel(t: ReturnType<typeof useT>, scope: string): string {
   return t("pairing.scopeSession");
 }
 
-function PairingOutcome({ outcome }: { outcome: ConnectionOutcome }) {
+function PairingOutcome({ outcome }: Readonly<{ outcome: ConnectionOutcome }>) {
   const t = useT();
   if (!outcome.ok) {
     if (outcome.reason === "refused") {

@@ -644,7 +644,7 @@ export function RenditionsPage() {
 
 /** One destination, as a chip. Disabled rows are drawn too: they still select
  *  this rendition, and deleting it affects them the moment they are enabled. */
-function DestChip({ dest }: { dest: DestStatus }) {
+function DestChip({ dest }: Readonly<{ dest: DestStatus }>) {
   const t = useT();
   const state = destinationShownState(dest.process);
   const tone: SignalTone = dest.enabled ? toneForState(state) : "idle";
@@ -675,7 +675,7 @@ export function RenditionCard({
   onEdit,
   onRestart,
   onDelete,
-}: {
+}: Readonly<{
   view: RenditionView;
   live?: RenditionStatus;
   /** null before the first live snapshot, when only the counts are known. */
@@ -688,7 +688,7 @@ export function RenditionCard({
   onEdit: () => void;
   onRestart: () => void;
   onDelete: () => void;
-}) {
+}>) {
   const stateLabel = useStateLabel();
   const t = useT();
   const r = view.rendition;
@@ -969,7 +969,7 @@ export function RenditionDialog({
   users,
   counts,
   onSaved,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The rendition being edited, or null to create one. */
@@ -991,7 +991,7 @@ export function RenditionDialog({
   /** The database's own counts, which stand in when `users` is null. */
   counts: { destinations: number; enabledDestinations: number } | null;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const editing = rendition !== null;
@@ -1987,7 +1987,7 @@ function DeleteRenditionDialog({
   counts,
   onOpenChange,
   onDeleted,
-}: {
+}: Readonly<{
   rendition: Rendition | null;
   /** null when the live list has not arrived. NOT `[]`: this dialog's whole
    *  job is the sentence "N destinations fall back to passthrough", and an
@@ -1996,7 +1996,7 @@ function DeleteRenditionDialog({
   counts: { destinations: number; enabledDestinations: number } | null;
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
-}) {
+}>) {
   const t = useT();
   const [busy, setBusy] = useState(false);
 

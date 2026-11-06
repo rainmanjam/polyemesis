@@ -39,7 +39,7 @@ import type { UpgradePlan, UpgradeResult, VersionInfo } from "../lib/types";
  *  second on-air survey on every page load. This component already holds the
  *  answer -- including the refreshed one after a check -- so it hands it over
  *  rather than making the chrome ask again. #660. */
-export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) {
+export function UpdateBanner({ onInfo }: Readonly<{ onInfo?: (v: VersionInfo) => void }>) {
   const t = useT();
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -344,7 +344,7 @@ export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) 
  *  else. The clipboard write is allowed to fail without comment -- it is
  *  blocked on an insecure origin, which a self-hosted box on plain HTTP is --
  *  and the text stays selectable either way. */
-function CopyableCommand({ value }: { value: string }) {
+function CopyableCommand({ value }: Readonly<{ value: string }>) {
   const t = useT();
   const { copy, copied } = useCopy();
   return (

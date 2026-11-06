@@ -482,11 +482,11 @@ export function ComplianceRow({
   report,
   truePeakFailOverDb,
   integrationSeconds = 20,
-}: {
+}: Readonly<{
   report: LoudnessReport;
   truePeakFailOverDb: number;
   integrationSeconds?: number;
-}) {
+}>) {
   const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";

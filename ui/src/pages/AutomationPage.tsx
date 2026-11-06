@@ -509,14 +509,14 @@ function AlertRules({
   onReload,
   onEdit,
   onNew,
-}: {
+}: Readonly<{
   rules: AlertRule[];
   meta: AlertsMeta | null;
   loadFailed: boolean;
   onReload: () => void;
   onEdit: (r: AlertRule) => void;
   onNew: () => void;
-}) {
+}>) {
   const t = useT();
   const [testing, setTesting] = useState<number | null>(null);
 
@@ -736,12 +736,12 @@ function RuleDialog({
   meta,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   draft: AlertRule;
   meta: AlertsMeta;
   onClose: () => void;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const [form, setForm] = useState<AlertRule>(draft);
   const [saving, setSaving] = useState(false);
@@ -987,14 +987,14 @@ function Schedules({
   onReload,
   onEdit,
   onNew,
-}: {
+}: Readonly<{
   schedules: Schedule[];
   runs: ScheduleRun[];
   loadFailed: boolean;
   onReload: () => void;
   onEdit: (s: Schedule) => void;
   onNew: () => void;
-}) {
+}>) {
   const t = useT();
   const { status } = useLiveData();
   const destNames = useMemo(() => {
@@ -1202,11 +1202,11 @@ function ScheduleDialog({
   draft,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   draft: Schedule;
   onClose: () => void;
   onSaved: () => void;
-}) {
+}>) {
   const t = useT();
   const { status } = useLiveData();
   const [form, setForm] = useState<Schedule>(draft);

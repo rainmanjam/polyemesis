@@ -76,7 +76,7 @@ export function SystemPage() {
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-muted-foreground">{label}</span>

@@ -52,7 +52,7 @@ const MOD_DELAYS = [2, 4, 6];
 /** Twitch's ceiling on follower_mode_duration: three months, in minutes. */
 const MAX_FOLLOWER_MINUTES = 129600;
 
-export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
+export function ChatRules({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
   // ONE CARD PER ACCOUNT. Keyed on the account, so switching the connected
   // Twitch account remounts the card: it starts "reading" again with default
   // durations, rather than showing -- and on a failed read, applying -- the
@@ -61,7 +61,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
   return <ChatRulesForAccount key={twitch?.account ?? ""} statuses={statuses} />;
 }
 
-function ChatRulesForAccount({ statuses }: { statuses: ChatStatus[] }) {
+function ChatRulesForAccount({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
   const t = useT();
   // Twitch only, and by connection rather than by hope: an account that is not
   // attached cannot take a settings write, and the button would 400.

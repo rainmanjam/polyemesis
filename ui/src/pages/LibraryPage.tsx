@@ -582,11 +582,11 @@ function HitRow({
   hit,
   markers,
   onOpen,
-}: {
+}: Readonly<{
   hit: TranscriptHit;
   markers: [string, string];
   onOpen: () => void;
-}) {
+}>) {
   return (
     <li>
       <button
@@ -631,7 +631,7 @@ function SessionCard({
   onEdit,
   onPlay,
   onChanged,
-}: {
+}: Readonly<{
   session: LibrarySession;
   expanded: boolean;
   jobsAvailable: boolean;
@@ -643,7 +643,7 @@ function SessionCard({
   onEdit: () => void;
   onPlay: (recordingId: number) => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [recordings, setRecordings] = useState<LibraryRecording[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -765,12 +765,12 @@ function SessionEditor({
   busy,
   onClose,
   onSave,
-}: {
+}: Readonly<{
   session: LibrarySession;
   busy: boolean;
   onClose: () => void;
   onSave: (patch: { title: string; description: string; tags: string[] }) => void;
-}) {
+}>) {
   const t = useT();
   const [title, setTitle] = useState(session.title);
   const [description, setDescription] = useState(session.description);
@@ -851,14 +851,14 @@ function RecordingList({
   transcriptsOffId,
   onPlay,
   onChanged,
-}: {
+}: Readonly<{
   recordings: LibraryRecording[];
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
   transcriptsOffId?: string;
   onPlay: (id: number) => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [busy, setBusy] = useState(0);
   // Above the early return: a hook after a conditional return runs in a
@@ -1035,13 +1035,13 @@ function SpeakerField({
   speaker,
   busy,
   onSave,
-}: {
+}: Readonly<{
   track: number;
   speaker: string;
   busy: boolean;
   /** Throws on failure. */
   onSave: (speaker: string) => Promise<void>;
-}) {
+}>) {
   const t = useT();
   const model = useSaveModel<string>({
     stored: speaker,
@@ -1086,14 +1086,14 @@ export function PlayerDialog({
   transcribeAvailable,
   transcribeNote,
   onChanged,
-}: {
+}: Readonly<{
   target: PlayerTarget;
   onClose: () => void;
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
   transcribeNote?: string;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [rec, setRec] = useState<LibraryRecording | null>(null);
   const [transcript, setTranscript] = useState<TranscriptView | null>(null);

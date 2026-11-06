@@ -97,7 +97,7 @@ export function DestinationCard({
   onVerticalStart,
   onVerticalStop,
   onVerticalRestart,
-}: {
+}: Readonly<{
   dest: DestStatus;
   /** The YouTube vertical half of this destination, when it has one (#7). Drawn
    *  as a sub-row with its own controls. Absent for every other row. */
@@ -154,7 +154,7 @@ export function DestinationCard({
    *  null when not known here -- same scoping as trackLabels. Sizes the track
    *  chips, which used to be six whatever the ingest carried. */
   trackCount?: number | null;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   // The two halves of #506: a stop that can be taken back, and a refusal to

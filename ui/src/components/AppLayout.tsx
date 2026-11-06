@@ -114,10 +114,10 @@ const NAV: NavItem[] = [
 export function AppLayout({
   username,
   onSignOut,
-}: {
+}: Readonly<{
   username: string;
   onSignOut: () => void;
-}) {
+}>) {
   const { status, connected, frameError, sourceCount, programme, programmes } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
@@ -776,11 +776,11 @@ export function PageHeader({
   title,
   subtitle,
   actions,
-}: {
+}: Readonly<{
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>

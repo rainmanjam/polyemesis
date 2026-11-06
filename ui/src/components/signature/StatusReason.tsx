@@ -20,7 +20,7 @@ export interface StatusReasonProps {
  *  operator reads, and the step and the time are the two facts they check
  *  next. Unknowns are printed as unknowns. That is deliberate, and it is the
  *  rule's whole point: a missing line reads as "nothing to say". */
-export function StatusReason({ reason, step, asOf, className }: StatusReasonProps) {
+export function StatusReason({ reason, step, asOf, className }: Readonly<StatusReasonProps>) {
   const t = useT();
   const when = asOf ? timestamp(asOf) : "";
   return (

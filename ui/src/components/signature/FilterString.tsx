@@ -12,10 +12,10 @@ import { useT } from "@/lib/i18n";
 export function FilterString({
   value,
   className,
-}: {
+}: Readonly<{
   value: string;
   className?: string;
-}) {
+}>) {
   const t = useT();
   // A blocked clipboard (insecure origin) is not reported: the text is selectable anyway.
   const { copy, copied } = useCopy();

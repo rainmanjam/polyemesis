@@ -617,12 +617,12 @@ function AdvancedCard({
   settings,
   inError,
   children,
-}: {
+}: Readonly<{
   card: AdvancedCardKey;
   settings: Settings;
   inError: boolean;
   children: React.ReactNode;
-}) {
+}>) {
   const ctx = useContext(AdvancedContext);
   const shown = advancedCardShown(card, { show: ctx.show, settings, inError, revealed: ctx.revealed });
   return (
@@ -640,11 +640,11 @@ function AdvancedHiddenLine({
   settings,
   inError,
   cards,
-}: {
+}: Readonly<{
   settings: Settings;
   inError: boolean;
   cards: readonly AdvancedCardKey[];
-}) {
+}>) {
   const t = useT();
   const ctx = useContext(AdvancedContext);
   const hidden = cards.filter(
@@ -667,7 +667,7 @@ function AdvancedHiddenLine({
 }
 
 /** A group heading inside a tab (settings-council R4). */
-function SettingsGroupHeading({ title, desc }: { title: TranslationKey; desc: TranslationKey }) {
+function SettingsGroupHeading({ title, desc }: Readonly<{ title: TranslationKey; desc: TranslationKey }>) {
   const t = useT();
   return (
     <div className="flex flex-col gap-0.5 pt-1 lg:col-span-2">
@@ -678,7 +678,7 @@ function SettingsGroupHeading({ title, desc }: { title: TranslationKey; desc: Tr
 }
 
 /** Says which programmes a card's settings apply to (settings-council R8). */
-function ScopeNote({ programme }: { programme?: string | null }) {
+function ScopeNote({ programme }: Readonly<{ programme?: string | null }>) {
   const t = useT();
   if (programme === undefined) {
     return (
@@ -707,14 +707,14 @@ function IngestSettings({
   onSave,
   saving,
   programme,
-}: {
+}: Readonly<{
   settings: Settings;
   system: SystemInfo | null;
   onSave: (s: Settings) => Promise<void>;
   saving: boolean;
   /** The programme this form writes to, or null when it could not be named. */
   programme: string | null;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   // The kit's save model (A95): the draft is held over the stored settings,
@@ -941,11 +941,11 @@ function ListenerPortsCard({
   listeners,
   setListeners,
   footer,
-}: {
+}: Readonly<{
   listeners: ListenerSettings;
   setListeners: (patch: Partial<ListenerSettings>) => void;
   footer?: React.ReactNode;
-}) {
+}>) {
   const t = useT();
   return (
     <Card>
@@ -1011,11 +1011,11 @@ function ListenerPortsOnly({
   settings,
   onSave,
   saving,
-}: {
+}: Readonly<{
   settings: Settings;
   onSave: (s: Settings) => Promise<void>;
   saving: boolean;
-}) {
+}>) {
   const t = useT();
   const model = useSaveModel<ListenerSettings>({
     stored: settings.listeners ?? DEFAULT_LISTENERS,
@@ -1048,7 +1048,7 @@ function ListenerPortsOnly({
  *  council R13). It used to be a card of its own on the zero-source branch and
  *  a row inside the Encoder URL card on the other, so the same check looked
  *  like two different things depending on whether a source existed. */
-function FfmpegCard({ system }: { system: SystemInfo | null }) {
+function FfmpegCard({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   return (
     <Card className="h-fit">
@@ -1072,7 +1072,7 @@ function FfmpegCard({ system }: { system: SystemInfo | null }) {
  *  -- and that operator has, by definition, not created a source yet. Leaving
  *  it inside the ingest form would have taken the FFmpeg check away from the
  *  one person the check was written for. */
-function FfmpegBadges({ system }: { system: SystemInfo | null }) {
+function FfmpegBadges({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   /* NOT `return null`. This renders inside a card whose only other content is
    * its title, so nothing meant an empty box with a heading on it and no way
@@ -1119,10 +1119,10 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
 function SettingsPullIngestFields({
   draft,
   setDraft,
-}: {
+}: Readonly<{
   draft: Settings;
   setDraft: (s: Settings) => void;
-}) {
+}>) {
   return (
     <PullIngestFields
       value={draft.ingest.pull}
@@ -1196,14 +1196,14 @@ function PipelineSettings({
   // AutomodConfig can render a rejected regex against the rule that carries it.
   // A toast cannot: the operator is looking at the pattern they mistyped.
   saveError,
-}: {
+}: Readonly<{
   settings: Settings;
   onSave: (s: Settings) => Promise<void>;
   onSaveMqtt: (s: Settings, password: string) => Promise<void>;
   onClearMqttPassword: () => Promise<void>;
   saving: boolean;
   saveError: string | null;
-}) {
+}>) {
   const t = useT();
   const tn = useTN();
   const [draft, setDraft] = useState(settings);
@@ -2282,10 +2282,10 @@ const PCI_VENDORS = [
 function MultitrackHardware({
   draft,
   setDraft,
-}: {
+}: Readonly<{
   draft: Settings;
   setDraft: (s: Settings) => void;
-}) {
+}>) {
   const t = useT();
   const gpus = draft.multitrack?.gpus ?? [];
   // Always sent as an explicit array, never omitted, so clearing the last entry
@@ -2519,12 +2519,12 @@ function PlatformList({
   creds,
   accounts,
   onChanged,
-}: {
+}: Readonly<{
   guides: SetupGuide[];
   creds: PlatformCreds[];
   accounts: PlatformAccount[];
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [open, setOpen] = useState<string | null>(null);
   const rows = guides.map((g) => {
@@ -2587,14 +2587,14 @@ export function PlatformRow({
   open,
   onToggle,
   onChanged,
-}: {
+}: Readonly<{
   guide: SetupGuide;
   creds: PlatformCreds | null;
   accounts: PlatformAccount[];
   open: boolean;
   onToggle: () => void;
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const panelId = `platform-panel-${guide.platform}`;
   const reading = platformSetupStatus({
@@ -2791,12 +2791,12 @@ export function PlatformCredCard({
   creds,
   accounts,
   onChanged,
-}: {
+}: Readonly<{
   guide: SetupGuide;
   creds: PlatformCreds | null;
   accounts: PlatformAccount[];
   onChanged: () => void;
-}) {
+}>) {
   const t = useT();
   const [clientId, setClientId] = useState(creds?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
@@ -3325,7 +3325,7 @@ export function PlatformCredCard({
 
 /* ---------------------------------------------------------------- security */
 
-function SecuritySettings({ system }: { system: SystemInfo | null }) {
+function SecuritySettings({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -3551,7 +3551,7 @@ const acmeStanceCopy: Record<AcmeStance, TranslationKey> = {
  *  Guidance is safe to show over HTTP. So: it says what to write, checks
  *  whether it would work first, and leaves the writing to a person with a
  *  shell. */
-function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
+function LetsEncryptWalkthrough({ tls }: Readonly<{ tls: TlsStatus }>) {
   const t = useT();
   const stance = acmeStance(tls);
   // The address bar is the fallback source of the name, and only the browser
@@ -3860,7 +3860,7 @@ function shortenPath(path: string, max = 48): string {
   return `${path.slice(0, keep)}…${path.slice(path.length - keep)}`;
 }
 
-function SecretKeyCard({ system }: { system: SystemInfo | null }) {
+function SecretKeyCard({ system }: Readonly<{ system: SystemInfo | null }>) {
   const t = useT();
   const tn = useTN();
   const [ack, setAck] = useState(readSecretKeyAck);

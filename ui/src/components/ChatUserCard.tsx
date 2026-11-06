@@ -54,14 +54,14 @@ export function ChatUserCard({
   authorName,
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   platform: ChatPlatform;
   account?: string;
   authorId: string;
   authorName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}) {
+}>) {
   const t = useT();
   /* A CONTROL over the two claims this dialog makes about the scrollback.
    *

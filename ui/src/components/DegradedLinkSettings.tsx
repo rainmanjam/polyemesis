@@ -25,7 +25,7 @@ export function DegradedLinkSettings({
   onChange,
   idPrefix = "degraded",
   collapsible = false,
-}: {
+}: Readonly<{
   value: DegradedSettings | undefined;
   onChange: (next: DegradedSettings) => void;
   /** Distinguishes the controls when several programmes' cards share a page. */
@@ -34,7 +34,7 @@ export function DegradedLinkSettings({
    *  summary states the thresholds, and open on their own while the switch is
    *  on. Settings keeps the default, where the fields are always shown. */
   collapsible?: boolean;
-}) {
+}>) {
   const t = useT();
   const panelId = useId();
   // null follows the switch: open when on, closed when off. A click overrides it.

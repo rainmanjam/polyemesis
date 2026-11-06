@@ -34,7 +34,7 @@ import { VIEWER_POLL_MS, viewerReadout, type ViewerReadout } from "@/features/ac
 /** The rendered readout, split out from the polling so it can be rendered from
  *  a plain value in a test. Every branch is a distinct sentence; none of them
  *  is a bare number that could be misread. */
-export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
+export function ViewerReadoutLine({ readout }: Readonly<{ readout: ViewerReadout }>) {
   const t = useT();
   const lang = useLanguage();
 
@@ -111,7 +111,7 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
 }
 
 /** Asks, on an interval, while anyone is looking. */
-export function AccountLiveStats({ accountId }: { accountId: number }) {
+export function AccountLiveStats({ accountId }: Readonly<{ accountId: number }>) {
   const t = useT();
   const [readout, setReadout] = useState<ViewerReadout | null>(null);
   const [title, setTitle] = useState<string>("");
