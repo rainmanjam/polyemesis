@@ -189,9 +189,9 @@ func (s *Server) reconcileNow(action string) string {
 //
 // A payload that is not a JSON object -- an array, a bare string -- cannot
 // carry the key, so it is written unchanged and the warning is logged. No
-// mutation response in this package has that shape today, and the guard test
-// TestEveryReconcileGoesThroughTheHelper is what keeps a new one from arriving
-// unnoticed.
+// mutation response in this package has that shape today, and
+// TestReconcileHasOneSpellingAndItsResultCannotBeDropped keeps every reconcile
+// result going through this helper.
 func writeMutation(w http.ResponseWriter, status int, warning string, v any) {
 	if warning == "" {
 		writeJSON(w, status, v)
@@ -2188,7 +2188,7 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	// both `sessionUser != 0` there and `if userID == 0 { return false }` in
 	// sessionEpochChanged skip the re-check, so such a socket would never be
 	// closed by a password change. That is unreachable in this build --
-	// auth.checkEpoch (internal/auth/auth.go:141) refuses an unparseable
+	// auth.Manager.checkEpoch refuses an unparseable
 	// subject before authenticate returns, pinned by
 	// TestATokenWithAnUnparseableSubjectIsRefused -- and it is written down
 	// this way round because the previous wording claimed the opposite. A

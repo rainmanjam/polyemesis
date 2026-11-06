@@ -492,7 +492,7 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // Model.TimeoutForBan is how long a viewer the model flags stays timed out.
 // Only the first was applied, so every model-decided timeout ran at the
 // built-in default and the operator's configured duration did nothing --
-// while internal/engine/reload.go:301 classified timeoutForBan as ClassLive
+// while the reload table in internal/engine/reload.go classified timeoutForBan as ClassLive
 // through this function, which is a written promise that saving it takes
 // effect.
 func modelConfigFrom(a db.AutomodSettings) (automod.ModelConfig, error) {

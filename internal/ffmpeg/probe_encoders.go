@@ -128,6 +128,16 @@ func probeEncodersWith(ctx context.Context, ffmpegBin string, names []string, pe
 // can never be the reason a rendition is refused or a choice is hidden.
 const notProbedPrefix = "not probed: "
 
+// IsNotProbed reports whether a capability reason says the probe never ran --
+// a cancelled scan, an expired budget -- as opposed to the encoder failing.
+// Detection marks such a probe as not working with a reason that says so; read
+// literally, one interrupted scan would take every encoder out of the editor
+// and refuse every rendition. Nothing was demonstrated, so nothing may be
+// withheld on it: a capability check must fail open.
+func IsNotProbed(reason string) bool {
+	return strings.HasPrefix(reason, strings.TrimSpace(notProbedPrefix))
+}
+
 // discardVerdictsIfHarnessIsBroken throws away every failure in a run where the
 // software encoder also failed.
 //

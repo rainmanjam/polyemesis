@@ -902,3 +902,20 @@ func TestAnFFmpegThatNeverStartsIsNotTreatedAsABrokenProbe(t *testing.T) {
 		}
 	}
 }
+
+func TestIsNotProbedRecognisesTheReasonsDetectionWrites(t *testing.T) {
+	for _, reason := range []string{
+		notProbedPrefix + "detection was cancelled",
+		notProbedPrefix + "overall detection budget expired",
+		"not probed:",
+	} {
+		if !IsNotProbed(reason) {
+			t.Errorf("IsNotProbed(%q) = false", reason)
+		}
+	}
+	for _, reason := range []string{"", "encoder failed", "probed: not probed"} {
+		if IsNotProbed(reason) {
+			t.Errorf("IsNotProbed(%q) = true", reason)
+		}
+	}
+}

@@ -436,7 +436,7 @@ func mcpScrub(text string, secrets []string) string {
 // mcpUntrustedOpen and mcpUntrustedClose fence viewer-written text. The payload
 // between them is JSON produced by encoding/json, which escapes '<' and '>' as
 // < and >, so no chat message can spell the closing tag and break
-// out of the fence however it is worded. TestMCPChatTextCannotCloseTheFence
+// out of the fence however it is worded. TestChatAndTranscriptTextIsFencedAsUntrustedAndCannotCloseTheFence
 // holds that.
 const (
 	mcpUntrustedOpen  = "<untrusted-viewer-content>"

@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -2692,7 +2693,7 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 			// Nothing resolves a platform API off a custom destination. Every
 			// capability lookup in oauth.Set keys on the platform and there is
 			// no custom entry -- ScheduledBroadcastsFor, LifecycleFor and Get
-			// all answer false -- so preannounce.go:107 and lifecycle.go:539
+			// all answer false -- so the pre-announce and lifecycle sweeps
 			// skip the row entirely and no token is ever sent anywhere on its
 			// behalf. The leak this clause exists to stop cannot happen here.
 			//
@@ -3822,7 +3823,7 @@ func checkSentAutomodFields(body []byte) error {
 // captionFacebookRefusal is what the operator reads when a Facebook caption mode
 // is asked for while its switch is closed. It names the switch, because "not
 // allowed" alone sends the operator looking in the wrong place.
-const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set POLYEMESIS_CAPTIONS_FACEBOOK=1 on the server to turn them on"
+const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set " + startupenv.FacebookCaptionsVar + "=1 on the server to turn them on"
 
 // captionModeAllowedNow reports whether a save may store the caption mode it
 // names. Only a save that turns Facebook captions ON (the mode is facebook_sei

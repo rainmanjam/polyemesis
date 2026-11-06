@@ -31,10 +31,10 @@ import (
 //	                             -> destinations.enabled = 0
 //
 // and internal/api/lifecycle.go keys its END policy on exactly that column.
-// planLifecycle(enabled=false, ...) at lifecycle.go:804 is "THE END BRANCH":
+// planLifecycle(enabled=false, ...) has "THE END BRANCH":
 // a destination whose recorded phase is testing, live, testStarting or
 // liveStarting is sent oauth.PhaseComplete. A completed YouTube broadcast
-// CANNOT RETURN TO LIVE -- lifecycle.go:838 says so in the fault text an
+// CANNOT RETURN TO LIVE -- planLifecycle says so in the fault text an
 // operator would then be shown, and its only remedy is to create or announce a
 // new broadcast.
 //
@@ -221,7 +221,7 @@ type bulkStopRequest struct {
 	// Lifted from expert.go's PUT, which requires the same field for a
 	// strictly smaller hazard (an FFmpeg argument override). Deliberately NOT
 	// required on start-all: starting is recoverable by stopping again, but a
-	// completed YouTube broadcast cannot return to live (lifecycle.go:838), so
+	// completed YouTube broadcast cannot return to live (see planLifecycle), so
 	// only the irreversible half of this pair needs a caller to say they meant it.
 	Confirm bool `json:"confirm"`
 }
