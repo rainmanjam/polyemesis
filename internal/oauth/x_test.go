@@ -109,7 +109,7 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 	if err != nil {
 		t.Fatalf("AuthURL produced an unparseable URL %q: %v", raw, err)
 	}
-	if got, want := u.Scheme+"://"+u.Host+u.Path, "https://api.x.com/2/oauth2/authorize"; got != want {
+	if got, want := u.Scheme+"://"+u.Host+u.Path, "https://x.com/i/oauth2/authorize"; got != want {
 		t.Errorf("AuthURL points at %q, want %q", got, want)
 	}
 	q := u.Query()
@@ -889,5 +889,13 @@ func TestXBroadcastStateFindsASourceBoundByItsIDWhenTheKeyDiffers(t *testing.T) 
 	}
 	if st.StreamActive == nil || !*st.StreamActive {
 		t.Errorf("StreamActive = %v, want true: the source is bound by its id", st.StreamActive)
+	}
+}
+
+// The consent page is x.com, but the token endpoint stays on api.x.com: a POST there
+// answers normally (confirmed live 2026-11-06). The two must not drift together.
+func TestXTokenEndpointStaysOnAPIHost(t *testing.T) {
+	if got, want := (&X{}).tokenEndpoint(), "https://api.x.com/2/oauth2/token"; got != want {
+		t.Errorf("tokenEndpoint() = %q, want %q", got, want)
 	}
 }

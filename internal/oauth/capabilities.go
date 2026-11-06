@@ -450,7 +450,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:                "OAuth 2.0 authorization code with PKCE at api.x.com/2/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; no live request has confirmed it yet.",
+			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge.",
 			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/users/{id}/sources). That call needs X Livestream access (app must be whitelisted by X), so until then this is a paste from X's producer tooling.",
 			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
 			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, read from X's activity stream with the app's bearer token, which the operator supplies as POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works. Not yet checked against a whitelisted app.",
