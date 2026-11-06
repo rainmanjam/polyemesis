@@ -310,9 +310,13 @@ export function ClipEditor() {
           return [];
         }
       }),
-    ).then((all) => {
-      if (!cancelled) setSprites(all.flat());
-    });
+    )
+      .then((all) => {
+        if (!cancelled) setSprites(all.flat());
+      })
+      // Each fetch already degrades to no thumbnails; this catches anything
+      // the merge itself throws, so the scrubber just stays plain.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
