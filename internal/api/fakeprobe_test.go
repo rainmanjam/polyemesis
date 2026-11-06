@@ -291,7 +291,12 @@ func fakeProbeLock(live string) (func(), error) {
 		if err == nil {
 			return func() { _ = os.Remove(lock) }, nil
 		}
-		if !os.IsExist(err) {
+		// On Windows a lock directory another probe has just removed can sit in
+		// "delete pending", and Mkdir then answers access denied rather than
+		// exists. That is the lock still being held, not a failure: a probe that
+		// gave up here exited without leaving the census and left a stale line
+		// that inflated the next peak.
+		if !os.IsExist(err) && !os.IsPermission(err) {
 			return nil, fmt.Errorf("take the census lock: %w", err)
 		}
 		if time.Now().After(deadline) {
@@ -322,8 +327,15 @@ func fakeProbeWriteLines(path string, lines []string) error {
 		b.WriteString(l)
 		b.WriteString("\n")
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return fmt.Errorf("write the live list: %w", err)
+	// Retried briefly for the same Windows reason as the lock: a reader or a
+	// scanner can hold the file for a moment, and a probe that failed to leave
+	// the census here would leave a stale line behind.
+	var err error
+	for i := 0; i < 50; i++ {
+		if err = os.WriteFile(path, []byte(b.String()), 0o600); err == nil {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return nil
+	return fmt.Errorf("write the live list: %w", err)
 }
