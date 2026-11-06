@@ -196,6 +196,12 @@ its first tagged release.
 - **The Go live sheet warns with the same YouTube count as the Stop dialog.** It counted every enabled
   YouTube destination, so it could promise a broadcast would end when the Stop dialog, which asks the
   server, said none would.
+- **Cancelling a clip export or a highlight scan returns promptly.** The clip cutter, the editor's
+  keyframe probe and the highlight loudness pass started FFmpeg without a kill grace, so a child that left
+  a worker holding its output pipe could keep a cancelled job waiting until that worker exited. They now
+  start through the shared FFmpeg runner, which gives up on the pipes five seconds after the kill.
+- **`polyemesis mcp` accepts `http://LOCALHOST`.** The stdio relay matched `localhost` case-sensitively
+  and refused a mixed-case loopback URL that the API treats as loopback.
 
 ### Added
 
@@ -205,6 +211,11 @@ its first tagged release.
 
 ### Changed
 
+- **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
+  failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
+  available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).
+  A job of that kind stored by an earlier version still lists, as "Archive compression", and fails with
+  a message that says so instead of pointing at a Settings switch that does not exist.
 - **Audio and video ceilings follow the platforms' own pages.** Twitch's audio ceiling is 160 kbps (its
   help page), not OBS's 320, so a destination sending more than 160 kbps to Twitch now shows the
   audio-bitrate warning. Kick has no audio ceiling (no source gives one), so the 160 kbps warning for Kick
