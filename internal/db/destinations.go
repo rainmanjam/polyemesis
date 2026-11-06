@@ -1528,7 +1528,6 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 	return out, rows.Err()
 }
 
-// GetDestination loads one destination.
 func (d *DB) GetDestination(id int64) (*Destination, error) {
 	row := d.sql.QueryRow(destByIDQuery, id)
 	dst, err := d.scanDestination(row)

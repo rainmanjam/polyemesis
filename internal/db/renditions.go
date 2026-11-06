@@ -961,7 +961,6 @@ func (d *DB) ListRenditions() ([]*Rendition, error) {
 	return out, rows.Err()
 }
 
-// GetRendition loads one rendition.
 func (d *DB) GetRendition(id int64) (*Rendition, error) {
 	row := d.sql.QueryRow(renditionByIDQuery, id)
 	r, err := scanRendition(row)

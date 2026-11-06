@@ -684,7 +684,6 @@ func (h *Hub) Wake(name string) bool {
 	return sent
 }
 
-// Close shuts the hub down.
 func (h *Hub) Close() error {
 	var err error
 	h.closeOnce.Do(func() {

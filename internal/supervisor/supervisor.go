@@ -692,7 +692,6 @@ func (p *Process) waitBackoff(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// Name returns the process name.
 func (p *Process) Name() string { return p.spec.Name }
 
 // currentArgs is the argv of the running child, falling back to the configured

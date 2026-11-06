@@ -112,7 +112,6 @@ func (d *DB) AlertRules() ([]alerts.Rule, error) {
 	return out, rows.Err()
 }
 
-// GetAlertRule loads one rule.
 func (d *DB) GetAlertRule(id int64) (*alerts.Rule, error) {
 	r, err := scanAlertRule(d.sql.QueryRow(alertRuleByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -218,7 +217,6 @@ func (d *DB) SetAlertRuleEnabled(id int64, enabled bool) error {
 	return nil
 }
 
-// DeleteAlertRule removes a rule.
 func (d *DB) DeleteAlertRule(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM alert_rules WHERE id = ?`, id)
 	if err != nil {

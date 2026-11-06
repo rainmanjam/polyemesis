@@ -87,8 +87,7 @@ const (
 
 	// MaxTileGrid bounds one axis of a tile grid. Purely a guard against a
 	// configuration typo turning into a gigapixel allocation inside FFmpeg.
-	MaxTileGrid = 100
-	// MaxTileDimension bounds one tile.
+	MaxTileGrid      = 100
 	MaxTileDimension = 1024
 )
 

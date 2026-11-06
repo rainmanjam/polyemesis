@@ -67,7 +67,6 @@ func TestMetersArgsCap(t *testing.T) {
 			args := MetersArgs(MetersSpec{TrackChannels: tc.chans, RelayURL: "udp://127.0.0.1:5000"})
 			fc := filterComplexOf(t, args)
 
-			// Count the input legs actually compiled.
 			legs := strings.Count(fc, "aresample=")
 			if legs != tc.wantMetered {
 				t.Errorf("compiled %d legs, want %d\n%s", legs, tc.wantMetered, fc)

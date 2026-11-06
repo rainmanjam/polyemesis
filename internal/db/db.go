@@ -542,7 +542,6 @@ func (d *DB) UserVersion() (int, error) {
 // a typed store method.
 func (d *DB) SQL() *sql.DB { return d.sql }
 
-// Close closes the database.
 func (d *DB) Close() error { return d.sql.Close() }
 
 // Ping reads one page out of the database file, for a caller that needs to know

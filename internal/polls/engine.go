@@ -99,7 +99,6 @@ func WithSender(s Sender) Option { return func(e *Engine) { e.send = s } }
 // WithMirror mirrors polls to native platform polls.
 func WithMirror(m Mirror) Option { return func(e *Engine) { e.mirror = m } }
 
-// WithLogger replaces the logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(e *Engine) {
 		if l != nil {

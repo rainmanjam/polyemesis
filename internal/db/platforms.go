@@ -401,7 +401,6 @@ func (d *DB) ListPlatformAccounts() ([]PlatformAccount, error) {
 	return out, rows.Err()
 }
 
-// DeletePlatformAccount disconnects an account.
 func (d *DB) DeletePlatformAccount(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM platform_accounts WHERE id = ?`, id)
 	if err != nil {

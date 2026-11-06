@@ -111,7 +111,6 @@ func scanPoll(row interface{ Scan(...any) error }) (*Poll, error) {
 	return &p, nil
 }
 
-// Poll returns one poll.
 func (d *DB) Poll(id int64) (*Poll, error) {
 	return scanPoll(d.sql.QueryRow(`SELECT `+pollColumns+` FROM polls WHERE id = ?`, id))
 }

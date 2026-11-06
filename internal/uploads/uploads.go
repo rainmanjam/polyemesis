@@ -1393,7 +1393,6 @@ func (s *Store) Sweep(olderThan time.Duration) (SweepResult, error) {
 	return res, nil
 }
 
-// Delete removes one stored upload.
 func (s *Store) Delete(name string) error {
 	full, err := s.Resolve(name)
 	if err != nil {

@@ -94,7 +94,6 @@ func (e *Engine) decide(p db.Platform, findings []Finding) Verdict {
 // Matrix returns the current matrix, for the API to render.
 func (e *Engine) Matrix() Matrix { return e.matrix }
 
-// SetMatrix replaces the matrix.
 func (e *Engine) SetMatrix(m Matrix) { e.matrix = m }
 
 // Capabilities returns the gate, so the API can render unavailable cells with
