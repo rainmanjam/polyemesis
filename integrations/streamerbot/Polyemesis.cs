@@ -7,7 +7,8 @@
 // REST call it makes.
 //
 // CONFIGURATION, in Streamer.bot global variables, PERSISTED:
-//   polyemesisUrl     https://host:8080   (no trailing slash needed)
+//   polyemesisUrl     https://host:8080   (no trailing slash needed); http://
+//                     is accepted only for this machine (localhost, 127.0.0.1)
 //   polyemesisToken   an API token: "admin" scope for the controls, "read"
 //                     is enough for Status
 //   polyemesisSource  optional programme id, for an install with more than one
@@ -15,7 +16,9 @@
 // THE TOKEN LIVES IN A GLOBAL, NOT IN THIS CODE. An action exported from
 // Streamer.bot carries its code; a token typed into it would travel with every
 // export you share. Globals are not exported with actions. This file never
-// logs the token, and sends it only to polyemesisUrl.
+// logs the token, and sends it only to polyemesisUrl, and only over https:// (or
+// http:// to this machine): the same rule as the Stream Deck plugin and the OBS
+// script.
 //
 // Tested against the polyemesis REST API by internal/api/streamerbot_pack_test.go,
 // which replays every request in actions.json. Not tested inside Streamer.bot:
@@ -131,6 +134,27 @@ public class CPHInline
         return Request(method, path, json, out ignored);
     }
 
+    // The hosts plain http:// may be used with: this machine only.
+    private static readonly string[] Loopback = { "localhost", "127.0.0.1", "[::1]" }; // Uri.Host spells IPv6 with brackets
+
+    // Refusal returns null when the token may be sent to url, else the reason.
+    // THE TOKEN GOES ONLY WHERE IT CANNOT BE READ ON THE WAY. Mirrors
+    // integrations/streamdeck/src/config.ts parseServerUrl and
+    // integrations/obs/polyemesis_obs.py parse_server: https:// to anywhere,
+    // http:// only to this machine.
+    private static string Refusal(string url)
+    {
+        Uri u;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out u))
+            return "the address is not a URL; use https://host:port";
+        if (u.Host == "")
+            return "the address has no host; use https://host:port";
+        if (u.Scheme == "https") return null;
+        if (u.Scheme == "http" && Array.IndexOf(Loopback, u.Host) >= 0) return null;
+        return "refusing " + u.Scheme + "://" + u.Host + ": the API token would cross the network unencrypted. "
+            + "Use https://, or http:// only to this machine (localhost)";
+    }
+
     private bool Request(string method, string path, string json, out string body)
     {
         body = null;
@@ -139,6 +163,12 @@ public class CPHInline
         if (url == "" || token == "")
         {
             CPH.LogWarn("polyemesis: set the polyemesisUrl and polyemesisToken global variables (persisted)");
+            return false;
+        }
+        string refusal = Refusal(url);
+        if (refusal != null)
+        {
+            CPH.LogWarn("polyemesis: " + refusal);
             return false;
         }
         var req = new HttpRequestMessage(new HttpMethod(method), url + path);

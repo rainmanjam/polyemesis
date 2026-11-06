@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 )
 
 // THE OBS SCRIPT, RUN UNDER A STAND-IN FOR OBS. integrations/obs's script
@@ -276,5 +278,23 @@ func TestTheOBSScriptReportsARefusalWithoutItsToken(t *testing.T) {
 	}
 	if strings.Contains(out, token) {
 		t.Errorf("the script printed its token:\n%s", out)
+	}
+}
+
+// THE WIRE CONTRACT, SPELLED OUT. The OBS script and the route agree on these
+// three strings, and operators' installed copies of the script carry them. The
+// router test in internal/api reads them out of the script and checks them
+// against these constants, which alone would let a constant and the script be
+// renamed together without anything failing; the literals here are the
+// independent oracle. Changing one is a wire change, not a refactor.
+func TestTheOBSWireVocabularyIsTheExactStrings(t *testing.T) {
+	for got, want := range map[obsbridge.Kind]string{
+		obsbridge.KindStreamStarted: "stream.started",
+		obsbridge.KindStreamStopped: "stream.stopped",
+		obsbridge.KindSceneChanged:  "scene.changed",
+	} {
+		if string(got) != want {
+			t.Errorf("the bridge's event %q is spelled %q on the wire contract; the script posts %q", got, got, want)
+		}
 	}
 }

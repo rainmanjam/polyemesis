@@ -77,7 +77,7 @@
       "name": "polyemesis: Status to chat",
       "method": "Execute C# Method: Status",
       "request": "GET",
-      "path": "/api/v1/destinations",
+      "path": "/api/v1/destinations?source={source}",
       "body": null,
       "scope": "read",
       "description": "Reads the destinations and sets %polyemesisLive% (how many are running) and %polyemesisSummary% for a following Send Message sub-action."
