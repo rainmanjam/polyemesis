@@ -50,8 +50,9 @@ type Config struct {
 	RecordingsDir string
 
 	// ArchiveEnabled is the first of the two switches on the destructive path.
-	// Off by default, and off means an archive job fails immediately with an
-	// explanation rather than sitting in the queue looking like it might run.
+	// Nothing sets it outside tests yet, so archive compression is hidden:
+	// submit refuses new jobs, and one stored by an earlier build fails
+	// immediately with an explanation rather than sitting in the queue.
 	ArchiveEnabled bool
 	// ArchiveMinAge is how old a recording must be before it may be
 	// re-encoded. Zero means DefaultArchiveMinAge.
@@ -598,8 +599,9 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 	}
 	if !p.cfg.ArchiveEnabled {
 		return jobs.Permanent(errors.New(
-			"archive compression is switched off. It re-encodes recordings with a lossy codec " +
-				"and can replace the multitrack master, so it has to be enabled in Settings first"))
+			"archive compression is not available yet. It re-encodes recordings with a lossy codec " +
+				"and can replace the multitrack master, so it stays off until it can be enabled deliberately; " +
+				"this job was queued by an earlier version and will not run"))
 	}
 	if !params.AcknowledgeLossy {
 		return jobs.Permanent(errors.New(

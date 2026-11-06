@@ -955,18 +955,10 @@ func (s *Server) buildJob(kind jobs.Kind, rec db.Recording, req submitRequest) (
 			SkipSprites:      req.SkipSprites,
 		})
 	case media.KindArchive:
-		return media.NewArchiveJob(rec.ID, media.ArchiveParams{
-			Recording:  rec.Filename,
-			DurationMS: rec.DurationMS,
-			// The age gate is the archive worker's, and it needs to know how
-			// old the recording is rather than how old the row is.
-			RecordedAtUnix:   rec.StartedAt.Unix(),
-			Codec:            media.ArchiveCodec(req.Codec),
-			Quality:          req.Quality,
-			Preset:           req.Preset,
-			AcknowledgeLossy: req.AcknowledgeLossy,
-			ReplaceOriginal:  req.ReplaceOriginal,
-		})
+		// Hidden until it can be enabled: the worker refuses every archive job
+		// (Config.ArchiveEnabled has no setting), so queueing one only creates a
+		// job that is certain to fail. Jobs stored by older builds still list.
+		return jobs.Job{}, errors.New("archive compression is not available yet")
 	case clipper.JobKind:
 		// Deliberately not submitted from here. A clip is chosen from a
 		// timeline with in and out points, and the clip editor owns that whole

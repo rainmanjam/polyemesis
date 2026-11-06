@@ -969,7 +969,7 @@ func TestRunArchiveRefusesBeforeStartingFFmpegAtAll(t *testing.T) {
 	}{
 		{
 			"the feature is switched off",
-			Config{}, nil, "switched off",
+			Config{}, nil, "not available yet",
 		},
 		{
 			"the human never acknowledged the loss",
