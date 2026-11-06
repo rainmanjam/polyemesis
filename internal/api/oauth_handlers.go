@@ -785,7 +785,7 @@ func urlEscape(s string) string {
 // The LiveStatter interface moved to internal/oauth (stats.go). It was declared
 // here because the API layer was the only consumer and Kick the only provider;
 // both stopped being true, and a capability interface outside the oauth package
-// cannot carry the Set twin endpoints.go requires.
+// cannot be resolved through oauth.As on a Set.
 
 // handleAccountStats reads the live viewer count for one connected account.
 //
@@ -812,8 +812,8 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
 		return
 	}
-	// Through the Set twin rather than a type assertion on a provider this
-	// handler resolved itself: a Server built with a stubbed Set must not fall
+	// Through oauth.As on the server's Set rather than a type assertion on a
+	// provider this handler resolved itself: a Server built with a stubbed Set must not fall
 	// through to a production provider for viewer numbers alone.
 	st, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform)
 	if !ok {

@@ -473,7 +473,7 @@ func TestOnlyYouTubeAndXOfferBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t 
 			claimed, denied)
 	}
 
-	// The Set twin, resolved and DRIVEN. A twin that exists but reads the
+	// Resolved through the Set and DRIVEN. A lookup that reads the
 	// production providers is the failure endpoints.go warns about, and for a
 	// transition it would mean a test starting or ending a broadcast on a real
 	// channel.

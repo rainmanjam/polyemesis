@@ -218,10 +218,9 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 				http.Error(w, "{}", http.StatusNotFound)
 			}
 		})
-		// Resolved from a Set aimed at the stub, not the package-level
-		// As[CompliancePusher]: that one resolves against the production providers, so
-		// this test used to depend on fbServer having rewritten a package var.
-		// It now proves the lookup and the redirection together.
+		// Resolved from a Set aimed at the stub, not the zero Set (which is
+		// production): this test used to depend on fbServer having rewritten a
+		// package var. It now proves the lookup and the redirection together.
 		cp, ok := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")
@@ -263,10 +262,9 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 				http.Error(w, "{}", http.StatusNotFound)
 			}
 		})
-		// Resolved from a Set aimed at the stub, not the package-level
-		// As[CompliancePusher]: that one resolves against the production providers, so
-		// this test used to depend on fbServer having rewritten a package var.
-		// It now proves the lookup and the redirection together.
+		// Resolved from a Set aimed at the stub, not the zero Set (which is
+		// production): this test used to depend on fbServer having rewritten a
+		// package var. It now proves the lookup and the redirection together.
 		cp, ok := As[CompliancePusher](NewSet(WithBaseURL(fb.api)), db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")

@@ -75,8 +75,6 @@ func delayServer(t *testing.T, n int) (s *Server, h http.Handler, sign func(*htt
 	for _, id := range ids {
 		waitPhase(t, s, id, engine.DelayBuffering, 3*time.Minute)
 	}
-	// Something buffered in each line, so a drain has a tail to play.
-	time.Sleep(200 * time.Millisecond)
 	return s, h, sign, ids
 }
 

@@ -122,9 +122,9 @@ func NewVimeo(opts ...ProviderOption) *Vimeo {
 // Set is a resolved group of providers plus the capability lookups that go with
 // it. It is the injection point internal/api was missing.
 //
-// The package-level Get, As[MetadataPusher], As[CompliancePusher], As[TargetedProvider], As[ManualKey]
-// and As[ScheduledBroadcaster] all resolve against the production set, which is
-// why a caller outside this package could not aim them anywhere else -- and
+// The package-level Get and Providers resolve against the production set, and
+// the capability lookups used to as well, which is why a caller outside this
+// package could not aim them anywhere else -- and
 // why internal/api grew five function-pointer fields on Server (ingestForFn,
 // pushMetadataFn, pushComplianceFn, pushBroadcastFn, rescheduleFn) to stub out
 // the calls those lookups returned. A caller that holds a Set instead of

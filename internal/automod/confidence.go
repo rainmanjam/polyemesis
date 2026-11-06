@@ -29,7 +29,7 @@ const MinUsableConfidence Confidence = 0.01
 // form, a config file -- into a floor that can be trusted.
 //
 // It is the ONLY way to make a Confidence from a float, so a caller cannot
-// copy a raw number into a config the way modelConfigFor used to.
+// copy a raw number into a config the way modelConfigFrom used to.
 func ParseConfidence(v float64) (Confidence, error) {
 	c := Confidence(v)
 	if c < MinUsableConfidence || c > 1 {

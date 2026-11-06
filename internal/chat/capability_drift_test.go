@@ -136,12 +136,23 @@ func TestTheCapabilityMatrixAgreesWithTheChatProfiles(t *testing.T) {
 			continue
 		}
 		pr, _ := ProfileOf(p)
-		if got, want := row.Get(oauth.CapChatSend) == oauth.SupportYes, pr.Send; got != want {
-			t.Errorf("%s: matrix chat send yes=%v, adapter sends=%v", p, got, want)
-		}
 		moderates := pr.Delete || pr.Ban || pr.Hide
-		if got := row.Get(oauth.CapModeration) == oauth.SupportYes; got != moderates {
-			t.Errorf("%s: matrix moderation yes=%v, adapter moderates=%v", p, got, moderates)
+		// X's adapter is built but only attached behind POLYEMESIS_X_LIVESTREAM
+		// and never run against a whitelisted app, so its cells may say
+		// Unverified; the rule for it is only that they must not say No. Every
+		// other platform's cell is Yes exactly when the adapter can do it.
+		liveGated := p == db.PlatformX
+		agrees := func(cell oauth.Support, can bool) bool {
+			if liveGated {
+				return !can || cell != oauth.SupportNo
+			}
+			return (cell == oauth.SupportYes) == can
+		}
+		if cell := row.Get(oauth.CapChatSend); !agrees(cell, pr.Send) {
+			t.Errorf("%s: matrix chat send = %q, adapter sends=%v", p, cell, pr.Send)
+		}
+		if cell := row.Get(oauth.CapModeration); !agrees(cell, moderates) {
+			t.Errorf("%s: matrix moderation = %q, adapter moderates=%v", p, cell, moderates)
 		}
 	}
 }

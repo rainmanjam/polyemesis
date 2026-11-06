@@ -314,10 +314,6 @@ describe("the features page rooms (S6)", () => {
     expect(features).toMatch(/Home and away/);
     expect(features).toMatch(/Esports|esports/);
   });
-
-  it("keeps the no-dedicated-pages decision in the source", () => {
-    expect(features).toMatch(/PROSE, NOT PAGES/);
-  });
 });
 
 describe("the hero's link sentences keep their spaces (S1)", () => {

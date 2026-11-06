@@ -68,7 +68,7 @@ func TestDeletingASourceWithoutAConfirmationIsRefusedAndDeletesNothing(t *testin
 func TestDeletingAnOnAirDestinationRequiresAConfirmation(t *testing.T) {
 	h, store, sign := sourceServer(t)
 
-	for _, phase := range []string{"live", "testing", "LIVE"} {
+	for _, phase := range []string{"live", "testing", "LIVE", "prepublished"} {
 		t.Run(phase, func(t *testing.T) {
 			id := makeDest(t, h, sign, "on air "+phase)
 			if _, err := store.UpdateLifecycle(id, func(d *db.Destination) bool {

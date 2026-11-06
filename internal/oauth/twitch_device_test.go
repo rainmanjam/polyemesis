@@ -479,11 +479,11 @@ func TestDeviceFlowIsTwitchOnlyAndSaysWhyForEachPlatformThatLacksIt(t *testing.T
 	}
 }
 
-// The Set twin, for the reason endpoints.go states in prose: a caller holding a
-// stubbed Set that resolved this through the package function would POST an
+// Resolved through the Set, for the reason endpoints.go states in prose: a
+// caller holding a stubbed Set that resolved this against production would POST an
 // operator's real client id to id.twitch.tv and then poll it every five
 // seconds, from a test that believed everything was pointed at a stub.
-func TestSetDeviceForResolvesAgainstTheSetAndNotTheRealTwitch(t *testing.T) {
+func TestDeviceFlowerResolvesAgainstTheSetAndNotTheRealTwitch(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 

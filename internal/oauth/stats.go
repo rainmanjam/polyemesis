@@ -18,8 +18,8 @@ import (
 // were reasonable when there was one implementor and neither survives a second:
 // a cross-platform capability named after one platform reads as Kick-specific
 // to anyone deciding whether to implement it, and an interface outside this
-// package cannot have the Set twin that endpoints.go requires of every
-// capability. The shape needed no change -- it was already neutral -- so this
+// package cannot be resolved through As on a Set, which endpoints.go requires
+// of every capability. The shape needed no change -- it was already neutral -- so this
 // is a rename and a move, not a redesign.
 type LiveStats struct {
 	Live bool `json:"live"`
@@ -71,8 +71,8 @@ type LiveStats struct {
 // people are watching.
 //
 // A platform opts in by having the method; there is no registration list. Same
-// shape as MetadataPusher and CompliancePusher -- see metadata.go:157 for the
-// pattern and endpoints.go:153 for why the Set twin below is not optional.
+// shape as MetadataPusher and CompliancePusher -- see metadata.go for the
+// pattern and As in endpoints.go for how a capability is resolved against a Set.
 type LiveStatter interface {
 	Provider
 	Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error)

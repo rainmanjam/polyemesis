@@ -187,9 +187,9 @@ func (s *Server) handleStartDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Through the Set twin rather than oauth.As[DeviceFlower], on endpoints.go's own
-	// terms: the package function would hand a stubbed server the PRODUCTION
-	// Twitch provider and then poll id.twitch.tv every five seconds.
+	// Resolved through the server's Set, on endpoints.go's own terms: the zero
+	// Set would hand a stubbed server the PRODUCTION Twitch provider and then
+	// poll id.twitch.tv every five seconds.
 	df, ok := oauth.As[oauth.DeviceFlower](s.providers, platform)
 	if !ok {
 		// A refusal rather than a 200 with supported:false, and the difference

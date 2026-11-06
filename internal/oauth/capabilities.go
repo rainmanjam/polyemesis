@@ -439,12 +439,13 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// Built behind the gate, not yet exercised against a whitelisted app.
 			CapMetadata: SupportUnknown,
 			CapChatRead: SupportUnknown,
-			// Send and moderation are what XAdapter implements (Sender, Deleter
-			// and Banner), so the cells say so; chat's
-			// TestTheCapabilityMatrixAgreesWithTheChatProfiles holds them to it.
-			// The Livestream gate still applies to both.
-			CapChatSend:           SupportYes,
-			CapModeration:         SupportYes,
+			// Send and moderation are built (XAdapter implements Sender, Deleter
+			// and Banner) but only attached behind POLYEMESIS_X_LIVESTREAM, and
+			// have never run against a whitelisted app, so they stay Unverified.
+			// chat's TestTheCapabilityMatrixAgreesWithTheChatProfiles allows that
+			// for a live-gated platform.
+			CapChatSend:           SupportUnknown,
+			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportUnknown,
 		},

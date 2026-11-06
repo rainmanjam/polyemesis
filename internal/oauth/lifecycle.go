@@ -219,8 +219,8 @@ type TransitionResult struct {
 // state can be COMMANDED.
 //
 // A platform opts in by having the methods; there is no registration list. Same
-// shape as LiveStatter and MetadataPusher -- see stats.go:78 for the pattern and
-// endpoints.go:153 for why the Set twin is not optional.
+// shape as LiveStatter and MetadataPusher -- see stats.go for the pattern and
+// As in endpoints.go for how a capability is resolved against a Set.
 type BroadcastLifecycler interface {
 	Provider
 	// BroadcastState reads the current phase and the transition preconditions.
