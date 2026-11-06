@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -88,6 +89,42 @@ func goModCache() string {
 	return ""
 }
 
+// untrackedTests is the set of _test.go files under root that git does not
+// track, as slash-separated paths relative to root. The census is a ratchet on
+// what is committed: a file a concurrent tool or another worktree is still
+// writing (half-written, so it may not even parse) is not part of it, and
+// counting one made the ratchet fail for a reason no commit could fix.
+//
+// Ignored files are included in "not tracked", which is what keeps a scratch
+// checkout out of the count too. When root is not a git work tree, or git is not
+// installed, the answer is empty and every file counts, as before.
+func untrackedTests(root string) map[string]bool {
+	// Only when root IS the work tree's top: a scratch tree that merely sits
+	// inside some checkout would otherwise read as entirely untracked.
+	top, err := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel").Output()
+	if err != nil || !sameDir(strings.TrimSpace(string(top)), root) {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", root, "ls-files", "--others", "-z", "--", "*_test.go")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			set[filepath.ToSlash(p)] = true
+		}
+	}
+	return set
+}
+
+func sameDir(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && filepath.Clean(ra) == filepath.Clean(rb)
+}
+
 // walkSkips counts calls to t.Skip, t.Skipf, t.SkipNow and testing.Short()
 // across the repository, by package directory, excluding internal/testenv --
 // which is the one place a skip is allowed to live, and whose own Quarantine
@@ -98,6 +135,7 @@ func walkSkips(t *testing.T, root string) (map[string]int, map[string]int, []str
 	shorts := map[string]int{}
 	var quarantineIDs []string
 	modCache := goModCache()
+	untracked := untrackedTests(root)
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -128,6 +166,9 @@ func walkSkips(t *testing.T, root string) (map[string]int, map[string]int, []str
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
+		if untracked[filepath.ToSlash(rel)] {
+			return nil
+		}
 		pkg := filepath.ToSlash(filepath.Dir(rel))
 		if pkg == "internal/testenv" {
 			return nil
@@ -567,5 +608,50 @@ func TestSkipCensusIgnoresTreesGoTestDoesNotRun(t *testing.T) {
 	ctl, _, _ := walkSkips(t, root)
 	if ctl["cmd/tool"] != 1 || ctl["internal/real"] != 1 || len(ctl) != 2 {
 		t.Errorf("census with a second real package = %v, want internal/real:1 and cmd/tool:1", ctl)
+	}
+}
+
+// THE CENSUS COUNTS WHAT IS COMMITTED, NOT WHAT A CONCURRENT TOOL IS WRITING.
+//
+// An untracked _test.go carrying a skip (another agent's worktree file, an
+// editor's scratch copy) must not move the ratchet; the same file once git
+// tracks it must. A checkout with no git at all keeps counting everything.
+func TestSkipCensusIgnoresUntrackedTestFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Log("git is not installed; the untracked-file rule has nothing to run against")
+		return
+	}
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	const skipping = "package p\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) { t.Skip(\"env\") }\n"
+	write := func(rel string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(skipping), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q")
+	write("internal/tracked/a_test.go")
+	run("add", "internal/tracked/a_test.go")
+	write("internal/scratch/b_test.go")
+
+	got, _, _ := walkSkips(t, root)
+	if got["internal/tracked"] != 1 || got["internal/scratch"] != 0 {
+		t.Fatalf("census = %v, want the tracked package counted and the untracked one not", got)
+	}
+
+	run("add", "internal/scratch/b_test.go")
+	got, _, _ = walkSkips(t, root)
+	if got["internal/scratch"] != 1 {
+		t.Fatalf("census = %v, want the file counted once git tracks it", got)
 	}
 }
