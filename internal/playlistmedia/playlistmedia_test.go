@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
-	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -296,7 +296,7 @@ func TestRunNormaliseWritesThroughAPartialAndPublishes(t *testing.T) {
 		// is. The value is unused: buildNormalise's -t bound never reaches a
 		// fake Execer that ignores its argv.
 		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			sawPartial = cmd.Args[len(cmd.Args)-1]
 			return os.WriteFile(sawPartial, []byte("normalised"), 0o644)
 		}))
@@ -354,7 +354,7 @@ func TestAFailedEncodeLeavesNothingBehind(t *testing.T) {
 
 	p := newTestProcessor(t, dir,
 		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			out := cmd.Args[len(cmd.Args)-1]
 			if err := os.WriteFile(out, []byte("half a file"), 0o644); err != nil {
 				return err
@@ -384,7 +384,7 @@ func TestAnUploadThatIsAlreadyNormalisedIsNotNormalisedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := newTestProcessor(t, dir, WithExecer(func(_ context.Context, _ media.Command, _ media.Sink) error {
+	p := newTestProcessor(t, dir, WithExecer(func(_ context.Context, _ ffmpeg.Command, _ ffmpeg.Sink) error {
 		t.Error("FFmpeg was run for an upload that was already normalised")
 		return nil
 	}))
@@ -403,7 +403,7 @@ func TestAnUploadThatIsAlreadyNormalisedIsNotNormalisedAgain(t *testing.T) {
 	var ran bool
 	p2 := newTestProcessor(t, dir,
 		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			ran = true
 			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o644)
 		}))
@@ -422,7 +422,7 @@ func TestASourceWithNoAudioStillGetsTheProfilesStereoTrack(t *testing.T) {
 	var args []string
 	p := newTestProcessor(t, dir,
 		WithStreamProber(streams(true, false)),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			args = cmd.Args
 			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o644)
 		}))
@@ -456,7 +456,7 @@ func TestAnAudioOnlyUploadIsRefusedPermanently(t *testing.T) {
 
 	p := newTestProcessor(t, dir,
 		WithStreamProber(streams(false, true)),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started for a source with no video track")
 			return nil
 		}))
@@ -486,7 +486,7 @@ func TestAProbeThatCannotReadTheFileFailsPermanently(t *testing.T) {
 			return false, jobs.Permanent(errors.New(
 				"ffprobe could not read truncated-1a2b.mp4: moov atom not found"))
 		}),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started on a file FFprobe could not read")
 			return nil
 		}))
@@ -726,7 +726,7 @@ func TestADerivativeThatWouldExhaustTheDiskIsRefusedBeforeItIsWritten(t *testing
 
 	p := newTestProcessor(t, dir,
 		WithFreeSpace(func(string) (uint64, error) { return DefaultMinFreeBytes + 1<<20, nil }),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started on a volume that could not hold the output")
 			return nil
 		}))
@@ -752,7 +752,7 @@ func TestAFreeSpaceCheckThatCannotAnswerRefusesTheJob(t *testing.T) {
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
 	p := newTestProcessor(t, dir,
 		WithFreeSpace(func(string) (uint64, error) { return 0, errors.New("statfs: permission denied") }),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started although free space was unknown")
 			return nil
 		}))
@@ -811,7 +811,7 @@ func TestTheGuardIsOnByDefault(t *testing.T) {
 func TestFailuresARetryCannotFixArePermanent(t *testing.T) {
 	dir := t.TempDir()
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
-	never := WithExecer(func(context.Context, media.Command, media.Sink) error {
+	never := WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 		t.Error("FFmpeg was started for a job that should have been refused")
 		return nil
 	})
@@ -892,7 +892,7 @@ func newTestProcessor(t *testing.T, dataDir string, opts ...Option) *Processor {
 		WithSourceVerifier(func(context.Context, string) (float64, error) { return 2, nil }),
 	}
 	// No default WithExecer here, unlike before: New's own default is
-	// media.Exec, the REAL subprocess runner, resolving "ffmpeg"/"ffprobe"
+	// ffmpeg.Exec, the REAL subprocess runner, resolving "ffmpeg"/"ffprobe"
 	// below via $PATH. Every test that must not touch a real binary already
 	// supplies its own WithExecer (grep confirms it), so this is a no-op for
 	// them; it is what lets the real-media tests in this file call

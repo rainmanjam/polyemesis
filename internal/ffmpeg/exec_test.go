@@ -1,4 +1,4 @@
-package media
+package ffmpeg
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
 
 // TestHelperProcess is not a test. It is this binary re-executed as the child
@@ -46,7 +46,7 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "a warning nobody minds")
 	case "grandchild":
 		// Spawns a copy of this binary that INHERITS the pipes and outlives it,
-		// then blocks. That is the shape killGrace was written for: x265 and
+		// then blocks. That is the shape KillGrace was written for: x265 and
 		// SVT-AV1 fork their own workers, and killing the parent leaves those
 		// workers holding the output pipes open.
 		//
@@ -134,11 +134,11 @@ func TestExecBoundsHowMuchOfAChattyChildEndsUpInOneErrorMessage(t *testing.T) {
 // what a verifier must not see.
 func TestExecKeepsProgressAndTheHumanLogApart(t *testing.T) {
 	var (
-		snapshots []ffmpeg.Progress
+		snapshots []Progress
 		lines     []string
 	)
 	err := Exec(context.Background(), helper("progress"), Sink{
-		Progress: func(p ffmpeg.Progress) { snapshots = append(snapshots, p) },
+		Progress: func(p Progress) { snapshots = append(snapshots, p) },
 		Line:     func(l string) { lines = append(lines, l) },
 	})
 	if err != nil {
@@ -219,5 +219,72 @@ func TestEveryLineAChildWroteReachesTheSinkEvenWhenTheSinkIsSlow(t *testing.T) {
 		t.Fatalf("the sink saw %d lines of 100. Wait closed the pipe before the "+
 			"reader had finished, and the tail of a failing child's output -- "+
 			"usually the reason it failed -- was discarded.", got)
+	}
+}
+
+// EVERY FFPROBE RUN IS IN THE CENSUS WHILE IT RUNS. recording, the playlist
+// stream checks and the live probe called exec.CommandContext themselves and
+// were absent from the census, so a probe outliving shutdown would have been
+// reported as nothing. Output (and RunEnrolled, for the callers that bring their
+// own pipes) enrol the child and discharge it when Wait returns.
+func TestOutputEnrolsTheProbeForAsLongAsItRuns(t *testing.T) {
+	enrolled := func() bool {
+		for _, c := range childcensus.Live() {
+			if c.Kind == probeKind {
+				return true
+			}
+		}
+		return false
+	}
+	if enrolled() {
+		t.Skip("another probe is in flight; this test cannot tell its own child apart")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := Output(ctx, helper("sleep"))
+		done <- err
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !enrolled() {
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("a running probe never appeared in the census")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a cancelled probe reported success")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Output did not return after its context ended")
+	}
+	if enrolled() {
+		t.Error("the probe is still in the census after Output returned")
+	}
+}
+
+func TestOutputReturnsStdoutAndStderrSeparately(t *testing.T) {
+	out, stderr, err := Output(context.Background(), helper("progress"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "progress=end") || strings.Contains(string(out), "nobody minds") {
+		t.Errorf("stdout = %q", out)
+	}
+	if !strings.Contains(stderr, "a warning nobody minds") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestRunEnrolledReportsAStartFailure(t *testing.T) {
+	err := RunEnrolled(exec.Command("definitely-not-a-real-binary-xyz"), probeKind)
+	if err == nil {
+		t.Fatal("a command that cannot start reported success")
 	}
 }

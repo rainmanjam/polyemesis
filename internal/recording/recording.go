@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
@@ -596,17 +596,16 @@ func (m *Manager) measure(rec *db.Recording) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, m.ffprobe,
+	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: m.ffprobe, Args: []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-print_format", "json",
 		"-show_entries", "format=duration:stream=codec_type",
 		path,
-	).Output()
+	}})
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return fmt.Errorf("ffprobe: %s", strings.TrimSpace(string(ee.Stderr)))
+		if stderr = strings.TrimSpace(stderr); stderr != "" {
+			return fmt.Errorf("ffprobe: %s", stderr)
 		}
 		return err
 	}

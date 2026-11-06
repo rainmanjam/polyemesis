@@ -6,7 +6,6 @@ import (
 	"io"
 	"os/exec"
 	"strings"
-	"time"
 )
 
 // DurationSource says HOW ProbeResult.DurationSeconds was arrived at, because
@@ -103,7 +102,7 @@ func CountDurationSeconds(ctx context.Context, ffmpegBin, format, path string) (
 	// The same reasoning as probeFile's: killing the child is a different event
 	// from its stdout pipe closing, and a wrapper script leaves a grandchild
 	// holding the write end. Without this a cancelled upload sits in Wait.
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = KillGrace
 	// -progress prints one small block per second, so this is far smaller than
 	// a probe's JSON -- but it is unbounded in the file's LENGTH rather than in
 	// its stream count, and the cap costs nothing.
@@ -111,7 +110,7 @@ func CountDurationSeconds(ctx context.Context, ffmpegBin, format, path string) (
 	stderrBuf := &cappedBuffer{max: probeStderrCap}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderrBuf
-	if err := cmd.Run(); err != nil {
+	if err := RunEnrolled(cmd, probeKind); err != nil {
 		if s := strings.TrimSpace(stderrBuf.buf.String()); s != "" {
 			return 0, fmt.Errorf("%s: %w", truncate(s, 300), err)
 		}

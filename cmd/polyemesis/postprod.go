@@ -395,10 +395,10 @@ func niceWrapper(gov *jobs.Governor) func(string, []string) (string, []string) {
 // child PID is still FFmpeg's and the supervisor's process-group kill is
 // unaffected; both binaries are optional and absent means the command is
 // returned untouched.
-func niceExecer(gov *jobs.Governor) media.Execer {
-	return func(ctx context.Context, cmd media.Command, sink media.Sink) error {
+func niceExecer(gov *jobs.Governor) ffmpeg.Execer {
+	return func(ctx context.Context, cmd ffmpeg.Command, sink ffmpeg.Sink) error {
 		name, args := gov.NiceCommand(cmd.Name, cmd.Args...)
-		return media.Exec(ctx, media.Command{Name: name, Args: args}, sink)
+		return ffmpeg.Exec(ctx, ffmpeg.Command{Name: name, Args: args}, sink)
 	}
 }
 

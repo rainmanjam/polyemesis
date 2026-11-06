@@ -671,7 +671,9 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// scanLines is a small shared helper for reading process output line by line.
+// scanLines reads r line by line with a buffer large enough for FFmpeg's
+// longest diagnostics, which run well past bufio's default 64 KiB when a filter
+// graph is quoted back at you.
 func scanLines(r interface{ Read([]byte) (int, error) }, fn func(string)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

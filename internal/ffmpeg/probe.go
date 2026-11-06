@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // ProbeResult is the parsed shape of the live ingest.
@@ -111,15 +110,9 @@ func Probe(ctx context.Context, ffprobeBin, input string, timeoutSeconds int) (*
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 5
 	}
-	cmd := exec.CommandContext(ctx, ffprobeBin, ProbeArgs(input, timeoutSeconds)...)
-	out, err := cmd.Output()
+	out, stderr, err := Output(ctx, Command{Name: ffprobeBin, Args: ProbeArgs(input, timeoutSeconds)})
 	if err != nil {
-		var ee *exec.ExitError
-		stderr := ""
-		if ok := asExitError(err, &ee); ok {
-			stderr = strings.TrimSpace(string(ee.Stderr))
-		}
-		if stderr != "" {
+		if stderr = strings.TrimSpace(stderr); stderr != "" {
 			return nil, fmt.Errorf("ffprobe %s: %s", input, truncate(stderr, 300))
 		}
 		return nil, fmt.Errorf("ffprobe %s: %w", input, err)
@@ -351,7 +344,7 @@ func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*Pro
 	//
 	// Real ffprobe forks nothing, so this costs a correct install nothing. It
 	// bounds the case where the configured binary is not the one assumed.
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = KillGrace
 	// BOTH PIPES ARE CAPPED, which cmd.Output() does for only one of them.
 	//
 	// Output() gives stdout an uncapped bytes.Buffer and reserves its 32 KiB cap
@@ -372,7 +365,7 @@ func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*Pro
 	stderrBuf := &cappedBuffer{max: probeStderrCap}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderrBuf
-	err := cmd.Run()
+	err := RunEnrolled(cmd, probeKind)
 	if err != nil {
 		stderr := strings.TrimSpace(stderrBuf.buf.String())
 		// THE CONTEXT ERROR FIRST, and this branch did not have it while the
@@ -710,12 +703,4 @@ func parseRational(s string) float64 {
 func atoi(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
-}
-
-func asExitError(err error, target **exec.ExitError) bool {
-	ee, ok := err.(*exec.ExitError)
-	if ok {
-		*target = ee
-	}
-	return ok
 }

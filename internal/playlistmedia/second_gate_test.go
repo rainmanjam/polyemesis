@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
-	"github.com/rainmanjam/polyemesis/internal/media"
 )
 
 // THE SECOND GATE.
@@ -87,7 +87,7 @@ func TestANormaliseSourceThatNamesOtherFilesIsRefusedPermanently(t *testing.T) {
 		FFmpeg: "ffmpeg", FFprobe: ffprobe, DataDir: dir, Uploads: mustStore(t, dir),
 	},
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started on a file that names other files")
 			return nil
 		}))
@@ -115,7 +115,7 @@ func TestANormaliseSourceThatNamesOtherFilesIsRefusedPermanently(t *testing.T) {
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
 		WithStreamProber(streams(true, true)),
 		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 1, 1, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			ran = true
 			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o600)
 		}))
@@ -142,7 +142,7 @@ func TestASourceThisServerCannotInspectIsRetryable(t *testing.T) {
 		Uploads: mustStore(t, dir),
 	},
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started although the source could not be inspected")
 			return nil
 		}))
@@ -204,7 +204,7 @@ func TestADerivativeThatReachedTheOutputCapIsNotPublished(t *testing.T) {
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
 	p := newTestProcessor(t, dir,
 		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
-		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+		WithExecer(func(_ context.Context, cmd ffmpeg.Command, _ ffmpeg.Sink) error {
 			// Write exactly as much as -fs allowed, which is what a run that hit
 			// the limit looks like on disk.
 			capStr, n := pairValue(cmd.Args, "-fs")
@@ -242,7 +242,7 @@ func TestASourceWithNoKnowableDurationIsRefused(t *testing.T) {
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
 	p := newTestProcessor(t, dir,
 		WithSourceVerifier(func(context.Context, string) (float64, error) { return 0, nil }),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started for a source of unknown length")
 			return nil
 		}))
@@ -269,7 +269,7 @@ func TestAnItemLongerThanTheMaximumIsRefused(t *testing.T) {
 		WithSourceVerifier(func(context.Context, string) (float64, error) {
 			return float64(MaxDurationMS)/1000 + 1, nil
 		}),
-		WithExecer(func(context.Context, media.Command, media.Sink) error {
+		WithExecer(func(context.Context, ffmpeg.Command, ffmpeg.Sink) error {
 			t.Error("FFmpeg was started for an item past the duration limit")
 			return nil
 		}))
