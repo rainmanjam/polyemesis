@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "Wciąż uruchamiane: {count}",
   "golive.stillStartingOne": "Wciąż uruchamiane: {count}",
   "golive.nothingReady": "Nic nie jest gotowe do uruchomienia.",
+  "golive.impactUnknown": "Nie udało się wczytać liczby transmisji YouTube, które zakończyłoby zatrzymanie. „Zatrzymaj wszystko” zapyta ponownie, zanim cokolwiek zakończy.",
   "golive.youtubeWarn": "Po zatrzymaniu zakończą się transmisje YouTube: {count}.",
   "golive.youtubeWarnOne": "{count} transmisja YouTube zakończy się po zatrzymaniu.",
   "golive.summary": "na żywo: {live} · uruchamiane: {starting} · nieudane: {failed} · zablokowane: {blocked}",

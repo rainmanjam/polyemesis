@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} 件はまだ開始中",
   "golive.stillStartingOne": "{count} 件はまだ開始中",
   "golive.nothingReady": "開始できる配信先がありません。",
+  "golive.impactUnknown": "停止で終了する YouTube 配信の数を読み込めませんでした。「すべて停止」は、何かを終了する前にもう一度確認します。",
   "golive.youtubeWarn": "停止すると {count} 件の YouTube 配信が終了します。",
   "golive.youtubeWarnOne": "停止すると {count} 件の YouTube 配信が終了します。",
   "golive.summary": "配信中 {live} · 開始中 {starting} · 失敗 {failed} · 保留 {blocked}",

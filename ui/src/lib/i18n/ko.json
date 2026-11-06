@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count}곳 아직 시작 중",
   "golive.stillStartingOne": "{count}곳 아직 시작 중",
   "golive.nothingReady": "시작할 준비가 된 대상이 없습니다.",
+  "golive.impactUnknown": "중지하면 종료될 YouTube 방송 수를 불러오지 못했습니다. '모두 중지'는 무언가를 종료하기 전에 다시 확인합니다.",
   "golive.youtubeWarn": "중지하면 YouTube 방송 {count}건이 종료됩니다.",
   "golive.youtubeWarnOne": "중지하면 YouTube 방송 {count}건이 종료됩니다.",
   "golive.summary": "라이브 {live} · 시작 중 {starting} · 실패 {failed} · 차단 {blocked}",

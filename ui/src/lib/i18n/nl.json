@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} nog bezig met starten",
   "golive.stillStartingOne": "{count} nog bezig met starten",
   "golive.nothingReady": "Niets is klaar om te starten.",
+  "golive.impactUnknown": "Het aantal YouTube-uitzendingen dat een stop zou beëindigen kon niet worden geladen. Alles stoppen vraagt het opnieuw voordat er iets wordt beëindigd.",
   "golive.youtubeWarn": "{count} YouTube-uitzendingen eindigen als je stopt.",
   "golive.youtubeWarnOne": "{count} YouTube-uitzending eindigt als je stopt.",
   "golive.summary": "live: {live} · starten: {starting} · mislukt: {failed} · geblokkeerd: {blocked}",

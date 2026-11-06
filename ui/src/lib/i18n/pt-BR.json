@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} ainda iniciando",
   "golive.stillStartingOne": "{count} ainda iniciando",
   "golive.nothingReady": "Nada está pronto para iniciar.",
+  "golive.impactUnknown": "Não foi possível carregar o número de transmissões do YouTube que uma parada encerraria. «Parar tudo» consulta de novo antes de encerrar qualquer coisa.",
   "golive.youtubeWarn": "{count} transmissões do YouTube terminarão se forem paradas.",
   "golive.youtubeWarnOne": "{count} transmissão do YouTube terminará se for parada.",
   "golive.summary": "no ar: {live} · iniciando: {starting} · falhas: {failed} · bloqueados: {blocked}",
