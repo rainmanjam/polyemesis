@@ -1,3 +1,6 @@
+import { capabilityFor, supportOf } from "@/lib/capabilities";
+import { platformName } from "@/lib/platforms";
+import { causeLabel } from "@/lib/failureRemedy";
 import { useState } from "react";
 import { Link } from "react-router";
 import {
@@ -49,24 +52,6 @@ import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { destinationInPlay, destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
-
-const PLATFORM_LABEL: Record<string, string> = {
-  youtube: "YouTube",
-  twitch: "Twitch",
-  kick: "Kick",
-  // Facebook was missing, so a Facebook destination's subtitle read a bare
-  // lowercase "facebook" beside four properly capitalised siblings — the
-  // fallback firing where a label belongs, exactly the failure the i18n drift
-  // guard exists to catch one layer up.
-  facebook: "Facebook",
-  // Kept although Trovo is retired: a row saved before the shutdown still
-  // carries the platform, and its card should still name it properly.
-  trovo: "Trovo",
-  vimeo: "Vimeo",
-  // X destinations carry "x" since the editor's X preset gained its platform.
-  x: "X",
-  custom: "Custom",
-};
 
 /** Platforms that have shut down, with the sentence the card shows for them.
  *
@@ -188,7 +173,11 @@ export function DestinationCard({
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
   const reason = dest.enabled ? dest.reason : undefined;
-  const platformLabel = PLATFORM_LABEL[dest.platform] ?? dest.platform;
+  const platformLabel = platformName(dest.platform);
+  // Offered where the platform hands the key over (the capability matrix says
+  // "yes"): custom, Vimeo, X and Rumble have no key API, and the server answers
+  // a refresh there with a 400.
+  const canRefreshKey = supportOf(capabilityFor(dest.platform), "streamKey") === "yes";
   const retiredKey =
     dest.platform in RETIRED_PLATFORM
       ? RETIRED_PLATFORM[dest.platform as keyof typeof RETIRED_PLATFORM]
@@ -197,8 +186,8 @@ export function DestinationCard({
   /* --- Facebook broadcast lifecycle -------------------------------------
    *
    *  GATED ON PLATFORM SELECTION, NOT DISABLED, which is the rule this file's
-   *  kebab already follows one item up: "Refresh stream key" is HIDDEN for
-   *  custom and kick rather than greyed out, because a control that cannot do
+   *  kebab already follows one item up: "Refresh stream key" is HIDDEN where
+   *  the platform has no key API rather than greyed out, because a control that cannot do
    *  anything is not made better by being visible and dead. Same here, plus
    *  the id: without a live video there is no broadcast to end and nothing to
    *  read health from, so the pair appears exactly when both are true. */
@@ -283,7 +272,7 @@ export function DestinationCard({
             <div className="min-w-0">
               <div className="truncate text-[13px] font-semibold leading-tight">{dest.name}</div>
               <div className="font-mono text-[10px] leading-tight text-muted-foreground">
-                {PLATFORM_LABEL[dest.platform] ?? dest.platform} · {dest.kind.toUpperCase()}
+                {platformName(dest.platform)} · {dest.kind.toUpperCase()}
               </div>
             </div>
           </div>
@@ -328,7 +317,7 @@ export function DestinationCard({
                     <RefreshCw /> {t("common.restart")}
                   </DropdownMenuItem>
                 )}
-                {dest.platform !== "custom" && dest.platform !== "kick" && !retiredKey && (
+                {canRefreshKey && !retiredKey && (
                   <DropdownMenuItem onSelect={onRefreshKey}>
                     <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
                   </DropdownMenuItem>
@@ -477,8 +466,8 @@ export function DestinationCard({
                   reason.urlFix
                     ? t("reason.urlFix.cause")
                     : reason.cause === "unknown" && reason.line
-                    ? `${t(`reason.cause.${reason.cause}`)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
-                    : t(`reason.cause.${reason.cause}`)
+                    ? `${causeLabel(t, reason.cause)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
+                    : causeLabel(t, reason.cause)
                 }
                 step={t("foundation.status.step.destination", { platform: platformLabel })}
                 asOf={reason.at}
@@ -529,7 +518,7 @@ export function DestinationCard({
             <StatusReason
               reason={dest.process.lastError}
               step={t("foundation.status.step.destination", {
-                platform: PLATFORM_LABEL[dest.platform] ?? dest.platform,
+                platform: platformName(dest.platform),
               })}
               asOf={null}
             />

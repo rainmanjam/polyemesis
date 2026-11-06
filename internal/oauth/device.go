@@ -112,21 +112,21 @@ type DeviceAuth struct {
 	// from memory publishes to nowhere and reads as our bug.
 	VerificationURI string `json:"verificationUri"`
 	// Interval is the minimum wait between polls, as the platform stated it,
-	// floored by deviceMinPollInterval.
+	// floored by DeviceMinPollInterval.
 	Interval time.Duration `json:"-"`
 	// ExpiresAt is when the device code dies and the operator has to start
 	// again. Zero if the platform said nothing.
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// deviceMinPollInterval is the floor under whatever the platform asks for.
+// DeviceMinPollInterval is the floor under whatever the platform asks for.
 //
 // A platform that omits `interval`, or sends 0, would otherwise leave a caller
 // polling a token endpoint as fast as the network allows -- which is how an
 // operator's app gets rate-limited for the whole box, mid-connect, for a
 // mistake nobody made. Twitch's own responses carry 5; this only ever applies
 // when the answer is missing or absurd.
-const deviceMinPollInterval = 5 * time.Second
+const DeviceMinPollInterval = 5 * time.Second
 
 // ErrDeviceAuthPending is the ordinary answer to nearly every poll: the
 // operator has not finished at the verification URI yet. A caller sleeps for
@@ -242,11 +242,11 @@ func postFormJSON(ctx context.Context, endpoint string, form url.Values, out any
 }
 
 // devicePollInterval turns the platform's `interval` seconds into a duration
-// that cannot produce a hot loop. See deviceMinPollInterval.
+// that cannot produce a hot loop. See DeviceMinPollInterval.
 func devicePollInterval(seconds int) time.Duration {
 	d := time.Duration(seconds) * time.Second
-	if d < deviceMinPollInterval {
-		return deviceMinPollInterval
+	if d < DeviceMinPollInterval {
+		return DeviceMinPollInterval
 	}
 	return d
 }

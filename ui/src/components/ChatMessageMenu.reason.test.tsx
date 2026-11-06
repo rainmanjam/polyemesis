@@ -76,7 +76,7 @@ describe("ChatMessageMenu", () => {
     // A platform with no capability row falls back to "unverified", and no
     // chat adapter implements anything for it. Without this sentence the menu
     // is five greyed rows with no explanation, which reads as a broken tool.
-    draw(msg({ platform: "custom" }));
+    draw(msg({ platform: "custom" as unknown as ChatPlatform }));
     expect(screen.getByText(/publishes no moderation API/)).toBeTruthy();
   });
 
@@ -149,11 +149,9 @@ describe("ChatMessageMenu on a platform whose moderation column says yes", () =>
 describe("ChatMessageMenu on a platform that implements nothing", () => {
   afterEach(cleanup);
 
-  // Rumble is outside the ChatPlatform union on purpose (types.ts:234) and
-  // still arrives at runtime, which is exactly how an ungated Delete survived
-  // review: the type system believes this message cannot exist.
-  const rumble = () =>
-    msg({ platform: "rumble" as unknown as ChatPlatform, author: { id: "u1", name: "someone" } });
+  // Rumble is a chat platform whose adapter implements no moderation at all,
+  // which is how an ungated Delete survived review.
+  const rumble = () => msg({ platform: "rumble", author: { id: "u1", name: "someone" } });
 
   it("renders Delete inert instead of live-and-refused", () => {
     // It was `{onDelete && <DropdownMenuItem …>}` with no gate whatever, three

@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} masih dimulai",
   "golive.stillStartingOne": "{count} masih dimulai",
   "golive.nothingReady": "Belum ada yang siap dimulai.",
+  "golive.impactUnknown": "Jumlah siaran YouTube yang akan diakhiri oleh penghentian tidak dapat dimuat. Hentikan semua menanyakannya lagi sebelum mengakhiri apa pun.",
   "golive.youtubeWarn": "{count} siaran YouTube akan berakhir jika dihentikan.",
   "golive.youtubeWarnOne": "{count} siaran YouTube akan berakhir jika dihentikan.",
   "golive.summary": "{live} siaran · {starting} memulai · {failed} gagal · {blocked} terblokir",

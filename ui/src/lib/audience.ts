@@ -1,20 +1,13 @@
+import { platformName } from "@/lib/platforms";
 import type { AnalyticsPoint, AnalyticsReading } from "@/lib/types";
 
 /** The public player's platform name on an analytics reading. */
 export const PLAYER = "player";
 
-const LABELS: Record<string, string> = {
-  youtube: "YouTube",
-  twitch: "Twitch",
-  kick: "Kick",
-  facebook: "Facebook",
-  rumble: "Rumble",
-};
-
 /** A platform's display name. The player's row is labelled by the caller,
  *  through the catalogue, because it is a phrase rather than a brand. */
 export function platformLabel(platform: string): string {
-  return LABELS[platform] ?? platform;
+  return platformName(platform);
 }
 
 /** The count a reading carries, or null when the platform did not report one.

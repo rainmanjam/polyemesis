@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} encore en démarrage",
   "golive.stillStartingOne": "{count} encore en démarrage",
   "golive.nothingReady": "Rien n'est prêt à démarrer.",
+  "golive.impactUnknown": "Le nombre de diffusions YouTube qu'un arrêt terminerait n'a pas pu être chargé. « Tout arrêter » le redemande avant de terminer quoi que ce soit.",
   "golive.youtubeWarn": "{count} diffusions YouTube se termineront si elles sont arrêtées.",
   "golive.youtubeWarnOne": "{count} diffusion YouTube se terminera si elle est arrêtée.",
   "golive.summary": "en direct : {live} · en démarrage : {starting} · en échec : {failed} · bloqués : {blocked}",

@@ -223,6 +223,10 @@ type accountView struct {
 	// Health is the last refresh's outcome and the token's own expiry, read
 	// per request (A5). See account_health.go.
 	Health AccountHealth `json:"health"`
+	// IsPage says a Facebook account is a Page, whose broadcasts are always
+	// public. The console reads this rather than knowing how the ref is spelled.
+	// Omitted for every other account.
+	IsPage bool `json:"isPage,omitempty"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +244,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 			// The same derivation the Stream Deck's key reads, through
 			// accountHealthCache: see destsignals.go.
 			Health: s.accountHealthNow(a, now),
+			IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

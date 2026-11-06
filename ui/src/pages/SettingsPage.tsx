@@ -1,3 +1,4 @@
+import { DEFAULT_LISTENERS, WIRE } from "@/lib/contract/wire";
 import { createContext, useContext, useEffect, useId, useState } from "react";
 import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
@@ -733,7 +734,7 @@ function IngestSettings({
     if (await copyText(system.ingestUrl)) toast.success(t("set.ingestUrlCopied"));
   };
 
-  const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
+  const listeners = draft.listeners ?? DEFAULT_LISTENERS;
   const setListeners = (patch: Partial<typeof listeners>) =>
     setDraft({ ...draft, listeners: { ...listeners, ...patch } });
 
@@ -1017,7 +1018,7 @@ function ListenerPortsOnly({
 }) {
   const t = useT();
   const model = useSaveModel<ListenerSettings>({
-    stored: settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 },
+    stored: settings.listeners ?? DEFAULT_LISTENERS,
     onSave: (listeners) => onSave({ ...settings, listeners }),
     equal: sameSettings,
   });
@@ -1148,12 +1149,12 @@ function SettingsPullIngestFields({
  *  first GET lands or against a server too old to send the key. */
 function chatFrom(draft: Settings): Required<ChatRetentionSettings> {
   return {
-    retentionHours: draft.chat?.retentionHours ?? 2,
-    keepMessages: draft.chat?.keepMessages ?? 2000,
-    purgeMinutes: draft.chat?.purgeMinutes ?? 5,
-    historyMessages: draft.chat?.historyMessages ?? 500,
-    youtubeQuotaUnits: draft.chat?.youtubeQuotaUnits ?? 10000,
-    youtubeQuotaReserve: draft.chat?.youtubeQuotaReserve ?? 200,
+    retentionHours: draft.chat?.retentionHours ?? WIRE.defaults.chatRetentionHours,
+    keepMessages: draft.chat?.keepMessages ?? WIRE.defaults.chatKeepMessages,
+    purgeMinutes: draft.chat?.purgeMinutes ?? WIRE.defaults.chatPurgeMinutes,
+    historyMessages: draft.chat?.historyMessages ?? WIRE.defaults.chatHistoryMessages,
+    youtubeQuotaUnits: draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits,
+    youtubeQuotaReserve: draft.chat?.youtubeQuotaReserve ?? WIRE.defaults.youTubeQuotaReserve,
   };
 }
 
@@ -1305,7 +1306,7 @@ function PipelineSettings({
                 type="number"
                 min={0}
                 max={43800}
-                value={draft.chat?.retentionHours ?? 2}
+                value={draft.chat?.retentionHours ?? WIRE.defaults.chatRetentionHours}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1324,7 +1325,7 @@ function PipelineSettings({
                 type="number"
                 min={0}
                 max={5000000}
-                value={draft.chat?.keepMessages ?? 2000}
+                value={draft.chat?.keepMessages ?? WIRE.defaults.chatKeepMessages}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1354,7 +1355,7 @@ function PipelineSettings({
                 type="number"
                 min={1}
                 max={1440}
-                value={draft.chat?.purgeMinutes ?? 5}
+                value={draft.chat?.purgeMinutes ?? WIRE.defaults.chatPurgeMinutes}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1373,7 +1374,7 @@ function PipelineSettings({
                 type="number"
                 min={LIMITS.chatHistoryMessages.min}
                 max={LIMITS.chatHistoryMessages.max}
-                value={draft.chat?.historyMessages ?? 500}
+                value={draft.chat?.historyMessages ?? WIRE.defaults.chatHistoryMessages}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1398,7 +1399,7 @@ function PipelineSettings({
                 type="number"
                 min={LIMITS.youtubeQuotaUnits.min}
                 max={LIMITS.youtubeQuotaUnits.max}
-                value={draft.chat?.youtubeQuotaUnits ?? 10000}
+                value={draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1431,8 +1432,8 @@ function PipelineSettings({
                 id="chat-yt-reserve"
                 type="number"
                 min={0}
-                max={Math.floor((draft.chat?.youtubeQuotaUnits ?? 10000) / 2)}
-                value={draft.chat?.youtubeQuotaReserve ?? 200}
+                max={Math.floor((draft.chat?.youtubeQuotaUnits ?? WIRE.defaults.youTubeQuotaUnits) / WIRE.defaults.youTubeQuotaReserveFraction)}
+                value={draft.chat?.youtubeQuotaReserve ?? WIRE.defaults.youTubeQuotaReserve}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -1507,7 +1508,7 @@ function PipelineSettings({
               type="number"
               min={LIMITS.alertRetryAttempts.min}
               max={LIMITS.alertRetryAttempts.max}
-              value={draft.alerts?.retryAttempts ?? 4}
+              value={draft.alerts?.retryAttempts ?? WIRE.defaults.alertRetryAttempts}
               onChange={(e) =>
                 setDraft({ ...draft, alerts: { retryAttempts: Number(e.target.value) } })
               }
@@ -1612,7 +1613,7 @@ function PipelineSettings({
                   id="fo-grace"
                   type="number"
                   min={1}
-                  value={draft.failover?.graceSeconds ?? 10}
+                  value={draft.failover?.graceSeconds ?? WIRE.defaults.failoverGraceSeconds}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1652,7 +1653,7 @@ function PipelineSettings({
                     id="fo-stable"
                     type="number"
                     min={0}
-                    value={draft.failover?.returnStableSeconds ?? 60}
+                    value={draft.failover?.returnStableSeconds ?? WIRE.defaults.failoverReturnStableSeconds}
                     onChange={(e) =>
                       setDraft({
                         ...draft,
@@ -1995,7 +1996,7 @@ function PipelineSettings({
                       type="number"
                       min={1}
                       max={3600}
-                      value={draft.mqtt?.intervalSeconds ?? 10}
+                      value={draft.mqtt?.intervalSeconds ?? WIRE.defaults.mqttIntervalSeconds}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -2011,7 +2012,7 @@ function PipelineSettings({
                       type="number"
                       min={1}
                       max={65535}
-                      value={draft.mqtt?.keepAliveSeconds ?? 30}
+                      value={draft.mqtt?.keepAliveSeconds ?? WIRE.defaults.mqttKeepAliveSeconds}
                       onChange={(e) =>
                         setDraft({
                           ...draft,

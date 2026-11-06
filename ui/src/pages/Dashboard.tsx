@@ -44,7 +44,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { GoLiveSheet } from "@/components/GoLiveSheet";
-import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLive";
+import { goLiveRows, type GoLiveRow } from "@/lib/goLive";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
@@ -720,8 +720,26 @@ function BulkDestinationControl({
   const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
   const stopCountSeq = useRef(0);
   const count = destinations.length;
-  // The Go live sheet still counts YouTube broadcasts locally for its own warning.
-  const youtube = youtubeBroadcastsAtRisk(destinations);
+  // The Go live sheet's warning is the server's stop-impact count too (the rule
+  // the Stop dialog uses). It is fetched when the sheet opens and again after
+  // each start, since a start changes what a stop would end. A count that could
+  // not be loaded is said so, never shown as zero.
+  const [goLiveYouTube, setGoLiveYouTube] = useState(0);
+  const [goLiveImpactFailed, setGoLiveImpactFailed] = useState(false);
+  const goLiveSeq = useRef(0);
+  const loadGoLiveImpact = () => {
+    const seq = ++goLiveSeq.current;
+    api.stopImpact().then(
+      (impact) => {
+        if (seq !== goLiveSeq.current) return;
+        setGoLiveYouTube(impact.youtubeBroadcasts);
+        setGoLiveImpactFailed(false);
+      },
+      () => {
+        if (seq === goLiveSeq.current) setGoLiveImpactFailed(true);
+      },
+    );
+  };
 
   const openStopAll = () => {
     const seq = ++stopCountSeq.current;
@@ -810,6 +828,9 @@ function BulkDestinationControl({
           disabled={busy}
           onClick={() => {
             setSheetRows(goLiveRows(destinations, sources));
+            setGoLiveYouTube(0);
+            setGoLiveImpactFailed(false);
+            loadGoLiveImpact();
           }}
         >
           <Play /> {t("golive.trigger")}
@@ -870,8 +891,13 @@ function BulkDestinationControl({
         }}
         rows={sheetRows ?? []}
         live={destinations}
-        youtubeAtRisk={youtube}
-        onStart={(id) => api.startDestination(id).then(() => undefined)}
+        youtubeAtRisk={goLiveYouTube}
+        impactUnknown={goLiveImpactFailed}
+        onStart={(id) =>
+          api.startDestination(id).then(() => {
+            loadGoLiveImpact();
+          })
+        }
         onRetry={(id) => api.restartDestination(id).then(() => undefined)}
         onFinished={onFinished}
       />

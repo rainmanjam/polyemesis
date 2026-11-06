@@ -1,6 +1,9 @@
 package platform
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRowsAreUnique(t *testing.T) {
 	keys, enums, presets := map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -177,5 +180,15 @@ func TestYouTubeRecommendationAndMaximumAreDifferentFacts(t *testing.T) {
 	}
 	if m := Must(Rumble).Moderation; m == nil || m.Hide || m.Delete || m.TimeoutBan {
 		t.Errorf("rumble is listed for moderation with no upstream action, got %+v", m)
+	}
+}
+
+// Every row has a short name: it is what the console prints beside a chat line
+// and in a sentence, and a row without one would print a blank.
+func TestEveryRowHasAShortName(t *testing.T) {
+	for _, r := range All() {
+		if strings.TrimSpace(r.ShortName) == "" || strings.TrimSpace(r.Name) == "" {
+			t.Errorf("row %q has an empty Name or ShortName", r.Key)
+		}
 	}
 }

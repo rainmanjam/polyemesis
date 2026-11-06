@@ -12,8 +12,8 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 307,
-    "swept": 79,
+    "methodPatternPairs": 308,
+    "swept": 80,
     "excused": 60,
     "denied": 168,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 10,
-    "invariant": 63,
+    "invariant": 64,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -1080,6 +1080,12 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/platforms/registry",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/playout",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -2128,6 +2134,11 @@
     {
       "path": "/api/v1/platforms/presets",
       "pattern": "GET /api/v1/platforms/presets",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/platforms/registry",
+      "pattern": "GET /api/v1/platforms/registry",
       "class": "invariant"
     },
     {

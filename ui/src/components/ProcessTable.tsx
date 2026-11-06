@@ -4,7 +4,7 @@ import { ChevronRight, FileText, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/StatusPill";
 import { duration } from "@/lib/format";
-import { remedyFor } from "@/lib/failureRemedy";
+import { causeLabel, remedyFor } from "@/lib/failureRemedy";
 import { useT } from "@/lib/i18n";
 import { processRunning } from "@/lib/liveness";
 import { processStatus } from "@/lib/status";
@@ -120,7 +120,7 @@ export function ProcessTable({
                             The raw lastError stays for an unclassified failure. */}
                         {p.reason && remedy ? (
                           <div className="flex flex-col gap-0.5 text-down">
-                            <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
+                            <span className="font-medium">{causeLabel(t, p.reason.cause)}</span>
                             <span>{t(remedy.text)}</span>
                           </div>
                         ) : (

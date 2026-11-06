@@ -67,7 +67,7 @@ describe("platformLinkFor", () => {
   });
 
   it("has no link shape to guess for a custom platform", () => {
-    expect(platformLinkFor(msg({ platform: "custom" }))).toBeNull();
+    expect(platformLinkFor(msg({ platform: "custom" as unknown as ChatPlatform }))).toBeNull();
   });
 
   // Names arrive from strangers on the internet and go straight into a URL.
@@ -94,5 +94,12 @@ describe("platformNoun", () => {
     expect(platformNoun("twitch")).toBe("Twitch");
     expect(platformNoun("kick")).toBe("Kick");
     expect(platformNoun("facebook")).toBe("Facebook");
+  });
+
+  // X and Rumble are chat platforms with no case in the old switch, so the
+  // moderation menu printed "on x" in lower case.
+  it("names X and Rumble too", () => {
+    expect(platformNoun("x")).toBe("X");
+    expect(platformNoun("rumble")).toBe("Rumble");
   });
 });

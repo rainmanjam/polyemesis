@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} hedef hâlâ başlatılıyor",
   "golive.stillStartingOne": "{count} hedef hâlâ başlatılıyor",
   "golive.nothingReady": "Başlatmaya hazır bir şey yok.",
+  "golive.impactUnknown": "Bir durdurmanın sonlandıracağı YouTube yayını sayısı yüklenemedi. «Tümünü durdur», herhangi bir şeyi sonlandırmadan önce bunu yeniden sorar.",
   "golive.youtubeWarn": "Durdurulursa {count} YouTube yayını sona erer.",
   "golive.youtubeWarnOne": "Durdurulursa {count} YouTube yayını sona erer.",
   "golive.summary": "{live} yayında · {starting} başlatılıyor · {failed} başarısız · {blocked} engelli",

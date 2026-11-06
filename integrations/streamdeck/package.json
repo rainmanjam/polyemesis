@@ -5,7 +5,7 @@
   "description": "Elgato Stream Deck plugin for a polyemesis install: destination state keys, go live, stop with confirmation, failover and dial meters.",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

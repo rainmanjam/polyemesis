@@ -32,6 +32,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/logtz"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
@@ -3529,6 +3530,16 @@ func (s *Server) handlePlatformCapabilities(w http.ResponseWriter, r *http.Reque
 		"support":   oauth.SupportLegend(),
 		"tiers":     oauth.TierLegend(),
 	})
+}
+
+// handlePlatformRegistry serves the platform registry (internal/platform) as
+// clients read it: the names, the stored value, which platforms carry
+// destinations and chat, and the ingest and title rules a client applies to what
+// an operator types. It is the same description the console is built against
+// (ui/src/lib/contract/wire.generated.ts), so a scripted client does not need a
+// table of its own either. Public facts only: nothing here is per install.
+func (s *Server) handlePlatformRegistry(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, platform.Describe())
 }
 
 // ---------------------------------------------------------------- recordings

@@ -583,6 +583,7 @@ func leakRoutes() []string {
 		"/api/v1/platforms/credentials",
 		"/api/v1/platforms/accounts",
 		"/api/v1/platforms/capabilities",
+		"/api/v1/platforms/registry",
 		"/api/v1/platforms/guides",
 		"/api/v1/platforms/presets",
 		"/api/v1/library",

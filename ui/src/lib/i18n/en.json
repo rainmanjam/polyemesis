@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} still starting",
   "golive.stillStartingOne": "{count} still starting",
   "golive.nothingReady": "Nothing is ready to start.",
+  "golive.impactUnknown": "The count of YouTube broadcasts a stop would end could not be loaded. Stop all asks again before it ends anything.",
   "golive.youtubeWarn": "{count} YouTube broadcasts will end if stopped.",
   "golive.youtubeWarnOne": "{count} YouTube broadcast will end if stopped.",
   "golive.summary": "{live} live · {starting} starting · {failed} failed · {blocked} blocked",

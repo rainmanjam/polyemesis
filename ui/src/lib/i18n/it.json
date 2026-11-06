@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} ancora in avvio",
   "golive.stillStartingOne": "{count} ancora in avvio",
   "golive.nothingReady": "Nulla è pronto per l'avvio.",
+  "golive.impactUnknown": "Non è stato possibile caricare il numero di dirette YouTube che un arresto terminerebbe. «Ferma tutto» lo richiede di nuovo prima di terminare qualsiasi cosa.",
   "golive.youtubeWarn": "{count} dirette YouTube termineranno se fermate.",
   "golive.youtubeWarnOne": "{count} diretta YouTube terminerà se fermata.",
   "golive.summary": "in diretta: {live} · in avvio: {starting} · non riusciti: {failed} · bloccati: {blocked}",

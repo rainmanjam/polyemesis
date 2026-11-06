@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} 个仍在启动",
   "golive.stillStartingOne": "{count} 个仍在启动",
   "golive.nothingReady": "没有可开始的目标。",
+  "golive.impactUnknown": "无法加载停止时会结束的 YouTube 直播数量。“全部停止”会在结束任何内容之前再次询问。",
   "golive.youtubeWarn": "停止后将结束 {count} 个 YouTube 直播。",
   "golive.youtubeWarnOne": "停止后将结束 {count} 个 YouTube 直播。",
   "golive.summary": "{live} 直播 · {starting} 启动中 · {failed} 失败 · {blocked} 已阻止",

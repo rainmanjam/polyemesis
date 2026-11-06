@@ -3,7 +3,6 @@ import {
   goLiveRows,
   planStarts,
   runPacedStarts,
-  youtubeBroadcastsAtRisk,
 } from "./goLive";
 import type { DestStatus } from "./types";
 
@@ -57,19 +56,6 @@ describe("planStarts", () => {
       sources,
     );
     expect(planStarts(rows).map((d) => d.id)).toEqual([1]);
-  });
-});
-
-describe("youtubeBroadcastsAtRisk", () => {
-  it("counts the YouTube broadcasts that a Stop would end", () => {
-    // A completed YouTube broadcast cannot return to live (destinations_bulk.go),
-    // so this is the number the operator must see before pressing anything.
-    const n = youtubeBroadcastsAtRisk([
-      dest({ id: 1, platform: "youtube", enabled: true }),
-      dest({ id: 2, platform: "youtube", enabled: false }),
-      dest({ id: 3, platform: "twitch", enabled: true }),
-    ]);
-    expect(n).toBe(1);
   });
 });
 

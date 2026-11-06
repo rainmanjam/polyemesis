@@ -938,13 +938,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // the control is hidden rather than shown-and-ignored -- offering a setting
   // that silently does nothing is the defect roadmap item 0 exists for.
   //
-  // Only a ref that SAYS page: counts. A legacy ref carrying no prefix resolves
+  // Only an account the server says is a Page counts (its ref says "page:"). A legacy ref carrying no prefix resolves
   // as "auto" server-side, trying Pages first and falling back to the profile,
   // so which it is cannot be known here. Those keep the control and its hint,
   // because hiding it on a guess would take away a setting that does work.
   const facebookTargetsAPage = useMemo(() => {
     const acct = accounts.find((a) => String(a.id) === accountId);
-    return acct?.accountRef?.startsWith("page:") ?? false;
+    return acct?.isPage ?? false;
   }, [accounts, accountId]);
 
   /** What this destination's platform says it wants. Null when the operator has

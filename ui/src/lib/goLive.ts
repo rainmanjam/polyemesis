@@ -56,13 +56,6 @@ export function planStarts(rows: readonly GoLiveRow[]): GoLiveRow[] {
   return rows.filter((r) => r.ready && !r.enabled);
 }
 
-/** How many YouTube broadcasts a Stop would end. An enabled YouTube destination
- *  is a broadcast in progress, and stopping it is permanent (see
- *  destinations_bulk.go). Counted so the operator sees it before the click. */
-export function youtubeBroadcastsAtRisk(destinations: readonly DestStatus[]): number {
-  return destinations.filter((d) => d.enabled && d.platform === "youtube").length;
-}
-
 /** Starts the destinations one at a time, `paceMs` apart, collecting a message
  *  per refusal. A refusal does not stop the walk: the rest of a Go live press
  *  should still go out, and the operator is shown which one did not take.

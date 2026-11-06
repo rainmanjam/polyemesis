@@ -134,8 +134,8 @@ func TestTwitchDeviceAuthNeverPollsFasterThanTheFloor(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StartDeviceAuth: %v", err)
 			}
-			if auth.Interval < deviceMinPollInterval {
-				t.Errorf("poll interval is %v, below the %v floor", auth.Interval, deviceMinPollInterval)
+			if auth.Interval < DeviceMinPollInterval {
+				t.Errorf("poll interval is %v, below the %v floor", auth.Interval, DeviceMinPollInterval)
 			}
 		})
 	}

@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "Ещё запускаются: {count}",
   "golive.stillStartingOne": "Ещё запускается: {count}",
   "golive.nothingReady": "Нет готовых направлений для запуска.",
+  "golive.impactUnknown": "Не удалось загрузить число трансляций YouTube, которые завершит остановка. «Остановить всё» запросит его снова, прежде чем что-либо завершить.",
   "golive.youtubeWarn": "При остановке завершатся трансляции YouTube: {count}.",
   "golive.youtubeWarnOne": "{count} трансляция YouTube завершится при остановке.",
   "golive.summary": "в эфире: {live} · запускается: {starting} · с ошибкой: {failed} · заблокировано: {blocked}",

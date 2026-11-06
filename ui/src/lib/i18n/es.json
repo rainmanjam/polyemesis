@@ -1844,6 +1844,7 @@
   "golive.stillStarting": "{count} aún iniciándose",
   "golive.stillStartingOne": "{count} aún iniciándose",
   "golive.nothingReady": "No hay nada listo para iniciar.",
+  "golive.impactUnknown": "No se pudo cargar el número de emisiones de YouTube que terminaría una detención. «Detener todo» lo consulta de nuevo antes de terminar nada.",
   "golive.youtubeWarn": "{count} transmisiones de YouTube terminarán si se detienen.",
   "golive.youtubeWarnOne": "{count} transmisión de YouTube terminará si se detiene.",
   "golive.summary": "en directo: {live} · iniciando: {starting} · fallidos: {failed} · bloqueados: {blocked}",
