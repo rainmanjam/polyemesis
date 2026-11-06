@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // annotated builds a source of n stereo tracks carrying the given annotations.
@@ -868,5 +870,36 @@ func TestRoleTracksIsSortedAndDeduplicated(t *testing.T) {
 	}
 	if !sort.IntsAreSorted(got) {
 		t.Error("result is not ascending")
+	}
+}
+
+// The music table is the registry's rows plus the two that are not platforms.
+// A platform whose row carries no Music policy (X, Vimeo, TikTok, Rumble) gets
+// the custom row, which keeps every track -- a table gap today, not a decision;
+// the refactor report lists it.
+func TestPolicyTableIsTheRegistryPlusFileAndCustom(t *testing.T) {
+	var want []Platform
+	for _, row := range platform.All() {
+		if row.Music != nil && row.Enum != platform.Custom {
+			want = append(want, Platform(row.Enum))
+		}
+	}
+	want = append(want, PlatformFile, PlatformCustom)
+	var got []Platform
+	for _, p := range PlatformPolicies() {
+		got = append(got, p.Platform)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("policies = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("policies = %v, want %v", got, want)
+		}
+	}
+	for _, p := range []string{platform.X, platform.Vimeo, platform.TikTok, platform.Rumble, "instagram"} {
+		if PlatformFor(p, "rtmp") != PlatformCustom {
+			t.Errorf("%s has no music row and should fall to custom", p)
+		}
 	}
 }

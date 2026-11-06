@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // MaxTracks is the number of audio tracks polyemesis accepts from an ingest.
@@ -101,9 +103,9 @@ const (
 // Common loudness targets, offered as named starting points rather than forced
 // on anyone: the right number depends entirely on where the stream is going.
 const (
-	LUFSStreaming = -14.0 // YouTube, Twitch, Spotify: what their own normalizer targets
-	LUFSPodcast   = -16.0 // Apple Podcasts / spoken word
-	LUFSBroadcast = -23.0 // EBU R128
+	LUFSStreaming = platform.LUFSStreaming // YouTube, Twitch, Spotify: what their own normalizer targets
+	LUFSPodcast   = -16.0                  // Apple Podcasts / spoken word
+	LUFSBroadcast = -23.0                  // EBU R128
 )
 
 // DefaultTruePeakDB is the ceiling used when a loudness target names none.
