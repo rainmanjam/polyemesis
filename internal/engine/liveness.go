@@ -76,9 +76,10 @@ func (d DestStatus) AlertState() alerts.DestState {
 
 // IngestState is the state of the engine's programme ingest: its child's state,
 // or for a programme with no child the state of the listener that carries it.
-// The metrics scrape reads this rather than deriving it.
-func (m *Manager) IngestState(e *Engine) supervisor.State {
-	if in := e.Status().Ingest; in != nil {
+// The metrics scrape reads this rather than deriving it. `ingest` is the
+// caller's own Status().Ingest, so state and restarts come from one snapshot.
+func (m *Manager) IngestState(e *Engine, ingest *supervisor.Status) supervisor.State {
+	if in := ingest; in != nil {
 		return in.State
 	}
 	set := e.Settings()

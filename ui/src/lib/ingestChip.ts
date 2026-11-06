@@ -51,8 +51,13 @@ export function ingestChipReading(
   // describe the primary, which can recover while a manual-return failover keeps
   // the backup selected. "Running" for it would hide which ingest is on air.
   if (onBackup) return { kind: "backup" };
-  if (ingestProcessUp(ingest) && ingest?.progress?.bitrateKbps != null) {
-    return { kind: "bitrate", kbps: ingest.progress.bitrateKbps };
+  // The server always serializes progress.bitrateKbps, 0 included, so a
+  // listener idling for its encoder arrives as a running child at 0 kbps. A zero
+  // with nothing arriving is therefore "waiting"; a zero while bytes ARE arriving
+  // is a child that disagrees with the relay, a real reading that still shows.
+  const kbps = ingest?.progress?.bitrateKbps;
+  if (ingestProcessUp(ingest) && kbps != null && (kbps > 0 || ingestLive)) {
+    return { kind: "bitrate", kbps };
   }
   // An SRT source is live with no child at all, so it has no bitrate to show
   // and "Running" is the honest answer rather than a zero at a stream that is

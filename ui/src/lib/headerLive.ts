@@ -33,6 +33,7 @@ export interface HeaderLive {
 interface DestLike {
   sourceId?: number | null;
   enabled?: boolean;
+  delay?: { phase?: string } | null;
   process?: Pick<ProcessStatus, "state"> & {
     uptimeSec?: number;
     stalled?: boolean;

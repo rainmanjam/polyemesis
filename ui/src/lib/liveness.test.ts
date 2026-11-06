@@ -75,6 +75,27 @@ describe("the bar's degraded count always has a row to explain it", () => {
   });
 });
 
+describe("a stopped destination draining its delay tail is still on air", () => {
+  const draining = [
+    dest(1, {
+      enabled: false,
+      delay: { phase: "draining" } as DestStatus["delay"],
+      process: { state: "running", uptimeSec: 40 },
+    }),
+  ];
+  it("counts in the header, the bar, the lane heading and the delete confirm", () => {
+    expect(header(draining)).toBe(1);
+    expect(onAir(draining).live).toBe(1);
+    expect(draining.filter(destinationOnAir)).toHaveLength(1); // lane heading, delete confirm
+    expect(onAirSeconds(draining)).toBe(40);
+  });
+  it("does not count once the tail has ended or the process is gone", () => {
+    const ended = [dest(1, { enabled: false, delay: { phase: "draining" } as DestStatus["delay"], process: { state: "stopped" } })];
+    expect(header(ended)).toBe(0);
+    expect(onAir(ended).live).toBe(0);
+  });
+});
+
 describe("destination liveness policy", () => {
   it("treats media as having moved on uptime or output time", () => {
     expect(destinationShownState(proc({ uptimeSec: 3 }))).toBe("running");
@@ -102,7 +123,8 @@ describe("destination liveness policy", () => {
 });
 
 describe("ingest liveness", () => {
-  const listener = proc({ state: "running", progress: {} as ProcessStatus["progress"] });
+  // The shape the server really sends: progress.bitrateKbps is always present.
+  const listener = proc({ state: "running", progress: { bitrateKbps: 0 } as ProcessStatus["progress"] });
 
   it("does not read a waiting listener as live (chip)", () => {
     // Running with no bytes arriving: an SRT/RTMP listener idling for its encoder.
@@ -112,7 +134,9 @@ describe("ingest liveness", () => {
   });
 
   it("is live only while bytes arrive", () => {
-    expect(ingestChipReading(listener, true, false, true)).toEqual({ kind: "state", state: "running" });
+    expect(ingestChipReading(null, true, false, true)).toEqual({ kind: "state", state: "running" });
+    const flowing = proc({ state: "running", progress: { bitrateKbps: 4500 } as ProcessStatus["progress"] });
+    expect(ingestChipReading(flowing, true, false, true)).toEqual({ kind: "bitrate", kbps: 4500 });
     expect(ingestWaiting(listener, false)).toBe(true);
     expect(ingestWaiting(listener, true)).toBe(false);
     expect(ingestWaiting(null, false)).toBe(false);

@@ -63,8 +63,13 @@ describe("the header ingest chip", () => {
     // HAS told us it is at zero is a genuine reading and must still show. A
     // fix that suppressed both would hide a stalled stream, which is worse
     // than the bug.
-    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, false)).toBe(
+    // Zero while bytes ARE arriving disagrees with the relay: a real reading.
+    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, true)).toBe(
       "0 kbps",
+    );
+    // Zero with nothing arriving is a listener waiting for its encoder.
+    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, false)).toBe(
+      "Waiting",
     );
   });
 

@@ -1,6 +1,6 @@
 import type { DestinationId, DestStatus, FailureCause, ProcessState, RenditionStatus, Status } from "./types";
 import type { SignalTone } from "./signal";
-import { destinationShownState, ingestProcessUp } from "./liveness";
+import { destinationOnAir, destinationShownState, ingestProcessUp } from "./liveness";
 
 /* What the dashboard says FIRST, as plain functions.
  *
@@ -49,7 +49,7 @@ export function onAir(destinations: readonly DestStatus[] | null | undefined): O
       return !!state && states.includes(state);
     }).length;
   return {
-    live: count("running"),
+    live: (destinations ?? []).filter(destinationOnAir).length,
     enabled: rows.length,
     degraded: count("starting", "reconnecting"),
     failed: count("failed"),

@@ -1,5 +1,5 @@
 import { ingestProcessUp } from "./liveness";
-import type { Levels, ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
+import type { Levels, ProcessState, ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
 
 /* What the dashboard is allowed to assert, as plain functions.
  *
@@ -105,12 +105,12 @@ export function processAbsence(featureEnabled: boolean | null | undefined): Proc
  * that the stream is running and empty; "—" is the truth, which is that there
  * is nothing to report. */
 export function ingestBitrateKbps(
-  processState: string | undefined,
+  processState: ProcessState | undefined,
   processKbps: number | undefined,
   recent: { kbps: number }[],
   live: boolean,
 ): number | null {
-  if (processState === "running") return processKbps ?? 0;
+  if (processState !== undefined && ingestProcessUp({ state: processState })) return processKbps ?? 0;
   if (!live) return null;
   const last = recent.at(-1);
   return last ? last.kbps : null;

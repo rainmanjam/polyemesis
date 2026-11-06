@@ -1323,7 +1323,7 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 				Dropped:     st.Relay.Dropped,
 			},
 		}
-		in.State = string(s.mgr.IngestState(e))
+		in.State = string(s.mgr.IngestState(e, st.Ingest))
 		if st.Ingest != nil {
 			in.Restarts = st.Ingest.Restarts
 		}

@@ -13,9 +13,11 @@ import type { ProcessState, ProcessStatus } from "./types";
  * THE POLICY, in one paragraph. A destination is ON AIR when it is enabled and
  * its process is running AND has carried media: uptimeSec > 0 (the supervisor
  * stamps it when this run's output first moves) or progress.outTimeMs > 0. A
- * running process with no media yet is STARTING. A stalled process (output not
- * advancing) stays on air, because the card still draws it live and carries the
- * stall beside the lamp; only the go-live sheet, which asks "has this start
+ * running process with no media yet is STARTING. A stopped destination draining its delay tail is on air too (the engine
+ * and MQTT say so). A stalled process (output not advancing) stays on air,
+ * because the card still draws it live and carries the stall beside the lamp.
+ * That DIFFERS from Prometheus polyemesis_destination_up and the webhook
+ * "flowing" reading, which count a stall as down so an alert can fire. Only the go-live sheet, which asks "has this start
  * landed and is it moving?", additionally requires !stalled (destinationLanded).
  * The ingest is LIVE only while bytes arrive; a running process or listener
  * with nothing arriving is WAITING.
@@ -57,8 +59,17 @@ export function destinationShownState(process?: Proc | null): ProcessState | und
   return state ?? undefined;
 }
 
-/** Whether the destination is on air: enabled, running and carrying media. */
-export function destinationOnAir(d: { enabled?: boolean; process?: Proc | null }): boolean {
+/** Whether the destination is on air: enabled, running and carrying media.
+ *
+ *  A stopped destination playing its broadcast-delay tail out (enabled false,
+ *  process still running, delay.phase "draining") is still on the air, as it
+ *  is to the engine's alert projection and MQTT: viewers are still watching. */
+export function destinationOnAir(d: {
+  enabled?: boolean;
+  process?: Proc | null;
+  delay?: { phase?: string } | null;
+}): boolean {
+  if (d.delay?.phase === "draining" && processRunning(d.process)) return true;
   return !!d.enabled && destinationShownState(d.process) === "running";
 }
 
@@ -71,7 +82,11 @@ export function destinationLanded(process?: Proc | null): boolean {
 /** How long the broadcast has been on air: the longest-running enabled
  *  destination, since the first one up is when the audience could first see it. */
 export function onAirSeconds(
-  destinations: readonly { enabled?: boolean; process?: (Proc & { uptimeSec?: number }) | null }[] | null | undefined,
+  destinations: readonly {
+    enabled?: boolean;
+    process?: (Proc & { uptimeSec?: number }) | null;
+    delay?: { phase?: string } | null;
+  }[] | null | undefined,
 ): number {
   return (destinations ?? []).reduce(
     (max, d) => (destinationOnAir(d) ? Math.max(max, d.process?.uptimeSec ?? 0) : max),

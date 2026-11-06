@@ -47,7 +47,7 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
 import { destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -177,7 +177,6 @@ export function DestinationCard({
   const held = useHeldStop(onStop);
   const { unsettled } = useSettledAction(dest.enabled);
   const stateLabel = useStateLabel();
-  const state = dest.process?.state;
   // What the badge and its tone say: "running" reads as starting until this
   // run has carried media (see destinationShownState). `running` below stays
   // the server's word, because it gates the live readings, and a starting
@@ -303,7 +302,7 @@ export function DestinationCard({
                   "border-transparent bg-tally text-tally-foreground",
               )}
             >
-              {dest.enabled && shownState === "running" && (
+              {destinationOnAir({ enabled: dest.enabled, process: dest.process }) && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
               {t(destinationStatus(dest.enabled, shownState, dest.delay?.phase).labelKey)}
@@ -523,7 +522,7 @@ export function DestinationCard({
             )}
           </div>
         )}
-        {!dest.error && !reason && dest.process?.lastError && state !== "running" && (
+        {!dest.error && !reason && dest.process?.lastError && !running && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <StatusReason

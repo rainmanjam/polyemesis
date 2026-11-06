@@ -17,7 +17,8 @@ its first tagged release.
   reads Waiting, not Running.
 - **MQTT reads a destination's delay the way alerts and webhooks do.** A stopped destination still
   playing its delayed tail out is `enabled` on the retained topic until the tail ends, instead of
-  reading disabled while it was still on the air.
+  reading disabled while it was still on the air. The audience sampler likewise no longer treats a
+  destination that carries an error as running.
 - **With two Kick accounts connected, the second channel's chat is no longer credited to the first.**
   Kick posts every connected channel to one webhook URL, and every delivery went to the first Kick
   adapter, which stamped its own account on it. Each delivery now goes to the adapter for the

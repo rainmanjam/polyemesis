@@ -60,6 +60,7 @@ import {
   type ProcessInfo,
 } from "@/lib/types";
 import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { processRunning } from "@/lib/liveness";
 import { MoreAbout } from "@/components/MoreAbout";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
@@ -765,7 +766,7 @@ export function MonitoringPage() {
   // running" never sits above a CPU warning. It does not reuse the Dashboard
   // verdict, which is still to be unified (A3, A73).
   const failedCount = processes.filter((p) => p.status.state === "failed").length;
-  const runningCount = processes.filter((p) => p.status.state === "running").length;
+  const runningCount = processes.filter((p) => processRunning(p.status)).length;
   const pageVerdict = monitorVerdict({
     processes: processes.length,
     running: runningCount,

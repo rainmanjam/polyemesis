@@ -224,7 +224,7 @@ func (s *Server) destinationDelivering(id int64) bool {
 		if ds.ID != id {
 			continue
 		}
-		return ds.Enabled && ds.Error == "" && ds.Process != nil && ds.Process.State == "running" && !ds.Process.Stalled
+		return ds.Enabled && ds.IsUp() && !ds.Process.Stalled
 	}
 	return false
 }
