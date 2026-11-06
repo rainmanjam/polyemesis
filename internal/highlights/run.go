@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
-	"github.com/rainmanjam/polyemesis/internal/childcensus"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
 
@@ -30,29 +29,35 @@ func RunStreaming(ctx context.Context, name string, args []string, stdout func(i
 	cmd := exec.CommandContext(ctx, name, args...)
 	jobs.LowerPriority(cmd)
 	cmd.Stderr = &stderr
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	childcensus.Enrol(cmd.Process.Pid, filepath.Base(name), "highlights")
-	defer childcensus.Discharge(cmd.Process.Pid)
-	if perr := stdout(pipe); perr != nil {
-		// The parser has given up, so the rest of the pass is wasted work --
-		// possibly hours of audio. Kill the child rather than read it to the
-		// end; Wait reaps it (and closes the pipe), and the deferred
-		// Discharge takes it out of the census. Its "killed" is not news.
-		cancel()
-		_ = cmd.Wait()
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+
+	parsed := make(chan error, 1)
+	go func() {
+		perr := stdout(pr)
+		if perr != nil {
+			// The parser has given up, so the rest of the pass is wasted work --
+			// possibly hours of audio. Kill the child rather than read it to the
+			// end. Its "killed" is not news.
+			cancel()
+		}
+		// Drain whatever the parser left unread, so FFmpeg is never blocked on a
+		// full pipe while Wait waits for it.
+		_, _ = io.Copy(io.Discard, pr)
+		parsed <- perr
+	}()
+	// ffmpeg.RunEnrolled owns the spawn: census, and WaitDelay so a cancelled
+	// pass returns even when something else holds the pipe.
+	runErr := ffmpeg.RunEnrolled(cmd, "highlights")
+	_ = pw.Close()
+	if perr := <-parsed; perr != nil {
 		return perr
 	}
-	// Drain whatever the parser left unread, so FFmpeg is never blocked on a
-	// full pipe while Wait waits for it.
-	_, _ = io.Copy(io.Discard, pipe)
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("%w: %s", err, lastLine(stderr.String()))
+	if runErr != nil {
+		if why := lastLine(stderr.String()); why != "" {
+			return fmt.Errorf("%w: %s", runErr, why)
+		}
+		return runErr
 	}
 	return nil
 }

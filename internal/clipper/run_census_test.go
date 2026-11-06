@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -27,6 +28,17 @@ func TestClipperHelperProcess(t *testing.T) {
 	case "slow":
 		time.Sleep(400 * time.Millisecond)
 		fmt.Println("cut done")
+		os.Exit(0)
+	case "grandchild":
+		// A parent that leaves a child holding its output pipe, the way x265
+		// and SVT-AV1 leave their workers, then waits to be killed.
+		gc := exec.Command(os.Args[0], "-test.run=^TestClipperHelperProcess$", "clipper-helper", "sleeper")
+		gc.Stdout, gc.Stderr = os.Stdout, os.Stderr
+		_ = gc.Start()
+		time.Sleep(20 * time.Second)
+		os.Exit(0)
+	case "sleeper":
+		time.Sleep(20 * time.Second)
 		os.Exit(0)
 	case "fail":
 		fmt.Fprintln(os.Stderr, "Invalid data found when processing input")
@@ -160,5 +172,37 @@ func TestAFailedEncodesErrorIsItsReasonWithoutCaptionChatter(t *testing.T) {
 	long := strings.Repeat("Last message repeated\n", 100) + "Conversion failed!"
 	if got := ffmpegFailure(long); len(got) > failureLimit+3 || !strings.HasSuffix(got, "Conversion failed!") {
 		t.Errorf("a long failure is not its tail: %d bytes, %q", len(got), got[max(0, len(got)-40):])
+	}
+}
+
+// A CANCELLED CUT RETURNS. A child that has left a grandchild holding the
+// output pipe would keep Wait blocked until the grandchild exited; the shared
+// KillGrace bound is what makes cancelling a clip job real.
+//
+// MUTATION: start the child without ffmpeg.RunEnrolled's WaitDelay.
+// Observed: FAIL, still blocked after 9 s (the grandchild sleeps 20 s).
+func TestACancelledChildReturnsPromptlyEvenWithAGrandchildHoldingThePipe(t *testing.T) {
+	for name, run := range map[string]func(context.Context, string, []string) ([]byte, error){
+		"runCommand": runCommand, "RunLowPriority": RunLowPriority,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			done := make(chan error, 1)
+			go func() {
+				_, err := run(ctx, os.Args[0], []string{"-test.run=^TestClipperHelperProcess$", "clipper-helper", "grandchild"})
+				done <- err
+			}()
+			time.Sleep(300 * time.Millisecond)
+			cancel()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Error("a cancelled child reported success")
+				}
+			case <-time.After(9 * time.Second):
+				t.Fatal("the cancelled child was still being waited on 9 s later")
+			}
+		})
 	}
 }
