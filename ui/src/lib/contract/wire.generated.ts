@@ -135,7 +135,19 @@ export const WIRE = {
   },
   "defaults": {
     "srtPort": 6000,
-    "rtmpPort": 1935
+    "rtmpPort": 1935,
+    "chatRetentionHours": 2,
+    "chatKeepMessages": 2000,
+    "chatPurgeMinutes": 5,
+    "chatHistoryMessages": 500,
+    "youTubeQuotaUnits": 10000,
+    "youTubeQuotaReserve": 200,
+    "youTubeQuotaReserveFraction": 2,
+    "alertRetryAttempts": 4,
+    "failoverGraceSeconds": 5,
+    "failoverReturnStableSeconds": 30,
+    "mqttIntervalSeconds": 10,
+    "mqttKeepAliveSeconds": 30
   },
   "renditionBounds": {
     "minDimension": 128,

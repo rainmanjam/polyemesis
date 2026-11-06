@@ -104,9 +104,24 @@ type wireRenditionBounds struct {
 	MaxGopSeconds float64 `json:"maxGopSeconds"`
 }
 
+// wireDefaults are the values db.DefaultSettings gives, for the settings form's
+// placeholders and for a response from a server older than a field. They are
+// read from DefaultSettings, never typed here.
 type wireDefaults struct {
-	SRTPort  int `json:"srtPort"`
-	RTMPPort int `json:"rtmpPort"`
+	SRTPort                 int `json:"srtPort"`
+	RTMPPort                int `json:"rtmpPort"`
+	ChatRetentionHours      int `json:"chatRetentionHours"`
+	ChatKeepMessages        int `json:"chatKeepMessages"`
+	ChatPurgeMinutes        int `json:"chatPurgeMinutes"`
+	ChatHistoryMessages     int `json:"chatHistoryMessages"`
+	YouTubeQuotaUnits       int `json:"youTubeQuotaUnits"`
+	YouTubeQuotaReserve     int `json:"youTubeQuotaReserve"`
+	YouTubeQuotaReserveFrac int `json:"youTubeQuotaReserveFraction"`
+	AlertRetryAttempts      int `json:"alertRetryAttempts"`
+	FailoverGraceSeconds    int `json:"failoverGraceSeconds"`
+	FailoverReturnStableSec int `json:"failoverReturnStableSeconds"`
+	MQTTIntervalSeconds     int `json:"mqttIntervalSeconds"`
+	MQTTKeepAliveSeconds    int `json:"mqttKeepAliveSeconds"`
 }
 
 type wireSite struct {
@@ -313,7 +328,16 @@ func buildWireContract(t *testing.T) wireContract {
 			MaxDumpSeconds:                 int(engine.MaxDumpRequest.Seconds()),
 			BulkStartPacingMs:              ms(bulkStartPacing),
 		},
-		Defaults: wireDefaults{SRTPort: def.Listeners.SRTPort, RTMPPort: def.Listeners.RTMPPort},
+		Defaults: wireDefaults{
+			SRTPort: def.Listeners.SRTPort, RTMPPort: def.Listeners.RTMPPort,
+			ChatRetentionHours: def.Chat.RetentionHours, ChatKeepMessages: def.Chat.KeepMessages,
+			ChatPurgeMinutes: def.Chat.PurgeMinutes, ChatHistoryMessages: def.Chat.HistoryMessages,
+			YouTubeQuotaUnits: def.Chat.YouTubeQuotaUnits, YouTubeQuotaReserve: def.Chat.YouTubeQuotaReserve,
+			YouTubeQuotaReserveFrac: db.MaxYouTubeQuotaReserveFraction,
+			AlertRetryAttempts:      def.Alerts.RetryAttempts,
+			FailoverGraceSeconds:    def.Failover.GraceSeconds, FailoverReturnStableSec: def.Failover.ReturnStableSeconds,
+			MQTTIntervalSeconds: def.MQTT.IntervalSecond, MQTTKeepAliveSeconds: def.MQTT.KeepAliveSec,
+		},
 		RenditionBounds: wireRenditionBounds{
 			MinDimension: db.MinRenditionDimension, MaxDimension: db.MaxRenditionDimension,
 			MaxFps: db.MaxRenditionFPS, MinBitrate: db.MinRenditionBitrate, MaxBitrate: db.MaxRenditionBitrate,

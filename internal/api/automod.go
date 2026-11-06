@@ -321,6 +321,7 @@ func matrixFromSettings(a db.AutomodSettings) automod.Matrix {
 // THE CONSOLE HAS THE SAME RULE, in ui/src/lib/automodConfig.ts checkerReady,
 // which renders these columns inert. The two must agree: where they did not,
 // the console said "nothing automatic" and the banner said a ban was armed.
+// TestAutomodReadinessContract runs one table of cases through both.
 func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 	switch c {
 	case automod.CheckerRules:
