@@ -349,7 +349,13 @@ describe("Platforms as rows (settings-council R1, R2, R10, R16)", () => {
     expect(await screen.findByText("Refused by Twitch.")).toBeTruthy();
     // A refused pair keeps the credential layer open.
     expect(screen.getByText(T("settingsUx.appCredentials")).closest("details")?.open).toBe(true);
-  });
+    /* 15s, not the default 5s. This finishes in about 100ms locally, but the
+     * SonarCloud job runs the whole suite under v8 coverage and on main at
+     * a8227224 this test hit the 5s limit there (the file took 15.8s). One
+     * red test means vitest writes no lcov at all, so Sonar read every UI
+     * line as uncovered and new_coverage fell from 86.3 to 77.2. The headroom
+     * is for a slow runner, not for a slow page: the assertions are unchanged. */
+  }, 15000);
 
   it("shows one warning: the redirect problem that applies now, ahead of the standing note", async () => {
     guides = [guide("twitch", "Twitch", { note: "Standing caveat.", redirectWarnings: ["This origin will be refused."] })];
