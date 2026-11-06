@@ -721,10 +721,10 @@ export function ClipEditor() {
                   />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-on-video-dim">
                       {t("clipedit.noProxy")}
                     </p>
-                    <p className="text-tiny text-muted-foreground">
+                    <p className="text-tiny text-on-video-dim">
                       {t("clipedit.noProxyHint")}
                     </p>
                   </div>

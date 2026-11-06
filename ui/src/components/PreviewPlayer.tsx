@@ -178,7 +178,7 @@ export function PreviewPlayer({
           decoded frame of a finished stream show straight through with
           "Waiting for a stream…" floating on top of it. */}
       {!showPicture && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black text-muted-foreground">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black text-on-video-dim">
           <MonitorPlay className="h-6 w-6 opacity-40" />
           <span className="text-[11px]">
             {!active
@@ -188,7 +188,7 @@ export function PreviewPlayer({
                 : t("preview.waiting")}
           </span>
           {offAir && (
-            <span className="text-[10px] opacity-70">{t("preview.startEncoder")}</span>
+            <span className="text-[10px]">{t("preview.startEncoder")}</span>
           )}
         </div>
       )}
@@ -203,10 +203,10 @@ export function PreviewPlayer({
           seconds an operator is most likely to be looking. */}
       {standingIn && (
         <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-black/70 px-1.5 py-0.5 backdrop-blur-sm">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-warn">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-on-video-warn">
             {t("i18nSweep.inputOffline")}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-on-video-dim">
             {t("i18nSweep.showingOnAir", { what: onAir ?? "" })}
           </span>
         </div>

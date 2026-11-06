@@ -466,6 +466,17 @@
 }
 
 @theme inline {
+  /* TEXT ON A FIXED-BLACK VIDEO WELL. A preview well, a clip's proxy slot and
+     the badge over a live picture stay black in BOTH themes, so the ink on them
+     cannot follow the theme: --muted-foreground is dark in the light theme
+     (1.65:1 on black) and was only 3.13:1 in dark. These three are literals
+     on purpose, the dark theme's own ink steps: 17.2:1, 10.5:1 and 9.7:1 on
+     #000. palette-contrast.test.ts holds them at AA and keeps themed text
+     colours off any bg-black element. */
+  --color-on-video: oklch(93.3% 0.0087 264.5);
+  --color-on-video-dim: oklch(78% 0.02 265);
+  --color-on-video-warn: oklch(76.5% 0.1399 72.9);
+
   /* MOTION, wired. The three durations and the easing below were declared in
      :root from the start and read by nothing: they were never registered here,
      so Tailwind emitted no utility for them and all 27 `transition-colors`

@@ -439,6 +439,47 @@ describe("the pre-paint colours are the tokens", () => {
   });
 });
 
+describe("text on a fixed-black video well uses the on-video tokens, in both themes", () => {
+  /* A preview well, a clip's proxy slot and the badge over a live picture are
+   * BLACK in both themes (a video letterbox does not go white). Text drawn on
+   * them therefore cannot take a themed token: --muted-foreground is dark in
+   * the light theme (1.65:1 on black) and only 3.13:1 in dark. They get the
+   * --color-on-video* set, literals that do not follow the theme. */
+  const THEME_BLOCK = APP_CSS.slice(APP_CSS.indexOf("@theme inline {"));
+  const onVideo = (name: string): Oklch => {
+    const m = THEME_BLOCK.match(new RegExp(`--color-${name}:\\s*oklch\\(\\s*([\\d.]+)%\\s+([\\d.]+)\\s+([\\d.]+)\\s*\\)`));
+    if (!m) throw new Error(`--color-${name} is not an oklch literal in @theme inline`);
+    return [Number(m[1]) / 100, Number(m[2]), Number(m[3])];
+  };
+  const BLACK: Rgb = [0, 0, 0];
+  const rgbOf = (c: Oklch) => linear(c).map((v) => encode(clamp(v))) as Rgb;
+
+  it.each(["on-video", "on-video-dim", "on-video-warn"])("--color-%s reads at AA on #000", (name) => {
+    expect(contrast(rgbOf(onVideo(name)), BLACK)).toBeGreaterThanOrEqual(TEXT);
+  });
+
+  it("keeps every themed text colour off a bg-black element", () => {
+    const hits: string[] = [];
+    for (const f of APP_SOURCES) {
+      for (const m of readFileSync(f, "utf8").matchAll(/(?:"[^"\n]*|`[^`\n]*)\bbg-black\b[^"`\n]*["`]/g)) {
+        if (/\btext-(muted-foreground|subtle-foreground|foreground|warn|ok|down|primary-bright|idle)\b/.test(m[0])) {
+          hits.push(`${f.slice(ROOT.length)}: ${m[0]}`);
+        }
+      }
+    }
+    // The public player is a separate, always-dark page with its own palette.
+    expect(hits.filter((h) => !h.includes("PublicPlayer"))).toEqual([]);
+  });
+
+  it("paints the clip editor's no-proxy text and the preview badge with the on-video tokens", () => {
+    const clip = readFileSync(join(SRC, "pages", "ClipEditor.tsx"), "utf8");
+    expect(clip).toMatch(/text-on-video-dim[^>]*>\s*\{t\("clipedit\.noProxy"\)/);
+    const prev = readFileSync(join(SRC, "components", "PreviewPlayer.tsx"), "utf8");
+    expect(prev).toContain("text-on-video-warn");
+    expect(prev).not.toMatch(/bg-black\/70[^\n]*\n[^\n]*\n[^\n]*text-warn/);
+  });
+});
+
 /* ---------------------------------------- how the tokens may be spent */
 
 function files(dir: string, ext: RegExp): string[] {
