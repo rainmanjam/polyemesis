@@ -1,5 +1,7 @@
-/** Types mirroring the Go API. Kept hand-written and small rather than
- *  generated, so the shapes the UI actually consumes stay obvious. */
+/** Types mirroring the Go API. Hand-written and small, so the shapes the UI
+ *  actually consumes stay obvious, except for the words and numbers the server
+ *  owns (state words, event types, routing bounds, platform names): those come
+ *  from contract/wire.ts, which Go generates, and are only re-exported here. */
 
 import type { TranslationKey } from "./i18n";
 import { WIRE } from "./contract/wire";

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WIRE } from "@/lib/contract/wire";
 import { accentFor } from "@/lib/chat";
 import { platformLabel } from "@/lib/audience";
+import { PLATFORM_MARK } from "@/lib/overlay";
 import { platformName, X_GO_LIVE_TITLE_MAX } from "./platforms";
 
 describe("platformName", () => {
@@ -29,5 +30,15 @@ describe("platformName", () => {
 
   it("serves the X go-live title limit from the server's rule", () => {
     expect(X_GO_LIVE_TITLE_MAX).toBe(WIRE.platforms.rules.xGoLiveTitleMax);
+  });
+});
+
+describe("the overlay's platform marks", () => {
+  // Rumble and X both had chat and neither had a mark, so their lines read as
+  // belonging to no platform when marks were on.
+  it("has one for every platform a chat line can come from", () => {
+    for (const p of WIRE.platforms.platforms) {
+      if (p.chat) expect(PLATFORM_MARK[p.enum], p.enum).toBeDefined();
+    }
   });
 });

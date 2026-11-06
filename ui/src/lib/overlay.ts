@@ -221,6 +221,7 @@ export const PLATFORM_MARK: Record<string, { label: string; color: string }> = {
   kick: { label: "KICK", color: "#53fc18" },
   facebook: { label: "FB", color: "#1877f2" },
   rumble: { label: "RMBL", color: "#85c742" },
+  x: { label: "X", color: "#ffffff" },
 };
 
 // ---------------------------------------------------------- the poll widget

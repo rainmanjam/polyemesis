@@ -1355,14 +1355,15 @@ for (const { rel, page, factsDate } of sourcedPages) {
   }
 
   // The Stream Deck plugin runs on the Node the Elgato runtime ships: the manifest asks for it
-  // and the plugin README says it. Two words for one number.
+  // and the plugin README and package.json engines say it. Three words for one number.
   const manifestNode = JSON.parse(
     read("integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/manifest.json") || "{}",
   ).Nodejs?.Version;
   const readmeNode = /runs on Node (\d+)/.exec(read("integrations/streamdeck/README.md"))?.[1];
-  if (!manifestNode || manifestNode !== readmeNode) {
+  const pluginEngines = /^>=(\d+)\./.exec(JSON.parse(read("integrations/streamdeck/package.json") || "{}").engines?.node ?? "")?.[1];
+  if (!manifestNode || manifestNode !== readmeNode || manifestNode !== pluginEngines) {
     fail.push(
-      `the Stream Deck manifest asks for Node ${manifestNode} and its README says Node ${readmeNode}; ` +
+      `the Stream Deck manifest asks for Node ${manifestNode}, its README says Node ${readmeNode} and its package.json engines floor is ${pluginEngines}; ` +
         "they are the same requirement and must be the same number.",
     );
   }
@@ -1371,7 +1372,7 @@ for (const { rel, page, factsDate } of sourcedPages) {
   const states = [
     [/up to (\d+) (?:AAC )?tracks/gi, (m) => m[1] === String(facts.maxTracks), "the track limit"],
     [/FFmpeg (\d+(?:\.\d+)?)\+? or later/g, (m) => m[1] === `${facts.ffmpegMinMajor}.0` || m[1] === String(facts.ffmpegMinMajor), "the FFmpeg floor"],
-    [/\bGo (\d+\.\d+(?:\.\d+)?)\+/g, (m) => m[1] === facts.goMinVersion, "the Go floor"],
+    [/\bGo (\d+\.\d+(?:\.\d+)?)\+/g, (m) => m[1] === facts.goMinVersion || `${m[1]}.0` === facts.goMinVersion, "the Go floor"],
     [/\bNode (\d+\.\d+)\+\/(\d+\.\d+)\+/g, (m) => !!nodeWords && m[1] === nodeWords[1] && m[2] === nodeWords[2], "the Node build floor"],
   ];
   const files = [["README.md", read("README.md")]];
@@ -1386,6 +1387,11 @@ for (const { rel, page, factsDate } of sourcedPages) {
     }
   };
   walk("web/src");
+  // The operator docs are published as site pages. STATUS.md is a dated log of what was true
+  // when it was written, so it keeps old figures on purpose.
+  for (const e of readdirSync(join(ROOT, "docs"), { withFileTypes: true })) {
+    if (e.isFile() && e.name.endsWith(".md") && e.name !== "STATUS.md") files.push([`docs/${e.name}`, read(`docs/${e.name}`)]);
+  }
   for (const [file, src] of files) {
     for (const [re, ok, what] of states) {
       for (const m of src.matchAll(re)) {
