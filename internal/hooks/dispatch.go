@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 )
 
 const (
@@ -748,14 +749,7 @@ func (w *worker) record(r DeliveryRecord) {
 // endpoint, so there is no herd to spread out and a deterministic schedule is
 // testable.
 func backoffFor(attempt int) time.Duration {
-	d := backoffBase
-	for i := 1; i < attempt; i++ {
-		d *= 2
-		if d >= backoffMax {
-			return backoffMax
-		}
-	}
-	return d
+	return backoff.Exponential(attempt-1, backoffBase, backoffMax)
 }
 
 func deliveryID() (string, error) {

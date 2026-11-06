@@ -14,6 +14,7 @@ import (
 
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 )
 
 // Publisher is the MQTT side, narrowed the same way alerts.Doer narrows HTTP.
@@ -63,12 +64,14 @@ type Config struct {
 
 // Defaults applied to a zero-valued Config.
 const (
-	DefaultKeepAliveSec  = 30
-	defaultConnectTimeo  = 10 * time.Second
-	defaultPublishTimeo  = 5 * time.Second
-	reconnectBackoffMin  = time.Second
-	reconnectBackoffMax  = 30 * time.Second
-	reconnectBackoffMult = 2
+	DefaultKeepAliveSec = 30
+	defaultConnectTimeo = 10 * time.Second
+	defaultPublishTimeo = 5 * time.Second
+	// Reconnect delay is exponential from 1s to 30s, mirroring the alerts
+	// notifier. A broker that is down is usually down for a while, and a client
+	// retrying every second shows up in somebody's logs as an attack.
+	reconnectBackoffMin = time.Second
+	reconnectBackoffMax = 30 * time.Second
 )
 
 // Client is a live connection to a broker.
@@ -80,21 +83,6 @@ type Client struct {
 	up atomic.Bool
 
 	closeOnce sync.Once
-}
-
-// backoff is exponential from 1s to 30s, mirroring the existing alerts
-// notifier. A broker that is down is usually down for a while, and a client
-// retrying every second is a client that shows up in somebody's logs as an
-// attack.
-func backoff(attempt int) time.Duration {
-	d := reconnectBackoffMin
-	for range attempt {
-		d *= reconnectBackoffMult
-		if d >= reconnectBackoffMax {
-			return reconnectBackoffMax
-		}
-	}
-	return d
 }
 
 // Connect opens the connection and begins maintaining it in the background.
@@ -123,12 +111,14 @@ func Connect(ctx context.Context, cfg Config, log *slog.Logger) (*Client, error)
 	c := &Client{topics: topics, log: log}
 
 	pc := autopaho.ClientConfig{
-		ServerUrls:       []*url.URL{u},
-		KeepAlive:        keepAlive,
-		ConnectTimeout:   defaultConnectTimeo,
-		ReconnectBackoff: backoff,
-		ConnectUsername:  cfg.Username,
-		ConnectPassword:  []byte(cfg.Password),
+		ServerUrls:     []*url.URL{u},
+		KeepAlive:      keepAlive,
+		ConnectTimeout: defaultConnectTimeo,
+		ReconnectBackoff: func(attempt int) time.Duration {
+			return backoff.Exponential(attempt, reconnectBackoffMin, reconnectBackoffMax)
+		},
+		ConnectUsername: cfg.Username,
+		ConnectPassword: []byte(cfg.Password),
 		// The availability story in one field. Retained and QoS 1 so a
 		// subscriber that connects after polyemesis died still learns it is
 		// gone -- which is the case this whole package exists for.
