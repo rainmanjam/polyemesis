@@ -639,7 +639,11 @@ FFMPEG_PINNED_PROBE=""
 # reviewed in a pull request; the server that serves the tarball has no say in
 # what it is checked against.
 #
-# TO BUMP: pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
+# TO BUMP: .github/ffmpeg-pin.env is the source (CI reads it through
+# .github/actions/install-ffmpeg) and internal/testenv/ffmpeg_pin_single_source_test.go
+# fails if this script or Dockerfile.cuda differs from it. Edit the pin file
+# first, then copy the 8.1 Linux values here.
+# Pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
 # then change the tag, both asset names and both hashes TOGETHER, in one PR:
 #   gh release download <tag> -R BtbN/FFmpeg-Builds -p checksums.sha256
 #   grep -E 'linux(arm)?64-gpl-8\.1\.tar\.xz' checksums.sha256

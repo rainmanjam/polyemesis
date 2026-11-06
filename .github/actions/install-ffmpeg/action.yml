@@ -1,0 +1,128 @@
+# Install the pinned BtbN FFmpeg build named by .github/ffmpeg-pin.env.
+#
+# Every workflow that needs FFmpeg calls this instead of carrying its own
+# download, hash check and cache key. Linux x64 (to /usr/local/bin) and Windows
+# x64 (onto GITHUB_PATH); macOS has no BtbN build and stays on brew.
+#
+# A CACHE HIT SKIPS THE DOWNLOAD ENTIRELY: this artefact failed seven times in
+# one day on 503s and stalls from the release CDN while already wrapped in
+# retries, because a retry re-asks a host that is refusing. The cache stops
+# asking. The key is `ffmpeg-<OS>-<asset>`, so it changes whenever the pin does.
+# --proto/--proto-redir keep every hop on https: the binary installed here is
+# the one that then measures every suite.
+#
+# Anything a job additionally needs (fonts, libsrt or encoder assertions, lsof)
+# stays in that job's own step after this one.
+name: install FFmpeg (pinned build)
+description: Download, sha256-verify, cache and install the BtbN FFmpeg build pinned in .github/ffmpeg-pin.env.
+inputs:
+  series:
+    description: FFmpeg line to install, a key prefix in ffmpeg-pin.env (8.1 or 9.0).
+    default: "8.1"
+  save:
+    description: "'true' saves the cache on refs/heads/main after a miss; 'false' only restores."
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      env:
+        SERIES: ${{ inputs.series }}
+        PIN_FILE: ${{ github.action_path }}/../../ffmpeg-pin.env
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64)   plat=LINUX_AMD64;   cache="/tmp/ffcache" ;;
+          Windows-X64) plat=WINDOWS_AMD64; cache="${RUNNER_TEMP}/ffcache" ;;
+          *) echo "::error::no pinned FFmpeg build for $RUNNER_OS $RUNNER_ARCH"; exit 1 ;;
+        esac
+        get() {
+          v="$(awk -F= -v k="$1" '$1 == k { print substr($0, length(k) + 2); exit }' "$PIN_FILE")"
+          if [ -z "$v" ]; then echo "::error::$1 is not set in ffmpeg-pin.env"; exit 1; fi
+          printf '%s' "$v"
+        }
+        key="FFMPEG_${SERIES//./_}_${plat}"
+        tag="$(get FFMPEG_BTBN_TAG)"
+        asset="$(get "${key}_ASSET")"
+        {
+          echo "asset=$asset"
+          echo "sha256=$(get "${key}_SHA256")"
+          echo "url=https://github.com/BtbN/FFmpeg-Builds/releases/download/${tag}/${asset}"
+          echo "cache=$cache"
+          echo "key=ffmpeg-${RUNNER_OS}-${asset}"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.cache }}
+        key: ${{ steps.pin.outputs.key }}
+
+    - name: Install FFmpeg (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        FFCACHE: ${{ steps.pin.outputs.cache }}
+        URL: ${{ steps.pin.outputs.url }}
+        WANT: ${{ steps.pin.outputs.sha256 }}
+      run: |
+        set -euo pipefail
+        if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+          echo "ffmpeg restored from cache"
+        else
+          for attempt in 1 2 3; do
+            if curl -fsSL --proto '=https' --proto-redir '=https' \
+                 --retry 3 --retry-all-errors --retry-delay 5 \
+                 --connect-timeout 20 --max-time 90 \
+                 -o /tmp/ff.tar.xz "$URL"; then
+              break
+            fi
+            echo "ffmpeg download attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep 5
+          done
+          # The hash comes from the pin file, not from the release serving the
+          # tarball.
+          echo "${WANT}  /tmp/ff.tar.xz" | sha256sum -c -
+          mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild
+          mkdir -p "$FFCACHE"
+          cp /tmp/ffbuild/bin/ffmpeg /tmp/ffbuild/bin/ffprobe "$FFCACHE/"
+        fi
+        sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+        sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+
+    - name: Install FFmpeg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        FFCACHE: ${{ steps.pin.outputs.cache }}
+        URL: ${{ steps.pin.outputs.url }}
+        WANT: ${{ steps.pin.outputs.sha256 }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $cache = $env:FFCACHE
+        if (Test-Path "$cache\ffmpeg.exe") {
+          Write-Host 'ffmpeg restored from cache'
+        } else {
+          for ($i = 1; $i -le 3; $i++) {
+            try { Invoke-WebRequest -Uri $env:URL -OutFile "$env:RUNNER_TEMP\ff.zip" -TimeoutSec 90; break }
+            catch { if ($i -eq 3) { throw }; Write-Host "ffmpeg download attempt $i failed"; Start-Sleep -Seconds 5 }
+          }
+          $got = (Get-FileHash -Algorithm SHA256 "$env:RUNNER_TEMP\ff.zip").Hash.ToLower()
+          if ($got -ne $env:WANT) { throw "ffmpeg zip sha256 $got, want $env:WANT" }
+          Expand-Archive -Path "$env:RUNNER_TEMP\ff.zip" -DestinationPath "$env:RUNNER_TEMP\ff" -Force
+          $src = (Get-ChildItem "$env:RUNNER_TEMP\ff" -Filter bin -Recurse -Directory | Select-Object -First 1).FullName
+          if (-not $src) { throw 'no bin/ directory in the FFmpeg archive' }
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          Copy-Item "$src\*" -Destination $cache -Force
+        }
+        if (-not (Test-Path "$cache\ffmpeg.exe")) { throw 'no ffmpeg.exe after install' }
+        # GITHUB_PATH, not $env:PATH: the latter dies with this step.
+        Add-Content -Path $env:GITHUB_PATH -Value $cache
+
+    - if: inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.cache }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
