@@ -154,7 +154,7 @@ func (t *Tools) TwoAudioFLV() (ok, probed bool, reason string) {
 // then reads back.
 func flvProbeMuxArgs(out string) []string {
 	return []string{
-		"-hide_banner", "-loglevel", LogLevel(LogError), "-nostdin",
+		flagHideBanner, "-loglevel", LogLevel(LogError), "-nostdin",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=0.5:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=1000:duration=0.5:sample_rate=48000",
 		"-map", "0:a", "-map", "1:a",

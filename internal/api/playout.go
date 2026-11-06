@@ -790,7 +790,7 @@ func (s *Server) playoutHandler() http.Handler {
 			w.Header().Set("WWW-Authenticate", `Basic realm="polyemesis playout", charset="UTF-8"`)
 			// Refusals are never stored: a CDN rule that makes /playout/
 			// cache-eligible must not hold a 401 or a pre-publish 404 at the edge.
-			w.Header().Set("Cache-Control", cacheNoStore)
+			w.Header().Set("Cache-Control", cacheNoStore) // NOSONAR: header names stay literal, shape_derivation_test scans for them
 			writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
 			return
 		default:

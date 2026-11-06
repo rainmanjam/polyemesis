@@ -57,7 +57,7 @@ func LogLevel(def string) string {
 //     owns and renames on success, so a .partial left by a killed process must
 //     not make the retry hang on FFmpeg's interactive overwrite prompt
 func CommonArgs(defaultLevel string, overwrite bool) []string {
-	args := []string{"-hide_banner", "-nostdin", "-loglevel", LogLevel(defaultLevel)}
+	args := []string{flagHideBanner, "-nostdin", "-loglevel", LogLevel(defaultLevel)}
 	if overwrite {
 		args = append(args, "-y")
 	}

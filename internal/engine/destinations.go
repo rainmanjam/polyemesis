@@ -71,25 +71,7 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			continue
 		}
 		p := destPlan{row: row}
-
-		// The upstream's own signature rides in the destination's, so editing a
-		// rendition restarts exactly the destinations downstream of it and
-		// nothing else. A passthrough destination's upstream is the silence
-		// tier when there is one, which is why silenceSig is the seed rather
-		// than the empty string: switching synthesis on or off has to restart
-		// every destination, not just the ones on a rendition.
-		upstream := silenceSig
-		if row.RenditionID != nil {
-			sig, ok := wantRends[*row.RenditionID]
-			if !ok {
-				// The rendition was deleted between the two queries. Deleting
-				// one drops its destinations back to passthrough, so the
-				// reconcile that follows the delete sees a nil id and this
-				// destination comes straight back.
-				p.err = fmt.Sprintf("rendition %d is no longer available", *row.RenditionID)
-			}
-			upstream = sig
-		}
+		upstream := destUpstream(row, wantRends, silenceSig, &p)
 
 		// provisional means the ingest could not be probed at all, so src is the
 		// placeholder and its channel counts are a guess. CompileProvisional
@@ -123,49 +105,8 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		// could not change: the operator left the toggle off. Where they turned
 		// it ON the answer depends on what Twitch says, so the pair is compiled
 		// and startDest decides -- see oneMix below.
-		switch {
-		case row.VODProfile == nil || cerr != nil:
-			// Nothing to pair, or nothing worth pairing.
-		case flvRefused(e.tools) != "":
-			// THIS FFMPEG CANNOT WRITE A SECOND AUDIO TRACK INTO FLV. The probe
-			// ran (ffmpeg.Tools.ProbeTwoAudioFLV) and the second stream did not
-			// survive the muxer, so pairing would push a one-track file while the
-			// argv says two. The live mix goes out alone and the card carries the
-			// probe's own words. Applies to every RTMP destination, not only
-			// Twitch, because the FLV muxer is the same for all of them. An
-			// unprobed binary is not refused: see ffmpeg.Tools.TwoAudioFLV.
-			p.vodDropped = "the second (VOD) audio track is not being sent: " + flvRefused(e.tools)
-		case provisional:
-			// SAY SO. This arm used to share the one above and set no note, so a
-			// destination on an unprobed ingest dropped its second mix on every
-			// platform in silence -- the one drop with no explanation attached,
-			// which is the case an operator is least able to work out for
-			// themselves because nothing about it is their configuration.
-			p.vodDropped = noteVODProvisional
-		case twitchOneAudioTrack(row) && !wantsMultitrack(row):
-			p.vodDropped = noteVODWithoutMultitrack
-		default:
-			paired, perr := routing.CompilePair(row.Profile, row.VODProfile, src)
-			if perr != nil {
-				// CompilePair fails only where Compile just failed, so reaching
-				// here means the live mix is broken too and cerr would have been
-				// set. Belt and braces: report it rather than silently publish
-				// one track.
-				cerr = perr
-			} else {
-				// The single-mix graph is kept beside the paired one for the
-				// destinations whose second track is conditional on a
-				// negotiation that has not happened yet. Compiled HERE, from
-				// the same src, rather than recompiled inside startDest: the
-				// two must be the same destination described two ways, and a
-				// second compile against a source read a moment later is how
-				// they stop being.
-				if vodNeedsNegotiation(row) {
-					one := compiled
-					p.oneMix = &one
-				}
-				compiled = paired.Result
-			}
+		if cerr == nil {
+			compiled, cerr = e.pairVOD(row, src, compiled, provisional, &p)
 		}
 		if cerr != nil {
 			p.err = cerr.Error()
@@ -177,6 +118,78 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		plans[row.ID] = p
 	}
 	return plans
+}
+
+// destUpstream is the signature of the upstream a destination reads. The
+// upstream's own signature rides in the destination's, so editing a rendition
+// restarts exactly the destinations downstream of it and nothing else. A
+// passthrough destination's upstream is the silence tier when there is one,
+// which is why silenceSig is the seed rather than the empty string: switching
+// synthesis on or off has to restart every destination, not just the ones on a
+// rendition.
+func destUpstream(row *db.Destination, wantRends map[int64]string, silenceSig string, p *destPlan) string {
+	if row.RenditionID == nil {
+		return silenceSig
+	}
+	sig, ok := wantRends[*row.RenditionID]
+	if !ok {
+		// The rendition was deleted between the two queries. Deleting
+		// one drops its destinations back to passthrough, so the
+		// reconcile that follows the delete sees a nil id and this
+		// destination comes straight back.
+		p.err = fmt.Sprintf("rendition %d is no longer available", *row.RenditionID)
+	}
+	return sig
+}
+
+// pairVOD compiles the second (VOD) audio mix beside the live one when the
+// destination asked for it and can carry it, recording on p why it was dropped
+// otherwise. It returns the graph to run: the pair, or the live mix alone.
+func (e *Engine) pairVOD(row *db.Destination, src routing.Source, compiled routing.Result, provisional bool, p *destPlan) (routing.Result, error) {
+	switch {
+	case row.VODProfile == nil:
+		// Nothing to pair.
+	case flvRefused(e.tools) != "":
+		// THIS FFMPEG CANNOT WRITE A SECOND AUDIO TRACK INTO FLV. The probe
+		// ran (ffmpeg.Tools.ProbeTwoAudioFLV) and the second stream did not
+		// survive the muxer, so pairing would push a one-track file while the
+		// argv says two. The live mix goes out alone and the card carries the
+		// probe's own words. Applies to every RTMP destination, not only
+		// Twitch, because the FLV muxer is the same for all of them. An
+		// unprobed binary is not refused: see ffmpeg.Tools.TwoAudioFLV.
+		p.vodDropped = "the second (VOD) audio track is not being sent: " + flvRefused(e.tools)
+	case provisional:
+		// SAY SO. This arm used to share the one above and set no note, so a
+		// destination on an unprobed ingest dropped its second mix on every
+		// platform in silence -- the one drop with no explanation attached,
+		// which is the case an operator is least able to work out for
+		// themselves because nothing about it is their configuration.
+		p.vodDropped = noteVODProvisional
+	case twitchOneAudioTrack(row) && !wantsMultitrack(row):
+		p.vodDropped = noteVODWithoutMultitrack
+	default:
+		paired, perr := routing.CompilePair(row.Profile, row.VODProfile, src)
+		if perr != nil {
+			// CompilePair fails only where Compile just failed, so reaching
+			// here means the live mix is broken too and cerr would have been
+			// set. Belt and braces: report it rather than silently publish
+			// one track.
+			return compiled, perr
+		}
+		// The single-mix graph is kept beside the paired one for the
+		// destinations whose second track is conditional on a
+		// negotiation that has not happened yet. Compiled HERE, from
+		// the same src, rather than recompiled inside startDest: the
+		// two must be the same destination described two ways, and a
+		// second compile against a source read a moment later is how
+		// they stop being.
+		if vodNeedsNegotiation(row) {
+			one := compiled
+			p.oneMix = &one
+		}
+		compiled = paired.Result
+	}
+	return compiled, nil
 }
 
 // keepDestination is the whole test for leaving a running destination alone,
@@ -232,176 +245,36 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 	//
 	// Resolved BEFORE the lock: upstreamHub takes e.mu.RLock for a rendition
 	// destination, and this function holds the write lock.
-	wantHub := make(map[int64]*relay.Hub, len(plans))
-	for id, p := range plans {
-		if p.err != "" || p.row == nil {
-			continue
-		}
-		if h, err := e.upstreamHub(p.row); err == nil {
-			wantHub[id] = h
-		}
-	}
+	wantHub := e.wantedHubs(plans)
 
 	// Which leaving destinations still have a row, read before the lock.
-	var leaving []int64
-	e.mu.RLock()
-	for id, d := range e.dests {
-		if _, wanted := plans[id]; !wanted && d.delay != nil {
-			leaving = append(leaving, id)
-		}
-	}
-	e.mu.RUnlock()
-	stillThere := e.rowsStillThere(leaving)
+	stillThere := e.rowsStillThere(e.leavingDelayed(plans))
 
 	e.mu.Lock()
 	cutReq := e.cutRequested
 	e.cutRequested = nil
-	var toStop, toDrain []*destination
-	var liveTry []liveCandidate
-	var repoints []delayRepoint
+	var sets stopSets
 	for id, d := range e.dests {
 		p, wanted := plans[id]
-		// A running destination whose hub is not the hub it would now be given
-		// is reading a port nothing writes to. Restarting it is the only repair:
-		// its FFmpeg took the relay URL on its command line and cannot be told
-		// a new one. A destination that has no hub yet (d.hub == nil) is not
-		// running and is judged on spec alone.
-		keep := keepDestination(d, p, wanted, wantHub[id])
-		if !keep && delayedHubMoved(d, p, wanted, wantHub[id]) {
-			// EXCEPT A DELAYED ONE. Its FFmpeg reads the private hub, which has
-			// not moved; only the line's input has to follow the upstream. So
-			// the line is re-pointed and the buffer -- up to fifteen minutes of
-			// programme -- survives a rendition restart or a rebuilt tier.
-			next := *d
-			next.hub = wantHub[id]
-			e.dests[id] = &next
-			repoints = append(repoints, delayRepoint{d: &next, to: wantHub[id]})
-			d, keep = &next, true
-		}
-		if keep && d.graph != nil && p.row != nil && levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
-			// Same restart signature, different levels: a live change, decided
-			// below once the lock is released, since it does I/O. A copy
-			// destination's argv has no graph, so it has no level to move.
-			if copyPathOf(p.row) {
-				e.setLiveNoteLocked(id, liveNote{applied: AppliedLive, reason: copyNoEffect})
-			} else {
-				liveTry = append(liveTry, liveCandidate{id: id, d: d, p: p})
-			}
-		}
-		if !keep && wanted && d.proc != nil && d.graph != nil && p.row != nil && p.err == "" &&
-			levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
-			// The levels moved, but so did something a command cannot carry, so
-			// the level reaches the output by this restart. Recorded so the
-			// operator is told a restart happened rather than nothing.
-			e.setLiveNoteLocked(id, liveNote{applied: AppliedRestart, reason: structuralRestart})
-		}
-		if !keep && !wanted && d.delay != nil && d.proc != nil && stillThere[id] && !cutReq[id] {
-			// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
-			// before the FFmpeg stops, so the audience sees the end of the
-			// programme rather than a cut Delay before it. A DELETED row and a
-			// cut request (Stop now, stop-all, delete) fall through to the cut
-			// below instead: the delay exists to keep things off the air, and
-			// those are the operator saying so. See the table in delay.go.
-			delete(e.dests, id)
-			if e.draining == nil {
-				e.draining = map[int64]*destination{}
-			}
-			e.draining[id] = d
-			toDrain = append(toDrain, d)
-			continue
-		}
-		if !keep {
-			toStop = append(toStop, d)
-			delete(e.dests, id)
-			// RECORDED BEFORE THE LOCK IS RELEASED, and that ordering is the
-			// whole point. The entry leaves e.dests here, teardownDest runs
-			// below without the lock, and the child is not asked to stop until
-			// well inside it -- so between this unlock and that stop the process
-			// is alive and belongs to nothing. Status() read that gap and
-			// published a nil Process for a destination that was delivering
-			// (#462). Handing it to retiring keeps it answerable throughout.
-			if d.proc != nil {
-				if e.retiring == nil {
-					e.retiring = map[int64]*destination{}
-				}
-				e.retiring[id] = d
-			}
-		}
+		e.sortDestLocked(&sets, id, d, p, wanted, wantHub[id], stillThere[id] && !cutReq[id])
 	}
 	e.mu.Unlock()
 
-	for _, d := range toDrain {
+	for _, d := range sets.toDrain {
 		e.beginDrain(d)
 	}
-	for _, r := range repoints {
-		if err := r.d.delay.repoint(r.to); err != nil {
-			// The line's input could not follow, so nothing new would ever
-			// reach the buffer: a destination about to go quiet while looking
-			// healthy. Torn down instead, so the next reconcile starts it
-			// afresh on the new upstream -- the buffer is lost, and said so.
-			e.log.Error("broadcast delay: could not move the delay buffer to the new upstream; "+
-				"restarting the destination, and its buffered delay is lost",
-				"dest", r.d.row.Name, "err", err)
-			e.mu.Lock()
-			mine := e.dests[r.d.row.ID] == r.d
-			if mine {
-				delete(e.dests, r.d.row.ID)
-			}
-			e.mu.Unlock()
-			if mine {
-				e.teardownDest(r.d)
-			}
-			continue
-		}
-		e.log.Info("broadcast delay: upstream replaced; the delay buffer follows it and is kept",
-			"dest", r.d.row.Name)
-	}
+	e.applyRepoints(sets.repoints)
 
 	// Live attempts, outside the lock. A refusal, a timeout, or a platform with no
 	// verified path falls back to the restart this function would otherwise have
 	// done, and the reason is recorded for the operator.
-	for _, c := range liveTry {
-		err := liveApplyTo(c.d.proc, c.d.graph, c.p.compiled)
-		e.mu.Lock()
-		if err == nil {
-			// The running process took the level, so that is what happened,
-			// whether or not the entry is still the one in the map. It is
-			// republished only if it is; one that was replaced mid-apply (a
-			// shutdown) is not resurrected, and there is nothing to restart.
-			// Recording "restart" here, as this once did, told the operator a
-			// restart happened -- with an empty reason -- when none had.
-			if e.dests[c.id] == c.d {
-				next := *c.d
-				next.compiled = c.p.compiled
-				e.dests[c.id] = &next
-			}
-			e.setLiveNoteLocked(c.id, liveNote{applied: AppliedLive})
-			e.mu.Unlock()
-			continue
+	for _, c := range sets.liveTry {
+		if d := e.tryLiveApply(c); d != nil {
+			sets.toStop = append(sets.toStop, d)
 		}
-		e.setLiveNoteLocked(c.id, liveNote{applied: AppliedRestart, reason: fallbackReason(err)})
-		if e.dests[c.id] == c.d {
-			delete(e.dests, c.id)
-			if c.d.proc != nil {
-				if e.retiring == nil {
-					e.retiring = map[int64]*destination{}
-				}
-				e.retiring[c.id] = c.d
-				// The replacement startDest builds is this output restarting,
-				// not a new one, so it carries the count on. Only here: a
-				// structural edit is a new configuration and starts at zero, as
-				// every other edit does.
-				if e.restartCarry == nil {
-					e.restartCarry = map[int64]*supervisor.Process{}
-				}
-				e.restartCarry[c.id] = c.d.proc
-			}
-			toStop = append(toStop, c.d)
-		}
-		e.mu.Unlock()
 	}
 
-	for _, d := range toStop {
+	for _, d := range sets.toStop {
 		e.teardownDest(d)
 		// AFTER teardown, not before: teardownDest returns once the child has
 		// been asked to stop and its port and subscription released, which is
@@ -415,6 +288,203 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			e.mu.Unlock()
 		}
 	}
+}
+
+// stopSets is what stopDestinations decided, under the lock, to do with each
+// running destination once the lock is released.
+type stopSets struct {
+	toStop, toDrain []*destination
+	liveTry         []liveCandidate
+	repoints        []delayRepoint
+}
+
+// wantedHubs resolves the hub each planned, runnable destination would be given
+// now. A destination whose hub cannot be resolved is absent from the map.
+func (e *Engine) wantedHubs(plans map[int64]destPlan) map[int64]*relay.Hub {
+	wantHub := make(map[int64]*relay.Hub, len(plans))
+	for id, p := range plans {
+		if p.err != "" || p.row == nil {
+			continue
+		}
+		if h, err := e.upstreamHub(p.row); err == nil {
+			wantHub[id] = h
+		}
+	}
+	return wantHub
+}
+
+// leavingDelayed lists the running delayed destinations the plan no longer
+// wants.
+func (e *Engine) leavingDelayed(plans map[int64]destPlan) []int64 {
+	var leaving []int64
+	e.mu.RLock()
+	for id, d := range e.dests {
+		if _, wanted := plans[id]; !wanted && d.delay != nil {
+			leaving = append(leaving, id)
+		}
+	}
+	e.mu.RUnlock()
+	return leaving
+}
+
+// sortDestLocked decides what happens to one running destination: kept as is,
+// kept with a live level change to try, flushed, or stopped. flushable is true
+// when the row still exists and no cut was requested for it. Caller holds e.mu.
+func (e *Engine) sortDestLocked(sets *stopSets, id int64, d *destination, p destPlan, wanted bool, hub *relay.Hub, flushable bool) {
+	// A running destination whose hub is not the hub it would now be given
+	// is reading a port nothing writes to. Restarting it is the only repair:
+	// its FFmpeg took the relay URL on its command line and cannot be told
+	// a new one. A destination that has no hub yet (d.hub == nil) is not
+	// running and is judged on spec alone.
+	keep := keepDestination(d, p, wanted, hub)
+	if !keep && delayedHubMoved(d, p, wanted, hub) {
+		// EXCEPT A DELAYED ONE. Its FFmpeg reads the private hub, which has
+		// not moved; only the line's input has to follow the upstream. So
+		// the line is re-pointed and the buffer -- up to fifteen minutes of
+		// programme -- survives a rendition restart or a rebuilt tier.
+		next := *d
+		next.hub = hub
+		e.dests[id] = &next
+		sets.repoints = append(sets.repoints, delayRepoint{d: &next, to: hub})
+		d, keep = &next, true
+	}
+	if keep {
+		e.noteKeptLevelsLocked(sets, id, d, p)
+		return
+	}
+	if wanted && d.proc != nil && d.graph != nil && p.row != nil && p.err == "" &&
+		levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
+		// The levels moved, but so did something a command cannot carry, so
+		// the level reaches the output by this restart. Recorded so the
+		// operator is told a restart happened rather than nothing.
+		e.setLiveNoteLocked(id, liveNote{applied: AppliedRestart, reason: structuralRestart})
+	}
+	if !wanted && d.delay != nil && d.proc != nil && flushable {
+		// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
+		// before the FFmpeg stops, so the audience sees the end of the
+		// programme rather than a cut Delay before it. A DELETED row and a
+		// cut request (Stop now, stop-all, delete) fall through to the cut
+		// below instead: the delay exists to keep things off the air, and
+		// those are the operator saying so. See the table in delay.go.
+		delete(e.dests, id)
+		if e.draining == nil {
+			e.draining = map[int64]*destination{}
+		}
+		e.draining[id] = d
+		sets.toDrain = append(sets.toDrain, d)
+		return
+	}
+	sets.toStop = append(sets.toStop, d)
+	delete(e.dests, id)
+	// RECORDED BEFORE THE LOCK IS RELEASED, and that ordering is the
+	// whole point. The entry leaves e.dests here, teardownDest runs
+	// below without the lock, and the child is not asked to stop until
+	// well inside it -- so between this unlock and that stop the process
+	// is alive and belongs to nothing. Status() read that gap and
+	// published a nil Process for a destination that was delivering
+	// (#462). Handing it to retiring keeps it answerable throughout.
+	if d.proc != nil {
+		e.retireLocked(id, d)
+	}
+}
+
+// noteKeptLevelsLocked handles a kept destination whose levels moved. Caller
+// holds e.mu.
+func (e *Engine) noteKeptLevelsLocked(sets *stopSets, id int64, d *destination, p destPlan) {
+	if d.graph == nil || p.row == nil || !levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
+		return
+	}
+	// Same restart signature, different levels: a live change, decided
+	// below once the lock is released, since it does I/O. A copy
+	// destination's argv has no graph, so it has no level to move.
+	if copyPathOf(p.row) {
+		e.setLiveNoteLocked(id, liveNote{applied: AppliedLive, reason: copyNoEffect})
+		return
+	}
+	sets.liveTry = append(sets.liveTry, liveCandidate{id: id, d: d, p: p})
+}
+
+// retireLocked records a destination leaving e.dests whose process is still
+// alive, so Status keeps answering for it until teardown. Caller holds e.mu.
+func (e *Engine) retireLocked(id int64, d *destination) {
+	if e.retiring == nil {
+		e.retiring = map[int64]*destination{}
+	}
+	e.retiring[id] = d
+}
+
+// applyRepoints moves each delayed destination's line onto its new upstream.
+func (e *Engine) applyRepoints(repoints []delayRepoint) {
+	for _, r := range repoints {
+		if err := r.d.delay.repoint(r.to); err != nil {
+			// The line's input could not follow, so nothing new would ever
+			// reach the buffer: a destination about to go quiet while looking
+			// healthy. Torn down instead, so the next reconcile starts it
+			// afresh on the new upstream -- the buffer is lost, and said so.
+			e.log.Error("broadcast delay: could not move the delay buffer to the new upstream; "+
+				"restarting the destination, and its buffered delay is lost",
+				"dest", r.d.row.Name, "err", err)
+			e.dropRepointed(r.d)
+			continue
+		}
+		e.log.Info("broadcast delay: upstream replaced; the delay buffer follows it and is kept",
+			"dest", r.d.row.Name)
+	}
+}
+
+// dropRepointed tears down a delayed destination whose line could not follow,
+// if it is still the entry in e.dests.
+func (e *Engine) dropRepointed(d *destination) {
+	e.mu.Lock()
+	mine := e.dests[d.row.ID] == d
+	if mine {
+		delete(e.dests, d.row.ID)
+	}
+	e.mu.Unlock()
+	if mine {
+		e.teardownDest(d)
+	}
+}
+
+// tryLiveApply sends one level-only change to a running process. It returns
+// the destination to tear down when the change fell back to a restart, nil
+// otherwise.
+func (e *Engine) tryLiveApply(c liveCandidate) *destination {
+	err := liveApplyTo(c.d.proc, c.d.graph, c.p.compiled)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil {
+		// The running process took the level, so that is what happened,
+		// whether or not the entry is still the one in the map. It is
+		// republished only if it is; one that was replaced mid-apply (a
+		// shutdown) is not resurrected, and there is nothing to restart.
+		// Recording "restart" here, as this once did, told the operator a
+		// restart happened -- with an empty reason -- when none had.
+		if e.dests[c.id] == c.d {
+			next := *c.d
+			next.compiled = c.p.compiled
+			e.dests[c.id] = &next
+		}
+		e.setLiveNoteLocked(c.id, liveNote{applied: AppliedLive})
+		return nil
+	}
+	e.setLiveNoteLocked(c.id, liveNote{applied: AppliedRestart, reason: fallbackReason(err)})
+	if e.dests[c.id] != c.d {
+		return nil
+	}
+	delete(e.dests, c.id)
+	if c.d.proc != nil {
+		e.retireLocked(c.id, c.d)
+		// The replacement startDest builds is this output restarting,
+		// not a new one, so it carries the count on. Only here: a
+		// structural edit is a new configuration and starts at zero, as
+		// every other edit does.
+		if e.restartCarry == nil {
+			e.restartCarry = map[int64]*supervisor.Process{}
+		}
+		e.restartCarry[c.id] = c.d.proc
+	}
+	return c.d
 }
 
 // startDestinations starts everything the plan wants that is not already

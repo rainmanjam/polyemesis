@@ -60,27 +60,12 @@ func (s *Server) withdrawStaleAnnouncements(ctx context.Context, now time.Time, 
 	for _, sc := range scheds {
 		byID[sc.ID] = sc
 	}
-	owned := make(map[string]bool, len(open))
-	for _, o := range open {
-		if o.PlatformEventID != "" {
-			owned[o.PlatformEventID] = true
-		}
-	}
+	owned := ownedEventIDs(open)
 
 	var warnings []string
 	for _, d := range dests {
 		for _, a := range d.Facebook.Broadcasts() {
-			if a.ScheduleID == 0 || (only != 0 && a.ScheduleID != only) {
-				continue
-			}
-			if !a.Occurrence.After(now) || owned[a.BroadcastID] {
-				continue
-			}
-			if sc, ok := byID[a.ScheduleID]; ok && sc.Enabled && sc.Action == scheduler.ActionStart &&
-				scheduleTargets(sc, d.ID) {
-				continue
-			}
-			if s.destinationLive(d.ID) {
+			if !staleAnnouncement(a, d.ID, now, only, byID, owned) || s.destinationLive(d.ID) {
 				continue
 			}
 			if w := s.withdrawAnnouncement(ctx, d, a); w != "" {
@@ -89,6 +74,34 @@ func (s *Server) withdrawStaleAnnouncements(ctx context.Context, now time.Time, 
 		}
 	}
 	return warnings
+}
+
+// ownedEventIDs is the platform event ids the open recurring-template
+// occurrences own.
+func ownedEventIDs(open []scheduler.Occurrence) map[string]bool {
+	owned := make(map[string]bool, len(open))
+	for _, o := range open {
+		if o.PlatformEventID != "" {
+			owned[o.PlatformEventID] = true
+		}
+	}
+	return owned
+}
+
+// staleAnnouncement reports whether marker a on destination destID is one
+// withdrawStaleAnnouncements may withdraw: a schedule's (only's, when only is
+// non-zero), still ahead, not owned by an occurrence, and for a show no
+// enabled start schedule will air on that destination.
+func staleAnnouncement(a db.Announcement, destID int64, now time.Time, only int64,
+	byID map[int64]scheduler.Schedule, owned map[string]bool) bool {
+	if a.ScheduleID == 0 || (only != 0 && a.ScheduleID != only) {
+		return false
+	}
+	if !a.Occurrence.After(now) || owned[a.BroadcastID] {
+		return false
+	}
+	sc, ok := byID[a.ScheduleID]
+	return !ok || !sc.Enabled || sc.Action != scheduler.ActionStart || !scheduleTargets(sc, destID)
 }
 
 // withdrawAnnouncement removes one stale marker, cancelling its event where the

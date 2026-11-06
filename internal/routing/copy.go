@@ -58,62 +58,71 @@ func CopySummary(tracks []int) string {
 //
 // A profile with no problems returns nil, so a caller can append unconditionally.
 func CopyMixProblems(p Profile) []string {
-	var probs []string
-	add := func(f string, v ...any) { probs = append(probs, fmt.Sprintf(f, v...)) }
-
 	switch p.Mode {
 	case ModeMatrix:
-		// Reported once per shape rather than once per cell. A 6-channel track
-		// wired across a stereo pair is twelve cells, and twelve near-identical
-		// sentences would bury the one instruction the operator has to change.
-		var gain, route, invert bool
-		for _, c := range p.Matrix {
-			// A cell at zero gain contributes nothing and resolveCells drops it
-			// before the graph is built, so it is not an instruction to
-			// contradict -- it is the absence of one.
-			if c.Gain <= 0 {
-				continue
-			}
-			if c.Gain != 1 {
-				gain = true
-			}
-			if c.Channel != c.Out {
-				route = true
-			}
-			if c.Invert {
-				invert = true
-			}
-		}
-		if gain {
-			add("the mix matrix sets a gain other than unity, which a destination " +
-				"that copies its audio cannot apply: every selected track is " +
-				"forwarded at the level it arrived")
-		}
-		if invert {
-			add("the mix matrix inverts a channel's polarity, which a destination " +
-				"that copies its audio cannot do: every selected track is " +
-				"forwarded with the samples it arrived with")
-		}
-		if route {
-			add("the mix matrix routes channels between outputs, which a " +
-				"destination that copies its audio cannot do: each selected " +
-				"track is forwarded with the channel layout it arrived with")
-		}
-
+		return matrixCopyProblems(p.Matrix)
 	default: // ModeSimple
-		for _, sel := range p.Tracks {
-			// Only enabled rows. ApplyDefaults leaves a gain on a disabled row
-			// and the UI keeps whatever the operator last dragged there, so a
-			// disabled track at 50% is a setting nothing will ever read.
-			if !sel.Enabled || sel.Gain <= 0 {
-				continue
-			}
-			if sel.Gain != 1 {
-				add("track %d is set to a gain other than unity, which a "+
-					"destination that copies its audio cannot apply: every "+
-					"selected track is forwarded at the level it arrived",
-					sel.Track+1)
-			}
+		return simpleCopyProblems(p.Tracks)
+	}
+}
+
+// matrixCopyProblems is CopyMixProblems for a matrix profile.
+func matrixCopyProblems(cells []Cell) []string {
+	var probs []string
+	// Reported once per shape rather than once per cell. A 6-channel track
+	// wired across a stereo pair is twelve cells, and twelve near-identical
+	// sentences would bury the one instruction the operator has to change.
+	gain, route, invert := matrixCopyShapes(cells)
+	if gain {
+		probs = append(probs, "the mix matrix sets a gain other than unity, which a destination "+
+			"that copies its audio cannot apply: every selected track is "+
+			"forwarded at the level it arrived")
+	}
+	if invert {
+		probs = append(probs, "the mix matrix inverts a channel's polarity, which a destination "+
+			"that copies its audio cannot do: every selected track is "+
+			"forwarded with the samples it arrived with")
+	}
+	if route {
+		probs = append(probs, "the mix matrix routes channels between outputs, which a "+
+			"destination that copies its audio cannot do: each selected "+
+			"track is forwarded with the channel layout it arrived with")
+	}
+	return probs
+}
+
+// matrixCopyShapes reports which shapes of change a copy cannot honour the
+// matrix's cells ask for: a gain, a re-route, a polarity inversion.
+func matrixCopyShapes(cells []Cell) (gain, route, invert bool) {
+	for _, c := range cells {
+		// A cell at zero gain contributes nothing and resolveCells drops it
+		// before the graph is built, so it is not an instruction to
+		// contradict -- it is the absence of one.
+		if c.Gain <= 0 {
+			continue
+		}
+		gain = gain || c.Gain != 1
+		route = route || c.Channel != c.Out
+		invert = invert || c.Invert
+	}
+	return gain, route, invert
+}
+
+// simpleCopyProblems is CopyMixProblems for a simple profile.
+func simpleCopyProblems(tracks []TrackSel) []string {
+	var probs []string
+	for _, sel := range tracks {
+		// Only enabled rows. ApplyDefaults leaves a gain on a disabled row
+		// and the UI keeps whatever the operator last dragged there, so a
+		// disabled track at 50% is a setting nothing will ever read.
+		if !sel.Enabled || sel.Gain <= 0 {
+			continue
+		}
+		if sel.Gain != 1 {
+			probs = append(probs, fmt.Sprintf("track %d is set to a gain other than unity, which a "+
+				"destination that copies its audio cannot apply: every "+
+				"selected track is forwarded at the level it arrived",
+				sel.Track+1))
 		}
 	}
 	return probs

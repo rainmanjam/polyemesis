@@ -92,31 +92,8 @@ func ParseLevels(r io.Reader, trackChannels []int, fn func(Levels)) error {
 		return nil
 	}
 
-	// merged channel index (0-based) -> (track, channel)
-	type loc struct{ track, ch int }
-	index := make([]loc, total)
-	n := 0
-	for t, c := range trackChannels {
-		for i := 0; i < c; i++ {
-			index[n] = loc{t, i}
-			n++
-		}
-	}
-
-	fresh := func() Levels {
-		l := Levels{Peak: make([][]float64, len(trackChannels)), RMS: make([][]float64, len(trackChannels))}
-		for t, c := range trackChannels {
-			l.Peak[t] = make([]float64, c)
-			l.RMS[t] = make([]float64, c)
-			for i := range l.Peak[t] {
-				l.Peak[t][i] = SilenceDB
-				l.RMS[t][i] = SilenceDB
-			}
-		}
-		return l
-	}
-
-	cur := fresh()
+	index := mergedChannelIndex(trackChannels, total)
+	cur := freshLevels(trackChannels)
 	have := false
 
 	return scanLines(r, func(line string) {
@@ -129,22 +106,13 @@ func ParseLevels(r io.Reader, trackChannels []int, fn func(Levels)) error {
 			if have {
 				fn(cur)
 			}
-			cur = fresh()
+			cur = freshLevels(trackChannels)
 			have = false
 			return
 		}
 
-		key, val, ok := strings.Cut(line, "=")
-		if !ok || !strings.HasPrefix(key, "lavfi.astats.") {
-			return
-		}
-		rest := strings.TrimPrefix(key, "lavfi.astats.")
-		chStr, metric, ok := strings.Cut(rest, ".")
+		chNum, metric, val, ok := parseAstatsLine(line, total)
 		if !ok {
-			return
-		}
-		chNum, err := strconv.Atoi(chStr)
-		if err != nil || chNum < 1 || chNum > total {
 			return
 		}
 		l := index[chNum-1]
@@ -159,6 +127,58 @@ func ParseLevels(r io.Reader, trackChannels []int, fn func(Levels)) error {
 			have = true
 		}
 	})
+}
+
+// levelLoc is where one merged astats channel belongs: its track, and its
+// channel within the track.
+type levelLoc struct{ track, ch int }
+
+// mergedChannelIndex maps a merged channel index (0-based) to its
+// (track, channel).
+func mergedChannelIndex(trackChannels []int, total int) []levelLoc {
+	index := make([]levelLoc, total)
+	n := 0
+	for t, c := range trackChannels {
+		for i := 0; i < c; i++ {
+			index[n] = levelLoc{t, i}
+			n++
+		}
+	}
+	return index
+}
+
+// freshLevels is a snapshot shaped for trackChannels with every channel
+// silent.
+func freshLevels(trackChannels []int) Levels {
+	l := Levels{Peak: make([][]float64, len(trackChannels)), RMS: make([][]float64, len(trackChannels))}
+	for t, c := range trackChannels {
+		l.Peak[t] = make([]float64, c)
+		l.RMS[t] = make([]float64, c)
+		for i := range l.Peak[t] {
+			l.Peak[t][i] = SilenceDB
+			l.RMS[t][i] = SilenceDB
+		}
+	}
+	return l
+}
+
+// parseAstatsLine reads one "lavfi.astats.<channel>.<metric>=<value>" line.
+// ok is false for any other line, or a channel outside 1..total.
+func parseAstatsLine(line string, total int) (chNum int, metric, val string, ok bool) {
+	key, val, ok := strings.Cut(line, "=")
+	if !ok || !strings.HasPrefix(key, "lavfi.astats.") {
+		return 0, "", "", false
+	}
+	rest := strings.TrimPrefix(key, "lavfi.astats.")
+	chStr, metric, ok := strings.Cut(rest, ".")
+	if !ok {
+		return 0, "", "", false
+	}
+	chNum, err := strconv.Atoi(chStr)
+	if err != nil || chNum < 1 || chNum > total {
+		return 0, "", "", false
+	}
+	return chNum, metric, val, true
 }
 
 // parseDB converts an astats level to a drawable number. Digital silence

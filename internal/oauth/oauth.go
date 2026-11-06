@@ -39,6 +39,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
+// mimeJSON is the JSON media type for the Accept and Content-Type headers.
+const mimeJSON = "application/json"
+
 // Token is the result of an authorization-code exchange or a refresh.
 type Token struct {
 	AccessToken  string
@@ -566,7 +569,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", mimeJSON)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -635,7 +638,7 @@ func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, he
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", mimeJSON)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -669,7 +672,7 @@ func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, p
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", mimeJSON)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

@@ -557,112 +557,23 @@ func candidatesFor(c sourceChoice) []candidate {
 func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 	ranked := slices.Clone(cands)
 	slices.SortStableFunc(ranked, func(a, b candidate) int { return cmp.Compare(a.rank, b.rank) })
+	l := ladder(ranked)
 
-	// available answers about one named source, for the rules that are about a
-	// particular source rather than about preference order.
-	available := func(k sourceKind) bool {
-		for _, cand := range ranked {
-			if cand.kind == k {
-				return cand.available
-			}
-		}
-		return false
-	}
-
-	pinnable := func(k sourceKind) bool {
-		for _, cand := range ranked {
-			if cand.kind == k {
-				return cand.pinnable
-			}
-		}
-		return false
-	}
 	// degraded is the primary delivering over a link the operator's
 	// thresholds have ruled out. Only then does a reason start "degraded: ";
 	// a primary that has stopped delivering is dead, and says so.
 	degraded := c.primaryDegraded && c.primary.alive(c.now, c.grace)
 
-	// best is the ladder itself: the first available candidate wins, and says
-	// the sentence that goes with having won. fallbackKind is where the
-	// selector parks when nothing at all is available — never sourceNone,
-	// because handing the pipeline nothing is worse than every alternative.
-	//
-	// reasons is looked up with comma-ok rather than a plain index, and a miss
-	// panics instead of returning "". A plain index is what this looked like
-	// until a review of the candidate-list cutover: available(k) matches the
-	// FIRST candidate of a kind in rank order, while best here matches the
-	// FIRST AVAILABLE one, and those two agree only when the list has one
-	// candidate per kind. candidatesFor always builds it that way today, but
-	// nothing in the type checks that a future caller -- or a map literal
-	// missing the entry for a kind Task 4 adds -- keeps it true. Get it wrong
-	// and a plain index hands the operator a blank Failover.Reason on a real
-	// switch, which reads as "nothing happened" when something did. A panic
-	// naming the kind is a test failure at the point the list is built wrong,
-	// which is the whole point of a candidate winning a reason nobody wrote.
-	//
-	// An available sourceNone is rejected the same way, and BEFORE the reason
-	// lookup, because it is malformed for a different reason: sourceNone is the
-	// absence of a source, not a source that can be on air, so a list offering
-	// it as available says something that cannot be true. Returning it would be
-	// worse than the blank reason above -- applySourceChoice's want ==
-	// sourceNone guard would drop the decision, and a dropped decision is a
-	// failover that silently did not happen. Today a "" kind happens to trip
-	// the missing-reason panic below, because no branch registers a reason
-	// under the empty key -- but only by accident, and a map literal that ever
-	// gained a sourceNone entry would turn that accident into a silent
-	// discard. This check does not read the reasons map, so no map can undo it.
-	best := func(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
-		for _, cand := range ranked {
-			if cand.available {
-				if cand.kind == sourceNone {
-					panic("chooseFrom: the candidate list offers sourceNone as available, but sourceNone is the absence of a source and can never be put on air -- fix the list that was built")
-				}
-				reason, ok := reasons[cand.kind]
-				if !ok {
-					panic(fmt.Sprintf("chooseFrom: candidate %q won but this branch has no reason registered for it -- add one to the map", cand.kind))
-				}
-				return cand.kind, reason
-			}
-		}
-		return fallbackKind, fallbackReason
-	}
-
 	// An operator's pin outranks the ladder, but only while the pinned source
 	// is available: a pin that outlived its source would strand the broadcast
 	// on a dead input.
-	if reason, ok := pinReason(c.pinned); ok && pinnable(c.pinned) {
+	if reason, ok := pinReason(c.pinned); ok && l.pinnable(c.pinned) {
 		return c.pinned, reason
 	}
 
 	switch c.cur {
 	case sourceBackup:
-		if available(sourceBackup) {
-			// The flapping guard. Manual is the default because an encoder that
-			// dropped once usually drops again, and each automatic return is a
-			// visible cut for every viewer.
-			if available(sourcePrimary) && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
-				return sourcePrimary, "the primary ingest has been delivering steadily again"
-			}
-			return sourceBackup, ""
-		}
-		// Manual return means "do not flap", not "never recover": with the
-		// backup gone there is nothing to flap between. The backup is known
-		// unavailable here, so it cannot win its own branch.
-		if degraded {
-			// The primary is delivering, so "neither ingest is delivering"
-			// would be false; it is ruled out by its link, and the reason
-			// has to say that or the operator sees a slate over a live
-			// encoder with no explanation.
-			return best(map[sourceKind]string{
-				sourcePlaylist: degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded, so the playlist is on air",
-				sourceSlate:    degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded",
-			}, sourcePrimary, "the backup ingest stopped delivering and the primary is back")
-		}
-		return best(map[sourceKind]string{
-			sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
-			sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
-			sourceSlate:    "neither ingest is delivering",
-		}, sourcePrimary, "the backup ingest stopped delivering")
+		return l.fromBackup(c, degraded)
 
 	case sourceSlate:
 		// A slate is a holding pattern, never a destination. The return to a
@@ -671,7 +582,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// sitting on a standby card while the show is back on air is the worse
 		// failure by a wide margin. Staying put is silent; a slate that has been
 		// switched off underneath us falls through to the primary.
-		return best(map[sourceKind]string{
+		return l.best(map[sourceKind]string{
 			sourcePrimary:  "the primary ingest is delivering again",
 			sourceBackup:   "the backup ingest is delivering",
 			sourcePlaylist: "the playlist is running",
@@ -693,7 +604,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// nothing at all had moved. That is the trap a fourth kind walks into
 		// by being added only to the maps of branches it can arrive in, and
 		// never to a branch of its own.
-		return best(map[sourceKind]string{
+		return l.best(map[sourceKind]string{
 			sourcePrimary:  "the primary ingest is delivering again",
 			sourceBackup:   "the backup ingest is delivering",
 			sourcePlaylist: "",
@@ -701,39 +612,145 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		}, sourcePrimary, "the playlist stopped running")
 
 	default:
-		// Already on the primary means the primary winning is not news, so the
-		// reason stays empty and nothing is logged or published.
-		onPrimary := ""
-		if c.cur != sourcePrimary {
-			onPrimary = "the primary ingest is delivering"
+		return l.fromPrimary(c, degraded)
+	}
+}
+
+// ladder is the candidate list in rank order.
+type ladder []candidate
+
+// available answers about one named source, for the rules that are about a
+// particular source rather than about preference order.
+func (l ladder) available(k sourceKind) bool {
+	for _, cand := range l {
+		if cand.kind == k {
+			return cand.available
 		}
-		// Nothing better exists, so stay parked on the primary rather than
-		// switching to nothing: a feed that is merely waiting still holds its
-		// place, and it starts carrying the stream the moment an encoder
-		// arrives.
-		noOther := ""
-		if c.cur != sourcePrimary {
-			noOther = "there is no other source to run"
+	}
+	return false
+}
+
+// pinnable is whether an operator's pin on k would deliver bytes.
+func (l ladder) pinnable(k sourceKind) bool {
+	for _, cand := range l {
+		if cand.kind == k {
+			return cand.pinnable
 		}
-		if degraded {
-			// The primary is still delivering, just badly. Every reason here
-			// names the link rather than a stop, and the fallback -- nothing
-			// else to run -- keeps the degraded primary on air: a poor picture
-			// beats none, and it stays silent when the primary was already on
-			// air because nothing moved.
-			return best(map[sourceKind]string{
-				sourceBackup:   degradedPrefix + "the primary ingest's link is degraded",
-				sourcePlaylist: degradedPrefix + "the primary ingest's link is degraded and the playlist is running",
-				sourceSlate:    degradedPrefix + "the primary ingest's link is degraded and no backup is on air",
-			}, sourcePrimary, noOther)
+	}
+	return false
+}
+
+// best is the ladder itself: the first available candidate wins, and says
+// the sentence that goes with having won. fallbackKind is where the
+// selector parks when nothing at all is available — never sourceNone,
+// because handing the pipeline nothing is worse than every alternative.
+//
+// reasons is looked up with comma-ok rather than a plain index, and a miss
+// panics instead of returning "". A plain index is what this looked like
+// until a review of the candidate-list cutover: available(k) matches the
+// FIRST candidate of a kind in rank order, while best here matches the
+// FIRST AVAILABLE one, and those two agree only when the list has one
+// candidate per kind. candidatesFor always builds it that way today, but
+// nothing in the type checks that a future caller -- or a map literal
+// missing the entry for a kind Task 4 adds -- keeps it true. Get it wrong
+// and a plain index hands the operator a blank Failover.Reason on a real
+// switch, which reads as "nothing happened" when something did. A panic
+// naming the kind is a test failure at the point the list is built wrong,
+// which is the whole point of a candidate winning a reason nobody wrote.
+//
+// An available sourceNone is rejected the same way, and BEFORE the reason
+// lookup, because it is malformed for a different reason: sourceNone is the
+// absence of a source, not a source that can be on air, so a list offering
+// it as available says something that cannot be true. Returning it would be
+// worse than the blank reason above -- applySourceChoice's want ==
+// sourceNone guard would drop the decision, and a dropped decision is a
+// failover that silently did not happen. Today a "" kind happens to trip
+// the missing-reason panic below, because no branch registers a reason
+// under the empty key -- but only by accident, and a map literal that ever
+// gained a sourceNone entry would turn that accident into a silent
+// discard. This check does not read the reasons map, so no map can undo it.
+func (l ladder) best(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
+	for _, cand := range l {
+		if !cand.available {
+			continue
 		}
-		return best(map[sourceKind]string{
-			sourcePrimary:  onPrimary,
-			sourceBackup:   "the primary ingest stopped delivering",
-			sourcePlaylist: "the primary ingest stopped delivering and the playlist is running",
-			sourceSlate:    "the primary ingest stopped delivering and no backup is on air",
+		if cand.kind == sourceNone {
+			panic("chooseFrom: the candidate list offers sourceNone as available, but sourceNone is the absence of a source and can never be put on air -- fix the list that was built")
+		}
+		reason, ok := reasons[cand.kind]
+		if !ok {
+			panic(fmt.Sprintf("chooseFrom: candidate %q won but this branch has no reason registered for it -- add one to the map", cand.kind))
+		}
+		return cand.kind, reason
+	}
+	return fallbackKind, fallbackReason
+}
+
+// fromBackup is the ladder while the backup ingest is on air.
+func (l ladder) fromBackup(c sourceChoice, degraded bool) (sourceKind, string) {
+	if l.available(sourceBackup) {
+		// The flapping guard. Manual is the default because an encoder that
+		// dropped once usually drops again, and each automatic return is a
+		// visible cut for every viewer.
+		if l.available(sourcePrimary) && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
+			return sourcePrimary, "the primary ingest has been delivering steadily again"
+		}
+		return sourceBackup, ""
+	}
+	// Manual return means "do not flap", not "never recover": with the
+	// backup gone there is nothing to flap between. The backup is known
+	// unavailable here, so it cannot win its own branch.
+	if degraded {
+		// The primary is delivering, so "neither ingest is delivering"
+		// would be false; it is ruled out by its link, and the reason
+		// has to say that or the operator sees a slate over a live
+		// encoder with no explanation.
+		return l.best(map[sourceKind]string{
+			sourcePlaylist: degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded, so the playlist is on air",
+			sourceSlate:    degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded",
+		}, sourcePrimary, "the backup ingest stopped delivering and the primary is back")
+	}
+	return l.best(map[sourceKind]string{
+		sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
+		sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
+		sourceSlate:    "neither ingest is delivering",
+	}, sourcePrimary, "the backup ingest stopped delivering")
+}
+
+// fromPrimary is the ladder while the primary ingest, or nothing, is on air.
+func (l ladder) fromPrimary(c sourceChoice, degraded bool) (sourceKind, string) {
+	// Already on the primary means the primary winning is not news, so the
+	// reason stays empty and nothing is logged or published.
+	onPrimary := ""
+	if c.cur != sourcePrimary {
+		onPrimary = "the primary ingest is delivering"
+	}
+	// Nothing better exists, so stay parked on the primary rather than
+	// switching to nothing: a feed that is merely waiting still holds its
+	// place, and it starts carrying the stream the moment an encoder
+	// arrives.
+	noOther := ""
+	if c.cur != sourcePrimary {
+		noOther = "there is no other source to run"
+	}
+	if degraded {
+		// The primary is still delivering, just badly. Every reason here
+		// names the link rather than a stop, and the fallback -- nothing
+		// else to run -- keeps the degraded primary on air: a poor picture
+		// beats none, and it stays silent when the primary was already on
+		// air because nothing moved.
+		return l.best(map[sourceKind]string{
+			sourceBackup:   degradedPrefix + "the primary ingest's link is degraded",
+			sourcePlaylist: degradedPrefix + "the primary ingest's link is degraded and the playlist is running",
+			sourceSlate:    degradedPrefix + "the primary ingest's link is degraded and no backup is on air",
 		}, sourcePrimary, noOther)
 	}
+	return l.best(map[sourceKind]string{
+		sourcePrimary:  onPrimary,
+		sourceBackup:   "the primary ingest stopped delivering",
+		sourcePlaylist: "the primary ingest stopped delivering and the playlist is running",
+		sourceSlate:    "the primary ingest stopped delivering and no backup is on air",
+	}, sourcePrimary, noOther)
 }
 
 // pinReason is the sentence for an honoured manual override, and whether the

@@ -40,6 +40,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// xBroadcastsPath is the X API v2 broadcasts path prefix.
+const xBroadcastsPath = "/2/broadcasts/"
+
 // XMaxMessage is X's chat limit. SendBroadcastChatRequest.text carries maxLength
 // 140 in the served spec.
 const XMaxMessage = 140
@@ -214,7 +217,7 @@ func (x *XAdapter) Send(ctx context.Context, text string) (Message, error) {
 			Timestamp string `json:"timestamp"`
 		} `json:"data"`
 	}
-	if err := x.xCall(ctx, http.MethodPost, "/2/broadcasts/"+url.PathEscape(id)+"/chat", false,
+	if err := x.xCall(ctx, http.MethodPost, xBroadcastsPath+url.PathEscape(id)+"/chat", false,
 		map[string]string{"text": text}, &out); err != nil {
 		return Message{}, fmt.Errorf("X refused the chat message: %s", xProblemMessage(err))
 	}
@@ -253,7 +256,7 @@ func (x *XAdapter) Delete(ctx context.Context, messageID string) error {
 			Deleted bool `json:"deleted"`
 		} `json:"data"`
 	}
-	if err := x.xCall(ctx, http.MethodDelete, "/2/broadcasts/"+url.PathEscape(id)+"/chat/"+messageID,
+	if err := x.xCall(ctx, http.MethodDelete, xBroadcastsPath+url.PathEscape(id)+"/chat/"+messageID,
 		false, nil, &out); err != nil {
 		return fmt.Errorf("X refused to remove the message: %s", xProblemMessage(err))
 	}
@@ -290,7 +293,7 @@ func (x *XAdapter) Ban(ctx context.Context, userID string, d time.Duration, _ st
 			Muted bool `json:"muted"`
 		} `json:"data"`
 	}
-	if err := x.xCall(ctx, http.MethodPost, "/2/broadcasts/"+url.PathEscape(id)+"/chat/mutes",
+	if err := x.xCall(ctx, http.MethodPost, xBroadcastsPath+url.PathEscape(id)+"/chat/mutes",
 		false, body, &out); err != nil {
 		return fmt.Errorf("X refused the mute: %s", xProblemMessage(err))
 	}
@@ -310,7 +313,7 @@ func (x *XAdapter) Unban(ctx context.Context, userID string) error {
 	if err != nil {
 		return err
 	}
-	if err := x.xCall(ctx, http.MethodDelete, "/2/broadcasts/"+url.PathEscape(id)+"/chat/mutes/"+userID,
+	if err := x.xCall(ctx, http.MethodDelete, xBroadcastsPath+url.PathEscape(id)+"/chat/mutes/"+userID,
 		false, nil, nil); err != nil {
 		return fmt.Errorf("X refused the unmute: %s", xProblemMessage(err))
 	}

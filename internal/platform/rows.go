@@ -65,7 +65,7 @@ func buildRows() []Row {
 			Presets: []string{"youtube", "youtube-rtmps"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
-				Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
+				Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06", // NOSONAR S1192: each row's check date is its own fact; they only coincide today
 			},
 			// 51000 is YouTube's MAXIMUM video bitrate (OBS's data); the 12000 in
 			// Guidance is its RECOMMENDED figure for 1080p60. Different facts, kept

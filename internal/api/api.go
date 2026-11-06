@@ -56,6 +56,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
+// routeDestinationExpert is the expert-override route registered for GET, PUT and DELETE.
+const routeDestinationExpert = "/destinations/{id}/expert"
+
+// errInvalidID is the 400 body every {id} route returns for an unparseable path id.
+const errInvalidID = "invalid id"
+
 // eng is the engine an unscoped request operates on: the default source's.
 //
 // Every endpoint that predates sources goes through here, which is what keeps
@@ -1410,9 +1416,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// refusals still apply to the signed-in operator.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
-				api.Get(r, "/destinations/{id}/expert", s.handleGetExpert, readDenied)
-				api.Put(r, "/destinations/{id}/expert", s.handlePutExpert, needsSource)
-				api.Delete(r, "/destinations/{id}/expert", s.handleDeleteExpert, needsSource)
+				api.Get(r, routeDestinationExpert, s.handleGetExpert, readDenied)
+				api.Put(r, routeDestinationExpert, s.handlePutExpert, needsSource)
+				api.Delete(r, routeDestinationExpert, s.handleDeleteExpert, needsSource)
 				api.Post(r, "/destinations/{id}/expert/preview", s.handlePreviewExpert, readDenied)
 				r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
 			})

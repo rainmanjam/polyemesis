@@ -27,26 +27,8 @@ type trackGainBody struct {
 // when it had to be restarted. A restart always rebuilds from the stored profile,
 // so it cannot bring back a level the operator has already changed.
 func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
-	id, err := idParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	track, err := strconv.Atoi(chi.URLParam(r, "track"))
-	if err != nil || track < 0 {
-		writeError(w, http.StatusBadRequest, "invalid track")
-		return
-	}
-	var body trackGainBody
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Muted == nil && body.Gain == nil {
-		writeError(w, http.StatusBadRequest, `send "muted", "gain", or both`)
-		return
-	}
-	if body.Gain != nil && (math.IsNaN(*body.Gain) || math.IsInf(*body.Gain, 0) || *body.Gain <= 0) {
-		writeError(w, http.StatusBadRequest, `gain must be a finite number above zero; to silence a track send "muted": true`)
+	id, track, body, ok := readTrackGainRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -58,48 +40,12 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	// A copy destination forwards its audio untouched: there is no volume stage
-	// for a level to reach. Storing it and answering success would tell a
-	// controller the track is muted while its sound keeps flowing.
-	if row.Audio.Copy && row.Kind != db.DestAudio {
-		writeError(w, http.StatusConflict, "this destination passes its audio through unchanged, "+
-			"so a track level cannot apply to it; turn off audio copy to mix and mute tracks")
+	idx, status, msg := trackGainTarget(row, track, body)
+	if msg != "" {
+		writeError(w, status, msg)
 		return
 	}
-	idx := -1
-	for i, sel := range row.Profile.Tracks {
-		if sel.Track == track {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		writeError(w, http.StatusNotFound, "track is not part of this destination's selection")
-		return
-	}
-	if row.Profile.Mode == routing.ModeMatrix && body.Gain != nil {
-		writeError(w, http.StatusBadRequest, "a matrix mix takes its gain per cell; mute the track instead")
-		return
-	}
-
-	before := row.Profile.Tracks[idx]
-	if body.Muted != nil {
-		row.Profile.Tracks[idx].Muted = *body.Muted
-	}
-	if body.Gain != nil {
-		row.Profile.Tracks[idx].Gain = *body.Gain
-	}
-	changed := row.Profile.Tracks[idx] != before
-	// THE VOD MIX FOLLOWS THE SAME FADER. A destination with a second mix carries
-	// the same source in both, so a live mute or gain on a track reaches the VOD
-	// mix's copy of that track too. A track the VOD mix does not select is left
-	// out, so a live change to the music bed cannot put it back into the archive.
-	// In a matrix VOD mix the gain is per cell and structural, so only mute mirrors.
-	if row.VODProfile != nil {
-		if mirrored := mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain); mirrored {
-			changed = true
-		}
-	}
+	changed := applyTrackLevel(row, idx, track, body)
 
 	lw, storeErr, updateErr := s.persistTrackLevels(row, changed)
 	switch {
@@ -128,6 +74,82 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// is reported the way every other mutation reports it (#709), not as a 500
 	// that would read as "nothing happened".
 	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// readTrackGainRequest reads and checks the destination id, the track and the
+// body, answering 400 and reporting false when one is unusable.
+func readTrackGainRequest(w http.ResponseWriter, r *http.Request) (id int64, track int, body trackGainBody, ok bool) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidID)
+		return id, track, body, false
+	}
+	track, err = strconv.Atoi(chi.URLParam(r, "track"))
+	if err != nil || track < 0 {
+		writeError(w, http.StatusBadRequest, "invalid track")
+		return id, track, body, false
+	}
+	if !decodeJSON(w, r, &body) {
+		return id, track, body, false
+	}
+	if body.Muted == nil && body.Gain == nil {
+		writeError(w, http.StatusBadRequest, `send "muted", "gain", or both`)
+		return id, track, body, false
+	}
+	if body.Gain != nil && (math.IsNaN(*body.Gain) || math.IsInf(*body.Gain, 0) || *body.Gain <= 0) {
+		writeError(w, http.StatusBadRequest, `gain must be a finite number above zero; to silence a track send "muted": true`)
+		return id, track, body, false
+	}
+	return id, track, body, true
+}
+
+// trackGainTarget is the index in row's live mix of the track a level change
+// is for, or the status and message refusing it (msg is "" when it may go
+// ahead).
+func trackGainTarget(row *db.Destination, track int, body trackGainBody) (idx, status int, msg string) {
+	// A copy destination forwards its audio untouched: there is no volume stage
+	// for a level to reach. Storing it and answering success would tell a
+	// controller the track is muted while its sound keeps flowing.
+	if row.Audio.Copy && row.Kind != db.DestAudio {
+		return -1, http.StatusConflict, "this destination passes its audio through unchanged, " +
+			"so a track level cannot apply to it; turn off audio copy to mix and mute tracks"
+	}
+	idx = -1
+	for i, sel := range row.Profile.Tracks {
+		if sel.Track == track {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return idx, http.StatusNotFound, "track is not part of this destination's selection"
+	}
+	if row.Profile.Mode == routing.ModeMatrix && body.Gain != nil {
+		return idx, http.StatusBadRequest, "a matrix mix takes its gain per cell; mute the track instead"
+	}
+	return idx, 0, ""
+}
+
+// applyTrackLevel puts the requested mute and gain on track (at idx in the
+// live mix) and on the VOD mix's copy of it, reporting whether anything moved.
+func applyTrackLevel(row *db.Destination, idx, track int, body trackGainBody) bool {
+	before := row.Profile.Tracks[idx]
+	if body.Muted != nil {
+		row.Profile.Tracks[idx].Muted = *body.Muted
+	}
+	if body.Gain != nil {
+		row.Profile.Tracks[idx].Gain = *body.Gain
+	}
+	changed := row.Profile.Tracks[idx] != before
+	// THE VOD MIX FOLLOWS THE SAME FADER. A destination with a second mix carries
+	// the same source in both, so a live mute or gain on a track reaches the VOD
+	// mix's copy of that track too. A track the VOD mix does not select is left
+	// out, so a live change to the music bed cannot put it back into the archive.
+	// In a matrix VOD mix the gain is per cell and structural, so only mute mirrors.
+	if row.VODProfile != nil && mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain) {
+		changed = true
+	}
+	return changed
 }
 
 // matrixVODNote is what a fader gain change is told when the VOD mix is a

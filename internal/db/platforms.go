@@ -11,6 +11,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
+// textNotNullEmpty is the column definition for the non-null text columns added by migration.
+const textNotNullEmpty = "TEXT NOT NULL DEFAULT ''"
+
 // PlatformCreds is the operator's own OAuth developer app. polyemesis cannot
 // ship client secrets, so the user registers an app and pastes the pair in.
 type PlatformCreds struct {
@@ -176,9 +179,9 @@ func (d *DB) MigratePlatformCredsCheck() error {
 	// transaction would wait), so a start that was interrupted between two
 	// ALTERs finishes the job on the next start instead of skipping it.
 	for _, col := range []struct{ name, ddl string }{
-		{"check_state", "TEXT NOT NULL DEFAULT ''"},
-		{"check_method", "TEXT NOT NULL DEFAULT ''"},
-		{"check_detail", "TEXT NOT NULL DEFAULT ''"},
+		{"check_state", textNotNullEmpty},
+		{"check_method", textNotNullEmpty},
+		{"check_detail", textNotNullEmpty},
 		{"checked_at", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		has, err := columnExists(d.sql, "platform_creds", col.name)

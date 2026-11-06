@@ -129,7 +129,7 @@ func WithFlushInterval(d time.Duration) Option {
 // WithRetry bounds the retry budget. Bounded is the point: an endpoint that is
 // down stays down, and retrying it forever would turn one dead webhook into a
 // permanently busy goroutine.
-func WithRetry(attempts int, base, max time.Duration) Option {
+func WithRetry(attempts int, base, ceiling time.Duration) Option {
 	return func(n *Notifier) {
 		if attempts > 0 {
 			n.attempts = attempts
@@ -137,8 +137,8 @@ func WithRetry(attempts int, base, max time.Duration) Option {
 		if base > 0 {
 			n.backoff = base
 		}
-		if max > 0 {
-			n.maxBackoff = max
+		if ceiling > 0 {
+			n.maxBackoff = ceiling
 		}
 	}
 }
@@ -328,7 +328,7 @@ func (n *Notifier) Run(ctx context.Context) {
 			return
 		case ev := <-n.events:
 			rules := n.currentRules()
-			if took := n.co.Add(rules, ev, n.now()); took > 0 {
+			if n.co.Add(rules, ev, n.now()) > 0 {
 				n.bump(func(s *Stats) { s.Coalesced++ })
 			}
 			if n.recorder != nil && IsTimelineType(ev.Type) {

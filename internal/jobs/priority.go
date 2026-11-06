@@ -9,4 +9,4 @@ import "os/exec"
 // Off Windows it does nothing, deliberately: the governor's NiceCommand puts
 // nice and ionice in front of the command line, which is how the priority is
 // lowered there, and doing it twice would only make the two disagree.
-func LowerPriority(cmd *exec.Cmd) {}
+func LowerPriority(cmd *exec.Cmd) { /* no-op: see above */ }

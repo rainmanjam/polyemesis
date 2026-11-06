@@ -9,6 +9,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
+// flagFramesV is the FFmpeg flag that caps the video frames written.
+const flagFramesV = "-frames:v"
+
 // ---------------------------------------------------------------- thumbnails
 //
 // Three artefacts, one decode.
@@ -147,7 +150,7 @@ func PosterArgs(s PosterSpec) []string {
 		args = append(args, "-vf", vf)
 	}
 	args = append(args,
-		"-frames:v", "1",
+		flagFramesV, "1",
 		"-q:v", strconv.Itoa(jpegQuality(s.Quality)),
 		"-f", "image2",
 		s.Output,
@@ -268,7 +271,7 @@ func ContactSheetArgs(s ContactSheetSpec) []string {
 		// One sheet, even if the arithmetic drifts and a second grid could be
 		// filled. vf_tile flushes a partial grid at EOF, so a short recording
 		// still produces a sheet rather than nothing.
-		"-frames:v", "1",
+		flagFramesV, "1",
 		"-q:v", strconv.Itoa(jpegQuality(s.Quality)),
 		"-f", "image2",
 		s.Output,
@@ -591,11 +594,11 @@ func ThumbnailArgs(s ThumbnailSpec) []string {
 	args = append(args, "-i", s.Input, "-filter_complex", g.String())
 
 	if wantPoster {
-		args = append(args, "-map", "[pout]", "-frames:v", "1",
+		args = append(args, "-map", "[pout]", flagFramesV, "1",
 			"-q:v", strconv.Itoa(jpegQuality(s.Poster.Quality)), "-f", "image2", s.Poster.Output)
 	}
 	if wantContact {
-		args = append(args, "-map", "[cout]", "-frames:v", "1",
+		args = append(args, "-map", "[cout]", flagFramesV, "1",
 			"-q:v", strconv.Itoa(jpegQuality(contact.Quality)), "-f", "image2", contact.Output)
 	}
 	if wantSprites {

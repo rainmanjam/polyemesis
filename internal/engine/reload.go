@@ -6,6 +6,36 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 )
 
+// noteEvaluatedPerAdmission explains the post-production window fields.
+const noteEvaluatedPerAdmission = "evaluated per admission"
+
+// noteKindPolicy explains the per-kind post-production policy fields.
+const noteKindPolicy = "per-kind policy, consulted per admission"
+
+// noteRecompilesGraphs explains the annotation fields.
+const noteRecompilesGraphs = "recompiles every routing graph, moving destSpec"
+
+// noteSweepSelector explains the failover fields sweepSelector reads.
+const noteSweepSelector = "read by sweepSelector every 500ms"
+
+// noteFFmpegInputOption explains the pull-ingest fields that are FFmpeg input options.
+const noteFFmpegInputOption = "an FFmpeg input option"
+
+// noteRebuildsSecondary explains the automod secondary fields.
+const noteRebuildsSecondary = "rebuilds the secondary checker"
+
+// noteRebuildsModel explains the automod model fields.
+const noteRebuildsModel = "rebuilds the model checker"
+
+// noteRebuildsHistory explains the automod history fields.
+const noteRebuildsHistory = "rebuilds the history checker"
+
+// noteRecompilesPatterns explains the automod rule fields.
+const noteRecompilesPatterns = "recompiles the patterns"
+
+// noteRunnerPolls and the notes below are the reload-class explanations shown for each setting.
+const noteRunnerPolls = "polled by the runner"
+
 // What happens when an operator changes a setting while the stream is up.
 //
 // This file is the answer, written down as data rather than as prose, because
@@ -110,7 +140,7 @@ var settingsReload = map[string]ReloadRule{
 	"ingest.rtmp.streamKey":                {ClassRespawn, "reconcileIngest", "matched against the publisher's playpath at connect"},
 	"ingest.pull.url":                      {ClassRespawn, "reconcileIngest", "the input FFmpeg dials"},
 	"ingest.pull.reconnectDelayMaxSeconds": {ClassRespawn, "reconcileIngest", "an FFmpeg input option, not a supervisor one"},
-	"ingest.pull.rtspTransport":            {ClassRespawn, "reconcileIngest", "an FFmpeg input option"},
+	"ingest.pull.rtspTransport":            {ClassRespawn, "reconcileIngest", noteFFmpegInputOption},
 
 	// ------------------------------------------------------------- listeners
 	"listeners.srtPort":   {ClassRebind, "reconcileSharedIngest", "one bound socket for every source; the Manager stops it and binds the new number"},
@@ -153,13 +183,13 @@ var settingsReload = map[string]ReloadRule{
 
 	// -------------------------------------------------------------- failover
 	"failover.enabled":                              {ClassRespawn, "wantSelector", "starts or stops the selector tier, which moves every consumer's upstream signature"},
-	"failover.graceSeconds":                         {ClassLive, "failoverGrace", "read by sweepSelector every 500ms"},
-	"failover.return":                               {ClassLive, "applySourceChoice", "read by sweepSelector every 500ms"},
-	"failover.returnStableSeconds":                  {ClassLive, "applySourceChoice", "read by sweepSelector every 500ms"},
+	"failover.graceSeconds":                         {ClassLive, "failoverGrace", noteSweepSelector},
+	"failover.return":                               {ClassLive, "applySourceChoice", noteSweepSelector},
+	"failover.returnStableSeconds":                  {ClassLive, "applySourceChoice", noteSweepSelector},
 	"ingest.degraded.enabled":                       {ClassLive, "sampleSources", "read by sweepSelector every 500ms; switching it off resets the monitor and releases a degraded primary"},
-	"ingest.degraded.minBitrateKbps":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
-	"ingest.degraded.maxRttMs":                      {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
-	"ingest.degraded.maxLossPercent":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
+	"ingest.degraded.minBitrateKbps":                {ClassLive, "sampleSources", noteSweepSelector},
+	"ingest.degraded.maxRttMs":                      {ClassLive, "sampleSources", noteSweepSelector},
+	"ingest.degraded.maxLossPercent":                {ClassLive, "sampleSources", noteSweepSelector},
 	"ingest.degraded.sustainSeconds":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms; a breach or recovery already in progress is measured against the new window"},
 	"failover.backup.enabled":                       {ClassRespawn, "reconcileBackupIngest", "starts or stops the second listener"},
 	"failover.backup.mode":                          {ClassRespawn, "backupIngestSig", "the backup ingest's argv"},
@@ -168,8 +198,8 @@ var settingsReload = map[string]ReloadRule{
 	"failover.backup.rtmp.app":                      {ClassRespawn, "backupIngestSig", "part of the listener URL"},
 	"failover.backup.rtmp.streamKey":                {ClassRespawn, "backupIngestSig", "matched at connect"},
 	"failover.backup.pull.url":                      {ClassRespawn, "backupIngestSig", "the input FFmpeg dials"},
-	"failover.backup.pull.reconnectDelayMaxSeconds": {ClassRespawn, "backupIngestSig", "an FFmpeg input option"},
-	"failover.backup.pull.rtspTransport":            {ClassRespawn, "backupIngestSig", "an FFmpeg input option"},
+	"failover.backup.pull.reconnectDelayMaxSeconds": {ClassRespawn, "backupIngestSig", noteFFmpegInputOption},
+	"failover.backup.pull.rtspTransport":            {ClassRespawn, "backupIngestSig", noteFFmpegInputOption},
 	"failover.slate.enabled":                        {ClassLive, "applySourceChoice", "whether the slate is an eligible choice is re-read every 500ms; the slate's own argv is not"},
 	"failover.slate.imagePath":                      {ClassRespawn, "feedUpstreamSig", "the input file in the slate feed's argv"},
 	// Both were ClassLive/ClassRespawn-on-feedUpstreamSig when the playlist was
@@ -231,16 +261,16 @@ var settingsReload = map[string]ReloadRule{
 
 	// ------------------------------------------------------------------ mqtt
 	"mqtt.enabled":          {ClassLive, applyMQTT, "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
-	"mqtt.brokerUrl":        {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.username":         {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.brokerUrl":        {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.username":         {ClassLive, applyMQTT, noteRunnerPolls},
 	"mqtt.hasPassword":      {ClassLive, applyMQTT, "reported by the runner, set through its own endpoint"},
-	"mqtt.prefix":           {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.instance":         {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.clientId":         {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.intervalSeconds":  {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.keepAliveSeconds": {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.tlsSkipVerify":    {ClassLive, applyMQTT, "polled by the runner"},
-	"mqtt.discovery":        {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.prefix":           {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.instance":         {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.clientId":         {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.intervalSeconds":  {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.keepAliveSeconds": {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.tlsSkipVerify":    {ClassLive, applyMQTT, noteRunnerPolls},
+	"mqtt.discovery":        {ClassLive, applyMQTT, noteRunnerPolls},
 
 	// ---------------------------------------------------------- destinations
 	"destinations.staggerMs": {ClassLive, "startDestinations", "read per sweep and applied only to processes started in that sweep; it can never affect one already running"},
@@ -290,20 +320,20 @@ var settingsReload = map[string]ReloadRule{
 	"automod.highlightScoring":     {ClassOnDemand, "ModelConfig", "read when a highlight scan asks for scoring; nothing running holds it"},
 	"automod.platformEnabled":      {ClassLive, applyAutomod, "rebuilds the automod engine"},
 	"automod.on":                   {ClassLive, applyAutomod, "rebuilds the matrix"},
-	"automod.rules.id":             {ClassLive, applyAutomod, "recompiles the patterns"},
-	"automod.rules.name":           {ClassLive, applyAutomod, "recompiles the patterns"},
-	"automod.rules.enabled":        {ClassLive, applyAutomod, "recompiles the patterns"},
-	"automod.rules.pattern":        {ClassLive, applyAutomod, "recompiles the patterns"},
-	"automod.rules.action":         {ClassLive, applyAutomod, "recompiles the patterns"},
-	"automod.rules.timeoutSeconds": {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.id":             {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.name":           {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.enabled":        {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.pattern":        {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.action":         {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.timeoutSeconds": {ClassLive, applyAutomod, noteRecompilesPatterns},
 
 	// ------------------------------------------------- ingest track annotations
 	// Each leaf recompiles every routing graph, so it moves compiled.FilterComplex
 	// and therefore destSpec.
-	"ingest.annotations.track":    {ClassRespawn, "planDestinations", "recompiles every routing graph, moving destSpec"},
-	"ingest.annotations.label":    {ClassRespawn, "planDestinations", "recompiles every routing graph, moving destSpec"},
-	"ingest.annotations.role":     {ClassRespawn, "planDestinations", "recompiles every routing graph, moving destSpec"},
-	"ingest.annotations.language": {ClassRespawn, "planDestinations", "recompiles every routing graph, moving destSpec"},
+	"ingest.annotations.track":    {ClassRespawn, "planDestinations", noteRecompilesGraphs},
+	"ingest.annotations.label":    {ClassRespawn, "planDestinations", noteRecompilesGraphs},
+	"ingest.annotations.role":     {ClassRespawn, "planDestinations", noteRecompilesGraphs},
+	"ingest.annotations.language": {ClassRespawn, "planDestinations", noteRecompilesGraphs},
 	"ingest.annotations.denoise":  {ClassRespawn, "planDestinations", "adds a filter to the graph, moving destSpec"},
 
 	// --------------------------------------------------------- the slate's argv
@@ -320,56 +350,56 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.retainJobs": {ClassLive, "purgeJobHistoryLoop", "re-read every sweep; the floor that survives whatever their age"},
 
 	"postProd.kinds.kind":         {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted by the governor per admission"},
-	"postProd.kinds.mode":         {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted per admission"},
-	"postProd.kinds.usesGpu":      {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted per admission"},
-	"postProd.kinds.ignoreIngest": {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted per admission"},
+	"postProd.kinds.mode":         {ClassLive, "handlePutJobPolicy", noteKindPolicy},
+	"postProd.kinds.usesGpu":      {ClassLive, "handlePutJobPolicy", noteKindPolicy},
+	"postProd.kinds.ignoreIngest": {ClassLive, "handlePutJobPolicy", noteKindPolicy},
 
 	"postProd.kinds.windows.days":         {ClassLive, "handlePutJobPolicy", "a scheduling window, evaluated per admission against the clock"},
-	"postProd.kinds.windows.startMinutes": {ClassLive, "handlePutJobPolicy", "evaluated per admission"},
-	"postProd.kinds.windows.endMinutes":   {ClassLive, "handlePutJobPolicy", "evaluated per admission"},
-	"postProd.kinds.windows.tz":           {ClassLive, "handlePutJobPolicy", "evaluated per admission"},
+	"postProd.kinds.windows.startMinutes": {ClassLive, "handlePutJobPolicy", noteEvaluatedPerAdmission},
+	"postProd.kinds.windows.endMinutes":   {ClassLive, "handlePutJobPolicy", noteEvaluatedPerAdmission},
+	"postProd.kinds.windows.tz":           {ClassLive, "handlePutJobPolicy", noteEvaluatedPerAdmission},
 
 	// ------------------------------------------------------------- chat + alerts
 	"chat.historyMessages": {ClassLive, applyChatRetention, "resizes the in-memory ring on the running Hub via SetHistory"},
 	"alerts.retryAttempts": {ClassLive, applyAlertSettings, "pushed into every engine's Notifier, and remembered for engines created later"},
 
 	// ------------------------------------------------------- automod: history
-	"automod.history.maxMessages":           {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.windowSeconds":         {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.maxRepeats":            {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.maxLinks":              {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.maxMentionsPerMessage": {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.maxCapsRatio":          {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.minLengthForCaps":      {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.retainPerAuthor":       {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.idleEvictionSeconds":   {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.action":                {ClassLive, applyAutomod, "rebuilds the history checker"},
-	"automod.history.timeoutSeconds":        {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.maxMessages":           {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.windowSeconds":         {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.maxRepeats":            {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.maxLinks":              {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.maxMentionsPerMessage": {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.maxCapsRatio":          {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.minLengthForCaps":      {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.retainPerAuthor":       {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.idleEvictionSeconds":   {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.action":                {ClassLive, applyAutomod, noteRebuildsHistory},
+	"automod.history.timeoutSeconds":        {ClassLive, applyAutomod, noteRebuildsHistory},
 
 	// --------------------------------------------------------- automod: model
-	"automod.model.enabled":             {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.endpoint":            {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.model":               {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.enabled":             {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.endpoint":            {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.model":               {ClassLive, applyAutomod, noteRebuildsModel},
 	"automod.model.hasApiKey":           {ClassLive, applyAutomod, "reported by the checker; the key itself is sealed and set through its own endpoint"},
-	"automod.model.instruction":         {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.minConfidence":       {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.maxCallsPerHour":     {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.timeoutSeconds":      {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.action":              {ClassLive, applyAutomod, "rebuilds the model checker"},
-	"automod.model.timeoutForBan":       {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.instruction":         {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.minConfidence":       {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.maxCallsPerHour":     {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.timeoutSeconds":      {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.action":              {ClassLive, applyAutomod, noteRebuildsModel},
+	"automod.model.timeoutForBan":       {ClassLive, applyAutomod, noteRebuildsModel},
 	"automod.model.protocol":            {ClassLive, applyAutomod, "rebuilds the primary checker on the other connector"},
 	"automod.model.preset":              {ClassLive, applyAutomod, "rebuilds the checker with the preset's JSON mode, reasoning setting and flag-only lock"},
 	"automod.model.categoryActions":     {ClassLive, applyAutomod, "rebuilds both model checkers with the new per-category actions"},
 	"automod.model.tested":              {ClassLive, applyAutomod, "derived from the Test pass table on the way out; never stored"},
 	"automod.secondary.enabled":         {ClassLive, applyAutomod, "builds or drops the secondary checker"},
-	"automod.secondary.endpoint":        {ClassLive, applyAutomod, "rebuilds the secondary checker"},
-	"automod.secondary.model":           {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.endpoint":        {ClassLive, applyAutomod, noteRebuildsSecondary},
+	"automod.secondary.model":           {ClassLive, applyAutomod, noteRebuildsSecondary},
 	"automod.secondary.hasApiKey":       {ClassLive, applyAutomod, "reported by the checker; the key itself is sealed and set through its own endpoint"},
-	"automod.secondary.timeoutSeconds":  {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.timeoutSeconds":  {ClassLive, applyAutomod, noteRebuildsSecondary},
 	"automod.secondary.maxCallsPerHour": {ClassLive, applyAutomod, "rebuilds the secondary checker against its own long-lived budget"},
 	"automod.secondary.action":          {ClassLive, applyAutomod, "not read: the primary's policy applies to both checkers"},
 	"automod.secondary.timeoutForBan":   {ClassLive, applyAutomod, "not read: the primary's policy applies to both checkers"},
-	"automod.secondary.minConfidence":   {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.minConfidence":   {ClassLive, applyAutomod, noteRebuildsSecondary},
 	"automod.secondary.instruction":     {ClassLive, applyAutomod, "not read: the primary's instruction applies to both checkers"},
 	"automod.secondary.protocol":        {ClassLive, applyAutomod, "rebuilds the secondary checker on the other connector"},
 	"automod.secondary.preset":          {ClassLive, applyAutomod, "rebuilds the secondary checker with the preset's wire details"},

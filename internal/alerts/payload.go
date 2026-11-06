@@ -251,11 +251,11 @@ func deliveryTime(d Delivery) time.Time {
 
 // trunc cuts on a rune boundary and marks the cut, so a long FFmpeg error does
 // not turn into a 400 from the far end.
-func trunc(s string, max int) string {
-	if len(s) <= max {
+func trunc(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max - 3
+	cut := limit - 3
 	for cut > 0 && !isRuneStart(s[cut]) {
 		cut--
 	}

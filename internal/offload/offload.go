@@ -301,12 +301,7 @@ func (s *Service) passOnce(ctx context.Context) {
 		s.log.Warn("offload: list targets", "err", err)
 		return
 	}
-	var active []db.StorageTarget
-	for _, t := range targets {
-		if usable(t) {
-			active = append(active, t)
-		}
-	}
+	active := usableTargets(targets)
 	items, err := s.store.ListOffloadItems()
 	if err != nil {
 		s.log.Warn("offload: list items", "err", err)
@@ -322,15 +317,7 @@ func (s *Service) passOnce(ctx context.Context) {
 		return
 	}
 	changed := s.prune(items, cands)
-	clients := map[int64]Client{}
-	for _, t := range active {
-		c, err := s.newClient(t)
-		if err != nil {
-			s.log.Warn("offload: target unusable", "target", t.Name, "err", err)
-			continue
-		}
-		clients[t.ID] = c
-	}
+	clients := s.clientsFor(active)
 	for _, t := range active {
 		c := clients[t.ID]
 		if c == nil {
@@ -342,59 +329,112 @@ func (s *Service) passOnce(ctx context.Context) {
 			s.log.Warn("offload: prefix template; skipping target", "target", t.Name, "err", err)
 			continue
 		}
-		for _, cand := range cands {
-			if ctx.Err() != nil {
-				return
-			}
-			if !wants(t, cand.kind) {
-				continue
-			}
-			it, ok := byKey[itemKey(t.ID, cand.rel)]
-			if ok && it.State == db.OffloadVerified {
-				if it.Bytes == cand.size && !cand.mtime.After(it.VerifiedAt) {
-					continue
-				}
-				// The file changed after it was verified: the remote copy is
-				// no longer these bytes, so it is uploaded again.
-				it.State = db.OffloadPending
-				it.Attempts = 0
-				it.NextAttemptAt = time.Time{}
-			}
-			if ok && it.State == db.OffloadStuck {
-				// Stuck stays stuck until Retry now: retrying a refused
-				// credential every hour is noise, not progress.
-				continue
-			}
-			if ok && it.State == db.OffloadFailed && s.now().Before(it.NextAttemptAt) {
-				continue
-			}
-			if !ok || strings.HasPrefix(it.Key, unkeyedPrefix) {
-				if !ok {
-					it = db.OffloadItem{TargetID: t.ID, RelPath: cand.rel, Kind: cand.kind, State: db.OffloadPending}
-				}
-				key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, cand.rel)
-				if kerr != nil {
-					byKey[itemKey(t.ID, cand.rel)] = s.unkeyed(t, it, kerr)
-					changed = true
-					continue
-				}
-				it.Key = key
-				// One object, one file. A key another file already owns on
-				// this target is never written: it holds the other file's
-				// bytes.
-				if holder, herr := s.store.OffloadKeyHolder(t.ID, key); herr != nil || (holder != "" && holder != cand.rel) {
-					byKey[itemKey(t.ID, cand.rel)] = s.keyConflict(t, it, holder, herr)
-					changed = true
-					continue
-				}
-			}
-			byKey[itemKey(t.ID, cand.rel)] = s.upload(ctx, t, c, it, cand)
-			changed = true
+		targetChanged, cancelled := s.passTarget(ctx, t, c, cands, byKey)
+		if cancelled {
+			return
 		}
+		changed = changed || targetChanged
 	}
 	if changed {
 		s.onChange()
 	}
+}
+
+// usableTargets keeps the targets a pass may upload to.
+func usableTargets(targets []db.StorageTarget) []db.StorageTarget {
+	var active []db.StorageTarget
+	for _, t := range targets {
+		if usable(t) {
+			active = append(active, t)
+		}
+	}
+	return active
+}
+
+// clientsFor builds a client per target; a target whose client cannot be
+// built is logged and left out.
+func (s *Service) clientsFor(active []db.StorageTarget) map[int64]Client {
+	clients := map[int64]Client{}
+	for _, t := range active {
+		c, err := s.newClient(t)
+		if err != nil {
+			s.log.Warn("offload: target unusable", "target", t.Name, "err", err)
+			continue
+		}
+		clients[t.ID] = c
+	}
+	return clients
+}
+
+// passTarget uploads every due candidate to one target. cancelled reports a
+// context ended mid-pass: the caller stops without announcing a change.
+func (s *Service) passTarget(ctx context.Context, t db.StorageTarget, c Client, cands []candidate, byKey map[string]db.OffloadItem) (changed, cancelled bool) {
+	for _, cand := range cands {
+		if ctx.Err() != nil {
+			return changed, true
+		}
+		if !wants(t, cand.kind) {
+			continue
+		}
+		k := itemKey(t.ID, cand.rel)
+		it, ok := byKey[k]
+		if ok && !s.due(&it, cand) {
+			continue
+		}
+		if !ok || strings.HasPrefix(it.Key, unkeyedPrefix) {
+			var keyed bool
+			if it, keyed = s.assignKey(t, it, ok, cand); !keyed {
+				byKey[k] = it
+				changed = true
+				continue
+			}
+		}
+		byKey[k] = s.upload(ctx, t, c, it, cand)
+		changed = true
+	}
+	return changed, false
+}
+
+// due reports whether a known item needs an upload attempt now. A verified
+// item whose file changed since is reset to pending.
+func (s *Service) due(it *db.OffloadItem, cand candidate) bool {
+	if it.State == db.OffloadVerified {
+		if it.Bytes == cand.size && !cand.mtime.After(it.VerifiedAt) {
+			return false
+		}
+		// The file changed after it was verified: the remote copy is
+		// no longer these bytes, so it is uploaded again.
+		it.State = db.OffloadPending
+		it.Attempts = 0
+		it.NextAttemptAt = time.Time{}
+	}
+	if it.State == db.OffloadStuck {
+		// Stuck stays stuck until Retry now: retrying a refused
+		// credential every hour is noise, not progress.
+		return false
+	}
+	return it.State != db.OffloadFailed || !s.now().Before(it.NextAttemptAt)
+}
+
+// assignKey renders the object key for an item that has none (new, or
+// unkeyed last time). keyed is false when the item was recorded as unkeyed
+// instead; the returned item is then the persisted refusal.
+func (s *Service) assignKey(t db.StorageTarget, it db.OffloadItem, known bool, cand candidate) (_ db.OffloadItem, keyed bool) {
+	if !known {
+		it = db.OffloadItem{TargetID: t.ID, RelPath: cand.rel, Kind: cand.kind, State: db.OffloadPending}
+	}
+	key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, cand.rel)
+	if kerr != nil {
+		return s.unkeyed(t, it, kerr), false
+	}
+	it.Key = key
+	// One object, one file. A key another file already owns on
+	// this target is never written: it holds the other file's
+	// bytes.
+	if holder, herr := s.store.OffloadKeyHolder(t.ID, key); herr != nil || (holder != "" && holder != cand.rel) {
+		return s.keyConflict(t, it, holder, herr), false
+	}
+	return it, true
 }
 
 // unkeyedPrefix marks the stored key of an item that has no usable object
@@ -453,6 +493,27 @@ func (s *Service) candidates() ([]candidate, error) {
 	now := s.now()
 	live := recording.LiveSet(recs, s.segSecs(), now)
 	settled := now.Add(-SettleWindow)
+	out, finishedMasters := s.recordingCandidates(recs, live, settled)
+	dir := s.rec.Dir()
+	out = dirCandidates(out, dir, recording.StemsSubdir, db.OffloadKindStem, settled, func(name string) (*db.Recording, bool) {
+		base, ok := recording.StemMasterBase(name)
+		if !ok {
+			return nil, false
+		}
+		m, ok := finishedMasters[base]
+		return m, ok
+	})
+	anySettled := func(string) (*db.Recording, bool) { return nil, true }
+	out = dirCandidates(out, dir, transcribe.TranscriptsSubdir, db.OffloadKindTranscript, settled, anySettled)
+	out = dirCandidates(out, dir, clips.Subdir, db.OffloadKindClip, settled, anySettled)
+	out = dirCandidates(out, dir, clipper.ExportSubdir, db.OffloadKindClip, settled, anySettled)
+	sort.Slice(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })
+	return out, nil
+}
+
+// recordingCandidates lists the finished, settled recordings, and indexes
+// them by filename stem so their companion files can find their master.
+func (s *Service) recordingCandidates(recs []db.Recording, live map[string]bool, settled time.Time) ([]candidate, map[string]*db.Recording) {
 	var out []candidate
 	finishedMasters := map[string]*db.Recording{}
 	for i := range recs {
@@ -472,46 +533,37 @@ func (s *Service) candidates() ([]candidate, error) {
 		out = append(out, candidate{rel: r.Filename, kind: db.OffloadKindRecording, at: r.StartedAt,
 			source: r.SourceID, path: path, size: fi.Size(), mtime: fi.ModTime(), rec: r})
 	}
-	dir := s.rec.Dir()
-	add := func(sub, kind string, keep func(name string) (*db.Recording, bool)) {
-		entries, err := os.ReadDir(filepath.Join(dir, sub))
-		if err != nil {
-			return
-		}
-		for _, e := range entries {
-			if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			master, ok := keep(e.Name())
-			if !ok {
-				continue
-			}
-			fi, err := e.Info()
-			if err != nil || fi.ModTime().After(settled) {
-				continue
-			}
-			c := candidate{rel: sub + "/" + e.Name(), kind: kind, at: fi.ModTime(),
-				path: filepath.Join(dir, sub, e.Name()), size: fi.Size(), mtime: fi.ModTime()}
-			if master != nil {
-				c.at, c.source = master.StartedAt, master.SourceID
-			}
-			out = append(out, c)
-		}
+	return out, finishedMasters
+}
+
+// dirCandidates appends the settled files of dir/sub that keep accepts. keep
+// may return the master recording the file belongs to, whose start and source
+// then name the object.
+func dirCandidates(out []candidate, dir, sub, kind string, settled time.Time, keep func(name string) (*db.Recording, bool)) []candidate {
+	entries, err := os.ReadDir(filepath.Join(dir, sub))
+	if err != nil {
+		return out
 	}
-	add(recording.StemsSubdir, db.OffloadKindStem, func(name string) (*db.Recording, bool) {
-		base, ok := recording.StemMasterBase(name)
-		if !ok {
-			return nil, false
+	for _, e := range entries {
+		if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") {
+			continue
 		}
-		m, ok := finishedMasters[base]
-		return m, ok
-	})
-	anySettled := func(string) (*db.Recording, bool) { return nil, true }
-	add(transcribe.TranscriptsSubdir, db.OffloadKindTranscript, anySettled)
-	add(clips.Subdir, db.OffloadKindClip, anySettled)
-	add(clipper.ExportSubdir, db.OffloadKindClip, anySettled)
-	sort.Slice(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })
-	return out, nil
+		master, ok := keep(e.Name())
+		if !ok {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || fi.ModTime().After(settled) {
+			continue
+		}
+		c := candidate{rel: sub + "/" + e.Name(), kind: kind, at: fi.ModTime(),
+			path: filepath.Join(dir, sub, e.Name()), size: fi.Size(), mtime: fi.ModTime()}
+		if master != nil {
+			c.at, c.source = master.StartedAt, master.SourceID
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // prune drops item rows for files that are no longer on disk. The remote object is left alone -- mirror mode keeps local
@@ -576,69 +628,7 @@ var hexMD5 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // upload sends one file and verifies it. It returns the item as persisted.
 func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it db.OffloadItem, cand candidate) db.OffloadItem {
-	err := func() error {
-		f, err := os.Open(cand.path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		before, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		sh, mb, n, err := hashFile(f)
-		if err != nil {
-			return err
-		}
-		if n != before.Size() {
-			return errors.New("file changed while it was being hashed")
-		}
-		it.Bytes, it.SHA256 = n, sh
-		it.State = db.OffloadUploading
-		// The attempt count is the row's as it is NOW: a Retry now pressed
-		// after this pass read the items reset it, and this pass's copy is stale.
-		if cur, cerr := s.store.OffloadItemsFor(it.RelPath); cerr == nil {
-			for _, row := range cur {
-				if row.TargetID == it.TargetID && row.Attempts < it.Attempts {
-					it.Attempts = row.Attempts
-				}
-			}
-		}
-		// Claimed in the database BEFORE the PUT: the UNIQUE(target_id,
-		// object_key) index refuses a key another file holds, so the bucket
-		// write below can never overwrite that file's object.
-		// Conditioned on the binding generation the pass started with: a
-		// target moved to another address since then is not uploaded to here.
-		if err := s.store.PutOffloadItemIfBinding(it, t.BindingGen); err != nil {
-			return fmt.Errorf("claim object key %s: %w", it.Key, err)
-		}
-		var wantETag string
-		if n > s.mpThreshold {
-			composite, err := s.putMultipart(ctx, t, c, f, it, n, sh)
-			if err != nil {
-				return err
-			}
-			wantETag = composite
-		} else {
-			body := io.NewSectionReader(f, 0, n)
-			if _, err := c.Put(ctx, it.Key, body, n, sh, mb, map[string]string{"sha256": sh}); err != nil {
-				return err
-			}
-			raw, _ := base64.StdEncoding.DecodeString(mb)
-			wantETag = hex.EncodeToString(raw)
-		}
-		if err := verify(ctx, c, t, it.Key, n, sh, wantETag); err != nil {
-			return err
-		}
-		after, err := os.Stat(cand.path)
-		if err != nil {
-			return err
-		}
-		if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
-			return errors.New("file changed during upload; it will be sent again")
-		}
-		return nil
-	}()
+	err := s.send(ctx, t, c, &it, cand)
 	var stuck *StuckEvent
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -648,24 +638,7 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		it.LastError = clipErr(err)
 		it.NextAttemptAt = time.Time{}
 	case err != nil:
-		// Counted from the row as it is NOW, not as this pass read it: an
-		// operator who pressed Retry now while the attempt was in flight reset
-		// the count, and that reset is not overwritten by a stale copy.
-		if cur, cerr := s.store.OffloadItemsFor(it.RelPath); cerr == nil {
-			for _, row := range cur {
-				if row.TargetID == it.TargetID && row.Attempts < it.Attempts {
-					it.Attempts = row.Attempts
-				}
-			}
-		}
-		it.Attempts++
-		s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", clipErr(err))
-		it, stuck = s.fail(t, it, err, !retryable(err))
-		if it.State == db.OffloadStuck {
-			// Giving up: the parts already sent are abandoned on the service
-			// too, not left to bill until a lifecycle rule notices.
-			s.abortUpload(ctx, c, t.ID, it.RelPath)
-		}
+		it, stuck = s.uploadFailed(ctx, t, c, it, err)
 	default:
 		it.State = db.OffloadVerified
 		it.LastError = ""
@@ -686,6 +659,103 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		s.raiseStuck(*stuck)
 	}
 	return it
+}
+
+// send hashes, claims, uploads and verifies one file, filling in its size,
+// checksum, state and attempt count as it goes.
+func (s *Service) send(ctx context.Context, t db.StorageTarget, c Client, it *db.OffloadItem, cand candidate) error {
+	f, err := os.Open(cand.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	before, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	sh, mb, n, err := hashFile(f)
+	if err != nil {
+		return err
+	}
+	if n != before.Size() {
+		return errors.New("file changed while it was being hashed")
+	}
+	it.Bytes, it.SHA256 = n, sh
+	it.State = db.OffloadUploading
+	// The attempt count is the row's as it is NOW: a Retry now pressed
+	// after this pass read the items reset it, and this pass's copy is stale.
+	s.refreshAttempts(it)
+	// Claimed in the database BEFORE the PUT: the UNIQUE(target_id,
+	// object_key) index refuses a key another file holds, so the bucket
+	// write below can never overwrite that file's object.
+	// Conditioned on the binding generation the pass started with: a
+	// target moved to another address since then is not uploaded to here.
+	if err := s.store.PutOffloadItemIfBinding(*it, t.BindingGen); err != nil {
+		return fmt.Errorf("claim object key %s: %w", it.Key, err)
+	}
+	wantETag, err := s.put(ctx, t, c, f, *it, mb)
+	if err != nil {
+		return err
+	}
+	if err := verify(ctx, c, t, it.Key, n, sh, wantETag); err != nil {
+		return err
+	}
+	after, err := os.Stat(cand.path)
+	if err != nil {
+		return err
+	}
+	if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		return errors.New("file changed during upload; it will be sent again")
+	}
+	return nil
+}
+
+// put writes the object -- it.Bytes of f, checksummed it.SHA256 and mb -- in
+// parts above the multipart threshold, and returns the ETag the service
+// should report for it.
+func (s *Service) put(ctx context.Context, t db.StorageTarget, c Client, f *os.File, it db.OffloadItem, mb string) (string, error) {
+	n, sh := it.Bytes, it.SHA256
+	if n > s.mpThreshold {
+		return s.putMultipart(ctx, t, c, f, it, n, sh)
+	}
+	body := io.NewSectionReader(f, 0, n)
+	if _, err := c.Put(ctx, it.Key, body, n, sh, mb, map[string]string{"sha256": sh}); err != nil {
+		return "", err
+	}
+	raw, _ := base64.StdEncoding.DecodeString(mb)
+	return hex.EncodeToString(raw), nil
+}
+
+// refreshAttempts lowers its attempt count to the stored row's, when an
+// operator reset it since this pass read the items.
+func (s *Service) refreshAttempts(it *db.OffloadItem) {
+	cur, err := s.store.OffloadItemsFor(it.RelPath)
+	if err != nil {
+		return
+	}
+	for _, row := range cur {
+		if row.TargetID == it.TargetID && row.Attempts < it.Attempts {
+			it.Attempts = row.Attempts
+		}
+	}
+}
+
+// uploadFailed spends an attempt on a failed upload and decides whether the
+// item retries later or is stuck.
+func (s *Service) uploadFailed(ctx context.Context, t db.StorageTarget, c Client, it db.OffloadItem, err error) (db.OffloadItem, *StuckEvent) {
+	// Counted from the row as it is NOW, not as this pass read it: an
+	// operator who pressed Retry now while the attempt was in flight reset
+	// the count, and that reset is not overwritten by a stale copy.
+	s.refreshAttempts(&it)
+	it.Attempts++
+	s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", clipErr(err))
+	it, stuck := s.fail(t, it, err, !retryable(err))
+	if it.State == db.OffloadStuck {
+		// Giving up: the parts already sent are abandoned on the service
+		// too, not left to bill until a lifecycle rule notices.
+		s.abortUpload(ctx, c, t.ID, it.RelPath)
+	}
+	return it, stuck
 }
 
 // StuckEvent is what the alert, webhook and event-stream paths are told when

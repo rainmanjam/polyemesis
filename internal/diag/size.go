@@ -200,75 +200,9 @@ func capValue(v any, budget int) (any, int, bool) {
 		out, cut := cutString(t, budget)
 		return out, budget - encodedLen(out), cut
 	case []string:
-		out := make([]string, 0, len(t))
-		cut := false
-		dropped := 0
-		// ROOM FOR THE NOTE IS RESERVED BEFORE THE ELEMENTS SPEND THE BUDGET.
-		// Without it the loop consumes everything and the "N more" note cannot be
-		// afforded at the one moment it is needed -- which is precisely when
-		// elements were dropped.
-		reserve := 0
-		if len(t) > 1 && budget > noteReserve {
-			reserve = noteReserve
-			budget -= reserve
-		}
-		for i, s := range t {
-			if budget <= 0 {
-				// The remaining elements are dropped rather than emptied: an argv
-				// of blank strings looks like an argv that WAS blank.
-				dropped = len(t) - i
-				cut = true
-				break
-			}
-			c, did := cutString(s, budget)
-			// AN ELEMENT THAT CANNOT BE REPRESENTED AT ALL IS DROPPED, NOT
-			// APPENDED BLANK. When the remaining budget is smaller than the
-			// marker, cutString returns "" -- and appending that produced exactly
-			// the argv of blank strings this branch exists to avoid, which reads
-			// as arguments that were genuinely empty.
-			if s != "" && c == "" {
-				dropped = len(t) - i
-				cut = true
-				break
-			}
-			out = append(out, c)
-			budget -= encodedLen(c)
-			cut = cut || did
-		}
-		budget += reserve
-		if dropped > 0 {
-			// SAID, NOT SILENT. ["ffmpeg","-i","src","-f","flv","rtmp://…"] cut to
-			// ["ffmpeg","-i","src"] reads as a command that was genuinely that
-			// short, and the argv is usually the thing being diagnosed.
-			note := fmt.Sprintf("%s, %d more]", truncationMarker, dropped)
-			if len(note) <= budget {
-				out = append(out, note)
-				budget -= len(note)
-			}
-		}
-		return out, budget, cut
+		return capStrings(t, budget)
 	case map[string]any:
-		out := make(map[string]any, len(t))
-		cut := false
-		for _, k := range sortedKeys(t) {
-			// THE KEY MUST FIT BEFORE IT IS TAKEN. Checking only `budget <= 0`
-			// here let a 2 KB key past a 1-byte budget and expanded the record
-			// beyond the cap -- capRecord already guarded this and capValue did
-			// not, which is exactly the kind of gap a second reader finds.
-			if budget <= len(k) {
-				cut = true
-				break
-			}
-			budget -= len(k)
-			vv, rest, did := capValue(t[k], budget)
-			out[k] = vv
-			budget = rest
-			cut = cut || did
-		}
-		if len(out) != len(t) {
-			cut = true
-		}
-		return out, budget, cut
+		return capMap(t, budget)
 	case error:
 		// Reached only when capRecord is called directly: Observe's scrubValue has
 		// already flattened errors to strings by this point. Handled anyway,
@@ -283,23 +217,106 @@ func capValue(v any, budget int) (any, int, bool) {
 		out, did := cutString(t.String(), budget)
 		return out, budget - len(out), did
 	default:
-		n := valueBytes(v)
-		if n > budget {
-			// Dropped to an empty string rather than passed through unbudgeted, as
-			// an earlier version did -- that returned a negative budget AND
-			// reported no cut, so the record went over the cap claiming not to have.
-			return "", budget, true
-		}
-		if isScalar(v) {
-			return v, budget - n, false
-		}
-		// Unrecognised and it fits: carry its rendering, so what the bundle holds
-		// is what was measured.
-		if b, err := json.Marshal(v); err == nil {
-			return string(b), budget - n, false
-		}
-		return fmt.Sprint(v), budget - n, false
+		return capOther(v, budget)
 	}
+}
+
+// capStrings shortens a string list to fit budget, dropping the elements that
+// do not fit and saying how many went.
+func capStrings(t []string, budget int) ([]string, int, bool) {
+	// ROOM FOR THE NOTE IS RESERVED BEFORE THE ELEMENTS SPEND THE BUDGET.
+	// Without it the loop consumes everything and the "N more" note cannot be
+	// afforded at the one moment it is needed -- which is precisely when
+	// elements were dropped.
+	reserve := 0
+	if len(t) > 1 && budget > noteReserve {
+		reserve = noteReserve
+		budget -= reserve
+	}
+	out, budget, dropped, cut := cutStrings(t, budget)
+	budget += reserve
+	if dropped > 0 {
+		// SAID, NOT SILENT. ["ffmpeg","-i","src","-f","flv","rtmp://…"] cut to
+		// ["ffmpeg","-i","src"] reads as a command that was genuinely that
+		// short, and the argv is usually the thing being diagnosed.
+		note := fmt.Sprintf("%s, %d more]", truncationMarker, dropped)
+		if len(note) <= budget {
+			out = append(out, note)
+			budget -= len(note)
+		}
+	}
+	return out, budget, cut
+}
+
+// cutStrings spends budget on t's elements in order, and reports how many
+// were dropped once it ran out.
+func cutStrings(t []string, budget int) (out []string, rest, dropped int, cut bool) {
+	out = make([]string, 0, len(t))
+	for i, s := range t {
+		if budget <= 0 {
+			// The remaining elements are dropped rather than emptied: an argv
+			// of blank strings looks like an argv that WAS blank.
+			return out, budget, len(t) - i, true
+		}
+		c, did := cutString(s, budget)
+		// AN ELEMENT THAT CANNOT BE REPRESENTED AT ALL IS DROPPED, NOT
+		// APPENDED BLANK. When the remaining budget is smaller than the
+		// marker, cutString returns "" -- and appending that produced exactly
+		// the argv of blank strings this branch exists to avoid, which reads
+		// as arguments that were genuinely empty.
+		if s != "" && c == "" {
+			return out, budget, len(t) - i, true
+		}
+		out = append(out, c)
+		budget -= encodedLen(c)
+		cut = cut || did
+	}
+	return out, budget, 0, cut
+}
+
+// capMap shortens a map's values, in key order, to fit budget.
+func capMap(t map[string]any, budget int) (map[string]any, int, bool) {
+	out := make(map[string]any, len(t))
+	cut := false
+	for _, k := range sortedKeys(t) {
+		// THE KEY MUST FIT BEFORE IT IS TAKEN. Checking only `budget <= 0`
+		// here let a 2 KB key past a 1-byte budget and expanded the record
+		// beyond the cap -- capRecord already guarded this and capValue did
+		// not, which is exactly the kind of gap a second reader finds.
+		if budget <= len(k) {
+			cut = true
+			break
+		}
+		budget -= len(k)
+		vv, rest, did := capValue(t[k], budget)
+		out[k] = vv
+		budget = rest
+		cut = cut || did
+	}
+	if len(out) != len(t) {
+		cut = true
+	}
+	return out, budget, cut
+}
+
+// capOther fits a scalar or an unrecognised value to budget.
+func capOther(v any, budget int) (any, int, bool) {
+	n := valueBytes(v)
+	if n > budget {
+		// Dropped to an empty string rather than passed through unbudgeted, as
+		// an earlier version did -- that returned a negative budget AND
+		// reported no cut, so the record went over the cap claiming not to have.
+		return "", budget, true
+	}
+	if isScalar(v) {
+		return v, budget - n, false
+	}
+	// Unrecognised and it fits: carry its rendering, so what the bundle holds
+	// is what was measured.
+	if b, err := json.Marshal(v); err == nil {
+		return string(b), budget - n, false
+	}
+	return fmt.Sprint(v), budget - n, false
 }
 
 // sortedKeys gives the budget a deterministic spending order.

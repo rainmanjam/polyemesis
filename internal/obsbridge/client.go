@@ -231,52 +231,66 @@ func decodeFrame(raw []byte) (Event, bool) {
 	}
 	switch m.Op {
 	case OpEvent:
-		var e EventFrame
-		if json.Unmarshal(m.D, &e) != nil {
-			return Event{}, false
-		}
-		switch e.EventType {
-		case EventStreamStateChanged:
-			var s StreamState
-			if json.Unmarshal(e.EventData, &s) != nil {
-				return Event{}, false
-			}
-			switch s.OutputState {
-			case OutputStarted:
-				return Event{Kind: KindStreamStarted, Via: ViaWebSocket}, true
-			case OutputStopped:
-				return Event{Kind: KindStreamStopped, Via: ViaWebSocket}, true
-			}
-		case EventCurrentProgramSceneChanged:
-			var p ProgramScene
-			if json.Unmarshal(e.EventData, &p) != nil || p.Name() == "" {
-				return Event{}, false
-			}
-			return Event{Kind: KindSceneChanged, Scene: p.Name(), Via: ViaWebSocket}, true
-		}
+		return decodeEvent(m.D)
 	case OpRequestResponse:
-		var r RequestResponse
-		if json.Unmarshal(m.D, &r) != nil || !r.RequestStatus.Result {
+		return decodeResponse(m.D)
+	}
+	return Event{}, false
+}
+
+// decodeEvent reads an event frame: a stream starting or stopping, or the
+// program scene changing.
+func decodeEvent(d json.RawMessage) (Event, bool) {
+	var e EventFrame
+	if json.Unmarshal(d, &e) != nil {
+		return Event{}, false
+	}
+	switch e.EventType {
+	case EventStreamStateChanged:
+		var s StreamState
+		if json.Unmarshal(e.EventData, &s) != nil {
 			return Event{}, false
 		}
-		switch r.RequestType {
-		case ReqGetStreamStatus:
-			var s StreamStatus
-			if json.Unmarshal(r.ResponseData, &s) != nil {
-				return Event{}, false
-			}
-			k := KindStreamStopped
-			if s.OutputActive {
-				k = KindStreamStarted
-			}
-			return Event{Kind: k, Via: ViaWebSocket, Sync: true}, true
-		case ReqGetCurrentProgramScene:
-			var p ProgramScene
-			if json.Unmarshal(r.ResponseData, &p) != nil || p.Name() == "" {
-				return Event{}, false
-			}
-			return Event{Kind: KindSceneChanged, Scene: p.Name(), Via: ViaWebSocket, Sync: true}, true
+		switch s.OutputState {
+		case OutputStarted:
+			return Event{Kind: KindStreamStarted, Via: ViaWebSocket}, true
+		case OutputStopped:
+			return Event{Kind: KindStreamStopped, Via: ViaWebSocket}, true
 		}
+	case EventCurrentProgramSceneChanged:
+		var p ProgramScene
+		if json.Unmarshal(e.EventData, &p) != nil || p.Name() == "" {
+			return Event{}, false
+		}
+		return Event{Kind: KindSceneChanged, Scene: p.Name(), Via: ViaWebSocket}, true
+	}
+	return Event{}, false
+}
+
+// decodeResponse reads a successful answer to one of the bridge's sync
+// requests: the stream's status or the current program scene.
+func decodeResponse(d json.RawMessage) (Event, bool) {
+	var r RequestResponse
+	if json.Unmarshal(d, &r) != nil || !r.RequestStatus.Result {
+		return Event{}, false
+	}
+	switch r.RequestType {
+	case ReqGetStreamStatus:
+		var s StreamStatus
+		if json.Unmarshal(r.ResponseData, &s) != nil {
+			return Event{}, false
+		}
+		k := KindStreamStopped
+		if s.OutputActive {
+			k = KindStreamStarted
+		}
+		return Event{Kind: k, Via: ViaWebSocket, Sync: true}, true
+	case ReqGetCurrentProgramScene:
+		var p ProgramScene
+		if json.Unmarshal(r.ResponseData, &p) != nil || p.Name() == "" {
+			return Event{}, false
+		}
+		return Event{Kind: KindSceneChanged, Scene: p.Name(), Via: ViaWebSocket, Sync: true}, true
 	}
 	return Event{}, false
 }

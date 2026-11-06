@@ -658,3 +658,18 @@ func TestSenderHostMapsTheUpstreamSocketBackToTheGroupsCreator(t *testing.T) {
 		t.Error("SenderHost answered for an address no group owns")
 	}
 }
+
+// The link a group's non-ACK traffic falls back to is the one heard from
+// last; on a tie the earlier link in the group keeps it.
+func TestMostRecentLinkIsTheLastHeardAndTheFirstOnATie(t *testing.T) {
+	t0 := time.Unix(1_800_000_000, 0)
+	a := &link{lastSeen: t0}
+	b := &link{lastSeen: t0.Add(time.Second)}
+	c := &link{lastSeen: t0.Add(time.Second)}
+	if got := mostRecentLink([]*link{a, b, c}); got != b {
+		t.Errorf("mostRecentLink = %p, want the first of the latest (%p)", got, b)
+	}
+	if got := mostRecentLink([]*link{a}); got != a {
+		t.Errorf("mostRecentLink of one link = %p, want it (%p)", got, a)
+	}
+}

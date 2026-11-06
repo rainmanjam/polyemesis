@@ -60,12 +60,12 @@ type storageTargetRequest struct {
 }
 
 func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
-	str := func(dst *string, v *string) {
+	str := func(dst, v *string) {
 		if v != nil {
 			*dst = strings.TrimSpace(*v)
 		}
 	}
-	bl := func(dst *bool, v *bool) {
+	bl := func(dst, v *bool) {
 		if v != nil {
 			*dst = *v
 		}
@@ -171,7 +171,7 @@ func locationChanged(saved, next db.StorageTarget) bool {
 }
 
 // msgInvalidID is the 400 every storage route gives a path id that is not one.
-const msgInvalidID = "invalid id"
+const msgInvalidID = errInvalidID
 
 // validateEndpoint refuses an endpoint that is not an http(s) URL with a
 // host, one that carries credentials, a query or a fragment, and a literal

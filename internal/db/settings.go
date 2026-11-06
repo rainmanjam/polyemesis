@@ -467,12 +467,7 @@ func (p PlayoutSettings) problems() []string {
 	if k := p.AudioKbps; k < MinPlayoutAudioKbps || k > MaxPlayoutAudioKbps {
 		add("playout audio bitrate %d kbps out of range (%d-%d)", k, MinPlayoutAudioKbps, MaxPlayoutAudioKbps)
 	}
-	if t := p.SessionIdleSeconds; t < 5 || t > 3600 {
-		add("playout session idle timeout %ds out of range (5-3600)", t)
-	}
-	if n := p.MaxSessions; n < 1 || n > 1_000_000 {
-		add("playout session cap %d out of range (1-1000000)", n)
-	}
+	p.sessionProblems(add)
 	if len(p.Variants) > MaxPlayoutVariants {
 		add("playout has %d variants (maximum %d)", len(p.Variants), MaxPlayoutVariants)
 	}
@@ -482,23 +477,39 @@ func (p PlayoutSettings) problems() []string {
 
 	seen := map[string]bool{}
 	for _, v := range p.Variants {
-		if !variantNameOK(v.Name) {
-			add("playout variant name %q must be 1-%d characters of letters, digits, '-' or '_'",
-				v.Name, MaxPlayoutVariantName)
-			continue
-		}
-		// Two variants sharing a name would share a directory, and the second
-		// muxer would overwrite the first's playlist mid-stream.
-		if seen[strings.ToLower(v.Name)] {
-			add("duplicate playout variant name %q", v.Name)
-		}
-		seen[strings.ToLower(v.Name)] = true
-
-		if v.AudioTrack < 0 || v.AudioTrack > 63 {
-			add("playout variant %q audio track %d out of range (0-63)", v.Name, v.AudioTrack)
-		}
+		v.problems(seen, add)
 	}
 	return probs
+}
+
+// sessionProblems checks the viewer session idle timeout and cap.
+func (p PlayoutSettings) sessionProblems(add problemAdder) {
+	if t := p.SessionIdleSeconds; t < 5 || t > 3600 {
+		add("playout session idle timeout %ds out of range (5-3600)", t)
+	}
+	if n := p.MaxSessions; n < 1 || n > 1_000_000 {
+		add("playout session cap %d out of range (1-1000000)", n)
+	}
+}
+
+// problems checks one playout variant. seen holds the lower-cased names of the
+// variants before it; this one's is added once the name itself is sound.
+func (v PlayoutVariant) problems(seen map[string]bool, add problemAdder) {
+	if !variantNameOK(v.Name) {
+		add("playout variant name %q must be 1-%d characters of letters, digits, '-' or '_'",
+			v.Name, MaxPlayoutVariantName)
+		return
+	}
+	// Two variants sharing a name would share a directory, and the second
+	// muxer would overwrite the first's playlist mid-stream.
+	if seen[strings.ToLower(v.Name)] {
+		add("duplicate playout variant name %q", v.Name)
+	}
+	seen[strings.ToLower(v.Name)] = true
+
+	if v.AudioTrack < 0 || v.AudioTrack > 63 {
+		add("playout variant %q audio track %d out of range (0-63)", v.Name, v.AudioTrack)
+	}
 }
 
 // ----------------------------------------------------------------- failover
@@ -1536,21 +1547,7 @@ func (p PostProdSettings) problems() []string {
 	if m := p.DefaultMode; m != "" && !jobs.Mode(m).Valid() {
 		add("unknown job mode %q (realtime, deferred, scheduled, manual)", m)
 	}
-	if c := p.CPUCeilingPercent; c < 0 || c > 100 {
-		add("cpu ceiling %d%% out of range (0-100, 0 to disable)", c)
-	}
-	if r := p.CPUResumePercent; r < 0 || r > 100 {
-		add("cpu resume level %d%% out of range (0-100)", r)
-	}
-	if p.CPUCeilingPercent > 0 && p.CPUResumePercent >= p.CPUCeilingPercent {
-		add("cpu resume level %d%% must be below the ceiling %d%%", p.CPUResumePercent, p.CPUCeilingPercent)
-	}
-	if s := p.CPUSustainedSeconds; s < 0 || s > 3600 {
-		add("cpu sustained window %ds out of range (0-3600, 0 for the default)", s)
-	}
-	if s := p.CPUSettleSeconds; s < 0 || s > 3600 {
-		add("cpu settle window %ds out of range (0-3600, 0 for the default)", s)
-	}
+	p.cpuProblems(add)
 	if b := p.BatteryFloorPercent; b < 0 || b > 100 {
 		add("battery floor %d%% out of range (0-100, 0 to disable)", b)
 	}
@@ -1566,47 +1563,82 @@ func (p PostProdSettings) problems() []string {
 	if s := p.DeferSeconds; s < 0 || s > 3600 {
 		add("job deferral %ds out of range (0-3600, 0 for the default)", s)
 	}
-	if d := p.RetainDays; d < 0 || d > MaxPostProdRetainDays {
-		add("job history retention %d days out of range (0-%d, 0 to keep forever)", d, MaxPostProdRetainDays)
-	}
-	if n := p.RetainJobs; n < 0 || n > MaxPostProdRetainJobs {
-		add("job history floor %d out of range (0-%d)", n, MaxPostProdRetainJobs)
-	}
+	p.retentionProblems(add)
+	p.kindsProblems(add)
+	return probs
+}
+
+// kindsProblems checks the per-kind policy rows.
+func (p PostProdSettings) kindsProblems(add problemAdder) {
 	if len(p.Kinds) > MaxPostProdKinds {
 		add("post-production policy names %d job kinds (maximum %d)", len(p.Kinds), MaxPostProdKinds)
 	}
 
 	seen := map[string]bool{}
 	for _, k := range p.Kinds {
-		name := strings.TrimSpace(k.Kind)
-		switch {
-		case name == "":
-			add("a post-production policy row has no job kind")
-			continue
-		case len(name) > jobs.MaxKindLen:
-			add("job kind %q is longer than %d characters", name, jobs.MaxKindLen)
-			continue
-		// Two rows for one kind would silently pick whichever the map iteration
-		// landed on last.
-		case seen[name]:
-			add("duplicate post-production policy for job kind %q", name)
-			continue
-		}
-		seen[name] = true
+		k.problems(seen, add)
+	}
+}
 
-		if k.Mode != "" && !jobs.Mode(k.Mode).Valid() {
-			add("job kind %q has an unknown mode %q", name, k.Mode)
-		}
-		if len(k.Windows) > jobs.MaxWindows {
-			add("job kind %q has %d windows (maximum %d)", name, len(k.Windows), jobs.MaxWindows)
-		}
-		for _, w := range k.Windows {
-			if err := w.Validate(); err != nil {
-				add("job kind %q: %v", name, err)
-			}
+// retentionProblems checks how much job history is kept.
+func (p PostProdSettings) retentionProblems(add problemAdder) {
+	if d := p.RetainDays; d < 0 || d > MaxPostProdRetainDays {
+		add("job history retention %d days out of range (0-%d, 0 to keep forever)", d, MaxPostProdRetainDays)
+	}
+	if n := p.RetainJobs; n < 0 || n > MaxPostProdRetainJobs {
+		add("job history floor %d out of range (0-%d)", n, MaxPostProdRetainJobs)
+	}
+}
+
+// cpuProblems checks the CPU ceiling, resume level and the windows around them.
+func (p PostProdSettings) cpuProblems(add problemAdder) {
+	if c := p.CPUCeilingPercent; c < 0 || c > 100 {
+		add("cpu ceiling %d%% out of range (0-100, 0 to disable)", c)
+	}
+	if r := p.CPUResumePercent; r < 0 || r > 100 {
+		add("cpu resume level %d%% out of range (0-100)", r)
+	}
+	if p.CPUCeilingPercent > 0 && p.CPUResumePercent >= p.CPUCeilingPercent {
+		add("cpu resume level %d%% must be below the ceiling %d%%", p.CPUResumePercent, p.CPUCeilingPercent)
+	}
+	if s := p.CPUSustainedSeconds; s < 0 || s > 3600 {
+		add("cpu sustained window %ds out of range (0-3600, 0 for the default)", s)
+	}
+	if s := p.CPUSettleSeconds; s < 0 || s > 3600 {
+		add("cpu settle window %ds out of range (0-3600, 0 for the default)", s)
+	}
+}
+
+// problems checks one per-kind policy row. seen holds the kinds of the rows
+// before it, and this row's kind is added to it once the kind itself is sound.
+func (k PostProdKindSettings) problems(seen map[string]bool, add problemAdder) {
+	name := strings.TrimSpace(k.Kind)
+	switch {
+	case name == "":
+		add("a post-production policy row has no job kind")
+		return
+	case len(name) > jobs.MaxKindLen:
+		add("job kind %q is longer than %d characters", name, jobs.MaxKindLen)
+		return
+	// Two rows for one kind would silently pick whichever the map iteration
+	// landed on last.
+	case seen[name]:
+		add("duplicate post-production policy for job kind %q", name)
+		return
+	}
+	seen[name] = true
+
+	if k.Mode != "" && !jobs.Mode(k.Mode).Valid() {
+		add("job kind %q has an unknown mode %q", name, k.Mode)
+	}
+	if len(k.Windows) > jobs.MaxWindows {
+		add("job kind %q has %d windows (maximum %d)", name, len(k.Windows), jobs.MaxWindows)
+	}
+	for _, w := range k.Windows {
+		if err := w.Validate(); err != nil {
+			add("job kind %q: %v", name, err)
 		}
 	}
-	return probs
 }
 
 // ListenerSettings is where the server actually binds. Install-wide, because
@@ -2504,88 +2536,24 @@ func (s Settings) Validate() error {
 	var probs []string
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
-	for _, p := range s.Ingest.problems() {
-		add("%s", p)
-	}
-	if s.Recording.SegmentSeconds < 10 || s.Recording.SegmentSeconds > 24*3600 {
-		add("recording segment length %ds out of range (10-86400)", s.Recording.SegmentSeconds)
-	}
-	if s.Recording.MaxGB < 0 {
-		add("recording size cap cannot be negative")
-	}
-	if s.Recording.MaxAgeHours < 0 {
-		add("recording age cap cannot be negative")
-	}
-	if s.Recording.MinFreeGB < 0 {
-		add("recording free-space floor cannot be negative")
-	}
-	// THE SAVE IS REFUSED, not silently corrected. automod.ParseConfidence
-	// already stops a bad floor reaching the checker, but that fix alone would
-	// leave an operator looking at 80 in the settings form, a saved row that
-	// agrees with them, and a server quietly moderating on 0.8 -- three places
-	// telling three stories. Only this one can answer at the moment the value
-	// is typed, which is the moment it can still be corrected.
-	//
-	// Guarded on the model being ENABLED: an install that has never opened the
-	// automod page carries a zero here and is not misconfigured, it is
-	// unconfigured, and refusing every unrelated settings save over a field
-	// nobody has touched is its own defect.
-	for _, m := range []struct {
-		name string
-		cfg  AutomodModel
-	}{{"", s.Automod.Model}, {"secondary ", s.Automod.Secondary}} {
-		if m.cfg.Enabled {
-			if c := m.cfg.MinConfidence; c < 0.01 || c > 1 {
-				add("automod %sconfidence floor %v is outside 0.01-1 (the model reports "+
-					"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
-					"anything above 1 stops it acting at all)", m.name, c)
-			}
-		}
-		// Unconditional: a protocol saved while the checker is off is the
-		// one it wakes up with.
-		if p := m.cfg.Protocol; p != "" && p != AutomodProtocolJev && p != AutomodProtocolOpenAI {
-			add("automod %sprotocol %q is not jev or openai", m.name, p)
-		}
-	}
+	addEach(add, s.Ingest.problems())
+	s.Recording.problems(add)
+	s.Automod.problems(add)
 	// Empty is deliberately accepted as "the default": a client that has never
 	// heard of stems must be able to save the rest of the recording settings.
 	if !ffmpeg.ValidStemCodec(s.Recording.StemCodec) {
 		add("unknown stem codec %q (flac, wav)", s.Recording.StemCodec)
 	}
-	// THE ZONE HAS TO RESOLVE, and the refusal belongs here rather than at the
-	// point a timestamp is rendered. A zone that cannot be loaded silently
-	// falls back to UTC everywhere, which reads as "the setting does not work"
-	// on a screen that gives no reason -- and reads as a correct time to
-	// somebody who does not notice the offset.
-	if tz := strings.TrimSpace(s.Display.TimeZone); tz != "" {
-		if _, err := time.LoadLocation(tz); err != nil {
-			add("unknown display time zone %q -- use an IANA name such as "+
-				"\"Europe/London\" or \"America/New_York\", or leave it empty for UTC", tz)
-		}
-	}
+	s.Display.problems(add)
 	if s.Logging.MaxFileMB < 1 || s.Logging.MaxFileMB > 1024 {
 		add("log file size %dMB out of range (1-1024)", s.Logging.MaxFileMB)
 	}
 	if s.Logging.MaxFiles < 1 || s.Logging.MaxFiles > 100 {
 		add("log file count %d out of range (1-100)", s.Logging.MaxFiles)
 	}
-	if s.Preview.SegmentSeconds < 1 || s.Preview.SegmentSeconds > 10 {
-		add("preview segment length %ds out of range (1-10)", s.Preview.SegmentSeconds)
-	}
-	if s.Preview.VideoHeight < 144 || s.Preview.VideoHeight > 1080 {
-		add("preview height %d out of range (144-1080)", s.Preview.VideoHeight)
-	}
-	// Anything under a few seconds would tear the encoder down between a
-	// player's own playlist polls.
-	if t := s.Preview.IdleTimeoutSeconds; t != 0 && (t < 5 || t > 3600) {
-		add("preview idle timeout %ds out of range (5-3600, or 0 for the default)", t)
-	}
-	for _, p := range s.Playout.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Failover.problems(s.Ingest) {
-		add("%s", p)
-	}
+	s.Preview.problems(add)
+	addEach(add, s.Playout.problems())
+	addEach(add, s.Failover.problems(s.Ingest))
 	if s.ChatCommands.SourceID < 0 {
 		add("chat commands programme %d is not a programme", s.ChatCommands.SourceID)
 	}
@@ -2600,27 +2568,13 @@ func (s Settings) Validate() error {
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)
 	}
-	for _, p := range s.PostProd.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Listeners.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.MQTT.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Multitrack.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Destinations.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Chat.problems() {
-		add("%s", p)
-	}
-	for _, p := range s.Alerts.problems() {
-		add("%s", p)
-	}
+	addEach(add, s.PostProd.problems())
+	addEach(add, s.Listeners.problems())
+	addEach(add, s.MQTT.problems())
+	addEach(add, s.Multitrack.problems())
+	addEach(add, s.Destinations.problems())
+	addEach(add, s.Chat.problems())
+	addEach(add, s.Alerts.problems())
 	// The fields readSafeSettings blanks or masks beyond the primary ingest,
 	// which s.Ingest.problems() above already covered. Unconditional, unlike
 	// the MQTT checks: a placeholder saved while a feature is off is still the
@@ -2638,6 +2592,85 @@ func (s Settings) Validate() error {
 		return fmt.Errorf("invalid settings: %v", probs)
 	}
 	return nil
+}
+
+// problems checks the recording segment length and the retention caps.
+func (r RecordingSettings) problems(add problemAdder) {
+	if r.SegmentSeconds < 10 || r.SegmentSeconds > 24*3600 {
+		add("recording segment length %ds out of range (10-86400)", r.SegmentSeconds)
+	}
+	if r.MaxGB < 0 {
+		add("recording size cap cannot be negative")
+	}
+	if r.MaxAgeHours < 0 {
+		add("recording age cap cannot be negative")
+	}
+	if r.MinFreeGB < 0 {
+		add("recording free-space floor cannot be negative")
+	}
+}
+
+// problems checks each automod model's confidence floor and protocol.
+func (a AutomodSettings) problems(add problemAdder) {
+	// THE SAVE IS REFUSED, not silently corrected. automod.ParseConfidence
+	// already stops a bad floor reaching the checker, but that fix alone would
+	// leave an operator looking at 80 in the settings form, a saved row that
+	// agrees with them, and a server quietly moderating on 0.8 -- three places
+	// telling three stories. Only this one can answer at the moment the value
+	// is typed, which is the moment it can still be corrected.
+	//
+	// Guarded on the model being ENABLED: an install that has never opened the
+	// automod page carries a zero here and is not misconfigured, it is
+	// unconfigured, and refusing every unrelated settings save over a field
+	// nobody has touched is its own defect.
+	for _, m := range []struct {
+		name string
+		cfg  AutomodModel
+	}{{"", a.Model}, {"secondary ", a.Secondary}} {
+		if m.cfg.Enabled {
+			if c := m.cfg.MinConfidence; c < 0.01 || c > 1 {
+				add("automod %sconfidence floor %v is outside 0.01-1 (the model reports "+
+					"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
+					"anything above 1 stops it acting at all)", m.name, c)
+			}
+		}
+		// Unconditional: a protocol saved while the checker is off is the
+		// one it wakes up with.
+		if p := m.cfg.Protocol; p != "" && p != AutomodProtocolJev && p != AutomodProtocolOpenAI {
+			add("automod %sprotocol %q is not jev or openai", m.name, p)
+		}
+	}
+}
+
+// problems checks the display time zone resolves.
+func (d DisplaySettings) problems(add problemAdder) {
+	// THE ZONE HAS TO RESOLVE, and the refusal belongs here rather than at the
+	// point a timestamp is rendered. A zone that cannot be loaded silently
+	// falls back to UTC everywhere, which reads as "the setting does not work"
+	// on a screen that gives no reason -- and reads as a correct time to
+	// somebody who does not notice the offset.
+	if tz := strings.TrimSpace(d.TimeZone); tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			add("unknown display time zone %q -- use an IANA name such as "+
+				"\"Europe/London\" or \"America/New_York\", or leave it empty for UTC", tz)
+		}
+	}
+}
+
+// problems checks the preview encoder's segment length, height and idle
+// timeout.
+func (p PreviewSettings) problems(add problemAdder) {
+	if p.SegmentSeconds < 1 || p.SegmentSeconds > 10 {
+		add("preview segment length %ds out of range (1-10)", p.SegmentSeconds)
+	}
+	if p.VideoHeight < 144 || p.VideoHeight > 1080 {
+		add("preview height %d out of range (144-1080)", p.VideoHeight)
+	}
+	// Anything under a few seconds would tear the encoder down between a
+	// player's own playlist polls.
+	if t := p.IdleTimeoutSeconds; t != 0 && (t < 5 || t > 3600) {
+		add("preview idle timeout %ds out of range (5-3600, or 0 for the default)", t)
+	}
 }
 
 // mergeBaseSettings is DefaultSettings with the pre-first-run-choice ingest

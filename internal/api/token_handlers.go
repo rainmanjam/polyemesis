@@ -101,7 +101,7 @@ func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// Read the name BEFORE the row goes, because the created event carries a

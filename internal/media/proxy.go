@@ -152,9 +152,9 @@ func ProxyArgs(s ProxySpec) []string {
 
 	args = append(args, "-c:v", s.Encoder)
 	if p := s.Preset; p != "" {
-		args = append(args, "-preset", p)
+		args = append(args, flagPreset, p)
 	} else if s.Encoder == ProxyEncoder {
-		args = append(args, "-preset", DefaultProxyPreset)
+		args = append(args, flagPreset, DefaultProxyPreset)
 	}
 	args = append(args, proxyRateArgs(s)...)
 	// yuv420p is not optional for a browser: a 10-bit or 4:2:2 master would

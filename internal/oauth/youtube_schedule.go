@@ -245,7 +245,7 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		// the delete usually SUCCEEDS, and then there is no orphan and no
 		// instruction to follow. Best case beats worst case here because the
 		// worst case is exactly what we already had.
-		if delErr := y.deleteBroadcast(ctx, accessToken, created.ID); delErr == nil {
+		if y.deleteBroadcast(ctx, accessToken, created.ID) == nil {
 			return nil, dropCreatedStream(fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
 				"channel's stream, so it was deleted rather than left as an event page for a "+
 				"show that publishes elsewhere: %w", created.ID, err))

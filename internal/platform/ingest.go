@@ -33,8 +33,8 @@ func UTF16Len(s string) int { return len(utf16.Encode([]rune(s))) }
 // UTF16Truncate cuts s to at most max UTF-16 units without splitting a
 // character: a code point outside the BMP is two units and is kept or dropped
 // whole. It is how a title is cut to a limit UTF16Len counts.
-func UTF16Truncate(s string, max int) string {
-	if max <= 0 {
+func UTF16Truncate(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
 	n := 0
@@ -43,7 +43,7 @@ func UTF16Truncate(s string, max int) string {
 		if r >= 0x10000 {
 			w = 2
 		}
-		if n+w > max {
+		if n+w > limit {
 			return s[:i]
 		}
 		n += w

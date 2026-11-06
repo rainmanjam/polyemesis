@@ -176,13 +176,13 @@ func ParseTimestamp(s string) (int64, bool) {
 		return 0, false
 	}
 	h, _ := strconv.ParseInt(m[1], 10, 64)
-	min, _ := strconv.ParseInt(m[2], 10, 64)
+	minutes, _ := strconv.ParseInt(m[2], 10, 64)
 	sec, _ := strconv.ParseInt(m[3], 10, 64)
 	ms, _ := strconv.ParseInt(m[4], 10, 64)
-	if min > 59 || sec > 59 {
+	if minutes > 59 || sec > 59 {
 		return 0, false
 	}
-	return h*3600000 + min*60000 + sec*1000 + ms, true
+	return h*3600000 + minutes*60000 + sec*1000 + ms, true
 }
 
 // progressRE matches whisper.cpp's progress callback line:

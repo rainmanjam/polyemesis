@@ -19,6 +19,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
+// errInvalidPollID is the 400 body the poll routes return for an unparseable id.
+const errInvalidPollID = "invalid poll id"
+
 // Chat polls (#14). The counting is internal/polls; this file is its REST
 // face and the Twitch mirror.
 //
@@ -142,7 +145,7 @@ func (s *Server) handleGetPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid poll id")
+		writeError(w, http.StatusBadRequest, errInvalidPollID)
 		return
 	}
 	if cur, ok := s.polls.Current(); ok && cur.ID == id {
@@ -190,7 +193,7 @@ func (s *Server) handleEndPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid poll id")
+		writeError(w, http.StatusBadRequest, errInvalidPollID)
 		return
 	}
 	res, err := s.polls.End(id)
@@ -225,7 +228,7 @@ func (s *Server) handleExportPolls(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid poll id")
+			writeError(w, http.StatusBadRequest, errInvalidPollID)
 			return
 		}
 		p, err := s.store.Poll(id)

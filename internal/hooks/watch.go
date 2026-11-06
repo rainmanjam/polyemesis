@@ -184,103 +184,130 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 	var out []Event
 	for _, d := range rows {
 		live[d.ID] = true
-		ref := DestinationRef{ID: d.ID, Name: d.Name, Platform: d.Platform}
-		w.names[d.ID] = ref
-
-		st := w.dest[d.ID]
-		if st == nil {
-			st = &edgeState{}
-			w.dest[d.ID] = st
-		}
-		// A disabled destination is OFF rather than exempt. That is the
-		// deliberate divergence from alerts, which treats it as "not down"
-		// because nobody should be woken for a switch somebody flipped. A hook
-		// is a fact: a script mirroring what is live needs the edge whoever
-		// caused it.
-		//
-		// AND "ON" MEANS DELIVERING, NOT SPAWNED. This used to be Enabled &&
-		// Running, and Running is true from the moment the child exists. A
-		// destination pointed at a closed port was therefore announced as
-		// "delivering" on every spawn -- one exploratory run saw the up hook
-		// 14s before a byte left for anywhere -- and a sink that stopped
-		// reading was never announced at all, because the blocked child stays
-		// Running for as long as its TCP connection does.
-		flowing := w.delivering(d)
-		stalled := d.Enabled && d.Running && !flowing
-		if stalled && s.IngestConfigured && !s.IngestLive {
-			// NOTHING ARRIVING IS NOT A DESTINATION STALLING. With the source
-			// gone every destination's output time stops, and that is
-			// ingest.disconnected's news; a down per destination on top of it
-			// would tell a script that every platform had failed when none had.
-			// Hold whatever edge the destination is on, and restart the dwell
-			// so the gap is not counted against it once the source returns.
-			st.offSince = time.Time{}
-			continue
-		}
-		up, down := st.observe(d.Enabled && d.Running && flowing, now, w.cfg.DestinationDownAfter)
-		switch {
-		case up:
-			out = append(out, Event{
-				Trigger: TriggerDestinationUp, At: now, Source: w.src,
-				Destination: &ref, Reason: "delivering",
-			})
-		case down:
-			reason := "stopped"
-			switch {
-			case !d.Enabled:
-				reason = "disabled"
-			case stalled:
-				// The process is up and its output is not moving: the sink
-				// stopped taking data. Not "stopped", which a script (and
-				// the lifecycle coordinator) reads as a crash.
-				reason = "stalled"
-			}
-			ev := Event{
-				Trigger: TriggerDestinationDown, At: now, Source: w.src,
-				Destination: &ref, Reason: reason, Error: d.Error,
-			}
-			// Only for a failure. A disabled destination is the operator's
-			// decision, and a cause left over from its last failed run would
-			// tell a script that the disable was a key rejection.
-			if r := d.Reason; r != nil && d.Enabled {
-				ev.Cause, ev.Held, ev.KeyChanged = r.Cause, r.Held, r.KeyChanged
-			}
-			out = append(out, ev)
-		}
-
-		// HELD: once per hold, and never ahead of the down. A destination this
-		// watcher still calls ON has its down dwell running, and a "held" now
-		// would reach a script that still believes it is delivering; so the
-		// hold waits, and follows the down in the sweep that emits it (st.on is
-		// already false there, so the order is down, then held). One that was
-		// never ON -- a bad key from the first attempt -- has no down coming,
-		// and is announced at once. A disabled destination is not held,
-		// whatever reason it is still carrying, by the rule the down applies to
-		// its cause fields just above.
-		//
-		// Moved here from the events stream's watcher, which derived it on its
-		// own when no webhook carried it. One derivation is what keeps the two
-		// surfaces from saying it twice.
-		isHeld := d.Enabled && d.Reason != nil && d.Reason.Held
-		switch {
-		case !isHeld:
-			w.held[d.ID] = false
-		case !w.held[d.ID] && !st.on:
-			w.held[d.ID] = true
-			r := d.Reason
-			out = append(out, Event{
-				Trigger: TriggerDestinationHeld, At: now, Source: w.src,
-				Destination: &ref,
-				Reason:      "held after repeated quick rejections; press Retry when it is fixed",
-				Error:       d.Error,
-				Cause:       r.Cause, Held: true, KeyChanged: r.KeyChanged,
-			})
-		}
+		out = append(out, w.observeDestination(s, d, now)...)
 	}
 
 	// Rows that disappeared. A destination that was live and has been deleted
 	// must not simply vanish: the last thing a script heard was that it came
 	// up, and nothing would ever correct that.
+	return append(out, w.removeGone(live, now)...)
+}
+
+// observeDestination is one destination's edges for this sweep.
+func (w *Watcher) observeDestination(s alerts.Snapshot, d alerts.DestState, now time.Time) []Event {
+	ref := DestinationRef{ID: d.ID, Name: d.Name, Platform: d.Platform}
+	w.names[d.ID] = ref
+
+	st := w.dest[d.ID]
+	if st == nil {
+		st = &edgeState{}
+		w.dest[d.ID] = st
+	}
+	// A disabled destination is OFF rather than exempt. That is the
+	// deliberate divergence from alerts, which treats it as "not down"
+	// because nobody should be woken for a switch somebody flipped. A hook
+	// is a fact: a script mirroring what is live needs the edge whoever
+	// caused it.
+	//
+	// AND "ON" MEANS DELIVERING, NOT SPAWNED. This used to be Enabled &&
+	// Running, and Running is true from the moment the child exists. A
+	// destination pointed at a closed port was therefore announced as
+	// "delivering" on every spawn -- one exploratory run saw the up hook
+	// 14s before a byte left for anywhere -- and a sink that stopped
+	// reading was never announced at all, because the blocked child stays
+	// Running for as long as its TCP connection does.
+	flowing := w.delivering(d)
+	stalled := d.Enabled && d.Running && !flowing
+	if stalled && s.IngestConfigured && !s.IngestLive {
+		// NOTHING ARRIVING IS NOT A DESTINATION STALLING. With the source
+		// gone every destination's output time stops, and that is
+		// ingest.disconnected's news; a down per destination on top of it
+		// would tell a script that every platform had failed when none had.
+		// Hold whatever edge the destination is on, and restart the dwell
+		// so the gap is not counted against it once the source returns.
+		st.offSince = time.Time{}
+		return nil
+	}
+	var out []Event
+	up, down := st.observe(d.Enabled && d.Running && flowing, now, w.cfg.DestinationDownAfter)
+	switch {
+	case up:
+		out = append(out, Event{
+			Trigger: TriggerDestinationUp, At: now, Source: w.src,
+			Destination: &ref, Reason: "delivering",
+		})
+	case down:
+		out = append(out, w.downEvent(d, &ref, stalled, now))
+	}
+
+	if ev, ok := w.heldEvent(d, st, &ref, now); ok {
+		out = append(out, ev)
+	}
+	return out
+}
+
+// downEvent is destination d's down edge, with why it went down.
+func (w *Watcher) downEvent(d alerts.DestState, ref *DestinationRef, stalled bool, now time.Time) Event {
+	reason := "stopped"
+	switch {
+	case !d.Enabled:
+		reason = "disabled"
+	case stalled:
+		// The process is up and its output is not moving: the sink
+		// stopped taking data. Not "stopped", which a script (and
+		// the lifecycle coordinator) reads as a crash.
+		reason = "stalled"
+	}
+	ev := Event{
+		Trigger: TriggerDestinationDown, At: now, Source: w.src,
+		Destination: ref, Reason: reason, Error: d.Error,
+	}
+	// Only for a failure. A disabled destination is the operator's
+	// decision, and a cause left over from its last failed run would
+	// tell a script that the disable was a key rejection.
+	if r := d.Reason; r != nil && d.Enabled {
+		ev.Cause, ev.Held, ev.KeyChanged = r.Cause, r.Held, r.KeyChanged
+	}
+	return ev
+}
+
+// heldEvent is destination d's held edge, once per hold.
+// HELD: once per hold, and never ahead of the down. A destination this
+// watcher still calls ON has its down dwell running, and a "held" now
+// would reach a script that still believes it is delivering; so the
+// hold waits, and follows the down in the sweep that emits it (st.on is
+// already false there, so the order is down, then held). One that was
+// never ON -- a bad key from the first attempt -- has no down coming,
+// and is announced at once. A disabled destination is not held,
+// whatever reason it is still carrying, by the rule the down applies to
+// its cause fields just above.
+//
+// Moved here from the events stream's watcher, which derived it on its
+// own when no webhook carried it. One derivation is what keeps the two
+// surfaces from saying it twice.
+func (w *Watcher) heldEvent(d alerts.DestState, st *edgeState, ref *DestinationRef, now time.Time) (Event, bool) {
+	isHeld := d.Enabled && d.Reason != nil && d.Reason.Held
+	switch {
+	case !isHeld:
+		w.held[d.ID] = false
+	case !w.held[d.ID] && !st.on:
+		w.held[d.ID] = true
+		r := d.Reason
+		return Event{
+			Trigger: TriggerDestinationHeld, At: now, Source: w.src,
+			Destination: ref,
+			Reason:      "held after repeated quick rejections; press Retry when it is fixed",
+			Error:       d.Error,
+			Cause:       r.Cause, Held: true, KeyChanged: r.KeyChanged,
+		}, true
+	}
+	return Event{}, false
+}
+
+// removeGone forgets the destinations not in this sweep (live), with a down
+// edge for each one that was on.
+func (w *Watcher) removeGone(live map[int64]bool, now time.Time) []Event {
+	var out []Event
 	var gone []int64
 	for id := range w.dest {
 		if !live[id] {

@@ -301,7 +301,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		// choose and refused to give it the template's. Cancelling it is the only way that does not put
 		// a public page with the wrong title in front of viewers. If the cancel also fails, the event is
 		// recorded so its id is not lost, and it is named in the log for the operator to remove.
-		if cerr := s.cancelCreatedEvent(ctx, ed, acct.AccessToken, b.ID); cerr == nil {
+		if s.cancelCreatedEvent(ctx, ed, acct.AccessToken, b.ID) == nil {
 			release()
 			s.log.Warn("recurring: the platform refused the event's title, so the event was cancelled",
 				"destination", d.Name, "schedule", sc.Name, "err", redactErr(err))
@@ -337,7 +337,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		// A pending claim left here ages out after claimAbandonAfter and the occurrence is created AGAIN, a
 		// duplicate public event. So the row is stranded with the event id instead, which the sweep cancels. If
 		// even that write fails, the row is gone, and the event is cancelled now so it is not left unnamed.
-		if serr := s.store.StrandOccurrence(claimID, b.ID); serr == nil {
+		if s.store.StrandOccurrence(claimID, b.ID) == nil {
 			s.log.Error("recurring: the event was created but its record could not be written; it is "+
 				"recorded as stranded and will be cancelled", "destination", d.Name, "schedule", sc.Name,
 				"event", b.ID, "err", redactErr(err))

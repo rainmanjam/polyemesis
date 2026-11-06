@@ -171,100 +171,142 @@ type rowKey struct{ platform, account string }
 // Samples taken in one tick share an At, which is how ticks are told apart;
 // the sampler stamps every reading of a tick with the tick's own time.
 func Summarise(samples []Sample) Summary {
-	type acc struct {
-		row  Row
-		sum  int
-		peak int
-	}
-	rows := map[rowKey]*acc{}
-	order := []rowKey{}
-	ticks := map[int64]*Point{}
-	tickOrder := []int64{}
-
+	rows := rowFold{rows: map[rowKey]*rowAcc{}}
+	ticks := tickFold{ticks: map[int64]*Point{}}
 	for _, s := range samples {
-		k := rowKey{s.Platform, s.Account}
-		a, ok := rows[k]
-		if !ok {
-			a = &acc{row: Row{Platform: s.Platform, Account: s.Account}}
-			rows[k] = a
-			order = append(order, k)
-		}
-		if s.Name != "" {
-			a.row.Name = s.Name
-		}
-		a.row.Samples++
-
-		at := s.At.UnixMilli()
-		p, ok := ticks[at]
-		if !ok {
-			p = &Point{At: s.At}
-			ticks[at] = p
-			tickOrder = append(tickOrder, at)
-		}
-		if transient(s.Reason) {
-			p.Partial = true
-		}
+		a := rows.add(s)
+		p := ticks.add(s)
 		if s.Viewers == nil {
 			continue
 		}
 		v := *s.Viewers
-		if a.row.Reported == 0 || v > a.peak {
-			a.peak = v
-		}
-		a.row.Reported++
-		a.sum += v
+		a.count(v)
 		if p.Total == nil {
 			z := 0
 			p.Total = &z
 		}
 		*p.Total += v
 	}
+	out := Summary{Rows: rows.summarise()}
+	out.Points, out.PeakTotal, out.AverageTotal = ticks.summarise()
+	return out
+}
 
-	out := Summary{Rows: make([]Row, 0, len(order)), Points: make([]Point, 0, len(tickOrder))}
-	for _, k := range order {
-		a := rows[k]
+// rowAcc accumulates one platform account's readings.
+type rowAcc struct {
+	row  Row
+	sum  int
+	peak int
+}
+
+// count adds one reported viewer count.
+func (a *rowAcc) count(v int) {
+	if a.row.Reported == 0 || v > a.peak {
+		a.peak = v
+	}
+	a.row.Reported++
+	a.sum += v
+}
+
+// rowFold is the per-account rows, in first-seen order.
+type rowFold struct {
+	rows  map[rowKey]*rowAcc
+	order []rowKey
+}
+
+// add counts one sample against its account's row, creating it on first
+// sight, and returns the row.
+func (f *rowFold) add(s Sample) *rowAcc {
+	k := rowKey{s.Platform, s.Account}
+	a, ok := f.rows[k]
+	if !ok {
+		a = &rowAcc{row: Row{Platform: s.Platform, Account: s.Account}}
+		f.rows[k] = a
+		f.order = append(f.order, k)
+	}
+	if s.Name != "" {
+		a.row.Name = s.Name
+	}
+	a.row.Samples++
+	return a
+}
+
+// summarise finishes each row's peak and average and sorts the rows for the
+// report.
+func (f *rowFold) summarise() []Row {
+	out := make([]Row, 0, len(f.order))
+	for _, k := range f.order {
+		a := f.rows[k]
 		if a.row.Reported > 0 {
 			peak := a.peak
 			avg := round1(float64(a.sum) / float64(a.row.Reported))
 			a.row.Peak, a.row.Average = &peak, &avg
 		}
-		out.Rows = append(out.Rows, a.row)
+		out = append(out, a.row)
 	}
-	sort.SliceStable(out.Rows, func(i, j int) bool {
+	sort.SliceStable(out, func(i, j int) bool {
 		// The player last: it is the self-hosted row, read after the platforms.
-		pi, pj := out.Rows[i].Platform == PlatformPlayer, out.Rows[j].Platform == PlatformPlayer
+		pi, pj := out[i].Platform == PlatformPlayer, out[j].Platform == PlatformPlayer
 		if pi != pj {
 			return pj
 		}
-		if out.Rows[i].Platform != out.Rows[j].Platform {
-			return out.Rows[i].Platform < out.Rows[j].Platform
+		if out[i].Platform != out[j].Platform {
+			return out[i].Platform < out[j].Platform
 		}
-		return out.Rows[i].Account < out.Rows[j].Account
+		return out[i].Account < out[j].Account
 	})
+	return out
+}
 
-	sort.Slice(tickOrder, func(i, j int) bool { return tickOrder[i] < tickOrder[j] })
+// tickFold is the per-tick totals, keyed by the tick's time.
+type tickFold struct {
+	ticks map[int64]*Point
+	order []int64
+}
+
+// add returns the point for s's tick, creating it on first sight, and marks
+// it partial when s is a transient failure.
+func (f *tickFold) add(s Sample) *Point {
+	at := s.At.UnixMilli()
+	p, ok := f.ticks[at]
+	if !ok {
+		p = &Point{At: s.At}
+		f.ticks[at] = p
+		f.order = append(f.order, at)
+	}
+	if transient(s.Reason) {
+		p.Partial = true
+	}
+	return p
+}
+
+// summarise returns the points in time order, a partial tick's total left
+// out, with the peak and mean over the ticks that have a total.
+func (f *tickFold) summarise() (points []Point, peak *int, average *float64) {
+	sort.Slice(f.order, func(i, j int) bool { return f.order[i] < f.order[j] })
+	points = make([]Point, 0, len(f.order))
 	sum, n := 0, 0
-	for _, at := range tickOrder {
-		p := *ticks[at]
+	for _, at := range f.order {
+		p := *f.ticks[at]
 		if p.Partial {
 			p.Total = nil
 		}
-		out.Points = append(out.Points, p)
+		points = append(points, p)
 		if p.Total == nil {
 			continue
 		}
-		if out.PeakTotal == nil || *p.Total > *out.PeakTotal {
+		if peak == nil || *p.Total > *peak {
 			v := *p.Total
-			out.PeakTotal = &v
+			peak = &v
 		}
 		sum += *p.Total
 		n++
 	}
 	if n > 0 {
 		avg := round1(float64(sum) / float64(n))
-		out.AverageTotal = &avg
+		average = &avg
 	}
-	return out
+	return points, peak, average
 }
 
 // round1 keeps one decimal: an average of viewers to more precision than that

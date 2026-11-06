@@ -14,6 +14,9 @@ import (
 	"unicode/utf8"
 )
 
+// ffmpegSubtitlesTag is the prefix FFmpeg puts on its subtitles-filter log lines.
+const ffmpegSubtitlesTag = "[Parsed_subtitles"
+
 // Running a cut is deliberately the smallest part of this package.
 //
 // Everything that decides anything — where the keyframes are, which segments a
@@ -240,7 +243,7 @@ func ffmpegFailure(out string) string {
 		// first line: what comes before the filter's prefix is ours, and is
 		// kept whatever the line goes on to say.
 		head, tail := "", line
-		if i := strings.Index(line, "[Parsed_subtitles"); i > 0 {
+		if i := strings.Index(line, ffmpegSubtitlesTag); i > 0 {
 			head, tail = line[:i], line[i:]
 		}
 		if captionChatter(tail) {
@@ -274,7 +277,7 @@ func captionChatter(line string) bool {
 	if subtitlesFailure(line) {
 		return false
 	}
-	return strings.Contains(line, "[Parsed_subtitles") || strings.Contains(line, "fontselect") ||
+	return strings.Contains(line, ffmpegSubtitlesTag) || strings.Contains(line, "fontselect") ||
 		strings.Contains(line, "glyph 0x") || strings.Contains(line, "libass")
 }
 
@@ -298,7 +301,7 @@ var subtitlesFailures = []string{
 // with nothing about fonts or glyphs in it.
 func subtitlesFailure(line string) bool {
 	_, msg, ok := strings.Cut(line, "] ")
-	if !ok || !strings.HasPrefix(line, "[Parsed_subtitles") {
+	if !ok || !strings.HasPrefix(line, ffmpegSubtitlesTag) {
 		return false
 	}
 	if strings.Contains(msg, "glyph") || strings.Contains(msg, "font") {

@@ -7,7 +7,7 @@ package db
 
 import (
 	"database/sql"
-	_ "embed"
+	_ "embed" // go:embed directives in this file
 	"fmt"
 	"os"
 	"sync"
@@ -15,7 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
 )
 
 //go:embed schema.sql

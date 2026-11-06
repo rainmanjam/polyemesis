@@ -99,9 +99,9 @@ type Sessions struct {
 // NewSessions creates a tracker. Zero or negative arguments take the defaults
 // rather than disabling the tracker, so a settings blob written before playout
 // existed still produces something that counts.
-func NewSessions(idle time.Duration, max int) *Sessions {
+func NewSessions(idle time.Duration, limit int) *Sessions {
 	s := &Sessions{viewers: map[viewerKey]*viewer{}, salt: randomSalt()}
-	s.SetLimits(idle, max)
+	s.SetLimits(idle, limit)
 	return s
 }
 
@@ -119,16 +119,16 @@ func randomSalt() uint64 {
 // SetLimits applies changed settings without discarding the sessions already
 // counted; a viewer must not disappear from the dashboard because the idle
 // timeout was nudged.
-func (s *Sessions) SetLimits(idle time.Duration, max int) {
+func (s *Sessions) SetLimits(idle time.Duration, limit int) {
 	if idle <= 0 {
 		idle = 20 * time.Second
 	}
-	if max <= 0 {
-		max = 5000
+	if limit <= 0 {
+		limit = 5000
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.idle, s.max = idle, max
+	s.idle, s.max = idle, limit
 }
 
 // Observe records one request from addr for variant.

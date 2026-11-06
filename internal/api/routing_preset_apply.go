@@ -130,7 +130,7 @@ type presetApplyRow struct {
 // presetApplyBetweenPhases runs after the destinations are listed and before
 // the transaction that writes them. A seam for what can land in between -- a
 // stop, a rename, a delete -- and nothing else. Never written outside a test.
-var presetApplyBetweenPhases = func() {}
+var presetApplyBetweenPhases = func() { /* no-op outside tests */ }
 
 // presetReconcile is the one reconcile an apply makes. A var so a test can stand
 // in a reconcile that fails, which nothing in a test fixture does for real.
@@ -145,49 +145,15 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-	mix := strings.TrimSpace(q.Get(presetMixParam))
-	switch mix {
-	case "":
-		mix = presetMixLive
-	case presetMixLive, presetMixVOD:
-	default:
-		writeError(w, http.StatusBadRequest, `"`+presetMixParam+`" must be "live" or "vod"`)
-		return
-	}
-	dryRun := false
-	if raw := strings.TrimSpace(q.Get(presetDryRunParam)); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, `"`+presetDryRunParam+`" must be true or false`)
-			return
-		}
-		dryRun = v
-	}
-	var only *int64
-	if raw := strings.TrimSpace(q.Get(destinationParam)); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			writeError(w, http.StatusBadRequest, `"`+destinationParam+`" must be a destination id`)
-			return
-		}
-		only = &id
-	}
-	named := strings.TrimSpace(q.Get(sourceParam)) != ""
-
-	src := eng.Source()
-	opts := routing.DefaultPresetOptsFor(src)
-	body, ok := readJSONBody(w, r)
+	q, ok := parsePresetApplyQuery(w, r.URL.Query())
 	if !ok {
 		return
 	}
-	if len(bytes.TrimSpace(body)) > 0 {
-		// FULL REPLACEMENT, as the compile route reads it: see handleApplyPreset.
-		opts = routing.PresetOpts{}
-		if err := decodeJSONInto(body, &opts); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+
+	src := eng.Source()
+	opts, ok := presetOptsFromBody(w, r, src)
+	if !ok {
+		return
 	}
 	preset := presetParam(r)
 	// The preset itself first. An unknown id, or one that cannot build against
@@ -197,7 +163,7 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	p := presetPlan{preset: preset, mix: mix, built: built, src: src}
+	p := presetPlan{preset: preset, mix: q.mix, built: built, src: src}
 
 	// The PUT's lock, from the listing to the reconcile: a PUT or a gain write
 	// that read a row before the transaction and wrote it after would put the old
@@ -206,27 +172,97 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 	s.trackGainMu.Lock()
 	defer s.trackGainMu.Unlock()
 
-	rows, ok := s.presetTargets(w, eng.SourceID(), named, only)
+	rows, ok := s.presetTargets(w, eng.SourceID(), q.named, q.only)
 	if !ok {
 		return
 	}
 
-	if dryRun {
-		results := make([]presetApplyRow, 0, len(rows))
-		for _, row := range rows {
-			out, _ := p.row(row)
-			if out.Outcome == presetSaved {
-				out.Outcome = presetReady
-			}
-			results = append(results, out)
-		}
-		if writePresetRefusal(w, preset, only, results) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"preset": preset, "mix": mix, "dryRun": true, "results": results})
+	if q.dryRun {
+		answerPresetDryRun(w, p, q.only, rows)
 		return
 	}
+	s.applyPresetRows(w, p, q.only, rows)
+}
 
+// presetApplyQuery is the apply route's query string, validated.
+type presetApplyQuery struct {
+	mix    string
+	dryRun bool
+	only   *int64
+	named  bool
+}
+
+// parsePresetApplyQuery validates the apply route's query string, answering
+// 400 and reporting false on the first bad parameter.
+func parsePresetApplyQuery(w http.ResponseWriter, q url.Values) (presetApplyQuery, bool) {
+	var out presetApplyQuery
+	out.mix = strings.TrimSpace(q.Get(presetMixParam))
+	switch out.mix {
+	case "":
+		out.mix = presetMixLive
+	case presetMixLive, presetMixVOD:
+	default:
+		writeError(w, http.StatusBadRequest, `"`+presetMixParam+`" must be "live" or "vod"`)
+		return out, false
+	}
+	if raw := strings.TrimSpace(q.Get(presetDryRunParam)); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, `"`+presetDryRunParam+`" must be true or false`)
+			return out, false
+		}
+		out.dryRun = v
+	}
+	if raw := strings.TrimSpace(q.Get(destinationParam)); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, `"`+destinationParam+`" must be a destination id`)
+			return out, false
+		}
+		out.only = &id
+	}
+	out.named = strings.TrimSpace(q.Get(sourceParam)) != ""
+	return out, true
+}
+
+// presetOptsFromBody is the preset options: the source's defaults, or the
+// request body in full when one was sent.
+func presetOptsFromBody(w http.ResponseWriter, r *http.Request, src routing.Source) (routing.PresetOpts, bool) {
+	opts := routing.DefaultPresetOptsFor(src)
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return opts, false
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		// FULL REPLACEMENT, as the compile route reads it: see handleApplyPreset.
+		opts = routing.PresetOpts{}
+		if err := decodeJSONInto(body, &opts); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return opts, false
+		}
+	}
+	return opts, true
+}
+
+// answerPresetDryRun answers a dry run: every row's verdict, nothing stored.
+func answerPresetDryRun(w http.ResponseWriter, p presetPlan, only *int64, rows []*db.Destination) {
+	results := make([]presetApplyRow, 0, len(rows))
+	for _, row := range rows {
+		out, _ := p.row(row)
+		if out.Outcome == presetSaved {
+			out.Outcome = presetReady
+		}
+		results = append(results, out)
+	}
+	if writePresetRefusal(w, p.preset, only, results) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"preset": p.preset, "mix": p.mix, "dryRun": true, "results": results})
+}
+
+// applyPresetRows writes the preset's mix to rows in one transaction,
+// reconciles, and answers with every row's outcome.
+func (s *Server) applyPresetRows(w http.ResponseWriter, p presetPlan, only *int64, rows []*db.Destination) {
 	ids := make([]int64, 0, len(rows))
 	before := make(map[int64]engine.DestinationRun, len(rows))
 	for _, row := range rows {
@@ -261,7 +297,7 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if writePresetRefusal(w, preset, only, results) {
+	if writePresetRefusal(w, p.preset, only, results) {
 		return
 	}
 	if err != nil {
@@ -274,19 +310,28 @@ func (s *Server) handleApplyPresetToProgramme(w http.ResponseWriter, r *http.Req
 
 	var reconcileWarn string
 	if len(written) > 0 {
-		reconcileWarn = presetReconcile(s)
-		for _, d := range written {
-			out := byID[d.ID]
-			out.Applied, out.Reason = s.destinationApplied(d.ID, d.SourceID, before[d.ID], reconcileWarn)
-			byID[d.ID] = out
-		}
-		for i := range results {
-			if r, ok := byID[results[i].ID]; ok && r.Outcome == presetSaved {
-				results[i] = r
-			}
+		reconcileWarn = s.reconcilePresetRows(written, before, byID, results)
+	}
+	writeMutation(w, http.StatusOK, reconcileWarn, map[string]any{"preset": p.preset, "mix": p.mix, "results": results})
+}
+
+// reconcilePresetRows runs the one reconcile and reads back what it applied to
+// each written row, updating the saved rows in results in place. It returns
+// the reconcile's warning.
+func (s *Server) reconcilePresetRows(written []*db.Destination, before map[int64]engine.DestinationRun,
+	byID map[int64]presetApplyRow, results []presetApplyRow) string {
+	reconcileWarn := presetReconcile(s)
+	for _, d := range written {
+		out := byID[d.ID]
+		out.Applied, out.Reason = s.destinationApplied(d.ID, d.SourceID, before[d.ID], reconcileWarn)
+		byID[d.ID] = out
+	}
+	for i := range results {
+		if r, ok := byID[results[i].ID]; ok && r.Outcome == presetSaved {
+			results[i] = r
 		}
 	}
-	writeMutation(w, http.StatusOK, reconcileWarn, map[string]any{"preset": preset, "mix": mix, "results": results})
+	return reconcileWarn
 }
 
 // writePresetRefusal answers a request that cannot go ahead, and reports

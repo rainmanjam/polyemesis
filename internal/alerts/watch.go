@@ -210,7 +210,7 @@ type downState struct {
 }
 
 // observe folds one bad/good observation and reports which edge was crossed.
-func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire, recover bool) {
+func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire, recovered bool) {
 	if !bad {
 		if d.fired {
 			d.since, d.fired = time.Time{}, false
@@ -417,176 +417,7 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 	var out []Event
 	for _, d := range s.Destinations {
 		live[d.ID] = true
-		st := w.dest[d.ID]
-		if st == nil {
-			st = &downState{}
-			w.dest[d.ID] = st
-		}
-		slow := w.slow[d.ID]
-		if slow == nil {
-			slow = &downState{}
-			w.slow[d.ID] = slow
-		}
-		rate := w.rate[d.ID]
-		if rate == nil {
-			rate = &rateWindow{}
-			w.rate[d.ID] = rate
-		}
-		if !d.Enabled || d.Buffering {
-			// A destination the operator turned off is not down. Nor is one
-			// holding its output back for a broadcast delay: it has no process
-			// until the delayed data is due, and paging somebody about it
-			// fifteen minutes before it is meant to start would be noise. Clearing the
-			// state means turning it back on starts the clock fresh instead of
-			// firing on the time it spent disabled.
-			*st = downState{}
-			*slow = downState{}
-			rate.reset()
-			// Disabled is not held, whatever reason the row still carries;
-			// re-enabling into a hold is a new one.
-			w.held[d.ID] = false
-			continue
-		}
-		fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
-		key := "destination:" + strconv.FormatInt(d.ID, 10)
-		if recovered {
-			// destination.recovered CLOSES A falling_behind THAT WAS OPEN ACROSS
-			// THE OUTAGE. The incident the operator was told about -- this
-			// destination is not delivering -- is over, and the recovery says
-			// so; a caught_up a window later would close it a second time. The
-			// new run starts with no latch, so if it is slow too, that is a
-			// new falling_behind, not the old one held.
-			*slow = downState{}
-		}
-
-		// The rate is only judged while the destination is up, the source is
-		// arriving, and there is a measurement to judge.
-		var slowFire, slowRecovered bool
-		var speed float64
-		switch {
-		case !d.Running:
-			// A destination that is not running has no speed, so the condition
-			// is UNOBSERVABLE rather than recovered. Feeding "not slow" into
-			// observe() here would announce that it caught up, at the exact
-			// moment it actually gave up -- and it would do so ahead of
-			// destination.down, which has its own longer dwell to serve.
-			//
-			// A latch that already FIRED is HELD, never dropped. Dropping it
-			// was silent, and a stall usually ends exactly here: the sink
-			// resets the connection, the child exits and is respawned inside
-			// one sweep, far short of destination.down's dwell. With the latch
-			// gone nothing was ever sent -- no caught_up, no recovered -- for a
-			// falling_behind the operator had been paged with (exploratory row
-			// 7). Held, it is closed by exactly one message: caught_up once
-			// the new run is measured at realtime, or destination.recovered if
-			// this turns into an outage long enough to be reported as one.
-			if !slow.fired {
-				*slow = downState{}
-			}
-			rate.reset()
-		case s.IngestConfigured && !s.IngestLive:
-			// NOTHING TO DELIVER IS NOT FALLING BEHIND. With the source gone
-			// every destination's output time stops, and reading that as a
-			// stall would page once per destination for what ingest.lost
-			// already says once. The history is dropped so the gap is not
-			// averaged into the first rate after the source returns; a latch
-			// that already fired is held rather than cleared, because nothing
-			// has been seen to recover.
-			rate.reset()
-			if !slow.fired {
-				*slow = downState{}
-			}
-		default:
-			var known bool
-			speed, known = rate.observe(now, d.OutTimeMS, w.cfg.SpeedWindow)
-			if known {
-				slowFire, slowRecovered = slow.observe(speed < w.cfg.SpeedFloor, now, w.cfg.FallingBehindFor)
-			} else if !slow.fired {
-				// Not enough history yet: unknown, not slow, and not a
-				// recovery either.
-				*slow = downState{}
-			}
-		}
-		switch {
-		case slowFire:
-			out = append(out, Event{
-				Type: TypeDestinationFallingBehind, Severity: SeverityWarning,
-				Key:   key + ":speed",
-				Title: d.Name + " is falling behind",
-				Text: d.Name + " has been delivering at " + speedText(speed) +
-					" realtime for " + short(now.Sub(slow.since)) +
-					". That usually means the platform or the network is not " +
-					"taking data fast enough.",
-				At: now,
-			}.WithField("destination", d.Name).
-				WithField("platform", d.Platform).
-				WithField("speed", speedText(speed)).
-				WithField("dropped frames", strconv.FormatInt(d.DropFrames, 10)).
-				WithField("duplicated frames", strconv.FormatInt(d.DupFrames, 10)))
-		case slowRecovered:
-			out = append(out, Event{
-				Type: TypeDestinationCaughtUp, Severity: SeverityInfo,
-				Key:   key + ":speed",
-				Title: d.Name + " is keeping up again",
-				Text:  d.Name + " is back to realtime.", At: now,
-			}.WithField("destination", d.Name))
-		}
-		switch {
-		case fire:
-			ev := Event{
-				Type: TypeDestinationDown, Severity: SeverityCritical, Key: key,
-				Title: "Destination down: " + d.Name,
-				Text:  d.Name + " has not been delivering for " + short(now.Sub(st.since)) + ".",
-				At:    now,
-			}
-			// THE REASON GOES IN THE TEXT, not only in a field. The timeline
-			// records Title and Text and drops Fields (engine.go's recorder),
-			// so a reason carried only as a field would reach Slack and be
-			// missing from the history page an operator reads afterwards.
-			// "cause" is the same machine-readable name the status JSON, MQTT
-			// and the webhook envelope use.
-			if r := d.Reason; r != nil {
-				ev.Text += " Reason: " + r.Sentence() + "."
-				ev = ev.WithField("reason", r.Cause.Label()).
-					WithField("cause", string(r.Cause)).
-					WithField("detail", r.Line)
-			}
-			out = append(out, ev.WithField("destination", d.Name).
-				WithField("platform", d.Platform).
-				WithField("error", d.Error))
-		case recovered:
-			out = append(out, Event{
-				Type: TypeDestinationRecovered, Severity: SeverityInfo, Key: key,
-				Title: "Destination recovered: " + d.Name,
-				Text:  d.Name + " is delivering again.", At: now,
-			}.WithField("destination", d.Name))
-		}
-		// HELD: once per hold, on the sweep it begins. Not behind the down's
-		// dwell: that dwell exists to ride out a reconnect, and a hold is the
-		// verdict that there will be no reconnect. The down still fires on its
-		// own clock and still says "held" in its text, for a rule that
-		// subscribes to it alone. Critical, like the down: nothing recovers
-		// this without a person.
-		if r := d.Reason; r != nil && r.Held {
-			if !w.held[d.ID] {
-				w.held[d.ID] = true
-				out = append(out, Event{
-					Type: TypeDestinationHeld, Severity: SeverityCritical, Key: key + ":held",
-					Title: "Destination held: " + d.Name,
-					// The reason in the TEXT, for the reason destination.down
-					// gives above: the timeline drops Fields.
-					Text: d.Name + " is no longer being retried. Reason: " + r.Sentence() + ".",
-					At:   now,
-				}.WithField("reason", r.Cause.Label()).
-					WithField("cause", string(r.Cause)).
-					WithField("detail", r.Line).
-					WithField("destination", d.Name).
-					WithField("platform", d.Platform).
-					WithField("error", d.Error))
-			}
-		} else {
-			w.held[d.ID] = false
-		}
+		out = append(out, w.watchDestination(s, d, now)...)
 	}
 	for id := range w.dest {
 		if !live[id] {
@@ -597,6 +428,213 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 		}
 	}
 	return out
+}
+
+// destState returns the down, slow and rate trackers for one destination,
+// creating them on first sight.
+func (w *Watcher) destState(id int64) (st, slow *downState, rate *rateWindow) {
+	if st = w.dest[id]; st == nil {
+		st = &downState{}
+		w.dest[id] = st
+	}
+	if slow = w.slow[id]; slow == nil {
+		slow = &downState{}
+		w.slow[id] = slow
+	}
+	if rate = w.rate[id]; rate == nil {
+		rate = &rateWindow{}
+		w.rate[id] = rate
+	}
+	return st, slow, rate
+}
+
+// watchDestination judges one destination: its delivery rate, whether it is
+// down, and whether it is held.
+func (w *Watcher) watchDestination(s Snapshot, d DestState, now time.Time) []Event {
+	st, slow, rate := w.destState(d.ID)
+	if !d.Enabled || d.Buffering {
+		// A destination the operator turned off is not down. Nor is one
+		// holding its output back for a broadcast delay: it has no process
+		// until the delayed data is due, and paging somebody about it
+		// fifteen minutes before it is meant to start would be noise. Clearing the
+		// state means turning it back on starts the clock fresh instead of
+		// firing on the time it spent disabled.
+		*st = downState{}
+		*slow = downState{}
+		rate.reset()
+		// Disabled is not held, whatever reason the row still carries;
+		// re-enabling into a hold is a new one.
+		w.held[d.ID] = false
+		return nil
+	}
+	fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
+	key := "destination:" + strconv.FormatInt(d.ID, 10)
+	if recovered {
+		// destination.recovered CLOSES A falling_behind THAT WAS OPEN ACROSS
+		// THE OUTAGE. The incident the operator was told about -- this
+		// destination is not delivering -- is over, and the recovery says
+		// so; a caught_up a window later would close it a second time. The
+		// new run starts with no latch, so if it is slow too, that is a
+		// new falling_behind, not the old one held.
+		*slow = downState{}
+	}
+
+	// The rate is only judged while the destination is up, the source is
+	// arriving, and there is a measurement to judge.
+	slowFire, slowRecovered, speed := w.judgeSpeed(s, d, slow, rate, now)
+	var out []Event
+	out = append(out, speedEvents(d, key, slowFire, slowRecovered, speed, slow, now)...)
+	out = append(out, downEvents(d, key, fire, recovered, st, now)...)
+	return append(out, w.heldEvents(d, key, now)...)
+}
+
+// judgeSpeed feeds this sweep's delivery rate into the slow latch, when there
+// is a rate to judge.
+func (w *Watcher) judgeSpeed(s Snapshot, d DestState, slow *downState, rate *rateWindow, now time.Time) (slowFire, slowRecovered bool, speed float64) {
+	switch {
+	case !d.Running:
+		// A destination that is not running has no speed, so the condition
+		// is UNOBSERVABLE rather than recovered. Feeding "not slow" into
+		// observe() here would announce that it caught up, at the exact
+		// moment it actually gave up -- and it would do so ahead of
+		// destination.down, which has its own longer dwell to serve.
+		//
+		// A latch that already FIRED is HELD, never dropped. Dropping it
+		// was silent, and a stall usually ends exactly here: the sink
+		// resets the connection, the child exits and is respawned inside
+		// one sweep, far short of destination.down's dwell. With the latch
+		// gone nothing was ever sent -- no caught_up, no recovered -- for a
+		// falling_behind the operator had been paged with (exploratory row
+		// 7). Held, it is closed by exactly one message: caught_up once
+		// the new run is measured at realtime, or destination.recovered if
+		// this turns into an outage long enough to be reported as one.
+		if !slow.fired {
+			*slow = downState{}
+		}
+		rate.reset()
+	case s.IngestConfigured && !s.IngestLive:
+		// NOTHING TO DELIVER IS NOT FALLING BEHIND. With the source gone
+		// every destination's output time stops, and reading that as a
+		// stall would page once per destination for what ingest.lost
+		// already says once. The history is dropped so the gap is not
+		// averaged into the first rate after the source returns; a latch
+		// that already fired is held rather than cleared, because nothing
+		// has been seen to recover.
+		rate.reset()
+		if !slow.fired {
+			*slow = downState{}
+		}
+	default:
+		var known bool
+		speed, known = rate.observe(now, d.OutTimeMS, w.cfg.SpeedWindow)
+		if known {
+			slowFire, slowRecovered = slow.observe(speed < w.cfg.SpeedFloor, now, w.cfg.FallingBehindFor)
+		} else if !slow.fired {
+			// Not enough history yet: unknown, not slow, and not a
+			// recovery either.
+			*slow = downState{}
+		}
+	}
+	return slowFire, slowRecovered, speed
+}
+
+// speedEvents is the falling_behind or caught_up edge, if the slow latch
+// moved this sweep.
+func speedEvents(d DestState, key string, slowFire, slowRecovered bool, speed float64, slow *downState, now time.Time) []Event {
+	switch {
+	case slowFire:
+		return []Event{Event{
+			Type: TypeDestinationFallingBehind, Severity: SeverityWarning,
+			Key:   key + ":speed",
+			Title: d.Name + " is falling behind",
+			Text: d.Name + " has been delivering at " + speedText(speed) +
+				" realtime for " + short(now.Sub(slow.since)) +
+				". That usually means the platform or the network is not " +
+				"taking data fast enough.",
+			At: now,
+		}.WithField("destination", d.Name).
+			WithField("platform", d.Platform).
+			WithField("speed", speedText(speed)).
+			WithField("dropped frames", strconv.FormatInt(d.DropFrames, 10)).
+			WithField("duplicated frames", strconv.FormatInt(d.DupFrames, 10))}
+	case slowRecovered:
+		return []Event{Event{
+			Type: TypeDestinationCaughtUp, Severity: SeverityInfo,
+			Key:   key + ":speed",
+			Title: d.Name + " is keeping up again",
+			Text:  d.Name + " is back to realtime.", At: now,
+		}.WithField("destination", d.Name)}
+	}
+	return nil
+}
+
+// downEvents is the down or recovered edge, if the down latch moved this
+// sweep.
+func downEvents(d DestState, key string, fire, recovered bool, st *downState, now time.Time) []Event {
+	switch {
+	case fire:
+		ev := Event{
+			Type: TypeDestinationDown, Severity: SeverityCritical, Key: key,
+			Title: "Destination down: " + d.Name,
+			Text:  d.Name + " has not been delivering for " + short(now.Sub(st.since)) + ".",
+			At:    now,
+		}
+		// THE REASON GOES IN THE TEXT, not only in a field. The timeline
+		// records Title and Text and drops Fields (engine.go's recorder),
+		// so a reason carried only as a field would reach Slack and be
+		// missing from the history page an operator reads afterwards.
+		// "cause" is the same machine-readable name the status JSON, MQTT
+		// and the webhook envelope use.
+		if r := d.Reason; r != nil {
+			ev.Text += " Reason: " + r.Sentence() + "."
+			ev = ev.WithField("reason", r.Cause.Label()).
+				WithField("cause", string(r.Cause)).
+				WithField("detail", r.Line)
+		}
+		return []Event{ev.WithField("destination", d.Name).
+			WithField("platform", d.Platform).
+			WithField("error", d.Error)}
+	case recovered:
+		return []Event{Event{
+			Type: TypeDestinationRecovered, Severity: SeverityInfo, Key: key,
+			Title: "Destination recovered: " + d.Name,
+			Text:  d.Name + " is delivering again.", At: now,
+		}.WithField("destination", d.Name)}
+	}
+	return nil
+}
+
+// heldEvents is the destination.held edge.
+//
+// HELD: once per hold, on the sweep it begins. Not behind the down's
+// dwell: that dwell exists to ride out a reconnect, and a hold is the
+// verdict that there will be no reconnect. The down still fires on its
+// own clock and still says "held" in its text, for a rule that
+// subscribes to it alone. Critical, like the down: nothing recovers
+// this without a person.
+func (w *Watcher) heldEvents(d DestState, key string, now time.Time) []Event {
+	r := d.Reason
+	if r == nil || !r.Held {
+		w.held[d.ID] = false
+		return nil
+	}
+	if w.held[d.ID] {
+		return nil
+	}
+	w.held[d.ID] = true
+	return []Event{Event{
+		Type: TypeDestinationHeld, Severity: SeverityCritical, Key: key + ":held",
+		Title: "Destination held: " + d.Name,
+		// The reason in the TEXT, for the reason destination.down
+		// gives above: the timeline drops Fields.
+		Text: d.Name + " is no longer being retried. Reason: " + r.Sentence() + ".",
+		At:   now,
+	}.WithField("reason", r.Cause.Label()).
+		WithField("cause", string(r.Cause)).
+		WithField("detail", r.Line).
+		WithField("destination", d.Name).
+		WithField("platform", d.Platform).
+		WithField("error", d.Error)}
 }
 
 // speedText renders FFmpeg's speed ratio the way its own output does, so an

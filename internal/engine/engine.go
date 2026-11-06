@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1248,10 +1249,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	e.selMu.Lock()
 	e.mu.Lock()
 	e.stopped = true
-	dests := make([]*destination, 0, len(e.dests)+len(e.draining))
-	for _, d := range e.dests {
-		dests = append(dests, d)
-	}
+	dests := slices.AppendSeq(make([]*destination, 0, len(e.dests)+len(e.draining)), maps.Values(e.dests))
 	// Destinations still playing their delayed tail out are cut: a shutdown
 	// cannot wait up to fifteen minutes, and left running they would be
 	// FFmpegs publishing to a platform that nothing could find or stop. Taken
@@ -1262,17 +1260,11 @@ func (e *Engine) StopWithin(ctx context.Context) {
 		delete(e.draining, id)
 		e.drains.remove(id, e)
 	}
-	rends := make([]*rendition, 0, len(e.rends))
-	for _, r := range e.rends {
-		rends = append(rends, r)
-	}
+	rends := slices.AppendSeq(make([]*rendition, 0, len(e.rends)), maps.Values(e.rends))
 	// The measurement tiers come down with the consumers below, not after
 	// them: an analyser reads a destination's hub and the clip buffer reads the
 	// selector's, so both would spend the shutdown on a relay that had closed.
-	monitors := make([]*loudnessMon, 0, len(e.loud))
-	for _, m := range e.loud {
-		monitors = append(monitors, m)
-	}
+	monitors := slices.AppendSeq(make([]*loudnessMon, 0, len(e.loud)), maps.Values(e.loud))
 	clipCap, clipPort, clipHub := e.clipCap, e.clipPort, e.clipHub
 	// The captioner is a consumer of the same hub, so it comes down in the same
 	// phase. Left running it would spend the shutdown transcribing a dead relay
@@ -1293,10 +1285,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// consumer, which goes through a teardown that releases both. Collected
 	// here, under the same lock, and released after the stops below.
 	auxPorts := []int{e.recorderPort, e.previewPort, e.metersPort}
-	auxSubs := []struct {
-		hub  *relay.Hub
-		name string
-	}{
+	auxSubs := []auxSub{
 		{e.hub, recorderSubName},
 		{hubOr(e.previewHub, e.hub), previewSubName},
 		{hubOr(e.metersHub, e.hub), metersSubName},
@@ -1321,31 +1310,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 		wg.Add(1)
 		go func() { defer wg.Done(); _ = p.Stop(ctx) }()
 	}
-	// Through teardownDest rather than a second stop path, so there is exactly
-	// one definition of "take a destination down" -- and so the REDUNDANT
-	// output goes down with it.
-	//
-	// Stopping d.proc alone was worse than a leak. The backup is built with
-	// supervisor.Spec{AutoRestart: true}, so the orphan did not exit: it went on
-	// reconnecting to the platform's backup ingest for ever, from a process in
-	// no map and on no monitoring page, and its relay port -- one of the 500
-	// shared across every source engine -- was never released. Deleting a
-	// SOURCE reaches this same code (Manager.Sync deletes the engine and calls
-	// Stop) while the daemon keeps running, so an operator who deleted a source
-	// was still publishing to Facebook from something nothing could see.
-	for _, d := range dests {
-		dest := d
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			e.teardownDest(dest)
-			// A drain this took over: whoever is waiting in CutDelay hears it
-			// only now that the child is down.
-			if dest.delay != nil {
-				dest.delay.finish()
-			}
-		}()
-	}
+	e.teardownDestsAsync(&wg, dests)
 	for _, m := range monitors {
 		mon := m
 		wg.Add(1)
@@ -1384,50 +1349,15 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	}
 	wg.Wait()
 	for _, r := range rends {
-		// #707. The rendition's own subscription and port, which this loop used
-		// to skip: it closed the output hub and stopped the process, and left
-		// the INPUT subscription and the port behind. teardownRendition does
-		// both; this path did not, and renditions are the per-source multiplier
-		// on the leak.
-		if r.subName != "" {
-			in := r.in
-			if in == nil {
-				in = e.hub
-			}
-			in.Unsubscribe(r.subName)
-		}
-		e.releasePort(r.port)
-		if r.hub != nil {
-			_ = r.hub.Close()
-		}
+		e.releaseStoppedRendition(r)
 	}
-	for i, p := range auxPorts {
-		// ONLY WHAT SUBSCRIBED. A consumer holds its relay port exactly when it
-		// subscribed, so port 0 means it never started -- the normal case on an
-		// idle engine, where nothing was publishing. Unsubscribing it anyway
-		// asked the hub to remove a name it never had, which the hub reports at
-		// ERROR (#711: that is how a subscription used to outlive its process),
-		// so every clean restart of an idle server raised three false alarms on
-		// the one line that must stay trustworthy.
-		if p == 0 {
-			continue
-		}
-		if sub := auxSubs[i]; sub.hub != nil {
-			sub.hub.Unsubscribe(sub.name)
-		}
-		e.releasePort(p)
-	}
+	e.releaseAuxPorts(auxPorts, auxSubs)
 
 	// One more level up. The order here is the same dependency chain the
 	// reconcile uses, read from the bottom: the renditions above were reading
 	// the selector's hub, the selector's feed was reading the silence tier's or
 	// the backup's, and each can only go once the thing that reads it has.
-	if sel != nil {
-		e.teardownFeed(sel.feed)
-		if sel.hub != nil {
-			_ = sel.hub.Close()
-		}
-	}
+	e.teardownStoppedSelector(sel)
 	e.teardownSilence(silence)
 	e.teardownBackup(backup)
 	// The same level as the backup and torn down with it: both are hubs the
@@ -1462,12 +1392,107 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// a leaked port costs one slot rather than correctness. But it is at Error,
 	// because the alternative is discovering it when Allocate starts failing
 	// everywhere at once and reads as an unrelated fault.
+	e.reportLeakedPorts()
+	e.log.Info("engine stopped")
+}
+
+// reportLeakedPorts logs any relay port still held after shutdown.
+func (e *Engine) reportLeakedPorts() {
 	if n := e.heldPortCount(); n > 0 {
 		e.log.Error("engine shutdown did not return every relay port it held; "+
 			"the pool is shared across all engines and these are gone until restart",
 			"leaked", n)
 	}
-	e.log.Info("engine stopped")
+}
+
+// teardownDestsAsync takes every destination down in parallel, each on wg.
+//
+// Through teardownDest rather than a second stop path, so there is exactly
+// one definition of "take a destination down" -- and so the REDUNDANT
+// output goes down with it.
+//
+// Stopping d.proc alone was worse than a leak. The backup is built with
+// supervisor.Spec{AutoRestart: true}, so the orphan did not exit: it went on
+// reconnecting to the platform's backup ingest for ever, from a process in
+// no map and on no monitoring page, and its relay port -- one of the 500
+// shared across every source engine -- was never released. Deleting a
+// SOURCE reaches this same code (Manager.Sync deletes the engine and calls
+// Stop) while the daemon keeps running, so an operator who deleted a source
+// was still publishing to Facebook from something nothing could see.
+func (e *Engine) teardownDestsAsync(wg *sync.WaitGroup, dests []*destination) {
+	for _, d := range dests {
+		dest := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.teardownDest(dest)
+			// A drain this took over: whoever is waiting in CutDelay hears it
+			// only now that the child is down.
+			if dest.delay != nil {
+				dest.delay.finish()
+			}
+		}()
+	}
+}
+
+// auxSub is the hub subscription one of the recorder, preview and meters
+// consumers holds.
+type auxSub struct {
+	hub  *relay.Hub
+	name string
+}
+
+// releaseStoppedRendition gives back a stopped rendition's input subscription
+// and port and closes its output hub.
+func (e *Engine) releaseStoppedRendition(r *rendition) {
+	// #707. The rendition's own subscription and port, which this loop used
+	// to skip: it closed the output hub and stopped the process, and left
+	// the INPUT subscription and the port behind. teardownRendition does
+	// both; this path did not, and renditions are the per-source multiplier
+	// on the leak.
+	if r.subName != "" {
+		in := r.in
+		if in == nil {
+			in = e.hub
+		}
+		in.Unsubscribe(r.subName)
+	}
+	e.releasePort(r.port)
+	if r.hub != nil {
+		_ = r.hub.Close()
+	}
+}
+
+// releaseAuxPorts gives back the recorder's, preview's and meters' relay ports
+// and subscriptions. ports[i] pairs with subs[i].
+func (e *Engine) releaseAuxPorts(ports []int, subs []auxSub) {
+	for i, p := range ports {
+		// ONLY WHAT SUBSCRIBED. A consumer holds its relay port exactly when it
+		// subscribed, so port 0 means it never started -- the normal case on an
+		// idle engine, where nothing was publishing. Unsubscribing it anyway
+		// asked the hub to remove a name it never had, which the hub reports at
+		// ERROR (#711: that is how a subscription used to outlive its process),
+		// so every clean restart of an idle server raised three false alarms on
+		// the one line that must stay trustworthy.
+		if p == 0 {
+			continue
+		}
+		if sub := subs[i]; sub.hub != nil {
+			sub.hub.Unsubscribe(sub.name)
+		}
+		e.releasePort(p)
+	}
+}
+
+// teardownStoppedSelector takes down the selector's feed and closes its hub.
+func (e *Engine) teardownStoppedSelector(sel *selector) {
+	if sel == nil {
+		return
+	}
+	e.teardownFeed(sel.feed)
+	if sel.hub != nil {
+		_ = sel.hub.Close()
+	}
 }
 
 func (e *Engine) currentRecordingSettings() db.RecordingSettings {

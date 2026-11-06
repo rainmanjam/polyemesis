@@ -56,7 +56,7 @@ func commonArgsLiveFor(goos string) []string {
 	if !liveCommandsSupportedOn(goos) {
 		return CommonArgs(LogWarning, false)
 	}
-	return append([]string{"-hide_banner"}, "-loglevel", LogLevel(LogWarning))
+	return append([]string{flagHideBanner}, "-loglevel", LogLevel(LogWarning))
 }
 
 // --------------------------------------------------------------------- ingest
@@ -1663,7 +1663,7 @@ func PreviewArgs(s PreviewSpec) []string {
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
 		"-c:v", "libx264",
-		"-preset", "veryfast",
+		flagPreset, "veryfast",
 		"-tune", "zerolatency",
 		"-b:v", strconv.Itoa(s.VideoKbps)+"k",
 		"-maxrate", strconv.Itoa(s.VideoKbps)+"k",
@@ -1841,7 +1841,7 @@ func MetersArgs(s MetersSpec) []string {
 // ProbeArgs builds the ffprobe command used to learn the ingest's track layout.
 func ProbeArgs(input string, timeoutSeconds int) []string {
 	return []string{
-		"-hide_banner",
+		flagHideBanner,
 		"-loglevel", "error",
 		"-print_format", "json",
 		"-show_streams",

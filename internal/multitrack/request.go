@@ -182,87 +182,116 @@ func Reconcile(a Ask, c *Config) []Divergence {
 		return nil
 	}
 	var out []Divergence
-	add := func(field, format string, args ...any) {
-		out = append(out, Divergence{Field: field, Detail: fmt.Sprintf(format, args...)})
-	}
-
-	wantTracks := a.MaxVideoTracks
-	if wantTracks == 0 {
-		wantTracks = DefaultMaxVideoTracks
-	}
-	if got := uint32(len(c.EncoderConfigurations)); got > wantTracks {
-		add("renditions", "Twitch negotiated %d video renditions but polyemesis asked for at most %d "+
-			"and can publish %d. The extra renditions will not be sent.", got, wantTracks, wantTracks)
-	}
-
+	out = append(out, renditionCountDivergence(a, c)...)
 	// The FIRST rendition is the one polyemesis would publish, because Twitch
 	// returns the ladder highest-first on every measured response. Comparing the
 	// whole ladder against one canvas would be comparing the wrong things: the
 	// lower rungs are SUPPOSED to be smaller.
 	if len(c.EncoderConfigurations) > 0 && a.Canvas.Width > 0 && a.Canvas.Height > 0 {
-		top := c.EncoderConfigurations[0]
-		if top.Width != a.Canvas.Width || top.Height != a.Canvas.Height {
-			add("rendition", "this destination is configured for %dx%d, but Twitch's Enhanced Broadcasting "+
-				"configuration asks for %dx%d. The operator's size is what polyemesis will encode; "+
-				"Twitch may transcode or refuse it.",
-				a.Canvas.Width, a.Canvas.Height, top.Width, top.Height)
-		}
-		if top.Framerate != nil && a.Canvas.Framerate.Denominator != 0 && top.Framerate.Denominator != 0 {
-			want := float64(a.Canvas.Framerate.Numerator) / float64(a.Canvas.Framerate.Denominator)
-			got := float64(top.Framerate.Numerator) / float64(top.Framerate.Denominator)
-			if want != got {
-				add("fps", "this destination is configured for %.3g fps, but Twitch's Enhanced Broadcasting "+
-					"configuration asks for %.3g fps.", want, got)
-			}
+		out = append(out, topRenditionDivergences(a, c.EncoderConfigurations[0])...)
+	}
+	out = append(out, bitrateDivergence(a, c)...)
+	out = append(out, vodAudioDivergence(a, c)...)
+	return append(out, audioChannelDivergences(a, c)...)
+}
+
+func divergence(field, format string, args ...any) Divergence {
+	return Divergence{Field: field, Detail: fmt.Sprintf(format, args...)}
+}
+
+func renditionCountDivergence(a Ask, c *Config) []Divergence {
+	wantTracks := a.MaxVideoTracks
+	if wantTracks == 0 {
+		wantTracks = DefaultMaxVideoTracks
+	}
+	if got := uint32(len(c.EncoderConfigurations)); got > wantTracks {
+		return []Divergence{divergence("renditions", "Twitch negotiated %d video renditions but polyemesis asked for at most %d "+
+			"and can publish %d. The extra renditions will not be sent.", got, wantTracks, wantTracks)}
+	}
+	return nil
+}
+
+// topRenditionDivergences compares the rendition polyemesis would publish
+// against the destination's canvas size and frame rate.
+func topRenditionDivergences(a Ask, top VideoEncoderConfig) []Divergence {
+	var out []Divergence
+	if top.Width != a.Canvas.Width || top.Height != a.Canvas.Height {
+		out = append(out, divergence("rendition", "this destination is configured for %dx%d, but Twitch's Enhanced Broadcasting "+
+			"configuration asks for %dx%d. The operator's size is what polyemesis will encode; "+
+			"Twitch may transcode or refuse it.",
+			a.Canvas.Width, a.Canvas.Height, top.Width, top.Height))
+	}
+	if top.Framerate != nil && a.Canvas.Framerate.Denominator != 0 && top.Framerate.Denominator != 0 {
+		want := float64(a.Canvas.Framerate.Numerator) / float64(a.Canvas.Framerate.Denominator)
+		got := float64(top.Framerate.Numerator) / float64(top.Framerate.Denominator)
+		if want != got {
+			out = append(out, divergence("fps", "this destination is configured for %.3g fps, but Twitch's Enhanced Broadcasting "+
+				"configuration asks for %.3g fps.", want, got))
 		}
 	}
+	return out
+}
 
-	if a.MaxAggregateBitrateKbps > 0 {
-		total := 0
-		for _, e := range c.EncoderConfigurations {
-			if kbps, ok := e.BitrateKbps(); ok {
-				total += kbps
-			}
-		}
-		for _, e := range c.AudioConfigurations.Live {
-			if kbps, ok := e.BitrateKbps(); ok {
-				total += kbps
-			}
-		}
-		for _, e := range c.AudioConfigurations.VOD {
-			if kbps, ok := e.BitrateKbps(); ok {
-				total += kbps
-			}
-		}
-		if total > a.MaxAggregateBitrateKbps {
-			add("bitrate", "Twitch's Enhanced Broadcasting configuration totals %d kbps across every track, "+
-				"above the %d kbps ceiling this destination asked for. Twitch does not treat that ceiling "+
-				"as binding.", total, a.MaxAggregateBitrateKbps)
+func bitrateDivergence(a Ask, c *Config) []Divergence {
+	if a.MaxAggregateBitrateKbps <= 0 {
+		return nil
+	}
+	if total := totalKbps(c); total > a.MaxAggregateBitrateKbps {
+		return []Divergence{divergence("bitrate", "Twitch's Enhanced Broadcasting configuration totals %d kbps across every track, "+
+			"above the %d kbps ceiling this destination asked for. Twitch does not treat that ceiling "+
+			"as binding.", total, a.MaxAggregateBitrateKbps)}
+	}
+	return nil
+}
+
+// totalKbps sums the bitrate of every video and audio track that states one.
+func totalKbps(c *Config) int {
+	total := 0
+	for _, e := range c.EncoderConfigurations {
+		if kbps, ok := e.BitrateKbps(); ok {
+			total += kbps
 		}
 	}
+	for _, e := range c.AudioConfigurations.Live {
+		if kbps, ok := e.BitrateKbps(); ok {
+			total += kbps
+		}
+	}
+	for _, e := range c.AudioConfigurations.VOD {
+		if kbps, ok := e.BitrateKbps(); ok {
+			total += kbps
+		}
+	}
+	return total
+}
 
-	// The two that matter most to issue #141, stated in both directions. Asking
-	// for the VOD track and not getting it is the failure the whole feature
-	// turns on; getting one nobody asked for means a mix would have to be routed
-	// to it that polyemesis has not been told to produce.
+// vodAudioDivergence states the two that matter most to issue #141, in both
+// directions. Asking for the VOD track and not getting it is the failure the
+// whole feature turns on; getting one nobody asked for means a mix would have
+// to be routed to it that polyemesis has not been told to produce.
+func vodAudioDivergence(a Ask, c *Config) []Divergence {
 	switch {
 	case a.VODAudio && len(c.AudioConfigurations.VOD) == 0:
-		add("vodAudio", "this destination asked for a separate VOD audio track and Twitch's configuration "+
-			"contains none, so the VOD will carry the live mix.")
+		return []Divergence{divergence("vodAudio", "this destination asked for a separate VOD audio track and Twitch's configuration "+
+			"contains none, so the VOD will carry the live mix.")}
 	case !a.VODAudio && len(c.AudioConfigurations.VOD) > 0:
-		add("vodAudio", "Twitch's configuration contains a VOD audio track that this destination did not "+
-			"ask for. It will be left unfed.")
+		return []Divergence{divergence("vodAudio", "Twitch's configuration contains a VOD audio track that this destination did not "+
+			"ask for. It will be left unfed.")}
 	}
+	return nil
+}
 
+func audioChannelDivergences(a Ask, c *Config) []Divergence {
 	wantChannels := a.AudioChannels
 	if wantChannels == 0 {
 		wantChannels = DefaultAudioChannels
 	}
+	var out []Divergence
 	for _, track := range append(append([]AudioEncoderConfig{}, c.AudioConfigurations.Live...),
 		c.AudioConfigurations.VOD...) {
 		if track.Channels != 0 && track.Channels != wantChannels {
-			add("audioChannels", "Twitch asks for %d audio channels on track %d; polyemesis mixes %d.",
-				track.Channels, track.TrackID, wantChannels)
+			out = append(out, divergence("audioChannels", "Twitch asks for %d audio channels on track %d; polyemesis mixes %d.",
+				track.Channels, track.TrackID, wantChannels))
 		}
 	}
 	return out

@@ -39,6 +39,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
+// reconcileDestination is the subject reconcileNow reports in its warning.
+const reconcileDestination = "the destination"
+
 // -------------------------------------------------------------- setup & auth
 
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -818,7 +821,7 @@ func fetchLatestRelease(ctx context.Context) (tag, url string, err error) {
 // the two could be compared at all. Both answers are needed: an unparseable
 // version must not be reported as up to date, and it must not be reported as
 // out of date either.
-func newerThan(latest, current string) (newer, comparable bool) {
+func newerThan(latest, current string) (newer, canCompare bool) {
 	l, ok := parseSemver(latest)
 	if !ok {
 		return false, false
@@ -1209,7 +1212,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		NumCPU:         sys.NumCPU,
 	}
 
-	w.Header().Set("Content-Type", metrics.ContentType)
+	w.Header().Set("Content-Type", metrics.ContentType) // NOSONAR: header names stay literal, shape_derivation_test scans for them
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.WriteString(w, metrics.Render(snap))
 }
@@ -1605,12 +1608,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// The version the client read, if it sent one. See versionedSettings.
 	body, sentVersion, err := takeSettingsVersion(body)
 	if err != nil {
-		var badRequest badRequestError
-		if errors.As(err, &badRequest) {
-			writeError(w, http.StatusBadRequest, badRequest.Error())
-		} else {
-			writeStoreError(w, err)
-		}
+		writeBadRequestOrStoreError(w, err)
 		return
 	}
 
@@ -1643,273 +1641,19 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// It never leaves this handler. changedSections compares it and returns
 	// section NAMES; nothing derived from these bytes reaches an alert.
 	var storedJSON []byte
-	// The stored ingest, and whether the save asked to change it on an install
-	// that has no source to change. Both are written inside the closure and
-	// read after it, which is the only place both the submitted document and
-	// the stored one exist at once.
-	var storedIngest db.IngestSettings
+	// Whether the save asked to change the ingest on an install that has no
+	// source to change. Written inside the closure and read after it, which is
+	// the only place both the submitted document and the stored one exist at
+	// once.
 	ingestRefused := false
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
-		// The merge base for ingest is the SOURCE, not the blob -- before
-		// anything below snapshots "what was stored". See
-		// overlaySourceIngest: with the blob as the base, a client that
-		// PUT back exactly what it GOT wrote the blob's stale ingest over the
-		// live source.
-		if _, err := s.overlaySourceIngest(settings, nil); err != nil {
-			return err
+		refused, err := s.mergeSavedSettings(settings, body, sentVersion, &storedJSON)
+		if refused {
+			ingestRefused = true
 		}
-		// A SAVE FROM A STALE READ IS REFUSED, not merged.
-		//
-		// The page PUTs the whole document, so without this the last writer
-		// won on every field: a tab opened with an auto-ban armed, another
-		// operator disarmed it, the first tab saved a recording retention --
-		// and the ban was armed again under a success toast. Refused rather
-		// than merged field by field, because only the client knows which
-		// fields it meant to change; a merge would have to guess, and the
-		// guess that re-arms a ban is the one this is for.
-		//
-		// Only when a version was SENT. Scripts and older clients that send
-		// none keep last-writer-wins, which is what they were written against.
-		if sentVersion != "" && sentVersion != settingsVersion(*settings) {
-			return errSettingsConflict
-		}
-		storedJSON, _ = json.Marshal(settings)
-		// The stored playlist, copied BEFORE the decode overwrites it.
-		//
-		// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
-		// backing array when the capacity allows, so decoding into settings can
-		// rewrite the stored items IN PLACE and leave "what was already saved"
-		// and "what was just sent" as the same memory. playlistUploadProblems
-		// needs them to be two different values or it cannot tell an item the
-		// operator is introducing from one they inherited.
-		storedPlaylist := db.PlaylistSettings{
-			Enabled: settings.Failover.Playlist.Enabled,
-			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
-		}
-		// The two stored pull URLs, for the same reason and taken at the same
-		// moment. Plain strings need no copy -- a string value IS a snapshot,
-		// where the playlist above is a slice whose backing array the decode
-		// can rewrite in place. See pullSourceUploadProblems.
-		storedPullURL := settings.Ingest.Pull.URL
-		storedBackupPullURL := settings.Failover.Backup.Pull.URL
-		// The whole stored ingest block, copied the same way and for the same
-		// reason -- Annotations is a slice the decode can rewrite in place. It
-		// is what the write-through below compares against, and what it puts
-		// back when there is nothing to write it through TO.
-		storedIngest = settings.Ingest
-		storedIngest.Annotations = append(
-			[]routing.TrackAnnotation(nil), settings.Ingest.Annotations...)
-		// The stored automod rules, copied for the same reason as the ingest
-		// block above: the decode rewrites the slice in place, so a comparison
-		// made afterwards would be a slice against itself.
-		storedRules := append([]db.AutomodRule(nil), settings.Automod.Rules...)
-		// And the stored armed cells, which newlyArmedOnUnconfigured compares
-		// against. A map is shared memory too, so a clone.
-		storedOn := maps.Clone(settings.Automod.On)
-		// And the stored model-checker blocks, which newlyEnabledUntested
-		// compares against. Copies: only their connection fields are read.
-		storedAutomod := db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
-		// Whether MQTT has ever been set up here, for AssignInstanceOnFirstSetup
-		// below: off, with no broker URL stored.
-		mqttNeverConfigured := !settings.MQTT.Enabled && strings.TrimSpace(settings.MQTT.BrokerURL) == ""
-		if err := decodeJSONInto(body, settings); err != nil {
-			return err
-		}
-		// A per-install MQTT instance when MQTT is first set up with the shared
-		// default, so two installs on one broker cannot collide. Never for an
-		// install that was ever configured: its topic tree is a contract.
-		settings.MQTT.AssignInstanceOnFirstSetup(mqttNeverConfigured, s.mqttInstanceForThisInstall())
-		// The one section decodeJSONInto's strictness cannot reach: automod
-		// has its own UnmarshalJSON. See db.CheckAutomodFields.
-		if err := checkSentAutomodFields(body); err != nil {
-			return err
-		}
-		// Validated HERE as well as inside UpdateSettings, and the order is the
-		// point: the filesystem check below must never run on a document the
-		// shape rules have already refused. Returning the typed error rather
-		// than writing the response keeps one 400 mapping below for both
-		// validation failures, whichever of the two found it.
-		if err := settings.Validate(); err != nil {
-			return db.InvalidSettingsError{Err: err}
-		}
-		// AND THE INGEST LISTENER MAY NOT ASK FOR A PORT THIS PROCESS ALREADY
-		// HOLDS.
-		//
-		// Saving rtmpPort as the server's own HTTP port returned 200. The
-		// listener then could not bind on the next reconcile, which logged one
-		// ERROR and returned -- and its comment concedes that the log is the
-		// only way anybody finds out. Ingest was dead, the settings page showed
-		// the port saved and green, and the operator spent the outage debugging
-		// their encoder.
-		//
-		// Here rather than in Settings.Validate for the same reason the rule
-		// compile below is here: db does not import config and must not, so a
-		// db type structurally cannot see the HTTP port. This handler is the
-		// only place both are visible, and it is the only settings writer a
-		// person can reach. See db.Settings.TCPPortConflicts for why SRT is not
-		// checked -- it is UDP, and sharing a number with HTTP is legal.
-		if probs := settings.TCPPortConflicts(s.reservedTCPPorts()); len(probs) > 0 {
-			return db.InvalidSettingsError{
-				Err: fmt.Errorf("invalid settings: %v", probs),
-			}
-		}
-		// AND THE AUTOMOD RULES HAVE TO COMPILE -- THE ONES BEING CHANGED.
-		//
-		// Rule.Compile refuses a bad regex, an empty pattern, an unknown action
-		// and a zero-duration timeout -- and nothing called it from here, so a
-		// pattern like "(unclosed[" saved with a 200. At apply time NewRuleSet
-		// is all-or-nothing, so ApplyAutomod sets rules = nil and EVERY pattern
-		// rule stops running, not only the broken one. The narrowest possible
-		// typo disarmed the whole checker.
-		//
-		// Silently, and against three screens saying otherwise: GET /settings
-		// listed the rules enabled, GET /automod/matrix reported the checker
-		// available, and the UI drew them. The only signal was one log.Error on
-		// a server nobody was tailing. An operator who typo'd a pattern last
-		// week has had no moderation since and every screen has told them they
-		// do.
-		//
-		// Scoped to a CHANGE, and that is not softness. An install upgrading
-		// from a version that accepted a bad pattern already has one stored;
-		// refusing every save would leave that operator unable to change
-		// anything at all -- their listener port, their recording retention --
-		// until they fixed a rule the UI may not even show them. The same trap
-		// the alert-rule SSRF guard avoids by refusing at the dial rather than
-		// at load. Touch the rules and they must compile; leave them alone and
-		// the existing breakage is not made your problem.
-		//
-		// Here rather than in Settings.Validate because internal/automod
-		// imports internal/db, so db cannot import the compiler that knows what
-		// a valid rule is. This handler is the only place both are visible, and
-		// it is the only writer a person can reach.
-		if !sameAutomodRules(storedRules, settings.Automod.Rules) {
-			if _, err := rulesFromSettings(settings.Automod); err != nil {
-				return db.InvalidSettingsError{Err: err}
-			}
-		}
-		// AND NO CELL MAY BE ARMED OVER A CHECKER THAT IS NOT THERE. See
-		// newlyArmedOnUnconfigured.
-		if err := newlyArmedOnUnconfigured(storedOn, settings.Automod); err != nil {
-			return err
-		}
-		// AND NO MODEL CHECKER MAY BE SWITCHED ON UNTESTED, nor given a preset
-		// or a category action this build does not have. See
-		// newlyEnabledUntested and automodProviderProblems.
-		if err := automodProviderProblems(settings.Automod); err != nil {
-			return err
-		}
-		if err := newlyEnabledUntested(storedAutomod, settings.Automod, s.store.AutomodTestPass); err != nil {
-			return err
-		}
-		// Derived on the way out, never stored: whatever a client sent for
-		// these is not a fact about this server.
-		settings.Automod.Model.Tested = false
-		settings.Automod.Secondary.Tested = false
-		// A save that touches the ingest section may not leave the mode unset.
-		//
-		// db.IngestUnset is storable on purpose — it is what a fresh install is
-		// before anyone has chosen, and the migration writes it during DB open,
-		// so the store cannot refuse it. But it is a starting state, never a
-		// choice: nobody opens this form and decides on "none". Refusing it here
-		// is what turns "no default" into "you have to pick", without which the
-		// unset state would just be a silent no-ingest.
-		//
-		// Scoped to CLEARING a mode that was already chosen, not to every save
-		// made before one is. The settings page PUTs the whole document, so
-		// refusing any unset ingest would fail the first unrelated change an
-		// operator makes on a fresh install — for a reason that has nothing to
-		// do with what they touched. What forces the choice on a fresh install
-		// is that nothing ingests until it is made, and the UI says so.
-		if settings.Ingest.Mode == db.IngestUnset {
-			var stored struct {
-				Ingest struct {
-					Mode db.IngestMode `json:"mode"`
-				} `json:"ingest"`
-			}
-			if json.Unmarshal(storedJSON, &stored) == nil && stored.Ingest.Mode != db.IngestUnset {
-				return badRequestError{"choose an ingest mode: srt, rtmp or pull"}
-			}
-		}
-		// The half of playlist validation that needs a filesystem.
-		// Settings.Validate checks an item's SHAPE and cannot check its
-		// existence -- internal/db has no uploads store and must not grow one --
-		// so the "a missing upload is a settings error" rule is enforced here,
-		// where the store already exists.
-		//
-		// Scoped to items this save INTRODUCES. An unrelated save must not be
-		// refused because an upload some earlier item named has since been
-		// deleted: the operator has no control that can clear it, and the
-		// readiness gate keeps the playlist off air regardless. See
-		// playlistUploadProblems.
-		//
-		// This is the one thing left inside the store's lock that touches
-		// something outside the process: a MkdirAll and a Stat per introduced
-		// item, on local disk. Bounded and short, unlike a network read, and
-		// moving it out would mean either checking uploads against a document
-		// that is not the one about to be stored or holding the check open
-		// across the write. Recorded rather than claimed away.
-		if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
-			return badRequestError{err.Error()}
-		}
-		// The same rule for the OTHER way a stored upload reaches an FFmpeg: a
-		// pull source naming one. That path bypasses ffmpeg.ProbeFile's format
-		// allowlist entirely, so a file this server was never allowed to inspect
-		// must not be routed to air through it. #201.
-		if err := s.pullSourceUploadProblems(*settings, storedPullURL, storedBackupPullURL); err != nil {
-			return badRequestError{err.Error()}
-		}
-		// AND THE INGEST BLOCK ON AN INSTALL WITH NOWHERE TO PUT IT.
-		//
-		// settings.ingest is not read by anything any more: the engine takes
-		// its ingest from the source row, and the write-through below is the
-		// only thing that gives this half of the form an effect. With no source
-		// there is nothing to write it through to, so an edit here would store,
-		// answer 200, and change nothing -- on the DEFAULT tab of the settings
-		// page, on a first-time operator's first screen. That is the exact bug
-		// the write-through was added to fix, arriving again from the other
-		// side, and it is the one this handler must never re-commit.
-		//
-		// So the stored block is PUT BACK and the handler refuses below. Two
-		// things follow from doing it here rather than at the top:
-		//
-		//   - every other setting in the same document is saved. Recording,
-		//     chat, automod, alerts and the listeners are all things an
-		//     operator legitimately configures before creating a source, which
-		//     is also why this route carries no requireSource.
-		//   - nothing that has no effect is stored. Refusing without this line
-		//     would leave the operator's dead ingest in the blob, and the form
-		//     would redisplay it on the next load as though it had taken.
-		//
-		// Scoped to a CHANGE. The settings page PUTs the whole document, so a
-		// save of anything else carries the ingest block along untouched, and
-		// refusing that would make every unrelated setting unreachable until a
-		// source exists.
-		if !ingestEqual(storedIngest, settings.Ingest) {
-			switch _, err := s.defaultSourceID(); {
-			case err == nil:
-			case errors.Is(err, db.ErrSourceNotFound):
-				settings.Ingest = storedIngest
-				ingestRefused = true
-			default:
-				return err
-			}
-		}
-		return nil
+		return err
 	})
-	var invalid db.InvalidSettingsError
-	var badRequest badRequestError
-	switch {
-	case errors.Is(err, errSettingsConflict):
-		writeErrorCode(w, http.StatusConflict, codeSettingsConflict, settingsConflictMsg)
-		return
-	case errors.As(err, &badRequest):
-		writeError(w, http.StatusBadRequest, badRequest.Error())
-		return
-	case errors.As(err, &invalid):
-		writeError(w, http.StatusBadRequest, invalid.Error())
-		return
-	case err != nil:
-		writeStoreError(w, err)
+	if writeSettingsSaveError(w, err) {
 		return
 	}
 	// Raised here rather than at the end of the handler: the document is stored
@@ -1986,25 +1730,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	//                   answered 200 for a save that silently never reached the
 	//                   pipeline, which is the failure this whole block exists
 	//                   to have stopped happening.
-	switch id, err := s.defaultSourceID(); {
-	case err == nil:
-		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
-			// What GET will serve if the write-through fails: the blob as
-			// stored, with the source's ingest -- which is still the old one --
-			// overlaid on it.
-			served := settings
-			served.Ingest = src.Ingest
-			src.Ingest = settings.Ingest
-			if err := s.store.UpdateSource(src); err != nil {
-				failStored(http.StatusBadRequest, "", "ingest settings: "+err.Error(), settingsVersion(served))
-				return
-			}
-		}
-	case errors.Is(err, db.ErrSourceNotFound):
-	default:
-		// No version here, deliberately: the store cannot say which source GET
-		// would overlay, so the page is left on its old one (see failStored).
-		writeStoreError(w, err)
+	if !s.writeIngestThrough(w, settings, failStored) {
 		return
 	}
 	// The MANAGER, not the default engine.
@@ -2069,6 +1795,374 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		Version:  settingsVersion(settings),
 		Reload:   s.mgr.LastReload(),
 	})
+}
+
+// mergeSavedSettings decodes a PUT /settings body over the stored document
+// (settings) and refuses what may not be saved; the UpdateSettings closure of
+// handlePutSettings. storedJSON receives the stored document as it was, and
+// refused reports an ingest change put back for want of a source.
+func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVersion string,
+	storedJSON *[]byte) (refused bool, err error) {
+	// The merge base for ingest is the SOURCE, not the blob -- before
+	// anything below snapshots "what was stored". See
+	// overlaySourceIngest: with the blob as the base, a client that
+	// PUT back exactly what it GOT wrote the blob's stale ingest over the
+	// live source.
+	if _, err := s.overlaySourceIngest(settings, nil); err != nil {
+		return false, err
+	}
+	// A SAVE FROM A STALE READ IS REFUSED, not merged.
+	//
+	// The page PUTs the whole document, so without this the last writer
+	// won on every field: a tab opened with an auto-ban armed, another
+	// operator disarmed it, the first tab saved a recording retention --
+	// and the ban was armed again under a success toast. Refused rather
+	// than merged field by field, because only the client knows which
+	// fields it meant to change; a merge would have to guess, and the
+	// guess that re-arms a ban is the one this is for.
+	//
+	// Only when a version was SENT. Scripts and older clients that send
+	// none keep last-writer-wins, which is what they were written against.
+	if sentVersion != "" && sentVersion != settingsVersion(*settings) {
+		return false, errSettingsConflict
+	}
+	stored := snapshotStoredSettings(settings)
+	*storedJSON = stored.json
+	if err := decodeJSONInto(body, settings); err != nil {
+		return false, err
+	}
+	// A per-install MQTT instance when MQTT is first set up with the shared
+	// default, so two installs on one broker cannot collide. Never for an
+	// install that was ever configured: its topic tree is a contract.
+	settings.MQTT.AssignInstanceOnFirstSetup(stored.mqttNeverConfigured, s.mqttInstanceForThisInstall())
+	if err := s.checkSavedSettings(settings, body); err != nil {
+		return false, err
+	}
+	if err := s.checkAutomodChange(settings, stored); err != nil {
+		return false, err
+	}
+	// Derived on the way out, never stored: whatever a client sent for
+	// these is not a fact about this server.
+	settings.Automod.Model.Tested = false
+	settings.Automod.Secondary.Tested = false
+	if err := s.checkSettingsAgainstStored(settings, stored); err != nil {
+		return false, err
+	}
+	return s.keepIngestWithoutSource(settings, stored.ingest)
+}
+
+// writeSettingsSaveError answers a settings save that failed, reporting
+// whether it did: a stale version is 409, a refused document 400, and
+// anything else the store's answer.
+func writeSettingsSaveError(w http.ResponseWriter, err error) bool {
+	var invalid db.InvalidSettingsError
+	var badRequest badRequestError
+	switch {
+	case errors.Is(err, errSettingsConflict):
+		writeErrorCode(w, http.StatusConflict, codeSettingsConflict, settingsConflictMsg)
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusBadRequest, invalid.Error())
+	case err != nil:
+		writeStoreError(w, err)
+	default:
+		return false
+	}
+	return true
+}
+
+// writeBadRequestOrStoreError answers err as a 400 when it is a
+// badRequestError, and as the store's answer otherwise.
+func writeBadRequestOrStoreError(w http.ResponseWriter, err error) {
+	var badRequest badRequestError
+	if errors.As(err, &badRequest) {
+		writeError(w, http.StatusBadRequest, badRequest.Error())
+	} else {
+		writeStoreError(w, err)
+	}
+}
+
+// writeIngestThrough writes the saved ingest block through to the default
+// source, reporting false when it answered the request with a failure.
+func (s *Server) writeIngestThrough(w http.ResponseWriter, settings db.Settings,
+	failStored func(status int, code, msg, version string)) bool {
+	switch id, err := s.defaultSourceID(); {
+	case err == nil:
+		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
+			// What GET will serve if the write-through fails: the blob as
+			// stored, with the source's ingest -- which is still the old one --
+			// overlaid on it.
+			served := settings
+			served.Ingest = src.Ingest
+			src.Ingest = settings.Ingest
+			if err := s.store.UpdateSource(src); err != nil {
+				failStored(http.StatusBadRequest, "", "ingest settings: "+err.Error(), settingsVersion(served))
+				return false
+			}
+		}
+	case errors.Is(err, db.ErrSourceNotFound):
+	default:
+		// No version here, deliberately: the store cannot say which source GET
+		// would overlay, so the page is left on its old one (see failStored).
+		writeStoreError(w, err)
+		return false
+	}
+	return true
+}
+
+// storedSettings is the stored settings document as it was before a save
+// decoded over it: copies, because the decode rewrites slices and maps in
+// place.
+type storedSettings struct {
+	json                   []byte
+	playlist               db.PlaylistSettings
+	pullURL, backupPullURL string
+	ingest                 db.IngestSettings
+	rules                  []db.AutomodRule
+	on                     map[string]bool
+	automod                db.AutomodSettings
+	mqttNeverConfigured    bool
+}
+
+// snapshotStoredSettings copies what handlePutSettings compares the saved
+// document against, before the decode overwrites it.
+func snapshotStoredSettings(settings *db.Settings) storedSettings {
+	var out storedSettings
+	out.json, _ = json.Marshal(settings)
+	// The stored playlist, copied BEFORE the decode overwrites it.
+	//
+	// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
+	// backing array when the capacity allows, so decoding into settings can
+	// rewrite the stored items IN PLACE and leave "what was already saved"
+	// and "what was just sent" as the same memory. playlistUploadProblems
+	// needs them to be two different values or it cannot tell an item the
+	// operator is introducing from one they inherited.
+	out.playlist = db.PlaylistSettings{
+		Enabled: settings.Failover.Playlist.Enabled,
+		Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
+	}
+	// The two stored pull URLs, for the same reason and taken at the same
+	// moment. Plain strings need no copy -- a string value IS a snapshot,
+	// where the playlist above is a slice whose backing array the decode
+	// can rewrite in place. See pullSourceUploadProblems.
+	out.pullURL = settings.Ingest.Pull.URL
+	out.backupPullURL = settings.Failover.Backup.Pull.URL
+	// The whole stored ingest block, copied the same way and for the same
+	// reason -- Annotations is a slice the decode can rewrite in place. It
+	// is what the write-through below compares against, and what it puts
+	// back when there is nothing to write it through TO.
+	out.ingest = settings.Ingest
+	out.ingest.Annotations = append(
+		[]routing.TrackAnnotation(nil), settings.Ingest.Annotations...)
+	// The stored automod rules, copied for the same reason as the ingest
+	// block above: the decode rewrites the slice in place, so a comparison
+	// made afterwards would be a slice against itself.
+	out.rules = append([]db.AutomodRule(nil), settings.Automod.Rules...)
+	// And the stored armed cells, which newlyArmedOnUnconfigured compares
+	// against. A map is shared memory too, so a clone.
+	out.on = maps.Clone(settings.Automod.On)
+	// And the stored model-checker blocks, which newlyEnabledUntested
+	// compares against. Copies: only their connection fields are read.
+	out.automod = db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
+	// Whether MQTT has ever been set up here, for AssignInstanceOnFirstSetup
+	// below: off, with no broker URL stored.
+	out.mqttNeverConfigured = !settings.MQTT.Enabled && strings.TrimSpace(settings.MQTT.BrokerURL) == ""
+	return out
+}
+
+// checkSavedSettings is the shape check of a decoded settings document: the
+// automod fields sent, Validate, and the TCP ports this process holds.
+func (s *Server) checkSavedSettings(settings *db.Settings, body []byte) error {
+	// The one section decodeJSONInto's strictness cannot reach: automod
+	// has its own UnmarshalJSON. See db.CheckAutomodFields.
+	if err := checkSentAutomodFields(body); err != nil {
+		return err
+	}
+	// Validated HERE as well as inside UpdateSettings, and the order is the
+	// point: the filesystem check below must never run on a document the
+	// shape rules have already refused. Returning the typed error rather
+	// than writing the response keeps one 400 mapping below for both
+	// validation failures, whichever of the two found it.
+	if err := settings.Validate(); err != nil {
+		return db.InvalidSettingsError{Err: err}
+	}
+	// AND THE INGEST LISTENER MAY NOT ASK FOR A PORT THIS PROCESS ALREADY
+	// HOLDS.
+	//
+	// Saving rtmpPort as the server's own HTTP port returned 200. The
+	// listener then could not bind on the next reconcile, which logged one
+	// ERROR and returned -- and its comment concedes that the log is the
+	// only way anybody finds out. Ingest was dead, the settings page showed
+	// the port saved and green, and the operator spent the outage debugging
+	// their encoder.
+	//
+	// Here rather than in Settings.Validate for the same reason the rule
+	// compile below is here: db does not import config and must not, so a
+	// db type structurally cannot see the HTTP port. This handler is the
+	// only place both are visible, and it is the only settings writer a
+	// person can reach. See db.Settings.TCPPortConflicts for why SRT is not
+	// checked -- it is UDP, and sharing a number with HTTP is legal.
+	if probs := settings.TCPPortConflicts(s.reservedTCPPorts()); len(probs) > 0 {
+		return db.InvalidSettingsError{
+			Err: fmt.Errorf("invalid settings: %v", probs),
+		}
+	}
+	return nil
+}
+
+// checkAutomodChange refuses an automod change that cannot run: rules that do
+// not compile, cells armed over a missing checker, and model checkers
+// switched on untested.
+func (s *Server) checkAutomodChange(settings *db.Settings, stored storedSettings) error {
+	// AND THE AUTOMOD RULES HAVE TO COMPILE -- THE ONES BEING CHANGED.
+	//
+	// Rule.Compile refuses a bad regex, an empty pattern, an unknown action
+	// and a zero-duration timeout -- and nothing called it from here, so a
+	// pattern like "(unclosed[" saved with a 200. At apply time NewRuleSet
+	// is all-or-nothing, so ApplyAutomod sets rules = nil and EVERY pattern
+	// rule stops running, not only the broken one. The narrowest possible
+	// typo disarmed the whole checker.
+	//
+	// Silently, and against three screens saying otherwise: GET /settings
+	// listed the rules enabled, GET /automod/matrix reported the checker
+	// available, and the UI drew them. The only signal was one log.Error on
+	// a server nobody was tailing. An operator who typo'd a pattern last
+	// week has had no moderation since and every screen has told them they
+	// do.
+	//
+	// Scoped to a CHANGE, and that is not softness. An install upgrading
+	// from a version that accepted a bad pattern already has one stored;
+	// refusing every save would leave that operator unable to change
+	// anything at all -- their listener port, their recording retention --
+	// until they fixed a rule the UI may not even show them. The same trap
+	// the alert-rule SSRF guard avoids by refusing at the dial rather than
+	// at load. Touch the rules and they must compile; leave them alone and
+	// the existing breakage is not made your problem.
+	//
+	// Here rather than in Settings.Validate because internal/automod
+	// imports internal/db, so db cannot import the compiler that knows what
+	// a valid rule is. This handler is the only place both are visible, and
+	// it is the only writer a person can reach.
+	if !sameAutomodRules(stored.rules, settings.Automod.Rules) {
+		if _, err := rulesFromSettings(settings.Automod); err != nil {
+			return db.InvalidSettingsError{Err: err}
+		}
+	}
+	// AND NO CELL MAY BE ARMED OVER A CHECKER THAT IS NOT THERE. See
+	// newlyArmedOnUnconfigured.
+	if err := newlyArmedOnUnconfigured(stored.on, settings.Automod); err != nil {
+		return err
+	}
+	// AND NO MODEL CHECKER MAY BE SWITCHED ON UNTESTED, nor given a preset
+	// or a category action this build does not have. See
+	// newlyEnabledUntested and automodProviderProblems.
+	if err := automodProviderProblems(settings.Automod); err != nil {
+		return err
+	}
+	return newlyEnabledUntested(stored.automod, settings.Automod, s.store.AutomodTestPass)
+}
+
+// checkSettingsAgainstStored refuses what a save may not change: an ingest
+// mode cleared back to unset, and uploads it introduces that are missing.
+func (s *Server) checkSettingsAgainstStored(settings *db.Settings, stored storedSettings) error {
+	// A save that touches the ingest section may not leave the mode unset.
+	//
+	// db.IngestUnset is storable on purpose — it is what a fresh install is
+	// before anyone has chosen, and the migration writes it during DB open,
+	// so the store cannot refuse it. But it is a starting state, never a
+	// choice: nobody opens this form and decides on "none". Refusing it here
+	// is what turns "no default" into "you have to pick", without which the
+	// unset state would just be a silent no-ingest.
+	//
+	// Scoped to CLEARING a mode that was already chosen, not to every save
+	// made before one is. The settings page PUTs the whole document, so
+	// refusing any unset ingest would fail the first unrelated change an
+	// operator makes on a fresh install — for a reason that has nothing to
+	// do with what they touched. What forces the choice on a fresh install
+	// is that nothing ingests until it is made, and the UI says so.
+	if settings.Ingest.Mode == db.IngestUnset {
+		var prev struct {
+			Ingest struct {
+				Mode db.IngestMode `json:"mode"`
+			} `json:"ingest"`
+		}
+		if json.Unmarshal(stored.json, &prev) == nil && prev.Ingest.Mode != db.IngestUnset {
+			return badRequestError{"choose an ingest mode: srt, rtmp or pull"}
+		}
+	}
+	// The half of playlist validation that needs a filesystem.
+	// Settings.Validate checks an item's SHAPE and cannot check its
+	// existence -- internal/db has no uploads store and must not grow one --
+	// so the "a missing upload is a settings error" rule is enforced here,
+	// where the store already exists.
+	//
+	// Scoped to items this save INTRODUCES. An unrelated save must not be
+	// refused because an upload some earlier item named has since been
+	// deleted: the operator has no control that can clear it, and the
+	// readiness gate keeps the playlist off air regardless. See
+	// playlistUploadProblems.
+	//
+	// This is the one thing left inside the store's lock that touches
+	// something outside the process: a MkdirAll and a Stat per introduced
+	// item, on local disk. Bounded and short, unlike a network read, and
+	// moving it out would mean either checking uploads against a document
+	// that is not the one about to be stored or holding the check open
+	// across the write. Recorded rather than claimed away.
+	if err := s.playlistUploadProblems(settings.Failover.Playlist, stored.playlist); err != nil {
+		return badRequestError{err.Error()}
+	}
+	// The same rule for the OTHER way a stored upload reaches an FFmpeg: a
+	// pull source naming one. That path bypasses ffmpeg.ProbeFile's format
+	// allowlist entirely, so a file this server was never allowed to inspect
+	// must not be routed to air through it. #201.
+	if err := s.pullSourceUploadProblems(*settings, stored.pullURL, stored.backupPullURL); err != nil {
+		return badRequestError{err.Error()}
+	}
+	return nil
+}
+
+// keepIngestWithoutSource puts the stored ingest block back when a save
+// changes it on an install with no source to write it through to, reporting
+// that it did.
+func (s *Server) keepIngestWithoutSource(settings *db.Settings, storedIngest db.IngestSettings) (bool, error) {
+	// AND THE INGEST BLOCK ON AN INSTALL WITH NOWHERE TO PUT IT.
+	//
+	// settings.ingest is not read by anything any more: the engine takes
+	// its ingest from the source row, and the write-through below is the
+	// only thing that gives this half of the form an effect. With no source
+	// there is nothing to write it through to, so an edit here would store,
+	// answer 200, and change nothing -- on the DEFAULT tab of the settings
+	// page, on a first-time operator's first screen. That is the exact bug
+	// the write-through was added to fix, arriving again from the other
+	// side, and it is the one this handler must never re-commit.
+	//
+	// So the stored block is PUT BACK and the handler refuses below. Two
+	// things follow from doing it here rather than at the top:
+	//
+	//   - every other setting in the same document is saved. Recording,
+	//     chat, automod, alerts and the listeners are all things an
+	//     operator legitimately configures before creating a source, which
+	//     is also why this route carries no requireSource.
+	//   - nothing that has no effect is stored. Refusing without this line
+	//     would leave the operator's dead ingest in the blob, and the form
+	//     would redisplay it on the next load as though it had taken.
+	//
+	// Scoped to a CHANGE. The settings page PUTs the whole document, so a
+	// save of anything else carries the ingest block along untouched, and
+	// refusing that would make every unrelated setting unreachable until a
+	// source exists.
+	if !ingestEqual(storedIngest, settings.Ingest) {
+		switch _, err := s.defaultSourceID(); {
+		case err == nil:
+		case errors.Is(err, db.ErrSourceNotFound):
+			settings.Ingest = storedIngest
+			return true, nil
+		default:
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // settingsResponse is the stored settings plus what saving them just did.
@@ -2396,7 +2490,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	row, err := s.store.GetDestination(id)
@@ -2837,7 +2931,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeCreateError(w, err)
 		return
 	}
-	rw := s.reconcileNow("the destination")
+	rw := s.reconcileNow(reconcileDestination)
 	resp := map[string]any{"destination": created}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
@@ -2876,7 +2970,7 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// The body is read BEFORE the lock below, so a slow client holds nothing.
@@ -3000,7 +3094,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	rw := s.reconcileNow("the destination")
+	rw := s.reconcileNow(reconcileDestination)
 
 	resp := map[string]any{"destination": updated}
 	if applied, reason := s.destinationApplied(id, updated.SourceID, runBefore, rw); applied != "" {
@@ -3064,7 +3158,7 @@ type deleteDestinationRequest struct {
 func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// READ BEFORE THE DELETE, because the question is about the row and about its
@@ -3213,7 +3307,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
-	if rw := s.reconcileNow("the destination"); rw != "" {
+	if rw := s.reconcileNow(reconcileDestination); rw != "" {
 		return destControl{ReconcileErr: errors.New(rw)}
 	}
 	var wasCut bool
@@ -3267,7 +3361,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// ?now=true is "Stop now": a delayed destination's buffered tail is cut,
@@ -3327,7 +3421,7 @@ func (s *Server) handleStopDestination(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// THE OWNING ENGINE, NOT THE DEFAULT ONE. s.eng() is s.mgr.Default(), so a
@@ -3572,7 +3666,7 @@ func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.recordings().Delete(id); err != nil {
@@ -3585,7 +3679,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)

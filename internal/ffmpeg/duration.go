@@ -182,7 +182,7 @@ func furthestOutTimeMS(r io.Reader) (int64, error) {
 // scraped from a status line whose format is not a contract.
 func CountDurationArgs(format, path string) []string {
 	return []string{
-		"-hide_banner",
+		flagHideBanner,
 		"-nostdin",
 		"-loglevel", LogLevel(LogError),
 		"-protocol_whitelist", "file",

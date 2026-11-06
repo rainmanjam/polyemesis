@@ -154,7 +154,7 @@ func (m *Manager) HoldForMissing(missing, total int) bool {
 			return false
 		}
 		if _, err := os.Stat(marker); errors.Is(err, os.ErrNotExist) {
-			if werr := os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644); werr != nil {
+			if os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644) != nil {
 				m.markerUnwritable.Store(true)
 			} else {
 				m.markerUnwritable.Store(false)
@@ -385,11 +385,37 @@ func (m *Manager) Scan() (bool, error) {
 	for _, r := range indexed {
 		measured[r.Filename] = r.DurationMS > 0
 	}
+	segments, onDisk := listSegments(entries)
 
 	changed := false
+	live := newestSegment(segments)
+	upserted := 0
+	for _, rec := range segments {
+		if m.indexSegment(rec, live, measured) {
+			changed = true
+			upserted++
+		}
+	}
+
+	m.unprobeableMu.Lock()
+	for name := range m.unprobeable {
+		if !onDisk[name] {
+			delete(m.unprobeable, name)
+		}
+	}
+	m.unprobeableMu.Unlock()
+
+	if m.deindexMissing(indexed, onDisk, upserted) {
+		changed = true
+	}
+	return changed, nil
+}
+
+// listSegments is the recordings in a directory listing, and the set of
+// their names.
+func listSegments(entries []os.DirEntry) ([]*db.Recording, map[string]bool) {
 	onDisk := map[string]bool{}
 	segments := make([]*db.Recording, 0, len(entries))
-
 	for _, e := range entries {
 		if e.IsDir() || !isRecording(e.Name()) {
 			continue
@@ -408,59 +434,62 @@ func (m *Manager) Scan() (bool, error) {
 			Bytes:     info.Size(),
 		})
 	}
+	return segments, onDisk
+}
 
-	live := newestSegment(segments)
-	upserted := 0
-	for _, rec := range segments {
-		// Probing costs an ffprobe per file, so it happens once per segment,
-		// and never on the one the recorder is still writing: its duration
-		// would be wrong the moment it was recorded.
-		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] &&
-			!m.knownUnprobeable(rec) {
-			switch err := m.measure(rec); {
-			case err == nil:
-				m.forgetUnprobeable(rec.Filename)
-			case errors.Is(err, errNoDuration):
-				m.noteUnprobeable(rec, err)
-			default:
-				// ffprobe timed out, could not be run, or failed in a way that
-				// says nothing settled about the bytes. Not remembered: the
-				// next scan asks again, as it always did.
-				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
-			}
-		}
-		// The programme that RECORDED the file, read from the name its
-		// recorder gave it -- never the programme of the manager doing the
-		// scan. Every engine's manager scans this one shared directory, and
-		// while each stamped its own programme on every file it saw, the
-		// upsert's "a non-null source_id wins" let each re-label the others'
-		// recordings in turn: source 1's segment read 3, 1, 1, 3 as the scans
-		// interleaved, and clipTracks named a clip's tracks after whichever
-		// programme had scanned last. The filename is the one input every
-		// scanner sees identically.
-		//
-		// A segment an earlier release wrote names no programme. It is left
-		// nil, which the upsert treats as "no opinion": whatever attribution
-		// the row already has stands, and none is invented.
-		if id, ok := SourceFromName(rec.Filename); ok {
-			rec.SourceID = &id
-		}
-		if err := m.store.UpsertRecording(rec); err != nil {
-			m.log.Warn("index recording", "file", rec.Filename, "err", err)
-			continue
-		}
-		changed = true
-		upserted++
+// indexSegment measures rec if it is due a probe, attributes it to the
+// programme that recorded it, and upserts it. It reports whether the row
+// was written.
+func (m *Manager) indexSegment(rec *db.Recording, live string, measured map[string]bool) bool {
+	// Probing costs an ffprobe per file, so it happens once per segment,
+	// and never on the one the recorder is still writing: its duration
+	// would be wrong the moment it was recorded.
+	if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] &&
+		!m.knownUnprobeable(rec) {
+		m.probeSegment(rec)
 	}
-
-	m.unprobeableMu.Lock()
-	for name := range m.unprobeable {
-		if !onDisk[name] {
-			delete(m.unprobeable, name)
-		}
+	// The programme that RECORDED the file, read from the name its
+	// recorder gave it -- never the programme of the manager doing the
+	// scan. Every engine's manager scans this one shared directory, and
+	// while each stamped its own programme on every file it saw, the
+	// upsert's "a non-null source_id wins" let each re-label the others'
+	// recordings in turn: source 1's segment read 3, 1, 1, 3 as the scans
+	// interleaved, and clipTracks named a clip's tracks after whichever
+	// programme had scanned last. The filename is the one input every
+	// scanner sees identically.
+	//
+	// A segment an earlier release wrote names no programme. It is left
+	// nil, which the upsert treats as "no opinion": whatever attribution
+	// the row already has stands, and none is invented.
+	if id, ok := SourceFromName(rec.Filename); ok {
+		rec.SourceID = &id
 	}
-	m.unprobeableMu.Unlock()
+	if err := m.store.UpsertRecording(rec); err != nil {
+		m.log.Warn("index recording", "file", rec.Filename, "err", err)
+		return false
+	}
+	return true
+}
 
+// probeSegment measures rec, remembering a file that has no duration to find.
+func (m *Manager) probeSegment(rec *db.Recording) {
+	switch err := m.measure(rec); {
+	case err == nil:
+		m.forgetUnprobeable(rec.Filename)
+	case errors.Is(err, errNoDuration):
+		m.noteUnprobeable(rec, err)
+	default:
+		// ffprobe timed out, could not be run, or failed in a way that
+		// says nothing settled about the bytes. Not remembered: the
+		// next scan asks again, as it always did.
+		m.log.Warn("probe recording", "file", rec.Filename, "err", err)
+	}
+}
+
+// deindexMissing drops the rows whose file this scan did not see, unless the
+// directory is not confirmed as the indexed volume. It reports whether any
+// row was dropped.
+func (m *Manager) deindexMissing(indexed []db.Recording, onDisk map[string]bool, upserted int) bool {
 	missing := 0
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
@@ -487,12 +516,13 @@ func (m *Manager) Scan() (bool, error) {
 				filepath.Join(m.dir, VolumeMarker),
 				"dir", m.dir, "indexed", len(indexed), "missing", missing)
 		}
-		return changed, nil
+		return false
 	}
 	if m.deindexHeld.Swap(false) {
 		m.log.Info("recordings volume confirmed; de-indexing resumed", "dir", m.dir)
 	}
 
+	changed := false
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
@@ -503,7 +533,7 @@ func (m *Manager) Scan() (bool, error) {
 			changed = true
 		}
 	}
-	return changed, nil
+	return changed
 }
 
 // errNoDuration is the one probe failure that is a fact about the file rather
@@ -667,58 +697,72 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	live[newestSegmentName(recs)] = true
 
 	if s.MaxAgeHours > 0 {
-		cutoff := time.Now().Add(-time.Duration(s.MaxAgeHours) * time.Hour)
-		remaining := recs[:0]
-		for _, r := range recs {
-			if !live[r.Filename] && r.StartedAt.Before(cutoff) {
-				if m.delete(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
-					deleted = true
-					continue
-				}
-			}
-			remaining = append(remaining, r)
-		}
-		recs = remaining
+		recs, deleted = m.sweepAge(recs, live, s.MaxAgeHours)
 	}
-
-	if s.MaxGB > 0 {
-		limit := int64(s.MaxGB * 1024 * 1024 * 1024)
-		var total int64
-		for _, r := range recs {
-			total += r.Bytes
-		}
-		// Stems are on the same volume and are not in the index, so a cap that
-		// ignored them would be several times looser than the number the
-		// operator typed. They are charged against the cap here and credited
-		// back as their masters go, so the loop never deletes more footage than
-		// the cap actually requires.
-		stems, serr := m.stemSizes()
-		if serr != nil {
-			m.log.Warn("stem sizes unreadable; size cap covers masters only", "err", serr)
-		}
-		for _, st := range stems {
-			total += st.bytes
-		}
-		// Never delete a live segment: see the #504 note above liveSegments.
-		for i := 0; total > limit && i < len(recs); i++ {
-			if live[recs[i].Filename] {
-				continue
-			}
-			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
-				continue
-			}
-			total -= recs[i].Bytes
-			// SweepStems runs straight after this and orphans everything
-			// starting before the oldest surviving master, so those bytes are
-			// as good as freed already.
-			if i+1 < len(recs) {
-				total -= creditStems(stems, recs[i+1].StartedAt.Add(-stemSweepSlack))
-			}
-			deleted = true
-		}
+	if s.MaxGB > 0 && m.sweepSize(recs, live, s.MaxGB) {
+		deleted = true
 	}
 
 	return deleted, nil
+}
+
+// sweepAge deletes the recordings older than maxAgeHours, live segments
+// excepted, and returns the ones that remain.
+func (m *Manager) sweepAge(recs []db.Recording, live map[string]bool, maxAgeHours int) ([]db.Recording, bool) {
+	deleted := false
+	cutoff := time.Now().Add(-time.Duration(maxAgeHours) * time.Hour)
+	remaining := recs[:0]
+	for _, r := range recs {
+		if !live[r.Filename] && r.StartedAt.Before(cutoff) {
+			if m.delete(r, fmt.Sprintf("older than %dh", maxAgeHours)) {
+				deleted = true
+				continue
+			}
+		}
+		remaining = append(remaining, r)
+	}
+	return remaining, deleted
+}
+
+// sweepSize deletes the oldest recordings, live segments excepted, until the
+// recordings and their stems fit maxGB.
+func (m *Manager) sweepSize(recs []db.Recording, live map[string]bool, maxGB float64) bool {
+	deleted := false
+	limit := int64(maxGB * 1024 * 1024 * 1024)
+	var total int64
+	for _, r := range recs {
+		total += r.Bytes
+	}
+	// Stems are on the same volume and are not in the index, so a cap that
+	// ignored them would be several times looser than the number the
+	// operator typed. They are charged against the cap here and credited
+	// back as their masters go, so the loop never deletes more footage than
+	// the cap actually requires.
+	stems, serr := m.stemSizes()
+	if serr != nil {
+		m.log.Warn("stem sizes unreadable; size cap covers masters only", "err", serr)
+	}
+	for _, st := range stems {
+		total += st.bytes
+	}
+	// Never delete a live segment: see the #504 note above liveSegments.
+	for i := 0; total > limit && i < len(recs); i++ {
+		if live[recs[i].Filename] {
+			continue
+		}
+		if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", maxGB)) {
+			continue
+		}
+		total -= recs[i].Bytes
+		// SweepStems runs straight after this and orphans everything
+		// starting before the oldest surviving master, so those bytes are
+		// as good as freed already.
+		if i+1 < len(recs) {
+			total -= creditStems(stems, recs[i+1].StartedAt.Add(-stemSweepSlack))
+		}
+		deleted = true
+	}
+	return deleted
 }
 
 // liveSegmentSlack widens the live window past one nominal segment length.

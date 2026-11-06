@@ -490,3 +490,57 @@ func TestTheEncodedBundleIsBoundedByCapacityTimesTheCap(t *testing.T) {
 			"it cannot open it: %v", err)
 	}
 }
+
+// capOther prices and keeps what fits, and empties -- and says so -- what
+// does not; an unrecognised value is carried as the rendering it was measured by.
+func TestCapOtherKeepsWhatFitsAndCutsWhatDoesNot(t *testing.T) {
+	type opaque struct{ A string }
+	cases := []struct {
+		name    string
+		v       any
+		budget  int
+		want    any
+		wantCut bool
+	}{
+		{"scalar fits", 42, 100, 42, false},
+		{"scalar over budget", 42, 1, "", true},
+		{"unrecognised fits", opaque{"x"}, 100, `{"A":"x"}`, false},
+		{"unrecognised over budget", opaque{strings.Repeat("x", 64)}, 10, "", true},
+		{"unmarshalable fits", make(chan int), 100, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, rest, cut := capOther(c.v, c.budget)
+			if cut != c.wantCut {
+				t.Errorf("cut = %v, want %v", cut, c.wantCut)
+			}
+			if rest > c.budget {
+				t.Errorf("budget grew: %d -> %d", c.budget, rest)
+			}
+			if c.name == "unmarshalable fits" {
+				if s, ok := got.(string); !ok || s == "" {
+					t.Errorf("got %#v, want its fmt rendering", got)
+				}
+				return
+			}
+			if got != c.want {
+				t.Errorf("got %#v, want %#v", got, c.want)
+			}
+		})
+	}
+}
+
+// A map whose next key does not fit stops there and reports the cut.
+func TestCapMapStopsAtAKeyThatDoesNotFit(t *testing.T) {
+	in := map[string]any{"a": "1", strings.Repeat("k", 50): "2"}
+	got, rest, cut := capMap(in, 20)
+	if !cut {
+		t.Error("cut = false, want true: a key was left out")
+	}
+	if len(got) != 1 || got["a"] != "1" {
+		t.Errorf("got %#v, want only the key that fit", got)
+	}
+	if rest < 0 {
+		t.Errorf("budget went negative: %d", rest)
+	}
+}

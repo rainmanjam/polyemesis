@@ -255,31 +255,8 @@ type pickedStream struct {
 
 // pickStream is the body of streamFor. Every return names whether it created the stream.
 func (y *YouTube) pickStream(ctx context.Context, accessToken string, opts IngestOptions) (pickedStream, error) {
-	// A CAPTION-ENABLED DESTINATION IS THE ONE CASE THAT NEVER SHARES, AND ITS
-	// KEY CAN MOVE ONCE.
-	//
-	// Its caption ingest URL is documented only on the insert response, so a
-	// stream it adopts from the list has a URL polyemesis cannot know. The rule:
-	//   - a stored URL plus the held key reuses that stream (the URL comes back
-	//     from the store, see IngestFor);
-	//   - anything else creates a stream, and the new key is the rotation the
-	//     operator is told about. A stored URL with no held key to match is not
-	//     enough to reuse a stream, so the destination rotates too.
-	// No shared or sibling stream is ever adopted on this path: its URL would be
-	// unknown, and a sibling's stream would give two destinations one source.
 	if opts.CaptionPOST {
-		if opts.HeldKey != "" && opts.CaptionIngestURL != "" && !(opts.RotateKey && opts.DedicatedIngest) {
-			streams, err := y.listStreams(ctx, accessToken)
-			if err != nil {
-				return pickedStream{}, err
-			}
-			for i := range streams {
-				if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
-					return pickedStream{ytLiveStream: &streams[i]}, nil
-				}
-			}
-		}
-		return y.createdStream(ctx, accessToken, opts.IngestLabel, true)
+		return y.pickCaptionStream(ctx, accessToken, opts)
 	}
 
 	streams, err := y.listStreams(ctx, accessToken)
@@ -296,10 +273,8 @@ func (y *YouTube) pickStream(ctx context.Context, accessToken string, opts Inges
 	// the only way an established key ever moves -- see IngestOptions.RotateKey
 	// for why it has to exist at all.
 	if opts.HeldKey != "" && !(opts.RotateKey && opts.DedicatedIngest) {
-		for i := range streams {
-			if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
-				return pickedStream{ytLiveStream: &streams[i]}, nil
-			}
+		if held := streamWithKey(streams, opts.HeldKey); held != nil {
+			return pickedStream{ytLiveStream: held}, nil
 		}
 	}
 
@@ -323,19 +298,66 @@ func (y *YouTube) pickStream(ctx context.Context, accessToken string, opts Inges
 	// One that held a key and cannot find it gets a new stream, which is the
 	// honest reading of its situation: whatever it was bound to is gone.
 	if !opts.DedicatedIngest && opts.HeldKey == "" {
-		// Prefer an existing reusable RTMP stream; that is the one the creator's
-		// scheduled broadcasts are already bound to.
-		for i := range streams {
-			if strings.EqualFold(streams[i].CDN.IngestionType, "rtmp") &&
-				streams[i].CDN.IngestionInfo.StreamName != "" &&
-				!isVerticalStreamTitle(streams[i].Snippet.Title) &&
-				!containsString(opts.ExcludeStreamIDs, streams[i].ID) {
-				return pickedStream{ytLiveStream: &streams[i]}, nil
-			}
+		if shared := sharedRTMPStream(streams, opts.ExcludeStreamIDs); shared != nil {
+			return pickedStream{ytLiveStream: shared}, nil
 		}
 	}
 
 	return y.createdStream(ctx, accessToken, opts.IngestLabel, false)
+}
+
+// pickCaptionStream is pickStream for a caption-enabled destination: the held
+// stream when its caption URL is stored, otherwise a new stream.
+func (y *YouTube) pickCaptionStream(ctx context.Context, accessToken string, opts IngestOptions) (pickedStream, error) {
+	// A CAPTION-ENABLED DESTINATION IS THE ONE CASE THAT NEVER SHARES, AND ITS
+	// KEY CAN MOVE ONCE.
+	//
+	// Its caption ingest URL is documented only on the insert response, so a
+	// stream it adopts from the list has a URL polyemesis cannot know. The rule:
+	//   - a stored URL plus the held key reuses that stream (the URL comes back
+	//     from the store, see IngestFor);
+	//   - anything else creates a stream, and the new key is the rotation the
+	//     operator is told about. A stored URL with no held key to match is not
+	//     enough to reuse a stream, so the destination rotates too.
+	// No shared or sibling stream is ever adopted on this path: its URL would be
+	// unknown, and a sibling's stream would give two destinations one source.
+	if opts.HeldKey != "" && opts.CaptionIngestURL != "" && !(opts.RotateKey && opts.DedicatedIngest) {
+		streams, err := y.listStreams(ctx, accessToken)
+		if err != nil {
+			return pickedStream{}, err
+		}
+		if held := streamWithKey(streams, opts.HeldKey); held != nil {
+			return pickedStream{ytLiveStream: held}, nil
+		}
+	}
+	return y.createdStream(ctx, accessToken, opts.IngestLabel, true)
+}
+
+// streamWithKey is the stream whose ingestion key is key, byte for byte, or
+// nil when the channel lists none.
+func streamWithKey(streams []ytLiveStream, key string) *ytLiveStream {
+	for i := range streams {
+		if streams[i].CDN.IngestionInfo.StreamName == key {
+			return &streams[i]
+		}
+	}
+	return nil
+}
+
+// sharedRTMPStream is the channel's reusable RTMP stream: the first with a key
+// that is not a vertical stream and not excluded, or nil.
+func sharedRTMPStream(streams []ytLiveStream, exclude []string) *ytLiveStream {
+	// Prefer an existing reusable RTMP stream; that is the one the creator's
+	// scheduled broadcasts are already bound to.
+	for i := range streams {
+		if strings.EqualFold(streams[i].CDN.IngestionType, "rtmp") &&
+			streams[i].CDN.IngestionInfo.StreamName != "" &&
+			!isVerticalStreamTitle(streams[i].Snippet.Title) &&
+			!containsString(exclude, streams[i].ID) {
+			return &streams[i]
+		}
+	}
+	return nil
 }
 
 // createdStream is createStream, marked as made by this call.

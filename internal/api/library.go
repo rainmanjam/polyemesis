@@ -283,7 +283,7 @@ func (s *Server) activeJobsFor(id int64, names map[int64]string) []jobView {
 func (s *Server) handleGetLibrarySession(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	sess, err := s.store.GetSession(id)
@@ -342,7 +342,7 @@ func (s *Server) expand(recs []db.Recording) []libraryRecording {
 func (s *Server) handleGetLibraryRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)
@@ -395,7 +395,7 @@ func (s *Server) handleCreateLibrarySession(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleUpdateLibrarySession(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req struct {
@@ -428,7 +428,7 @@ func (s *Server) handleUpdateLibrarySession(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleDeleteLibrarySession(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteSession(id); err != nil {
@@ -467,7 +467,7 @@ func (s *Server) handleRegroupSessions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateLibraryRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req db.Metadata
@@ -487,7 +487,7 @@ func (s *Server) handleUpdateLibraryRecording(w http.ResponseWriter, r *http.Req
 func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	t, err := s.store.GetTranscript(id)
@@ -510,7 +510,7 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteTranscript(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	// track is optional: absent deletes the whole transcript, present deletes
@@ -621,7 +621,7 @@ func (s *Server) removeTranscriptFiles(recordingID int64, track *recording.Trans
 func (s *Server) handleSetTranscriptSpeaker(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req struct {
@@ -795,7 +795,7 @@ func timeParam(s string) (time.Time, error) {
 func (s *Server) handleLibraryMedia(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)
@@ -894,7 +894,7 @@ func (s *Server) handleSubmitRecordingJob(w http.ResponseWriter, r *http.Request
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)

@@ -83,7 +83,7 @@ func (f *verticalPairsInFlight) end(id int64) {
 func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	dest, err := s.store.GetDestination(id)
@@ -307,7 +307,7 @@ func (s *Server) verticalChargeOK() bool {
 func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	pair, err := s.store.GetYouTubeVerticalPairByHorizontal(id)
@@ -397,7 +397,7 @@ func applyVerticalRead(view *verticalPairView, r verticalHealthRead) {
 func (s *Server) handleConfirmYouTubeVertical(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.ConfirmYouTubeVerticalPairing(id, time.Now()); err != nil {

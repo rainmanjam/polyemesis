@@ -231,14 +231,10 @@ func sanitise(s string) string {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			b.WriteRune(r)
 			lastDash = false
-		case r == '-' || r == '_':
-			if !lastDash {
-				b.WriteRune('-')
-				lastDash = true
-			}
 		default:
-			// Everything else -- spaces, quotes, dots, separators, control
-			// characters, anything non-ASCII -- collapses to a single dash.
+			// Everything else -- dashes and underscores, spaces, quotes, dots,
+			// separators, control characters, anything non-ASCII -- collapses to
+			// a single dash.
 			if !lastDash {
 				b.WriteRune('-')
 				lastDash = true

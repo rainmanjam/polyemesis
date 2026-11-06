@@ -128,19 +128,7 @@ func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter
 	sub, replay, gap := s.stream.Subscribe(filter, lastID)
 	defer sub.Close()
 
-	write := func(b []byte) bool {
-		// A deadline per write, because the server has no WriteTimeout (it
-		// would end every stream) and a client that stops reading must not
-		// hold this goroutine forever.
-		_ = rc.SetWriteDeadline(time.Now().Add(writeWait))
-		if _, err := w.Write(b); err != nil {
-			return false
-		}
-		if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return false
-		}
-		return true
-	}
+	write := sseWriter(w, rc)
 	if !write([]byte(fmt.Sprintf("retry: %d\n: polyemesis events\n\n", eventsRetryMS))) {
 		return
 	}
@@ -153,6 +141,30 @@ func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter
 		}
 	}
 
+	s.relayEvents(r, sub, guard, write)
+}
+
+// sseWriter is the stream's one way to write: a frame under a per-write
+// deadline, flushed, false once the client is gone.
+func sseWriter(w http.ResponseWriter, rc *http.ResponseController) func(b []byte) bool {
+	return func(b []byte) bool {
+		// A deadline per write, because the server has no WriteTimeout (it
+		// would end every stream) and a client that stops reading must not
+		// hold this goroutine forever.
+		_ = rc.SetWriteDeadline(time.Now().Add(writeWait))
+		if _, err := w.Write(b); err != nil {
+			return false
+		}
+		if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return false
+		}
+		return true
+	}
+}
+
+// relayEvents relays sub to the client until it leaves, falls behind, or the
+// guard says the credential is gone, with a heartbeat between events.
+func (s *Server) relayEvents(r *http.Request, sub *eventstream.Subscription, guard streamGuard, write func([]byte) bool) {
 	beat := time.NewTicker(s.heartbeatEvery())
 	defer beat.Stop()
 	every := guard.every
@@ -161,55 +173,64 @@ func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter
 	}
 	check := time.NewTicker(every)
 	defer check.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-guard.kicked:
-			return
-		case env, ok := <-sub.C:
-			if !ok {
-				// The hub closed it: this client fell too far behind. Ending
-				// the response is the whole of the remedy -- EventSource
-				// reconnects with Last-Event-ID and replays the gap from the
-				// ring. Logged, because an operator whose dashboard keeps
-				// reconnecting should be able to find out why.
-				if sub.Overflowed() {
-					s.log.Info("events stream: disconnected a client that fell behind",
-						"buffer", eventstream.DefaultClientBuffer)
-					// ABORTED, NOT ENDED. A clean return finishes the
-					// response and, on HTTP/1.1, hands the connection back
-					// to keep-alive to wait for a next request -- from a
-					// client that is not reading. The hub let go of it but
-					// the socket stayed, its backlog parked in kernel
-					// buffers, until the idle timeout (and for ever on a
-					// server without one). That is what happened whenever
-					// the hub dropped a client before any write had
-					// blocked: no deadline fired, because none was needed.
-					// Aborting closes an HTTP/1 connection and resets only
-					// this stream on HTTP/2; EventSource reconnects from
-					// either, with Last-Event-ID, exactly as from a clean
-					// end. chi's Recoverer re-panics this value and
-					// net/http logs nothing for it.
-					panic(http.ErrAbortHandler)
-				}
-				return
-			}
-			if !write(frame(env)) {
-				return
-			}
-		case <-check.C:
-			if guard.valid != nil && !guard.valid() {
-				return
-			}
-		case <-beat.C:
-			if guard.valid != nil && !guard.valid() {
-				return
-			}
-			if !write([]byte(": heartbeat\n\n")) {
-				return
-			}
+	for s.relayNext(r, sub, guard, write, beat.C, check.C) {
+		// relayNext does the work; this only repeats it until it says stop.
+	}
+}
+
+// relayNext waits for the stream's next event, check or heartbeat and acts on
+// it, reporting whether the stream goes on.
+func (s *Server) relayNext(r *http.Request, sub *eventstream.Subscription, guard streamGuard,
+	write func([]byte) bool, beat, check <-chan time.Time) bool {
+	select {
+	case <-r.Context().Done():
+		return false
+	case <-guard.kicked:
+		return false
+	case env, ok := <-sub.C:
+		if !ok {
+			s.endDroppedClient(sub)
+			return false
 		}
+		return write(frame(env))
+	case <-check:
+		return !guard.revoked()
+	case <-beat:
+		return !guard.revoked() && write([]byte(": heartbeat\n\n"))
+	}
+}
+
+// revoked reports whether the guard has a validity check and it now fails.
+func (g streamGuard) revoked() bool {
+	return g.valid != nil && !g.valid()
+}
+
+// endDroppedClient ends the response for a subscription the hub closed. The
+// hub closed it: this client fell too far behind.
+func (s *Server) endDroppedClient(sub *eventstream.Subscription) {
+	// The hub closed it: this client fell too far behind. Ending
+	// the response is the whole of the remedy -- EventSource
+	// reconnects with Last-Event-ID and replays the gap from the
+	// ring. Logged, because an operator whose dashboard keeps
+	// reconnecting should be able to find out why.
+	if sub.Overflowed() {
+		s.log.Info("events stream: disconnected a client that fell behind",
+			"buffer", eventstream.DefaultClientBuffer)
+		// ABORTED, NOT ENDED. A clean return finishes the
+		// response and, on HTTP/1.1, hands the connection back
+		// to keep-alive to wait for a next request -- from a
+		// client that is not reading. The hub let go of it but
+		// the socket stayed, its backlog parked in kernel
+		// buffers, until the idle timeout (and for ever on a
+		// server without one). That is what happened whenever
+		// the hub dropped a client before any write had
+		// blocked: no deadline fired, because none was needed.
+		// Aborting closes an HTTP/1 connection and resets only
+		// this stream on HTTP/2; EventSource reconnects from
+		// either, with Last-Event-ID, exactly as from a clean
+		// end. chi's Recoverer re-panics this value and
+		// net/http logs nothing for it.
+		panic(http.ErrAbortHandler)
 	}
 }
 

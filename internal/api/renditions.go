@@ -79,7 +79,7 @@ func (s *Server) handleListRenditions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	row, err := s.store.GetRendition(id)
@@ -175,7 +175,7 @@ func sourceRef(id *int64) string {
 func (s *Server) handleUpdateRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	existing, err := s.store.GetRendition(id)
@@ -225,7 +225,7 @@ func (s *Server) handleUpdateRendition(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	total, enabled, err := s.renditionUsage()
@@ -715,7 +715,7 @@ const redetectCeiling = 30 * time.Second
 func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	row, err := s.store.GetRendition(id)
@@ -756,7 +756,7 @@ func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleRenditionConcerns(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	row, err := s.store.GetRendition(id)

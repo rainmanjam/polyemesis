@@ -356,7 +356,7 @@ const codeAccountInUse = "account_in_use"
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	confirmed, ok := deleteConfirmed(w, r)
@@ -796,7 +796,7 @@ func urlEscape(s string) string {
 func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 
@@ -845,7 +845,7 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	dest, err := s.store.GetDestination(id)

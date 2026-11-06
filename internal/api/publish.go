@@ -596,7 +596,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetPublication(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	p, err := s.store.GetPublication(id)

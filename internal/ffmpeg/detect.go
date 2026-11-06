@@ -23,6 +23,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
+// flagHideBanner is the FFmpeg flag that silences the version banner.
+const flagHideBanner = "-hide_banner"
+
 // MinMajorVersion is the oldest FFmpeg we accept, and it is 8.0.
 //
 // It was 6.0, chosen for what polyemesis needed of every build: stable
@@ -214,7 +217,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath, assumeMajor string) (*
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, binFFmpeg, "-hide_banner", "-version").CombinedOutput()
+	out, err := exec.CommandContext(ctx, binFFmpeg, flagHideBanner, "-version").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("running %s -version failed: %w\n%s", binFFmpeg, err, truncate(string(out), 400))
 	}
@@ -314,7 +317,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath, assumeMajor string) (*
 // fix the problem from inside the product. The failure surfaces instead as a
 // clear message on the ingest process and a banner in the UI.
 func (t *Tools) checkSRT(ctx context.Context) {
-	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-protocols").CombinedOutput()
+	out, err := exec.CommandContext(ctx, t.FFmpeg, flagHideBanner, "-protocols").CombinedOutput()
 	if err != nil {
 		return // some builds restrict -protocols; assume the best
 	}
@@ -391,7 +394,7 @@ func (t *Tools) KnownRegressionWarning() string {
 // Like checkSRT this is advisory: a machine where every hardware probe fails
 // still runs every rendition on libx264.
 func (t *Tools) checkEncoders(ctx context.Context) {
-	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-encoders").CombinedOutput()
+	out, err := exec.CommandContext(ctx, t.FFmpeg, flagHideBanner, "-encoders").CombinedOutput()
 	if err == nil {
 		t.mu.Lock()
 		t.VideoEncoders = parseVideoEncoders(string(out))
@@ -416,7 +419,7 @@ func (t *Tools) checkEncoders(ctx context.Context) {
 // filter that exists, because filters are pure software. There is no hardware
 // underneath to disagree with the list, so the list IS the evidence.
 func (t *Tools) checkFilters(ctx context.Context) {
-	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-filters").CombinedOutput()
+	out, err := exec.CommandContext(ctx, t.FFmpeg, flagHideBanner, "-filters").CombinedOutput()
 	if err != nil {
 		// Left empty, which every caller reads as "assume the best". Refusing
 		// to start over a failed capability probe would take a working install

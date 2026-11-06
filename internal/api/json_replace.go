@@ -85,48 +85,61 @@ func ownsDecode(v reflect.Value) bool {
 func resetFields(obj map[string]json.RawMessage, v reflect.Value) {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		tag := f.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		name, _, _ := strings.Cut(tag, ",")
-		fv := v.Field(i)
+		resetField(obj, t.Field(i), v.Field(i))
+	}
+}
 
-		// An untagged embedded struct's fields are read from THIS object, as
-		// encoding/json flattens them.
-		if f.Anonymous && name == "" {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				if fv.IsNil() {
-					continue
-				}
-				fv, ft = fv.Elem(), ft.Elem()
-			}
-			if ft.Kind() == reflect.Struct && !ownsDecode(fv) {
-				resetFields(obj, fv)
-				continue
-			}
-		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		raw, ok := lookupKey(obj, name)
-		if !ok {
-			continue
-		}
-		switch fv.Kind() {
-		case reflect.Slice, reflect.Map, reflect.Array:
-			if fv.CanSet() {
-				fv.SetZero()
-			}
-		case reflect.Struct, reflect.Pointer:
-			resetValue(raw, fv)
+// resetField is resetFields for one field f of the struct, whose value is fv.
+func resetField(obj map[string]json.RawMessage, f reflect.StructField, fv reflect.Value) {
+	tag := f.Tag.Get("json")
+	if tag == "-" {
+		return
+	}
+	name, _, _ := strings.Cut(tag, ",")
+
+	// An untagged embedded struct's fields are read from THIS object, as
+	// encoding/json flattens them.
+	if f.Anonymous && name == "" {
+		var done bool
+		if fv, done = resetEmbedded(obj, f.Type, fv); done {
+			return
 		}
 	}
+	if !f.IsExported() {
+		return
+	}
+	if name == "" {
+		name = f.Name
+	}
+	raw, ok := lookupKey(obj, name)
+	if !ok {
+		return
+	}
+	switch fv.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Array:
+		if fv.CanSet() {
+			fv.SetZero()
+		}
+	case reflect.Struct, reflect.Pointer:
+		resetValue(raw, fv)
+	}
+}
+
+// resetEmbedded walks an untagged embedded struct field (type ft, value fv)
+// against obj itself. It reports whether the field is dealt with, and
+// otherwise returns the value (dereferenced) the caller carries on with.
+func resetEmbedded(obj map[string]json.RawMessage, ft reflect.Type, fv reflect.Value) (reflect.Value, bool) {
+	if ft.Kind() == reflect.Pointer {
+		if fv.IsNil() {
+			return fv, true
+		}
+		fv, ft = fv.Elem(), ft.Elem()
+	}
+	if ft.Kind() == reflect.Struct && !ownsDecode(fv) {
+		resetFields(obj, fv)
+		return fv, true
+	}
+	return fv, false
 }
 
 // lookupKey finds a field's key the way encoding/json matches it: exactly, or

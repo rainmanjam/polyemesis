@@ -62,6 +62,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
+// logComponent is the slog component attribute value for the one-port RTMP ingest.
+const logComponent = "rtmp-ingest"
+
 // handshakeTimeout bounds how long a connection may take to get through the
 // RTMP handshake and announce what it wants.
 //
@@ -330,7 +333,7 @@ func (s *Server) Start() error {
 
 	go s.acceptLoop(ln)
 	go s.revalidateEvery(revalidateInterval)
-	s.log.Info("one-port rtmp ingest listening", "component", "rtmp-ingest", "addr", s.addr)
+	s.log.Info("one-port rtmp ingest listening", "component", logComponent, "addr", s.addr)
 	return nil
 }
 
@@ -346,7 +349,7 @@ func (s *Server) acceptLoop(ln net.Listener) {
 			// A transient accept error must not end the loop: the listener is
 			// the only way any RTMP encoder reaches this install, and dropping
 			// out of the loop would take every source down until a restart.
-			s.log.Warn("rtmp accept failed", "component", "rtmp-ingest", "err", err)
+			s.log.Warn("rtmp accept failed", "component", logComponent, "err", err)
 			continue
 		}
 		go s.handle(conn)
@@ -439,7 +442,7 @@ func (s *Server) handle(conn net.Conn) {
 	host := authgate.PeerHost(conn.RemoteAddr())
 	if s.gate.Blocked(host) {
 		s.log.Debug("rtmp connect refused: peer is rate-limited after repeated wrong keys",
-			"component", "rtmp-ingest", "peer", peer)
+			"component", logComponent, "peer", peer)
 		return
 	}
 
@@ -447,7 +450,7 @@ func (s *Server) handle(conn net.Conn) {
 
 	sc := &gortmplib.ServerConn{RW: conn}
 	if err := sc.Initialize(); err != nil {
-		s.log.Debug("rtmp handshake failed", "component", "rtmp-ingest", "peer", peer, "err", err)
+		s.log.Debug("rtmp handshake failed", "component", logComponent, "peer", peer, "err", err)
 		return
 	}
 	// AcceptConn, NOT Accept. gortmplib v1.0.1 split what used to be one call:
@@ -460,7 +463,7 @@ func (s *Server) handle(conn net.Conn) {
 	// with a HEALTHY relay on the other side. Nothing in the type system caught
 	// that; the end-to-end tests did.
 	if err := sc.AcceptConn(); err != nil {
-		s.log.Debug("rtmp accept failed", "component", "rtmp-ingest", "peer", peer, "err", err)
+		s.log.Debug("rtmp accept failed", "component", logComponent, "peer", peer, "err", err)
 		return
 	}
 	// Immediately, and NOT deferred until after the key is checked.
@@ -479,7 +482,7 @@ func (s *Server) handle(conn net.Conn) {
 	// close the socket. Adopting it would change what a peer holding a wrong
 	// key can observe, so it belongs in its own change.
 	if err := sc.AcceptAction(); err != nil {
-		s.log.Debug("rtmp accept action failed", "component", "rtmp-ingest", "peer", peer, "err", err)
+		s.log.Debug("rtmp accept action failed", "component", logComponent, "peer", peer, "err", err)
 		return
 	}
 
@@ -493,7 +496,7 @@ func (s *Server) handle(conn net.Conn) {
 	if !sc.Publish {
 		if !isLoopback(conn.RemoteAddr()) {
 			s.log.Info("rtmp play refused: not from loopback",
-				"component", "rtmp-ingest", "peer", peer)
+				"component", logComponent, "peer", peer)
 			return
 		}
 		_ = conn.SetDeadline(time.Time{})
@@ -543,14 +546,14 @@ func (s *Server) handle(conn net.Conn) {
 			// the source. An unrecognised key and a well-formed key for a
 			// source that does not exist have to be the same event, or the log
 			// becomes an oracle for whoever can read it.
-			s.log.Info("rtmp publish refused", "component", "rtmp-ingest", "peer", peer)
+			s.log.Info("rtmp publish refused", "component", logComponent, "peer", peer)
 			// Only an unrecognised key counts as a guess. A found-but-disabled
 			// or found-but-not-ready target already proved this caller holds a
 			// real credential, so neither of those branches reaches here. See
 			// internal/authgate.
 			if s.gate.Fail(host) {
 				s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
-					"component", "rtmp-ingest", "peer", peer)
+					"component", logComponent, "peer", peer)
 			}
 		} else {
 			// Past here the publisher has already proved it holds a valid key,
@@ -561,7 +564,7 @@ func (s *Server) handle(conn net.Conn) {
 			// apart, and collapsing them leaves "my encoder connects and
 			// nothing comes out" with no next step.
 			s.log.Info("rtmp publish refused: "+verdict.String(),
-				"component", "rtmp-ingest", "peer", peer, "source", target.Name)
+				"component", logComponent, "peer", peer, "source", target.Name)
 		}
 		return
 	}
@@ -650,14 +653,14 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 		// looking at. Refusing it would leave a dead session holding the slot
 		// until its TCP timeout, and the stream would look broken for reasons
 		// invisible from the encoder side.
-		s.log.Info("rtmp publisher replaced", "component", "rtmp-ingest",
+		s.log.Info("rtmp publisher replaced", "component", logComponent,
 			"source", target.Name, "role", role(target.Backup), "peer", peer)
 		if c, ok := old.conn.RW.(net.Conn); ok {
 			_ = c.Close()
 		}
 	}
 
-	s.log.Info("rtmp publisher connected", "component", "rtmp-ingest",
+	s.log.Info("rtmp publisher connected", "component", logComponent,
 		"source", target.Name, "role", role(target.Backup), "peer", peer)
 
 	s.mu.Lock()
@@ -680,11 +683,11 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 	err := s.pump(sc, sess.key)
 
 	if n := endSubscribers(s.releaseSlot(sess)); n > 0 {
-		s.log.Info("rtmp subscribers ended with the publish", "component", "rtmp-ingest",
+		s.log.Info("rtmp subscribers ended with the publish", "component", logComponent,
 			"subscribers", n)
 	}
 
-	s.log.Info("rtmp publisher disconnected", "component", "rtmp-ingest",
+	s.log.Info("rtmp publisher disconnected", "component", logComponent,
 		"source", target.Name, "role", role(target.Backup), "peer", peer,
 		"held", time.Since(sess.started).Round(time.Second), "err", err)
 }
@@ -835,7 +838,7 @@ func (s *Server) Revalidate() int {
 		if sess.refusals.Add(1) < revokeAfter {
 			continue
 		}
-		s.log.Warn("rtmp publisher closed: no longer admitted", "component", "rtmp-ingest",
+		s.log.Warn("rtmp publisher closed: no longer admitted", "component", logComponent,
 			"peer", sess.peer, "role", role(sess.key.Backup), "reason", reason)
 		if c, ok := sess.conn.RW.(net.Conn); ok {
 			_ = c.Close()
@@ -869,7 +872,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	// subscriber and the publisher may legitimately be using different strings.
 	target, ok := s.lookup(streamKey)
 	if !ok {
-		s.log.Info("rtmp subscribe refused: unknown key", "component", "rtmp-ingest", "peer", peer)
+		s.log.Info("rtmp subscribe refused: unknown key", "component", logComponent, "peer", peer)
 		return
 	}
 	key := target.Key()
@@ -945,7 +948,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 		// mutex the publisher needs for every message.
 		if lost > 0 {
 			s.log.Warn("rtmp subscriber fell behind and lost messages",
-				"component", "rtmp-ingest", "peer", peer, "dropped", lost)
+				"component", logComponent, "peer", peer, "dropped", lost)
 		}
 	}()
 
@@ -995,74 +998,94 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 		s.mu.Lock()
 		st := s.streams[key]
 		s.mu.Unlock()
-		if st != nil {
-			st.mu.Lock()
-			st.cacheSetup(msg)
-			// READINESS, ENFORCED MID-SESSION.
-			//
-			// Ready was checked once, at admission, and never again -- so an
-			// ingest child that died a second later left this loop dropping
-			// every message into an empty subscriber set for the rest of the
-			// session. The encoder stays green, the bytes go nowhere, and
-			// nothing reports a fault: the green-encoder-no-output failure that
-			// Ready exists to prevent, reached after Ready had already said yes.
-			//
-			// A grace first, because an empty set is ordinary and transient --
-			// the ingest child exits whenever its publisher does and is
-			// respawned on a 500ms-5s backoff, and a reconcile restarts it on
-			// any settings change. Only a sustained absence means nobody is
-			// coming.
-			//
-			// The policy call, stated plainly: the publisher is DROPPED rather
-			// than left running. RTMP carries no way to tell an encoder "keep
-			// sending, nobody is listening yet", so the alternatives were to
-			// stream into the void indefinitely or to disconnect and let the
-			// encoder retry into the readiness grace, which is built for exactly
-			// this. A disconnect is visible in the encoder and recoverable
-			// without anyone intervening; silence is neither.
-			if len(st.subs) == 0 {
-				if st.emptySince.IsZero() {
-					st.emptySince = time.Now()
-				} else if time.Since(st.emptySince) > subscriberGrace {
-					st.mu.Unlock()
-					s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
-						"component", "rtmp-ingest", "for", subscriberGrace)
-					return nil
-				}
-			} else {
-				st.emptySince = time.Time{}
-			}
-			for sub := range st.subs {
-				// Non-blocking: a subscriber that cannot keep up is dropped
-				// rather than allowed to stall the publisher. One slow consumer
-				// must not become backpressure on the encoder, which has
-				// nowhere to put the frames it is still producing.
-				select {
-				case sub.ch <- msg:
-				default:
-					sub.dropped++
-					// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
-					//
-					// sub.dropped is otherwise reported ONLY in the deferred
-					// cleanup when a subscriber disconnects, so a run that is
-					// shedding messages for its whole life says nothing until
-					// teardown -- and by then the stream nobody could decode is
-					// gone. This is the counter that would have shown, in the
-					// first minute, that audio was being dropped.
-					// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
-					// "tell me about every drop" is 1, and dropped%1 is always
-					// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
-					// that logs NOTHING. That produced a clean "0 drops" during
-					// #674 which read as "the server dropped nothing" when it
-					// meant "the counter cannot fire". 1%N is 1 for every N>1,
-					// so the every-Nth behaviour is unchanged.
-					if shouldLogDrop(sub.dropped, dropLogEvery) {
-						s.log.Warn("rtmp subscriber dropping messages LIVE",
-							"component", "rtmp-ingest", "dropped", sub.dropped)
-					}
-				}
-			}
-			st.mu.Unlock()
+		if st != nil && !s.fanOut(st, msg) {
+			return nil
+		}
+	}
+}
+
+// fanOut caches msg's setup and offers msg to every subscriber of st. It
+// reports false when the publisher is to be dropped because nothing has been
+// reading the stream for longer than subscriberGrace.
+func (s *Server) fanOut(st *stream, msg message.Message) bool {
+	st.mu.Lock()
+	st.cacheSetup(msg)
+	// READINESS, ENFORCED MID-SESSION.
+	//
+	// Ready was checked once, at admission, and never again -- so an
+	// ingest child that died a second later left this loop dropping
+	// every message into an empty subscriber set for the rest of the
+	// session. The encoder stays green, the bytes go nowhere, and
+	// nothing reports a fault: the green-encoder-no-output failure that
+	// Ready exists to prevent, reached after Ready had already said yes.
+	//
+	// A grace first, because an empty set is ordinary and transient --
+	// the ingest child exits whenever its publisher does and is
+	// respawned on a 500ms-5s backoff, and a reconcile restarts it on
+	// any settings change. Only a sustained absence means nobody is
+	// coming.
+	//
+	// The policy call, stated plainly: the publisher is DROPPED rather
+	// than left running. RTMP carries no way to tell an encoder "keep
+	// sending, nobody is listening yet", so the alternatives were to
+	// stream into the void indefinitely or to disconnect and let the
+	// encoder retry into the readiness grace, which is built for exactly
+	// this. A disconnect is visible in the encoder and recoverable
+	// without anyone intervening; silence is neither.
+	if st.unreadTooLong() {
+		st.mu.Unlock()
+		s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
+			"component", logComponent, "for", subscriberGrace)
+		return false
+	}
+	for sub := range st.subs {
+		s.offer(sub, msg)
+	}
+	st.mu.Unlock()
+	return true
+}
+
+// unreadTooLong tracks how long st has had no subscriber and reports whether
+// that has outlasted subscriberGrace. Caller holds st.mu.
+func (st *stream) unreadTooLong() bool {
+	if len(st.subs) != 0 {
+		st.emptySince = time.Time{}
+		return false
+	}
+	if st.emptySince.IsZero() {
+		st.emptySince = time.Now()
+		return false
+	}
+	return time.Since(st.emptySince) > subscriberGrace
+}
+
+// offer hands msg to sub without blocking. A subscriber that cannot keep up is
+// dropped rather than allowed to stall the publisher. One slow consumer must
+// not become backpressure on the encoder, which has nowhere to put the frames
+// it is still producing. Caller holds the stream's mu.
+func (s *Server) offer(sub *subscriber, msg message.Message) {
+	select {
+	case sub.ch <- msg:
+	default:
+		sub.dropped++
+		// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
+		//
+		// sub.dropped is otherwise reported ONLY in the deferred
+		// cleanup when a subscriber disconnects, so a run that is
+		// shedding messages for its whole life says nothing until
+		// teardown -- and by then the stream nobody could decode is
+		// gone. This is the counter that would have shown, in the
+		// first minute, that audio was being dropped.
+		// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
+		// "tell me about every drop" is 1, and dropped%1 is always
+		// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
+		// that logs NOTHING. That produced a clean "0 drops" during
+		// #674 which read as "the server dropped nothing" when it
+		// meant "the counter cannot fire". 1%N is 1 for every N>1,
+		// so the every-Nth behaviour is unchanged.
+		if shouldLogDrop(sub.dropped, dropLogEvery) {
+			s.log.Warn("rtmp subscriber dropping messages LIVE",
+				"component", logComponent, "dropped", sub.dropped)
 		}
 	}
 }

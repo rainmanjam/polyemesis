@@ -81,13 +81,13 @@ func WithConcurrency(n int) Option {
 }
 
 // WithBackoff bounds the retry wait.
-func WithBackoff(base, max time.Duration) Option {
+func WithBackoff(base, ceiling time.Duration) Option {
 	return func(q *Queue) {
 		if base > 0 {
 			q.backoff = base
 		}
-		if max > 0 {
-			q.maxBackoff = max
+		if ceiling > 0 {
+			q.maxBackoff = ceiling
 		}
 	}
 }

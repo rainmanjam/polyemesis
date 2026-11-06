@@ -20,4 +20,4 @@ package supervisor
 // reaches nothing else. systemd's KillMode=mixed covers it in production;
 // proc_unix.go records that, and records that Pdeathsig is deliberately not the
 // answer.
-func EnsureCrashBackstop() {}
+func EnsureCrashBackstop() { /* no-op: see above */ }

@@ -505,7 +505,7 @@ func (s *Server) handleAnalyticsStreams(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleAnalyticsStream(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	format := r.URL.Query().Get("format")

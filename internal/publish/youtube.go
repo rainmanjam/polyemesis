@@ -16,6 +16,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// bearerPrefix is the Authorization scheme for the YouTube access token.
+const bearerPrefix = "Bearer "
+
 // YouTube publishes a clip as a YouTube Short with the Data API's resumable
 // upload (https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol).
 //
@@ -244,7 +247,7 @@ func (y *YouTube) probe(ctx context.Context, token, session string, total int64)
 	if err != nil {
 		return ytProbe{}, fail(CauseUnknown, true, "the stored upload session is unusable")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", bearerPrefix+token)
 	req.Header.Set("Content-Length", "0")
 	req.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", total))
 	resp, err := y.client().Do(req)
@@ -297,7 +300,7 @@ func (y *YouTube) open(ctx context.Context, r Run, total int64) (string, error) 
 	if err != nil {
 		return "", fail(CauseUnknown, false, "could not build the upload request")
 	}
-	req.Header.Set("Authorization", "Bearer "+r.Cred.AccessToken)
+	req.Header.Set("Authorization", bearerPrefix+r.Cred.AccessToken)
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	req.Header.Set("X-Upload-Content-Length", strconv.FormatInt(total, 10))
 	req.Header.Set("X-Upload-Content-Type", "video/mp4")
@@ -340,7 +343,7 @@ func (y *YouTube) send(ctx context.Context, r Run, f *os.File, session string, o
 		return Done{}, fail(CauseUnknown, true, "the stored upload session is unusable")
 	}
 	req.ContentLength = remaining
-	req.Header.Set("Authorization", "Bearer "+r.Cred.AccessToken)
+	req.Header.Set("Authorization", bearerPrefix+r.Cred.AccessToken)
 	req.Header.Set("Content-Type", "video/mp4")
 	req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, total-1, total))
 	resp, err := y.client().Do(req)

@@ -206,7 +206,7 @@ func toTranscribeSegments(in []db.TranscriptSegment) []transcribe.Segment {
 func (s *Server) handleExportTranscriptCaptions(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	f, ok := parseCaptionExportFormat(r.URL.Query().Get("format"))

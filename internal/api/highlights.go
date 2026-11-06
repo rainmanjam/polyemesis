@@ -33,7 +33,7 @@ func (s *Server) handleScanHighlights(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var body highlightScanBody
@@ -112,7 +112,7 @@ func viewOfHighlight(h db.Highlight) highlightView {
 func (s *Server) handleListHighlights(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	tl, err := s.clipTimeline(id)
@@ -152,7 +152,7 @@ func (s *Server) handleAcceptHighlight(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var body highlightAcceptBody
@@ -205,7 +205,7 @@ func (s *Server) handleAcceptHighlight(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDismissHighlight(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	h, err := s.store.DecideHighlight(id, db.HighlightDismissed)

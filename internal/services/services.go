@@ -22,7 +22,7 @@
 package services
 
 import (
-	_ "embed"
+	_ "embed" // go:embed directives in this file
 	"encoding/json"
 	"fmt"
 	"net/url"

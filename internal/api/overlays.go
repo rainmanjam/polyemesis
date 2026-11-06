@@ -242,7 +242,7 @@ func (s *Server) handleCreateOverlay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateOverlay(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	var req overlayRequest
@@ -272,7 +272,7 @@ func (s *Server) handleUpdateOverlay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRotateOverlayKey(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	o, err := s.store.RotateChatOverlayKey(id)
@@ -288,7 +288,7 @@ func (s *Server) handleRotateOverlayKey(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleRevokeOverlayKey(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	o, err := s.store.RevokeChatOverlayKey(id)
@@ -304,7 +304,7 @@ func (s *Server) handleRevokeOverlayKey(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteOverlay(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := s.store.DeleteChatOverlay(id); err != nil {

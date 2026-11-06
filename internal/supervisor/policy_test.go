@@ -156,3 +156,34 @@ func TestAFailedProcessIsRevivedByRestartAndNotByStart(t *testing.T) {
 
 	waitFor(t, "the revived process to run again", func() bool { return p.Status().Restarts >= 2 })
 }
+
+// The give-up boundary is exact: MaxRestarts restarts are allowed, so the exit
+// that makes the consecutive count MaxRestarts+1 is the one that gives up, and
+// the one before it is not. An off-by-one here either grants an extra life or
+// executes a process one restart early.
+func TestGiveUpIfExhaustedBoundary(t *testing.T) {
+	const max = 3
+	for _, tc := range []struct {
+		name        string
+		maxRestarts int
+		consecutive int
+		want        bool
+	}{
+		{"below the limit", max, max - 1, false},
+		{"at the limit is the last allowed restart", max, max, false},
+		{"one past the limit gives up", max, max + 1, true},
+		{"far past the limit gives up", max, max + 10, true},
+		{"zero means retry forever", 0, 1000, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := testProcess(t, fakeExit(1), Spec{AutoRestart: true})
+			p.SetPolicy(Policy{MinBackoff: time.Millisecond, MaxBackoff: time.Millisecond, MaxRestarts: tc.maxRestarts})
+			if got := p.giveUpIfExhausted(tc.consecutive, ""); got != tc.want {
+				t.Fatalf("giveUpIfExhausted(%d) with MaxRestarts=%d = %v, want %v", tc.consecutive, tc.maxRestarts, got, tc.want)
+			}
+			if tc.want && p.Status().State != StateFailed {
+				t.Fatalf("gave up but state is %q, want %q", p.Status().State, StateFailed)
+			}
+		})
+	}
+}

@@ -96,72 +96,181 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			if !scheduleTargets(sc, d.ID) {
 				continue
 			}
-			// THE CAPABILITY, NOT THE PLATFORM NAME. This used to read
-			// `d.Platform != db.PlatformFacebook` and then enforce a
-			// facebookScheduleHorizon constant declared in this file -- a
-			// platform fact written down twice, once as a name and once as a
-			// number, in the one package that has no way to check either.
-			// As[ScheduledBroadcaster] answers both at once: absent for every
-			// platform that cannot pre-announce, and carrying that platform's
-			// own bound for the one that can.
-			sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
-			if !ok {
-				continue
-			}
-			// A schedule with a recurring template on a platform that can title
-			// its events is the template sweep's (recurring.go), which creates the
-			// same event with the template's title. Creating it here as well would
-			// put two event pages on one show. A DB error also skips, rather than
-			// falling through to an untitled create.
-			if _, editor := sb.(oauth.ScheduledEditor); editor {
-				if _, err := s.store.GetBroadcastTemplate(sc.ID); !errors.Is(err, db.ErrNotFound) {
-					continue
-				}
-			}
-			// The bound is read here rather than beside scheduler.Next above
-			// because it belongs to the DESTINATION's platform, and the
-			// occurrence is not out of range until there is somewhere to send
-			// it. A schedule with no pre-announcing destination on it is out of
-			// scope however far away it is.
-			if at.Sub(now) > sb.ScheduleHorizon() {
-				continue
-			}
-			// No connected account means no token and no target, so there is
-			// nothing to create the broadcast against.
-			if d.AccountID == nil {
-				continue
-			}
-			// AN ENABLED DESTINATION IS OUT OF SCOPE, and this is the whole
-			// A5 fix rather than half of one.
-			//
-			// Creating a broadcast issues a NEW primary stream key, and that
-			// key is inside Target(), which is the first element of destSpec --
-			// the engine's restart hash. Writing it under a running FFmpeg
-			// leaves the process publishing to the old key until some unrelated
-			// reconcile happens to notice the spec changed, and then cycles a
-			// LIVE destination at a moment the operator did not choose and
-			// cannot connect to anything they did.
-			//
-			// Skipping costs the event page for a show whose destination was
-			// left enabled between broadcasts; the alternative costs a live
-			// stream. The ordinary shape -- the scheduler flips enabled at go
-			// live -- is unaffected, because the destination is disabled while
-			// the show is still ahead of it.
-			if d.Enabled {
-				s.log.Debug("pre-announce: skipping a destination that is already enabled; "+
-					"a new broadcast would replace the stream key it is publishing to",
-					"destination", d.Name, "schedule", sc.Name)
-				continue
-			}
-			if d.Facebook.AnnouncedFor(at) {
-				continue
-			}
-			s.announceOne(ctx, sb, sc, d, at, now)
+			s.preannounceDestination(ctx, sc, d, at, now)
 		}
 	}
 	// And the other direction: the events of shows no schedule will air any
 	// more. Last, so a schedule moved this sweep has already moved its own.
 	s.withdrawStaleAnnouncements(ctx, now, 0)
+}
+
+// preannounceDestination announces this schedule's occurrence at on d, when
+// d's platform can pre-announce and d is in scope for it.
+func (s *Server) preannounceDestination(ctx context.Context, sc scheduler.Schedule, d *db.Destination, at, now time.Time) {
+	// THE CAPABILITY, NOT THE PLATFORM NAME. This used to read
+	// `d.Platform != db.PlatformFacebook` and then enforce a
+	// facebookScheduleHorizon constant declared in this file -- a
+	// platform fact written down twice, once as a name and once as a
+	// number, in the one package that has no way to check either.
+	// As[ScheduledBroadcaster] answers both at once: absent for every
+	// platform that cannot pre-announce, and carrying that platform's
+	// own bound for the one that can.
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
+	if !ok {
+		return
+	}
+	// A schedule with a recurring template on a platform that can title
+	// its events is the template sweep's (recurring.go), which creates the
+	// same event with the template's title. Creating it here as well would
+	// put two event pages on one show. A DB error also skips, rather than
+	// falling through to an untitled create.
+	if _, editor := sb.(oauth.ScheduledEditor); editor {
+		if _, err := s.store.GetBroadcastTemplate(sc.ID); !errors.Is(err, db.ErrNotFound) {
+			return
+		}
+	}
+	// The bound is read here rather than beside scheduler.Next above
+	// because it belongs to the DESTINATION's platform, and the
+	// occurrence is not out of range until there is somewhere to send
+	// it. A schedule with no pre-announcing destination on it is out of
+	// scope however far away it is.
+	if at.Sub(now) > sb.ScheduleHorizon() {
+		return
+	}
+	// No connected account means no token and no target, so there is
+	// nothing to create the broadcast against.
+	if d.AccountID == nil {
+		return
+	}
+	// AN ENABLED DESTINATION IS OUT OF SCOPE, and this is the whole
+	// A5 fix rather than half of one.
+	//
+	// Creating a broadcast issues a NEW primary stream key, and that
+	// key is inside Target(), which is the first element of destSpec --
+	// the engine's restart hash. Writing it under a running FFmpeg
+	// leaves the process publishing to the old key until some unrelated
+	// reconcile happens to notice the spec changed, and then cycles a
+	// LIVE destination at a moment the operator did not choose and
+	// cannot connect to anything they did.
+	//
+	// Skipping costs the event page for a show whose destination was
+	// left enabled between broadcasts; the alternative costs a live
+	// stream. The ordinary shape -- the scheduler flips enabled at go
+	// live -- is unaffected, because the destination is disabled while
+	// the show is still ahead of it.
+	if d.Enabled {
+		s.log.Debug("pre-announce: skipping a destination that is already enabled; "+
+			"a new broadcast would replace the stream key it is publishing to",
+			"destination", d.Name, "schedule", sc.Name)
+		return
+	}
+	if d.Facebook.AnnouncedFor(at) {
+		return
+	}
+	s.announceOne(ctx, sb, sc, d, at, now)
+}
+
+// noteAnnouncementMoved records the outcome (err) of moving the broadcast
+// this schedule already has to its new occurrence at.
+func (s *Server) noteAnnouncementMoved(d *db.Destination, sc scheduler.Schedule, prev db.Announcement,
+	at, now time.Time, err error) {
+	if err != nil {
+		s.log.Warn("pre-announce: could not move the broadcast",
+			"destination", d.Name, "schedule", sc.Name, "err", err)
+		s.noteRescheduleFailure(d, sc, prev, now)
+		return
+	}
+	s.clearAnnounceFailures(d.ID, sc.ID)
+	s.record(d, func(cur *db.Destination) bool {
+		cur.Facebook.Announce(sc.ID, at, prev.BroadcastID, now)
+		return true
+	})
+	s.log.Info("moved a scheduled Facebook broadcast",
+		"destination", d.Name, "schedule", sc.Name, "at", at,
+		"broadcast", prev.BroadcastID)
+}
+
+// ageUnresolvedIntent counts a sweep that found this schedule's create intent
+// still unresolved, and forgets the intent once it has stood too long.
+func (s *Server) ageUnresolvedIntent(d *db.Destination, sc scheduler.Schedule, prev db.Announcement) {
+	// A marker with no broadcast id: a create was in flight and its result
+	// never reached the database. Something may well exist on Facebook that
+	// nothing here can see, and creating a second live_video would put two
+	// event pages in front of the same subscribers. Said once rather than
+	// every sweep.
+	//
+	// BUT NOT FOR EVER, AND THAT WAS THE BUG. This arm used to return here
+	// unconditionally -- and it is the one arm that never calls Announce,
+	// which is where markers are aged. So an intent nothing could resolve
+	// disabled pre-announce for this show permanently: every later sweep
+	// found it, returned, and the show it was recorded for went out with no
+	// event page at all. That is the single outcome this whole file exists
+	// to prevent, and one lost write was enough to cause it.
+	//
+	// COUNTED RATHER THAN TIMED, the same shape as staleBroadcastAfter
+	// below and asking the same kind of question: has this been unresolved
+	// for long enough that "a create is in flight" has stopped being a
+	// credible explanation. A create is bounded by the 30-second timeout
+	// above and a sweep is five minutes apart, so three consecutive sweeps
+	// means no caller is still inside one. Counting also needs nothing
+	// persisted: a wall clock would have to live in the marker, and a field
+	// added there is absent on every row an upgrade finds, which reads as
+	// "infinitely old" and ages every existing intent at once.
+	n := s.noteAnnounceFailure(d.ID, sc.ID)
+	if n == 1 {
+		s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
+			"never finished; not creating a second one for the same show yet",
+			"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
+	}
+	if n < staleBroadcastAfter {
+		return
+	}
+	// WHICH HARM THIS CHOOSES, plainly. If that create did reach Facebook,
+	// forgetting the intent means the next sweep makes a SECOND event page
+	// beside a first one nothing here can name. The alternative is the show
+	// having none, which is certain rather than possible -- and a duplicate
+	// is visible to the operator on their own Page, while a stranded marker
+	// is visible nowhere. capIntents already makes this trade for the same
+	// reason: losing an intent costs a retry.
+	//
+	// Recovering the first one instead would need Graph to be asked what
+	// scheduled live_videos this target already has, matched back to an
+	// occurrence. That is a capability internal/oauth does not expose, and
+	// inventing a match on start time would adopt somebody else's broadcast
+	// as readily as our own.
+	s.log.Warn("pre-announce: giving up on a create that was never confirmed; a fresh "+
+		"broadcast will be made for this show, and if the first create did reach "+
+		"Facebook there will be two event pages to tidy up",
+		"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence,
+		"consecutiveSweeps", staleBroadcastAfter)
+	s.record(d, func(cur *db.Destination) bool {
+		cur.Facebook.Forget(sc.ID, "")
+		return true
+	})
+	s.clearAnnounceFailures(d.ID, sc.ID)
+}
+
+// forgetFailedCreate puts back the intent of a create the platform refused and
+// reports the failure once per run of them.
+func (s *Server) forgetFailedCreate(d *db.Destination, sc scheduler.Schedule, err error) {
+	// The intent goes back: Graph refused, so the next sweep is free to try
+	// again -- which is the behaviour this whole file is built on.
+	s.record(d, func(cur *db.Destination) bool {
+		cur.Facebook.Forget(sc.ID, "")
+		return true
+	})
+	// Logged ONCE PER RUN OF FAILURES, not once per sweep. This is where an
+	// ineligible account lands -- Facebook requires 60 days and 100
+	// followers to schedule, and refuses otherwise -- and that is a fact
+	// about the account rather than a fault in the run: it cannot resolve
+	// without the operator, and at a five-minute tick the honest report of
+	// it was 288 identical warnings a day. The count clears on the next
+	// success, so a failure after a working sweep is reported again.
+	if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
+		s.log.Warn("pre-announce: could not create the broadcast; further identical "+
+			"failures for this show will not be logged until one succeeds",
+			"destination", d.Name, "schedule", sc.Name, "err", err)
+	}
 }
 
 // scheduleTargets reports whether this schedule acts on this destination.
@@ -233,78 +342,12 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		// the schedule moved. Move the broadcast rather than creating a second
 		// one, which would leave the first as an event page people are still
 		// subscribed to for a show that will not happen there.
-		if err := sb.RescheduleBroadcast(cctx, acct.AccessToken, prev.BroadcastID, at); err != nil {
-			s.log.Warn("pre-announce: could not move the broadcast",
-				"destination", d.Name, "schedule", sc.Name, "err", err)
-			s.noteRescheduleFailure(d, sc, prev, now)
-			return
-		}
-		s.clearAnnounceFailures(d.ID, sc.ID)
-		s.record(d, func(cur *db.Destination) bool {
-			cur.Facebook.Announce(sc.ID, at, prev.BroadcastID, now)
-			return true
-		})
-		s.log.Info("moved a scheduled Facebook broadcast",
-			"destination", d.Name, "schedule", sc.Name, "at", at,
-			"broadcast", prev.BroadcastID)
+		err = sb.RescheduleBroadcast(cctx, acct.AccessToken, prev.BroadcastID, at)
+		s.noteAnnouncementMoved(d, sc, prev, at, now, err)
 		return
 
 	case held:
-		// A marker with no broadcast id: a create was in flight and its result
-		// never reached the database. Something may well exist on Facebook that
-		// nothing here can see, and creating a second live_video would put two
-		// event pages in front of the same subscribers. Said once rather than
-		// every sweep.
-		//
-		// BUT NOT FOR EVER, AND THAT WAS THE BUG. This arm used to return here
-		// unconditionally -- and it is the one arm that never calls Announce,
-		// which is where markers are aged. So an intent nothing could resolve
-		// disabled pre-announce for this show permanently: every later sweep
-		// found it, returned, and the show it was recorded for went out with no
-		// event page at all. That is the single outcome this whole file exists
-		// to prevent, and one lost write was enough to cause it.
-		//
-		// COUNTED RATHER THAN TIMED, the same shape as staleBroadcastAfter
-		// below and asking the same kind of question: has this been unresolved
-		// for long enough that "a create is in flight" has stopped being a
-		// credible explanation. A create is bounded by the 30-second timeout
-		// above and a sweep is five minutes apart, so three consecutive sweeps
-		// means no caller is still inside one. Counting also needs nothing
-		// persisted: a wall clock would have to live in the marker, and a field
-		// added there is absent on every row an upgrade finds, which reads as
-		// "infinitely old" and ages every existing intent at once.
-		n := s.noteAnnounceFailure(d.ID, sc.ID)
-		if n == 1 {
-			s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
-				"never finished; not creating a second one for the same show yet",
-				"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
-		}
-		if n < staleBroadcastAfter {
-			return
-		}
-		// WHICH HARM THIS CHOOSES, plainly. If that create did reach Facebook,
-		// forgetting the intent means the next sweep makes a SECOND event page
-		// beside a first one nothing here can name. The alternative is the show
-		// having none, which is certain rather than possible -- and a duplicate
-		// is visible to the operator on their own Page, while a stranded marker
-		// is visible nowhere. capIntents already makes this trade for the same
-		// reason: losing an intent costs a retry.
-		//
-		// Recovering the first one instead would need Graph to be asked what
-		// scheduled live_videos this target already has, matched back to an
-		// occurrence. That is a capability internal/oauth does not expose, and
-		// inventing a match on start time would adopt somebody else's broadcast
-		// as readily as our own.
-		s.log.Warn("pre-announce: giving up on a create that was never confirmed; a fresh "+
-			"broadcast will be made for this show, and if the first create did reach "+
-			"Facebook there will be two event pages to tidy up",
-			"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence,
-			"consecutiveSweeps", staleBroadcastAfter)
-		s.record(d, func(cur *db.Destination) bool {
-			cur.Facebook.Forget(sc.ID, "")
-			return true
-		})
-		s.clearAnnounceFailures(d.ID, sc.ID)
+		s.ageUnresolvedIntent(d, sc, prev)
 		return
 	}
 
@@ -367,24 +410,7 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 	b, err := s.ingestFor(cctx, sb, creds.ClientID, acct,
 		s.ingestOptions(d, at))
 	if err != nil {
-		// The intent goes back: Graph refused, so the next sweep is free to try
-		// again -- which is the behaviour this whole file is built on.
-		s.record(d, func(cur *db.Destination) bool {
-			cur.Facebook.Forget(sc.ID, "")
-			return true
-		})
-		// Logged ONCE PER RUN OF FAILURES, not once per sweep. This is where an
-		// ineligible account lands -- Facebook requires 60 days and 100
-		// followers to schedule, and refuses otherwise -- and that is a fact
-		// about the account rather than a fault in the run: it cannot resolve
-		// without the operator, and at a five-minute tick the honest report of
-		// it was 288 identical warnings a day. The count clears on the next
-		// success, so a failure after a working sweep is reported again.
-		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
-			s.log.Warn("pre-announce: could not create the broadcast; further identical "+
-				"failures for this show will not be logged until one succeeds",
-				"destination", d.Name, "schedule", sc.Name, "err", err)
-		}
+		s.forgetFailedCreate(d, sc, err)
 		return
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)

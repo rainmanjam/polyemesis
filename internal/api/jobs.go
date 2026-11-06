@@ -303,31 +303,13 @@ func jobFilter(r *http.Request) (jobs.Filter, error) {
 	q := r.URL.Query()
 	var f jobs.Filter
 
-	for _, raw := range q["state"] {
-		for _, part := range strings.Split(raw, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			// "active" is the filter the page opens with, and spelling it out
-			// on the client would mean two definitions of the same idea.
-			if part == "active" {
-				f.States = append(f.States, jobs.Active().States...)
-				continue
-			}
-			st := jobs.State(part)
-			if !st.Valid() {
-				return f, fmt.Errorf("unknown job state %q", part)
-			}
-			f.States = append(f.States, st)
-		}
+	states, err := jobStates(q["state"])
+	f.States = states
+	if err != nil {
+		return f, err
 	}
-	for _, raw := range q["kind"] {
-		for _, part := range strings.Split(raw, ",") {
-			if part = strings.TrimSpace(part); part != "" {
-				f.Kinds = append(f.Kinds, jobs.Kind(part))
-			}
-		}
+	for _, part := range commaParts(q["kind"]) {
+		f.Kinds = append(f.Kinds, jobs.Kind(part))
 	}
 	if t := strings.TrimSpace(q.Get("target")); t != "" {
 		f.Target = t
@@ -351,13 +333,48 @@ func jobFilter(r *http.Request) (jobs.Filter, error) {
 	return f, nil
 }
 
+// jobStates reads the state filter: comma-separated, repeatable, with
+// "active" standing for every active state. An unknown state is an error,
+// returned with the states read before it.
+func jobStates(raw []string) ([]jobs.State, error) {
+	var out []jobs.State
+	for _, part := range commaParts(raw) {
+		// "active" is the filter the page opens with, and spelling it out
+		// on the client would mean two definitions of the same idea.
+		if part == "active" {
+			out = append(out, jobs.Active().States...)
+			continue
+		}
+		st := jobs.State(part)
+		if !st.Valid() {
+			return out, fmt.Errorf("unknown job state %q", part)
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// commaParts splits each of the repeated query values on commas, trimmed,
+// with empty parts dropped.
+func commaParts(raw []string) []string {
+	var out []string
+	for _, r := range raw {
+		for _, part := range strings.Split(r, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if !s.requireJobs(w) {
 		return
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	j, err := s.jobq.Get(id)
@@ -684,7 +701,7 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if s.gov == nil {
@@ -782,7 +799,7 @@ func (s *Server) jobAction(w http.ResponseWriter, r *http.Request, act func(int6
 	}
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	if err := act(id); err != nil {

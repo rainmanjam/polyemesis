@@ -50,6 +50,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
+// flagShowEntries is the ffprobe flag that selects which fields to print.
+const flagShowEntries = "-show_entries"
+
+// flagHideBanner is the ffprobe flag that silences the version banner.
+const flagHideBanner = "-hide_banner"
+
 // Dir is the data-directory child every derivative is written under. See the
 // package comment for why this is not optional.
 const Dir = "playlist-media"
@@ -1148,9 +1154,9 @@ func (p *Processor) probeStream(ctx context.Context, path, kind string) (bool, e
 // source, which is the one thing this package must not do.
 func streamArgs(path, kind string) []string {
 	return []string{
-		"-hide_banner", "-v", "error",
+		flagHideBanner, "-v", "error",
 		"-select_streams", kind + ":0",
-		"-show_entries", "stream=codec_type",
+		flagShowEntries, "stream=codec_type",
 		"-of", "csv=p=0",
 		path,
 	}
@@ -1183,8 +1189,8 @@ func (p *Processor) probeDuration(ctx context.Context, path string) (videoSecs, 
 // field instead.
 func probeStreamDurationsSecs(ctx context.Context, ffprobe, path string) (videoSecs, audioSecs float64, err error) {
 	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffprobe, Args: []string{
-		"-hide_banner", "-v", "error",
-		"-show_entries", "stream=codec_type,duration",
+		flagHideBanner, "-v", "error",
+		flagShowEntries, "stream=codec_type,duration",
 		"-of", "csv=p=0",
 		path,
 	}})
@@ -1246,8 +1252,8 @@ func ProbeOutputDurationMS(ctx context.Context, ffprobe, path string) (int64, er
 // instead.
 func probeFormatDurationSecs(ctx context.Context, ffprobe, path string) (float64, error) {
 	out, stderr, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffprobe, Args: []string{
-		"-hide_banner", "-v", "error",
-		"-show_entries", "format=duration",
+		flagHideBanner, "-v", "error",
+		flagShowEntries, "format=duration",
 		"-of", "default=nw=1:nk=1",
 		path,
 	}})

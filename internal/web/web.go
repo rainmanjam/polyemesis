@@ -13,6 +13,18 @@ import (
 	"strings"
 )
 
+// indexHTML is the SPA entry document inside the embedded dist.
+const indexHTML = "index.html"
+
+// cacheNoStore is the Cache-Control value for responses that must never be cached.
+const cacheNoStore = "no-store"
+
+// headerContentType is the Content-Type header name.
+const headerContentType = "Content-Type"
+
+// headerCacheControl is the Cache-Control header name.
+const headerCacheControl = "Cache-Control"
+
 //go:embed all:dist
 var embedded embed.FS
 
@@ -109,7 +121,7 @@ func HandlerFor(sub fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if p == "" {
-			p = "index.html"
+			p = indexHTML
 		}
 
 		// A DIRECTORY IS NOT AN ASSET, and this is the reason isRegularFile
@@ -126,9 +138,9 @@ func HandlerFor(sub fs.FS) http.Handler {
 			// cache forever. index.html must never be, or a deploy leaves users
 			// on the old bundle.
 			if strings.HasPrefix(p, "assets/") {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set(headerCacheControl, "public, max-age=31536000, immutable")
 			} else {
-				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set(headerCacheControl, "no-cache")
 			}
 			files.ServeHTTP(w, r)
 			return
@@ -148,8 +160,8 @@ func HandlerFor(sub fs.FS) http.Handler {
 		// internal/api/mcp_access.go): a client that asked for JSON-RPC gets
 		// the 404 an unknown endpoint gets, not the console's HTML.
 		if p == "api" || strings.HasPrefix(p, "api/") || p == "mcp" {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set(headerContentType, "application/json; charset=utf-8")
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
 			return
@@ -166,8 +178,8 @@ func HandlerFor(sub fs.FS) http.Handler {
 		// the callers that compare its body. So these fail, loudly, on the first
 		// probe, and say where the check lives.
 		if isProbePath(p) {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set(headerContentType, "application/json; charset=utf-8")
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"no health check here; probe /api/v1/health"}` + "\n"))
 			return
@@ -197,8 +209,8 @@ func HandlerFor(sub fs.FS) http.Handler {
 		// .html is deliberately absent: a request for a document is exactly
 		// what the SPA fallback is for.
 		if isStaticAssetPath(p) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set(headerContentType, "text/plain; charset=utf-8")
+			w.Header().Set(headerCacheControl, cacheNoStore)
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("no such file\n"))
 			return
@@ -206,16 +218,16 @@ func HandlerFor(sub fs.FS) http.Handler {
 
 		// Unknown path: hand it to the SPA router rather than 404ing, so a
 		// deep link like /routing/3 works on refresh.
-		index, err := sub.Open("index.html")
+		index, err := sub.Open(indexHTML)
 		if err != nil {
 			http.Error(w, "UI not built. Run `make ui` or `npm --prefix ui run build`.", http.StatusNotFound)
 			return
 		}
 		defer index.Close()
 		stat, _ := index.Stat()
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		http.ServeContent(w, r, "index.html", stat.ModTime(), index.(interface {
+		w.Header().Set(headerCacheControl, "no-cache")
+		w.Header().Set(headerContentType, "text/html; charset=utf-8")
+		http.ServeContent(w, r, indexHTML, stat.ModTime(), index.(interface {
 			Read([]byte) (int, error)
 			Seek(int64, int) (int64, error)
 		}))

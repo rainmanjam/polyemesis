@@ -676,28 +676,12 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	// column for every pre-announcing platform including YouTube) is REWRITTEN
 	// whenever a schedule moves, so a phase recorded against the id it used to
 	// carry would be attributed to a broadcast that is not the one on air.
-	if !d.Enabled && d.Platform == db.PlatformX && d.Lifecycle.Renewed {
-		// SWITCHING THE DESTINATION OFF ENDS THE SHOW, so the renewal marker goes
-		// with it and the next show's first go-live posts its announcement.
-		// Cleared here, before any branch below can return: a renewal whose open
-		// failed has no broadcast and is only held, and one that never aired goes
-		// quiet after one read. Both keep the rest of their block across the
-		// switch-off. One write, only when the marker is set.
-		if d = c.recordControl(d, d.Lifecycle.BroadcastID, func(b *db.BroadcastControl) { b.Renewed = false }); d == nil {
-			return
-		}
+	if d = c.clearRenewalOnSwitchOff(d); d == nil {
+		return
 	}
 	broadcastID := d.ActiveBroadcastID()
 	if broadcastID == "" {
-		// Taken BEFORE untrack, which clears it: an UP edge is the release of the
-		// open() hold below, and untrack would otherwise throw it away unread.
-		cleared := c.takeClearFault(d.ID)
-		c.untrack(d.ID)
-		if creator, ok := prov.(oauth.BroadcastCreator); ok && mode != sweepEndsOnly {
-			c.openOrHold(ctx, d, creator, cleared)
-		}
-		// Every other platform: no broadcast object, so nothing to command.
-		// Creating one is the announce path's job; see the header.
+		c.considerUnopened(ctx, d, prov, mode)
 		return
 	}
 	if d.AccountID == nil {
@@ -708,6 +692,63 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		return
 	}
 
+	c.trackRow(d, broadcastID)
+
+	// STOPPED BUT STILL AIRING ITS DELAYED TAIL: not yet. The row says
+	// disabled, which on its own would complete the broadcast this sweep, with
+	// the tail still playing to viewers. Tracked above so the gate stays on; the
+	// drain's end is a down edge, which wakes the sweep that ends it.
+	if !d.Enabled && c.airing != nil && c.airing(d.ID) {
+		return
+	}
+
+	cleared := c.takeClearFault(d.ID)
+	if d = c.resetOnUpEdge(d, broadcastID, cleared); d == nil {
+		return
+	}
+
+	if d.Enabled && d.Platform == db.PlatformX {
+		// Switched on again: the next switch-off earns its own read.
+		c.noteQuietX(d.ID, "")
+	}
+	if c.skipStateRead(d, broadcastID, mode) {
+		return
+	}
+	c.readAndAct(ctx, prov, d, broadcastID, cleared)
+}
+
+// clearRenewalOnSwitchOff drops an X destination's renewal marker when it is
+// switched off, returning the re-read row (nil if the write lost the row).
+func (c *lifecycleCoordinator) clearRenewalOnSwitchOff(d *db.Destination) *db.Destination {
+	if d.Enabled || d.Platform != db.PlatformX || !d.Lifecycle.Renewed {
+		return d
+	}
+	// SWITCHING THE DESTINATION OFF ENDS THE SHOW, so the renewal marker goes
+	// with it and the next show's first go-live posts its announcement.
+	// Cleared here, before any branch below can return: a renewal whose open
+	// failed has no broadcast and is only held, and one that never aired goes
+	// quiet after one read. Both keep the rest of their block across the
+	// switch-off. One write, only when the marker is set.
+	return c.recordControl(d, d.Lifecycle.BroadcastID, func(b *db.BroadcastControl) { b.Renewed = false })
+}
+
+// considerUnopened handles a row with no recorded broadcast: it is untracked,
+// and a platform that can create broadcasts opens (or holds) one.
+func (c *lifecycleCoordinator) considerUnopened(ctx context.Context, d *db.Destination,
+	prov oauth.BroadcastLifecycler, mode sweepMode) {
+	// Taken BEFORE untrack, which clears it: an UP edge is the release of the
+	// open() hold below, and untrack would otherwise throw it away unread.
+	cleared := c.takeClearFault(d.ID)
+	c.untrack(d.ID)
+	if creator, ok := prov.(oauth.BroadcastCreator); ok && mode != sweepEndsOnly {
+		c.openOrHold(ctx, d, creator, cleared)
+	}
+	// Every other platform: no broadcast object, so nothing to command.
+	// Creating one is the announce path's job; see the header.
+}
+
+// trackRow records d as a destination this coordinator is acting on.
+func (c *lifecycleCoordinator) trackRow(d *db.Destination, broadcastID string) {
 	var sourceID int64
 	if d.SourceID != nil {
 		sourceID = *d.SourceID
@@ -720,46 +761,42 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		BroadcastID: broadcastID,
 		Phase:       d.Lifecycle.Phase,
 	})
+}
 
-	// STOPPED BUT STILL AIRING ITS DELAYED TAIL: not yet. The row says
-	// disabled, which on its own would complete the broadcast this sweep, with
-	// the tail still playing to viewers. Tracked above so the gate stays on; the
-	// drain's end is a down edge, which wakes the sweep that ends it.
-	if !d.Enabled && c.airing != nil && c.airing(d.ID) {
-		return
+// resetOnUpEdge handles an UP edge (cleared): the live re-check budget is
+// spent and a recorded fault or attempt count is cleared. It returns the
+// row to carry on with, nil if the write lost it.
+func (c *lifecycleCoordinator) resetOnUpEdge(d *db.Destination, broadcastID string, cleared bool) *db.Destination {
+	if !cleared {
+		return d
 	}
+	// AN UP EDGE IS A FREE RE-READ, AND IT IS THE ONE THAT MATTERS MOST.
+	//
+	// The edge itself costs nothing -- the engine derives it either way and
+	// Observe has already woken the sweep -- so spending the skip budget here
+	// buys a state read at the exact moment it is most likely to have changed,
+	// without adding a single call to the steady state.
+	//
+	// Why THIS moment: an UP edge means bytes stopped and started again, and a
+	// stopped ingest is precisely what fires YouTube's enableAutoStop. The
+	// broadcast this destination is publishing to may well have been completed
+	// while the encoder was away, so the row's `live` is exactly the label the
+	// ten-minute cadence exists to catch -- caught here in one sweep instead.
+	c.forgetLiveRecheck(d.ID)
+	if d.Lifecycle.Fault == "" && d.Lifecycle.Attempts <= 0 {
+		return d
+	}
+	// It is delivering again, so the previous refusals -- overwhelmingly
+	// "no bytes are arriving yet" -- have stopped describing the world.
+	return c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+		b.Attempts, b.Fault = 0, ""
+	})
+}
 
-	cleared := c.takeClearFault(d.ID)
-	if cleared {
-		// AN UP EDGE IS A FREE RE-READ, AND IT IS THE ONE THAT MATTERS MOST.
-		//
-		// The edge itself costs nothing -- the engine derives it either way and
-		// Observe has already woken the sweep -- so spending the skip budget here
-		// buys a state read at the exact moment it is most likely to have changed,
-		// without adding a single call to the steady state.
-		//
-		// Why THIS moment: an UP edge means bytes stopped and started again, and a
-		// stopped ingest is precisely what fires YouTube's enableAutoStop. The
-		// broadcast this destination is publishing to may well have been completed
-		// while the encoder was away, so the row's `live` is exactly the label the
-		// ten-minute cadence exists to catch -- caught here in one sweep instead.
-		c.forgetLiveRecheck(d.ID)
-	}
-	if cleared && (d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0) {
-		// It is delivering again, so the previous refusals -- overwhelmingly
-		// "no bytes are arriving yet" -- have stopped describing the world.
-		d = c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
-			b.Attempts, b.Fault = 0, ""
-		})
-		if d == nil {
-			return
-		}
-	}
-
-	if d.Enabled && d.Platform == db.PlatformX {
-		// Switched on again: the next switch-off earns its own read.
-		c.noteQuietX(d.ID, "")
-	}
+// skipStateRead reports whether this sweep leaves the row alone without
+// reading its broadcast's state, applying the untracking or reset each
+// skipping case calls for.
+func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID string, mode sweepMode) bool {
 	switch {
 	case !d.Enabled && d.Lifecycle.Phase == "":
 		// A DISABLED DESTINATION THAT NEVER WENT THROUGH THE COORDINATOR IS NOT
@@ -767,7 +804,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// "somebody else's broadcast" story at once: a row that has no recorded
 		// phase has never been confirmed on air by this process, so there is
 		// nothing here that could justify sending `complete` to it.
-		return
+		return true
 	case !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated) &&
 		c.quietXAt(d.ID) == broadcastID:
 		// AN X BROADCAST THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF, AND
@@ -781,7 +818,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// lookup against X, which publishes no rate limits, every fifteen
 		// seconds for the life of the daemon. Re-enabling reads it again.
 		c.untrack(d.ID)
-		return
+		return true
 	case !d.Enabled && d.Platform == db.PlatformX && isTerminalPhase(d.Lifecycle.Phase):
 		// Finished, as below, and the finished broadcast is forgotten as well, so
 		// switching the destination on again opens a new one. This is the release
@@ -790,7 +827,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
 		}
 		c.untrack(d.ID)
-		return
+		return true
 	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
 		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
 		// disabled row whose broadcast has already completed has nothing left
@@ -808,10 +845,10 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// is what keeps the engine building snapshots, so a row nobody will ever
 		// act on would otherwise pin the observe loop on forever too.
 		c.untrack(d.ID)
-		return
+		return true
 	case d.Enabled && mode == sweepEndsOnly:
 		// Shutting down. Never go live on the way out.
-		return
+		return true
 	case d.Enabled && strings.EqualFold(d.Lifecycle.Phase, phaseLive) && d.Lifecycle.Fault == "" &&
 		!c.dueForLiveRecheck(d.ID):
 		// SETTLED, SO ASKED RARELY -- NOT NEVER. A confirmed-live broadcast on an
@@ -848,7 +885,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// label standing for at most ten minutes. See lifecycleLiveRecheckEvery
 		// for the full arithmetic, and forgetLiveRecheck for why the case that
 		// actually happens is noticed in one sweep rather than forty.
-		return
+		return true
 	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter:
 		// Held. See lifecycleGiveUpAfter -- the fault stands, the stream keeps
 		// going out, and nothing here calls the platform again until an UP edge
@@ -857,7 +894,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// The hold is deliberately NOT applied to the disabled branch below: an
 		// operator who gives up on going live and switches the destination off
 		// must still have their broadcast ended.
-		return
+		return true
 	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2:
 		// THE DISABLED PATH NEEDS A BOUND TOO, JUST A LATER ONE. Exempting it
 		// from the hold above is right -- a pending end must still land -- but
@@ -871,9 +908,15 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// considerably harder before it stops. endOrphan already works this way;
 		// this is the same rule for the row that still exists.
 		c.untrack(d.ID)
-		return
+		return true
 	}
+	return false
+}
 
+// readAndAct reads the broadcast's state from the platform and acts on the
+// plan derived from it.
+func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.BroadcastLifecycler,
+	d *db.Destination, broadcastID string, cleared bool) {
 	acct, err := c.tokenFor(ctx, *d.AccountID)
 	if err != nil {
 		c.noteFailure(d, broadcastID, fmt.Sprintf(
@@ -921,26 +964,39 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		c.raise(d, broadcastID, plan.Fault)
 		return
 	case plan.Send == "":
-		// Nothing to send: either it is where it should be, or the platform is
-		// mid-transition, or no bytes have arrived yet. All three are ordinary.
-		if plan.Unknown {
-			// Except this one, which is "polyemesis does not recognise the word
-			// the platform used". Counted so that it escalates instead of
-			// stalling in silence, which is the failure mode this whole file is
-			// built to avoid.
-			c.noteFailure(d, broadcastID, plan.Wait)
-			return
-		}
-		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
-			b.Phase, b.Attempts, b.Fault = plan.Phase, 0, ""
-		})
-		if plan.Wait != "" {
-			c.log.Debug("broadcast lifecycle: waiting", "destination", d.Name,
-				"broadcast", broadcastID, "phase", plan.Phase, "why", plan.Wait)
-		}
+		c.settleUnsent(d, broadcastID, plan)
 		return
 	}
+	c.sendPlan(cctx, prov, acct, d, broadcastID, st, plan)
+}
 
+// settleUnsent records a plan with nothing to send: the phase the platform
+// reported, or (for an unrecognised word) a counted failure.
+func (c *lifecycleCoordinator) settleUnsent(d *db.Destination, broadcastID string, plan lifecyclePlan) {
+	// Nothing to send: either it is where it should be, or the platform is
+	// mid-transition, or no bytes have arrived yet. All three are ordinary.
+	if plan.Unknown {
+		// Except this one, which is "polyemesis does not recognise the word
+		// the platform used". Counted so that it escalates instead of
+		// stalling in silence, which is the failure mode this whole file is
+		// built to avoid.
+		c.noteFailure(d, broadcastID, plan.Wait)
+		return
+	}
+	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+		b.Phase, b.Attempts, b.Fault = plan.Phase, 0, ""
+	})
+	if plan.Wait != "" {
+		c.log.Debug("broadcast lifecycle: waiting", "destination", d.Name,
+			"broadcast", broadcastID, "phase", plan.Phase, "why", plan.Wait)
+	}
+}
+
+// sendPlan sends the transition the plan calls for: complete, or a step
+// towards live unless captions would be frozen out.
+func (c *lifecycleCoordinator) sendPlan(cctx context.Context, prov oauth.BroadcastLifecycler,
+	acct *db.PlatformAccount, d *db.Destination, broadcastID string,
+	st *oauth.BroadcastLifecycleState, plan lifecyclePlan) {
 	if plan.Send == oauth.PhaseComplete {
 		c.end(cctx, prov, acct, d, broadcastID, plan)
 		return

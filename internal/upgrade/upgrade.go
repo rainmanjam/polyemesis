@@ -956,11 +956,11 @@ func resolve(binary string) string {
 	if binary == "" {
 		return binary
 	}
-	real, err := filepath.EvalSymlinks(binary)
+	resolved, err := filepath.EvalSymlinks(binary)
 	if err != nil {
 		return binary
 	}
-	return real
+	return resolved
 }
 
 // liveMode is the permission bits the installed binary currently carries, with

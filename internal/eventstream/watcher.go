@@ -43,28 +43,7 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 
 	out := make([]Envelope, 0, len(edges))
 	for _, ev := range edges {
-		env := FromHook(ev)
-		if ev.Destination != nil {
-			id := ev.Destination.ID
-			switch ev.Trigger {
-			case hooks.TriggerDestinationDown, hooks.TriggerDestinationHeld:
-				// The whole classified reason, beside the flat fields. Only
-				// for a failure, under the rule hooks.Watcher applies to the
-				// flat ones: a disabled destination's leftover cause would tell
-				// a script that the disable was a key rejection.
-				if d, ok := rows[id]; ok && d.Enabled && d.Reason != nil {
-					r := *d.Reason
-					env.Failure = &r
-				}
-			}
-			// A delayed destination's edges carry its delay (#11): "up" on one
-			// means the DELAYED programme reached the platform, and a script
-			// lining events up against the live feed needs to know by how much.
-			if d, ok := rows[id]; ok && d.DelaySeconds > 0 && env.Data == nil {
-				env.Data = map[string]int{"delaySeconds": d.DelaySeconds}
-			}
-		}
-		out = append(out, env)
+		out = append(out, edgeEnvelope(ev, rows))
 	}
 
 	// Sorted for the reason hooks.Watcher sorts: map order must never reach
@@ -75,28 +54,7 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
-		d := rows[id]
-		ref := &hooks.DestinationRef{ID: d.ID, Name: d.Name, Platform: d.Platform}
-
-		// RESTARTED: the respawn count went up on the same process. A count
-		// that went DOWN is a new process -- a spec change, or Retry -- which
-		// is not a respawn and is not announced as one. The first sight of a
-		// destination is a baseline, so a server restarted mid-show does not
-		// announce every destination's lifetime respawns as news.
-		prev, seen := w.restarts[id]
-		w.restarts[id] = d.Restarts
-		if seen && d.Restarts > prev {
-			env := Envelope{
-				Type: TypeDestinationRestarted, At: snap.At, Destination: ref,
-				Reason: restartReason(d.RestartCause),
-				Error:  d.Error,
-			}
-			data := map[string]int{"restarts": d.Restarts, "since": d.Restarts - prev}
-			if d.DelaySeconds > 0 {
-				data["delaySeconds"] = d.DelaySeconds
-			}
-			env.Data = data
-			env.Source = &hooks.SourceRef{ID: src.ID, Name: src.Name}
+		if env, ok := w.restarted(src, snap, rows[id]); ok {
 			out = append(out, env)
 		}
 	}
@@ -108,6 +66,63 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 		}
 	}
 	return out
+}
+
+// edgeEnvelope converts one webhook edge, adding what the destination's row
+// in this sweep says about it.
+func edgeEnvelope(ev hooks.Event, rows map[int64]alerts.DestState) Envelope {
+	env := FromHook(ev)
+	if ev.Destination == nil {
+		return env
+	}
+	id := ev.Destination.ID
+	switch ev.Trigger {
+	case hooks.TriggerDestinationDown, hooks.TriggerDestinationHeld:
+		// The whole classified reason, beside the flat fields. Only
+		// for a failure, under the rule hooks.Watcher applies to the
+		// flat ones: a disabled destination's leftover cause would tell
+		// a script that the disable was a key rejection.
+		if d, ok := rows[id]; ok && d.Enabled && d.Reason != nil {
+			r := *d.Reason
+			env.Failure = &r
+		}
+	}
+	// A delayed destination's edges carry its delay (#11): "up" on one
+	// means the DELAYED programme reached the platform, and a script
+	// lining events up against the live feed needs to know by how much.
+	if d, ok := rows[id]; ok && d.DelaySeconds > 0 && env.Data == nil {
+		env.Data = map[string]int{"delaySeconds": d.DelaySeconds}
+	}
+	return env
+}
+
+// restarted records destination d's respawn count and returns its
+// destination.restarted event when the count went up since the last sweep.
+func (w *Watcher) restarted(src hooks.SourceRef, snap alerts.Snapshot, d alerts.DestState) (Envelope, bool) {
+	ref := &hooks.DestinationRef{ID: d.ID, Name: d.Name, Platform: d.Platform}
+
+	// RESTARTED: the respawn count went up on the same process. A count
+	// that went DOWN is a new process -- a spec change, or Retry -- which
+	// is not a respawn and is not announced as one. The first sight of a
+	// destination is a baseline, so a server restarted mid-show does not
+	// announce every destination's lifetime respawns as news.
+	prev, seen := w.restarts[d.ID]
+	w.restarts[d.ID] = d.Restarts
+	if !seen || d.Restarts <= prev {
+		return Envelope{}, false
+	}
+	env := Envelope{
+		Type: TypeDestinationRestarted, At: snap.At, Destination: ref,
+		Reason: restartReason(d.RestartCause),
+		Error:  d.Error,
+	}
+	data := map[string]int{"restarts": d.Restarts, "since": d.Restarts - prev}
+	if d.DelaySeconds > 0 {
+		data["delaySeconds"] = d.DelaySeconds
+	}
+	env.Data = data
+	env.Source = &hooks.SourceRef{ID: src.ID, Name: src.Name}
+	return env, true
 }
 
 // restartReason says why a destination restarted, for the destination.restarted

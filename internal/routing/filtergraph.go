@@ -143,10 +143,7 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	// the limiter threshold, and then it is a structural change and restarts.
 	panCells := cells
 	if p.Mode != ModeMatrix {
-		unity := p
-		unity.Tracks = unityTracks(p.Tracks)
-		panCells, _ = resolveCells(unity, src)
-		panCells, _ = applyRolePolicy(unity, src, panCells)
+		panCells = unityPanCells(p, src)
 	}
 	if len(cells) == 0 {
 		if selected > 0 {
@@ -157,48 +154,13 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 		return Result{}, ErrNoAudio
 	}
 
-	// Group by track, preserving ascending track order so the generated string
-	// is deterministic (and therefore diffable and testable).
-	byTrack := map[int][]Cell{}
-	for _, c := range panCells {
-		byTrack[c.Track] = append(byTrack[c.Track], c)
-	}
-	tracks := make([]int, 0, len(byTrack))
-	for t := range byTrack {
-		tracks = append(tracks, t)
-	}
-	sort.Ints(tracks)
+	byTrack, tracks := groupByTrack(panCells)
 	res.Tracks = tracks
-
-	label := make(map[int]string, len(tracks))
-	bodies := make([]string, len(tracks))
-	for i, t := range tracks {
-		label[t] = n.track(t)
-		// Always present, including at unity, so the first gain edit is a
-		// command rather than a new stage. Placed right after the pan and before
-		// the denoiser: the gain used to act inside the pan, and moving it past
-		// a nonlinear stage would change how denoised tracks sound.
-		stage := volumeStage(n, t, trackVolume(p, t))
-		if provisional {
-			bodies[i] = provisionalChain(src, t, stage)
-		} else {
-			bodies[i] = trackChain(src, t, byTrack[t], stage)
-		}
-	}
+	label, bodies := trackBodies(p, src, tracks, byTrack, provisional, n)
 
 	// Duck before summing: a duck applied to the finished mix would pull the
 	// trigger down along with everything else.
-	legs := make([]string, 0, len(tracks))
-	var duckChains []string
-	tapped := false
-	if d, ok := p.EffectiveDucking(); ok {
-		var duckLegs, duckWarns []string
-		duckChains, duckLegs, duckWarns, tapped = duckGraph(d, src, tracks, label, provisional, n)
-		legs = duckLegs
-		if len(duckWarns) > 0 {
-			res.Warnings = dedupe(append(res.Warnings, duckWarns...))
-		}
-	}
+	duckChains, legs, tapped := duckStage(p, &res, src, tracks, label, provisional, n)
 
 	// The per-track chains are written only now, because whether they need
 	// trackAlign depends on how many ingest tracks the WHOLE graph reads, and a
@@ -206,15 +168,7 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	// the same: a label must be declared before the chain that consumes it.
 	align := len(tracks) > 1 || tapped
 	chains := make([]string, 0, len(tracks)+len(duckChains)+4)
-	for i, t := range tracks {
-		body := bodies[i]
-		if align {
-			body += "," + trackAlign
-		}
-		// n.track(t), not label[t]: duckGraph has already renamed a trigger
-		// it split, and this chain is the one that feeds the split.
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, body, n.track(t)))
-	}
+	chains = appendTrackChains(chains, tracks, bodies, align, n)
 	chains = append(chains, duckChains...)
 	if len(legs) == 0 {
 		for _, t := range tracks {
@@ -232,31 +186,8 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 		cur = n.of("a_mix")
 	}
 
-	norm := resolveNorm(p.Normalize, len(tracks), peakGain(cells))
-	loud, loudOK := p.EffectiveLoudness()
-	if loudOK {
-		// A destination that names a loudness target has asked for loudness
-		// normalization, whatever NormAuto would have picked on its own.
-		// EffectiveLoudness has already refused to override an explicit
-		// NormOff or NormLimiter, so reaching here means it is ours to set.
-		norm = NormLoudnorm
-	}
-	res.Normalization = norm
-	if f := normFilterFor(norm, loud, loudOK); f != "" {
-		chains = append(chains, fmt.Sprintf("[%s]%s[%s]", cur, f, n.of("a_norm")))
-		cur = n.of("a_norm")
-	}
-
-	// Delay last but one: holding the finished mix is what "this destination is
-	// 250 ms behind its video" means, and doing it after loudnorm keeps the
-	// loudness measurement looking at the same samples it always did.
-	switch {
-	case p.DelayMS > 0:
-		chains = append(chains, fmt.Sprintf("[%s]adelay=delays=%d:all=1[%s]", cur, p.DelayMS, n.of("a_delay")))
-		cur = n.of("a_delay")
-	case p.DelayMS < 0:
-		res.VideoDelayMS = -p.DelayMS
-	}
+	chains, cur = normStage(p, &res, chains, cur, len(tracks), cells, n)
+	chains, cur = delayStage(p, &res, chains, cur, n)
 
 	// Final resample pins the rate the AAC encoder sees and lets FFmpeg absorb
 	// the small timestamp drift that a UDP relay inevitably introduces.
@@ -287,17 +218,136 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	res.Summary = summarize(tracks)
 	if provisional {
 		res.Provisional = true
-		note := "the ingest layout could not be measured, so each track is being downmixed by FFmpeg at runtime; levels are approximate until a probe succeeds"
-		if p.Mode == ModeMatrix {
-			// Sharper, because more is being given up. A matrix says which
-			// CHANNEL goes where, and with the layout unknown none of that can
-			// be honoured -- a track carrying two languages is summed rather
-			// than separated. An operator has to be told that specifically.
-			note = "the ingest layout could not be measured, so this destination's mix matrix is NOT being applied: each track is downmixed to stereo by FFmpeg at runtime, per-channel routing and per-cell gains are ignored, and a track carrying different content on left and right is summed"
-		}
-		res.Warnings = dedupe(append(res.Warnings, note))
+		res.Warnings = dedupe(append(res.Warnings, provisionalNote(p.Mode)))
 	}
 	return res, nil
+}
+
+// duckStage builds the profile's duck, when it has one: its chains, the legs
+// the mix sums, and whether it taps a trigger track. Without a duck there are
+// no legs yet.
+func duckStage(p Profile, res *Result, src Source, tracks []int, label map[int]string, provisional bool, n ns) (duckChains, legs []string, tapped bool) {
+	legs = make([]string, 0, len(tracks))
+	if d, ok := p.EffectiveDucking(); ok {
+		var duckLegs, duckWarns []string
+		duckChains, duckLegs, duckWarns, tapped = duckGraph(d, src, tracks, label, provisional, n)
+		legs = duckLegs
+		if len(duckWarns) > 0 {
+			res.Warnings = dedupe(append(res.Warnings, duckWarns...))
+		}
+	}
+	return duckChains, legs, tapped
+}
+
+// unityPanCells is a simple-mode profile's cells with every track at unity
+// gain: the pan that is written, the configured gains living in the volume
+// stages instead.
+func unityPanCells(p Profile, src Source) []Cell {
+	unity := p
+	unity.Tracks = unityTracks(p.Tracks)
+	panCells, _ := resolveCells(unity, src)
+	panCells, _ = applyRolePolicy(unity, src, panCells)
+	return panCells
+}
+
+// groupByTrack groups cells by track, with the tracks in ascending order so
+// the generated string is deterministic (and therefore diffable and
+// testable).
+func groupByTrack(cells []Cell) (map[int][]Cell, []int) {
+	byTrack := map[int][]Cell{}
+	for _, c := range cells {
+		byTrack[c.Track] = append(byTrack[c.Track], c)
+	}
+	tracks := make([]int, 0, len(byTrack))
+	for t := range byTrack {
+		tracks = append(tracks, t)
+	}
+	sort.Ints(tracks)
+	return byTrack, tracks
+}
+
+// trackBodies is each track's label and the filters of its chain, in the
+// order of tracks.
+func trackBodies(p Profile, src Source, tracks []int, byTrack map[int][]Cell, provisional bool, n ns) (map[int]string, []string) {
+	label := make(map[int]string, len(tracks))
+	bodies := make([]string, len(tracks))
+	for i, t := range tracks {
+		label[t] = n.track(t)
+		// Always present, including at unity, so the first gain edit is a
+		// command rather than a new stage. Placed right after the pan and before
+		// the denoiser: the gain used to act inside the pan, and moving it past
+		// a nonlinear stage would change how denoised tracks sound.
+		stage := volumeStage(n, t, trackVolume(p, t))
+		if provisional {
+			bodies[i] = provisionalChain(src, t, stage)
+		} else {
+			bodies[i] = trackChain(src, t, byTrack[t], stage)
+		}
+	}
+	return label, bodies
+}
+
+// appendTrackChains appends each track's chain from its ingest stream to its
+// label, aligned when the graph reads more than one track.
+func appendTrackChains(chains []string, tracks []int, bodies []string, align bool, n ns) []string {
+	for i, t := range tracks {
+		body := bodies[i]
+		if align {
+			body += "," + trackAlign
+		}
+		// n.track(t), not label[t]: duckGraph has already renamed a trigger
+		// it split, and this chain is the one that feeds the split.
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, body, n.track(t)))
+	}
+	return chains
+}
+
+// normStage decides the mix's normalization and appends its filter, when it
+// has one, after cur.
+func normStage(p Profile, res *Result, chains []string, cur string, trackCount int, cells []Cell, n ns) ([]string, string) {
+	norm := resolveNorm(p.Normalize, trackCount, peakGain(cells))
+	loud, loudOK := p.EffectiveLoudness()
+	if loudOK {
+		// A destination that names a loudness target has asked for loudness
+		// normalization, whatever NormAuto would have picked on its own.
+		// EffectiveLoudness has already refused to override an explicit
+		// NormOff or NormLimiter, so reaching here means it is ours to set.
+		norm = NormLoudnorm
+	}
+	res.Normalization = norm
+	if f := normFilterFor(norm, loud, loudOK); f != "" {
+		chains = append(chains, fmt.Sprintf("[%s]%s[%s]", cur, f, n.of("a_norm")))
+		cur = n.of("a_norm")
+	}
+	return chains, cur
+}
+
+// delayStage appends the audio delay after cur; a negative delay holds the
+// video back instead.
+func delayStage(p Profile, res *Result, chains []string, cur string, n ns) ([]string, string) {
+	// Delay last but one: holding the finished mix is what "this destination is
+	// 250 ms behind its video" means, and doing it after loudnorm keeps the
+	// loudness measurement looking at the same samples it always did.
+	switch {
+	case p.DelayMS > 0:
+		chains = append(chains, fmt.Sprintf("[%s]adelay=delays=%d:all=1[%s]", cur, p.DelayMS, n.of("a_delay")))
+		cur = n.of("a_delay")
+	case p.DelayMS < 0:
+		res.VideoDelayMS = -p.DelayMS
+	}
+	return chains, cur
+}
+
+// provisionalNote is the warning a provisional compile carries.
+func provisionalNote(mode Mode) string {
+	if mode == ModeMatrix {
+		// Sharper, because more is being given up. A matrix says which
+		// CHANNEL goes where, and with the layout unknown none of that can
+		// be honoured -- a track carrying two languages is summed rather
+		// than separated. An operator has to be told that specifically.
+		return "the ingest layout could not be measured, so this destination's mix matrix is NOT being applied: each track is downmixed to stereo by FFmpeg at runtime, per-channel routing and per-cell gains are ignored, and a track carrying different content on left and right is summed"
+	}
+	return "the ingest layout could not be measured, so each track is being downmixed by FFmpeg at runtime; levels are approximate until a probe succeeds"
 }
 
 // trackAlign ends every track's chain whenever more than one track is mixed,
@@ -512,7 +562,46 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 	for _, t := range tracks {
 		inMix[t] = true
 	}
+	isTarget, targets := duckTargets(d, inMix)
+	triggers := duckTriggers(d, src, inMix)
 
+	if len(targets) == 0 {
+		return nil, nil, []string{"ducking is configured but none of its target tracks are in this destination's mix; no ducking is applied"}, false
+	}
+	if len(triggers) == 0 {
+		return nil, nil, []string{"ducking is configured but none of its trigger tracks are present on the ingest; no ducking is applied"}, false
+	}
+
+	chains, keys, tapped := duckKeys(src, triggers, inMix, label, provisional, n)
+
+	key := keys[0]
+	if len(keys) > 1 {
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
+			bracket(keys), len(keys), n.of("a_duckkey")))
+		key = n.of("a_duckkey")
+	}
+
+	bus := label[targets[0]]
+	if len(targets) > 1 {
+		in := make([]string, 0, len(targets))
+		for _, t := range targets {
+			in = append(in, label[t])
+		}
+		// Sum the targets before ducking rather than compressing each of them.
+		// amix=normalize=0 is a plain sum, so summing early is arithmetically
+		// identical, and one compressor means one gain-reduction envelope
+		// instead of several that could drift apart.
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
+			bracket(in), len(in), n.of("a_duckin")))
+		bus = n.of("a_duckin")
+	}
+	chains = append(chains, fmt.Sprintf("[%s][%s]sidechaincompress=%s[%s]", bus, key, duckParams(d), n.of("a_duck")))
+	return chains, duckedLegs(tracks, isTarget, label, n), nil, tapped
+}
+
+// duckTargets is the duck's target tracks that are in the mix, ascending, and
+// the same as a set.
+func duckTargets(d Ducking, inMix map[int]bool) (map[int]bool, []int) {
 	isTarget := map[int]bool{}
 	var targets []int
 	for _, t := range sortedSet(d.Target) {
@@ -521,6 +610,11 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 			targets = append(targets, t)
 		}
 	}
+	return isTarget, targets
+}
+
+// duckTriggers is the duck's trigger tracks that can be heard, ascending.
+func duckTriggers(d Ducking, src Source, inMix map[int]bool) []int {
 	var triggers []int
 	for _, t := range sortedSet(d.Trigger) {
 		// A trigger that is not in this destination's mix is still usable: tap
@@ -530,15 +624,13 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 			triggers = append(triggers, t)
 		}
 	}
+	return triggers
+}
 
-	if len(targets) == 0 {
-		return nil, nil, []string{"ducking is configured but none of its target tracks are in this destination's mix; no ducking is applied"}, false
-	}
-	if len(triggers) == 0 {
-		return nil, nil, []string{"ducking is configured but none of its trigger tracks are present on the ingest; no ducking is applied"}, false
-	}
-
-	var keys []string
+// duckKeys builds the key's inputs, one per trigger: a split of a mixed
+// trigger, relabelling it in label, or a tap of the ingest track. tapped
+// reports a tap.
+func duckKeys(src Source, triggers []int, inMix map[int]bool, label map[int]string, provisional bool, n ns) (chains, keys []string, tapped bool) {
 	for _, t := range triggers {
 		if inMix[t] {
 			mixLbl := fmt.Sprintf("%sa_t%d_mix", n.prefix, t)
@@ -567,30 +659,13 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		keys = append(keys, keyLbl)
 		tapped = true
 	}
+	return chains, keys, tapped
+}
 
-	key := keys[0]
-	if len(keys) > 1 {
-		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
-			bracket(keys), len(keys), n.of("a_duckkey")))
-		key = n.of("a_duckkey")
-	}
-
-	bus := label[targets[0]]
-	if len(targets) > 1 {
-		in := make([]string, 0, len(targets))
-		for _, t := range targets {
-			in = append(in, label[t])
-		}
-		// Sum the targets before ducking rather than compressing each of them.
-		// amix=normalize=0 is a plain sum, so summing early is arithmetically
-		// identical, and one compressor means one gain-reduction envelope
-		// instead of several that could drift apart.
-		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
-			bracket(in), len(in), n.of("a_duckin")))
-		bus = n.of("a_duckin")
-	}
-	chains = append(chains, fmt.Sprintf("[%s][%s]sidechaincompress=%s[%s]", bus, key, duckParams(d), n.of("a_duck")))
-
+// duckedLegs is the mix's legs once ducked: the ducked bus in place of the
+// first target, and every other track as it was.
+func duckedLegs(tracks []int, isTarget map[int]bool, label map[int]string, n ns) []string {
+	var legs []string
 	placed := false
 	for _, t := range tracks {
 		if isTarget[t] {
@@ -602,7 +677,7 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		}
 		legs = append(legs, label[t])
 	}
-	return chains, legs, nil, tapped
+	return legs
 }
 
 // duckParams renders sidechaincompress' parameters.
@@ -631,53 +706,72 @@ func resolveCells(p Profile, src Source) ([]Cell, []string) {
 
 	switch p.Mode {
 	case ModeMatrix:
-		// Track the level a cell would have contributed even when it is dropped,
-		// so a narrowed ingest can be reported as the volume change it is rather
-		// than only as a list of channel numbers.
-		var wanted, kept [OutChannels]float64
-		for _, c := range p.Matrix {
-			if c.Gain <= 0 {
-				continue
-			}
-			if c.Out >= 0 && c.Out < OutChannels {
-				wanted[c.Out] += c.Gain
-			}
-			t, ok := src.TrackByIndex(c.Track)
-			if !ok {
-				warns = append(warns, fmt.Sprintf("track %d is not present on the ingest; its matrix cells are ignored", c.Track+1))
-				continue
-			}
-			if c.Channel >= t.Channels {
-				warns = append(warns, fmt.Sprintf("track %d has %d channel(s); channel %d is ignored", c.Track+1, t.Channels, c.Channel+1))
-				continue
-			}
-			if c.Out >= 0 && c.Out < OutChannels {
-				kept[c.Out] += c.Gain
-			}
-			out = append(out, c)
-		}
-		if w := levelWarning(wanted, kept); w != "" {
-			warns = append(warns, w)
-		}
-
+		out, warns = resolveMatrixCells(p, src)
 	default: // ModeSimple
-		for _, sel := range p.Tracks {
-			if !sel.Enabled || sel.Gain <= 0 {
-				continue
-			}
-			t, ok := src.TrackByIndex(sel.Track)
-			if !ok {
-				warns = append(warns, fmt.Sprintf("track %d is selected but not present on the ingest; it is ignored", sel.Track+1))
-				continue
-			}
-			// Simple mode recomputes the downmix against the live layout every
-			// time, so it cannot be left holding coefficients scaled for a width
-			// the ingest no longer has.
-			out = append(out, CellsForTrack(sel.Track, t, sel.Gain)...)
-		}
+		out, warns = resolveSimpleCells(p, src)
 	}
 
 	warns = dedupe(warns)
+	return out, warns
+}
+
+// resolveMatrixCells is resolveCells for a matrix profile.
+func resolveMatrixCells(p Profile, src Source) (out []Cell, warns []string) {
+	// Track the level a cell would have contributed even when it is dropped,
+	// so a narrowed ingest can be reported as the volume change it is rather
+	// than only as a list of channel numbers.
+	var wanted, kept [OutChannels]float64
+	for _, c := range p.Matrix {
+		if c.Gain <= 0 {
+			continue
+		}
+		if c.Out >= 0 && c.Out < OutChannels {
+			wanted[c.Out] += c.Gain
+		}
+		if w := cellSourceProblem(c, src); w != "" {
+			warns = append(warns, w)
+			continue
+		}
+		if c.Out >= 0 && c.Out < OutChannels {
+			kept[c.Out] += c.Gain
+		}
+		out = append(out, c)
+	}
+	if w := levelWarning(wanted, kept); w != "" {
+		warns = append(warns, w)
+	}
+	return out, warns
+}
+
+// cellSourceProblem is why the ingest cannot supply a matrix cell, or "" when
+// it can.
+func cellSourceProblem(c Cell, src Source) string {
+	t, ok := src.TrackByIndex(c.Track)
+	if !ok {
+		return fmt.Sprintf("track %d is not present on the ingest; its matrix cells are ignored", c.Track+1)
+	}
+	if c.Channel >= t.Channels {
+		return fmt.Sprintf("track %d has %d channel(s); channel %d is ignored", c.Track+1, t.Channels, c.Channel+1)
+	}
+	return ""
+}
+
+// resolveSimpleCells is resolveCells for a simple profile.
+func resolveSimpleCells(p Profile, src Source) (out []Cell, warns []string) {
+	for _, sel := range p.Tracks {
+		if !sel.Enabled || sel.Gain <= 0 {
+			continue
+		}
+		t, ok := src.TrackByIndex(sel.Track)
+		if !ok {
+			warns = append(warns, fmt.Sprintf("track %d is selected but not present on the ingest; it is ignored", sel.Track+1))
+			continue
+		}
+		// Simple mode recomputes the downmix against the live layout every
+		// time, so it cannot be left holding coefficients scaled for a width
+		// the ingest no longer has.
+		out = append(out, CellsForTrack(sel.Track, t, sel.Gain)...)
+	}
 	return out, warns
 }
 

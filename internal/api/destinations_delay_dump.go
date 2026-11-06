@@ -135,7 +135,7 @@ func dumpRefusal(err error) (int, string) {
 func (s *Server) handleDumpDestinationDelay(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
 	req, want, ok := readDumpRequest(w, r)

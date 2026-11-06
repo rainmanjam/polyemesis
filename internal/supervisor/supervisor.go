@@ -689,8 +689,8 @@ func (p *Process) waitBackoff(ctx context.Context, d time.Duration) bool {
 			return true
 		case <-p.retune:
 			timer.Stop()
-			if max := p.Policy().MaxBackoff; time.Until(deadline) > max {
-				deadline = time.Now().Add(max)
+			if ceiling := p.Policy().MaxBackoff; time.Until(deadline) > ceiling {
+				deadline = time.Now().Add(ceiling)
 				// Status.NextRetryIn is what the dashboard counts down, so it
 				// has to move with the deadline or the card lies for the rest
 				// of the wait.
@@ -1093,15 +1093,8 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 	p.reason = nil
 	p.mu.Unlock()
 
-	// Before the first spawn only, and interruptible: a stop that arrives
-	// during the stagger window must not wait it out.
-	if p.spec.StartDelay > 0 {
-		select {
-		case <-ctx.Done():
-			p.setState(StateStopped, "")
-			return
-		case <-time.After(p.spec.StartDelay):
-		}
+	if !p.waitStartDelay(ctx) {
+		return
 	}
 
 	for {
@@ -1121,31 +1114,10 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 
 		reason := p.noteExit(tail, err, ranFor, &quickRejects)
 
-		msg := ""
-		if err != nil {
-			msg = err.Error()
-			// SCRUBBED, like every other rendering of this text. The error carries
-			// the child's own stderr, and for a destination that stderr is FFmpeg
-			// reporting the output URL it could not open -- stream key included.
-			//
-			// Found on a live run against a real platform: a refused publish put
-			// the key in server.log six times as the supervisor retried, while
-			// process.log was clean because that path already scrubbed. One sink
-			// was covered and its sibling was not.
-			//
-			// A refusal is exactly when this fires, and a refusal is exactly when
-			// an operator copies logs to somebody who can help. See #306.
-			p.log.Warn("process exited", "err", p.scrub(msg), "ranFor", ranFor.Round(time.Second))
-		} else {
-			p.log.Info("process exited cleanly", "ranFor", ranFor.Round(time.Second))
-		}
+		msg := p.logExit(err, ranFor)
 
 		if !p.spec.AutoRestart {
-			if err != nil {
-				p.setState(StateFailed, msg)
-			} else {
-				p.setState(StateStopped, "")
-			}
+			p.finishRun(err, msg)
 			return
 		}
 
@@ -1157,77 +1129,142 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		}
 		consecutive++
 
-		// HELD: refused quickly, for a cause retrying cannot fix, N times in a
-		// row. StateFailed for the reason the give-up below uses it -- the
-		// alert watcher treats it as down, and Start leaves it alone, so a
-		// reconcile does not quietly undo the hold; Restart is the one door,
-		// which is what the Retry button calls. Checked BEFORE the give-up so
-		// that a destination meeting both limits on the same exit says the
-		// more useful of the two things.
-		if reason != nil && reason.Held {
-			held := fmt.Sprintf("held after %d quick rejections (%s); press Retry once it is fixed",
-				reason.Rejections, reason.Cause.Label())
-			if msg != "" {
-				held += ": " + msg
-			}
-			p.log.Error("holding process: it keeps being refused quickly", "cause", reason.Cause,
-				"rejections", reason.Rejections, "err", p.scrub(msg))
-			p.appendLog(held, "error")
-			p.setState(StateFailed, held)
+		if p.holdIfRefused(reason, msg) || p.giveUpIfExhausted(consecutive, msg) {
 			return
 		}
 
-		// Out of patience. StateFailed rather than StateStopped: stopped is
-		// what an operator asked for, failed is what happened to them, and the
-		// alert watcher only treats one of those as an incident.
-		// Read here rather than at the top of supervise: the limit an exit is
-		// judged against is the one in force when it exited, which is what
-		// makes a lowered limit apply from the next exit rather than to the
-		// history that preceded it.
-		if pol := p.Policy(); pol.MaxRestarts > 0 && consecutive > pol.MaxRestarts {
-			give := fmt.Sprintf("gave up after %d consecutive restarts", consecutive-1)
-			if msg != "" {
-				give += ": " + msg
-			}
-			// SCRUBBED, for the reason the "process exited" line above is, and
-			// this line is the one that was missed when that one was fixed.
-			// #311 scrubbed the retry line and left this one carrying the same
-			// `msg` -- runOnce's error, which holds FFmpeg's stderr and with it
-			// the publish URL and its key.
-			//
-			// The give-up path is the WORSE of the two to leak on. It fires
-			// only after MaxRestarts consecutive failures, which is to say
-			// after a destination has been refused over and over -- exactly the
-			// state an operator is looking at when they copy server.log into an
-			// issue. The retry line got the attention because it fires often;
-			// this one fires when someone is about to ask for help.
-			p.log.Error("giving up on process", "restarts", consecutive-1, "err", p.scrub(msg))
-			p.appendLog(give, "error")
-			p.setState(StateFailed, give)
-			return
-		}
-
-		p.mu.Lock()
-		p.restarts++
-		p.restartCause = RestartCauseExit
-		p.noteRestartLocked(time.Now())
-		p.nextRetry = time.Now().Add(backoff)
-		p.mu.Unlock()
-		p.setState(StateReconnecting, msg)
-
-		p.appendLog(fmt.Sprintf("process exited after %s; retrying in %s",
-			ranFor.Round(time.Second), backoff.Round(time.Second)), "warning")
+		p.scheduleRetry(backoff, ranFor, msg)
 
 		if !p.waitBackoff(ctx, backoff) {
 			p.setState(StateStopped, "")
 			return
 		}
 
-		backoff *= 2
-		if max := p.Policy().MaxBackoff; backoff > max {
-			backoff = max
-		}
+		backoff = min(backoff*2, p.Policy().MaxBackoff)
 	}
+}
+
+// waitStartDelay waits out the spec's stagger before the first spawn only, and
+// interruptibly: a stop that arrives during the stagger window must not wait it
+// out. It reports false, having marked the process stopped, when it was
+// stopped.
+func (p *Process) waitStartDelay(ctx context.Context) bool {
+	if p.spec.StartDelay <= 0 {
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		p.setState(StateStopped, "")
+		return false
+	case <-time.After(p.spec.StartDelay):
+		return true
+	}
+}
+
+// logExit logs how a run ended and returns the error's text, "" for a clean
+// exit.
+func (p *Process) logExit(err error, ranFor time.Duration) string {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		// SCRUBBED, like every other rendering of this text. The error carries
+		// the child's own stderr, and for a destination that stderr is FFmpeg
+		// reporting the output URL it could not open -- stream key included.
+		//
+		// Found on a live run against a real platform: a refused publish put
+		// the key in server.log six times as the supervisor retried, while
+		// process.log was clean because that path already scrubbed. One sink
+		// was covered and its sibling was not.
+		//
+		// A refusal is exactly when this fires, and a refusal is exactly when
+		// an operator copies logs to somebody who can help. See #306.
+		p.log.Warn("process exited", "err", p.scrub(msg), "ranFor", ranFor.Round(time.Second))
+	} else {
+		p.log.Info("process exited cleanly", "ranFor", ranFor.Round(time.Second))
+	}
+	return msg
+}
+
+// finishRun records the end of a process that does not restart.
+func (p *Process) finishRun(err error, msg string) {
+	if err != nil {
+		p.setState(StateFailed, msg)
+	} else {
+		p.setState(StateStopped, "")
+	}
+}
+
+// holdIfRefused holds the process, and reports whether it did, when it was
+// refused quickly, for a cause retrying cannot fix, N times in a row.
+// StateFailed for the reason the give-up below uses it -- the
+// alert watcher treats it as down, and Start leaves it alone, so a
+// reconcile does not quietly undo the hold; Restart is the one door,
+// which is what the Retry button calls. Checked BEFORE the give-up so
+// that a destination meeting both limits on the same exit says the
+// more useful of the two things.
+func (p *Process) holdIfRefused(reason *failreason.Reason, msg string) bool {
+	if reason == nil || !reason.Held {
+		return false
+	}
+	held := fmt.Sprintf("held after %d quick rejections (%s); press Retry once it is fixed",
+		reason.Rejections, reason.Cause.Label())
+	if msg != "" {
+		held += ": " + msg
+	}
+	p.log.Error("holding process: it keeps being refused quickly", "cause", reason.Cause,
+		"rejections", reason.Rejections, "err", p.scrub(msg))
+	p.appendLog(held, "error")
+	p.setState(StateFailed, held)
+	return true
+}
+
+// giveUpIfExhausted gives up on the process, and reports whether it did, once
+// it is out of patience. StateFailed rather than StateStopped: stopped is
+// what an operator asked for, failed is what happened to them, and the
+// alert watcher only treats one of those as an incident.
+// The policy is read here rather than at the top of supervise: the limit an exit is
+// judged against is the one in force when it exited, which is what
+// makes a lowered limit apply from the next exit rather than to the
+// history that preceded it.
+func (p *Process) giveUpIfExhausted(consecutive int, msg string) bool {
+	pol := p.Policy()
+	if pol.MaxRestarts <= 0 || consecutive <= pol.MaxRestarts {
+		return false
+	}
+	give := fmt.Sprintf("gave up after %d consecutive restarts", consecutive-1)
+	if msg != "" {
+		give += ": " + msg
+	}
+	// SCRUBBED, for the reason the "process exited" line above is, and
+	// this line is the one that was missed when that one was fixed.
+	// #311 scrubbed the retry line and left this one carrying the same
+	// `msg` -- runOnce's error, which holds FFmpeg's stderr and with it
+	// the publish URL and its key.
+	//
+	// The give-up path is the WORSE of the two to leak on. It fires
+	// only after MaxRestarts consecutive failures, which is to say
+	// after a destination has been refused over and over -- exactly the
+	// state an operator is looking at when they copy server.log into an
+	// issue. The retry line got the attention because it fires often;
+	// this one fires when someone is about to ask for help.
+	p.log.Error("giving up on process", "restarts", consecutive-1, "err", p.scrub(msg))
+	p.appendLog(give, "error")
+	p.setState(StateFailed, give)
+	return true
+}
+
+// scheduleRetry counts the restart and announces the backoff before it.
+func (p *Process) scheduleRetry(backoff, ranFor time.Duration, msg string) {
+	p.mu.Lock()
+	p.restarts++
+	p.restartCause = RestartCauseExit
+	p.noteRestartLocked(time.Now())
+	p.nextRetry = time.Now().Add(backoff)
+	p.mu.Unlock()
+	p.setState(StateReconnecting, msg)
+
+	p.appendLog(fmt.Sprintf("process exited after %s; retrying in %s",
+		ranFor.Round(time.Second), backoff.Round(time.Second)), "warning")
 }
 
 // runOnce spawns the child and blocks until it exits.
@@ -1325,9 +1362,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	if startErr != nil {
 		_ = stdout.Close()
 		_ = stderr.Close()
-		if liveStdin != nil {
-			_ = liveStdin.Close()
-		}
+		closeIfSet(liveStdin)
 		return nil, fmt.Errorf("start %s: %w", p.spec.Bin, startErr)
 	}
 
@@ -1383,16 +1418,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 		p.terminate()
 	}
 
-	p.mu.Lock()
-	p.pid = cmd.Process.Pid
-	p.startedAt = time.Now()
-	p.mediaAt = time.Time{}
-	p.movedAt = time.Time{}
-	p.liveSince = time.Time{}
-	p.progress = ffmpeg.Progress{}
-	p.rate = nil
-	p.drops = nil
-	p.mu.Unlock()
+	p.markSpawned(cmd.Process.Pid)
 	p.setState(StateRunning, "")
 	p.log.Info("process started", "pid", cmd.Process.Pid)
 	// Debug rather than info: this is long, and one line per respawn would
@@ -1408,63 +1434,16 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 
 	go func() {
 		defer wg.Done()
-		handler := p.spec.StdoutHandler
-		if handler == nil {
-			handler = p.defaultStdout
-		}
-		if err := handler(stdout); err != nil && ctx.Err() == nil {
-			p.log.Debug("stdout handler ended", "err", err)
-		}
-		// KEEP READING AFTER THE HANDLER HAS STOPPED. A handler that returns
-		// early -- the -progress parser refusing a line over its 1 MiB buffer,
-		// or any handler's own error -- would otherwise leave the pipe with no
-		// reader: it fills, the child blocks in write(), and cmd.Wait() below
-		// never returns. The child then reads Running while doing nothing, and
-		// no amount of waiting fixes it. Discarding costs nothing and ends at
-		// EOF, or at the close the bounded drain below makes.
-		_, _ = io.Copy(io.Discard, stdout)
+		p.readStdout(ctx, stdout)
 	}()
 
 	// FFmpeg's last words before dying are on stderr, so the tail of this
-	// buffer is what tells a user *why* a destination is failing.
-	var lastLines []string
-	var tail []string
+	// buffer is what tells a user *why* a destination is failing. Written only
+	// by the reader below, and read only once `drained` has closed.
+	var capt stderrCapture
 	go func() {
 		defer wg.Done()
-		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 0, 64*1024), stderrLineMax)
-		sc.Split(scanLogLines)
-		// The same reason as the io.Copy after the stdout handler: whatever
-		// ends this loop early, the pipe must go on being read or the child
-		// wedges. scanLogLines never refuses a token, so what is left is a
-		// read error, and discarding the rest is the only safe answer to it.
-		defer func() { _, _ = io.Copy(io.Discard, stderr) }()
-		for sc.Scan() {
-			line := strings.TrimRight(sc.Text(), "\r\n")
-			if line == "" {
-				continue
-			}
-			deliverReply(liveCur, line)
-			level := p.levelOf(line)
-			p.appendLog(line, level)
-			// A line the decoder warm-up demoted (levelOf said info where
-			// classify did not) stays out of the classifier's tail. Otherwise a
-			// run that died mid-warm-up was given that burst as its failure
-			// reason -- the line the log had just called harmless, shown on the
-			// card, the alert and the webhook. See warmup_reason_test.go.
-			if level != "info" || classify(line) == "info" {
-				tail = append(tail, line)
-				if len(tail) > tailLines {
-					tail = tail[1:]
-				}
-			}
-			if level == "error" || level == "fatal" {
-				lastLines = append(lastLines, line)
-				if len(lastLines) > 3 {
-					lastLines = lastLines[1:]
-				}
-			}
-		}
+		p.readStderr(stderr, liveCur, &capt)
 	}()
 
 	// THE REAP FIRST, and on its own. cmd.Wait() here waits for the child and for
@@ -1513,6 +1492,38 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	// keeps publishing to a destination the operator believes is stopped.
 	//
 	// Comparing before clearing makes the two orders equivalent.
+	p.clearSpawn(cmd)
+
+	if waitErr != nil && len(capt.last) > 0 {
+		return capt.tail, fmt.Errorf("%v: %s", waitErr, strings.Join(capt.last, " | "))
+	}
+	return capt.tail, waitErr
+}
+
+// closeIfSet closes c when there is one.
+func closeIfSet(c io.Closer) {
+	if c != nil {
+		_ = c.Close()
+	}
+}
+
+// markSpawned records a new child and resets everything measured about the
+// previous one.
+func (p *Process) markSpawned(pid int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pid = pid
+	p.startedAt = time.Now()
+	p.mediaAt = time.Time{}
+	p.movedAt = time.Time{}
+	p.liveSince = time.Time{}
+	p.progress = ffmpeg.Progress{}
+	p.rate = nil
+	p.drops = nil
+}
+
+// clearSpawn forgets cmd, if it is still the published one.
+func (p *Process) clearSpawn(cmd *exec.Cmd) {
 	p.cmdMu.Lock()
 	if p.cmd == cmd {
 		p.cmd = nil
@@ -1526,11 +1537,76 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 		p.pid = 0
 	}
 	p.mu.Unlock()
+}
 
-	if waitErr != nil && len(lastLines) > 0 {
-		return tail, fmt.Errorf("%v: %s", waitErr, strings.Join(lastLines, " | "))
+// readStdout hands the child's stdout to the spec's handler, then drains it.
+func (p *Process) readStdout(ctx context.Context, stdout io.Reader) {
+	handler := p.spec.StdoutHandler
+	if handler == nil {
+		handler = p.defaultStdout
 	}
-	return tail, waitErr
+	if err := handler(stdout); err != nil && ctx.Err() == nil {
+		p.log.Debug("stdout handler ended", "err", err)
+	}
+	// KEEP READING AFTER THE HANDLER HAS STOPPED. A handler that returns
+	// early -- the -progress parser refusing a line over its 1 MiB buffer,
+	// or any handler's own error -- would otherwise leave the pipe with no
+	// reader: it fills, the child blocks in write(), and cmd.Wait() below
+	// never returns. The child then reads Running while doing nothing, and
+	// no amount of waiting fixes it. Discarding costs nothing and ends at
+	// EOF, or at the close the bounded drain below makes.
+	_, _ = io.Copy(io.Discard, stdout)
+}
+
+// stderrCapture is what runOnce keeps of a child's stderr: the classifier's
+// tail and the last few error lines.
+type stderrCapture struct {
+	tail []string
+	last []string
+}
+
+// note keeps one line at the level levelOf gave it.
+func (c *stderrCapture) note(line, level string) {
+	// A line the decoder warm-up demoted (levelOf said info where
+	// classify did not) stays out of the classifier's tail. Otherwise a
+	// run that died mid-warm-up was given that burst as its failure
+	// reason -- the line the log had just called harmless, shown on the
+	// card, the alert and the webhook. See warmup_reason_test.go.
+	if level != "info" || classify(line) == "info" {
+		c.tail = append(c.tail, line)
+		if len(c.tail) > tailLines {
+			c.tail = c.tail[1:]
+		}
+	}
+	if level == "error" || level == "fatal" {
+		c.last = append(c.last, line)
+		if len(c.last) > 3 {
+			c.last = c.last[1:]
+		}
+	}
+}
+
+// readStderr logs every stderr line, hands replies to the live command
+// channel, and keeps what capt needs.
+func (p *Process) readStderr(stderr io.Reader, liveCur *liveRun, capt *stderrCapture) {
+	sc := bufio.NewScanner(stderr)
+	sc.Buffer(make([]byte, 0, 64*1024), stderrLineMax)
+	sc.Split(scanLogLines)
+	// The same reason as the io.Copy after the stdout handler: whatever
+	// ends this loop early, the pipe must go on being read or the child
+	// wedges. scanLogLines never refuses a token, so what is left is a
+	// read error, and discarding the rest is the only safe answer to it.
+	defer func() { _, _ = io.Copy(io.Discard, stderr) }()
+	for sc.Scan() {
+		line := strings.TrimRight(sc.Text(), "\r\n")
+		if line == "" {
+			continue
+		}
+		deliverReply(liveCur, line)
+		level := p.levelOf(line)
+		p.appendLog(line, level)
+		capt.note(line, level)
+	}
 }
 
 // tailLines is how much of stderr runOnce hands the classifier. Every capture in

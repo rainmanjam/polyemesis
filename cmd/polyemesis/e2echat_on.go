@@ -45,6 +45,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
+// mimeJSON is the JSON media type.
+const mimeJSON = "application/json"
+
+// headerContentType is the Content-Type header name.
+const headerContentType = "Content-Type"
+
 const (
 	e2eChatAddr    = "127.0.0.1:18299"
 	e2eYouTubeAddr = "127.0.0.1:18300"
@@ -89,7 +95,7 @@ type fakeYouTube struct {
 func (f *fakeYouTube) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	switch r.URL.Path {
 	case "/liveChatMessages":
 		if f.fail {
@@ -168,7 +174,35 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 		adapters[p] = a
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /inject", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /inject", e2eInject(adapters))
+	mux.HandleFunc("POST /platform", e2ePlatform(adapters))
+	mux.HandleFunc("GET /sent", func(w http.ResponseWriter, _ *http.Request) {
+		out := map[string][]string{}
+		for p, a := range adapters {
+			a.mu.Lock()
+			out[string(p)] = append([]string{}, a.sent...)
+			a.mu.Unlock()
+		}
+		w.Header().Set(headerContentType, mimeJSON)
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	mux.HandleFunc("POST /youtube-poll", e2eYouTubePoll(yt, poller))
+	mux.HandleFunc("GET /youtube-poll", func(w http.ResponseWriter, _ *http.Request) {
+		yt.mu.Lock()
+		defer yt.mu.Unlock()
+		w.Header().Set(headerContentType, mimeJSON)
+		_ = json.NewEncoder(w).Encode(map[string]any{"created": yt.created, "closed": yt.closed})
+	})
+	srv := &http.Server{Addr: e2eChatAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = srv.ListenAndServe() }()
+	go func() { <-ctx.Done(); _ = srv.Close() }()
+	log.Warn("e2echat build: fake chat adapters attached; this binary is for testing only",
+		"inject", e2eChatAddr)
+}
+
+// e2eInject is POST /inject: one chat message into a platform's adapter.
+func e2eInject(adapters map[db.Platform]*e2eAdapter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Platform, ID, Name, User, Text string }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -185,8 +219,12 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 		}
 		a.in <- chat.Message{ID: req.ID, Text: req.Text, Author: chat.Author{ID: user, Name: req.Name}}
 		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("POST /platform", func(w http.ResponseWriter, r *http.Request) {
+	}
+}
+
+// e2ePlatform is POST /platform: a moderation action the platform reports.
+func e2ePlatform(adapters map[db.Platform]*e2eAdapter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Platform, Action, ID, User string }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -197,42 +235,45 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 			http.Error(w, "unknown platform", http.StatusBadRequest)
 			return
 		}
-		var f func(chat.Sink)
-		switch req.Action {
-		case "delete":
-			f = func(s chat.Sink) {
-				if rt, ok := s.(chat.Retractor); ok {
-					rt.Retract(req.ID)
-				}
-			}
-		case "ban", "clear":
-			user := req.User
-			if req.Action == "clear" {
-				user = ""
-			}
-			f = func(s chat.Sink) {
-				if rt, ok := s.(chat.RetractorAll); ok {
-					rt.RetractUser(user)
-				}
-			}
-		default:
+		f, ok := e2eControl(req.Action, req.ID, req.User)
+		if !ok {
 			http.Error(w, "action must be delete, ban or clear", http.StatusBadRequest)
 			return
 		}
 		a.ctl <- f
 		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("GET /sent", func(w http.ResponseWriter, _ *http.Request) {
-		out := map[string][]string{}
-		for p, a := range adapters {
-			a.mu.Lock()
-			out[string(p)] = append([]string{}, a.sent...)
-			a.mu.Unlock()
+	}
+}
+
+// e2eControl is the sink callback for a /platform action, false for an
+// action it does not know.
+func e2eControl(action, id, user string) (func(chat.Sink), bool) {
+	var f func(chat.Sink)
+	switch action {
+	case "delete":
+		f = func(s chat.Sink) {
+			if rt, ok := s.(chat.Retractor); ok {
+				rt.Retract(id)
+			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
-	})
-	mux.HandleFunc("POST /youtube-poll", func(w http.ResponseWriter, r *http.Request) {
+	case "ban", "clear":
+		if action == "clear" {
+			user = ""
+		}
+		f = func(s chat.Sink) {
+			if rt, ok := s.(chat.RetractorAll); ok {
+				rt.RetractUser(user)
+			}
+		}
+	default:
+		return nil, false
+	}
+	return f, true
+}
+
+// e2eYouTubePoll is POST /youtube-poll: the fake YouTube API's next answers.
+func e2eYouTubePoll(yt *fakeYouTube, poller *chat.YouTubeAdapter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Tally []int `json:"tally"`
 			Fail  *bool `json:"fail"`
@@ -254,16 +295,5 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 			poller.SetQuota(req.Quota[0], req.Quota[1])
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("GET /youtube-poll", func(w http.ResponseWriter, _ *http.Request) {
-		yt.mu.Lock()
-		defer yt.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"created": yt.created, "closed": yt.closed})
-	})
-	srv := &http.Server{Addr: e2eChatAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go func() { _ = srv.ListenAndServe() }()
-	go func() { <-ctx.Done(); _ = srv.Close() }()
-	log.Warn("e2echat build: fake chat adapters attached; this binary is for testing only",
-		"inject", e2eChatAddr)
+	}
 }

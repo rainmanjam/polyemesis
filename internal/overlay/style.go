@@ -9,6 +9,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// colorBlack is the black the overlay presets use for backgrounds.
+const colorBlack = "#000000"
+
+// colorWhite is the white the overlay presets use for text.
+const colorWhite = "#ffffff"
+
 // Style is how an overlay is drawn. Every value ends up in CSS on a page that
 // is composited into a broadcast, so every field is CLOSED: a preset and a font
 // from a fixed list, colours as #rrggbb, numbers within bounds. Nothing here is
@@ -34,17 +40,17 @@ type Style struct {
 // Presets. Each is a complete Style; picking one in the editor resets the
 // knobs to it, and the knobs then adjust from there.
 var presets = map[string]Style{
-	"classic": {Preset: "classic", Font: "sans", FontSize: 24, TextColor: "#ffffff",
-		BackgroundColor: "#000000", BackgroundOpacity: 0, AuthorColors: true,
+	"classic": {Preset: "classic", Font: "sans", FontSize: 24, TextColor: colorWhite,
+		BackgroundColor: colorBlack, BackgroundOpacity: 0, AuthorColors: true,
 		FadeSeconds: 30, MaxLines: 12, ShowPlatform: true, ShowBadges: true},
-	"bubble": {Preset: "bubble", Font: "rounded", FontSize: 22, TextColor: "#ffffff",
+	"bubble": {Preset: "bubble", Font: "rounded", FontSize: 22, TextColor: colorWhite,
 		BackgroundColor: "#111827", BackgroundOpacity: 75, AuthorColors: true,
 		FadeSeconds: 45, MaxLines: 8, ShowPlatform: true, ShowBadges: true},
-	"outline": {Preset: "outline", Font: "sans", FontSize: 28, TextColor: "#ffffff",
-		BackgroundColor: "#000000", BackgroundOpacity: 0, AuthorColors: false,
+	"outline": {Preset: "outline", Font: "sans", FontSize: 28, TextColor: colorWhite,
+		BackgroundColor: colorBlack, BackgroundOpacity: 0, AuthorColors: false,
 		FadeSeconds: 20, MaxLines: 6, ShowPlatform: false, ShowBadges: false},
 	"compact": {Preset: "compact", Font: "mono", FontSize: 16, TextColor: "#e5e7eb",
-		BackgroundColor: "#000000", BackgroundOpacity: 55, AuthorColors: true,
+		BackgroundColor: colorBlack, BackgroundOpacity: 55, AuthorColors: true,
 		FadeSeconds: 0, MaxLines: 20, ShowPlatform: true, ShowBadges: false},
 }
 
