@@ -5964,37 +5964,7 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		snap.IngestError = st.Ingest.LastError
 	}
 	for _, d := range st.Destinations {
-		ds := alerts.DestState{
-			// A stopped destination playing its delayed tail out is still on
-			// the air, so it is still ENABLED to every watcher until the tail
-			// ends: the down edge -- and the YouTube end it triggers -- waits
-			// for the last delayed second. See delayStillPublishing.
-			ID: d.ID, Name: d.Name, Enabled: d.Enabled || delayStillPublishing(d),
-			// Filling its delay: enabled, not running, and not down either.
-			Buffering:    delayHoldsBack(d),
-			DelaySeconds: d.DelaySeconds,
-			// A destination whose graph would not compile has no process at
-			// all, and that is as down as a failed one.
-			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
-			Platform: string(d.Platform),
-			Error:    d.Error,
-			// The classified failure, for the down alert's text (and so the
-			// timeline) and the webhook's cause.
-			Reason: d.Reason,
-		}
-		// FFmpeg has been reporting all three of these once a second per
-		// destination since -progress was wired up, and nothing has ever read
-		// them. Left at their zero values the watcher treats the rate as
-		// unknown and says nothing, which is what happens for a destination
-		// with no process.
-		if d.Process != nil {
-			ds.OutTimeMS = d.Process.Progress.OutTimeMS
-			ds.DropFrames = d.Process.Progress.DropFrames
-			ds.DupFrames = d.Process.Progress.DupFrames
-			ds.Restarts = d.Process.Restarts
-			ds.RestartCause = string(d.Process.RestartCause)
-		}
-		snap.Destinations = append(snap.Destinations, ds)
+		snap.Destinations = append(snap.Destinations, d.AlertState())
 	}
 	if st.Failover != nil {
 		snap.Failover = &alerts.FailoverState{

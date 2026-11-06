@@ -524,14 +524,17 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 
 		item := mqtt.SourceSnapshot{}
 		for _, d := range st.Destinations {
-			running := d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning
+			// The engine's own verdict, the one alerts and hooks judge,
+			// delay rule included. Nothing here decides what "up" means.
+			judged := d.AlertState()
+			running := judged.Running
 			if running {
 				src.DestsUp++
 			}
 			ds := mqtt.DestState{
 				ID: d.ID, Name: d.Name, Slug: mqtt.Slug(d.Name),
 				Platform: string(d.Platform), Kind: string(d.Kind),
-				Enabled: d.Enabled, Running: running,
+				Enabled: judged.Enabled, Running: running,
 				// Scrubbed HERE and not in Status (#160). Everything else on
 				// this topic tree was already covered -- SourceState.IngestError
 				// comes from supervisor Status.LastError, which Process.scrub

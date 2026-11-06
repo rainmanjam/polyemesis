@@ -39,6 +39,7 @@ const ingestChip = (ingest: ChipFixture | undefined, ingestLive: boolean) => {
   const r = ingestChipReading(ingest as unknown as ProcessStatus | undefined, ingestLive);
   if (r.kind === "backup") return "backup";
   if (r.kind === "pending") return "pending";
+  if (r.kind === "waiting") return "Waiting";
   return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
 };
 
@@ -51,7 +52,10 @@ describe("the header ingest chip", () => {
       shown,
       "a running child with no progress yet was shown as a measured bitrate",
     ).not.toContain("kbps");
-    expect(shown).toBe("Running");
+    // Running with nothing arriving is a listener waiting for its encoder, not
+    // a live ingest; "Running" is what bytes arriving earns.
+    expect(shown).toBe("Waiting");
+    expect(ingestChip({ state: "running" }, true)).toBe("Running");
   });
 
   it("still prints a real zero when the child actually reports zero", () => {
@@ -59,8 +63,13 @@ describe("the header ingest chip", () => {
     // HAS told us it is at zero is a genuine reading and must still show. A
     // fix that suppressed both would hide a stalled stream, which is worse
     // than the bug.
-    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, false)).toBe(
+    // Zero while bytes ARE arriving disagrees with the relay: a real reading.
+    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, true)).toBe(
       "0 kbps",
+    );
+    // Zero with nothing arriving is a listener waiting for its encoder.
+    expect(ingestChip({ state: "running", progress: { bitrateKbps: 0 } }, false)).toBe(
+      "Waiting",
     );
   });
 

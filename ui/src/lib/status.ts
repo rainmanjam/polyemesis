@@ -1,4 +1,5 @@
 import { stateLabelKey, type TranslationKey } from "./i18n";
+import { toneForState, type SignalTone } from "./signal";
 import type { OutputState } from "./outputStrip";
 import type { IngestPhase } from "./sourceIngest";
 import type { ChatSanction, DelayStatus, ProcessState, ProcessStatus } from "./types";
@@ -58,40 +59,20 @@ function lamp(r: StatusReading): StatusReading {
   return r.tone === "ok" ? { ...r, lamp: true } : r;
 }
 
-const PROCESS_TONE: Record<ProcessState, StatusTone> = {
-  running: "ok",
-  starting: "warn",
-  reconnecting: "warn",
-  failed: "bad",
-  stopped: "idle",
+/** signal.ts owns the state-to-tone table; StatusTone is its vocabulary
+ *  restated for the status kit. "armed" (loaded, not firing) is idle here. */
+const SIGNAL_TO_STATUS: Record<SignalTone, StatusTone> = {
+  live: "ok",
+  warn: "warn",
+  down: "bad",
+  armed: "idle",
+  idle: "idle",
 };
 
 /** A child process (ingest, encoder, output, recorder). Undefined or null is
  *  the absence of a process, which reads as Stopped, the same as stateLabelKey. */
 export function processStatus(state?: ProcessState | null): StatusReading {
-  return reading(stateLabelKey(state), state ? PROCESS_TONE[state] : "idle");
-}
-
-/** The state a destination's process is IN, for anything that draws it as on
- *  air or not: the server's state, except that "running" with no media yet is
- *  "starting".
- *
- *  RUNNING IS NOT ON AIR UNTIL MEDIA MOVES. The supervisor reports "running"
- *  from the moment FFmpeg is spawned (supervisor.go sets StateRunning straight
- *  after cmd.Start) -- before it has connected, let alone published -- and
- *  leaves uptimeSec at 0 until this run's output has carried media. It also
- *  keeps the previous run's failure reason until a run moves media. So a Kick
- *  destination that Amazon IVS refused on every connect drew a red LIVE lamp
- *  at 0 kbps with "--:--:--" uptime, beside the failure box, while each
- *  respawn was in flight. The server's state is right about the process; it
- *  is this reading of it as "on air" that was wrong, so it is corrected here
- *  and nothing sent back to the server changes. */
-export function destinationProcessState(
-  process?: Pick<ProcessStatus, "state" | "uptimeSec"> | null,
-): ProcessState | undefined {
-  const state = process?.state;
-  if (state === "running" && !(process!.uptimeSec > 0)) return "starting";
-  return state ?? undefined;
+  return reading(stateLabelKey(state), SIGNAL_TO_STATUS[toneForState(state)]);
 }
 
 /** A destination. Disabled means the operator switched it off, so the process
@@ -104,7 +85,8 @@ export function destinationStatus(
   state?: ProcessState | null,
   delayPhase?: DelayStatus["phase"] | null,
 ): StatusReading {
-  if (!enabled) return reading("state.off", "idle");
+  // A stopped destination still playing its delay tail out is on the air.
+  if (!enabled && delayPhase !== "draining") return reading("state.off", "idle");
   // A broadcast delay fills before any process exists, by design (#11). With no
   // process yet, that is a filling state, not a stopped one.
   if (!state && delayPhase === "buffering") return reading("wave3.bugs.delayFilling", "warn");

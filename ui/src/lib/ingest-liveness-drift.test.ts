@@ -31,14 +31,22 @@ import { join } from "node:path";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 
-function tsxFiles(dir: string): string[] {
+function sourceFiles(dir: string, exts: readonly string[]): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...tsxFiles(p));
-    else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) out.push(p);
+    if (entry.isDirectory()) out.push(...sourceFiles(p, exts));
+    else if (exts.some((e) => entry.name.endsWith(e)) && !entry.name.includes(".test.")) out.push(p);
   }
   return out;
+}
+
+const tsxFiles = (dir: string) => sourceFiles(dir, [".tsx"]);
+
+/** Comments explain the hazard and name the very expression this bans, so they
+ *  are not code. Crude on purpose: it only has to be right for this repo. */
+function withoutComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 describe("ingest liveness", () => {
@@ -76,5 +84,63 @@ describe("ingest liveness", () => {
       return src.includes("stateLabel(ingest?.state)") || src.includes("ingestChipReading(");
     });
     expect(guarded.length).toBeGreaterThan(0);
+  });
+
+  // "Is it live" is lib/liveness.ts's to answer, for destinations AND the
+  // ingest, and in .ts helpers as well as .tsx views: this guard used to read
+  // only .tsx, so headerLive, attention, ingestChip and dashboardFacts each
+  // kept their own copy of the raw reading.
+  describe("one liveness module", () => {
+    const MODULE = "ui/src/lib/liveness.ts";
+    // ANY comparison against the literal "running", whatever it is aliased
+    // to (`const s = d.process?.state; s === "running"`), a string parameter,
+    // single quotes or loose `==`. Narrower patterns were walked around by the
+    // very sites they were written for.
+    const RAW_RUNNING = /[!=]==?\s*["']running["']|["']running["']\s*[!=]==?/;
+    // Not process liveness, so they may spell it: background-job states and the
+    // rollover countdown's own kind both have a "running" of their own.
+    const NOT_LIVENESS: Record<string, string> = {
+      "ui/src/components/HighlightsPanel.tsx": "job state",
+      "ui/src/pages/ClipEditor.tsx": "job state",
+      "ui/src/pages/JobsPage.tsx": "job state",
+      "ui/src/pages/LibraryPage.tsx": "job state",
+      "ui/src/components/RolloverPanel.tsx": "rollover countdown kind",
+    };
+    const RAW_INGEST_TONE = /toneForState\(\s*ingest\??\.state/;
+
+    const files = () =>
+      sourceFiles(join(ROOT, "ui/src"), [".ts", ".tsx"]).filter(
+        (f) => f.slice(ROOT.length) !== MODULE && !(f.slice(ROOT.length) in NOT_LIVENESS),
+      );
+
+    it('bans comparing anything to "running" outside the module', () => {
+      const offenders = files()
+        .filter((f) => RAW_RUNNING.test(withoutComments(readFileSync(f, "utf8"))))
+        .map((f) => f.slice(ROOT.length));
+      expect(
+        offenders,
+        "these files decide 'running' themselves; call lib/liveness (destinationOnAir, " +
+          "destinationShownState, processRunning, ingestProcessUp) so every surface agrees",
+      ).toEqual([]);
+    });
+
+    it("bans drawing the ingest tone from the process state alone", () => {
+      const offenders = files()
+        .filter((f) => RAW_INGEST_TONE.test(withoutComments(readFileSync(f, "utf8"))))
+        .map((f) => f.slice(ROOT.length));
+      expect(offenders, "use ingestSignalTone from lib/liveness").toEqual([]);
+    });
+
+    it("still matches what it bans", () => {
+      // The control: without it a renamed field passes both rules vacuously.
+      expect(RAW_RUNNING.test('d.process?.state === "running"')).toBe(true);
+      expect(RAW_RUNNING.test('ingest.state !== "running"')).toBe(true);
+      expect(RAW_RUNNING.test("s == 'running'")).toBe(true);
+      expect(RAW_RUNNING.test('s === "running"')).toBe(true);
+      expect(RAW_RUNNING.test('// ingest?.state === "running"')).toBe(true);
+      expect(withoutComments('// ingest?.state === "running"\nconst a = 1;')).not.toMatch(RAW_RUNNING);
+      expect(RAW_INGEST_TONE.test("toneForState(ingest?.state)")).toBe(true);
+      expect(files().length).toBeGreaterThan(100);
+    });
   });
 });

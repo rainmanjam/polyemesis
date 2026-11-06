@@ -80,7 +80,11 @@ func TestTheHeaderAsksTheAppsOneQuestionAboutBeingLive(t *testing.T) {
 	}
 	// The tone is what makes the dot green, and it is the part that was
 	// inverted. Deriving it from the process alone is the original bug.
-	if !strings.Contains(src, "ingestLive ? \"live\" : toneForState(ingest?.state)") {
+	// ui/src/lib/liveness.ts owns the tone (ingestSignalTone), and the header
+	// must hand it the useProgrammeIngest verdict.
+	tone := testenv.StripJSComments(testenv.ReadUI(t, "lib", "liveness.ts"))
+	if !strings.Contains(src, "ingestSignalTone(ingest, ingestLive, onBackup)") ||
+		!strings.Contains(tone, "if (arriving) return \"live\"") {
 		t.Error("the ingest status dot is no longer driven by useIngestLive. That dot " +
 			"is the first thing an operator looks at to answer 'am I on air'.")
 	}

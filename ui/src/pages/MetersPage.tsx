@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { DisabledReason } from "@/components/DisabledReason";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useT, useTN } from "@/lib/i18n";
+import { processRunning } from "@/lib/liveness";
 
 type Verdict = "unknown" | "pass" | "warn" | "fail";
 
@@ -115,7 +116,7 @@ export function MetersPage() {
   const { levels, source, status, programme, programmeKnown, sourceCount } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
-  const metersRunning = status?.meters?.state === "running";
+  const metersRunning = processRunning(status?.meters);
   const [loudness, setLoudness] = useState<LoudnessView | null>(null);
   /* null until the server has said. The switch used to be seeded `true` and
      never seeded again, so every remount drew it ON -- over a monitor the

@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { attention, onAir } from "@/lib/attention";
+import { destinationInPlay, destinationShownState, ingestProcessUp } from "@/lib/liveness";
 import { toneForState } from "@/lib/signal";
 import { kbps } from "@/lib/format";
 import { useMotionTransition } from "@/lib/motion";
@@ -112,7 +113,7 @@ function RoomPanel({
   // across a room would be a false reading, not a missing one.
   const known = status?.destinations != null;
   const ingest = status?.ingest;
-  const enabled = (status?.destinations ?? []).filter((d) => d.enabled);
+  const enabled = (status?.destinations ?? []).filter(destinationInPlay);
 
   return (
     // Fixed to the viewport rather than to <main>: this is the whole screen by
@@ -145,7 +146,7 @@ function RoomPanel({
             </div>
             <div className="tnum mt-2 font-mono text-[clamp(1rem,2.5vw,1.75rem)] text-muted-foreground">
               {known && t(air.enabled === 1 ? "room.liveOfEnabledOne" : "room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
-              {ingest?.state === "running" && ` · ${kbps(ingest.progress?.bitrateKbps ?? 0)}`}
+              {ingest && ingestProcessUp(ingest) && ` · ${kbps(ingest.progress?.bitrateKbps ?? 0)}`}
             </div>
           </div>
         </div>
@@ -179,7 +180,10 @@ function RoomPanel({
           over to ask. */}
       <ul className="flex flex-col gap-1.5">
         {enabled.map((d) => {
-          const tone = toneForState(d.process?.state);
+          // The state the headline above counted by, so a row cannot say LIVE
+          // under a "0 live" count.
+          const shown = destinationShownState(d.process);
+          const tone = toneForState(shown);
           return (
             <li key={d.id} className="flex items-center gap-4 px-1">
               <StatusDot tone={tone} size="lg" />
@@ -187,7 +191,7 @@ function RoomPanel({
                 {d.name}
               </span>
               <span className="shrink-0 font-mono text-[clamp(0.875rem,1.8vw,1.25rem)] uppercase tracking-wider text-muted-foreground">
-                {stateLabel(d.process?.state)}
+                {stateLabel(shown)}
               </span>
             </li>
           );

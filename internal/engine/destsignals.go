@@ -197,8 +197,7 @@ func (e *Engine) platformHealth(row *db.Destination, p *supervisor.Status) *Plat
 	if row == nil {
 		return nil
 	}
-	live := p != nil && p.State == supervisor.StateRunning && p.UptimeSec > 0
-	if !live || row.AccountID == nil || row.StreamKey == "" || row.Platform != db.PlatformYouTube {
+	if !processDelivering(p) || row.AccountID == nil || row.StreamKey == "" || row.Platform != db.PlatformYouTube {
 		e.healthMu.Lock()
 		delete(e.healthChecks, row.ID)
 		e.healthMu.Unlock()

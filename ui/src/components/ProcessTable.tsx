@@ -6,6 +6,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { duration } from "@/lib/format";
 import { remedyFor } from "@/lib/failureRemedy";
 import { useT } from "@/lib/i18n";
+import { processRunning } from "@/lib/liveness";
 import { processStatus } from "@/lib/status";
 import type { ProcessInfo, ProcessState } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -106,7 +107,7 @@ export function ProcessTable({
                   </td>
                   <td className={cn("tnum py-1 pr-2 font-mono", p.restarts > 0 && "text-warn")}>{p.restarts}</td>
                   <td className="tnum py-1 pr-2 font-mono">
-                    {p.state === "running" ? duration(p.uptimeSec) : "—"}
+                    {processRunning(p) ? duration(p.uptimeSec) : "—"}
                   </td>
                   <td className={cn("tnum py-1 font-mono", errors > 0 && "text-warn")}>{errors}</td>
                 </tr>

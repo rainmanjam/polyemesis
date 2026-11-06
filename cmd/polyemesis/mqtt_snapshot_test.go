@@ -287,3 +287,45 @@ func TestTheRetainedSourceTopicCarriesTheDegradedReason(t *testing.T) {
 		t.Errorf("degraded = %q", src.Degraded)
 	}
 }
+
+// MQTT READS A DESTINATION THE WAY ALERTS AND HOOKS DO. A stopped destination
+// still playing its delayed tail out is on the air, so it is `enabled` on the
+// retained topic until the tail ends -- the verdict alertSnapshot already
+// gives, and the one mqtt.go used to skip by copying d.Enabled raw.
+func TestMQTTDestinationsFollowTheEnginesDelayRule(t *testing.T) {
+	proc := &supervisor.Status{State: supervisor.StateRunning, UptimeSec: 30}
+	for _, tc := range []struct {
+		name        string
+		d           engine.DestStatus
+		wantEnabled bool
+		wantRunning bool
+	}{
+		{"draining after stop is still enabled", engine.DestStatus{
+			ID: 1, Enabled: false, Process: proc,
+			Delay: &engine.DelayStatus{Phase: engine.DelayDraining},
+		}, true, true},
+		{"filling its delay: enabled, not running", engine.DestStatus{
+			ID: 2, Enabled: true,
+			Delay: &engine.DelayStatus{Phase: engine.DelayBuffering},
+		}, true, false},
+		{"stopped for good", engine.DestStatus{ID: 3, Enabled: false}, false, false},
+		{"running", engine.DestStatus{ID: 4, Enabled: true, Process: proc}, true, true},
+		{"running but errored", engine.DestStatus{ID: 5, Enabled: true, Process: proc, Error: "x"}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeMQTTEngine{id: 7, name: "p", status: engine.Status{
+				Destinations: []engine.DestStatus{tc.d},
+			}}
+			r := &mqttRunner{engines: func() []mqttEngine { return []mqttEngine{fake} }}
+			got := r.snapshot().Sources[0].Dests[0]
+			if got.Enabled != tc.wantEnabled || got.Running != tc.wantRunning {
+				t.Errorf("mqtt enabled=%v running=%v, want %v/%v", got.Enabled, got.Running, tc.wantEnabled, tc.wantRunning)
+			}
+			// And it must be the very judgement the alert watcher reads.
+			if a := tc.d.AlertState(); a.Enabled != got.Enabled || a.Running != got.Running {
+				t.Errorf("mqtt (%v/%v) disagrees with the alerts projection (%v/%v)",
+					got.Enabled, got.Running, a.Enabled, a.Running)
+			}
+		})
+	}
+}

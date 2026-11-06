@@ -2,8 +2,6 @@ package engine
 
 import (
 	"fmt"
-
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // OnAir is what is currently at stake if this process restarts.
@@ -110,18 +108,18 @@ func (m *Manager) OnAir() OnAir {
 			live = true
 		}
 		for _, d := range st.Destinations {
-			if running(d.Process) {
+			if processCarrying(d.Process) {
 				o.Destinations++
 				live = true
 			}
 			// The redundant output counts too: it is a second connection to a
 			// platform, and dropping it is the same event to whoever is watching.
-			if running(d.BackupProcess) {
+			if processCarrying(d.BackupProcess) {
 				o.Destinations++
 				live = true
 			}
 		}
-		if running(st.Recorder) {
+		if processCarrying(st.Recorder) {
 			o.Recording = true
 			live = true
 		}
@@ -136,16 +134,4 @@ func (m *Manager) OnAir() OnAir {
 		}
 	}
 	return o
-}
-
-// running reports whether a supervised process is actually carrying traffic.
-//
-// Reconnecting counts. A destination reconnecting to a platform is mid-broadcast
-// from the operator's point of view, and restarting underneath it turns a
-// recoverable blip into a dropped show.
-func running(s *supervisor.Status) bool {
-	if s == nil {
-		return false
-	}
-	return s.State == supervisor.StateRunning || s.State == supervisor.StateReconnecting
 }

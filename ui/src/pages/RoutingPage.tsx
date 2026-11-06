@@ -61,6 +61,7 @@ import {
 } from "@/lib/liveTrackLevel";
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
+import { destinationShownState } from "@/lib/liveness";
 import { toneForState } from "@/lib/signal";
 import {
   layoutTrackIndices,
@@ -857,7 +858,7 @@ export function RoutingPage() {
           id: d.id,
           name: d.name,
           tone: d.enabled
-            ? toneForState(status?.destinations?.find((x) => x.id === d.id)?.process?.state)
+            ? toneForState(destinationShownState(status?.destinations?.find((x) => x.id === d.id)?.process))
             : "idle",
           kind: !isSel ? "select" : live.mode === "matrix" ? "matrix" : "editable",
           routed: routedTracks(live),

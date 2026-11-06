@@ -47,7 +47,8 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { destinationProcessState, destinationStatus } from "@/lib/status";
+import { destinationInPlay, destinationOnAir, destinationShownState, processRunning } from "@/lib/liveness";
+import { destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -176,14 +177,14 @@ export function DestinationCard({
   const held = useHeldStop(onStop);
   const { unsettled } = useSettledAction(dest.enabled);
   const stateLabel = useStateLabel();
-  const state = dest.process?.state;
   // What the badge and its tone say: "running" reads as starting until this
-  // run has carried media (see destinationProcessState). `running` below stays
+  // run has carried media (see destinationShownState). `running` below stays
   // the server's word, because it gates the live readings, and a starting
   // process's 0 kbps and blank uptime are true.
-  const shownState = destinationProcessState(dest.process);
-  const tone = dest.enabled ? toneForState(shownState) : "idle";
-  const running = state === "running";
+  const shownState = destinationShownState(dest.process);
+  const inPlay = destinationInPlay(dest);
+  const tone = inPlay ? toneForState(shownState) : "idle";
+  const running = processRunning(dest.process);
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
   const reason = dest.enabled ? dest.reason : undefined;
@@ -296,16 +297,16 @@ export function DestinationCard({
                 own label, not the green that also means running and healthy. */}
             <Badge
               data-testid="card-state-badge"
-              variant={dest.enabled ? toneBadge[tone] : "outline"}
+              variant={inPlay ? toneBadge[tone] : "outline"}
               className={cn(
-                destinationStatus(dest.enabled, shownState, dest.delay?.phase).lamp &&
+                destinationStatus(inPlay, shownState, dest.delay?.phase).lamp &&
                   "border-transparent bg-tally text-tally-foreground",
               )}
             >
-              {dest.enabled && shownState === "running" && (
+              {destinationOnAir(dest) && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {t(destinationStatus(dest.enabled, shownState, dest.delay?.phase).labelKey)}
+              {t(destinationStatus(inPlay, shownState, dest.delay?.phase).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -522,7 +523,7 @@ export function DestinationCard({
             )}
           </div>
         )}
-        {!dest.error && !reason && dest.process?.lastError && state !== "running" && (
+        {!dest.error && !reason && dest.process?.lastError && !running && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <StatusReason

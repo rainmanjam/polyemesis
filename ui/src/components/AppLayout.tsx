@@ -61,7 +61,7 @@ import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
-import { toneForState } from "@/lib/signal";
+import { ingestSignalTone } from "@/lib/liveness";
 import { duration, kbps } from "@/lib/format";
 import {
   LANGUAGES,
@@ -218,7 +218,7 @@ export function AppLayout({
   // The process's uptime where there is one; for a push on the shared SRT
   // listener, which has none, how long its stream has been arriving.
   const uptime = ingestUptimeSec(ingest, snapshot?.relay, ingestLive);
-  const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  const ingestTone = ingestSignalTone(ingest, ingestLive, onBackup);
   const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
   // app-council A81: the badge counts the selected programme and says whose
   // count it is ("Main: 3 live"), or "All programmes" where nothing is
@@ -312,6 +312,7 @@ export function AppLayout({
               const r = ingestChipReading(ingest, ingestLive, onBackup, ingestKnown);
               if (r.kind === "backup") return t("chrome.ingestBackup");
               if (r.kind === "pending") return t("common.loading");
+              if (r.kind === "waiting") return t("state.waiting");
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>

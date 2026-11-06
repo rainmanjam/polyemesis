@@ -908,7 +908,11 @@ func formatValue(v float64) string {
 }
 
 // delivering is what polyemesis_destination_up reports: running, and not
-// stalled.
+// stalled. It differs from engine.DestStatus.IsUp on purpose: a stalled
+// destination is down to an alert even though the engine (and the console's
+// on-air count) still calls it up. This package cannot import the engine; State
+// is "running" only for a destination with a live process, so an errored one
+// (no process) is already stopped here.
 func delivering(dest Destination) bool {
 	return dest.State == stateRunning && !dest.Stalled
 }

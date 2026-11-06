@@ -86,20 +86,20 @@ func TestJoinAnd(t *testing.T) {
 // point of view. Restarting underneath it turns a recoverable blip into a
 // dropped show, so it must count as on air.
 func TestReconnectingCountsAsOnAir(t *testing.T) {
-	if !running(statusIn("reconnecting")) {
+	if !processCarrying(statusIn("reconnecting")) {
 		t.Error("a reconnecting destination is not counted as on air; an upgrade " +
 			"would be allowed to restart underneath a broadcast that was about to recover")
 	}
-	if !running(statusIn("running")) {
+	if !processCarrying(statusIn("running")) {
 		t.Error("a running destination is not counted as on air")
 	}
 	for _, s := range []string{"stopped", "failed", "starting"} {
-		if running(statusIn(s)) {
+		if processCarrying(statusIn(s)) {
 			t.Errorf("state %q counted as on air; an enabled destination that cannot "+
 				"start would make the gate impossible to get past", s)
 		}
 	}
-	if running(nil) {
+	if processCarrying(nil) {
 		t.Error("a nil process counted as on air")
 	}
 }

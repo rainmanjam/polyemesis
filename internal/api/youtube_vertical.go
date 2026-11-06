@@ -13,7 +13,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/redact"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // YouTube paired vertical (#7), HTTP layer.
@@ -288,7 +287,7 @@ func (s *Server) verticalHalfIsLive(ids ...int64) bool {
 		return false
 	}
 	for _, ds := range s.mgr.DestinationStatuses() {
-		if ds.Process == nil || ds.Process.State != supervisor.StateRunning {
+		if !ds.IsUp() {
 			continue
 		}
 		for _, id := range ids {

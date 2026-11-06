@@ -276,7 +276,7 @@ dashboard, and it is usually the fastest answer to "why is `live` false".
   "id": 7, "name": "Twitch", "slug": "twitch-a731a58c",
   "platform": "twitch",
   "kind": "rtmp",
-  "enabled": true,
+  "enabled": true,           // stays true while a stopped destination plays out its broadcast-delay tail
   "running": true,           // the ENGINE's verdict, not the process's
   "bitrateKbps": 6000.1,
   "uptimeSec": 3790.0,       // since media first arrived on this process

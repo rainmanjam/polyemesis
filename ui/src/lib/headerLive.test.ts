@@ -15,7 +15,8 @@ import { headerLive } from "./headerLive";
 const running = (id: number, sourceId: number | null) => ({
   id,
   sourceId,
-  process: { state: "running" as const },
+  enabled: true,
+  process: { state: "running" as const, uptimeSec: 10 },
 });
 const stopped = (id: number, sourceId: number | null) => ({
   id,
