@@ -29,7 +29,7 @@ func (y *YouTube) ActiveBroadcast(ctx context.Context, accessToken, channelRef s
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=id,snippet&broadcastStatus=active&broadcastType=all",
 		accessToken, nil, &out)
 	if err != nil {
@@ -65,7 +65,7 @@ func (y *YouTube) LiveViewers(ctx context.Context, accessToken, videoID string) 
 			} `json:"liveStreamingDetails"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+ytVideosPath+"?part=liveStreamingDetails&id="+url.QueryEscape(videoID),
 		accessToken, nil, &out)
 	if err != nil {

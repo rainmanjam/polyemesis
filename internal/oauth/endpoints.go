@@ -48,6 +48,9 @@ type endpoints struct {
 	auth string
 	// xLivestream is the operator's Livestream gate, read only by X.
 	xLivestream bool
+	// meter charges YouTube Data API calls to the install's allowance. Nil
+	// means unmetered. See quota_meter.go.
+	meter *meterBinding
 }
 
 // WithXLivestream sets X's Livestream gate for a provider set. Production hands

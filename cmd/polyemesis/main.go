@@ -480,14 +480,7 @@ func run(h *hooks) error {
 	})
 	// The publish worker refreshes tokens through the server's own path.
 	pp.publishTokens.Set(srv.PublishTokens())
-	// FIRST, before any loop below can call YouTube: every YouTube Data API
-	// call internal/oauth makes -- title push, compliance, the lifecycle and
-	// its startup reconciliation, preannounce, recurring, rollover -- is
-	// charged to the configured client's one shared allowance (bound in
-	// api.New), the one chat paces against. A startup sweep that ran first
-	// would spend quota nobody counted. TestTheQuotaMeterIsInstalledBefore-
-	// AnyLoopCanCallYouTube holds the order.
-	api.InstallYouTubeMeter(srv)
+	pp.publishTokens.SetMeter(srv.YouTubeMeter())
 	// The stored settings, applied the way a save applies them: the log's zone,
 	// chat retention, the YouTube allowance, automod and alert delivery. A
 	// boot that skipped one would revert an operator's choice at the first

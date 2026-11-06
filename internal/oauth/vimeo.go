@@ -247,7 +247,7 @@ type vimeoUser struct {
 // is one interface.
 func (v *Vimeo) Account(ctx context.Context, clientID, accessToken string) (*Account, error) {
 	var u vimeoUser
-	if err := getJSON(ctx, v.apiEndpoint()+"/me", accessToken, vimeoHeaders(), &u); err != nil {
+	if err := v.getJSON(ctx, v.apiEndpoint()+"/me", accessToken, vimeoHeaders(), &u); err != nil {
 		return nil, err
 	}
 	ref := strings.TrimPrefix(strings.TrimSpace(u.URI), "/users/")

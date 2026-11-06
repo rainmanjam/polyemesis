@@ -660,7 +660,7 @@ func TestAPartialTickHasNoTotalOnTheScrapeOrMQTT(t *testing.T) {
 }
 
 // TestTitlePushAndGoLiveChargeTheServersAllowance (R13): through the same
-// helper main uses, a title push and a go-live transition made by the oauth
+// meter api.New builds into the provider set, a title push and a go-live transition made by the oauth
 // providers are charged to this server's one YouTube allowance.
 func TestTitlePushAndGoLiveChargeTheServersAllowance(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -678,10 +678,8 @@ func TestTitlePushAndGoLiveChargeTheServersAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(stub.URL)
-	InstallYouTubeMeter(s, u.Host)
-	t.Cleanup(func() { oauth.SetYouTubeMeter(nil) })
 
-	y := oauth.NewYouTube(oauth.WithBaseURL(stub.URL))
+	y := oauth.NewYouTube(oauth.WithBaseURL(stub.URL), oauth.WithYouTubeMeter(s.YouTubeMeter(), u.Host))
 	q := s.ytQuota()
 	before := q.Status().Used
 	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})

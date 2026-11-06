@@ -274,9 +274,15 @@ var ErrReconnectRequired = errors.New("the platform no longer accepts this accou
 // and its workers start before the API server exists, and the token refresh
 // path lives on the server; until Set is called the source answers with a
 // retryable "starting up".
+//
+// It carries the YouTube quota meter for the same reason: the clip upload is
+// charged to the server's shared allowance, and it can only be reached through
+// a token the gate hands out, so a meter installed beside Set is in place
+// before any upload can start.
 type TokenGate struct {
-	mu sync.RWMutex
-	fn TokenSource
+	mu    sync.RWMutex
+	fn    TokenSource
+	meter func(units int)
 }
 
 // Source is the TokenSource to give the worker.
@@ -289,6 +295,23 @@ func (g *TokenGate) Source() TokenSource {
 			return Credential{}, errors.New("the server is still starting; this will be retried")
 		}
 		return fn(ctx, accountID)
+	}
+}
+
+// SetMeter installs the meter YouTube uploads are charged to.
+func (g *TokenGate) SetMeter(fn func(units int)) {
+	g.mu.Lock()
+	g.meter = fn
+	g.mu.Unlock()
+}
+
+// Charge spends units from the installed meter; a no-op until one is set.
+func (g *TokenGate) Charge(units int) {
+	g.mu.RLock()
+	fn := g.meter
+	g.mu.RUnlock()
+	if fn != nil && units > 0 {
+		fn(units)
 	}
 }
 

@@ -233,7 +233,7 @@ func adviceBody(err error) string {
 // requestJSON performs an authenticated request with an arbitrary method.
 // getJSON and postJSON cover the read and create paths; metadata writes are
 // PUT and PATCH, and they need the status back rather than a flattened string.
-func requestJSON(ctx context.Context, method, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
+func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -255,7 +255,7 @@ func requestJSON(ctx context.Context, method, endpoint, accessToken string, payl
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -397,7 +397,7 @@ func (y *YouTube) liveBroadcast(ctx context.Context, accessToken string) (*ytBro
 	var list struct {
 		Items []ytBroadcast `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+"/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=all&broadcastType=all&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
@@ -453,7 +453,7 @@ func (y *YouTube) PushMetadata(ctx context.Context, clientID, accessToken, accou
 		if b.Snippet.ScheduledStartTime != "" {
 			snip["scheduledStartTime"] = b.Snippet.ScheduledStartTime
 		}
-		err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=snippet",
+		err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=snippet",
 			accessToken, map[string]any{"id": b.ID, "snippet": snip}, nil, nil)
 		if err != nil {
 			return nil, scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -509,7 +509,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 			Snippet ytVideoSnippet `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
+	err = y.getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
 	if err != nil {
 		return "", err
 	}
@@ -519,7 +519,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 	snip := current.Items[0].Snippet
 	snip.CategoryID = id
 
-	err = requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
+	err = y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
 		map[string]any{"id": videoID, "snippet": snip}, nil, nil)
 	if err != nil {
 		return "", scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -540,7 +540,7 @@ func (y *YouTube) categoryID(ctx context.Context, accessToken, name string) (id,
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, y.apiEndpoint()+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
+	err = y.getJSON(ctx, y.apiEndpoint()+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
 	if err != nil {
 		return "", "", err
 	}
@@ -622,7 +622,7 @@ func (t *Twitch) PushMetadata(ctx context.Context, clientID, accessToken, accoun
 	if len(body) == 0 {
 		return res, nil
 	}
-	err := requestJSON(ctx, http.MethodPatch,
+	err := t.requestJSON(ctx, http.MethodPatch,
 		t.apiEndpoint()+"/channels?broadcaster_id="+url.QueryEscape(accountRef),
 		accessToken, body, helixHeaders(clientID), nil)
 	if err != nil {
@@ -651,7 +651,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var exact struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, t.apiEndpoint()+"/games?name="+url.QueryEscape(name),
+	err = t.getJSON(ctx, t.apiEndpoint()+"/games?name="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &exact)
 	if err != nil {
 		return "", "", err
@@ -663,7 +663,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var found struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, t.apiEndpoint()+"/search/categories?first=20&query="+url.QueryEscape(name),
+	err = t.getJSON(ctx, t.apiEndpoint()+"/search/categories?first=20&query="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &found)
 	if err != nil {
 		return "", "", err

@@ -205,7 +205,7 @@ func (t *Twitch) Account(ctx context.Context, clientID, accessToken string) (*Ac
 			DisplayName string `json:"display_name"`
 		} `json:"data"`
 	}
-	if err := getJSON(ctx, t.apiEndpoint()+"/users", accessToken, helixHeaders(clientID), &out); err != nil {
+	if err := t.getJSON(ctx, t.apiEndpoint()+"/users", accessToken, helixHeaders(clientID), &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -234,7 +234,7 @@ func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ing
 			StreamKey string `json:"stream_key"`
 		} `json:"data"`
 	}
-	err = getJSON(ctx,
+	err = t.getJSON(ctx,
 		t.apiEndpoint()+"/streams/key?broadcaster_id="+url.QueryEscape(acct.Ref),
 		accessToken, helixHeaders(clientID), &out)
 	if err != nil {
@@ -352,7 +352,7 @@ func (t *Twitch) Stats(ctx context.Context, clientID, accessToken string) (*Live
 	// duplicate or missing streams in the list as you page through the
 	// results", which is a hazard of the directory-wide query and irrelevant to
 	// one broadcaster: they are in the first page or they are not live.
-	err = getJSON(ctx,
+	err = t.getJSON(ctx,
 		t.apiEndpoint()+twitchStreamsPath+"?type=live&user_id="+url.QueryEscape(acct.Ref),
 		accessToken, helixHeaders(clientID), &out)
 	if err != nil {

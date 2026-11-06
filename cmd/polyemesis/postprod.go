@@ -627,7 +627,7 @@ func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *sec
 		Tokens: tokens.Source(),
 		Clips:  publish.ClipsFrom(store, exportDir),
 		Adapters: map[string]publish.Adapter{
-			publish.PlatformYouTube: &publish.YouTube{},
+			publish.PlatformYouTube: &publish.YouTube{Meter: tokens.Charge},
 			publish.PlatformTikTok:  &publish.TikTok{},
 			publish.PlatformX:       &publish.X{Enabled: gates.XPublish},
 		},

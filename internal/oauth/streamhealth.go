@@ -69,7 +69,7 @@ func (y *YouTube) StreamHealths(ctx context.Context, _, accessToken string) (map
 		if token != "" {
 			u += "&pageToken=" + url.QueryEscape(token)
 		}
-		if err := getJSON(ctx, u, accessToken, nil, &list); err != nil {
+		if err := y.getJSON(ctx, u, accessToken, nil, &list); err != nil {
 			return nil, err
 		}
 		for _, s := range list.Items {

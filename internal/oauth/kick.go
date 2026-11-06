@@ -198,7 +198,7 @@ func (k *Kick) channel(ctx context.Context, accessToken string) (*kickChannel, e
 		Data []kickChannel `json:"data"`
 	}
 	// No parameters: Kick reads the channel belonging to the token.
-	if err := getJSON(ctx, k.apiEndpoint()+kickChannelsPath, accessToken, nil, &out); err != nil {
+	if err := k.getJSON(ctx, k.apiEndpoint()+kickChannelsPath, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -291,7 +291,7 @@ func (k *Kick) SearchCategories(ctx context.Context, clientID, accessToken, quer
 	var out struct {
 		Data []KickCategory `json:"data"`
 	}
-	err := getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
+	err := k.getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +368,7 @@ func (k *Kick) UpdateChannel(ctx context.Context, accessToken string, u KickChan
 	if u.CustomTags != nil {
 		body["custom_tags"] = u.CustomTags
 	}
-	return requestJSON(ctx, http.MethodPatch, k.apiEndpoint()+"/public/v1/channels", accessToken, body, nil, nil)
+	return k.requestJSON(ctx, http.MethodPatch, k.apiEndpoint()+"/public/v1/channels", accessToken, body, nil, nil)
 }
 
 // PushBroadcastSettings writes the one field of BroadcastSettings that Kick
@@ -539,7 +539,7 @@ func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([
 	var out struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if err := getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
+	if err := k.getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	return decodeKickData(out.Data), nil

@@ -88,15 +88,6 @@ func (s *Server) YouTubeMeter() oauth.YouTubeMeter {
 	return func(cost int) { s.ytQuota().Spend(cost) }
 }
 
-// InstallYouTubeMeter is the wiring main uses: every YouTube Data API call
-// internal/oauth makes -- title push, compliance, the go-live lifecycle,
-// rollover -- is charged to this server's allowance. hosts are extra API
-// hosts to meter besides Google's, for a test that aims the providers at a
-// stub; production passes none.
-func InstallYouTubeMeter(s *Server, hosts ...string) {
-	oauth.SetYouTubeMeter(s.YouTubeMeter(), hosts...)
-}
-
 // ytLiveVideo is an account's live video, remembered so each tick is one
 // videos.list instead of a lookup and a read.
 type ytLiveVideo struct {

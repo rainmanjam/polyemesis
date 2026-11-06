@@ -58,7 +58,7 @@ func (y *YouTube) EditScheduledBroadcast(ctx context.Context, accessToken, broad
 			"id":     broadcastID,
 			"status": map[string]any{"privacyStatus": strings.ToLower(strings.TrimSpace(e.Privacy))},
 		}
-		if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+ytBroadcastsPath+"?part=status",
+		if err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+ytBroadcastsPath+"?part=status",
 			accessToken, body, nil, nil); err != nil {
 			return nil, broadcastWriteAdvice(err, b.Status.LifeCycleStatus, BroadcastSettings{})
 		}
@@ -87,7 +87,7 @@ func (y *YouTube) SetScheduledThumbnail(ctx context.Context, accessToken, broadc
 	}
 	q := url.Values{}
 	q.Set("videoId", broadcastID)
-	return requestRaw(ctx, http.MethodPost,
+	return y.requestRaw(ctx, http.MethodPost,
 		y.apiBase(ytUploadBase)+ytThumbnailsPath+"?"+q.Encode(), accessToken, mime, data)
 }
 
@@ -126,7 +126,7 @@ func (y *YouTube) CancelScheduledBroadcast(ctx context.Context, accessToken, bro
 
 // requestRaw sends a non-JSON body. It mirrors requestJSON for auth, status handling and the error
 // shape, so a refusal from thumbnails.set reads the same as every other refusal in this package.
-func requestRaw(ctx context.Context, method, endpoint, accessToken, contentType string, body []byte) error {
+func (e endpoints) requestRaw(ctx context.Context, method, endpoint, accessToken, contentType string, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func requestRaw(ctx context.Context, method, endpoint, accessToken, contentType 
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}

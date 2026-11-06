@@ -242,7 +242,7 @@ func (y *YouTube) rolloverSourceFor(ctx context.Context, accessToken, broadcastI
 	q := url.Values{}
 	q.Set("part", "id,snippet,status,contentDetails")
 	q.Set("id", broadcastID)
-	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
 		return rolloverSource{}, err
 	}
 	for _, it := range list.Items {
@@ -351,7 +351,7 @@ func (y *YouTube) createRolloverBroadcast(ctx context.Context, accessToken strin
 		}
 	}
 	var created ytBroadcast
-	err := requestJSON(ctx, http.MethodPost,
+	err := y.requestJSON(ctx, http.MethodPost,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status,contentDetails",
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -416,7 +416,7 @@ func (y *YouTube) RolloverSessionStart(ctx context.Context, accessToken, broadca
 	q := url.Values{}
 	q.Set("part", "id,snippet")
 	q.Set("id", id)
-	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
 		return time.Time{}, err
 	}
 	for _, it := range list.Items {

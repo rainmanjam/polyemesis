@@ -102,7 +102,7 @@ func TestAPlatformRefusalCarriesItsKind(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	var out any
-	err := getJSON(context.Background(), srv.URL+"/quota", "tok", nil, &out)
+	err := endpoints{}.getJSON(context.Background(), srv.URL+"/quota", "tok", nil, &out)
 	var se *StatusError
 	if !errors.As(err, &se) || !se.QuotaExceeded || se.Status != http.StatusForbidden {
 		t.Fatalf("quota refusal = %#v", err)
@@ -110,7 +110,7 @@ func TestAPlatformRefusalCarriesItsKind(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "the platform refused the request (403)") {
 		t.Fatalf("the message changed: %q", err.Error())
 	}
-	err = getJSON(context.Background(), srv.URL+"/limited", "tok", nil, &out)
+	err = endpoints{}.getJSON(context.Background(), srv.URL+"/limited", "tok", nil, &out)
 	if !errors.As(err, &se) || se.Status != http.StatusTooManyRequests || se.RetryAfter != 30*time.Second || se.QuotaExceeded {
 		t.Fatalf("rate limit = %#v", err)
 	}
@@ -127,15 +127,14 @@ func TestTheMeterChargesYouTubeDataAPICallsOnly(t *testing.T) {
 	t.Cleanup(func() { httpClient = prev })
 	var mu sync.Mutex
 	spent := 0
-	SetYouTubeMeter(func(cost int) { mu.Lock(); spent += cost; mu.Unlock() })
-	t.Cleanup(func() { SetYouTubeMeter(nil) })
+	y := NewYouTube(WithYouTubeMeter(func(cost int) { mu.Lock(); spent += cost; mu.Unlock() }))
 
 	ctx := context.Background()
 	var out any
-	_ = getJSON(ctx, "https://www.googleapis.com/youtube/v3/videos?part=snippet", "tok", nil, &out)
-	_ = postJSON(ctx, "https://www.googleapis.com/youtube/v3/liveBroadcasts/transition", "tok", map[string]any{}, nil, nil)
-	_ = getJSON(ctx, "https://api.twitch.tv/helix/streams", "tok", nil, &out)
-	_ = getJSON(WithQuotaCharged(ctx), "https://www.googleapis.com/youtube/v3/videos", "tok", nil, &out)
+	_ = y.getJSON(ctx, "https://www.googleapis.com/youtube/v3/videos?part=snippet", "tok", nil, &out)
+	_ = y.postJSON(ctx, "https://www.googleapis.com/youtube/v3/liveBroadcasts/transition", "tok", map[string]any{}, nil, nil)
+	_ = y.getJSON(ctx, "https://api.twitch.tv/helix/streams", "tok", nil, &out)
+	_ = y.getJSON(WithQuotaCharged(ctx), "https://www.googleapis.com/youtube/v3/videos", "tok", nil, &out)
 	mu.Lock()
 	defer mu.Unlock()
 	if spent != 51 {

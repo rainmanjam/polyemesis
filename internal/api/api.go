@@ -885,7 +885,12 @@ func New(o Options) *Server {
 	// One provider set for the server's life, carrying X's Livestream gate from
 	// the startup environment. A test that wants other hosts hands its own.
 	if !o.Providers.Configured() {
-		o.Providers = oauth.NewSet(oauth.WithXLivestream(o.Env.XLivestream))
+		// Built metered: every YouTube Data API call these providers make is
+		// charged to the server's one allowance, from the first call. s is
+		// assigned below, before the set can be used.
+		o.Providers = oauth.NewSet(
+			oauth.WithXLivestream(o.Env.XLivestream),
+			oauth.WithYouTubeMeter(func(cost int) { s.ytQuota().Spend(cost) }))
 	}
 	// Config.Validate has already refused a malformed trustedProxies, so an
 	// error here means a caller skipped it; loopback-only is the safe reading.
