@@ -155,13 +155,14 @@ its first tagged release.
   It now applies the rule the Stream Deck plugin and the OBS script already had: `https://` to
   any host, `http://` only to this machine, anything else refused with a warning in the
   Streamer.bot log and no request made. A pack pointed at a plain-`http://` remote host stops
-  working until its URL is changed to `https://`. 
+  working until its URL is changed to `https://`.
 - **The Streamer.bot Status action counts running destinations.** It read `enabled` off each item of
   `GET /destinations`, whose items nest the destination, so `%polyemesisLive%` was always 0 and the
   summary read "0 of N destinations running"; and `enabled` is configuration, not state. It now reads
-  `GET /status` and counts destinations whose process is `running`, the field the console and the
-  Stream Deck use. That list is install-wide, so with `polyemesisSource` set the action filters it
-  by each destination's programme itself; the manifest lists the path the code calls.
+  `GET /status?source=<polyemesisSource>` (which a multi-programme install requires) and counts
+  destinations whose process is `running`, the field the console and the Stream Deck use. The server
+  lists every programme's destinations whatever `?source=` says, so the action also filters them by
+  each destination's programme itself; the manifest lists the path the code calls.
 
 - **Poll announcements reach X.** The poll's start and end texts were sent unchanged to every chat, and
   X, which stops a chat message at 140 characters, refused any of 141 to 200. X's chat now gets a

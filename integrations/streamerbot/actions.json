@@ -77,10 +77,10 @@
       "name": "polyemesis: Status to chat",
       "method": "Execute C# Method: Status",
       "request": "GET",
-      "path": "/api/v1/status",
+      "path": "/api/v1/status?source={source}",
       "body": null,
       "scope": "read",
-      "description": "Reads the install status (destinations are install-wide; the polyemesisSource programme is filtered client-side by sourceId) and sets %polyemesisLive% (how many are running) and %polyemesisSummary% for a following Send Message sub-action."
+      "description": "Reads the install status (the server lists every programme's destinations, so the polyemesisSource programme is also filtered client-side by sourceId) and sets %polyemesisLive% (how many are running) and %polyemesisSummary% for a following Send Message sub-action."
     }
   ]
 }

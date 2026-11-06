@@ -717,11 +717,14 @@ need a distro upgrade. [BtbN's builds](https://github.com/BtbN/FFmpeg-Builds/rel
 include libsrt:
 
 ```bash
-# TAG, ASSET and SHA256 are the pinned values in .github/ffmpeg-pin.env
-# (FFMPEG_BTBN_TAG and the FFMPEG_9_0_LINUX_AMD64_* pair; use ..._ARM64_* on arm64).
+# The pinned tag, asset names and hashes live in one file of plain KEY=value
+# lines; load it. For arm64 use FFMPEG_9_0_LINUX_ARM64_* in place of ..._AMD64_*.
+curl -fsSL -o ffmpeg-pin.env \
+  https://raw.githubusercontent.com/rainmanjam/polyemesis/main/.github/ffmpeg-pin.env
+. ./ffmpeg-pin.env
 curl -fsSL -o ffmpeg.tar.xz \
-  "https://github.com/BtbN/FFmpeg-Builds/releases/download/$TAG/$ASSET"
-echo "$SHA256  ffmpeg.tar.xz" | sha256sum -c -
+  "https://github.com/BtbN/FFmpeg-Builds/releases/download/$FFMPEG_BTBN_TAG/$FFMPEG_9_0_LINUX_AMD64_ASSET"
+echo "$FFMPEG_9_0_LINUX_AMD64_SHA256  ffmpeg.tar.xz" | sha256sum -c -
 tar xf ffmpeg.tar.xz
 sudo install -m755 ffmpeg-*/bin/ffmpeg ffmpeg-*/bin/ffprobe /usr/local/bin/
 

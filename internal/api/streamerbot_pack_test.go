@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"regexp"
@@ -449,12 +450,58 @@ func TestStreamerbotStatusCountsRunningProcessesPerProgramme(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := csMethods(string(raw))["Status"]
-	for _, key := range []string{`"destinations"`, `"sourceId"`, `"process.state"`, `"running"`} {
-		if !strings.Contains(status, key) {
-			t.Errorf("Status() does not read %s, which the server's status body carries", key)
+	// The counting itself, in order and in exact form: skip a destination of
+	// another programme, count it, then count it as running. Flipping the
+	// filter's != to ==, counting before the filter, or reading another field
+	// changes one of these lines.
+	norm := regexp.MustCompile(`\s+`).ReplaceAllString(status, " ")
+	for _, want := range []string{
+		`Request("GET", "/api/v1/status" + SourceQuery(), null, out body)`,
+		`JArray dests = JObject.Parse(body)["destinations"] as JArray;`,
+		`foreach (JToken d in dests) { ` +
+			`if (only != null && d.Value<long?>("sourceId") != only) continue; ` +
+			`total++; ` +
+			`if ((string)d.SelectToken("process.state") == "running") live++; }`,
+	} {
+		if !strings.Contains(norm, want) {
+			t.Errorf("Status() no longer contains %q", want)
 		}
 	}
 	if strings.Contains(status, `"enabled"`) {
 		t.Error("Status() counts `enabled`, which is configuration, not whether the destination is running")
+	}
+}
+
+// On an install with several programmes GET /status without ?source= is a 400
+// (scopedEngine), which is where the per-programme filter has to work: the call
+// Status() makes names the programme, answers 200, and lists every programme's
+// destinations, so the sourceId filter is what scopes the count.
+func TestStreamerbotStatusOnAnInstallWithTwoProgrammes(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	first := onlySourceID(t, h, sign)
+	second := addSource(t, h, sign, "Vertical").ID
+	for _, src := range []int64{first, second, second} {
+		send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+			"sourceId": src, "name": "d", "kind": "rtmp", "url": "rtmp://example.invalid/live", "streamKey": "k",
+		}, http.StatusCreated)
+	}
+	tok := createScopedToken(t, h, sign, "streamer.bot status", db.ScopeRead)
+	get := func(path string) *httptest.ResponseRecorder {
+		return do(t, h, withBearer(jsonRequest(t, "GET", path, nil), tok))
+	}
+	if w := get("/api/v1/status"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "source_required") {
+		t.Fatalf("GET /status with no ?source= on two programmes answered %d %s, want 400 source_required", w.Code, w.Body.String())
+	}
+	for src, want := range map[int64]int{first: 1, second: 2} {
+		w := get("/api/v1/status?source=" + strconv.FormatInt(src, 10))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /status?source=%d answered %d %s", src, w.Code, w.Body.String())
+		}
+		if _, all := statusLive(t, w.Body.Bytes(), nil); all != 3 {
+			t.Errorf("the status lists %d destinations, want every programme's 3: the client-side filter is what scopes the count", all)
+		}
+		if _, total := statusLive(t, w.Body.Bytes(), &src); total != want {
+			t.Errorf("programme %d: %d destinations after the sourceId filter, want %d", src, total, want)
+		}
 	}
 }

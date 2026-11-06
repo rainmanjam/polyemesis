@@ -78,12 +78,14 @@ public class CPHInline
     // Status sets %polyemesisLive% and %polyemesisSummary% for a following
     // Send Message sub-action. It reads GET /status, whose destinations carry
     // the supervised process's state ("running" is what the console and the
-    // Stream Deck count). The list is install-wide whatever ?source= says, so
-    // the programme is filtered here, by each destination's sourceId.
+    // Stream Deck count). The server answers 400 source_required on a
+    // multi-programme install without ?source=, and returns every programme's
+    // destinations whatever ?source= says, so the programme is also filtered
+    // here, by each destination's sourceId.
     public bool Status()
     {
         string body;
-        if (!Request("GET", "/api/v1/status", null, out body)) return false;
+        if (!Request("GET", "/api/v1/status" + SourceQuery(), null, out body)) return false;
         long? only = SourceId();
         int live = 0, total = 0;
         JArray dests = JObject.Parse(body)["destinations"] as JArray;
