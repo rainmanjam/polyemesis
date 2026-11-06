@@ -1,15 +1,42 @@
 package platform
 
 const (
-	obsSource    = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
-	kickSource   = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13"
-	youtubeAPI   = "https://www.googleapis.com"
-	twitchAPI    = "https://api.twitch.tv"
-	kickAPI      = "https://api.kick.com"
-	xAPI         = "https://api.x.com"
-	graphAPI     = "https://graph.facebook.com"
-	tikTokAPI    = "https://open.tiktokapis.com"
-	graphVersion = "v24.0"
+	obsSource  = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
+	kickSource = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13"
+)
+
+// API roots. Constants, because callers declare their own constants from them
+// and a mutable global is the wrong shape for a host that tests must not
+// redirect (they point an instance at a stub instead).
+const (
+	YouTubeAPIHost = "https://www.googleapis.com"
+	YouTubeAPIRoot = YouTubeAPIHost + "/youtube/v3"
+	TwitchAPIRoot  = "https://api.twitch.tv/helix"
+	KickAPIHost    = "https://api.kick.com"
+	XAPIHost       = "https://api.x.com"
+	TikTokAPIHost  = "https://open.tiktokapis.com"
+
+	// GraphVersion is the pinned Graph API version. A bump here is the whole
+	// change: oauth and chat both build from it. v24.0 is the first version that
+	// removed overlay_url, which polyemesis deliberately never sends.
+	GraphVersion   = "v24.0"
+	GraphAPIHost   = "https://graph.facebook.com"
+	GraphAPIRoot   = GraphAPIHost + "/" + GraphVersion
+	GraphDialogURL = "https://www.facebook.com/" + GraphVersion + "/dialog/oauth"
+)
+
+// Text limits, as constants for the callers that declare their own constants
+// from them. Counted in each consumer's unit; see Text.
+const (
+	YouTubeTitleMax       = 100
+	YouTubeDescriptionMax = 5000
+	TwitchTitleMax        = 140
+	TikTokCaptionMax      = 2200
+	XGoLiveTitleMax       = 280
+
+	// TikTokPublishScope is what Direct Post needs, and is also asked for at
+	// sign-in.
+	TikTokPublishScope = "video.publish"
 )
 
 // buildRows is the table. Order is registry order: the platforms polyemesis
@@ -36,14 +63,14 @@ func buildRows() []Row {
 			Moderation: &Moderation{Delete: true, TimeoutBan: true, Order: 1},
 			Chat:       Chat{SendMax: 200, SendUnit: Runes, Order: 3},
 			Text: Text{
-				TitleMax: 100, DescriptionMax: 5000, StreamTitleMax: 128,
+				TitleMax: YouTubeTitleMax, DescriptionMax: YouTubeDescriptionMax, StreamTitleMax: 128,
 				MetadataUnit: Runes, PublishUnit: UTF16,
 			},
 			Limits: []Limit{{
 				Kind: LimitArchiveDuration, Hours: 12, Status: LimitDocumented,
 				Source: "https://support.google.com/youtube/answer/6247592?hl=en",
 			}},
-			APIHost: youtubeAPI, APIPath: "/youtube/v3", APIVersion: "v3",
+			APIHost: YouTubeAPIHost, APIPath: "/youtube/v3", APIVersion: "v3",
 		},
 		{
 			Key: Twitch, Enum: Twitch, Name: "Twitch", ShortName: "Twitch",
@@ -60,12 +87,12 @@ func buildRows() []Row {
 			Music:          &Music{Exclude: true, Reason: "Twitch DMCA policy", TargetLUFS: LUFSStreaming},
 			Moderation:     &Moderation{Delete: true, TimeoutBan: true, Order: 2},
 			Chat:           Chat{SendMax: 500, SendUnit: Runes, Order: 2},
-			Text:           Text{TitleMax: 140, MetadataUnit: Runes},
+			Text:           Text{TitleMax: TwitchTitleMax, MetadataUnit: Runes},
 			Limits: []Limit{{
 				Kind: LimitBroadcastDuration, Hours: 48, Status: LimitReported,
 				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines?language=en_US",
 			}},
-			APIHost: twitchAPI, APIPath: "/helix", APIVersion: "helix",
+			APIHost: "https://api.twitch.tv", APIPath: "/helix", APIVersion: "helix",
 		},
 		{
 			Key: Kick, Enum: Kick, Name: "Kick", ShortName: "Kick",
@@ -82,7 +109,7 @@ func buildRows() []Row {
 			Moderation:         &Moderation{Delete: true, TimeoutBan: true, Order: 3},
 			Chat:               Chat{SendMax: 500, SendUnit: Runes, Order: 1},
 			Limits:             []Limit{{Kind: LimitBroadcastDuration, Status: LimitUnverified}},
-			APIHost:            kickAPI,
+			APIHost:            KickAPIHost,
 		},
 		{
 			Key: Facebook, Enum: Facebook, Name: "Facebook Live", ShortName: "Facebook",
@@ -101,7 +128,7 @@ func buildRows() []Row {
 				Kind: LimitBroadcastDuration, Hours: 8, Status: LimitDocumented,
 				Source: "https://developers.facebook.com/docs/live-video-api/reference",
 			}},
-			APIHost: graphAPI, APIPath: "/" + graphVersion, APIVersion: graphVersion,
+			APIHost: GraphAPIHost, APIPath: "/" + GraphVersion, APIVersion: GraphVersion,
 		},
 		{
 			Key: X, Enum: X, Name: "X (Twitter) Live", ShortName: "X",
@@ -110,10 +137,11 @@ func buildRows() []Row {
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 3,
 				Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
 			},
-			Moderation: &Moderation{Delete: true, TimeoutBan: true, Order: 5},
-			Chat:       Chat{SendMax: 140, SendUnit: Runes, Order: 4},
-			Text:       Text{GoLiveTitleMax: 280},
-			APIHost:    xAPI,
+			Moderation:    &Moderation{Delete: true, TimeoutBan: true, Order: 5},
+			Chat:          Chat{SendMax: 140, SendUnit: Runes, Order: 4},
+			Text:          Text{GoLiveTitleMax: XGoLiveTitleMax},
+			PublishScopes: []string{"tweet.write", "media.write"},
+			APIHost:       XAPIHost,
 		},
 		{
 			// Rumble's enum exists for chat only; the preset saves as custom.
@@ -135,9 +163,10 @@ func buildRows() []Row {
 		{
 			// TikTok exists to publish clips; destinations on it are refused.
 			Key: TikTok, Enum: TikTok, Name: "TikTok LIVE", ShortName: "TikTok",
-			Presets: []string{"tiktok"},
-			Text:    Text{CaptionMax: 2200},
-			APIHost: tikTokAPI,
+			Presets:       []string{"tiktok"},
+			Text:          Text{CaptionMax: TikTokCaptionMax},
+			PublishScopes: []string{TikTokPublishScope},
+			APIHost:       TikTokAPIHost,
 		},
 
 		// Presets that save as custom. No Enum: see Row.

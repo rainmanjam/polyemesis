@@ -169,6 +169,11 @@ type Row struct {
 	// HealthAPI reports that the platform exposes a stream-health endpoint.
 	HealthAPI bool
 
+	// PublishScopes are the OAuth scopes clip publishing needs on top of
+	// sign-in. For X they are NOT the ones the sign-in asks for, which is why X
+	// publishing cannot be enabled by reconnecting.
+	PublishScopes []string
+
 	Music      *Music
 	Moderation *Moderation
 	Chat       Chat

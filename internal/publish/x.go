@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // X publishes a clip as a post with a video, through X's v2 chunked media upload
@@ -36,12 +38,12 @@ type X struct {
 	PollEvery time.Duration
 }
 
-const xBase = "https://api.x.com"
+const xBase = platform.XAPIHost
 
 // XScopes are what posting a video needs beyond sign-in. The existing grant
 // asks for neither, so enabling this later needs an X scope bump and a
 // reconnect; Ready reports that rather than letting X's 403 say it.
-var XScopes = []string{"tweet.write", "media.write"}
+var XScopes = platform.Must(platform.X).PublishScopes
 
 func (x *X) base() string {
 	if x.Base != "" {

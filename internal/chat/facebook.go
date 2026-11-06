@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 const (
@@ -82,7 +83,7 @@ func NewFacebook(cfg FacebookConfig) (*FacebookAdapter, error) {
 		return nil, fmt.Errorf("facebook chat is not configured: no access token, so connect the Facebook account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://graph.facebook.com/v24.0"
+		cfg.APIBase = platform.GraphAPIRoot
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

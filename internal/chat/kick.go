@@ -110,7 +110,7 @@ func NewKick(cfg KickConfig) (*KickAdapter, error) {
 		return nil, fmt.Errorf("kick chat is not configured: no access token, so connect the Kick account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://api.kick.com"
+		cfg.APIBase = platform.KickAPIHost
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

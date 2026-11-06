@@ -39,10 +39,11 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // xAPIBase is the production host for tokens and data.
-const xAPIBase = "https://api.x.com"
+const xAPIBase = platform.XAPIHost
 
 // xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
 // token and data host so a change to one does not move the other.
@@ -54,7 +55,7 @@ const xAPIBase = "https://api.x.com"
 // spec's host does not show the consent page, set these two to the guide's
 // "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
 const (
-	xAuthorizeBase = "https://api.x.com"
+	xAuthorizeBase = platform.XAPIHost
 	xAuthorizePath = "/2/oauth2/authorize"
 )
 

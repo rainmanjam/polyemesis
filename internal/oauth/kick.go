@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // ErrNoStreamKeyAPI marks the ingest lookup as impossible rather than failed.
@@ -75,7 +76,7 @@ func (k *Kick) apiEndpoint() string { return k.apiBase(kickAPIBase) }
 // the package.
 const (
 	kickIDBase  = "https://id.kick.com"
-	kickAPIBase = "https://api.kick.com"
+	kickAPIBase = platform.KickAPIHost
 )
 
 func (k *Kick) Platform() db.Platform { return db.PlatformKick }

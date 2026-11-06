@@ -44,7 +44,7 @@ import (
 // 140 in the served spec.
 var XMaxMessage = platform.Must(platform.X).Chat.SendMax
 
-const xAPIBaseDefault = "https://api.x.com"
+const xAPIBaseDefault = platform.XAPIHost
 
 // xNumericID is the shape X uses for message and user ids: digits only, 1 to 19
 // characters (the spec's ^[0-9]{1,19}$).

@@ -141,3 +141,26 @@ func TestMustPanicsOnAMissingRow(t *testing.T) {
 	}()
 	Must("nope")
 }
+
+func TestTextLimitsMatchTheirConstants(t *testing.T) {
+	y := Must(YouTube).Text
+	if y.TitleMax != YouTubeTitleMax || y.DescriptionMax != YouTubeDescriptionMax {
+		t.Errorf("youtube text = %+v", y)
+	}
+	if y.MetadataUnit != Runes || y.PublishUnit != UTF16 {
+		t.Errorf("youtube counts titles in %s at the metadata API and %s in the publisher", y.MetadataUnit, y.PublishUnit)
+	}
+	if Must(Twitch).Text.TitleMax != TwitchTitleMax || Must(X).Text.GoLiveTitleMax != XGoLiveTitleMax ||
+		Must(TikTok).Text.CaptionMax != TikTokCaptionMax {
+		t.Error("a Text limit no longer matches its constant")
+	}
+}
+
+func TestPublishScopes(t *testing.T) {
+	if got := Must(TikTok).PublishScopes; len(got) != 1 || got[0] != TikTokPublishScope {
+		t.Errorf("tiktok publish scopes = %v", got)
+	}
+	if got := Must(X).PublishScopes; len(got) != 2 {
+		t.Errorf("x publish scopes = %v", got)
+	}
+}

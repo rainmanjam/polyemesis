@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube publishes a clip as a YouTube Short with the Data API's resumable
@@ -48,10 +49,10 @@ var AcceptedYouTubeScopes = []string{
 }
 
 const (
-	youTubeBase = "https://www.googleapis.com"
+	youTubeBase = platform.YouTubeAPIHost
 	// youTubeUploadCost is videos.insert in quota units, from the same daily
 	// allowance live chat polling spends.
-	youTubeUploadCost = 1600
+	youTubeUploadCost = platform.YouTubeCostUploadVideo
 )
 
 func (y *YouTube) base() string {

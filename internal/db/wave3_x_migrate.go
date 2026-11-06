@@ -29,7 +29,7 @@ func (d *DB) MigrateWave3XTitle() error {
 // "subject to X post length limits" without a number, so the 280-character
 // post limit is used. PROVISIONAL until a live PUBLISH on a whitelisted app
 // confirms or corrects it.
-var XGoLiveTitleMax = platform.Must(platform.X).Text.GoLiveTitleMax
+const XGoLiveTitleMax = platform.XGoLiveTitleMax
 
 // MigrateWave3XTweet adds destinations.x_go_live_tweet, when an X destination
 // wants X's announcement post as its broadcast is published (see

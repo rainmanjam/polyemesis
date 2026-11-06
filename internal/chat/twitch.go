@@ -353,7 +353,7 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 }
 
 // TwitchHelixBase is Twitch's REST API. Overridden in tests.
-const TwitchHelixBase = "https://api.twitch.tv/helix"
+const TwitchHelixBase = platform.TwitchAPIRoot
 
 // twitchClientIDHeader is required on every Helix request alongside the bearer
 // token. A request carrying a valid token and no Client-Id is rejected.

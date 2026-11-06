@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // The YouTube quota meter (PR #950 review, item 2).
@@ -61,10 +63,10 @@ func WithQuotaCharged(ctx context.Context) context.Context {
 // every write this package makes -- insert, update, delete, bind,
 // transition, thumbnails.set, playlistItems.insert -- is 50.
 const (
-	ytCostList  = 1
-	ytCostWrite = 50
+	ytCostList  = platform.YouTubeCostList
+	ytCostWrite = platform.YouTubeCostWrite
 	// ytCostUploadVideo is videos.insert.
-	ytCostUploadVideo = 1600
+	ytCostUploadVideo = platform.YouTubeCostUploadVideo
 )
 
 // youTubeCost is the unit cost of a request, and whether it is a YouTube

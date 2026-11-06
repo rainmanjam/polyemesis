@@ -102,7 +102,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 		return nil, fmt.Errorf("youtube chat is not configured: no access token, so connect the YouTube account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://www.googleapis.com/youtube/v3"
+		cfg.APIBase = platform.YouTubeAPIRoot
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

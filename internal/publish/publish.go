@@ -27,6 +27,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // JobKind is what a publish is registered as on the queue.
@@ -78,10 +79,10 @@ type Meta struct {
 
 // Limits, in the platform's own units.
 const (
-	maxYouTubeTitle       = 100
-	maxYouTubeDescription = 5000
+	maxYouTubeTitle       = platform.YouTubeTitleMax
+	maxYouTubeDescription = platform.YouTubeDescriptionMax
 	maxYouTubeTagsChars   = 450 // YouTube allows 500; leave room for the quoting it adds
-	maxTikTokCaption      = 2200
+	maxTikTokCaption      = platform.TikTokCaptionMax
 	maxXPost              = 280
 	maxTags               = 30
 )
