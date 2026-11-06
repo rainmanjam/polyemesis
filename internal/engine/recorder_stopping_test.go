@@ -1,6 +1,9 @@
+//go:build !windows
+
 package engine
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -26,6 +29,11 @@ func wedgedRecorder(t *testing.T) *supervisor.Process {
 	proc := supervisor.New(slog.New(slog.NewTextHandler(io.Discard, nil)),
 		supervisor.Spec{Name: "recorder", Kind: "recorder", Bin: bin})
 	proc.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_ = proc.Stop(ctx)
+	})
 	waitUntil(t, func() bool { _, err := os.Stat(armed); return err == nil },
 		"the stand-in recorder to be running with SIGTERM ignored")
 	return proc
@@ -86,10 +94,14 @@ func TestRecorderRunningCoversARecorderStillStoppingDuringEngineStop(t *testing.
 // A DELETED SOURCE'S ENGINE LEAVES THE MAP BEFORE IT STOPS. Sync removes a
 // retiring engine from m.engines and only then calls Stop, so a probe that
 // read only the map answered "no recorder" while that programme's recorder
-// was still finalising a tagged rec-s<id>- segment.
+// was still finalising a tagged rec-s<id>- segment. And Engine.Stop does not
+// wait for a recorder stop a concurrent reconcile began, so the entry has to
+// outlive Stop until the engine itself reports no recorder.
 //
-// Mutation: drop the m.stopping loop in Manager.RecorderRunning. Observed to
+// Mutation: drop the stopping loop in Manager.RecorderRunning. Observed to
 // fail with "false while an engine that is still stopping has a recorder".
+// Mutation: forget the entry in doneStopping. Observed to fail with "false
+// while a recorder stop begun by a reconcile is still running".
 func TestManagerRecorderRunningCountsEnginesStillStopping(t *testing.T) {
 	e := lifeEngine(t)
 	e.recorder = loudTestProc()
@@ -103,8 +115,51 @@ func TestManagerRecorderRunningCountsEnginesStillStopping(t *testing.T) {
 	if !m.RecorderRunning() {
 		t.Fatal("RecorderRunning() = false while an engine that is still stopping has a recorder")
 	}
+
+	// Its Stop returned, but a recorder stop begun elsewhere is still running.
+	e.mu.Lock()
+	e.recorder, e.recorderStopping = nil, 1
+	e.mu.Unlock()
 	m.doneStopping(e)
+	if !m.RecorderRunning() {
+		t.Fatal("RecorderRunning() = false while a recorder stop begun by a reconcile is still running")
+	}
+
+	e.recorderStopped()
 	if m.RecorderRunning() {
-		t.Error("RecorderRunning() = true after the stopping engine was forgotten")
+		t.Error("RecorderRunning() = true after the last recorder stop returned")
+	}
+	m.mu.RLock()
+	left := len(m.stopping)
+	m.mu.RUnlock()
+	if left != 0 {
+		t.Errorf("%d stopped engines still tracked after they reported no recorder", left)
+	}
+}
+
+// An engine that fails to start may already have started its recorder, and it
+// is in no map: it is stopped through the same tracked path, so the entry is
+// marked done and dropped once it reports no recorder.
+func TestStopEngineMarksTheStopDone(t *testing.T) {
+	e, _ := storeEngine(t)
+	m := &Manager{engines: map[int64]*Engine{}}
+	m.mu.Lock()
+	m.markStopping(e)
+	m.mu.Unlock()
+	m.stopEngine(e)
+	m.mu.RLock()
+	done := m.stopping[e]
+	m.mu.RUnlock()
+	if !done {
+		t.Fatal("stopEngine returned without recording that the engine's Stop returned")
+	}
+	if m.RecorderRunning() {
+		t.Fatal("RecorderRunning() = true for a stopped engine with no recorder")
+	}
+	m.mu.RLock()
+	_, kept := m.stopping[e]
+	m.mu.RUnlock()
+	if kept {
+		t.Error("a stopped engine with no recorder was not forgotten")
 	}
 }

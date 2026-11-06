@@ -154,10 +154,13 @@ type Manager struct {
 	// counts in the install's totals. See RetiredAlertStats. Under mu.
 	retiredAlerts alerts.Stats
 	retiring      map[*alerts.Notifier]struct{}
-	// stopping holds engines taken out of engines whose Stop has not returned,
-	// so RecorderRunning still sees a recorder that is finalising its last
-	// segment. Under mu.
-	stopping map[*Engine]struct{}
+	// stopping holds engines taken out of engines (or never put in, for a
+	// failed start) that are being stopped, so RecorderRunning still sees a
+	// recorder finalising its last segment. The value is whether the engine's
+	// Stop has returned; even then an entry stays until the engine itself
+	// reports no recorder, because a stop a concurrent reconcile began is not
+	// one Engine.Stop waits for. Under mu.
+	stopping map[*Engine]bool
 	ctx      context.Context
 	started  bool
 	// stopped is set by StopWithin and cleared by Start, under mu. It is not
@@ -569,8 +572,7 @@ func (m *Manager) Sync() error {
 	m.mu.Unlock()
 
 	for _, eng := range stopping {
-		eng.Stop()
-		m.doneStopping(eng)
+		m.stopEngine(eng)
 		m.retireAlerts(eng.Alerts())
 	}
 	if !started {
@@ -598,7 +600,12 @@ func (m *Manager) Sync() error {
 		eng.drains = m.drains
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
-			eng.Stop()
+			// Start may already have started a recorder, and this engine is in
+			// no map, so it is tracked as stopping like a retired one.
+			m.mu.Lock()
+			m.markStopping(eng)
+			m.mu.Unlock()
+			m.stopEngine(eng)
 			continue
 		}
 		// Registering and re-pushing are ONE step, because a save that ran
@@ -1657,8 +1664,9 @@ func (m *Manager) IngestLive() bool {
 func (m *Manager) RecorderRunning() bool {
 	engines := m.Engines()
 	m.mu.RLock()
-	for eng := range m.stopping {
-		engines = append(engines, eng)
+	stopping := make(map[*Engine]bool, len(m.stopping))
+	for eng, done := range m.stopping {
+		stopping[eng] = done
 	}
 	m.mu.RUnlock()
 	for _, eng := range engines {
@@ -1666,22 +1674,48 @@ func (m *Manager) RecorderRunning() bool {
 			return true
 		}
 	}
-	return false
+	running := false
+	for eng, done := range stopping {
+		if eng.RecorderRunning() {
+			running = true
+		} else if done {
+			m.forgetStopped(eng)
+		}
+	}
+	return running
 }
 
-// markStopping records eng as taken out of the map but not yet stopped.
-// Called under mu, in the same critical section that removes it.
+// markStopping records eng as being stopped outside the map. Called under mu.
 func (m *Manager) markStopping(eng *Engine) {
 	if m.stopping == nil {
-		m.stopping = map[*Engine]struct{}{}
+		m.stopping = map[*Engine]bool{}
 	}
-	m.stopping[eng] = struct{}{}
+	m.stopping[eng] = false
 }
 
-// doneStopping forgets eng once its Stop has returned.
+// stopEngine stops eng and records that its Stop has returned, even through
+// a panic. The entry itself is dropped by RecorderRunning once eng reports no
+// recorder, not here: see the stopping field.
+func (m *Manager) stopEngine(eng *Engine) {
+	defer m.doneStopping(eng)
+	eng.Stop()
+}
+
+// doneStopping records that eng's Stop has returned.
 func (m *Manager) doneStopping(eng *Engine) {
 	m.mu.Lock()
-	delete(m.stopping, eng)
+	if _, ok := m.stopping[eng]; ok {
+		m.stopping[eng] = true
+	}
+	m.mu.Unlock()
+}
+
+// forgetStopped drops eng once it has stopped and no recorder of its is left.
+func (m *Manager) forgetStopped(eng *Engine) {
+	m.mu.Lock()
+	if m.stopping[eng] {
+		delete(m.stopping, eng)
+	}
 	m.mu.Unlock()
 }
 

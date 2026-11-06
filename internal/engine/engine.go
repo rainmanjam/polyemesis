@@ -3779,12 +3779,14 @@ func (e *Engine) stopAux(a auxSlot) {
 	e.mu.Unlock()
 
 	if proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		_ = proc.Stop(ctx)
-		cancel()
-	}
-	if recorder {
-		e.recorderStopped()
+		func() {
+			if recorder {
+				defer e.recorderStopped()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+			defer cancel()
+			_ = proc.Stop(ctx)
+		}()
 	}
 	hub.Unsubscribe(a.name)
 	if port != 0 {
