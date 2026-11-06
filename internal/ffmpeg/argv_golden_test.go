@@ -28,6 +28,8 @@ func ffmpegChildren() map[string][]string {
 		"ingest_rtmp": IngestArgs(IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-abc", RelayURL: "udp://127.0.0.1:20000"}),
 		"ingest_srt":  IngestArgs(IngestSpec{Kind: IngestSRT, SRTPort: 6000, SRTLatencyMS: 200, RelayURL: "udp://127.0.0.1:20000"}),
 		"ingest_pull": IngestArgs(IngestSpec{Kind: IngestPull, PullURL: "rtsp://cam.local/stream1", RelayURL: "udp://127.0.0.1:20000"}),
+		// The diagnostic second output (POLYEMESIS_INGEST_CAPTURE, startupenv).
+		"ingest_capture": IngestArgs(IngestSpec{Kind: IngestSRT, SRTPort: 6000, SRTLatencyMS: 200, RelayURL: "udp://127.0.0.1:20000", CaptureTo: "/tmp/capture.ts"}),
 
 		"destination_rtmp":       DestinationArgs(dest),
 		"destination_copy_audio": DestinationArgs(destAudioCopy),

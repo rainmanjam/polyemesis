@@ -31,6 +31,24 @@ its first tagged release.
   `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, which also drops the muxer's default 1.4 s
   of start delay from the timestamps they publish.
 
+- **Stopping the preview, a rendition, a playout variant, the meters or a failover feed on a quiet feed no
+  longer waits out the grace to be killed.** Only the recorder and the destinations were woken when
+  stopped after their publisher left; every other relay reader blocked in its read, ignored the
+  stop signal and was killed at the end of the 8 s grace. They are all built one way now, and a
+  stopped preview returns in under a second instead of eight.
+- **A redundant (backup) output now re-probes like its primary.** It lacked the publishing signal and
+  the re-probe handler, so a backup that started before the stream's audio existed sat at running and
+  published nothing for ever, where the primary restarts to probe again. It restarts on the demuxer's
+  own complaint, and again when the ingest layout is first measured if it has never published.
+- **The expert-mode command preview of a stopped destination shows the command that would run.** It
+  omitted the muxer and socket tuning (`-flvflags`, `-rw_timeout`, the mux queue sizes), so a
+  destination using them was previewed without them. A running destination's preview is built by the
+  engine from the pieces it was started with instead of by peeling the saved arguments off its live
+  command line.
+- **Burning a recorded caption file in no longer loses whitespace at the edge of its path.** FFmpeg trims
+  unescaped leading and trailing spaces, so a path ending in one named a different file; the burn-in
+  now uses the same filter escaper as every other filter argument, which also converts Windows
+  separators.
 - **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
   said 0 and the card said Starting, because a running process that had carried no media counted as
   live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and
