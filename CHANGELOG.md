@@ -8,7 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Security: the session cookie's `Secure` flag and the client address now trust forwarded headers by
+  the same rule.** With `trustProxyHeaders` on, `X-Forwarded-For` was believed only from loopback and
+  the addresses in `trustedProxies`, but `X-Forwarded-Proto` was believed from any peer, so a client
+  reaching the listener directly could choose its own cookie flags. Both headers are now believed
+  only from those listed proxies.
+- **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
+  login throttle already does. Keyed on the full address, a client holding one /64 could rotate
+  addresses and never reach the limit.
 
 ## [0.15.0] — 2026-11-06
 
