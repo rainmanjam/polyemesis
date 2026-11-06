@@ -741,7 +741,7 @@ func TestProbeEncodersAgainstRealFFmpegIsCoherent(t *testing.T) {
 func TestDetectWithRealFFmpegIsNeverFatalAndPicksACandidate(t *testing.T) {
 	requireFFmpeg(t)
 
-	tools, err := Detect(context.Background(), "", "")
+	tools, err := Detect(context.Background(), "", "", "")
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}

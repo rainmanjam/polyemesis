@@ -1,7 +1,7 @@
 "-nostdin"
 "-hide_banner"
 "-loglevel"
-"error"
+"debug"
 "-y"
 "-progress"
 "pipe:1"

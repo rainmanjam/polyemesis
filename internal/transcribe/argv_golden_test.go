@@ -8,7 +8,7 @@ import (
 
 func TestExtractArgvIsPinned(t *testing.T) {
 	for _, lvl := range []string{"", "debug"} {
-		t.Setenv("POLYEMESIS_FFMPEG_LOGLEVEL", lvl)
+		argvgold.LogLevel(t, lvl)
 		suffix := ""
 		if lvl != "" {
 			suffix = "_loglevel_" + lvl

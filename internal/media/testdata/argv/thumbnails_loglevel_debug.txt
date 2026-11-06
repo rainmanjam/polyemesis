@@ -1,7 +1,7 @@
 "-hide_banner"
 "-nostdin"
 "-loglevel"
-"warning"
+"debug"
 "-y"
 "-nostats"
 "-progress"

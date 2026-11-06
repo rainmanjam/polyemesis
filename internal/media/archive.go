@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // ------------------------------------------------------- archive compression
@@ -357,8 +359,8 @@ func ArchiveArgs(s ArchiveSpec) []string {
 	}
 	prof, known := archiveProfiles[s.Encoder]
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
+	args = append(args, ffmpeg.ProgressArgs()...)
 	if prof.vaapi {
 		dev := s.VAAPIDevice
 		if dev == "" {

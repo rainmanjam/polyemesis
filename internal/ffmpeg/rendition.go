@@ -485,8 +485,8 @@ func RenditionArgs(s RenditionSpec) []string {
 		prof.presetFlag = "-preset"
 	}
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
 
 	if prof.vaapi {
 		dev := s.VAAPIDevice
@@ -498,11 +498,7 @@ func RenditionArgs(s RenditionSpec) []string {
 		args = append(args, "-vaapi_device", dev)
 	}
 
-	args = append(args,
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-		"-i", RelayInputURL(s.InRelayURL),
-	)
+	args = append(args, RelayConsumerInput(s.InRelayURL, RelayQueue)...)
 
 	// The overlay image is a second -i, and it goes AFTER the relay so the relay
 	// stays input 0. That is what keeps `-map 0:a -c:a copy` below correct
@@ -568,10 +564,8 @@ func RenditionArgs(s RenditionSpec) []string {
 		"-keyint_min", strconv.Itoa(gop),
 		"-sc_threshold", "0",
 		"-c:a", "copy",
-		"-f", "mpegts",
-		"-flush_packets", "1",
-		RelayOutputURL(s.OutRelayURL),
 	)
+	args = append(args, RelayProducerOutput(s.OutRelayURL)...)
 	return args
 }
 

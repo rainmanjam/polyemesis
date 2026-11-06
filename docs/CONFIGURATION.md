@@ -559,7 +559,7 @@ Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and 
 | Variable | What it does |
 |---|---|
 | `POLYEMESIS_FFMPEG_ASSUME_MAJOR` | States the major version of an FFmpeg build whose own `-version` output does not carry a readable one — a master nightly reporting `N-113518-gd6a4b1e` being the honest case. Set it to the leading number: `POLYEMESIS_FFMPEG_ASSUME_MAJOR=8` |
-| `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets. Default `warning`; takes any value FFmpeg's own `-loglevel` takes |
+| `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets, the live ones and the one-shot post-production passes (proxies, thumbnails, clips, transcription) alike. Unset, a child keeps its own default: `warning` for the live ones, `error` for the one-shot passes. Takes any value FFmpeg's own `-loglevel` takes. Read once at startup |
 
 `POLYEMESIS_FFMPEG_ASSUME_MAJOR` is the answer to a server that refuses to
 start because it cannot read a version number. polyemesis requires FFmpeg 8.0

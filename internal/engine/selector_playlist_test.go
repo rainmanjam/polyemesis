@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
@@ -585,7 +586,7 @@ func TestPlaylistFeedLoopsTheListAtWallClockSpeed(t *testing.T) {
 	// the whole concatenation, not each entry -- and -re paces it at wall-clock
 	// speed. Without -re FFmpeg reads at disk speed and buries the relay in an
 	// hour of stream in seconds -- the same reason pullFile carries both flags.
-	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
+	args := ffmpeg.PlaylistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{"-stream_loop -1", "-re", "/data/playlist-1-abc.txt"} {
 		if !strings.Contains(joined, want) {
@@ -602,7 +603,7 @@ func TestPlaylistFeedLoopsTheListAtWallClockSpeed(t *testing.T) {
 // it is read as the OUTPUT format, so the list would be probed as though it were
 // media rather than demuxed as a playlist.
 func TestThePlaylistInputFlagsPrecedeTheInput(t *testing.T) {
-	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
+	args := ffmpeg.PlaylistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	idx := func(flag string) int {
 		for i, a := range args {
 			if a == flag {
@@ -642,7 +643,7 @@ func TestThePlaylistInputFlagsPrecedeTheInput(t *testing.T) {
 //
 // The mutation: drop either flag and this fails.
 func TestThePlaylistDemuxerIsNamedAndItsListIsTrusted(t *testing.T) {
-	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
+	args := ffmpeg.PlaylistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{"-f concat", "-safe 0", "-i file:/data/playlist-1-abc.txt"} {
 		if !strings.Contains(joined, want) {
@@ -670,10 +671,10 @@ func TestThePlaylistDemuxerIsNamedAndItsListIsTrusted(t *testing.T) {
 // holding is that every file input this package builds is spelled the same way,
 // so the guarantee does not rest on the reader re-deriving that argument.
 //
-// The mutation: drop the "file:" prefix from playlistFeedArgs and this fails.
+// The mutation: drop the "file:" prefix from ffmpeg.PlaylistFeedArgs and this fails.
 func TestThePlaylistListPathIsPinnedToTheFileProtocol(t *testing.T) {
 	// A colon in the FIRST segment, which is the only shape FFmpeg misreads.
-	args := playlistFeedArgs("2026:01/data/playlist-media/playlist-1-abc.txt",
+	args := ffmpeg.PlaylistFeedArgs("2026:01/data/playlist-media/playlist-1-abc.txt",
 		"udp://127.0.0.1:9000")
 	want := "file:2026:01/data/playlist-media/playlist-1-abc.txt"
 	found := false

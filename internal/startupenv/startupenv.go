@@ -3,19 +3,12 @@
 // server calls os.Getenv for these, so every consumer sees the same answer and
 // they all parse a boolean the same way.
 //
-// Four variables are still read where they are used, on purpose, and none of
-// them is a switch two parts of the server must agree on:
-//
-//   - POLYEMESIS_FFMPEG_LOGLEVEL, POLYEMESIS_INGEST_CAPTURE
-//     (internal/ffmpeg/build.go) and POLYEMESIS_FFMPEG_ASSUME_MAJOR
-//     (internal/ffmpeg/detect.go) belong to FFmpeg argument and detection
-//     assembly, which is being reworked as its own step; moving them now would
-//     collide with it.
-//   - POLYEMESIS_RELAY_CAPTURE (internal/relay) and POLYEMESIS_RTMP_DROP_LOG
-//     (internal/rtmpserver) are developer diagnostics read where the capture
-//     file is opened. They change no behaviour, and threading them through the
-//     relay and RTMP constructors would put a parameter on hot paths for a debug
-//     aid.
+// Two variables are still read where they are used, on purpose, and neither is
+// a switch two parts of the server must agree on: POLYEMESIS_RELAY_CAPTURE
+// (internal/relay) and POLYEMESIS_RTMP_DROP_LOG (internal/rtmpserver) are
+// developer diagnostics read where the capture file is opened. They change no
+// behaviour, and threading them through the relay and RTMP constructors would
+// put a parameter on hot paths for a debug aid.
 package startupenv
 
 import (
@@ -34,6 +27,12 @@ const (
 	RumbleChatKeyVar     = "RUMBLE_CHAT_API_KEY"
 	RumbleChatChannelVar = "RUMBLE_CHAT_CHANNEL"
 	SetupCodeVar         = "POLYEMESIS_SETUP_CODE"
+	// FFmpegLogLevelVar, IngestCaptureVar and FFmpegAssumeMajorVar belong to
+	// FFmpeg: internal/ffmpeg takes them from here and nothing there calls
+	// Getenv.
+	FFmpegLogLevelVar    = "POLYEMESIS_FFMPEG_LOGLEVEL"
+	IngestCaptureVar     = "POLYEMESIS_INGEST_CAPTURE"
+	FFmpegAssumeMajorVar = "POLYEMESIS_FFMPEG_ASSUME_MAJOR"
 )
 
 // Env is the startup environment. The zero value has every switch off and every
@@ -58,6 +57,17 @@ type Env struct {
 	// SetupCode presets the first-run setup code (see auth.PrepareSetupCode). It
 	// is passed on exactly as set: the auth package owns its rules.
 	SetupCode string
+
+	// FFmpegLogLevel is the -loglevel every FFmpeg child gets in place of its own
+	// default. Empty leaves each child's default alone.
+	FFmpegLogLevel string
+	// IngestCapture names a file the ingest child also writes the identical
+	// stream to, for examining what the relay fans out. Empty is off.
+	IngestCapture string
+	// FFmpegAssumeMajor states the major version of a build whose own version
+	// string cannot be read. It is passed on as set: internal/ffmpeg parses it
+	// and owns the floor check.
+	FFmpegAssumeMajor string
 }
 
 // FromEnv reads the process environment.
@@ -73,6 +83,9 @@ func FromLookup(get func(string) string) Env {
 		RumbleChatKey:     strings.TrimSpace(get(RumbleChatKeyVar)),
 		RumbleChatChannel: strings.TrimSpace(get(RumbleChatChannelVar)),
 		SetupCode:         get(SetupCodeVar),
+		FFmpegLogLevel:    strings.TrimSpace(get(FFmpegLogLevelVar)),
+		IngestCapture:     strings.TrimSpace(get(IngestCaptureVar)),
+		FFmpegAssumeMajor: strings.TrimSpace(get(FFmpegAssumeMajorVar)),
 	}
 }
 
@@ -88,8 +101,9 @@ func Flag(v string) bool {
 
 // String names the switches and says which secrets are set, never their values.
 func (e Env) String() string {
-	return fmt.Sprintf("startupenv{xPublish:%t xLivestream:%t facebookCaptions:%t xAppBearerSet:%t rumbleKeySet:%t rumbleChannel:%q setupCodeSet:%t}",
-		e.XPublish, e.XLivestream, e.FacebookCaptions, e.XAppBearer != "", e.RumbleChatKey != "", e.RumbleChatChannel, e.SetupCode != "")
+	return fmt.Sprintf("startupenv{xPublish:%t xLivestream:%t facebookCaptions:%t xAppBearerSet:%t rumbleKeySet:%t rumbleChannel:%q setupCodeSet:%t ffmpegLogLevel:%q ingestCapture:%q ffmpegAssumeMajor:%q}",
+		e.XPublish, e.XLivestream, e.FacebookCaptions, e.XAppBearer != "", e.RumbleChatKey != "", e.RumbleChatChannel, e.SetupCode != "",
+		e.FFmpegLogLevel, e.IngestCapture, e.FFmpegAssumeMajor)
 }
 
 // GoString keeps %#v from printing the secrets that String keeps out.

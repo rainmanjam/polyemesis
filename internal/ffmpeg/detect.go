@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
 // MinMajorVersion is the oldest FFmpeg we accept, and it is 8.0.
@@ -68,14 +69,16 @@ const floorFix = "Install FFmpeg 8.0 or newer (macOS: brew install ffmpeg; Ubunt
 // It is a claim, not an override: a value below MinMajorVersion is refused
 // rather than honoured, so it cannot be used to run a build this floor exists
 // to keep out.
-const AssumeMajorEnv = "POLYEMESIS_FFMPEG_ASSUME_MAJOR"
+//
+// The value is read once, at startup (startupenv), and handed to Detect.
+const AssumeMajorEnv = startupenv.FFmpegAssumeMajorVar
 
-// assumedMajor reads AssumeMajorEnv. It returns 0 when unset, an error when set
-// to something that is not a usable major version -- never a silent zero for a
-// value the operator did set, because a typo that reads as "unset" would put
-// them back at the refusal with no idea why their answer was ignored.
-func assumedMajor() (int, error) {
-	raw := strings.TrimSpace(os.Getenv(AssumeMajorEnv))
+// assumedMajor parses the operator's claim. It returns 0 when unset, an error
+// when set to something that is not a usable major version -- never a silent
+// zero for a value the operator did set, because a typo that reads as "unset"
+// would put them back at the refusal with no idea why their answer was ignored.
+func assumedMajor(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, nil
 	}
@@ -94,6 +97,11 @@ func assumedMajor() (int, error) {
 
 // Tools is a validated pair of binaries.
 type Tools struct {
+	// IngestCapture is startupenv.Env.IngestCapture, carried here because Tools
+	// is what every ingest builder already holds. Not a capability, so never
+	// serialised.
+	IngestCapture string `json:"-"`
+
 	FFmpeg     string `json:"ffmpeg"`
 	FFprobe    string `json:"ffprobe"`
 	Version    string `json:"version"`
@@ -159,10 +167,11 @@ var numRe = regexp.MustCompile(`^n?(\d+)\.(\d+)`)
 // Detect locates ffmpeg and ffprobe and verifies they are new enough.
 //
 // ffmpegPath/ffprobePath may be empty, in which case $PATH is searched.
-// Failure messages name the actual problem and the actual fix, because this
+// assumeMajor is the operator's claim about a version string this cannot read
+// (AssumeMajorEnv); empty means none. Failure messages name the actual problem and the actual fix, because this
 // is the first thing a new user hits and a vague error here costs them an
 // afternoon.
-func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error) {
+func Detect(ctx context.Context, ffmpegPath, ffprobePath, assumeMajor string) (*Tools, error) {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
@@ -251,7 +260,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 		// really is newer than the floor. They just have to say so themselves,
 		// which turns an unverifiable assumption made by us into a claim made
 		// by the person who installed the binary.
-		assumed, err := assumedMajor()
+		assumed, err := assumedMajor(assumeMajor)
 		if err != nil {
 			return nil, err
 		}

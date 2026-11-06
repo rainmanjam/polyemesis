@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -19,24 +18,14 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
-// commonArgs are the flags every polyemesis child gets.
-//
-//   - -hide_banner   : the build banner is noise in the log tail
-//   - -nostdin       : without it, a backgrounded ffmpeg can steal terminal
-//     input and silently pause itself
-//   - -loglevel      : warning keeps the log tail useful rather than a firehose
-func commonArgs() []string {
-	return append([]string{"-hide_banner", "-nostdin"}, logLevelArgs()...)
-}
-
-// commonArgsLive is commonArgs for a destination process, which takes runtime
-// commands on stdin (see supervisor.Spec.LiveCommands). It is identical except
-// that -nostdin is absent: with it, FFmpeg never reads its standard input, so a
-// volume command written there would be ignored. Stdin is then a live channel,
-// and FFmpeg also reads its interactive keys from it -- a stray `q` stops the
-// stream and `+`/`-` change the log level. Only the supervisor's serialised
-// command writer ever writes to that pipe, and it writes only validated
-// commands, so nothing can reach FFmpeg's key handler by accident.
+// commonArgsLive is the preamble of a destination process, which takes runtime
+// commands on stdin (see supervisor.Spec.LiveCommands). It is CommonArgs minus
+// -nostdin: with it, FFmpeg never reads its standard input, so a volume command
+// written there would be ignored. Stdin is then a live channel, and FFmpeg also
+// reads its interactive keys from it -- a stray `q` stops the stream and `+`/`-`
+// change the log level. Only the supervisor's serialised command writer ever
+// writes to that pipe, and it writes only validated commands, so nothing can
+// reach FFmpeg's key handler by accident.
 //
 // Windows is the exception: the live path is unverified there, the supervisor
 // gives the child no pipe, and the engine restarts on every level change. So
@@ -47,28 +36,9 @@ func commonArgsLive() []string {
 
 func commonArgsLiveFor(goos string) []string {
 	if goos == "windows" {
-		return commonArgs()
+		return CommonArgs(LogWarning, false)
 	}
-	return append([]string{"-hide_banner"}, logLevelArgs()...)
-}
-
-// logLevelArgs is the -loglevel pair every child gets.
-func logLevelArgs() []string {
-	lvl := "warning"
-	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
-	// reports its PID and PES parsing decisions -- which streams it saw, how
-	// many frames per PID, and why it gave up resolving codec parameters.
-	// Nothing has ever asked the demuxer for its own account of the failure.
-	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
-		lvl = v
-	}
-	return []string{"-loglevel", lvl}
-}
-
-// progressArgs routes machine-readable stats to stdout, leaving stderr as a
-// pure human log. -nostats suppresses the duplicate interactive line.
-func progressArgs() []string {
-	return []string{"-nostats", "-progress", "pipe:1"}
+	return append([]string{"-hide_banner"}, "-loglevel", LogLevel(LogWarning))
 }
 
 // --------------------------------------------------------------------- ingest
@@ -190,6 +160,10 @@ type IngestSpec struct {
 
 	// RelayURL is the loopback UDP address of the relay hub.
 	RelayURL string
+
+	// CaptureTo, when set, adds a second output carrying the identical stream
+	// to that path. It is a developer diagnostic (startupenv.IngestCapture).
+	CaptureTo string
 }
 
 // PullSource validates the configured pull URL and renders the exact string
@@ -639,8 +613,8 @@ func (s IngestSpec) PublicIngestURL(host string) string {
 // Pull mode is the same command with a different input: dialling out instead of
 // listening changes where the bytes come from, never what happens to them.
 func IngestArgs(s IngestSpec) []string {
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
 
 	switch s.Kind {
 	case IngestRTMP:
@@ -662,41 +636,17 @@ func IngestArgs(s IngestSpec) []string {
 		"-i", s.IngestURL(),
 		"-map", "0",
 		"-c", "copy",
-		"-f", "mpegts",
-		// Without flush_packets the muxer holds partial TS packets, adding
-		// unnecessary latency to a loopback hop that has none to spare.
-		//
-		// IT IS NOT ENOUGH ON ITS OWN, and believing it was cost #674 a long
-		// investigation. flush_packets flushes the AVIO buffer. It does NOT
-		// touch the INTERLEAVER, which sits in front of it:
-		// av_interleaved_write_frame holds every packet until it has one for
-		// each stream, or until the muxing queue spans max_interleave_delta.
-		// A multitrack FLV ingest whose audio tracks resolve late therefore
-		// writes NOTHING -- video included -- for up to the default 10s, while
-		// out_time climbs and total_size stays at 0. Measured exactly that way
-		// in internal/rtmpserver/ingest_remux_test.go.
-		//
-		// 100ms, NOT 0. Zero is the trap: max_interleave_delta=0 means "buffer
-		// until there is a packet for EVERY stream, however long that takes",
-		// which is the opposite of flushing early and would make the stall
-		// permanent instead of ten seconds. The default is 10000000 (10s); a
-		// small positive value is what forces output regardless. On a loopback
-		// relay 100ms of interleave buffering is already generous.
-		"-max_interleave_delta", "100000",
-		// No initial mux buffering either, for the same loopback reason.
-		"-muxdelay", "0",
-		"-muxpreload", "0",
-		"-flush_packets", "1",
-		RelayOutputURL(s.RelayURL),
 	)
+	args = append(args, RelayProducerOutput(s.RelayURL)...)
 	// AN IDENTICAL SECOND OUTPUT, TO A FILE, WHEN ASKED FOR.
 	//
-	// Off unless POLYEMESIS_INGEST_CAPTURE names a path. It carries the identical stream to a file, so the bytes the
-	// relay fans out can be examined directly instead of approximated. The hub
-	// copies datagrams verbatim (internal/relay/relay.go fanout), so this file
-	// IS what every destination receives.
-	if dir := os.Getenv("POLYEMESIS_INGEST_CAPTURE"); dir != "" {
-		args = append(args, "-map", "0", "-c", "copy", "-f", "mpegts", dir)
+	// Off unless CaptureTo (POLYEMESIS_INGEST_CAPTURE) names a path. It carries
+	// the identical stream to a file, so the bytes the relay fans out can be
+	// examined directly instead of approximated. The hub copies datagrams
+	// verbatim (internal/relay/relay.go fanout), so this file IS what every
+	// destination receives.
+	if s.CaptureTo != "" {
+		args = append(args, "-map", "0", "-c", "copy", "-f", "mpegts", s.CaptureTo)
 	}
 	return args
 }
@@ -711,6 +661,47 @@ func RelayOutputURL(base string) string {
 		return base + "&pkt_size=1316"
 	}
 	return base + "?pkt_size=1316"
+}
+
+// RelayProducerOutput is the output epilogue of every child that writes into the
+// relay hub: the muxer, its interleaving and flushing, and the hub's URL. It is
+// the last thing in the argv, after the stream maps and codecs, which is where
+// FFmpeg binds an output option to the output that follows it.
+//
+// ONE EPILOGUE FOR EVERY PRODUCER. The ingest carried the measured fix below and
+// the four others that write into the hub -- the silence synthesiser, the slate,
+// the rendition and the selector's copy hops -- carried a bare
+// `-f mpegts -flush_packets 1`. The selector's hop carries the same multitrack
+// streams the ingest does, so the stall below applies to it as much.
+//
+// Without flush_packets the muxer holds partial TS packets, adding
+// unnecessary latency to a loopback hop that has none to spare.
+//
+// IT IS NOT ENOUGH ON ITS OWN, and believing it was cost #674 a long
+// investigation. flush_packets flushes the AVIO buffer. It does NOT
+// touch the INTERLEAVER, which sits in front of it:
+// av_interleaved_write_frame holds every packet until it has one for
+// each stream, or until the muxing queue spans max_interleave_delta.
+// A multitrack FLV ingest whose audio tracks resolve late therefore
+// writes NOTHING -- video included -- for up to the default 10s, while
+// out_time climbs and total_size stays at 0. Measured exactly that way
+// in internal/rtmpserver/ingest_remux_test.go.
+//
+// 100ms, NOT 0. Zero is the trap: max_interleave_delta=0 means "buffer
+// until there is a packet for EVERY stream, however long that takes",
+// which is the opposite of flushing early and would make the stall
+// permanent instead of ten seconds. The default is 10000000 (10s); a
+// small positive value is what forces output regardless. On a loopback
+// relay 100ms of interleave buffering is already generous.
+func RelayProducerOutput(url string) []string {
+	return []string{
+		"-f", "mpegts",
+		"-max_interleave_delta", "100000",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
+		"-flush_packets", "1",
+		RelayOutputURL(url),
+	}
 }
 
 // relayFIFOPackets is the receive-side circular buffer, in 188-byte packets.
@@ -923,6 +914,39 @@ func RelayInputURL(base string) string {
 		sep = "&"
 	}
 	return base + sep + "fifo_size=" + strconv.Itoa(relayFIFOPackets) + "&overrun_nonfatal=1"
+}
+
+// Input queue sizes for a relay consumer's -thread_queue_size.
+const (
+	// RelayQueue is for every consumer that decodes or muxes the whole programme:
+	// the relay is a live source, and a large input queue absorbs scheduler
+	// jitter that would otherwise show up as dropped frames.
+	RelayQueue = 1024
+	// RelayMeterQueue is for the two analysers (MetersArgs and the loudness
+	// monitor), which decode audio only and discard it: they keep the smaller
+	// queue they were measured with.
+	RelayMeterQueue = 512
+)
+
+// RelayConsumerInput is the input prologue of every child that reads the relay
+// hub: genpts, the input queue, the probe limits and timestamp options of
+// RelayInputArgs, and the relay URL as -i.
+//
+// ONE PROLOGUE FOR EVERY READER. Five of the nine consumers (the rendition, the
+// silence synthesiser, the playout variants, the loudness monitor and the
+// selector's copy hops) wrote `-fflags +genpts -thread_queue_size N -i URL` by
+// hand and so ran with FFmpeg's own probe budget, with scan_all_pmts at the CLI's
+// forced 1 -- every one of them paid the whole probe window as dead air -- and
+// with the default 10 s -dts_delta_threshold that makes the tracks of an input
+// swap their offsets after an outage. Nothing recorded a reason for any of the
+// omissions.
+//
+// The caller puts its own flags (-vaapi_device, -nostats, the progress args)
+// before this, and everything that follows -i after.
+func RelayConsumerInput(url string, queue int) []string {
+	args := []string{"-fflags", "+genpts", "-thread_queue_size", strconv.Itoa(queue)}
+	args = append(args, relayInputArgsFor(url)...)
+	return append(args, "-i", RelayInputURL(url))
 }
 
 // RelayProbeInputURL is RelayInputURL plus a read timeout, for the one consumer
@@ -1363,15 +1387,8 @@ func DestinationArgs(s DestSpec) []string {
 	// No -nostdin: the destination takes live gain and mute on stdin. See
 	// commonArgsLive.
 	args := commonArgsLive()
-	args = append(args, progressArgs()...)
-	args = append(args,
-		"-fflags", "+genpts",
-		// The relay is a live source; a large input queue absorbs scheduler
-		// jitter that would otherwise show up as dropped frames.
-		"-thread_queue_size", "1024",
-	)
-	args = append(args, relayInputArgsFor(s.RelayURL)...)
-	args = append(args, "-i", RelayInputURL(s.RelayURL))
+	args = append(args, ProgressArgs()...)
+	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
 
 	// The copy path branches BEFORE -filter_complex, and it has to. A graph
 	// that is compiled and never mapped is not ignored: FFmpeg 8.1.2 answers
@@ -1601,15 +1618,10 @@ func RecorderArgs(s RecorderSpec) []string {
 	if s.SegmentSeconds == 0 {
 		s.SegmentSeconds = 3600
 	}
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
+	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
 	args = append(args,
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-	)
-	args = append(args, relayInputArgsFor(s.RelayURL)...)
-	args = append(args,
-		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0",
 		"-c", "copy",
 		"-f", "segment",
@@ -1662,15 +1674,10 @@ func PreviewArgs(s PreviewSpec) []string {
 	// Derived so shorter segments buy some.
 	listSize := max(6, (8+s.SegmentSeconds-1)/s.SegmentSeconds)
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
+	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
 	args = append(args,
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-	)
-	args = append(args, relayInputArgsFor(s.RelayURL)...)
-	args = append(args,
-		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
 		"-c:v", "libx264",
@@ -1849,7 +1856,7 @@ func MetersArgs(s MetersSpec) []string {
 		"%sastats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,"+
 			"ametadata=mode=print:file=-:direct=1[mout]", merged))
 
-	args := commonArgs()
+	args := CommonArgs(LogWarning, false)
 	args = append(args,
 		// The other long-running children get -nostats from progressArgs. This
 		// one cannot take progressArgs -- its stdout carries levels -- so it
@@ -1857,12 +1864,9 @@ func MetersArgs(s MetersSpec) []string {
 		// FFmpeg writes its interactive stats line to stderr for the child's
 		// whole life: \r-terminated updates and never a \n.
 		"-nostats",
-		"-fflags", "+genpts",
-		"-thread_queue_size", "512",
 	)
-	args = append(args, relayInputArgsFor(s.RelayURL)...)
+	args = append(args, RelayConsumerInput(s.RelayURL, RelayMeterQueue)...)
 	args = append(args,
-		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", strings.Join(chains, ";"),
 		"-map", "[mout]",
 		"-f", "null", "-",

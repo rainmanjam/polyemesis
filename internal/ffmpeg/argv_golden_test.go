@@ -1,16 +1,17 @@
-package ffmpeg
+package ffmpeg_test
 
 import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/argvgold"
+	. "github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // withLogLevel runs the argv builders under POLYEMESIS_FFMPEG_LOGLEVEL=lvl
 // ("" means unset). See argvgold for how the goldens are regenerated.
 func withLogLevel(t *testing.T, lvl string) {
 	t.Helper()
-	t.Setenv("POLYEMESIS_FFMPEG_LOGLEVEL", lvl)
+	argvgold.LogLevel(t, lvl)
 }
 
 // ffmpegChildren is one argv per kind of FFmpeg child this package builds.
@@ -51,13 +52,31 @@ func ffmpegChildren() map[string][]string {
 
 func TestFFmpegChildArgvIsPinned(t *testing.T) {
 	for _, lvl := range []string{"", "debug"} {
-		withLogLevel(t, lvl)
+		argvgold.LogLevel(t, lvl)
 		suffix := ""
 		if lvl != "" {
 			suffix = "_loglevel_" + lvl
 		}
 		for name, argv := range ffmpegChildren() {
+			// ffprobe's -loglevel only shapes its stderr, which is quoted back in an
+			// error; the override is for FFmpeg children.
+			if lvl != "" && name == "probe_ingest" {
+				continue
+			}
 			t.Run(name+suffix, func(t *testing.T) { argvgold.Check(t, name+suffix, argv) })
 		}
+	}
+}
+
+// Every child that READS the relay, and every child that WRITES it, goes through
+// one owner (RelayConsumerInput, RelayProducerOutput). The goldens above pin the
+// bytes; this pins the reason.
+func TestRelayReadersAndWritersCarryTheSharedOptions(t *testing.T) {
+	kids := ffmpegChildren()
+	for _, name := range []string{"destination_rtmp", "destination_copy_audio", "destination_file", "recorder", "stem_recorder", "preview", "meters", "rendition", "silence"} {
+		argvgold.RequireRelayConsumer(t, name, kids[name])
+	}
+	for _, name := range []string{"ingest_rtmp", "ingest_srt", "ingest_pull", "rendition", "silence", "slate_colour", "slate_offset"} {
+		argvgold.RequireRelayProducer(t, name, kids[name])
 	}
 }

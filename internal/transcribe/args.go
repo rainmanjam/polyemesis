@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // Command-line builders.
@@ -53,7 +55,7 @@ type ExtractSpec struct {
 // absolute stream index counts the video track and every track would be off by
 // one, silently transcribing the wrong microphone.
 func ExtractArgs(s ExtractSpec) []string {
-	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error", "-y"}
+	args := []string{"-nostdin", "-hide_banner", "-loglevel", ffmpeg.LogLevel(ffmpeg.LogError), "-y"}
 	if s.Progress {
 		args = append(args, "-progress", "pipe:1", "-nostats")
 	}

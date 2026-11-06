@@ -264,11 +264,18 @@ func run(h *hooks) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// The one read of the process environment's switches, keys and presets.
+	// Handed to FFmpeg detection, the setup code, the job tier, the engines and
+	// the API, so they agree and none calls Getenv.
+	env := startupenv.FromEnv()
+	ffmpeg.SetLogLevel(env.FFmpegLogLevel)
+
 	h.progress("detecting ffmpeg")
-	tools, err := ffmpeg.Detect(ctx, cfg.FFmpeg.Binary, cfg.FFmpeg.Probe)
+	tools, err := ffmpeg.Detect(ctx, cfg.FFmpeg.Binary, cfg.FFmpeg.Probe, env.FFmpegAssumeMajor)
 	if err != nil {
 		return err
 	}
+	tools.IngestCapture = env.IngestCapture
 	log.Info("ffmpeg detected", "version", tools.Version, "path", tools.FFmpeg, "srt", tools.HasLibSRT)
 
 	// The certificate is settled before anything long-lived is opened: an
@@ -314,10 +321,6 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
-	// The one read of the process environment's switches, keys and presets.
-	// Handed to the setup code, the job tier, the engines and the API, so they
-	// agree and none calls Getenv.
-	env := startupenv.FromEnv()
 	setupCode, err := prepareSetupCode(cfg, store, env.SetupCode)
 	if err != nil {
 		return err

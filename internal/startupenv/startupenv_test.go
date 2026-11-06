@@ -68,3 +68,17 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestFFmpegSettingsAreReadOnceAndTrimmed(t *testing.T) {
+	e := FromLookup(lookup(map[string]string{
+		FFmpegLogLevelVar:    " debug\n",
+		IngestCaptureVar:     " /tmp/capture.ts ",
+		FFmpegAssumeMajorVar: " 8 ",
+	}))
+	if e.FFmpegLogLevel != "debug" || e.IngestCapture != "/tmp/capture.ts" || e.FFmpegAssumeMajor != "8" {
+		t.Errorf("FFmpeg settings not read: %+v", e)
+	}
+	if z := FromLookup(lookup(nil)); z.FFmpegLogLevel != "" || z.IngestCapture != "" || z.FFmpegAssumeMajor != "" {
+		t.Errorf("an unset environment must leave FFmpeg alone: %+v", z)
+	}
+}

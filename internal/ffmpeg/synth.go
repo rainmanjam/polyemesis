@@ -135,13 +135,9 @@ func SilenceArgs(s SilenceSpec) []string {
 		s.Kbps = defaultSilenceKbps
 	}
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
-	args = append(args,
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-		"-i", RelayInputURL(s.InRelayURL),
-	)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
+	args = append(args, RelayConsumerInput(s.InRelayURL, RelayQueue)...)
 	args = append(args, SilenceInputArgs(s.Channels, s.SampleRate)...)
 	args = append(args,
 		// No '?' on the video map. This tier is only started for an ingest that
@@ -159,10 +155,8 @@ func SilenceArgs(s SilenceSpec) []string {
 		// would keep publishing silence into the hub long after the ingest went
 		// away, and the supervisor would never see it exit and restart it.
 		"-shortest",
-		"-f", "mpegts",
-		"-flush_packets", "1",
-		RelayOutputURL(s.OutRelayURL),
 	)
+	args = append(args, RelayProducerOutput(s.OutRelayURL)...)
 	return args
 }
 
@@ -267,8 +261,8 @@ func SlateArgs(s SlateSpec) []string {
 		prof.presetFlag = "-preset"
 	}
 
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := CommonArgs(LogWarning, false)
+	args = append(args, ProgressArgs()...)
 
 	if prof.vaapi {
 		dev := s.VAAPIDevice
@@ -333,11 +327,7 @@ func SlateArgs(s SlateSpec) []string {
 		args = append(args, "-output_ts_offset", formatSeconds(s.TimestampOffsetSeconds))
 	}
 
-	args = append(args,
-		"-f", "mpegts",
-		"-flush_packets", "1",
-		RelayOutputURL(s.OutRelayURL),
-	)
+	args = append(args, RelayProducerOutput(s.OutRelayURL)...)
 	return args
 }
 

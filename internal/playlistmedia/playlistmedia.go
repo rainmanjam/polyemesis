@@ -166,22 +166,6 @@ const (
 	NormaliseChannels     = 2
 )
 
-// commonArgs are the flags every child process here gets. It mirrors
-// internal/ffmpeg's unexported commonArgs rather than importing it, because
-// that one is not exported; the -y is the addition. Every output is written to
-// a .partial path, and a .partial left behind by a killed process must not make
-// the retry hang on FFmpeg's interactive overwrite prompt.
-func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-y"}
-}
-
-// progressArgs routes machine-readable stats to stdout, leaving stderr as a
-// pure human log — the same split internal/ffmpeg uses, so ffmpeg.ParseProgress
-// reads our children too.
-func progressArgs() []string {
-	return []string{"-nostats", "-progress", "pipe:1"}
-}
-
 // normaliseArgs builds the transcode of one upload to the fixed profile.
 //
 // The hardware probe is deliberately NOT consulted, the same call internal/media
@@ -227,8 +211,8 @@ const PadSlackSecs = 0.05
 // below; every encoding flag shared between them lives in one place, so the
 // two outputs cannot drift apart into two profiles.
 func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64, maxBytes int64) []string {
-	args := commonArgs()
-	args = append(args, progressArgs()...)
+	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
+	args = append(args, ffmpeg.ProgressArgs()...)
 	args = append(args, "-i", in)
 	if silent {
 		args = append(args, "-f", "lavfi", "-i",

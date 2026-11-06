@@ -20,8 +20,8 @@ func TestDestinationArgsHaveNoNostdinOtherChildrenKeepIt(t *testing.T) {
 	if runtime.GOOS != "windows" && slices.Contains(args, "-nostdin") {
 		t.Fatalf("a destination argv still carries -nostdin, so FFmpeg would ignore its command channel: %v", args)
 	}
-	if !slices.Contains(commonArgs(), "-nostdin") {
-		t.Fatal("commonArgs lost -nostdin; every other child would now read stdin")
+	if !slices.Contains(CommonArgs(LogWarning, false), "-nostdin") {
+		t.Fatal("CommonArgs lost -nostdin; every other child would now read stdin")
 	}
 	if runtime.GOOS != "windows" && slices.Contains(commonArgsLive(), "-nostdin") {
 		t.Fatal("commonArgsLive still carries -nostdin")

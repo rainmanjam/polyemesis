@@ -10,6 +10,27 @@ its first tagged release.
 
 ### Fixed
 
+- **`POLYEMESIS_FFMPEG_LOGLEVEL` reaches every FFmpeg child, as the documentation says.** Eight
+  children ignored it and ran at a level written into their command line: the selector's copy
+  hops, the playlist feed, the HLS/DASH playout variants, the loudness monitor, the proxy, thumbnail
+  and archive jobs, the clip exporter, the playlist transcode and the transcription audio extract. With the variable
+  unset, nothing changes: each keeps its own default (`warning` for the live ones, `error` for the
+  one-shot passes). The variable, `POLYEMESIS_INGEST_CAPTURE` and `POLYEMESIS_FFMPEG_ASSUME_MAJOR` are
+  now read once at startup with the rest of the environment.
+- **Every relay reader opens the relay the same way.** The rendition encoder, the silence
+  synthesiser, the HLS/DASH playout variants, the loudness monitor and the selector's copy hops read the relay
+  without the probe limits, `-scan_all_pmts 0` and the forward-jump `-dts_delta_threshold` that the
+  destinations, recorder, preview and ingest meter already used. They now carry the same input
+  options, so they stop spending the whole probe window as dead air on start and no longer swap track
+  offsets after a long outage. Visible as: those children start faster, and their command lines (on
+  the Monitoring page) carry the extra input options.
+- **Every writer into the relay carries the interleave-stall fix the ingest has.** The silence
+  synthesiser, the slate, the rendition encoder and the selector's copy hops (the failover and playlist
+  feeds) muxed with FFmpeg's default 10 s interleave buffer, so a multitrack stream whose later audio
+  tracks resolved late could write nothing, video included, for up to ten seconds. They now carry
+  `-max_interleave_delta 100000 -muxdelay 0 -muxpreload 0`, which also drops the muxer's default 1.4 s
+  of start delay from the timestamps they publish.
+
 - **The console agrees with itself about what is live.** The header said "1 live" while the on-air bar
   said 0 and the card said Starting, because a running process that had carried no media counted as
   live in some places and not others. The header, bar, across-the-room view, Dashboard lane heading and

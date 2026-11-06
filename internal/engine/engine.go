@@ -1918,6 +1918,7 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 		PullReconnectDelayMax: s.Ingest.Pull.ReconnectDelayMaxSeconds,
 		PullRTSPTransport:     s.Ingest.Pull.RTSPTransport,
 		RelayURL:              e.hub.InputURL(),
+		CaptureTo:             e.tools.IngestCapture,
 	}
 	return ffmpeg.IngestArgs(spec)
 }

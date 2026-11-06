@@ -1106,7 +1106,7 @@ else
   #    cleanly: the last item's final frame holds for about 2.5 seconds and the
   #    first item then plays about 2 seconds short. Reproduced with nothing but
   #    ffmpeg, the same `-stream_loop -1 -re -fflags +genpts -f concat -c copy`
-  #    argv playlistFeedArgs builds, and the derivatives straight off disk:
+  #    argv ffmpeg.PlaylistFeedArgs builds, and the derivatives straight off disk:
   #
   #      1:6 2:12 3:25 1:2 2:12 3:24 1:3 2:6      (samples at 2 Hz)
   #

@@ -34,7 +34,7 @@ import (
 // under the threshold, which is why the unit test never saw any of it.
 //
 // So this test builds the relay the way the selector does -- the production
-// relayFeedArgs hop, run once per feed with the offsets a switch would give it,
+// ffmpeg.RelayFeedArgs hop, run once per feed with the offsets a switch would give it,
 // 3-track primary then a 30 s 1-track backup then the primary again -- and reads
 // it with the production DestinationArgs command. Offline, from a file, because
 // what is under test is timestamps and a file has the same ones as the wire
@@ -134,7 +134,7 @@ func TestARoutedTrackRejoinsOnItsOwnTimelineAfterAThirtySecondOutage(t *testing.
 		// The production hop, pointed at files: its input and output URLs are
 		// the only two arguments that change.
 		hopOut := filepath.Join(dir, f.name+".hop.ts")
-		args := relayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", f.offset)
+		args := ffmpeg.RelayFeedArgs("udp://127.0.0.1:1", "udp://127.0.0.1:2", f.offset)
 		args = swapArg(t, args, "-i", fixture)
 		args[len(args)-1] = hopOut
 		if out, err := exec.Command(ffmpegBin, append([]string{"-y"}, args...)...).CombinedOutput(); err != nil {

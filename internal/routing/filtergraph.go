@@ -344,7 +344,7 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 //
 // So it is fixed where the format is chosen, which is the selector: the slate
 // is built at the primary's measured format, and a backup or playlist feed has
-// its audio re-encoded to it on the way in (engine's conformedFeedArgs). A
+// its audio re-encoded to it on the way in (ffmpeg.ConformedFeedArgs). A
 // failover then never changes the format a destination decodes, and the graph
 // is never rebuilt. What still rebuilds it is a primary never measured, which
 // leaves nothing to conform to, or one whose decoder emits a different sample
