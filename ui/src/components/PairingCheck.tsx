@@ -19,7 +19,7 @@ export function PairingCheck() {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ConnectionOutcome | null>(null);
 
-  const run = async (e: React.FormEvent) => {
+  const run = async (e: React.SubmitEvent) => {
     e.preventDefault();
     const value = token.trim();
     if (!value) return;

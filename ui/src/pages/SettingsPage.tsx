@@ -3332,7 +3332,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const change = async (e: React.FormEvent) => {
+  const change = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (next !== confirm) {
       toast.error(t("set.passwordMismatch"));
@@ -3961,7 +3961,7 @@ function ApiTokens() {
 
   const confirmRevoke = useConfirm<ApiToken>();
 
-  const create = async (e: React.FormEvent) => {
+  const create = async (e: React.SubmitEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
