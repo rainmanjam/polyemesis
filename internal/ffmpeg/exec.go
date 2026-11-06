@@ -245,6 +245,18 @@ func Output(ctx context.Context, cmd Command) ([]byte, string, error) {
 	return stdout.Bytes(), stderr.String(), err
 }
 
+// CombinedOutput runs a command to completion and returns stdout and stderr
+// interleaved as one stream, for a caller that quotes what FFmpeg said (the
+// expert dry-run). Enrolled and bounded by KillGrace exactly like Output.
+func CombinedOutput(ctx context.Context, cmd Command) ([]byte, error) {
+	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	c.WaitDelay = KillGrace
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	err := RunEnrolled(c, probeKind)
+	return buf.Bytes(), err
+}
+
 // probeKind is the census kind of an ffprobe run, mediaKind of an Exec child.
 const (
 	probeKind = "probe"

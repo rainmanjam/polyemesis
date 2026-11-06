@@ -10,7 +10,7 @@ import { WIRE } from "./wire.generated";
 
 export { WIRE };
 
-type Member<T extends readonly string[]> = T[number];
+export type Member<T extends readonly string[]> = T[number];
 
 /** internal/failreason.Cause. A cause newer than this build still arrives as a
  *  string: see causeLabel in failureRemedy.ts. */

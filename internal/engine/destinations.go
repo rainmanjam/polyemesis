@@ -283,7 +283,7 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// below once the lock is released, since it does I/O. A copy
 			// destination's argv has no graph, so it has no level to move.
 			if copyPathOf(p.row) {
-				e.setLiveNoteLocked(id, liveNote{applied: liveApplied, reason: copyNoEffect})
+				e.setLiveNoteLocked(id, liveNote{applied: AppliedLive, reason: copyNoEffect})
 			} else {
 				liveTry = append(liveTry, liveCandidate{id: id, d: d, p: p})
 			}
@@ -293,7 +293,7 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// The levels moved, but so did something a command cannot carry, so
 			// the level reaches the output by this restart. Recorded so the
 			// operator is told a restart happened rather than nothing.
-			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
+			e.setLiveNoteLocked(id, liveNote{applied: AppliedRestart, reason: structuralRestart})
 		}
 		if !keep && !wanted && d.delay != nil && d.proc != nil && stillThere[id] && !cutReq[id] {
 			// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
@@ -375,11 +375,11 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 				next.compiled = c.p.compiled
 				e.dests[c.id] = &next
 			}
-			e.setLiveNoteLocked(c.id, liveNote{applied: liveApplied})
+			e.setLiveNoteLocked(c.id, liveNote{applied: AppliedLive})
 			e.mu.Unlock()
 			continue
 		}
-		e.setLiveNoteLocked(c.id, liveNote{applied: liveRestart, reason: fallbackReason(err)})
+		e.setLiveNoteLocked(c.id, liveNote{applied: AppliedRestart, reason: fallbackReason(err)})
 		if e.dests[c.id] == c.d {
 			delete(e.dests, c.id)
 			if c.d.proc != nil {
@@ -819,7 +819,7 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	e.log.Info("destination reconnect policy retuned without a restart",
 		"dest", name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
 		"giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", name, reloadLive,
+	e.noteReload("destination", name, AppliedLive,
 		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
 			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
 
@@ -839,7 +839,7 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	p.Restart(ctx)
 	e.log.Info("destination revived: it had given up under the previous limit",
 		"dest", name, "giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", name, reloadRestart,
+	e.noteReload("destination", name, AppliedRestart,
 		"it had given up under the previous limit and the new one is more forgiving")
 }
 
@@ -1340,7 +1340,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
 	e.warnRenditionAgainstPlatform(row)
 	e.logMultitrack(row, mt, vodDropped)
-	e.noteReload("destination", row.Name, reloadRestart, "started")
+	e.noteReload("destination", row.Name, AppliedRestart, "started")
 	return nil
 }
 
@@ -1378,7 +1378,7 @@ func (e *Engine) teardownDest(d *destination) {
 	if d == nil {
 		return
 	}
-	e.noteReload("destination", d.row.Name, reloadRestart,
+	e.noteReload("destination", d.row.Name, AppliedRestart,
 		"its command line changed, or it was disabled or removed")
 	if d.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)

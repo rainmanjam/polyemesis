@@ -628,7 +628,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// encoder list without the hardware behind it is what made the rendition
 		// editor offer NVENC on an AMD box in the first place. Cached after the
 		// first scan, so this stays a cheap endpoint.
-		"gpu":        machineGPUs(r.Context()),
+		"gpu":        s.tools().GPUs(r.Context()),
 		"ingestUrl":  ingestURL,
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,

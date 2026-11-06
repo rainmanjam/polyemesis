@@ -142,6 +142,21 @@ type Tools struct {
 	// a second audio track into FLV. Nil until the probe runs; see TwoAudioFLV.
 	flvTwoAudio *FLVTwoAudioResult
 
+	// GPUDetect replaces DetectGPUs as the enumeration, so a test can move the
+	// "hardware" under a running Tools. Nil in production.
+	GPUDetect func(context.Context) GPUInfo `json:"-"`
+
+	// gpu is the one answer to "what GPUs does this machine have, and which
+	// render node does VAAPI use". Written by RefreshEncoderCapabilities and by
+	// the first GPUs call; read by the encoders route, /system and the engine,
+	// so a re-detect reaches every one of them.
+	gpu     GPUInfo
+	gpuDone bool
+	// gpuMu is the single-flight over enumeration plus the probe run: a user
+	// leaning on the re-detect button must not spawn one set of test encodes
+	// per click. Readers of a cached answer never take it.
+	gpuMu sync.Mutex
+
 	// mu guards the fields the encoder probe writes. Detection is a startup
 	// snapshot that RefreshEncoderCapabilities can replace underneath a
 	// running server, so readers cannot assume they are the only ones here.
@@ -466,7 +481,18 @@ func parseFilters(out string) []string {
 // It never fails. A probe that errors, times out or finds nothing leaves the
 // product on software encoding.
 func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapability {
-	caps := ProbeEncoders(ctx, t.FFmpeg, t.candidateEncoders())
+	t.gpuMu.Lock()
+	defer t.gpuMu.Unlock()
+
+	// One enumeration serves both the cached answer and the VAAPI probe, so
+	// the node the probe proved is the node a rendition is told to use.
+	info := t.detectGPUs(ctx)
+	t.mu.Lock()
+	t.gpu, t.gpuDone = info, true
+	t.mu.Unlock()
+
+	names := t.candidateEncoders()
+	caps := probeEncodersOn(ctx, t.FFmpeg, names, probeTimeout, probeBudget, probeVAAPIDevice(names, info))
 	if len(caps) == 0 {
 		// Nothing to probe, or no binary to probe with. Keep whatever the
 		// build list told us rather than downgrading to "nothing works".
@@ -489,6 +515,43 @@ func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapabil
 	// encodes on this machine is EncoderWorks' question, and conflating the
 	// two would let a cancelled probe read as a build without x264.
 	return append([]EncoderCapability(nil), t.EncoderCaps...)
+}
+
+// GPUs returns the machine's GPU enumeration, scanning on first ask and
+// whenever RefreshEncoderCapabilities re-runs it. A nil Tools scans each time.
+//
+// The scan is capped (gpuDetectTimeout) and cannot fail, so a wedged driver
+// costs a slow first request rather than a broken page.
+func (t *Tools) GPUs(ctx context.Context) GPUInfo {
+	if t == nil {
+		return DetectGPUs(ctx)
+	}
+	t.mu.RLock()
+	info, done := t.gpu, t.gpuDone
+	t.mu.RUnlock()
+	if done {
+		return info
+	}
+	t.gpuMu.Lock()
+	defer t.gpuMu.Unlock()
+	t.mu.RLock()
+	info, done = t.gpu, t.gpuDone
+	t.mu.RUnlock()
+	if done {
+		return info
+	}
+	info = t.detectGPUs(ctx)
+	t.mu.Lock()
+	t.gpu, t.gpuDone = info, true
+	t.mu.Unlock()
+	return info
+}
+
+func (t *Tools) detectGPUs(ctx context.Context) GPUInfo {
+	if t.GPUDetect != nil {
+		return t.GPUDetect(ctx)
+	}
+	return DetectGPUs(ctx)
 }
 
 // candidateEncoders is what is worth probing: the known candidates the build

@@ -284,6 +284,16 @@ func TestOutputReturnsStdoutAndStderrSeparately(t *testing.T) {
 	}
 }
 
+func TestCombinedOutputReturnsBothStreamsInOne(t *testing.T) {
+	out, err := CombinedOutput(context.Background(), helper("progress"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "progress=end") || !strings.Contains(string(out), "a warning nobody minds") {
+		t.Errorf("combined output = %q, want stdout and stderr", out)
+	}
+}
+
 func TestRunEnrolledReportsAStartFailure(t *testing.T) {
 	err := RunEnrolled(exec.Command("definitely-not-a-real-binary-xyz"), probeKind)
 	if err == nil {

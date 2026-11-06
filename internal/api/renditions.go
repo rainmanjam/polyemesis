@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -495,7 +494,7 @@ type encoderInfo struct {
 func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 	tools := s.tools()
 
-	gpu := machineGPUs(r.Context())
+	gpu := tools.GPUs(r.Context())
 	if r.URL.Query().Get("redetect") != "" {
 		// The plain listing is a read and stays reachable by a read-scoped
 		// token. This is not: it spawns a test encode per candidate encoder,
@@ -670,39 +669,13 @@ func hardwareFallbackOrder(tools *ffmpeg.Tools) []string {
 
 // ------------------------------------------------------------ hardware scan
 
-// hardware caches the GPU enumeration.
-//
-// It is package scope rather than a Server field because it describes the
-// machine, not a server instance — there is one of each per process, and a
-// second Server in a test is still looking at the same PCI bus. The mutex is
-// also the single-flight: a user leaning on the re-detect button must not spawn
-// one set of test encodes per click.
-var hardware struct {
-	mu   sync.Mutex
-	info ffmpeg.GPUInfo
-	done bool
-}
-
-// machineGPUs returns the cached enumeration, scanning once on first ask.
-//
-// The scan is capped at three seconds and cannot fail, so a wedged driver costs
-// a slow first request rather than a broken page.
-func machineGPUs(ctx context.Context) ffmpeg.GPUInfo {
-	hardware.mu.Lock()
-	defer hardware.mu.Unlock()
-	if !hardware.done {
-		hardware.info = ffmpeg.DetectGPUs(ctx)
-		hardware.done = true
-	}
-	return hardware.info
-}
-
 // redetectHardware re-enumerates the GPUs and re-runs every test encode.
 //
 // This is the answer to hardware that moved after launch: a driver package
 // upgraded, a card passed into the container after the fact, a laptop back from
 // suspend with a render node that now opens. Neither half can fail, so there is
-// nothing to return but the new answer.
+// nothing to return but the new answer. Tools owns the enumeration, so the
+// engines read the new render node on their next rendition start.
 //
 // The request's cancellation is deliberately dropped. A probe that is cancelled
 // reports every encoder as not working, and that verdict is cached — so a user
@@ -714,12 +687,8 @@ func redetectHardware(ctx context.Context, tools *ffmpeg.Tools) ffmpeg.GPUInfo {
 	scan, cancel := context.WithTimeout(context.WithoutCancel(ctx), redetectCeiling)
 	defer cancel()
 
-	hardware.mu.Lock()
-	defer hardware.mu.Unlock()
-	hardware.info = ffmpeg.DetectGPUs(scan)
-	hardware.done = true
 	tools.RefreshEncoderCapabilities(scan)
-	return hardware.info
+	return tools.GPUs(scan)
 }
 
 // redetectCeiling is a backstop, not the real bound — the GPU scan and the

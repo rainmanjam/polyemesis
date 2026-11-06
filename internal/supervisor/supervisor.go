@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1253,7 +1252,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	// (see live.go), so there it is simply not made and every live command is
 	// refused, which sends the caller to a restart.
 	var liveStdin io.WriteCloser
-	if p.spec.LiveCommands && runtime.GOOS != "windows" {
+	if p.spec.LiveCommands && ffmpeg.LiveCommandsSupported() {
 		w, err := cmd.StdinPipe()
 		if err != nil {
 			return nil, fmt.Errorf("stdin pipe: %w", err)

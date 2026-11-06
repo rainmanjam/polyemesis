@@ -444,7 +444,7 @@ func TestVAAPIDetectionIsSkippedWhenNoCandidateNeedsIt(t *testing.T) {
 	if !anyVAAPI([]string{EncoderX264, EncoderVAAPI}) {
 		t.Error("anyVAAPI missed a vaapi encoder in the list")
 	}
-	if got := probeVAAPIDevice(context.Background(), []string{EncoderX264}); got != "" {
+	if got := probeVAAPIDevice([]string{EncoderX264}, GPUInfo{VAAPIDevice: "/dev/dri/renderD129"}); got != "" {
 		t.Errorf("probeVAAPIDevice = %q for a non-vaapi list, want empty", got)
 	}
 }

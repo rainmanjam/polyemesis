@@ -92,9 +92,6 @@ const (
 	// previewStartDebounce keeps a burst of requests against a down encoder,
 	// or a start that keeps failing, from turning into a burst of spawns.
 	previewStartDebounce = 2 * time.Second
-	// gpuDetectTimeout bounds the DRM enumeration. A wedged driver must not
-	// hold up starting an encode.
-	gpuDetectTimeout = 5 * time.Second
 )
 
 // stopTimeout bounds how long we wait for one child to exit. See the comment in
@@ -257,11 +254,6 @@ type Engine struct {
 	// Stop now, stop-all and delete (CutOnStop). Guarded by e.mu, consumed by
 	// the stopDestinations pass that follows.
 	cutRequested map[int64]bool
-
-	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
-	// time a VAAPI rendition actually starts.
-	vaapiOnce sync.Once
-	vaapiDev  string
 
 	// reconcileMu serializes Reconcile end to end. It is NOT e.mu: e.mu is
 	// dropped and retaken a dozen times inside one reconcile so that Status()
@@ -2601,7 +2593,7 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // to survive until they come back, or the operator has to make it twice.
 func (e *Engine) applyMeterInterval(m db.MeterSettings) {
 	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
-	e.noteReload("meters", "meters", reloadLive, "metering interval applied without a respawn")
+	e.noteReload("meters", "meters", AppliedLive, "metering interval applied without a respawn")
 }
 
 // meterThrottle rate-limits metering frames on their way to the WebSocket.
@@ -2904,11 +2896,11 @@ func (e *Engine) reconcileOutputs() error {
 	e.destHold.Store(hold)
 	switch {
 	case holdDests:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"held: the ingest layout has not been probed yet, and a routing graph "+
 				"compiled against the placeholder would map tracks that may not exist")
 	case unmeasurable:
-		e.noteReload("destinations", "all", reloadRestart,
+		e.noteReload("destinations", "all", AppliedRestart,
 			"the ingest layout cannot be measured, so each track is downmixed by "+
 				"FFmpeg at runtime rather than by its profile's matrix")
 	}
@@ -3559,14 +3551,14 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	proc.Start()
 	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
 		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
-	e.noteReload("rendition", row.Name, reloadRestart, "started")
+	e.noteReload("rendition", row.Name, AppliedRestart, "started")
 }
 
 func (e *Engine) teardownRendition(r *rendition) {
 	if r == nil {
 		return
 	}
-	e.noteReload("rendition", r.row.Name, reloadRestart,
+	e.noteReload("rendition", r.row.Name, AppliedRestart,
 		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
@@ -6122,13 +6114,9 @@ func clearDir(dir string) {
 	}
 }
 
-// vaapiDevice resolves the render node a VAAPI rendition should use.
-//
-// Detection is deferred and done once: enumerating DRM nodes touches sysfs and
-// opens devices, which is not work to repeat on every rendition restart, and is
-// pointless on the overwhelming majority of installs that never run a VAAPI
-// encoder at all. Anything other than a VAAPI encoder returns empty
-// immediately, without detecting.
+// vaapiDevice resolves the render node a VAAPI rendition should use, asking
+// Tools at every start so a hardware re-detect reaches a running engine.
+// Anything other than a VAAPI encoder returns empty without asking.
 //
 // An empty result is the safe answer, not a failure: FFmpeg then uses its own
 // default node, which is exactly the behaviour every install had before this
@@ -6139,18 +6127,13 @@ func (e *Engine) vaapiDevice(r *db.Rendition) string {
 	if !strings.HasSuffix(string(r.Encoder), "_vaapi") {
 		return ""
 	}
-	e.vaapiOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), gpuDetectTimeout)
-		defer cancel()
-		info := ffmpeg.DetectGPUs(ctx)
-		e.vaapiDev = info.VAAPIDevice
-		if e.vaapiDev == "" {
-			e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
-		} else {
-			e.log.Info("VAAPI render node selected", "device", e.vaapiDev)
-		}
-	})
-	return e.vaapiDev
+	dev := e.tools.GPUs(context.Background()).VAAPIDevice
+	if dev == "" {
+		e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
+	} else {
+		e.log.Info("VAAPI render node selected", "device", dev)
+	}
+	return dev
 }
 
 // reconcileCount is how many times Reconcile has been entered. Test-only; see

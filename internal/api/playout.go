@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -921,8 +920,7 @@ func renderPoster(ffmpegPath, segment string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), posterTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, posterArgs(segment)...)
-	out, err := cmd.Output()
+	out, _, err := ffmpeg.Output(ctx, ffmpeg.Command{Name: ffmpegPath, Args: posterArgs(segment)})
 	if err != nil {
 		return nil, err
 	}

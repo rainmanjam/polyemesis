@@ -2,7 +2,7 @@
 
 // Unix only: these drive the live command channel, and on Windows the
 // supervisor gives a destination no stdin pipe and the engine restarts on every
-// level change instead (liveGainsSupported). There is nothing to drive there.
+// level change instead (ffmpeg.LiveCommandsSupported). There is nothing to drive there.
 
 package engine
 

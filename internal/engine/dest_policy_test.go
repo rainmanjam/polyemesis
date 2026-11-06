@@ -14,7 +14,7 @@ import (
 // backupSpecOf deliberately excludes Resilience, so reconcileBackup
 // short-circuits on an unchanged spec. Between them, nothing in the file
 // delivered a changed reconnect policy to the redundant feed, while
-// noteReload(..., reloadLive, "reconnect policy retuned...") told the operator
+// noteReload(..., AppliedLive, "reconnect policy retuned...") told the operator
 // it had been.
 //
 // Mutation: in applyDestPolicy, delete the line

@@ -1,7 +1,7 @@
 //go:build !windows
 
 // Unix only: it drives the live command channel, which Windows does not have
-// (liveGainsSupported); there every level change restarts instead.
+// (ffmpeg.LiveCommandsSupported); there every level change restarts instead.
 
 package engine
 
@@ -73,7 +73,7 @@ func TestALiveApplyAcknowledgedAfterTheEntryWasReplacedIsRecordedAsLive(t *testi
 	<-done
 
 	applied, reason, ok := e.DestinationLive(row.ID)
-	if !ok || applied != liveApplied {
+	if !ok || applied != AppliedLive {
 		t.Errorf("applied = %q reason = %q, want live: the running process acknowledged the level", applied, reason)
 	}
 	e.mu.RLock()

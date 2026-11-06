@@ -619,12 +619,7 @@ func runDryRun(ctx context.Context, bin string, argv []string) dryRunResult {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dryRunTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, bin, res.Argv...)
-	// Killing FFmpeg is not the same as getting its output pipe back — a child
-	// inherits it and CombinedOutput blocks until every holder is gone. Without
-	// WaitDelay the timeout above is a suggestion. Learned in probe_encoders.go.
-	cmd.WaitDelay = time.Second
-	output, err := cmd.CombinedOutput()
+	output, err := ffmpeg.CombinedOutput(runCtx, ffmpeg.Command{Name: bin, Args: res.Argv})
 	res.Output = truncateOutput(string(output), 4000)
 
 	switch {

@@ -30,7 +30,7 @@ func TestAppliedSinceALevelAloneIsLive(t *testing.T) {
 	e.stopDestinations(map[int64]destPlan{row.ID: planFor(t, e, &quieter)})
 
 	applied, reason := e.AppliedSince(row.ID, before)
-	if applied != liveApplied || reason != "" {
+	if applied != AppliedLive || reason != "" {
 		t.Fatalf("applied = %q reason = %q, want live with no reason", applied, reason)
 	}
 	if e.DestinationRunOf(row.ID) != before {

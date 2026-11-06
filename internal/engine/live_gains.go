@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"slices"
 	"sync"
 
@@ -85,12 +84,6 @@ type liveSetter interface {
 	SetVolume(instance string, level float64) error
 }
 
-// liveGainsSupported reports whether the live path may be attempted at all. On
-// Windows it is unverified, so every gain change restarts instead.
-func liveGainsSupported() bool {
-	return runtime.GOOS != "windows"
-}
-
 // levelsDiffer reports whether two graphs differ in the level of any named
 // volume stage. Callers have already established that the graphs are equal
 // once levels are masked; this only answers "did a level move".
@@ -139,9 +132,15 @@ type liveNote struct {
 	reason  string // set when applied is "restart" by fallback
 }
 
+// The two words a reconcile reports for how a change took effect, shared by
+// every tier's reload event and by the API's `applied` answers. The console
+// reads them from the generated wire contract (appliedStates).
 const (
-	liveApplied = "live"
-	liveRestart = "restart"
+	// AppliedLive means the change reached a process that kept running.
+	AppliedLive = "live"
+	// AppliedRestart means a child process was replaced, or the value is stored
+	// for the next start.
+	AppliedRestart = "restart"
 )
 
 // copyNoEffect is said of a copy destination's level. Its audio passes through
@@ -170,7 +169,7 @@ type liveCandidate struct {
 // updated FIRST, so any respawn from this point on is built with the new levels;
 // the commands then bring the running process to the same state.
 func liveApplyTo(proc liveSetter, holder *graphHolder, want routing.Result) error {
-	if !liveGainsSupported() {
+	if !ffmpeg.LiveCommandsSupported() {
 		return errors.New("live gain is not verified on this platform")
 	}
 	if proc == nil || holder == nil {
@@ -314,14 +313,14 @@ func (e *Engine) liveBackup(d *destination, compiled routing.Result) bool {
 		return true
 	}
 	if copyPathOf(d.row) {
-		e.setLiveNote(d.row.ID, liveNote{applied: liveApplied, reason: copyNoEffect})
+		e.setLiveNote(d.row.ID, liveNote{applied: AppliedLive, reason: copyNoEffect})
 		return true
 	}
 	if err := liveApplyTo(d.backup, d.backupGraph, compiled); err != nil {
-		e.setLiveNote(d.row.ID, liveNote{applied: liveRestart, reason: fallbackReason(err)})
+		e.setLiveNote(d.row.ID, liveNote{applied: AppliedRestart, reason: fallbackReason(err)})
 		return false
 	}
-	e.setLiveNote(d.row.ID, liveNote{applied: liveApplied})
+	e.setLiveNote(d.row.ID, liveNote{applied: AppliedLive})
 	return true
 }
 
@@ -367,7 +366,7 @@ func (e *Engine) levelChangeText(id int64) string {
 	switch {
 	case !ok:
 		return ""
-	case applied == liveRestart:
+	case applied == AppliedRestart:
 		return "applied by restart: " + reason
 	case reason != "":
 		return "applied live: " + reason
@@ -470,19 +469,19 @@ func (e *Engine) AppliedSince(id int64, before DestinationRun) (applied, reason 
 	switch {
 	case after.primary != before.primary:
 		// A refused live level falls back to this restart; its note says why.
-		if noted && a == liveRestart {
+		if noted && a == AppliedRestart {
 			return a, r
 		}
-		return liveRestart, structuralRestart
+		return AppliedRestart, structuralRestart
 	case before.backup != nil && after.backup != nil && after.backup != before.backup:
-		return liveApplied, backupRestarted
+		return AppliedLive, backupRestarted
 	case before.backup == nil && after.backup != nil:
-		return liveApplied, backupStarted
+		return AppliedLive, backupStarted
 	case before.backup != nil && after.backup == nil:
-		return liveApplied, backupStopped
+		return AppliedLive, backupStopped
 	case noted:
 		return a, r
 	default:
-		return liveApplied, nothingToApply
+		return AppliedLive, nothingToApply
 	}
 }
