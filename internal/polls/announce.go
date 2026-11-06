@@ -15,10 +15,8 @@ import (
 // platforms that can send when this was written. Twitch and Kick allow 500, so
 // one text fits everywhere and every platform's viewers read the same words.
 //
-// X now sends too and stops at 140, so a start or end text of 141 to 200
-// characters is refused there. It takes YouTube's figure, not the minimum over the
-// senders, because the minimum would change what operators see today; moving
-// to it is a product decision.
+// X stops at 140, so its chat is sent a shortened text instead (AnnounceMax);
+// every other chat keeps this one.
 const MaxAnnouncement = platform.YouTubeChatMax
 
 // truncate cuts s to n characters, marking the cut.
@@ -33,7 +31,17 @@ func truncate(s string, n int) string {
 	return strings.TrimRight(string(r[:n-1]), " ") + "…"
 }
 
-func fits(s string) bool { return utf8.RuneCountInString(s) <= MaxAnnouncement }
+func fits(s string, max int) bool { return utf8.RuneCountInString(s) <= max }
+
+// AnnounceMax is the longest announcement one platform's chat takes: the poll's
+// own cap, or the platform's send limit from the registry when that is shorter.
+// X stops at 140, so its viewers get a shortened text rather than a refused one.
+func AnnounceMax(p db.Platform) int {
+	if row, ok := platform.ByEnum(string(p)); ok && row.Chat.SendMax > 0 && row.Chat.SendMax < MaxAnnouncement {
+		return row.Chat.SendMax
+	}
+	return MaxAnnouncement
+}
 
 func humanDuration(d time.Duration) string {
 	if d >= time.Minute && d%time.Minute == 0 {
@@ -46,14 +54,14 @@ func humanDuration(d time.Duration) string {
 }
 
 // shorten builds a message from a template, shortening option labels and then
-// the question until it fits MaxAnnouncement.
-func shorten(question string, labels []string, build func(q string, labels []string) string) string {
-	for max := MaxOption; max >= 4; max-- {
+// the question until it fits max characters.
+func shorten(max int, question string, labels []string, build func(q string, labels []string) string) string {
+	for ml := MaxOption; ml >= 4; ml-- {
 		short := make([]string, len(labels))
 		for i, l := range labels {
-			short[i] = truncate(l, max)
+			short[i] = truncate(l, ml)
 		}
-		if s := build(question, short); fits(s) {
+		if s := build(question, short); fits(s, max) {
 			return s
 		}
 	}
@@ -62,17 +70,22 @@ func shorten(question string, labels []string, build func(q string, labels []str
 		short[i] = truncate(l, 4)
 	}
 	for q := utf8.RuneCountInString(question); q >= 1; q-- {
-		if s := build(truncate(question, q), short); fits(s) {
+		if s := build(truncate(question, q), short); fits(s, max) {
 			return s
 		}
 	}
-	return truncate(build("", short), MaxAnnouncement)
+	return truncate(build("", short), max)
 }
 
 // StartText is what the poll says in every chat when it opens. It never names
 // a platform, so the same words are fine on all of them.
-func StartText(s Spec) string {
-	return shorten(s.Question, s.Options, func(q string, labels []string) string {
+func StartText(s Spec) string { return StartTextMax(s, MaxAnnouncement) }
+
+// StartTextMax is StartText shortened to at most max characters, with an
+// ellipsis wherever a label or the question was cut. The voting instructions
+// are kept whole; the question and labels give way.
+func StartTextMax(s Spec, max int) string {
+	return shorten(max, s.Question, s.Options, func(q string, labels []string) string {
 		var b strings.Builder
 		b.WriteString("POLL: ")
 		b.WriteString(q)
@@ -89,6 +102,7 @@ func StartText(s Spec) string {
 // poll is running: vote THERE. It names only the platform it is posted on,
 // which is the one platform its viewers are already watching.
 func NativeStartText(s Spec, p db.Platform) string {
+	max := AnnounceMax(p)
 	where := "the poll in this chat"
 	switch p {
 	case db.PlatformTwitch:
@@ -99,21 +113,24 @@ func NativeStartText(s Spec, p db.Platform) string {
 	q := s.Question
 	for n := utf8.RuneCountInString(q); n >= 1; n-- {
 		text := fmt.Sprintf("POLL: %s — vote in %s. %s to vote.", truncate(q, n), where, humanDuration(s.Duration()))
-		if fits(text) {
+		if fits(text, max) {
 			return text
 		}
 	}
-	return truncate("POLL — vote in "+where+".", MaxAnnouncement)
+	return truncate("POLL — vote in "+where+".", max)
 }
 
 // EndText is what the poll says in every chat when it closes.
-func EndText(r Result) string {
+func EndText(r Result) string { return EndTextMax(r, MaxAnnouncement) }
+
+// EndTextMax is EndText shortened to at most max characters.
+func EndTextMax(r Result, max int) string {
 	labels := make([]string, len(r.Options))
 	for i, o := range r.Options {
 		labels[i] = o.Label
 	}
 	w := r.Winners()
-	return shorten(r.Question, labels, func(q string, labels []string) string {
+	return shorten(max, r.Question, labels, func(q string, labels []string) string {
 		switch {
 		case len(w) == 0:
 			return fmt.Sprintf("POLL CLOSED: %s — no votes.", q)

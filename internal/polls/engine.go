@@ -413,7 +413,9 @@ func (e *Engine) finaliseLocked(a *active, now time.Time) {
 	e.cur = nil
 	if e.send != nil {
 		res := snapshot(a)
-		e.goAsync(func(ctx context.Context) { e.sendText(ctx, EndText(res)) })
+		e.goAsync(func(ctx context.Context) {
+			e.sendEach(ctx, func(p db.Platform, _ string) string { return EndTextMax(res, AnnounceMax(p)) })
+		})
 	}
 }
 
@@ -531,15 +533,11 @@ func (e *Engine) announceStart(ctx context.Context, a *active) {
 		if native[chatKey{p, account}] {
 			return NativeStartText(a.spec, p)
 		}
-		return StartText(a.spec)
+		return StartTextMax(a.spec, AnnounceMax(p))
 	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a.res.Announced = results
-}
-
-func (e *Engine) sendText(ctx context.Context, text string) []Announcement {
-	return e.sendEach(ctx, func(db.Platform, string) string { return text })
 }
 
 func (e *Engine) sendEach(ctx context.Context, textFor func(db.Platform, string) string) []Announcement {

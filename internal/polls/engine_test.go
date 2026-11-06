@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -672,6 +673,56 @@ func TestNoSurfaceCarriesAVoter(t *testing.T) {
 			if strings.Contains(b, secret) {
 				t.Errorf("%q leaked into %s", secret, b)
 			}
+		}
+	}
+}
+
+// X stops a chat message at 140 characters. Its viewers are sent a shortened
+// announcement, ellipsis where it was cut and the voting instructions intact;
+// every other chat keeps the full 200-character text.
+func TestXIsSentAShortenedAnnouncement(t *testing.T) {
+	s := &fakeSender{res: []chat.SendResult{
+		{Platform: db.PlatformTwitch, Account: "t", OK: true},
+		{Platform: db.PlatformX, Account: "x", OK: true},
+	}}
+	f := newFixture(t, WithSender(s))
+	opts := []string{strings.Repeat("A", MaxOption), strings.Repeat("B", MaxOption), strings.Repeat("C", MaxOption)}
+	r := f.start(t, opts...)
+	if _, err := f.e.End(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.e.Wait()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var xStart, twitchStart string
+	for _, text := range s.byChat["x/x"] {
+		if n := utf8.RuneCountInString(text); n > 140 {
+			t.Errorf("X was sent %d characters: %q", n, text)
+		}
+		if strings.HasPrefix(text, "POLL:") {
+			xStart = text
+		}
+	}
+	for _, text := range s.byChat["twitch/t"] {
+		if strings.HasPrefix(text, "POLL:") {
+			twitchStart = text
+		}
+	}
+	if !strings.Contains(xStart, "…") || !strings.Contains(xStart, "!vote N") {
+		t.Errorf("X start = %q, want an ellipsis and the voting instructions", xStart)
+	}
+	if got := utf8.RuneCountInString(twitchStart); got <= 140 || got > MaxAnnouncement {
+		t.Errorf("Twitch should keep the full text (141 to 200 characters), got %d: %q", got, twitchStart)
+	}
+}
+
+func TestAnnounceMaxIsTheSendLimitWhereShorter(t *testing.T) {
+	for p, want := range map[db.Platform]int{
+		db.PlatformX: 140, db.PlatformYouTube: 200, db.PlatformTwitch: 200,
+		db.PlatformKick: 200, db.PlatformFacebook: 200, db.PlatformRumble: 200,
+	} {
+		if got := AnnounceMax(p); got != want {
+			t.Errorf("AnnounceMax(%s) = %d, want %d", p, got, want)
 		}
 	}
 }
