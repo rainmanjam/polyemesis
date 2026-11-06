@@ -152,9 +152,6 @@ type Processor struct {
 	log   *slog.Logger
 	cfg   Config
 	probe Prober
-	// now is time.Now, as a field only so a test can pin the ProbedAt it
-	// records. Unset means time.Now.
-	now func() time.Time
 }
 
 // Option customises a Processor.

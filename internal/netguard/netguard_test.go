@@ -231,3 +231,15 @@ func TestHostLocalIsTheStricterHalfOfTheSameList(t *testing.T) {
 		t.Error("IsPublicAddr(nil) = true")
 	}
 }
+
+func TestIsLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "LOCALHOST": true, "LocalHost": true,
+		"127.0.0.1": true, "127.5.5.5": true, "::1": true,
+		"example.com": false, "10.0.0.1": false, "": false, "localhost.example.com": false,
+	} {
+		if got := IsLoopbackHost(host); got != want {
+			t.Errorf("IsLoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}

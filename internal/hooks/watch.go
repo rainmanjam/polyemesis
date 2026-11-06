@@ -36,8 +36,8 @@ func (c WatchConfig) normalized() WatchConfig {
 	}
 	// THE DEFAULT WAS DECLARED AND NEVER APPLIED. This clamped negatives and
 	// stopped, so a zero -- which the struct above documents as "takes every
-	// default", and which is what engine.go:623 constructs -- meant NO DWELL AT
-	// ALL. DefaultDestinationDownAfter was referenced nowhere but its own
+	// default", and which is what the engine's hookWatch construction passes --
+	// meant NO DWELL AT ALL. DefaultDestinationDownAfter was referenced nowhere but its own
 	// declaration and a comment reasoning about a delay that never happened.
 	//
 	// The effect is the storm the constant exists to prevent: with a zero dwell
@@ -45,8 +45,8 @@ func (c WatchConfig) normalized() WatchConfig {
 	// supervisor reconnect published a destination-down hook and an
 	// up-again hook behind it.
 	//
-	// It also silently falsified the LifecycleObserver design at
-	// engine.go:3853, which reasons that "a torn-down-and-restarted destination
+	// It also silently falsified the engine.LifecycleObserver design,
+	// which reasons that "a torn-down-and-restarted destination
 	// crosses no edge at all, because the DOWN direction has a 10s dwell
 	// (hooks.DefaultDestinationDownAfter) and one reconcile completes well
 	// inside it." Every spec-change restart crossed one.

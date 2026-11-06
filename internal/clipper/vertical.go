@@ -430,9 +430,6 @@ type captionScreen struct {
 	Lines    []string
 }
 
-// maxCaptionLines bounds how many drawtext filters one short's graph carries.
-const maxCaptionLines = 600
-
 // minScreen drops a caption that would be on screen for less than a few
 // frames: it is a flicker, not a caption.
 const minScreen = 100 * time.Millisecond

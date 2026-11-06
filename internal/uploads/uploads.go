@@ -1057,7 +1057,7 @@ func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uin
 // PROCESS-WIDE AND KEYED BY PATH, not a field on Store, and that is the load-
 // bearing part of the fix rather than an implementation detail.
 // api.Server.uploadStore builds a NEW *Store on every request BY DESIGN
-// (media.go:616 -- "it owns no state beyond a path"), so a mutex and a counter
+// (api.Server.uploadStore -- "it owns no state beyond a path"), so a mutex and a counter
 // living on the struct would be a fresh mutex and a zero counter per request:
 // the guard would read correctly, test green against a single injected Store,
 // and bound absolutely nothing in production. That is this repository's

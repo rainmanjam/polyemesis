@@ -912,6 +912,12 @@ func redirectHost(cfg config.Config, requestHost string) string {
 // and the warning would then describe a port the redirect does not use.
 func listenPort(addr string) string { return config.ListenPort(addr) }
 
+// shellQuote single-quotes a path so a data directory with a space in it can be
+// pasted into the recovery command as written.
+func shellQuote(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
 // bootSettings is the one read of the stored settings at startup. A row that
 // cannot be read stops the boot: the alternative, built-in defaults, would
 // shorten chat retention, drop the operator's automod and alert choices and
@@ -919,12 +925,6 @@ func listenPort(addr string) string { return config.ListenPort(addr) }
 //
 // The error says how to get out, because the operator reading it has a server
 // that will not start: docs/CONFIGURATION.md, "The data directory".
-// shellQuote single-quotes a path so a data directory with a space in it can be
-// pasted into the recovery command as written.
-func shellQuote(p string) string {
-	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
-}
-
 func bootSettings(store *db.DB, dbPath string) (db.Settings, error) {
 	s, err := store.GetSettings()
 	if err != nil {
