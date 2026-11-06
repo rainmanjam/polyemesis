@@ -653,10 +653,19 @@ internal/
   tlsx/        certificate layer: tls.Config, local CA + leaf, autocert, expiry
                introspection. Takes an already-resolved mode; knows no yaml.
   secrets/     NaCl secretbox token encryption at rest
+  redact/      the leaf that masks secrets in text, URLs and decoded JSON;
+               imports nothing of ours, so any layer can redact
+  startupenv/  the environment switches read ONCE at startup into one value
+               that is handed down; nothing else calls os.Getenv for them
   fsperm/      restricts access to the files and directories holding secrets
+  platform/    the one table of per-platform FACTS (limits, ceilings, flags,
+               capabilities) that db, routing, services, oauth, chat, automod
+               and publish used to copy between them
   oauth/       youtube.go · twitch.go · kick.go · facebook.go + PKCE + refresh,
                plus the capability matrix the UI and the docs both render
-  recording/   segment index, retention sweeper (max GB / max age), free-space guard
+  recording/   segment index, retention sweeper (max GB / max age), free-space guard;
+               recording/segname owns the segment filename, written and read
+               back in one place
   events/      in-process pub/sub the WebSocket fans out
   engine/      the orchestrator: owns ingest+relay+recorder+preview+meters,
                plus the rendition tier and the destinations that consume it.
@@ -665,6 +674,17 @@ internal/
                the primary/backup pair
   api/         chi router, REST handlers, WebSocket hub
   web/         go:embed internal/web/dist + SPA fallback
+
+  -- shared leaves (import nothing of ours, so any layer can use them)
+  mpegts/      the MPEG-TS packet layout and PAT/PMT parsing: one copy for the
+               relay, clip ring, delay line and caption injector
+  freedisk/    bytes free and total on the volume holding a path, per OS
+  backoff/     the one doubling-and-capped retry delay (MQTT, webhooks,
+               offload, analytics)
+  procname/    the names of the processes the supervisor runs: their kind and
+               the name a destination's output goes by
+  livevolume/  the spelling of a destination graph's named volume stage, which
+               routing, the engine and the supervisor must agree on
 
   -- ingest and viewer-facing edges
   srtserver/   the one-port SRT ingest: one listener serving every source,
