@@ -3845,7 +3845,7 @@ func ledgerNoteWith(regen string) string {
 		"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
 		"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
 		"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
-		"MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter " +
+		"MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter " +
 		"credential, which is a real permanent residual on the stderr path for very short " +
 		"secrets, covered only by the best-effort redact.Redact pass. Every credential this " +
 		"system mints or accepts is longer (SRT refuses a passphrase under 10, publish " +

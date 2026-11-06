@@ -48,7 +48,7 @@ const (
 // Doer is the HTTP client, narrowed so a test can count attempts without a
 // listening socket. Same shape as alerts.Doer, and deliberately a second
 // declaration rather than an import: internal/hooks must not depend on
-// internal/alerts for anything but redaction and the Snapshot type.
+// internal/alerts for anything but the Snapshot type.
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
@@ -647,7 +647,7 @@ func (d *Dispatcher) attempt(ctx context.Context, h Hook, body []byte, env Envel
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, bodySnippet))
 	// RETURNED RAW, AND THE ORDER IS THE WHOLE POINT. This used to apply
 	// redact.Redact here and leave the exact pass to the caller, which inverted
-	// the rule internal/alerts states about itself: the declared SecretSet is
+	// the rule internal/redact states about itself: the declared SecretSet is
 	// the MECHANISM and Redact is the BACKSTOP over what is left. Redact
 	// TRANSFORMS text -- RedactURL re-encodes a query string -- so a declared
 	// literal that arrived inside a URL was no longer byte-identical by the time

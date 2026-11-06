@@ -22,7 +22,7 @@
 // secret set.
 //
 // AND THE SECRET SET IS THE MECHANISM; redact.Redact IS THE BACKSTOP. That is
-// not a preference, it is what internal/alerts says about itself: "The correct
+// not a preference, it is what internal/redact says about itself: "The correct
 // reading of a Redact call is 'the declared secrets are already gone; this is
 // the best-effort pass over what is left'." TestRedactIsCalledOnlyFromTheAllowlist
 // fails the build on callers who forget it. So Recorder takes a *SecretSet built

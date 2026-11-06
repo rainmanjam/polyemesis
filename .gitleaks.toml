@@ -125,6 +125,9 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     '''rtmp-api\.facebook\.com:\d+''',
   ]
   paths = [
+    # Pre-move home of the same fixtures. Full-history scans (security.yml, --log-opts HEAD)
+    # still walk every commit that has them at this path.
+    '''internal/alerts/redact_test\.go''',
     '''internal/redact/redact_test\.go''',
     '''internal/alerts/event_redact_test\.go''',
     '''internal/oauth/facebook_test\.go''',
@@ -163,9 +166,9 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     # slog record can carry one and asserts none survives to the export.
     #
     # Those plants have to LOOK like the real thing. A value shorter than
-    # alerts.MinSecretLen is refused by the secret set outright, and one that
+    # redact.MinSecretLen is refused by the secret set outright, and one that
     # does not resemble a platform key would not exercise the residual
-    # alerts.Redact pass either -- so a fixture gitleaks ignores would be a
+    # redact.Redact pass either -- so a fixture gitleaks ignores would be a
     # fixture that proves less. It is correct for the scanner to flag these.
     #
     # Same AND condition and the same reasoning as the blocks above: the values
