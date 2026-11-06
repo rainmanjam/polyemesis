@@ -54,6 +54,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
@@ -163,7 +164,7 @@ func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
+		cfg.Sleep = backoff.SleepCtx
 	}
 	return &RumbleAdapter{
 		cfg:    cfg,

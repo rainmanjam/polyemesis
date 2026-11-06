@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
@@ -87,7 +88,7 @@ func NewFacebook(cfg FacebookConfig) (*FacebookAdapter, error) {
 		cfg.Now = time.Now
 	}
 	if cfg.Sleep == nil {
-		cfg.Sleep = sleepCtx
+		cfg.Sleep = backoff.SleepCtx
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = fbPollInterval

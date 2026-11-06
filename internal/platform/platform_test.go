@@ -192,3 +192,18 @@ func TestEveryRowHasAShortName(t *testing.T) {
 		}
 	}
 }
+
+func TestChatOverlaysAreOrderedAndUnique(t *testing.T) {
+	seen := map[int]string{}
+	var enums []string
+	for _, r := range ChatOverlays() {
+		if prev, dup := seen[r.Chat.OverlayOrder]; dup {
+			t.Errorf("%s and %s share overlay order %d", prev, r.Enum, r.Chat.OverlayOrder)
+		}
+		seen[r.Chat.OverlayOrder] = r.Enum
+		enums = append(enums, r.Enum)
+	}
+	if len(enums) == 0 || enums[0] != "twitch" {
+		t.Errorf("overlay platforms = %v, want twitch first", enums)
+	}
+}

@@ -255,13 +255,20 @@ const (
 // and waits for it. For the callers that need their own pipes (capped buffers,
 // say) and so cannot use Output, which is every other way a probe is run.
 //
+// A command with no WaitDelay of its own gets KillGrace, so every caller that
+// goes through here is bounded the way Exec is: a cancelled context ends the
+// child and the wait, not just the signal.
+//
 // Discharged where Wait returns, which is the only moment the pid is genuinely
 // gone; a child that ignores the kill is still very much a child.
 func RunEnrolled(c *exec.Cmd, kind string) error {
+	if c.WaitDelay == 0 {
+		c.WaitDelay = KillGrace
+	}
 	if err := c.Start(); err != nil {
 		return err
 	}
-	childcensus.Enrol(c.Process.Pid, c.Args[0], kind)
+	childcensus.Enrol(c.Process.Pid, filepath.Base(c.Args[0]), kind)
 	defer childcensus.Discharge(c.Process.Pid)
 	return c.Wait()
 }

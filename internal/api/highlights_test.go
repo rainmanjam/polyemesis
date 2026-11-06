@@ -314,7 +314,7 @@ func TestClipTemplatesAreSavedValidatedAndListedWithTheEditorsOptions(t *testing
 // here against a fake provider, never a real one.
 func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	_, _, srv, _ := highlightFixture(t)
-	model := HighlightModel(srv.store, srv.box, automod.NewBudget(), nil)
+	model := highlights.ModelFrom(srv.store, srv.box, automod.NewBudget(), nil)
 	if c, why := model(); c != nil || !strings.Contains(why, "highlight scoring") {
 		t.Errorf("default settings: %v %q", c != nil, why)
 	}

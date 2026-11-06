@@ -110,7 +110,7 @@ type tikTokUser struct {
 
 func (t *TikTok) Account(ctx context.Context, clientID, accessToken string) (*Account, error) {
 	var u tikTokUser
-	if err := getJSON(ctx, t.apiEndpoint()+"/v2/user/info/?fields=open_id,display_name", accessToken, nil, &u); err != nil {
+	if err := t.getJSON(ctx, t.apiEndpoint()+"/v2/user/info/?fields=open_id,display_name", accessToken, nil, &u); err != nil {
 		return nil, err
 	}
 	if c := u.Error.Code; c != "" && c != "ok" {

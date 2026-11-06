@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -222,7 +223,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		flushKick:  make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
-	n.sleep = sleepCtx
+	n.sleep = backoff.SleepCtx
 	for _, o := range opts {
 		o(n)
 	}
@@ -483,7 +484,7 @@ func (n *Notifier) Send(ctx context.Context, r Rule, ev Event) error {
 	// FALSE: post hands back the raw *url.Error, whose text is the full rule
 	// URL, secret path and all. The route is admin-only, which lowers the
 	// severity and does not make an untrue comment acceptable.
-	return errors.New(n.endpointSecrets(rule).Scrub(ClientErrorText(err)))
+	return errors.New(n.endpointSecrets(rule).Scrub(redact.ClientErrorText(err)))
 }
 
 // HasRules reports whether anybody is listening.
@@ -590,7 +591,7 @@ func (n *Notifier) currentRules() []Rule {
 func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 	err := n.post(ctx, d)
 	if err != nil {
-		text := n.endpointSecrets(d.Rule).Scrub(ClientErrorText(err))
+		text := n.endpointSecrets(d.Rule).Scrub(redact.ClientErrorText(err))
 		n.log.Warn("alert delivery failed",
 			"rule", d.Rule.Name, "url", d.Rule.RedactedURL(), "err", text)
 		n.bump(func(s *Stats) { s.Failed++; s.LastError = text })
@@ -606,7 +607,7 @@ func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 // FFmpeg-vocabulary denylist exist for operator-typed expert arguments, and a
 // webhook path shorter than MinSecretLen is not a credential anybody minted.
 func (n *Notifier) endpointSecrets(r Rule) *redact.SecretSet {
-	return redact.NewSecretSet(nil, EndpointSecrets(r.URL)...)
+	return redact.NewSecretSet(nil, redact.EndpointSecrets(r.URL)...)
 }
 
 // SetRetry changes the retry budget on a running Notifier.
@@ -734,17 +735,7 @@ func (n *Notifier) attempt(ctx context.Context, r Rule, body []byte, contentType
 // endpoint at a rate its own MinInterval already bounds, so there is no
 // thundering herd to spread out, and a deterministic schedule is testable.
 func (n *Notifier) backoffFor(attempt int) time.Duration {
-	d := n.backoff
-	for i := 1; i < attempt; i++ {
-		d *= 2
-		if d >= n.maxBackoff {
-			return n.maxBackoff
-		}
-	}
-	if d > n.maxBackoff {
-		return n.maxBackoff
-	}
-	return d
+	return backoff.Exponential(attempt-1, n.backoff, n.maxBackoff)
 }
 
 // retryAfter honours the header when it is a sane number of seconds.
@@ -776,14 +767,3 @@ func (e statusError) Error() string {
 func (e statusError) Status() int { return int(e) }
 
 func errStatus(code int) error { return statusError(code) }
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}

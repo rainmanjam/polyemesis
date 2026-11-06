@@ -39,6 +39,12 @@ var spawnersThatNeedNoCensus = map[string]string{
 		"the startup capability probes (version, encoders, filters, GPU): each collects " +
 		"its output and returns, is bounded by a context deadline, and cannot outlive " +
 		"the call that made it, let alone the process",
+	"internal/clipper": "builds the *exec.Cmd (low priority where the OS needs telling) and " +
+		"runs it through ffmpeg.RunEnrolled, which enrols it in the census for as long as " +
+		"it runs and bounds the wait with KillGrace; the Enrol is in internal/ffmpeg",
+	"internal/highlights": "builds the *exec.Cmd (low priority where the OS needs telling) " +
+		"and runs it through ffmpeg.RunEnrolled, which enrols it in the census for as long " +
+		"as it runs and bounds the wait with KillGrace; the Enrol is in internal/ffmpeg",
 	"internal/api": "two short output-collected runs -- the playout poster frame and the " +
 		"expert dry-run, the latter bounded by both a context deadline and WaitDelay. " +
 		"Neither can survive the handler, so neither can survive the shutdown",

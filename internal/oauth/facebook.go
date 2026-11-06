@@ -1446,7 +1446,7 @@ func (f *Facebook) get(ctx context.Context, accessToken, path string, q url.Valu
 	if len(q) > 0 {
 		endpoint += "?" + q.Encode()
 	}
-	return requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
+	return f.requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
 }
 
 // post sends its parameters in the query string, which is the form Meta's own
@@ -1457,7 +1457,7 @@ func (f *Facebook) post(ctx context.Context, accessToken, path string, params ur
 	if len(params) > 0 {
 		endpoint += "?" + params.Encode()
 	}
-	return requestJSON(ctx, http.MethodPost, endpoint, accessToken, nil, nil, out)
+	return f.requestJSON(ctx, http.MethodPost, endpoint, accessToken, nil, nil, out)
 }
 
 // graphError is Meta's error envelope. Every field here is server-authored

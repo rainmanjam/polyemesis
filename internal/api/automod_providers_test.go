@@ -199,7 +199,7 @@ func TestTheMatrixServesThePresetTable(t *testing.T) {
 func TestTheDefaultCheckerSettingsMatchThePresetTable(t *testing.T) {
 	d := db.DefaultSettings().Automod
 	for _, m := range []db.AutomodModel{d.Model, d.Secondary} {
-		p := automod.ResolvePreset(protocolOf(m), m.Preset)
+		p := automod.ResolvePreset(automod.ProtocolOf(m), m.Preset)
 		if p.ID != m.Preset || p.Endpoint != m.Endpoint || p.Model != m.Model {
 			t.Errorf("default %+v disagrees with preset %+v", m, p)
 		}
@@ -207,7 +207,7 @@ func TestTheDefaultCheckerSettingsMatchThePresetTable(t *testing.T) {
 	if string(automod.ProtocolJev) != db.AutomodProtocolJev || string(automod.ProtocolOpenAI) != db.AutomodProtocolOpenAI {
 		t.Fatal("db's protocol names drifted from automod's")
 	}
-	if protocolOf(d.Model) != automod.ProtocolJev {
+	if automod.ProtocolOf(d.Model) != automod.ProtocolJev {
 		t.Fatal("the primary does not default to Jev")
 	}
 }

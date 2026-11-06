@@ -80,7 +80,7 @@ func (y *YouTube) CreateVerticalStream(ctx context.Context, accessToken, label s
 			"frameRate":     "variable",
 		},
 	}
-	err := postJSON(ctx,
+	err := y.postJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -130,7 +130,7 @@ func (y *YouTube) VerticalStreamHealth(ctx context.Context, accessToken, streamI
 			} `json:"status"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx, y.apiEndpoint()+ytStreamsPath+"?part=id,status&id="+url.QueryEscape(id),
+	err := y.getJSON(ctx, y.apiEndpoint()+ytStreamsPath+"?part=id,status&id="+url.QueryEscape(id),
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err

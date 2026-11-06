@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // Style is how an overlay is drawn. Every value ends up in CSS on a page that
@@ -53,11 +53,15 @@ var PresetNames = []string{"classic", "bubble", "outline", "compact"}
 
 var fonts = map[string]bool{"sans": true, "serif": true, "mono": true, "rounded": true}
 
-// Platforms an overlay can filter on: the ones chat adapters exist for.
-var Platforms = []string{
-	string(db.PlatformTwitch), string(db.PlatformYouTube), string(db.PlatformKick),
-	string(db.PlatformFacebook), string(db.PlatformRumble), string(db.PlatformX),
-}
+// Platforms an overlay can filter on: the ones chat adapters exist for, read
+// from the platform registry so a new chat platform needs no edit here.
+var Platforms = func() []string {
+	var out []string
+	for _, r := range platform.ChatOverlays() {
+		out = append(out, r.Enum)
+	}
+	return out
+}()
 
 // Bounds.
 const (

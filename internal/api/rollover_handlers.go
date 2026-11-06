@@ -120,7 +120,7 @@ func (s *Server) rolloverCoordinatorOrNew() *rolloverCoordinator {
 	if s.rollover != nil {
 		return s.rollover
 	}
-	return newRolloverCoordinator(s.log, s.store, rolloverHost{})
+	return newRolloverCoordinator(s.log, s.store, rolloverHost{youtube: youtubeRolloverFrom(s.providers)})
 }
 
 // rolloverSettingsBody is what the settings screen sends. Every field is optional on the wire and validated below.

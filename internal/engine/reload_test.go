@@ -71,6 +71,8 @@ func TestEveryReloadRuleNamesAFunctionThatExists(t *testing.T) {
 		filepath.Join("..", "mqtt"),
 		filepath.Join("..", "jobs"),
 		filepath.Join("..", "chat"),
+		// ModelConfig, which a highlight scan reads for its scoring switch.
+		filepath.Join("..", "highlights"),
 		// The display time zone is delivered by logtz.Set -- from the settings
 		// handler on a save, and from main at boot. It is a delivery package
 		// like the others here, so a rule naming it has to be checkable.

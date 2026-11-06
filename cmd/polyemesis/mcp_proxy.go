@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
 // `polyemesis mcp` is a stdio-to-HTTP relay for the MCP server (#12).
@@ -108,7 +109,7 @@ func mcpEndpointURL(raw string) (string, error) {
 	switch u.Scheme {
 	case "https":
 	case "http":
-		if !isLoopbackHost(u.Hostname()) {
+		if !netguard.IsLoopbackHost(u.Hostname()) {
 			return "", errors.New("refusing http:// to a remote host: the API token would cross the network in clear; use https://")
 		}
 	default:
@@ -173,7 +174,7 @@ func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("refusing to send the API token to %s://%s; it is only for %s://%s",
 			r.URL.Scheme, r.URL.Host, t.scheme, t.host)
 	}
-	if r.URL.Scheme == "http" && !isLoopbackHost(r.URL.Hostname()) {
+	if r.URL.Scheme == "http" && !netguard.IsLoopbackHost(r.URL.Hostname()) {
 		return nil, errors.New("refusing to send the API token over plain http to a remote host")
 	}
 	r = r.Clone(r.Context())
@@ -212,14 +213,6 @@ func serverMessage(b []byte) string {
 		return oneLine(body.Error)
 	}
 	return oneLine(strings.TrimSpace(string(b)))
-}
-
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // relayMCP pumps messages between stdio and the server until stdin closes.

@@ -5,10 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rainmanjam/polyemesis/internal/childcensus"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -368,10 +367,11 @@ func RunLowPriority(ctx context.Context, name string, args []string) ([]byte, er
 	return runChild(ctx, name, args, true)
 }
 
-// runChild starts one FFmpeg-family child, collects its output, and keeps it
-// in the process census for as long as it runs: a cut or a vertical encode is
-// minutes of work that could outlive a shutdown, and a child nobody enrolled
-// is invisible to the shutdown report (#717).
+// runChild runs one FFmpeg-family child to completion and collects its output.
+// internal/ffmpeg owns how a background child is spawned: enrolled in the
+// process census for as long as it runs (a cut or a vertical encode is minutes
+// of work that could outlive a shutdown, #717) and bounded by KillGrace, so a
+// cancelled job returns instead of waiting on pipes a grandchild still holds.
 func runChild(ctx context.Context, name string, args []string, lower bool) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if lower {
@@ -379,13 +379,7 @@ func runChild(ctx context.Context, name string, args []string, lower bool) ([]by
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	childcensus.Enrol(cmd.Process.Pid, filepath.Base(name), "clipper")
-	err := cmd.Wait()
-	childcensus.Discharge(cmd.Process.Pid)
-	if err != nil {
+	if err := ffmpeg.RunEnrolled(cmd, "clipper"); err != nil {
 		return out.Bytes(), fmt.Errorf("%w: %s", err, ffmpegFailure(out.String()))
 	}
 	return out.Bytes(), nil

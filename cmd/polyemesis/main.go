@@ -479,15 +479,7 @@ func run(h *hooks) error {
 		Env: env,
 	})
 	// The publish worker refreshes tokens through the server's own path.
-	pp.publishTokens.Set(srv.PublishTokens())
-	// FIRST, before any loop below can call YouTube: every YouTube Data API
-	// call internal/oauth makes -- title push, compliance, the lifecycle and
-	// its startup reconciliation, preannounce, recurring, rollover -- is
-	// charged to the configured client's one shared allowance (bound in
-	// api.New), the one chat paces against. A startup sweep that ran first
-	// would spend quota nobody counted. TestTheQuotaMeterIsInstalledBefore-
-	// AnyLoopCanCallYouTube holds the order.
-	api.InstallYouTubeMeter(srv)
+	pp.publishTokens.Set(srv.PublishTokens(), srv.YouTubeMeter())
 	// The stored settings, applied the way a save applies them: the log's zone,
 	// chat retention, the YouTube allowance, automod and alert delivery. A
 	// boot that skipped one would revert an operator's choice at the first
@@ -919,6 +911,12 @@ func redirectHost(cfg config.Config, requestHost string) string {
 // and the warning would then describe a port the redirect does not use.
 func listenPort(addr string) string { return config.ListenPort(addr) }
 
+// shellQuote single-quotes a path so a data directory with a space in it can be
+// pasted into the recovery command as written.
+func shellQuote(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
 // bootSettings is the one read of the stored settings at startup. A row that
 // cannot be read stops the boot: the alternative, built-in defaults, would
 // shorten chat retention, drop the operator's automod and alert choices and
@@ -926,12 +924,6 @@ func listenPort(addr string) string { return config.ListenPort(addr) }
 //
 // The error says how to get out, because the operator reading it has a server
 // that will not start: docs/CONFIGURATION.md, "The data directory".
-// shellQuote single-quotes a path so a data directory with a space in it can be
-// pasted into the recovery command as written.
-func shellQuote(p string) string {
-	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
-}
-
 func bootSettings(store *db.DB, dbPath string) (db.Settings, error) {
 	s, err := store.GetSettings()
 	if err != nil {

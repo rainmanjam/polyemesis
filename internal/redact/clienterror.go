@@ -1,11 +1,9 @@
-package alerts
+package redact
 
 import (
 	"errors"
 	"net/url"
 	"strings"
-
-	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // ClientErrorText renders an outbound HTTP error for a place an operator will
@@ -61,10 +59,10 @@ func ClientErrorText(err error) string {
 	// error names the target, for one), and that copy is not covered by
 	// rebuilding the wrapper. Replaced by value, which needs no grammar.
 	if ue.URL != "" {
-		inner = strings.ReplaceAll(inner, ue.URL, redact.RedactWebhookURL(ue.URL))
+		inner = strings.ReplaceAll(inner, ue.URL, RedactWebhookURL(ue.URL))
 	}
 
-	out := redact.RedactWebhookURL(ue.URL)
+	out := RedactWebhookURL(ue.URL)
 	if ue.Op != "" {
 		out = ue.Op + " " + out
 	}

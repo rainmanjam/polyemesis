@@ -85,7 +85,7 @@ func (s *Server) clipVertical(tl clipTimeline, body clipRequestBody) (*clipper.V
 	if err != nil {
 		return nil, err
 	}
-	cues, err := clipper.CaptionCues(cut.Segments(), ClipTranscriptSource(s.store),
+	cues, err := clipper.CaptionCues(cut.Segments(), clipper.StoreTranscript(s.store),
 		time.Duration(body.InMS)*time.Millisecond, time.Duration(body.OutMS)*time.Millisecond, tracks)
 	if err != nil {
 		return nil, err
@@ -241,27 +241,6 @@ func (s *Server) handleDeleteClipTemplate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// ClipTranscriptSource reads a recording's transcript as caption lines. Exported
-// because the clip worker, wired in cmd/polyemesis, reads the words at run time
-// through the same adapter the editor plans with.
-func ClipTranscriptSource(store *db.DB) clipper.TranscriptSource {
-	return func(recordingID int64) ([]clipper.TranscriptLine, error) {
-		tr, err := store.GetTranscript(recordingID)
-		if errors.Is(err, db.ErrNotFound) || (err == nil && tr == nil) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		merged := tr.Merged()
-		out := make([]clipper.TranscriptLine, 0, len(merged))
-		for _, seg := range merged {
-			out = append(out, clipper.TranscriptLine{Track: seg.Track, StartMS: seg.StartMS, EndMS: seg.EndMS, Text: seg.Text})
-		}
-		return out, nil
-	}
 }
 
 // validateTemplate checks a template WHOLE: the layout, and the caption style

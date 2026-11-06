@@ -521,7 +521,7 @@ func ValidUploadName(name string) bool {
 // deduplication for us: submitting a playlist whose second and fifth items are
 // the same file produces one job, not two, because both submissions carry the
 // same kind and the same target.
-func NormaliseTarget(upload string) string { return "upload:" + upload }
+func NormaliseTarget(upload string) string { return jobs.UploadTarget(upload) }
 
 // --------------------------------------------------------------- the processor
 

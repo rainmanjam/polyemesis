@@ -63,7 +63,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -610,7 +609,7 @@ func transportTimeout() {
 	emit("timeoutErrHasSecret", strings.Contains(rec.Error, pathSecret))
 	// The diagnostic has to SURVIVE the scrub. Blanking the whole error would
 	// pass a "no secret" check and turn every support conversation into "it says
-	// delivery failed" -- which is the trade alerts.ClientErrorText's own doc
+	// delivery failed" -- which is the trade redact.ClientErrorText's own doc
 	// comment refuses to make.
 	emit("timeoutErrNamesHost", strings.Contains(rec.Error, hostOf(endpoint)))
 
@@ -898,7 +897,7 @@ func remote() {
 		text += " " + err.Error()
 	}
 	disclosed := false
-	for _, lit := range alerts.EndpointSecrets(raw) {
+	for _, lit := range redact.EndpointSecrets(raw) {
 		if len(lit) >= redact.MinSecretLen && strings.Contains(text, lit) {
 			disclosed = true
 		}

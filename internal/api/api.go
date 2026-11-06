@@ -877,6 +877,11 @@ type Options struct {
 	// five function-pointer fields on Server no longer exist. See Server's own
 	// providers field.
 	Providers oauth.Set
+	// ProviderOptions are applied after the server's own (X gate, quota meter)
+	// when Providers is unset. A test aims the metered set at a stub with
+	// oauth.WithBaseURL and oauth.WithMeteredHosts and still exercises the
+	// production wiring.
+	ProviderOptions []oauth.ProviderOption
 }
 
 // New creates the server.
@@ -885,7 +890,13 @@ func New(o Options) *Server {
 	// One provider set for the server's life, carrying X's Livestream gate from
 	// the startup environment. A test that wants other hosts hands its own.
 	if !o.Providers.Configured() {
-		o.Providers = oauth.NewSet(oauth.WithXLivestream(o.Env.XLivestream))
+		// Built metered: every YouTube Data API call these providers make is
+		// charged to the server's one allowance, from the first call. s is
+		// assigned below, before the set can be used.
+		o.Providers = oauth.NewSet(append([]oauth.ProviderOption{
+			oauth.WithXLivestream(o.Env.XLivestream),
+			oauth.WithYouTubeMeter(func(cost int) { s.ytQuota().Spend(cost) }),
+		}, o.ProviderOptions...)...)
 	}
 	// Config.Validate has already refused a malformed trustedProxies, so an
 	// error here means a caller skipped it; loopback-only is the safe reading.
@@ -1003,6 +1014,7 @@ func New(o Options) *Server {
 			announce:    s.publishRollover,
 			chatNotice:  s.sendRolloverNotice,
 			twitchStart: s.twitchStreamStart,
+			youtube:     youtubeRolloverFrom(o.Providers),
 		})
 	}
 	if s.obs != nil {

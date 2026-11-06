@@ -34,7 +34,7 @@ func TestTheUIsRecordingJobKindsAreTheOnesTheServerBuilds(t *testing.T) {
 	slices.Sort(ui)
 
 	server := []string{string(transcribe.KindTranscribe), string(media.KindProxy),
-		string(media.KindThumbnails), string(media.KindArchive)}
+		string(media.KindThumbnails)}
 	slices.Sort(server)
 	if !slices.Equal(ui, server) {
 		t.Errorf("RecordingJobKind = %v, server builds %v", ui, server)

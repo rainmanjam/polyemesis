@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -230,7 +229,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 	cutter := newCutter(log, tools, gov)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
 	reg(clipper.JobKind, clipper.Register(q, clipper.NewWorker(cutter, resolve,
-		clipper.WithTranscript(api.ClipTranscriptSource(store)),
+		clipper.WithTranscript(clipper.StoreTranscript(store)),
 		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
 		clipper.WithCaptionBurn(tools.HasFilter("subtitles")))))
 
@@ -554,7 +553,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 		// The same adapter the clip worker reads captions through: a missing
 		// transcript is none, and a store that cannot be read is an error.
 		Transcript: func(recordingID int64) ([]highlights.Line, error) {
-			lines, err := api.ClipTranscriptSource(store)(recordingID)
+			lines, err := clipper.StoreTranscript(store)(recordingID)
 			if err != nil {
 				return nil, err
 			}
@@ -576,7 +575,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 			}
 			return store.ReplacePendingHighlights(recordingID, rows)
 		},
-		Model: api.HighlightModel(store, box, automod.NewBudget(), log),
+		Model: highlights.ModelFrom(store, box, automod.NewBudget(), log),
 	}
 }
 
@@ -627,7 +626,7 @@ func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *sec
 		Tokens: tokens.Source(),
 		Clips:  publish.ClipsFrom(store, exportDir),
 		Adapters: map[string]publish.Adapter{
-			publish.PlatformYouTube: &publish.YouTube{},
+			publish.PlatformYouTube: &publish.YouTube{Meter: tokens.Charge},
 			publish.PlatformTikTok:  &publish.TikTok{},
 			publish.PlatformX:       &publish.X{Enabled: gates.XPublish},
 		},

@@ -170,16 +170,6 @@ func slotSettings(a db.AutomodSettings, slot automod.Slot) db.AutomodModel {
 	return a.Model
 }
 
-// protocolOf is a stored block's protocol. Anything but "jev" is the
-// OpenAI-compatible connector, which is what an empty protocol has always
-// meant (db.AutomodSettings.UnmarshalJSON).
-func protocolOf(m db.AutomodModel) automod.Protocol {
-	if m.Protocol == db.AutomodProtocolJev {
-		return automod.ProtocolJev
-	}
-	return automod.ProtocolOpenAI
-}
-
 // checkerFingerprint identifies a checker's CONNECTION: protocol, preset,
 // endpoint and model. A Test pass is bound to it, so changing any of the four
 // -- pointing a tested checker somewhere new -- needs a new test. The key is
@@ -187,7 +177,7 @@ func protocolOf(m db.AutomodModel) automod.Protocol {
 // no digest of a credential is ever stored.
 func checkerFingerprint(m db.AutomodModel) string {
 	h := sha256.New()
-	for _, part := range []string{string(protocolOf(m)), m.Preset, strings.TrimSpace(m.Endpoint), strings.TrimSpace(m.Model)} {
+	for _, part := range []string{string(automod.ProtocolOf(m)), m.Preset, strings.TrimSpace(m.Endpoint), strings.TrimSpace(m.Model)} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
 	}
@@ -252,8 +242,8 @@ func automodProviderProblems(a db.AutomodSettings) error {
 			continue
 		}
 		p, ok := automod.PresetByID(m.Preset)
-		if !ok || p.Protocol != protocolOf(m) {
-			probs = append(probs, fmt.Sprintf("%s preset %q is not a %s preset", slot, m.Preset, protocolOf(m)))
+		if !ok || p.Protocol != automod.ProtocolOf(m) {
+			probs = append(probs, fmt.Sprintf("%s preset %q is not a %s preset", slot, m.Preset, automod.ProtocolOf(m)))
 		}
 	}
 	keys := make([]string, 0, len(a.Model.CategoryActions))
@@ -481,112 +471,6 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // one rule pattern must still serve chat, still flag, and still run the history
 // detectors — refusing to moderate at all because one regex is malformed is the
 // wrong trade in both directions.
-// modelConfigFor turns one checker's stored model settings into the engine's
-// config. conn is the checker's own block -- endpoint, model, budget, timeout,
-// floor, preset -- and shared is the primary's, which carries the policy both
-// checkers apply: the Instruction, the legacy Action, TimeoutForBan and the
-// category table.
-//
-// EXTRACTED SO IT CAN BE TESTED WITHOUT A STORE, because two fields here were
-// silently not wired and nothing could see it. The stored shape and the
-// engine's are deliberately different -- see matrixFromSettings for the same
-// reasoning -- and that gap is exactly where a field gets forgotten.
-//
-// THE TWO TIMEOUTS ARE NOT THE SAME TIMEOUT, and conflating them is what went
-// wrong. Model.TimeoutSeconds is how long to wait for the model to ANSWER;
-// Model.TimeoutForBan is how long a viewer the model flags stays timed out.
-// Only the first was applied, so every model-decided timeout ran at the
-// built-in default and the operator's configured duration did nothing --
-// while the reload table in internal/engine/reload.go classified timeoutForBan as ClassLive
-// through this function, which is a written promise that saving it takes
-// effect.
-func modelConfigFor(conn, shared db.AutomodModel) (automod.ModelConfig, error) {
-	var confidenceProblem error
-	cfg := automod.DefaultModelConfig()
-	cfg.Enabled = true
-	cfg.Endpoint = conn.Endpoint
-	cfg.Model = conn.Model
-	cfg.MaxCallsPerHour = conn.MaxCallsPerHour
-	// The preset's wire details, from the server's table by ID -- never from
-	// the document, so a client cannot unlock a local preset's flag-only
-	// lock or send a JSON mode the preset does not have.
-	preset := automod.ResolvePreset(automod.ProtocolOpenAI, conn.Preset)
-	cfg.Preset = preset.ID
-	cfg.JSONMode = preset.JSONMode
-	cfg.ReasoningEffort = preset.ReasoningEffort
-	cfg.FlagOnly = preset.Local
-	cfg.CategoryActions = categoryActionsFrom(shared)
-	// PARSED, NOT COPIED, and the compiler now insists. This line used to be a
-	// bare assignment sitting directly above a neighbour that DID carry a
-	// `> 0` guard -- the hazard understood on one line and not the one above
-	// it. A stored 0 removed the confidence floor entirely and every model
-	// opinion acted; a stored 80, from reading the scale as a percentage, sat
-	// above every verdict the model can return and silently retired the
-	// checker. Out of range keeps DefaultModelConfig's 0.8, which is a floor
-	// that works, rather than either failure.
-	if c, err := automod.ParseConfidence(conn.MinConfidence); err == nil {
-		cfg.MinConfidence = c
-	} else {
-		confidenceProblem = err
-	}
-	cfg.Instruction = shared.Instruction
-	if conn.TimeoutSeconds > 0 {
-		cfg.Timeout = time.Duration(conn.TimeoutSeconds) * time.Second
-	}
-	// Left at DefaultModelConfig's value when unset rather than zeroed: zero is
-	// a PERMANENT ban at every adapter, which is the same trap the rule path
-	// carried until it was fixed alongside this.
-	if shared.TimeoutForBan > 0 {
-		cfg.TimeoutSeconds = shared.TimeoutForBan
-	}
-	if automod.KnownActions(automod.Action(shared.Action)) {
-		cfg.Action = automod.Action(shared.Action)
-	}
-	return cfg, confidenceProblem
-}
-
-// jevConfigFor is modelConfigFor for a Jev-protocol checker. The same split
-// between the checker's own connection and the shared policy, read through
-// modelConfigFor so the two connectors cannot come to different conclusions
-// about a floor, a timeout or an action.
-func jevConfigFor(conn, shared db.AutomodModel) (automod.JevConfig, error) {
-	m, err := modelConfigFor(conn, shared)
-	preset := automod.ResolvePreset(automod.ProtocolJev, conn.Preset)
-	return automod.JevConfig{
-		Enabled:         true,
-		Endpoint:        m.Endpoint,
-		Model:           m.Model,
-		Timeout:         m.Timeout,
-		MaxCallsPerHour: m.MaxCallsPerHour,
-		Action:          m.Action,
-		TimeoutSeconds:  m.TimeoutSeconds,
-		MinConfidence:   m.MinConfidence,
-		Instruction:     m.Instruction,
-		Preset:          preset.ID,
-		Compact:         preset.Compact,
-		FlagOnly:        preset.Local,
-		CategoryActions: m.CategoryActions,
-	}, err
-}
-
-// categoryActionsFrom parses the stored table, dropping anything this build
-// does not recognise rather than guessing at it. The settings handler refuses
-// such entries on save (automodProviderProblems); this is for a blob written
-// by a newer version.
-func categoryActionsFrom(shared db.AutomodModel) map[automod.Category]automod.Action {
-	if len(shared.CategoryActions) == 0 {
-		return nil
-	}
-	out := map[automod.Category]automod.Action{}
-	for k, v := range shared.CategoryActions {
-		c, ok := automod.ParseModelCategory(k)
-		if ok && automod.KnownActions(automod.Action(v)) {
-			out[c] = automod.Action(v)
-		}
-	}
-	return out
-}
-
 // buildChecker is one slot's connector, or nil when it is switched off.
 func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
 	slot automod.Slot, budget *automod.Budget) automod.ModelChecker {
@@ -616,15 +500,15 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 // with a save moving the endpoint in between -- cannot pair the old key with
 // the new address: the call is refused instead.
 func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
-	if protocolOf(conn) == automod.ProtocolJev {
-		cfg, err := jevConfigFor(conn, shared)
+	if automod.ProtocolOf(conn) == automod.ProtocolJev {
+		cfg, err := automod.JevConfigFor(conn, shared)
 		if err != nil && onFloorErr != nil {
 			onFloorErr(err)
 		}
 		cfg.APIKey, cfg.KeyBinding = key, binding
 		return automod.NewJev(cfg, budget)
 	}
-	cfg, err := modelConfigFor(conn, shared)
+	cfg, err := automod.ModelConfigFor(conn, shared)
 	if err != nil && onFloorErr != nil {
 		onFloorErr(err)
 	}

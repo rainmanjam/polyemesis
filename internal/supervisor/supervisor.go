@@ -41,6 +41,12 @@ const (
 	StateFailed       State = "failed"
 )
 
+// States is every lifecycle state, in lifecycle order. A consumer that emits a
+// series per state ranges over this instead of copying the list.
+func States() []State {
+	return []State{StateStopped, StateStarting, StateRunning, StateReconnecting, StateFailed}
+}
+
 const (
 	defaultMinBackoff = time.Second
 	defaultMaxBackoff = 30 * time.Second

@@ -87,7 +87,7 @@ func (y *YouTube) SetVODPrivacy(ctx context.Context, accessToken, videoID string
 		"id":     videoID,
 		"status": map[string]any{"privacyStatus": string(privacy)},
 	}
-	if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+ytVideosPath+"?part=status",
+	if err := y.requestJSON(ctx, http.MethodPut, y.apiEndpoint()+ytVideosPath+"?part=status",
 		accessToken, body, nil, nil); err != nil {
 		// youtube.upload is NOT accepted by videos.update, unlike thumbnails.set
 		// -- so an account whose grant is narrower than the youtube scope this
@@ -191,7 +191,7 @@ func (y *YouTube) AddVODToPlaylist(ctx context.Context, accessToken, playlistID,
 			ID string `json:"id"`
 		}
 		res.Attempts = attempt + 1
-		err := requestJSON(ctx, http.MethodPost,
+		err := y.requestJSON(ctx, http.MethodPost,
 			y.apiEndpoint()+ytPlaylistItemsPath+"?part=snippet", accessToken, body, nil, &created)
 		if err == nil {
 			res.Added, res.ItemID = true, created.ID

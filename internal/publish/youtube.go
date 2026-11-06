@@ -35,6 +35,10 @@ type YouTube struct {
 	// Base is the API origin; tests aim it at a fake server.
 	Base   string
 	Client *http.Client
+	// Meter is told the quota cost of the upload, which is billed against the
+	// same daily allowance as every other YouTube Data API call. Nil means
+	// uncounted (tests).
+	Meter func(units int)
 }
 
 // AcceptedYouTubeScopes are the scopes videos.insert documents as sufficient:
@@ -298,7 +302,9 @@ func (y *YouTube) open(ctx context.Context, r Run, total int64) (string, error) 
 	req.Header.Set("X-Upload-Content-Length", strconv.FormatInt(total, 10))
 	req.Header.Set("X-Upload-Content-Type", "video/mp4")
 	// Charged here, because videos.insert is billed when the session opens.
-	oauth.ChargeYouTubeQuota(youTubeUploadCost)
+	if y.Meter != nil {
+		y.Meter(youTubeUploadCost)
+	}
 	resp, err := y.client().Do(req)
 	if err != nil {
 		return "", netFailure(err)

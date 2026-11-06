@@ -129,7 +129,7 @@ func (y *YouTube) Account(ctx context.Context, clientID, accessToken string) (*A
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+"/channels?part=snippet&mine=true",
 		accessToken, nil, &out)
 	if err != nil {
@@ -375,7 +375,7 @@ func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLive
 		if pageToken != "" {
 			target += "&pageToken=" + url.QueryEscape(pageToken)
 		}
-		if err := getJSON(ctx, target, accessToken, nil, &list); err != nil {
+		if err := y.getJSON(ctx, target, accessToken, nil, &list); err != nil {
 			return nil, err
 		}
 		all = append(all, list.Items...)
@@ -468,7 +468,7 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string, w
 	if withCaptions {
 		part += ",contentDetails"
 	}
-	err := postJSON(ctx,
+	err := y.postJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part="+part,
 		accessToken, payload, nil, &created)
 	if err != nil {
@@ -586,7 +586,7 @@ func (y *YouTube) Stats(ctx context.Context, clientID, accessToken string) (*Liv
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx,
+	err = y.getJSON(ctx,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=id,snippet&broadcastStatus=active&broadcastType=all",
 		accessToken, nil, &broadcasts)
 	if err != nil {
@@ -626,7 +626,7 @@ func (y *YouTube) Stats(ctx context.Context, clientID, accessToken string) (*Liv
 			} `json:"liveStreamingDetails"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx,
+	err = y.getJSON(ctx,
 		y.apiEndpoint()+ytVideosPath+"?part=liveStreamingDetails&id="+url.QueryEscape(id),
 		accessToken, nil, &videos)
 	if err != nil {

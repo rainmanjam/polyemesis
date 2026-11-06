@@ -660,39 +660,58 @@ func TestAPartialTickHasNoTotalOnTheScrapeOrMQTT(t *testing.T) {
 }
 
 // TestTitlePushAndGoLiveChargeTheServersAllowance (R13): through the same
-// helper main uses, a title push and a go-live transition made by the oauth
+// meter api.New builds into the provider set, a title push and a go-live transition made by the oauth
 // providers are charged to this server's one YouTube allowance.
 func TestTitlePushAndGoLiveChargeTheServersAllowance(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/liveBroadcasts" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"title":"Old","channelId":"ch"},"status":{"lifeCycleStatus":"testing"}}]}`))
+			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"title":"Old","channelId":"ch","actualStartTime":"2026-11-06T10:00:00Z"},"status":{"lifeCycleStatus":"testing"}}]}`))
 		default:
 			_, _ = w.Write([]byte(`{"id":"bc1","status":{"lifeCycleStatus":"live"},"snippet":{"title":"New"}}`))
 		}
 	}))
 	t.Cleanup(stub.Close)
-	s, _, store := testServer(t, config.Config{})
+	u, _ := url.Parse(stub.URL)
+	// No Providers: api.New builds the set itself, and that is the wiring under
+	// test. The options only aim it at the stub.
+	s, _, store := testServerWith(t, Options{ProviderOptions: []oauth.ProviderOption{
+		oauth.WithBaseURL(stub.URL), oauth.WithMeteredHosts(u.Host)}})
 	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "client-pass"); err != nil {
 		t.Fatal(err)
 	}
-	u, _ := url.Parse(stub.URL)
-	InstallYouTubeMeter(s, u.Host)
-	t.Cleanup(func() { oauth.SetYouTubeMeter(nil) })
-
-	y := oauth.NewYouTube(oauth.WithBaseURL(stub.URL))
 	q := s.ytQuota()
-	before := q.Status().Used
-	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})
-	pushed := q.Status().Used - before
-	if pushed < 50 {
-		t.Fatalf("a title push charged %d units, want at least the 50 of its write", pushed)
+	used := func() int { return q.Status().Used }
+
+	y, ok := oauth.As[oauth.MetadataPusher](s.providers, db.PlatformYouTube)
+	if !ok {
+		t.Fatal("the server's provider set has no YouTube metadata pusher")
 	}
-	before = q.Status().Used
-	_, _ = y.TransitionBroadcast(context.Background(), "tok", "bc1", oauth.PhaseLive)
-	if went := q.Status().Used - before; went < 50 {
+	before := used()
+	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})
+	if pushed := used() - before; pushed < 50 {
+		t.Fatalf("a title push through api.New's providers charged %d units, want at least the 50 of its write", pushed)
+	}
+	lc, ok := oauth.As[oauth.BroadcastLifecycler](s.providers, db.PlatformYouTube)
+	if !ok {
+		t.Fatal("no lifecycler")
+	}
+	before = used()
+	_, _ = lc.TransitionBroadcast(context.Background(), "tok", "bc1", oauth.PhaseLive)
+	if went := used() - before; went < 50 {
 		t.Fatalf("a go-live transition charged %d units, want at least 50", went)
+	}
+	// The production rollover coordinator resolves YouTube through the same set,
+	// so the sweep's reads are counted too.
+	br, ok := s.rollover.host.youtube()
+	if !ok {
+		t.Fatal("the rollover coordinator has no YouTube provider")
+	}
+	before = used()
+	_, _ = br.RolloverSessionStart(context.Background(), "tok", "bc1")
+	if went := used() - before; went < 1 {
+		t.Fatalf("a rollover read charged %d units; the rollover coordinator is unmetered", went)
 	}
 }
 

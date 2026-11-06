@@ -96,7 +96,7 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	// produced a *url.Error quoting that string, mask and all.
 	//
 	// #160 made that proxy blind. Dispatcher.Test now returns the error through
-	// alerts.ClientErrorText, which masks the endpoint PATH on purpose --
+	// redact.ClientErrorText, which masks the endpoint PATH on purpose --
 	// because net/http's wrapper quotes the whole URL and a Slack-shaped hook
 	// keeps its entire credential there. So the masked-URL case and the
 	// real-URL case now render IDENTICALLY, both as

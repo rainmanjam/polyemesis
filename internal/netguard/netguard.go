@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -188,4 +189,17 @@ func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 		lastErr = fmt.Errorf("no addresses resolved for %s", host)
 	}
 	return nil, lastErr
+}
+
+// IsLoopbackHost reports whether plain HTTP is acceptable for this host.
+// Platforms carve out localhost precisely because there is no network hop to
+// protect, so warning about it would train an operator to ignore the warning
+// that matters. "localhost" is matched without regard to case, as a URL host
+// is.
+func IsLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

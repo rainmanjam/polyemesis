@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,7 +107,6 @@ var kindCatalogue = []jobs.KindInfo{
 	transcribe.Info,
 	media.ProxyInfo,
 	media.ThumbnailsInfo,
-	media.ArchiveInfo,
 	clipper.Info,
 	highlights.Info,
 	publish.Info,
@@ -114,8 +114,13 @@ var kindCatalogue = []jobs.KindInfo{
 	uploadverify.Info,
 }
 
+// hiddenKinds are registered, so a job already stored for one still runs to a
+// clean failure, but they are not offered: the catalogue above is what a user
+// can submit, and archive compression has no switch to turn it on yet.
+var hiddenKinds = []jobs.KindInfo{media.ArchiveInfo}
+
 func kindLabel(k jobs.Kind) string {
-	for _, c := range kindCatalogue {
+	for _, c := range slices.Concat(kindCatalogue, hiddenKinds) {
 		if c.Kind == k {
 			return c.Label
 		}

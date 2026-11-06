@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/platform"
@@ -21,35 +20,31 @@ import (
 // rollover, scheduling. None of them used to tell the pacer, so the chat poll
 // paced itself against a budget that the rest of polyemesis was quietly
 // spending. The meter charges every Data API request this package sends, at
-// the published unit costs, to whatever the server installs with
-// SetYouTubeMeter (internal/chat's shared YouTubeQuota). A caller that
+// the published unit costs, to the meter the provider set was built
+// with (WithYouTubeMeter; the server passes internal/chat's shared YouTubeQuota). A caller that
 // charged its read up front -- the audience sampler, the vertical status read
 // -- marks its context with WithQuotaCharged so the call is not counted twice.
 
 // YouTubeMeter is told the unit cost of each YouTube Data API call made.
 type YouTubeMeter func(cost int)
 
-type installedMeter struct {
-	m YouTubeMeter
-	// hosts are extra API hosts metered on every path, for a test that aims
-	// the providers at a stub. Production installs none.
-	hosts map[string]bool
+// WithYouTubeMeter hands a provider set the meter every YouTube Data API call
+// is charged to. It is a construction option rather than a package global, so
+// a provider can only be built metered or deliberately unmetered; there is no
+// moment after construction at which a call could go uncounted.
+func WithYouTubeMeter(m YouTubeMeter) ProviderOption {
+	return func(e *endpoints) { e.meter = m }
 }
 
-var youTubeMeter atomic.Pointer[installedMeter]
-
-// SetYouTubeMeter installs the meter. Nil removes it. hosts are extra hosts
-// to meter besides Google's (tests only).
-func SetYouTubeMeter(m YouTubeMeter, hosts ...string) {
-	if m == nil {
-		youTubeMeter.Store(nil)
-		return
+// WithMeteredHosts meters every request to the given extra hosts, on every
+// path, besides Google's. For a test that aims the providers at a stub.
+func WithMeteredHosts(hosts ...string) ProviderOption {
+	return func(e *endpoints) {
+		e.meterHosts = map[string]bool{}
+		for _, h := range hosts {
+			e.meterHosts[h] = true
+		}
 	}
-	im := &installedMeter{m: m, hosts: map[string]bool{}}
-	for _, h := range hosts {
-		im.hosts[h] = true
-	}
-	youTubeMeter.Store(im)
 }
 
 type quotaChargedKey struct{}
@@ -75,7 +70,7 @@ const (
 //
 // /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
 // 50, and videos.insert is 1,600. The clip publisher (internal/publish) makes
-// that call itself and charges it with ChargeYouTubeQuota.
+// that call itself and charges it through its own Meter field.
 func youTubeCost(r *http.Request) (int, bool) {
 	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
@@ -98,24 +93,15 @@ func costByMethod(method string) int {
 	return ytCostWrite
 }
 
-// ChargeYouTubeQuota spends units from the installed meter, for a YouTube call
-// made outside this package's own HTTP client (the clip upload). A missing
-// meter is a no-op.
-func ChargeYouTubeQuota(units int) {
-	if m := youTubeMeter.Load(); m != nil && units > 0 {
-		m.m(units)
-	}
-}
-
 // doRequest sends a request through the shared client, charging the meter
 // for a YouTube Data API call that was not charged by its caller.
-func doRequest(r *http.Request) (*http.Response, error) {
-	if m := youTubeMeter.Load(); m != nil {
+func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
+	if m := e.meter; m != nil {
 		if charged, _ := r.Context().Value(quotaChargedKey{}).(bool); !charged {
 			if cost, ok := youTubeCost(r); ok {
-				m.m(cost)
-			} else if m.hosts[r.URL.Host] {
-				m.m(costByMethod(r.Method))
+				m(cost)
+			} else if e.meterHosts[r.URL.Host] {
+				m(costByMethod(r.Method))
 			}
 		}
 	}

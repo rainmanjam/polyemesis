@@ -629,7 +629,7 @@ func decodeScope(raw json.RawMessage) string {
 }
 
 // getJSON performs an authenticated GET and decodes into out.
-func getJSON(ctx context.Context, endpoint, accessToken string, headers map[string]string, out any) error {
+func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, headers map[string]string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -640,7 +640,7 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -659,7 +659,7 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 	return json.Unmarshal(body, out)
 }
 
-func postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
+func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -674,7 +674,7 @@ func postJSON(ctx context.Context, endpoint, accessToken string, payload any, he
 		req.Header.Set(k, v)
 	}
 
-	resp, err := doRequest(req)
+	resp, err := e.doRequest(req)
 	if err != nil {
 		return err
 	}

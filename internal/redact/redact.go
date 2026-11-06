@@ -270,7 +270,7 @@ func splitTrailer(raw string) (string, string) {
 //
 //     Use RedactWebhookURL for that shape. Running Redact over a webhook URL,
 //     or over an error wrapping one, is a NO-OP and must never be recorded as
-//     a fix; see alerts.ClientErrorText.
+//     a fix; see ClientErrorText.
 //
 //  3. IT DOES NOT SEE JSON. `{"token":"KEY"}` is unchanged: the quotes sit
 //     between the separator and the value, so the bare-pair regex does not

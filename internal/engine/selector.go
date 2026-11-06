@@ -145,6 +145,13 @@ const (
 	sourceSlate    sourceKind = "slate"
 )
 
+// FailoverSources is every kind the selector can put on air, in the order the
+// metrics series are emitted. A consumer ranges over this instead of copying
+// the list.
+func FailoverSources() []string {
+	return []string{string(sourcePrimary), string(sourceBackup), string(sourcePlaylist), string(sourceSlate)}
+}
+
 // selector is the running tier.
 type selector struct {
 	// hub is the relay every downstream consumer reads, for its whole life.

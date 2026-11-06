@@ -92,7 +92,7 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 			} `json:"contentDetails"`
 		} `json:"items"`
 	}
-	err := getJSON(ctx,
+	err := y.getJSON(ctx,
 		y.apiEndpoint()+ytBroadcastsPath+"?part=id,snippet,status,contentDetails&id="+url.QueryEscape(id),
 		accessToken, nil, &list)
 	if err != nil {
@@ -135,7 +135,7 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 			} `json:"status"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx,
+	err = y.getJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part=status&id="+url.QueryEscape(state.BoundStreamID),
 		accessToken, nil, &streams)
 	if err != nil || len(streams.Items) == 0 {
@@ -192,7 +192,7 @@ func (y *YouTube) TransitionBroadcast(ctx context.Context, accessToken, broadcas
 	}
 	// nil payload: no body, and requestJSON therefore sends no Content-Type
 	// either, which is what a parameter-only POST should look like on the wire.
-	err := requestJSON(ctx, http.MethodPost,
+	err := y.requestJSON(ctx, http.MethodPost,
 		y.apiEndpoint()+ytTransitionPath+"?"+q.Encode(), accessToken, nil, nil, &out)
 	if err != nil {
 		return classifyTransition(err, id, to)
