@@ -54,6 +54,14 @@ export function driftText(ms: number): string {
   return `${sign}${(abs / 1000).toFixed(2)} s`;
 }
 
+/** digits with at most one ".", at least one digit; no regex that can backtrack. */
+function isPlainNumber(part: string): boolean {
+  const [whole, frac, ...extra] = part.split(".");
+  if (extra.length > 0) return false;
+  if (whole === "" && (frac === undefined || frac === "")) return false;
+  return /^\d*$/.test(whole) && /^\d*$/.test(frac ?? "");
+}
+
 /** Parses what a human types into a timecode field.
  *
  *  Accepts "90", "1:30", "01:02:03", any of them with a decimal fraction, and
@@ -66,7 +74,7 @@ export function parseTimecode(text: string): number | null {
   if (parts.length > 3) return null;
   let total = 0;
   for (const part of parts) {
-    if (!/^\d*\.?\d*$/.test(part) || part === "" || part === ".") return null;
+    if (!isPlainNumber(part)) return null;
     const v = Number.parseFloat(part);
     if (!Number.isFinite(v)) return null;
     total = total * 60 + v;

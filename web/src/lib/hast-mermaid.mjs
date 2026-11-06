@@ -45,6 +45,14 @@ function classList(v) {
   return [];
 }
 
+/** A fence's source minus its trailing newlines. A scan, not /\n+$/, which is
+ *  quadratic on a long run of newlines. */
+function trimTrailingNewlines(s) {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === "\n") end--;
+  return s.slice(0, end);
+}
+
 /** Concatenates the text under a node. A fence is normally one text node, but
  *  nothing guarantees that, and a diagram silently truncated at the first
  *  newline would be a confusing way to find out.
@@ -108,7 +116,7 @@ export const hastMermaid = {
           // its own SVG output back as source.
           "data-mermaid": "pending",
         },
-        children: [{ type: "text", value: textOf(code).replace(/\n+$/, "") }],
+        children: [{ type: "text", value: trimTrailingNewlines(textOf(code)) }],
       });
     },
   },

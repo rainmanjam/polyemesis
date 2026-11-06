@@ -16,6 +16,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { parseNumbered } from "./parse-numbered.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const I18N = join(HERE, "..", "src", "lib", "i18n");
@@ -105,18 +106,6 @@ function buildPrompt(lang, values) {
     `- Preserve the trailing ellipsis on any string that has one.\n\n` +
     numbered
   );
-}
-
-/** Parses "N. text" back into an ordered array, tolerating stray blank lines. */
-function parseNumbered(out, want) {
-  const byIndex = new Map();
-  for (const line of out.split("\n")) {
-    const m = /^\s*(\d+)\s*[.)]\s*(.*)$/.exec(line);
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (n >= 1 && n <= want && !byIndex.has(n)) byIndex.set(n, m[2].trim());
-  }
-  return Array.from({ length: want }, (_, i) => byIndex.get(i + 1) ?? null);
 }
 
 const placeholders = (s) => (s.match(/\{[a-zA-Z0-9_]+\}/g) ?? []).sort().join(",");

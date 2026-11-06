@@ -30,3 +30,12 @@ describe("ivsAppPathFix", () => {
     expect(ivsAppPathFix(input)).toBeNull();
   });
 });
+
+describe("ivsAppPathFix on pathological input", () => {
+  it("finishes fast on a huge run of slashes and still answers", () => {
+    const t0 = performance.now();
+    expect(ivsAppPathFix(`rtmps://${host}/${"/".repeat(200_000)}x/y`)).toBe(`rtmps://${host}:443/app`);
+    expect(ivsAppPathFix(`rtmps://${host}/${"/".repeat(200_000)}app`)).toBeNull();
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+});

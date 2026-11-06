@@ -97,3 +97,22 @@ describe("Facebook's published timings", () => {
     expect(FACEBOOK_STREAM_HEALTH_INTERVAL_MS).toBe(2000);
   });
 });
+
+describe("formatHealthValue trailing zeros", () => {
+  it.each([
+    [100.5, "100.5"],
+    [12.3, "12.3"],
+    [1234.567, "1234.57"],
+    [10.004, "10"],
+    [0.5, "0.5"],
+    [-2.5, "-2.5"],
+  ])("renders %s as %s", (v, want) => {
+    expect(formatHealthValue(v)).toBe(want);
+  });
+
+  it("is linear on a value whose digits are all zeros before the point", () => {
+    const t0 = performance.now();
+    expect(formatHealthValue(1e21)).toBeTypeOf("string");
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});

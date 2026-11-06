@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { trimTrailingSlashes } from "@/lib/trimSlashes";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import type {
   StorageProvider,
@@ -119,7 +120,7 @@ const blankDraft = (): Draft => ({
 
 const draftOf = (t: StorageTarget): Draft => ({ ...t, secret: "" });
 
-const normalEndpoint = (e: string) => e.trim().replace(/\/+$/, "").toLowerCase();
+const normalEndpoint = (e: string) => trimTrailingSlashes(e.trim()).toLowerCase();
 
 /** The secret is bound to the address it was saved for (the server enforces
  *  it): change the endpoint, bucket or private-address opt-in and it has to be

@@ -18,13 +18,6 @@ import { MemoryRouter, Route, Routes } from "react-router";
 
 let lines: unknown[] = [];
 
-const transcriptLine = (i: number) => ({
-  recordingId: 5,
-  track: 0,
-  startMs: i * 1000,
-  endMs: i * 1000 + 900,
-  text: `line ${i}`,
-});
 
 const source = {
   recordingId: 5,
