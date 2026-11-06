@@ -712,6 +712,8 @@ type destination struct {
 	// graph is the graph the primary process is spawned from, shared with its
 	// NextArgs so respawns carry the last live level. See live_gains.go.
 	graph *graphHolder
+	// argv builds the primary's command lines. See destArgv.
+	argv *destArgv
 	// hub is where this destination reads from: the ingest hub for a
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
@@ -1681,9 +1683,35 @@ func (e *Engine) Reconcile() error {
 
 	e.applyLogging(settings.Logging)
 	e.reconcileIngest(settings, prev)
+	if err := e.reconcileDownstream(settings); err != nil {
+		return err
+	}
+	e.publishStatus()
+	return nil
+}
+
+// reconcileDownstream reconciles everything that reads what the ingest delivers
+// and the outputs decide: the recorder and the meters, then the outputs, then
+// the preview, clips, captions and loudness monitors that read the hub the
+// outputs settled. The caller holds reconcileMu.
+//
+// ONE SEQUENCE, CALLED FROM TWO PLACES. Reconcile runs it after the ingest; the
+// probe loop runs it when a measurement changes the layout, which is the path
+// that starts destinations on every fresh install. The probe loop used to carry
+// a hand-copied subset and then a hand-copied whole, and the copy drifted twice:
+// it ran three steps and stopped, leaving #612 (a loudness monitor reported as
+// enabled that no analyser ever served), and then it ran the recorder and the
+// meters in the other order.
+//
+// An outputs error stops the sequence and is returned. The steps after it read
+// the hub the outputs failed to settle, so running them would act on a decision
+// that was never made; the next reconcile runs them. None of the others can fail
+// the sequence: a measurement that will not start and a capture buffer that will
+// not bind are both worth a log line and nothing more, and a destination must
+// never be held back by either.
+func (e *Engine) reconcileDownstream(settings db.Settings) error {
 	e.reconcileRecorder(settings)
 	e.reconcileMeters(settings)
-
 	if err := e.reconcileOutputs(); err != nil {
 		return err
 	}
@@ -1694,15 +1722,11 @@ func (e *Engine) Reconcile() error {
 	// Run before the outputs it compared its running encoder against the OLD
 	// upstream, decided nothing had changed, and then the hub was swapped
 	// underneath it -- leaving the preview subscribed to a tier that was no
-	// longer on air.
-	// Neither can fail the reconcile: a measurement that will not start and a
-	// capture buffer that will not bind are both worth a log line and nothing
-	// more, and a destination must never be held back by either.
+	// longer on air. Clips and captions read the same hub for the same reason.
 	e.reconcilePreview(settings)
 	e.reconcileClips()
 	e.reconcileCaptions()
 	e.reconcileLoudness(settings)
-	e.publishStatus()
 	return nil
 }
 
@@ -3839,39 +3863,16 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				//
 				// Taken HERE, not inside reconcileOutputs: Reconcile already
 				// holds it when it calls that, and the mutex is not reentrant.
-				// AND THE CONSUMERS OF WHAT reconcileOutputs JUST STARTED.
-				//
-				// This used to run three of Reconcile's steps and stop, which is
-				// the hazard the paragraph above describes arriving from the
-				// other direction: a hand-copied subset of a sequence drifts the
-				// moment the sequence grows. It had already drifted. The
-				// analyser tier is reconciled ONLY by reconcileLoudness, this is
-				// the path that starts destinations on every fresh install --
-				// they are held until a probe lands -- and Reconcile is
-				// event-driven with no ticker, so nothing ran it again.
-				//
-				// The result was #612: an install reporting the loudness monitor
-				// enabled with no analyser ever having run. GET /loudness said
-				// so, the Meters page drew the switch on, and nothing measured.
-				// Only toggling the switch off and on recovered it, because that
-				// was one of the few things that reached a real Reconcile.
-				//
-				// Preview, clips and captions are here for the same reason and
-				// were wrong in the same way: each reads a hub that
-				// reconcileOutputs may have just replaced. Their own comment in
-				// Reconcile says they must run "after the outputs, because these
-				// read the hub that the silence and selector tiers decide" --
-				// and this path settles exactly that and then skipped them.
+				// The whole downstream sequence, not a subset of it: see
+				// reconcileDownstream for what a hand-copied subset cost (#612).
 				settings := e.Settings()
 				e.reconcileMu.Lock()
-				e.reconcileMeters(settings)
-				e.reconcileRecorder(settings)
-				_ = e.reconcileOutputs()
-				e.reconcilePreview(settings)
-				e.reconcileClips()
-				e.reconcileCaptions()
-				e.reconcileLoudness(settings)
+				err := e.reconcileDownstream(settings)
 				e.reconcileMu.Unlock()
+				if err != nil {
+					e.log.Warn("ingest layout changed but the outputs could not be reconciled; "+
+						"the next reconcile will", "err", err)
+				}
 				e.publishStatus()
 			}
 			e.mu.RLock()

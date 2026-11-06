@@ -8,7 +8,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1313,42 +1312,6 @@ func SpliceExtraArgs(base, in, out []string) []string {
 	argv = append(argv, base[inputAt:len(base)-1]...)
 	argv = append(argv, out...)
 	return append(argv, base[len(base)-1])
-}
-
-// StripExtraArgs is the exact inverse of SpliceExtraArgs: given a command that
-// was built with in and out spliced into it, it returns the generated command
-// underneath.
-//
-// It exists so the expert-mode editor can preview a CANDIDATE edit against a
-// destination that is already running with a previous one. The live process's
-// argv is the only place the relay port the hub actually assigned appears, so
-// it has to be the base — but splicing the candidate onto it directly would
-// stack the new arguments on top of the old.
-//
-// The tokens are removed only where they match exactly. Anything else — a
-// command that was not built by SpliceExtraArgs, arguments that were changed on
-// disk since the process started — is returned untouched, so the operator is
-// shown the real argv rather than a guess at what it should have been.
-func StripExtraArgs(argv, in, out []string) []string {
-	if len(in) == 0 && len(out) == 0 {
-		return argv
-	}
-	out2 := argv
-
-	if n := len(out); n > 0 && len(out2) >= n+1 {
-		// Immediately before the target, which is the final element.
-		at := len(out2) - 1 - n
-		if slices.Equal(out2[at:len(out2)-1], out) {
-			out2 = append(append([]string{}, out2[:at]...), out2[len(out2)-1])
-		}
-	}
-	if n := len(in); n > 0 {
-		inputAt := slices.Index(out2, "-i")
-		if inputAt >= n && slices.Equal(out2[inputAt-n:inputAt], in) {
-			out2 = append(append([]string{}, out2[:inputAt-n]...), out2[inputAt:]...)
-		}
-	}
-	return out2
 }
 
 // DestinationArgs builds one destination's command.

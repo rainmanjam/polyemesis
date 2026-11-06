@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
-	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -434,28 +434,11 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		return bin, nil, false, "", errNoSource
 	}
 
-	want := procname.DestProcessName(row.ID, procname.RolePrimary)
-	for _, p := range e.Processes() {
-		if p.Name() != want {
-			continue
-		}
-		argv := p.Args()
-		if len(argv) <= 1 {
-			continue
-		}
-		// The running process was started WITH whatever was saved at the time,
-		// because the engine splices them. Peeling those back off is what makes
-		// a preview of a candidate edit show the candidate instead of the
-		// candidate stacked on top of the previous one.
-		//
-		// Parse errors are ignored deliberately: arguments that no longer parse
-		// cannot be the ones this process was started with, so there is nothing
-		// to strip, and refusing to show the operator their live command line is
-		// the worst possible answer to "what is running right now".
-		applied := expertArgsOf(row)
-		oldIn, _ := splitExpertArgs(applied.InputArgs, "input args")
-		oldOut, _ := splitExpertArgs(applied.OutputArgs, "output args")
-		return argv[0], ffmpeg.StripExtraArgs(argv[1:], oldIn, oldOut), true, "", nil
+	// A RUNNING destination is previewed from the command it is running, which the
+	// engine builds without the expert arguments the row carries: a preview of a
+	// candidate edit shows the candidate, not the candidate stacked on the last.
+	if runBin, argv, ok := e.DestinationBaseArgv(row.ID); ok {
+		return runBin, argv, true, "", nil
 	}
 
 	compiled, cerr := routing.Compile(row.Profile, e.Source())
@@ -479,27 +462,14 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 			"recordings directory at start."
 	}
 
-	// This is the SECOND place a ffmpeg.DestSpec is built -- the engine's
-	// destSpecFor is the other -- and it has always omitted Audio and Transport,
-	// so the preview of a destination using either already differs from the
-	// command that runs. CopyAudio is added here anyway, because the difference
-	// it makes is not a missing flag but a whole shape: without it the operator
-	// previewing a copy destination is shown a filter graph and an encoder that
-	// will not be there. Unifying the two construction sites is a separate
-	// change and has its own follow-up issue.
-	base = ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-		Kind:          ffmpeg.DestKind(row.Kind),
-		Target:        target,
-		RelayURL:      placeholderRelayURL,
-		FilterComplex: compiled.FilterComplex,
-		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
-		VideoDelayMS:  compiled.VideoDelayMS,
-		CopyAudio:     row.Audio.Copy,
-		AudioTracks:   compiled.Tracks,
-	})
+	// The engine's own description of the command, so the preview cannot differ
+	// from what runs. It is the BASE: the row's saved expert arguments are left
+	// out, because the caller splices the candidate's in (resolveExpertCommand)
+	// and the preview is of that edit, not of it stacked on the last one -- which
+	// is also why there is no log to warn about their text.
+	spec := engine.DestSpecFor(nil, row, compiled, placeholderRelayURL, target)
+	spec.ExtraInputArgs, spec.ExtraOutputArgs = nil, nil
+	base = ffmpeg.DestinationArgs(spec)
 	return bin, base, false, note, nil
 }
 

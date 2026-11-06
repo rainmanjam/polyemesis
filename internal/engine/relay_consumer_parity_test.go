@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -210,5 +211,64 @@ func TestEveryRelayConsumerSpecComesFromTheSharedConstructor(t *testing.T) {
 	}
 	if !seen["relayConsumerSpec"] {
 		t.Fatal("the walker did not find relayConsumerSpec, so it checks nothing")
+	}
+}
+
+// ONE DOWNSTREAM SEQUENCE. Reconcile and the probe loop both reconcile the
+// recorder, meters, outputs, preview, clips, captions and loudness monitors.
+// The probe loop carried its own copy, and the copy had drifted twice: first it
+// ran three of the steps and stopped (#612: a loudness monitor reported as
+// enabled that no analyser ever served), then it ran the recorder and the meters
+// in the other order from Reconcile. Each step is now called from one place,
+// reconcileDownstream, so neither caller can reorder or skip one.
+func TestEachDownstreamStepIsCalledFromTheOneSequence(t *testing.T) {
+	steps := map[string]bool{
+		"reconcileRecorder": true, "reconcileMeters": true, "reconcileOutputs": true,
+		"reconcilePreview": true, "reconcileClips": true, "reconcileCaptions": true,
+		"reconcileLoudness": true,
+	}
+	fset := token.NewFileSet()
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no source files found: %v", err)
+	}
+	callers := map[string][]string{}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && steps[sel.Sel.Name] {
+					callers[sel.Sel.Name] = append(callers[sel.Sel.Name], fn.Name.Name)
+				}
+				return true
+			})
+		}
+	}
+	// The storage guard reconciles the recorder ALONE when disk space returns or
+	// runs out; that is not a copy of the sequence.
+	allowed := map[string][]string{"reconcileRecorder": {"onStorage"}}
+	for step := range steps {
+		got := slices.Clone(callers[step])
+		slices.Sort(got)
+		want := append([]string{"reconcileDownstream"}, allowed[step]...)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s is called from %v, want %v: a second copy of the sequence is how the probe "+
+				"loop skipped steps and ran two of them out of order", step, got, want)
+		}
 	}
 }

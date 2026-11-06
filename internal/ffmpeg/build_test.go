@@ -1240,37 +1240,6 @@ func TestSpliceExtraArgsPutsArgumentsWhereFFmpegReadsThem(t *testing.T) {
 	}
 }
 
-// StripExtraArgs is what lets the editor preview a candidate edit against a
-// destination that is already running with a previous one. Without it the
-// preview would show the new arguments stacked on top of the old.
-func TestStripExtraArgsIsTheInverseOfSplice(t *testing.T) {
-	base := []string{"-hide_banner", "-i", "udp://x", "-f", "flv", "rtmp://y"}
-
-	cases := [][2][]string{
-		{nil, nil},
-		{{"-re"}, nil},
-		{nil, {"-muxdelay", "0"}},
-		{{"-analyzeduration", "10M"}, {"-metadata", "title=x"}},
-	}
-	for _, c := range cases {
-		in, out := c[0], c[1]
-		got := StripExtraArgs(SpliceExtraArgs(slices.Clone(base), in, out), in, out)
-		if !slices.Equal(got, base) {
-			t.Errorf("strip(splice(base, %v, %v)) = %v\nwant %v", in, out, got, base)
-		}
-	}
-}
-
-// Anything that was not built by SpliceExtraArgs comes back untouched. Showing
-// the operator the real argv beats showing them a guess at what it should be.
-func TestStripExtraArgsLeavesACommandItDoesNotRecognise(t *testing.T) {
-	argv := []string{"-i", "udp://x", "-f", "flv", "rtmp://y"}
-	got := StripExtraArgs(slices.Clone(argv), []string{"-re"}, []string{"-muxdelay", "0"})
-	if !slices.Equal(got, argv) {
-		t.Errorf("StripExtraArgs() = %v, want it unchanged: %v", got, argv)
-	}
-}
-
 // The engine and the API must tokenize the same stored string identically, or
 // the command the operator confirmed and the command that runs disagree about
 // where one argument ends.

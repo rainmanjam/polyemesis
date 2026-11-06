@@ -582,7 +582,7 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string, sei
 		// setting stored and never reaching the process it governs) and wrong
 		// about the remedy: the remedy was to deliver it, not to drop the
 		// operator's connection in order to deliver it.
-		destArgvSig(destSpecFor(nil, row, compiled, "", row.Target())),
+		destArgvSig(DestSpecFor(nil, row, compiled, "", row.Target())),
 		// Not on the command line, and both required. Which tier a destination
 		// reads is what makes moving it between tiers, or editing the tier it
 		// sits on, restart that destination and no other.
@@ -608,7 +608,7 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string, sei
 	return hashStrings(parts)
 }
 
-// destSpecFor is one output's ffmpeg.DestSpec: the single description of what
+// DestSpecFor is one output's ffmpeg.DestSpec: the single description of what
 // goes on its command line.
 //
 // THE ONE PLACE. destArgs renders it, destSpec and backupSpecOf hash it. Before
@@ -619,11 +619,18 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string, sei
 // received differed with nothing reporting it. compiled.OutLabel had already
 // gone missing from both.
 //
+// EXPORTED because the expert-mode preview must show the command that would run,
+// and a second hand-written ffmpeg.DestSpec in internal/api had already drifted
+// from this one: it omitted the output audio encoding and the muxer and socket
+// tuning, so a destination using either was previewed without it. The function
+// is pure -- the row, the compiled graph, the relay URL and the target are all it
+// reads -- so the API can call it without an engine behind it.
+//
 // log may be nil, and is on the hashing paths: they build this purely to hash
 // it, twice per destination per reconcile, and expertArgv's warning about
 // unparseable text would otherwise be printed three times a pass about a value
 // the editor already reports.
-func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result, relayURL, target string) ffmpeg.DestSpec {
+func DestSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result, relayURL, target string) ffmpeg.DestSpec {
 	return ffmpeg.DestSpec{
 		Kind:          ffmpeg.DestKind(row.Kind),
 		Target:        target,
@@ -865,7 +872,7 @@ func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []stri
 	}
 	argv, err := ffmpeg.SplitArgs(raw)
 	if err != nil {
-		// A nil log is the restart-hash path -- see destSpecFor. It builds the
+		// A nil log is the restart-hash path -- see DestSpecFor. It builds the
 		// same spec purely to hash it, twice per destination per reconcile, and
 		// this line would be printed three times a pass about a value the
 		// editor already shows the operator with the reason it will not apply.
@@ -939,6 +946,63 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
+// destArgv builds one output's command lines: the argv each spawn runs, and the
+// same command without its expert arguments for the expert-mode preview.
+//
+// It holds what stays the same across spawns (the row, the relay URL, the graph
+// holder) and remembers the one thing that does not, the output target a file
+// destination resolves anew each time. That is what lets the preview show the
+// command a RUNNING destination is running without searching the child's argv
+// for the expert arguments it was started with and peeling them back off, which
+// depended on the order DestinationArgs lays its argv out in.
+type destArgv struct {
+	e     *Engine
+	row   *db.Destination
+	url   string
+	graph *graphHolder
+
+	mu  sync.Mutex
+	out string // the target the most recent build used
+}
+
+// build is the argv for a spawn writing to out, built from the graph as it
+// stands now (so a level applied live is in force after a reconnect).
+func (a *destArgv) build(out string) []string {
+	a.mu.Lock()
+	a.out = out
+	a.mu.Unlock()
+	return a.graph.argv(func(r routing.Result) []string {
+		return a.e.destArgs(a.row, r, a.url, out)
+	})
+}
+
+// base is the command the destination is running, minus the expert arguments
+// its row carries: the base a candidate edit is spliced onto.
+func (a *destArgv) base() []string {
+	a.mu.Lock()
+	out := a.out
+	a.mu.Unlock()
+	spec := DestSpecFor(nil, a.row, a.graph.get(), a.url, out)
+	spec.ExtraInputArgs, spec.ExtraOutputArgs = nil, nil
+	return ffmpeg.DestinationArgs(spec)
+}
+
+// DestinationBaseArgv is the command line a running destination was built to
+// run, without its expert arguments, and the binary it runs with. ok is false
+// when the destination is not running.
+func (e *Engine) DestinationBaseArgv(id int64) (bin string, argv []string, ok bool) {
+	if e == nil {
+		return "", nil, false
+	}
+	e.mu.RLock()
+	d := e.dests[id]
+	e.mu.RUnlock()
+	if d == nil || d.argv == nil || d.proc == nil {
+		return "", nil, false
+	}
+	return e.tools.FFmpeg, d.argv.base(), true
+}
+
 // destArgs is one output's FFmpeg command line.
 //
 // Shared by the primary and the backup so the two cannot drift: a redundant
@@ -948,7 +1012,7 @@ func destWritesAFile(row *db.Destination) bool {
 //
 // Only the relay it reads and the target it writes differ between them.
 func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
-	return ffmpeg.DestinationArgs(destSpecFor(e.log, row, compiled, relayURL, target))
+	return ffmpeg.DestinationArgs(DestSpecFor(e.log, row, compiled, relayURL, target))
 }
 
 // wantsBackup reports whether this destination should be publishing a
@@ -1004,7 +1068,7 @@ func backupTarget(row *db.Destination) string {
 // backupSpecOf hashes everything on the BACKUP's command line.
 //
 // SAME INPUTS, SEPARATE VERDICT, and the distinction is the whole design. The
-// two share one description of the command line -- destSpecFor, with the
+// two share one description of the command line -- DestSpecFor, with the
 // backup's target substituted -- because a redundant feed encoded differently
 // from the one it backs up is not redundancy. They must never share a hash:
 // enabling backup already costs one reconnect for an unavoidable reason (a new
@@ -1016,7 +1080,7 @@ func backupTarget(row *db.Destination) string {
 func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string) string {
 	return hashStrings([]string{
 		strconv.FormatBool(wantsBackup(row)),
-		destArgvSig(destSpecFor(nil, row, compiled, "", backupTarget(row))),
+		destArgvSig(DestSpecFor(nil, row, compiled, "", backupTarget(row))),
 		upstream,
 	})
 }
@@ -1143,9 +1207,8 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// The graph this process is spawned from. Every spawn reads it, so a level
 	// applied live is still in force after a crash or reconnect. See graphHolder.
 	graph := newGraphHolder(compiled)
-	buildArgs := func(out string) []string {
-		return e.destArgs(row, graph.get(), url, out)
-	}
+	argv := &destArgv{e: e, row: row, url: url, graph: graph, out: target}
+	buildArgs := argv.build
 
 	// Only a file destination needs a fresh argv per spawn, and only because
 	// its output path cannot be reused. An RTMP or SRT target is reconnected
@@ -1239,7 +1302,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	}
 	published := &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
-		compiled: compiled, graph: graph, hub: hub, spec: spec,
+		compiled: compiled, graph: graph, argv: argv, hub: hub, spec: spec,
 		multitrack: mt, vodDropped: vodDropped, delay: dd, capt: capt,
 	}
 	e.dests[row.ID] = published
@@ -1589,15 +1652,16 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	// No minted key (only the primary negotiates a multitrack mint) and no
 	// StartDelay: the backup starts from publishDest once the primary is already
 	// in the map, so there is no tick to spread.
+	argv := &destArgv{e: e, row: d.row, url: url, graph: graph, out: backupTarget(d.row)}
 	proc, watch := e.newDestinationProcess(destConsumer{
 		relayConsumer: relayConsumer{
 			name: sub, sub: sub, kind: procname.KindDestination, hub: hub,
-			args:    e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
+			args:    argv.build(argv.out),
 			secrets: destSecrets(d.row),
 		},
 		row:      d.row,
 		label:    d.row.Name + " (backup)",
-		nextArgs: func() []string { return e.destArgs(d.row, graph.get(), url, backupTarget(d.row)) },
+		nextArgs: func() []string { return argv.build(argv.out) },
 	})
 
 	d.backup = proc

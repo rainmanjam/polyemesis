@@ -1,6 +1,6 @@
 package captions
 
-import "strings"
+import "github.com/rainmanjam/polyemesis/internal/ffmpeg"
 
 // SubtitlesFilter returns the FFmpeg filter that burns a subtitle file into the
 // picture. The shipped image's FFmpeg is built with libass, so the subtitles
@@ -11,35 +11,12 @@ import "strings"
 // 8.1.3, a cue appended after the encode began was never drawn. Live captions
 // are therefore burned into a rendition with drawtext's textfile and reload=1
 // instead (see burn.go and ffmpeg.TextSpec.TextFile). This builds the filter
-// argument for a recorded caption file, with the path escaped as
-// filterOptionValue describes.
+// argument for a recorded caption file.
+//
+// The path is escaped by ffmpeg.GraphArgPath, the one filtergraph escaper in the
+// tree: for the option parser and then for the graph parser, with forward
+// slashes on Windows and boundary whitespace kept. This package used to carry a
+// second copy that had neither of the last two.
 func SubtitlesFilter(path string) string {
-	return "subtitles=filename=" + filterOptionValue(path)
-}
-
-// filterOptionValue escapes a value for use as a filter option inside a
-// filtergraph. FFmpeg parses it twice, so it is escaped twice, innermost first:
-//
-//  1. for the filter's option parser, which splits key=value pairs on ':' and
-//     treats '\' and '\” as escape and quote characters;
-//  2. for the filtergraph parser, which runs first and splits the graph on '[',
-//     ']', ',' and ';', consuming one level of '\' and '\” as it goes.
-//
-// This is the order the FFmpeg filters documentation gives under "Notes on
-// filtergraph escaping". The result is meant for an argv element, so no shell
-// level is added.
-func filterOptionValue(v string) string {
-	return escapeWith(escapeWith(v, `\':`), `\'[],;`)
-}
-
-// escapeWith puts a backslash in front of every rune of v that is in special.
-func escapeWith(v, special string) string {
-	var b strings.Builder
-	for _, r := range v {
-		if strings.ContainsRune(special, r) {
-			b.WriteByte('\\')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return "subtitles=filename=" + ffmpeg.GraphArgPath(path)
 }

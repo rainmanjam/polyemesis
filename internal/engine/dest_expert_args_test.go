@@ -18,7 +18,7 @@ import (
 // Second: the hash must agree with the command line, which is the property that
 // was broken -- the hash said "restart" about an argv that had not moved.
 //
-// Mutation: in destSpecFor, change
+// Mutation: in DestSpecFor, change
 // `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
 // `ExtraInputArgs: []string{row.ExtraInputArgs}`, which is the pre-parse text
 // the hashes used to carry. Observed to fail: every reformatting case reports a
@@ -74,7 +74,7 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 // move the hash either, or the operator's stream is dropped to deliver a change
 // that was never applied.
 //
-// Mutation: in destSpecFor, change
+// Mutation: in DestSpecFor, change
 // `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
 // `ExtraInputArgs: []string{row.ExtraInputArgs}`. Observed to fail on both
 // hashes and on the command line.

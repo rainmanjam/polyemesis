@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -18,8 +19,8 @@ import (
 // graph parser eat the backslash that was meant to protect a quote or a colon
 // from the option parser: "it's" reached the filter as "its".
 //
-// MUTATION, internal/captions/burnin.go: put back the old single pass in
-// filterOptionValue (one backslash before each of \ ' : [ ] , ; and space).
+// MUTATION, internal/captions/burnin.go: put back the old single pass in the
+// escaper (one backslash before each of \ ' : [ ] , ; and space).
 // Observed: FAIL -- the colon, quote and backslash cases here, and the FFmpeg
 // round trip below, where FFmpeg looked for a file with the quote stripped.
 func TestBurnInFilterEscapesItsPathForTheOptionAndThenForTheFiltergraph(t *testing.T) {
@@ -28,7 +29,14 @@ func TestBurnInFilterEscapesItsPathForTheOptionAndThenForTheFiltergraph(t *testi
 		"/data/a:b.srt":         `subtitles=filename=/data/a\\:b.srt`,
 		"/data/it's, [odd].srt": `subtitles=filename=/data/it\\\'s\, \[odd\].srt`,
 		"/data/a;b.srt":         `subtitles=filename=/data/a\;b.srt`,
-		`/data/back\slash.srt`:  `subtitles=filename=/data/back\\\\slash.srt`,
+	}
+	// A backslash is a separator on Windows, where the shared escaper converts it
+	// (a path handed to a filter there has to use forward slashes), and a
+	// character in a name everywhere else.
+	if filepath.Separator == '\\' {
+		cases[`/data/back\slash.srt`] = `subtitles=filename=/data/back/slash.srt`
+	} else {
+		cases[`/data/back\slash.srt`] = `subtitles=filename=/data/back\\\\slash.srt`
 	}
 	for in, want := range cases {
 		if got := SubtitlesFilter(in); got != want {
@@ -44,10 +52,10 @@ func TestBurnInFilterEscapesItsPathForTheOptionAndThenForTheFiltergraph(t *testi
 // file name uses only characters every OS allows; the temp directory supplies a
 // drive colon and backslashes on Windows.
 func TestFFmpegOpensAFileWhosePathNeedsBothEscapingLevels(t *testing.T) {
-	ffmpeg := testenv.FFmpegBinary(t, "ffmpeg", "ffmpeg is needed to read the escaped filter argument back")
+	ffmpegBin := testenv.FFmpegBinary(t, "ffmpeg", "ffmpeg is needed to read the escaped filter argument back")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "it's, [od;d] x.nut")
-	gen := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+	gen := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error", "-y",
 		"-f", "lavfi", "-i", "color=c=red:s=32x32:d=1", "-c:v", "ffv1", path)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Fatalf("generating the fixture failed: %v\n%s", err, out)
@@ -55,10 +63,24 @@ func TestFFmpegOpensAFileWhosePathNeedsBothEscapingLevels(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("fixture missing: %v", err)
 	}
-	graph := "movie=filename=" + filterOptionValue(path) + "[v]"
-	run := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+	graph := "movie=filename=" + ffmpeg.GraphArgPath(path) + "[v]"
+	run := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
 		"-filter_complex", graph, "-map", "[v]", "-frames:v", "1", "-f", "null", "-")
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("FFmpeg could not open %q through the escaped graph %q: %v\n%s", path, graph, err, out)
+	}
+}
+
+// BOUNDARY WHITESPACE IS PART OF THE PATH. FFmpeg's tokenizer trims unescaped
+// leading and trailing whitespace from an option value at BOTH levels, so a
+// caption file whose name ends in a space was opened as a different file and the
+// burn-in failed with no useful error. This package's own escaper never saw it;
+// the shared one (ffmpeg.GraphArgPath) escapes each boundary character once per
+// level, and leaves interior whitespace as it is.
+func TestSubtitlesFilterKeepsWhitespaceAtTheEdgesOfThePath(t *testing.T) {
+	got := SubtitlesFilter("/data/a b.srt ")
+	want := `subtitles=filename=/data/a b.srt\\\ `
+	if got != want {
+		t.Errorf("SubtitlesFilter = %q, want %q", got, want)
 	}
 }
