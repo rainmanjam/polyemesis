@@ -34,8 +34,14 @@ func LogLevel(t testing.TB, lvl string) {
 // A name ending in "_loglevel_debug" is a case built under LogLevel(t, "debug"),
 // and must carry that level: docs/CONFIGURATION.md says POLYEMESIS_FFMPEG_LOGLEVEL
 // is the -loglevel EVERY FFmpeg child gets, and eight children once ignored it.
-func Check(t testing.TB, name string, argv []string) {
+//
+// roots are directories the test itself passed in as slash paths. A builder that
+// joins onto one (filepath.Join) returns the host's separator, so an argument
+// under a root is compared with its separators as slashes. Nothing else is
+// rewritten: a filter escape or URL carries backslashes or slashes on purpose.
+func Check(t testing.TB, name string, argv []string, roots ...string) {
 	t.Helper()
+	argv = slashUnder(argv, roots, string(filepath.Separator))
 	if strings.HasSuffix(name, "_loglevel_debug") && !hasPair(argv, "-loglevel", "debug") {
 		t.Errorf("%s ignores POLYEMESIS_FFMPEG_LOGLEVEL=debug: %q", name, argv)
 	}
@@ -62,6 +68,25 @@ func Check(t testing.TB, name string, argv []string) {
 	if string(want) != got {
 		t.Errorf("the argv for %s changed.\n--- got\n%s--- want\n%s", name, got, string(want))
 	}
+}
+
+// slashUnder returns argv with every element that starts with one of roots
+// (spelled with sep) rewritten back to slashes. It is the identity where sep is
+// already a slash.
+func slashUnder(argv, roots []string, sep string) []string {
+	if sep == "/" || len(roots) == 0 {
+		return argv
+	}
+	out := slices.Clone(argv)
+	for i, a := range out {
+		for _, r := range roots {
+			if r != "" && strings.HasPrefix(a, strings.ReplaceAll(r, "/", sep)) {
+				out[i] = strings.ReplaceAll(a, sep, "/")
+				break
+			}
+		}
+	}
+	return out
 }
 
 func hasPair(argv []string, flag, val string) bool {

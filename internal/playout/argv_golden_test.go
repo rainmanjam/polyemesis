@@ -17,7 +17,7 @@ func TestVariantArgvIsPinned(t *testing.T) {
 		dash := hls
 		dash.DASH = true
 		argvgold.RequireRelayConsumer(t, "playout variant", VariantArgs(hls))
-		t.Run("hls"+suffix, func(t *testing.T) { argvgold.Check(t, "variant_hls"+suffix, VariantArgs(hls)) })
-		t.Run("hls_dash"+suffix, func(t *testing.T) { argvgold.Check(t, "variant_hls_dash"+suffix, VariantArgs(dash)) })
+		t.Run("hls"+suffix, func(t *testing.T) { argvgold.Check(t, "variant_hls"+suffix, VariantArgs(hls), hls.Dir) })
+		t.Run("hls_dash"+suffix, func(t *testing.T) { argvgold.Check(t, "variant_hls_dash"+suffix, VariantArgs(dash), dash.Dir) })
 	}
 }
