@@ -97,28 +97,26 @@ type Text struct {
 	MetadataUnit, PublishUnit Count
 }
 
-// LimitKind names what a duration limit measures.
-type LimitKind string
-
+// What a duration limit measures. Plain strings: internal/oauth serves them to
+// the UI under its own typed names, and those typed values are the wire
+// contract.
 const (
-	LimitBroadcastDuration LimitKind = "broadcastDuration"
-	LimitArchiveDuration   LimitKind = "archiveDuration"
+	LimitBroadcastDuration = "broadcastDuration"
+	LimitArchiveDuration   = "archiveDuration"
 )
 
-// LimitStatus says how well a limit is established.
-type LimitStatus string
-
+// How well a limit is established.
 const (
-	LimitDocumented LimitStatus = "documented"
-	LimitReported   LimitStatus = "reported"
-	LimitUnverified LimitStatus = "unverified"
+	LimitDocumented = "documented"
+	LimitReported   = "reported"
+	LimitUnverified = "unverified"
 )
 
 // Limit is one published cap on a broadcast.
 type Limit struct {
-	Kind   LimitKind
+	Kind   string
 	Hours  float64
-	Status LimitStatus
+	Status string
 	Source string
 }
 
@@ -223,6 +221,16 @@ func ByEnum(enum string) (Row, bool) {
 		}
 	}
 	return Row{}, false
+}
+
+// Must is ByEnum for package-level initialisers, where a missing row is a
+// programming error and should stop the build's tests rather than read as zero.
+func Must(enum string) Row {
+	r, ok := ByEnum(enum)
+	if !ok {
+		panic("platform: no row for " + enum)
+	}
+	return r
 }
 
 // ByPreset finds the row a catalogue preset belongs to.

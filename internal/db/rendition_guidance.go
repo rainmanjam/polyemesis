@@ -1,6 +1,10 @@
 package db
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
+)
 
 // THE CATALOGUE WAS RESEARCHED AND NOTHING READ IT. #661
 //
@@ -43,15 +47,18 @@ type RenditionConcern struct {
 //
 // A rendition field of 0 means "keep the source's", and the source is not known
 // until something is streaming, so those are skipped rather than guessed at.
-func RenditionConcerns(r *Rendition, platform Platform) []RenditionConcern {
+func RenditionConcerns(r *Rendition, plat Platform) []RenditionConcern {
 	if r == nil {
 		return nil
 	}
-	preset, ok := DestinationPresetByID(string(platform))
-	if !ok || preset.Video == nil {
+	// Keyed by the platform string. Five presets with dated guidance (Instagram,
+	// LinkedIn, Dailymotion, Owncast, Rumble) save as "custom", so no stored
+	// destination ever names their row and they are never reached from here.
+	row, ok := platform.ByKey(string(plat))
+	if !ok || row.Guidance == nil {
 		return nil
 	}
-	g := preset.Video
+	g := row.Guidance
 	var out []RenditionConcern
 	add := func(field, detail string) {
 		out = append(out, RenditionConcern{
@@ -61,15 +68,15 @@ func RenditionConcerns(r *Rendition, platform Platform) []RenditionConcern {
 
 	if g.Width > 0 && r.Width > g.Width {
 		add("width", fmt.Sprintf("%s publishes %d wide; this rendition is %d",
-			preset.Name, g.Width, r.Width))
+			row.Name, g.Width, r.Width))
 	}
 	if g.Height > 0 && r.Height > g.Height {
 		add("height", fmt.Sprintf("%s publishes %dp; this rendition is %dp",
-			preset.Name, g.Height, r.Height))
+			row.Name, g.Height, r.Height))
 	}
 	if g.FPS > 0 && r.FPS > g.FPS {
 		add("fps", fmt.Sprintf("%s publishes %d fps; this rendition is %d",
-			preset.Name, g.FPS, r.FPS))
+			row.Name, g.FPS, r.FPS))
 	}
 
 	// THE BITRATE, and the one place the catalogue's own shape matters. Equal
@@ -84,19 +91,19 @@ func RenditionConcerns(r *Rendition, platform Platform) []RenditionConcern {
 	case g.KbpsMax > 0 && rate > g.KbpsMax:
 		if g.KbpsMin == g.KbpsMax {
 			add("bitrate", fmt.Sprintf("%s publishes %d kbps; this rendition peaks at %d",
-				preset.Name, g.KbpsMax, rate))
+				row.Name, g.KbpsMax, rate))
 		} else {
 			add("bitrate", fmt.Sprintf("%s publishes up to %d kbps; this rendition peaks at %d",
-				preset.Name, g.KbpsMax, rate))
+				row.Name, g.KbpsMax, rate))
 		}
 	case g.KbpsMin > 0 && r.VideoBitrate > 0 && r.VideoBitrate < g.KbpsMin:
 		add("bitrate", fmt.Sprintf("%s publishes at least %d kbps; this rendition is %d",
-			preset.Name, g.KbpsMin, r.VideoBitrate))
+			row.Name, g.KbpsMin, r.VideoBitrate))
 	}
 
 	if g.GOPSeconds > 0 && r.GOPSeconds > 0 && r.GOPSeconds > g.GOPSeconds {
 		add("gop", fmt.Sprintf("%s asks for a %gs keyframe interval; this rendition uses %gs",
-			preset.Name, g.GOPSeconds, r.GOPSeconds))
+			row.Name, g.GOPSeconds, r.GOPSeconds))
 	}
 	return out
 }

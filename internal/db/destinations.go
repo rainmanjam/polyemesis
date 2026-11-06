@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rainmanjam/polyemesis/internal/services"
 	"net/url"
 	"strings"
 	"time"
@@ -13,7 +12,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/services"
 )
 
 // DestKind is the transport a destination publishes over.
@@ -39,16 +40,16 @@ const IcecastScheme = "icecast://"
 type Platform string
 
 const (
-	PlatformCustom  Platform = "custom"
-	PlatformYouTube Platform = "youtube"
-	PlatformTwitch  Platform = "twitch"
-	PlatformKick    Platform = "kick"
+	PlatformCustom  Platform = platform.Custom
+	PlatformYouTube Platform = platform.YouTube
+	PlatformTwitch  Platform = platform.Twitch
+	PlatformKick    Platform = platform.Kick
 	// PlatformFacebook is a real platform rather than a preset because Facebook
 	// issues its ingest per broadcast over the Graph API: there is nothing for
 	// an operator to paste, so the integration has to exist for the destination
 	// to work at all. The string matches routing.PlatformFacebook, which is what
 	// makes the Rights Manager music policy apply to these destinations.
-	PlatformFacebook Platform = "facebook"
+	PlatformFacebook Platform = platform.Facebook
 	// PlatformRumble exists for CHAT and for nothing else, which makes it the
 	// first entry here that is not about a destination.
 	//
@@ -64,11 +65,11 @@ const (
 	// platform can be integrated for one capability and manual for another, and
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
-	PlatformRumble Platform = "rumble"
+	PlatformRumble Platform = platform.Rumble
 	// PlatformX is X (Twitter) Livestream. Sign-in and the Livestream family are
 	// behind X's whitelist, so the integration is switched off until the owner's
 	// app is whitelisted. Paste-the-key works either way. See oauth/x.go.
-	PlatformX Platform = "x"
+	PlatformX Platform = platform.X
 	// PlatformTrovo is RETIRED. Trovo ceased live streaming on 30 June 2026,
 	// and polyemesis no longer offers it anywhere: no preset, no sign-in, no
 	// create. The constant stays because rows created before the shutdown still
@@ -76,7 +77,7 @@ const (
 	// a reason (see RetiredReason and MigrateRetiredPlatforms), kept readable,
 	// and left for the operator to delete. Removing the value would make them
 	// unreadable instead, which is the one outcome worse than unrunnable.
-	PlatformTrovo Platform = "trovo"
+	PlatformTrovo Platform = platform.Trovo
 	// PlatformVimeo exists for SIGN-IN, and sign-in is the only thing it can
 	// promise every operator.
 	//
@@ -92,12 +93,12 @@ const (
 	// account is what lets polyemesis ASK Vimeo whether this operator can reach
 	// the live API, and say so at connect time rather than letting a refusal
 	// arrive mid-broadcast. See internal/oauth/vimeo.go.
-	PlatformVimeo Platform = "vimeo"
+	PlatformVimeo Platform = platform.Vimeo
 	// PlatformTikTok exists to POST CLIPS (Wave 4 #5c): a connected account is
 	// where a finished short is published, and nothing else. It is not a
 	// destination platform -- Validate does not accept it -- because TikTok LIVE
 	// stays a pasted key. See oauth/tiktok.go.
-	PlatformTikTok Platform = "tiktok"
+	PlatformTikTok Platform = platform.TikTok
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -777,9 +778,7 @@ func (d Destination) Validate() error {
 	default:
 		add("unknown destination kind %q", d.Kind)
 	}
-	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, PlatformX, "":
-	default:
+	if d.Platform != "" && !d.Platform.acceptsDestinations() {
 		add("unknown platform %q", d.Platform)
 	}
 	if d.AudioBitrate < 32 || d.AudioBitrate > 512 {
@@ -991,17 +990,30 @@ var ErrKeyUnreadable = errors.New("the stream key could not be read on this mach
 // is for the operator.
 var ErrPlatformRetired = errors.New("platform retired")
 
-// retiredPlatforms is every platform that no longer exists, with the sentence
-// the operator is shown. One map, so the create refusal, the start refusal and
-// the reason on the row cannot say three different things.
-var retiredPlatforms = map[Platform]string{
-	PlatformTrovo: "Trovo shut down on 30 June 2026",
+// RetiredReason is why p can no longer be streamed to, or "" for a platform
+// that is still live. The platform registry holds the sentence, so the create
+// refusal, the start refusal and the reason on the row cannot say three
+// different things.
+func (p Platform) RetiredReason() string {
+	row, _ := platform.ByEnum(string(p))
+	return row.Retired
 }
 
-// RetiredReason is why p can no longer be streamed to, or "" for a platform
-// that is still live.
-func (p Platform) RetiredReason() string {
-	return retiredPlatforms[p]
+// acceptsDestinations reports whether Validate lets a destination carry p.
+func (p Platform) acceptsDestinations() bool {
+	row, ok := platform.ByEnum(string(p))
+	return ok && row.AcceptsDestinations
+}
+
+// retiredPlatforms lists every platform that no longer exists.
+func retiredPlatforms() []Platform {
+	var out []Platform
+	for _, row := range platform.All() {
+		if row.Retired != "" {
+			out = append(out, Platform(row.Enum))
+		}
+	}
+	return out
 }
 
 // retiredError is a refusal carrying ErrPlatformRetired and the reason.
@@ -2458,7 +2470,7 @@ func (d *DB) MigrateStrandedStreamKeys() error {
 // nothing and the checkpoint is skipped.
 func (d *DB) MigrateRetiredPlatforms() error {
 	var changed int64
-	for p := range retiredPlatforms {
+	for _, p := range retiredPlatforms() {
 		for _, q := range []string{
 			`UPDATE destinations SET enabled = 0 WHERE platform = ? AND enabled <> 0`,
 			`DELETE FROM platform_accounts WHERE platform = ?`,

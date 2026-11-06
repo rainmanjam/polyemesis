@@ -1,6 +1,10 @@
 package db
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
+)
 
 // MigrateWave3XTitle adds destinations.go_live_title, the title the lifecycle
 // coordinator sends when it publishes an X broadcast (#3). X takes a title only
@@ -25,7 +29,7 @@ func (d *DB) MigrateWave3XTitle() error {
 // "subject to X post length limits" without a number, so the 280-character
 // post limit is used. PROVISIONAL until a live PUBLISH on a whitelisted app
 // confirms or corrects it.
-const XGoLiveTitleMax = 280
+var XGoLiveTitleMax = platform.Must(platform.X).Text.GoLiveTitleMax
 
 // MigrateWave3XTweet adds destinations.x_go_live_tweet, when an X destination
 // wants X's announcement post as its broadcast is published (see
