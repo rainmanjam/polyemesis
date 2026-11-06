@@ -64,9 +64,9 @@ describe("uploadThumbnail", () => {
     expect(calls[0].url).toBe("/api/v1/schedules/9/template/thumbnail");
     expect(calls[0].init.method).toBe("PUT");
     expect(calls[0].init.body).toBe(pic);
-    const headers = calls[0].init.headers as Record<string, string>;
-    expect(headers["Content-Type"]).toBe("image/png");
-    expect(headers["X-CSRF-Token"]).toBe("tok+1");
+    const headers = new Headers(calls[0].init.headers);
+    expect(headers.get("Content-Type")).toBe("image/png");
+    expect(headers.get("X-CSRF-Token")).toBe("tok+1");
   });
 
   it("refuses a wrong type or an oversized picture before any request", async () => {

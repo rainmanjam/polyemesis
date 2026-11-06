@@ -273,63 +273,81 @@ export function isAccountInUse(e: unknown): e is ApiError {
   return e instanceof ApiError && e.code === ACCOUNT_IN_USE;
 }
 
+/** The cookie the server sets for the double-submit CSRF check, and the header
+ *  that must echo it (internal/auth: csrfCookieName, csrfHeaderName). */
+const CSRF_COOKIE = "polyemesis_csrf";
+const CSRF_HEADER = "X-CSRF-Token";
+
 /** Read the double-submit CSRF token the server set as a readable cookie. */
 function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+/** Send one request to the API with the session's credentials, the CSRF header
+ *  on every non-GET, and the session-ended check, and hand back the raw
+ *  Response. This is the ONLY place that decorates a request; `request` parses
+ *  JSON on top of it, and the callers that need the body untouched (an image
+ *  upload, a file download) use it directly. A `Content-Type` already on
+ *  `init.headers` is kept. */
+export async function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
-  if (method !== "GET" && method !== "HEAD") {
-    headers.set("X-CSRF-Token", csrfToken());
-  }
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (method !== "GET" && method !== "HEAD") headers.set(CSRF_HEADER, csrfToken());
 
-  const resp = await fetch(BASE + path, {
-    ...init,
-    headers,
-    credentials: "same-origin",
-  });
+  const resp = await fetch(BASE + path, { ...init, headers, credentials: "same-origin" });
   // A 401 mid-session returns the console to the login screen; see
   // lib/session.ts for which 401s do not.
   noteResponseStatus(path, resp.status);
+  return resp;
+}
 
-  if (resp.status === 204) return undefined as T;
-
+/** The body of a response, parsed as JSON when it is, else as the raw text. */
+async function readBody(resp: Response): Promise<unknown> {
   const text = await resp.text();
-  let body: unknown = null;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
+}
 
-  if (!resp.ok) {
-    const msg =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : typeof body === "string" && body && !looksLikeHtml(body)
-          ? body
-          : `request failed (${resp.status})`;
-    // Omitted by the server on every error that has nothing to branch on, so
-    // absent is the common case and "" is the honest reading of it.
-    const code =
-      body && typeof body === "object" && "code" in body
-        ? String((body as { code: unknown }).code)
-        : "";
-    const storedVersion =
-      body && typeof body === "object" && "version" in body
-        ? String((body as { version: unknown }).version)
-        : "";
-    throw new ApiError(resp.status, msg, code, refusedDestinations(body), storedVersion);
-  }
+/** The ApiError for a non-ok response whose body is already read. `fallback`
+ *  is the sentence when the body has none. */
+function apiErrorFrom(status: number, body: unknown, fallback = `request failed (${status})`): ApiError {
+  const msg =
+    body && typeof body === "object" && "error" in body
+      ? String((body as { error: unknown }).error)
+      : typeof body === "string" && body && !looksLikeHtml(body)
+        ? body
+        : fallback;
+  // Omitted by the server on every error that has nothing to branch on, so
+  // absent is the common case and "" is the honest reading of it.
+  const code =
+    body && typeof body === "object" && "code" in body
+      ? String((body as { code: unknown }).code)
+      : "";
+  const storedVersion =
+    body && typeof body === "object" && "version" in body
+      ? String((body as { version: unknown }).version)
+      : "";
+  return new ApiError(status, msg, code, refusedDestinations(body), storedVersion);
+}
+
+/** The ApiError for a non-ok response nobody has read yet. */
+export async function apiErrorFromResponse(resp: Response, fallback?: string): Promise<ApiError> {
+  return apiErrorFrom(resp.status, await readBody(resp), fallback);
+}
+
+/** JSON in, JSON out, and the ApiError (with `code`, the refused destinations
+ *  and a settings-conflict `storedVersion`) on failure. */
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const resp = await requestRaw(path, init);
+  if (resp.status === 204) return undefined as T;
+  const body = await readBody(resp);
+  if (!resp.ok) throw apiErrorFrom(resp.status, body);
   reportReconcileFailure(body);
   return body as T;
 }
@@ -423,6 +441,9 @@ const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
 const delWithBody = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "DELETE", body: JSON.stringify(body) });
 
+/** The generic verbs, for routes that have no named wrapper in `api` (lib/autoApi.ts). */
+export const http = { get, post, put, del };
+
 /** `?t=<token>` when a playback token is in play, empty otherwise. The public
  *  routes accept the token this way because an <img> src and a <video> src are
  *  the only handles a player page has on those requests. */
@@ -444,7 +465,7 @@ function tokenQuery(token?: string): string {
  *  where it cannot be. Optional in the type for exactly that reason: a
  *  destination row written before sources existed carries no `sourceId`, and
  *  guessing one on its behalf is the bug this parameter exists to end. */
-function sourceQuery(sourceId?: number | null): string {
+export function sourceQuery(sourceId?: number | null): string {
   return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
 }
 
@@ -989,26 +1010,13 @@ export const api = {
    *  Returns the text and the filename the server chose, so the caller does the
    *  saving — this module does not touch the DOM. */
   exportDebug: async (): Promise<{ text: string; filename: string }> => {
-    const resp = await fetch(`${BASE}/debug/export`, {
-      method: "POST",
-      // The same double-submit token every other non-GET carries. Built here
-      // rather than through request() because that helper parses the body as
-      // JSON, and this one needs the raw text and the Content-Disposition.
-      headers: { "X-CSRF-Token": csrfToken() },
-      credentials: "same-origin",
-    });
-    noteResponseStatus("/debug/export", resp.status);
-    const text = await resp.text();
+    // Through requestRaw rather than request() because that parses the body
+    // as JSON, and this one needs the raw text and the Content-Disposition.
+    const resp = await requestRaw("/debug/export", { method: "POST" });
     if (!resp.ok) {
-      let msg = `export failed (${resp.status})`;
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        if (parsed.error) msg = parsed.error;
-      } catch {
-        /* a non-JSON body; the status is all there is to report */
-      }
-      throw new ApiError(resp.status, msg);
+      throw apiErrorFrom(resp.status, await readBody(resp), `export failed (${resp.status})`);
     }
+    const text = await resp.text();
     // The server names the file with a timestamp so two bundles in one support
     // thread can be told apart. Fall back only if the header is missing.
     const cd = resp.headers.get("Content-Disposition") ?? "";
