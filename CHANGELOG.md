@@ -22,8 +22,10 @@ its first tagged release.
 - **Times on every page follow the display time zone from the first paint.** The zone was applied only
   once a page that reads settings (Dashboard, Settings, Sources, Recordings, Playout) had loaded, so a
   cold load onto Jobs, Clips, Monitoring, Automation or Library drew every time in UTC. The console
-  now reads it before it draws anything. The failover banner's "since" time and the other few places
-  that used the browser's own zone follow it too.
+  now reads it before it draws anything. The failover banner's "since" time, the output strip and
+  track meter times, the OBS bridge times, API token dates and the account expiry date used the
+  browser's own zone; they now use the display zone too (UTC on a default install) and show 24-hour
+  time.
 - **A display time zone the server cannot load is reported on a settings save as well as at start-up.**
   Start-up warned and a save silently logged in UTC. Both paths now run the same list of what stored
   settings configure in a running process, so a setting added to it is applied at both.

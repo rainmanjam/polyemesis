@@ -2,6 +2,20 @@
 // ONCE, at startup, into one value that is handed down. Nothing else in the
 // server calls os.Getenv for these, so every consumer sees the same answer and
 // they all parse a boolean the same way.
+//
+// Four variables are still read where they are used, on purpose, and none of
+// them is a switch two parts of the server must agree on:
+//
+//   - POLYEMESIS_FFMPEG_LOGLEVEL, POLYEMESIS_INGEST_CAPTURE
+//     (internal/ffmpeg/build.go) and POLYEMESIS_FFMPEG_ASSUME_MAJOR
+//     (internal/ffmpeg/detect.go) belong to FFmpeg argument and detection
+//     assembly, which is being reworked as its own step; moving them now would
+//     collide with it.
+//   - POLYEMESIS_RELAY_CAPTURE (internal/relay) and POLYEMESIS_RTMP_DROP_LOG
+//     (internal/rtmpserver) are developer diagnostics read where the capture
+//     file is opened. They change no behaviour, and threading them through the
+//     relay and RTMP constructors would put a parameter on hot paths for a debug
+//     aid.
 package startupenv
 
 import (
@@ -19,6 +33,7 @@ const (
 	XAppBearerVar        = "POLYEMESIS_X_APP_BEARER"
 	RumbleChatKeyVar     = "RUMBLE_CHAT_API_KEY"
 	RumbleChatChannelVar = "RUMBLE_CHAT_CHANNEL"
+	SetupCodeVar         = "POLYEMESIS_SETUP_CODE"
 )
 
 // Env is the startup environment. The zero value has every switch off and every
@@ -39,6 +54,10 @@ type Env struct {
 	// world-readable in ps.
 	RumbleChatKey     string
 	RumbleChatChannel string
+
+	// SetupCode presets the first-run setup code (see auth.PrepareSetupCode). It
+	// is passed on exactly as set: the auth package owns its rules.
+	SetupCode string
 }
 
 // FromEnv reads the process environment.
@@ -53,6 +72,7 @@ func FromLookup(get func(string) string) Env {
 		XAppBearer:        strings.TrimSpace(get(XAppBearerVar)),
 		RumbleChatKey:     strings.TrimSpace(get(RumbleChatKeyVar)),
 		RumbleChatChannel: strings.TrimSpace(get(RumbleChatChannelVar)),
+		SetupCode:         get(SetupCodeVar),
 	}
 }
 
@@ -68,8 +88,8 @@ func Flag(v string) bool {
 
 // String names the switches and says which secrets are set, never their values.
 func (e Env) String() string {
-	return fmt.Sprintf("startupenv{xPublish:%t xLivestream:%t facebookCaptions:%t xAppBearerSet:%t rumbleKeySet:%t rumbleChannel:%q}",
-		e.XPublish, e.XLivestream, e.FacebookCaptions, e.XAppBearer != "", e.RumbleChatKey != "", e.RumbleChatChannel)
+	return fmt.Sprintf("startupenv{xPublish:%t xLivestream:%t facebookCaptions:%t xAppBearerSet:%t rumbleKeySet:%t rumbleChannel:%q setupCodeSet:%t}",
+		e.XPublish, e.XLivestream, e.FacebookCaptions, e.XAppBearer != "", e.RumbleChatKey != "", e.RumbleChatChannel, e.SetupCode != "")
 }
 
 // GoString keeps %#v from printing the secrets that String keeps out.

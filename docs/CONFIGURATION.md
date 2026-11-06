@@ -519,6 +519,13 @@ overlays, and turns a restore into a re-download of every speech model. Check
 what you have with `-verify-backup`, which reads `polyemesis.db` and
 `secret.key` and says nothing about the rest.
 
+**If the server refuses to start because the stored settings cannot be read**,
+stop it and restore `polyemesis.db` from a backup (check the copy with
+`-verify-backup`), or reset only the settings to their defaults, which keeps
+sources, destinations and credentials:
+`sqlite3 <dataDir>/polyemesis.db "DELETE FROM settings WHERE id = 1"`. The next
+start writes the defaults; re-enter the settings you had changed.
+
 Nothing outside this directory is written at runtime, which is also what makes
 the container's single volume mount sufficient.
 

@@ -26,10 +26,10 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 119 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 120 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 2 |
-| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 11 |
+| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 10 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.

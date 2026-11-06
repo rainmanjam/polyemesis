@@ -22,7 +22,7 @@ func openBootStore(t *testing.T) *db.DB {
 // under test.
 func settingsOf(t *testing.T, store *db.DB) db.Settings {
 	t.Helper()
-	s, err := bootSettings(store)
+	s, err := bootSettings(store, "test.db")
 	if err != nil {
 		t.Fatalf("bootSettings: %v", err)
 	}
@@ -43,18 +43,27 @@ func TestAnUnreadableSettingsRowStopsTheBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := bootSettings(store)
+	_, err := bootSettings(store, "/data/polyemesis.db")
 	if err == nil {
 		t.Fatal("an unreadable settings row did not stop the boot")
 	}
-	if !strings.Contains(err.Error(), "settings") {
-		t.Errorf("the error does not say what failed: %v", err)
+	for _, want := range []string{"settings", "-verify-backup", "DELETE FROM settings WHERE id = 1", "/data/polyemesis.db", "docs/CONFIGURATION.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not say how to recover (missing %q): %v", want, err)
+		}
+	}
+	// And the reset it names works: the next read writes the defaults.
+	if _, err := store.SQL().Exec(`DELETE FROM settings WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bootSettings(store, "test.db"); err != nil {
+		t.Errorf("the documented reset did not clear the failure: %v", err)
 	}
 }
 
 func TestAReadableSettingsRowBoots(t *testing.T) {
 	store := openBootStore(t)
-	if _, err := bootSettings(store); err != nil {
+	if _, err := bootSettings(store, "/data/polyemesis.db"); err != nil {
 		t.Fatalf("a fresh store refused to boot: %v", err)
 	}
 }

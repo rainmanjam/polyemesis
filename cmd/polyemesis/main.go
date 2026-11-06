@@ -314,19 +314,20 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
-	setupCode, err := prepareSetupCode(cfg, store)
+	// The one read of the process environment's switches, keys and presets.
+	// Handed to the setup code, the job tier, the engines and the API, so they
+	// agree and none calls Getenv.
+	env := startupenv.FromEnv()
+	setupCode, err := prepareSetupCode(cfg, store, env.SetupCode)
 	if err != nil {
 		return err
 	}
 	// The one read of the stored settings at boot, before anything is built from
 	// them. Every consumer below is handed this value.
-	settings, err := bootSettings(store)
+	settings, err := bootSettings(store, cfg.DBPath())
 	if err != nil {
 		return err
 	}
-	// And the one read of the process environment's switches. Handed to the job
-	// tier, the engines and the API, so all three agree and none calls Getenv.
-	env := startupenv.FromEnv()
 
 	bus := events.NewBroker()
 
@@ -919,10 +920,17 @@ func listenPort(addr string) string { return config.ListenPort(addr) }
 // cannot be read stops the boot: the alternative, built-in defaults, would
 // shorten chat retention, drop the operator's automod and alert choices and
 // loosen the job tier's policy, all before anything says so.
-func bootSettings(store *db.DB) (db.Settings, error) {
+//
+// The error says how to get out, because the operator reading it has a server
+// that will not start: docs/CONFIGURATION.md, "The data directory".
+func bootSettings(store *db.DB, dbPath string) (db.Settings, error) {
 	s, err := store.GetSettings()
 	if err != nil {
-		return db.Settings{}, fmt.Errorf("reading the stored settings (refusing to start on guessed ones): %w", err)
+		return db.Settings{}, fmt.Errorf("the stored settings cannot be read, so polyemesis will not start on guessed ones: %w. "+
+			"To recover, stop the server and either restore %s from a backup (check the copy with `polyemesis -verify-backup <dir>`), "+
+			"or reset only the settings to their defaults, keeping sources and destinations, with "+
+			"`sqlite3 %s \"DELETE FROM settings WHERE id = 1\"` and start again. See docs/CONFIGURATION.md, \"The data directory\"",
+			err, dbPath, dbPath)
 	}
 	return s, nil
 }

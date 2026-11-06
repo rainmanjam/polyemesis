@@ -90,6 +90,9 @@ func TestEveryReloadRuleNamesAFunctionThatExists(t *testing.T) {
 			t.Errorf("settingsReload[%q] has no reason. The reason is what a reviewer "+
 				"reads when they disagree with the class.", path)
 		}
+		if strings.Contains(rule.Applies, ".") {
+			continue // package-qualified: TestQualifiedReloadAppliersAreExactAndCalled
+		}
 		re := regexp.MustCompile(`func (\([^)]*\) )?` + regexp.QuoteMeta(rule.Applies) + `\b`)
 		if !re.MatchString(src) {
 			t.Errorf("settingsReload[%q] names %s, which is not defined in any package "+

@@ -30,6 +30,11 @@ const xRateHoldDefault = time.Minute
 // numeric user id, and asking for it again on every read doubled the identity calls a sweep made.
 const xUserCacheTTL = 10 * time.Minute
 
+// xUserCacheMax bounds the user cache. Every token refresh is a new fingerprint
+// and the old one is never read again; expired entries are dropped on write, and
+// this is the backstop for a burst of distinct tokens inside one TTL.
+const xUserCacheMax = 64
+
 // xCallState is what one X provider remembers between calls, keyed by a fingerprint of the access token so no token
 // is held as a map key.
 type xCallState struct {
@@ -78,6 +83,12 @@ func (s *xCallState) hold(fp string, until time.Time) {
 	if s.holds == nil {
 		s.holds = map[string]time.Time{}
 	}
+	now := s.clock()
+	for k, end := range s.holds {
+		if !now.Before(end) {
+			delete(s.holds, k)
+		}
+	}
 	if until.After(s.holds[fp]) {
 		s.holds[fp] = until
 	}
@@ -99,7 +110,23 @@ func (s *xCallState) rememberUser(fp string, u xUser) {
 	if s.users == nil {
 		s.users = map[string]xCachedUser{}
 	}
-	s.users[fp] = xCachedUser{user: u, at: s.clock()}
+	now := s.clock()
+	for k, c := range s.users {
+		if now.Sub(c.at) >= xUserCacheTTL {
+			delete(s.users, k)
+		}
+	}
+	for len(s.users) >= xUserCacheMax {
+		var oldest string
+		var oldestAt time.Time
+		for k, c := range s.users {
+			if oldest == "" || c.at.Before(oldestAt) {
+				oldest, oldestAt = k, c.at
+			}
+		}
+		delete(s.users, oldest)
+	}
+	s.users[fp] = xCachedUser{user: u, at: now}
 }
 
 // rateHoldFrom reads when X says the limit resets. ok is false when the answer says nothing about a limit that has

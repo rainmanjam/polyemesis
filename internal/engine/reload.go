@@ -89,14 +89,20 @@ func ClassOf(path string) (ReloadRule, bool) {
 	return r, ok
 }
 
-// The out-of-band appliers live in internal/api, which imports this package, so
-// a rule cannot hold the function itself. Each name is written once, here, and
-// TestEveryReloadRuleNamesAFunctionThatExists resolves it against the source.
+// The out-of-band appliers live in internal/api (and logtz, and cmd/polyemesis
+// for MQTT), which import this package, so a rule cannot hold the function
+// itself. Each is written once, here, as a package-qualified name: "api.Func",
+// "logtz.Func" or "main.Type.Method". TestQualifiedReloadAppliersAreExactAndCalled
+// resolves every one against the source and checks that api's ApplySettings
+// calls exactly the ones named for it.
 const (
-	applyChatRetention = "ApplyChatRetention"
-	applyYouTubeQuota  = "ApplyYouTubeQuota"
-	applyAutomod       = "ApplyAutomod"
-	applyAlertSettings = "ApplyAlertSettings"
+	applyChatRetention = "api.ApplyChatRetention"
+	applyYouTubeQuota  = "api.ApplyYouTubeQuota"
+	applyAutomod       = "api.ApplyAutomod"
+	applyAlertSettings = "api.ApplyAlertSettings"
+	applyDisplayZone   = "logtz.Set"
+	// MQTT is not applied by a save at all: the runner polls the stored settings.
+	applyMQTT = "main.mqttRunner.reconcile"
 )
 
 // settingsReload is keyed by the dotted json path of every leaf in db.Settings.
@@ -205,8 +211,8 @@ var settingsReload = map[string]ReloadRule{
 	// empty zone as UTC on purpose, and redefining that here would move when
 	// every existing schedule fires because somebody changed a display
 	// preference.
-	"display.timeZone": {ClassOnDemand, "Set",
-		"logtz.ReplaceAttr reads it per log line; the console reads it from the next GET /settings. No process holds it and nothing restarts"},
+	"display.timeZone": {ClassLive, applyDisplayZone,
+		"ApplySettings sets the log's zone on boot and on every save, and logtz.ReplaceAttr reads it per line; the console reads it at start and after its own save. No process holds it and nothing restarts"},
 
 	"logging.persistProcessLogs": {ClassLive, "applyLogging", "swaps the FileSink behind logSink, so children already running start filling the new file"},
 	"logging.maxFileMb":          {ClassLive, "applyLogging", "re-opens the sink; no child is touched"},
@@ -230,17 +236,17 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.ingestLingerSeconds":   {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
 
 	// ------------------------------------------------------------------ mqtt
-	"mqtt.enabled":          {ClassLive, applyAutomod, "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
-	"mqtt.brokerUrl":        {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.username":         {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.hasPassword":      {ClassLive, applyAutomod, "reported by the runner, set through its own endpoint"},
-	"mqtt.prefix":           {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.instance":         {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.clientId":         {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.intervalSeconds":  {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.keepAliveSeconds": {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.tlsSkipVerify":    {ClassLive, applyAutomod, "polled by the runner"},
-	"mqtt.discovery":        {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.enabled":          {ClassLive, applyMQTT, "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
+	"mqtt.brokerUrl":        {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.username":         {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.hasPassword":      {ClassLive, applyMQTT, "reported by the runner, set through its own endpoint"},
+	"mqtt.prefix":           {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.instance":         {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.clientId":         {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.intervalSeconds":  {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.keepAliveSeconds": {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.tlsSkipVerify":    {ClassLive, applyMQTT, "polled by the runner"},
+	"mqtt.discovery":        {ClassLive, applyMQTT, "polled by the runner"},
 
 	// ---------------------------------------------------------- destinations
 	"destinations.staggerMs": {ClassLive, "startDestinations", "read per sweep and applied only to processes started in that sweep; it can never affect one already running"},

@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -218,5 +219,46 @@ func TestAnXCallRefusesAnEmptyBroadcastIDBeforeAnyRequest(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("%d requests for an empty id, want none", hits.Load())
+	}
+}
+
+// Tokens come and go (every refresh is a new fingerprint), and an entry for a
+// token that is no longer current is never read again. The caches drop what has
+// expired as they are written, so they do not grow with every refresh for the
+// life of the process.
+func TestTheXCachesDoNotKeepEntriesForTokensThatAreGone(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &xCallState{now: func() time.Time { return now }}
+
+	for i := range 50 {
+		fp := xTokenFingerprint(fmt.Sprintf("token-%d", i), "")
+		s.rememberUser(fp, xUser{})
+		s.hold(fp, now.Add(time.Minute))
+	}
+	now = now.Add(xUserCacheTTL + time.Hour)
+	s.rememberUser("current", xUser{})
+	s.hold("current", now.Add(time.Minute))
+
+	s.mu.Lock()
+	users, holds := len(s.users), len(s.holds)
+	s.mu.Unlock()
+	if users != 1 || holds != 1 {
+		t.Errorf("after the tokens expired the caches hold %d users and %d holds, want 1 each", users, holds)
+	}
+}
+
+func TestTheXUserCacheIsCappedEvenWhileEveryEntryIsFresh(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &xCallState{now: func() time.Time { return now }}
+	for i := range xUserCacheMax * 3 {
+		now = now.Add(time.Second)
+		s.rememberUser(fmt.Sprintf("fp-%d", i), xUser{})
+	}
+	s.mu.Lock()
+	n := len(s.users)
+	_, newest := s.users[fmt.Sprintf("fp-%d", xUserCacheMax*3-1)]
+	s.mu.Unlock()
+	if n > xUserCacheMax || !newest {
+		t.Errorf("user cache holds %d entries (cap %d), newest kept = %v", n, xUserCacheMax, newest)
 	}
 }

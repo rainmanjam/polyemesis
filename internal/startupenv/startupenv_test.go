@@ -50,9 +50,9 @@ func TestStringValuesAreTrimmed(t *testing.T) {
 // The Rumble key and the X bearer are secrets: a struct printed into a log or an
 // error must not carry them.
 func TestPrintingTheEnvDoesNotLeakASecret(t *testing.T) {
-	e := FromLookup(lookup(map[string]string{XAppBearerVar: "s3cret-bearer", RumbleChatKeyVar: "s3cret-key"}))
+	e := FromLookup(lookup(map[string]string{XAppBearerVar: "s3cret-bearer", RumbleChatKeyVar: "s3cret-key", SetupCodeVar: "s3cret-code"}))
 	for _, out := range []string{e.String(), e.GoString()} {
-		for _, secret := range []string{"s3cret-bearer", "s3cret-key"} {
+		for _, secret := range []string{"s3cret-bearer", "s3cret-key", "s3cret-code"} {
 			if contains(out, secret) {
 				t.Errorf("%q leaks %q", out, secret)
 			}
