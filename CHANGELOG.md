@@ -134,6 +134,23 @@ its first tagged release.
 - **Rumble chat cannot be moderated, and the moderation matrix now says so.** Delete, timeout, ban and
   upstream hide read as available on Rumble although it has no moderation API; they are now shown
   as unavailable with the reason. Flagging and the local hide still work.
+- **A failure cause newer than the console no longer reads blank.** The destination card, on-air bar,
+  Go live sheet and process table looked the cause up by name and showed nothing for one they had no
+  label for; they now show "Unknown failure", as the remedy already did.
+- **Refresh stream key is offered where the platform can hand a key over.** It was hidden for Kick,
+  which can, and shown for Vimeo, X and Rumble, where every press failed with a 400.
+- **Chat names X and Rumble properly.** The moderation menu printed "on x" in lower case, and Rumble
+  chat was labelled "Custom". Every place the console names a platform now reads one list, taken from
+  the server's platform registry.
+- **The Go live sheet warns with the same YouTube count as the Stop dialog.** It counted every enabled
+  YouTube destination, so it could promise a broadcast would end when the Stop dialog, which asks the
+  server, said none would.
+
+### Added
+
+- **`GET /api/v1/platforms/registry`** serves the platform registry (names, the stored platform value,
+  which platforms carry destinations and chat, and the IVS and X title rules) for scripted clients.
+  `GET /platforms/accounts` gains `isPage` on a Facebook account that is a Page.
 
 ### Changed
 
