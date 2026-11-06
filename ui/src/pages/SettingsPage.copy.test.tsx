@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import type { Settings } from "@/lib/types";
@@ -17,6 +17,7 @@ vi.mock("@/hooks/useLiveData", () => ({
   useLiveData: () => ({ source: null, bitrate: [] }),
 }));
 
+let minted = 0;
 const settings = {
   display: { timeZone: "" },
   ingest: { mode: "srt", srt: { passphrase: "", latencyMs: 120 }, rtmp: { app: "live", streamKey: "" } },
@@ -36,6 +37,15 @@ vi.mock("@/lib/api", async () => {
       putSettings: (next: Settings) => Promise.resolve(next),
       automodMatrix: () => Promise.resolve({ platforms: [], actions: [], checkers: [], cells: [] }),
       completeTour: () => Promise.resolve(),
+      tlsStatus: () => Promise.resolve({ mode: "selfsigned", configured: "auto", certificate: null }),
+      listTokens: () => Promise.resolve([]),
+      createToken: (name: string) => {
+        minted += 1;
+        return Promise.resolve({
+          token: { id: minted, name, scope: "read" },
+          plaintext: `secret-${minted}`,
+        });
+      },
     },
   };
 });
@@ -73,5 +83,44 @@ describe("copying the ingest URL on the Ingest tab", () => {
     await copyIngest();
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(writeText).toHaveBeenCalledWith("srt://studio.example:6000");
+  });
+});
+
+describe("copying a freshly minted API token", () => {
+  async function mint(name: string) {
+    const expected = minted + 1;
+    fireEvent.change(await screen.findByPlaceholderText(translate("en", "set.tokenNamePlaceholder")), {
+      target: { value: name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(translate("en", "i18nSweep.createToken")) }));
+    await waitFor(() => expect(minted).toBe(expected));
+    await screen.findByText(translate("en", "set.tokenCopyNow", { name }));
+  }
+  // The Copy inside the one-time token box; the Security tab has other Copy buttons.
+  const tokenBox = (name: string) =>
+    within(screen.getByText(translate("en", "set.tokenCopyNow", { name })).closest("div.flex-col") as HTMLElement);
+  const open = () =>
+    render(
+      <MemoryRouter initialEntries={["/settings?tab=security"]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+  it("says so when the clipboard is unavailable", async () => {
+    open();
+    await mint("a");
+    fireEvent.click(tokenBox("a").getByRole("button", { name: translate("en", "common.copy") }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  });
+
+  it("does not call token B Copied because token A was copied a moment ago", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+    open();
+    await mint("a");
+    fireEvent.click(tokenBox("a").getByRole("button", { name: translate("en", "common.copy") }));
+    await tokenBox("a").findByText(translate("en", "clipedit.copied"));
+    await mint("b");
+    expect(tokenBox("b").queryByText(translate("en", "clipedit.copied"))).toBeNull();
+    expect(tokenBox("b").getByRole("button", { name: translate("en", "common.copy") })).toBeTruthy();
   });
 });

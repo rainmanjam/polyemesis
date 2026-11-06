@@ -96,6 +96,17 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      a gate WITH A DEADLINE rather than either extreme. */
   const [programmeKnown, setProgrammeKnown] = useState(false);
 
+  /* resolveSources runs from a timer, a manual refresh and the socket's
+     self-heal, so two can be in flight. Each takes a number and only the newest
+     may apply its answer: an older response landing last must not restore a
+     deleted programme or overwrite a newer count. */
+  const resolveGen = useRef(0);
+  /* Whether /sources has ever answered. After that, a failed read keeps the
+     last good list and programme: dropping to "no programme" would tear down
+     the scoped socket and send unscoped requests the server refuses with
+     source_required on a multi-programme install. */
+  const resolvedOnce = useRef(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
 
@@ -276,9 +287,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
   const resolveSources = useCallback(async (): Promise<number | null> => {
+    const gen = ++resolveGen.current;
     try {
       const rows = await api.listSources();
       const ids = rows.map((r) => r.id);
+      if (gen !== resolveGen.current) return ids.length;
+      resolvedOnce.current = true;
       knownIds.current = ids;
       setSourceCount(ids.length);
       // Unchanged lists keep their identity: this runs on a timer, and a new
@@ -302,8 +316,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       return ids.length;
     } catch {
       // A console that will not render because it could not list sources is
-      // worse than one showing the install's only programme.
-      setProgramme(null);
+      // worse than one showing the install's only programme. Only before the
+      // first answer, though: see resolvedOnce.
+      if (gen === resolveGen.current && !resolvedOnce.current) setProgramme(null);
       return null;
     } finally {
       setProgrammeKnown(true);

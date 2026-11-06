@@ -3946,7 +3946,7 @@ function ApiTokens() {
   // Held in state and nowhere else: the server keeps only a hash, so this is
   // the one and only time the plaintext exists.
   const [minted, setMinted] = useState<{ token: ApiToken; plaintext: string } | null>(null);
-  const { copy: copyText, copied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
+  const { copy: copyText, copiedKey } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
 
   const load = () => {
     api
@@ -3988,8 +3988,11 @@ function ApiTokens() {
 
   const copy = async () => {
     if (!minted) return;
-    await copyText(minted.plaintext);
+    // Keyed by the secret itself: a freshly minted token is not "Copied" because
+    // the previous one was a moment ago.
+    await copyText(minted.plaintext, minted.plaintext);
   };
+  const tokenCopied = minted != null && copiedKey === minted.plaintext;
 
   return (
     <Card className="lg:col-span-2">
@@ -4044,7 +4047,7 @@ function ApiTokens() {
             <div className="flex items-center gap-1.5">
               <SecretCode value={minted.plaintext} />
               <Button size="sm" variant="outline" onClick={copy}>
-                {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
+                {tokenCopied ? <Check /> : <Copy />} {tokenCopied ? t("clipedit.copied") : t("common.copy")}
               </Button>
             </div>
             <span className="text-sm text-muted-foreground">{t("set.tokenHashNote")}</span>

@@ -165,3 +165,38 @@ describe("LiveDataProvider: the source count stays true with no socket frame", (
     }
   });
 });
+
+describe("LiveDataProvider: a poll that fails or answers late", () => {
+  it("keeps the last good programme and list when a later read fails", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("programme").textContent).toBe("7"));
+
+    list.mockRejectedValueOnce(new Error("unreachable"));
+    await act(async () => {
+      screen.getByText("refresh").click();
+    });
+    // Dropping to null would unscope the socket and every REST read.
+    expect(screen.getByTestId("programme").textContent).toBe("7");
+    expect(screen.getByTestId("count").textContent).toBe("2");
+  });
+
+  it("lets only the newest read apply, whatever order the answers arrive in", async () => {
+    list.mockResolvedValueOnce(rows(7, 8));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"));
+
+    let older!: (v: never) => void;
+    list.mockImplementationOnce(() => new Promise((r) => (older = r as never)));
+    list.mockResolvedValueOnce(rows(8));
+    await act(async () => {
+      screen.getByText("refresh").click(); // older request, still in flight
+      screen.getByText("refresh").click(); // newer request, answers at once
+    });
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+    // The older answer (which still lists 7) lands last and must be dropped.
+    await act(async () => older(rows(7, 8)));
+    expect(screen.getByTestId("count").textContent).toBe("1");
+    expect(screen.getByTestId("programme").textContent).toBe("8");
+  });
+});
