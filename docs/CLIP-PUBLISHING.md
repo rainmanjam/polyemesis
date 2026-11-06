@@ -58,9 +58,9 @@ TikTok here is for posting clips; TikTok LIVE stays a pasted server URL and key.
 **X** publishing is built and **switched off**. It runs only when the server's
 environment has `POLYEMESIS_X_PUBLISH=1`, a switch separate from the Livestream
 whitelist switch (`POLYEMESIS_X_LIVESTREAM`). With it off the API refuses X,
-the worker refuses X, and no request is made. X's sign-in grant does not include
-the `tweet.write` and `media.write` scopes either, so enabling X later also
-needs a scope bump and a reconnect.
+the worker refuses X, and no request is made. X's sign-in asks for the
+`tweet.write` and `media.write` scopes (sign-in scope version 2), so an X account
+connected before that has to reconnect once before it can publish clips.
 
 ## Never twice
 

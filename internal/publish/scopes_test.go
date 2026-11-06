@@ -18,6 +18,7 @@ func TestPublishScopesAreAskedForAtSignIn(t *testing.T) {
 		scopes []string
 	}{
 		{platform.TikTok, oauth.NewTikTok().Scopes()},
+		{platform.X, oauth.NewX().Scopes()},
 	} {
 		for _, want := range platform.Must(c.enum).PublishScopes {
 			if !slices.Contains(c.scopes, want) {
@@ -27,15 +28,15 @@ func TestPublishScopesAreAskedForAtSignIn(t *testing.T) {
 	}
 }
 
-// X is the recorded exception: publishing needs tweet.write and media.write,
-// and the sign-in grant asks for neither. Ready tells the operator to reconnect,
-// which cannot help. This test pins the gap so that closing it is a visible
-// change; when oauth/x.go starts asking for them, flip it.
-func TestXPublishScopesAreNotAskedForAtSignIn(t *testing.T) {
+// X used to be the exception: publishing needed tweet.write and media.write and
+// the sign-in grant asked for neither, so "reconnect" could never have helped.
+// Sign-in now reads the scopes from the registry, so an account that reconnects
+// holds them.
+func TestXSignInAsksForThePublishScopes(t *testing.T) {
 	granted := oauth.NewX().Scopes()
 	for _, need := range platform.Must(platform.X).PublishScopes {
-		if slices.Contains(granted, need) {
-			t.Errorf("X sign-in now asks for %q: update Ready's advice and this test", need)
+		if !slices.Contains(granted, need) {
+			t.Errorf("X publishing needs %q and sign-in does not ask for it", need)
 		}
 	}
 	if !slices.Equal(XScopes, platform.Must(platform.X).PublishScopes) {

@@ -94,7 +94,7 @@ func xSecret(parts ...string) string { return strings.Join(parts, "") }
 
 // ---------------------------------------------------------------- the surface
 
-// TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds pins the consent
+// TestXAuthURLSendsPKCEAndTheScopesLivestreamAndClipPublishingNeed pins the consent
 // request. PKCE is ON: X's authorization-code flow documents PKCE as the
 // recommended flow for the Livestream API, so the challenge reaches the wire
 // and the verifier is sent at exchange.
@@ -121,22 +121,22 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 	}
 	granted := strings.Fields(q.Get("scope"))
 	sort.Strings(granted)
-	want := []string{"broadcast.read", "broadcast.write", "offline.access", "tweet.read", "users.read"}
+	want := []string{"broadcast.read", "broadcast.write", "media.write", "offline.access", "tweet.read", "tweet.write", "users.read"}
 	if !reflect.DeepEqual(granted, want) {
 		t.Errorf("scope = %v, want exactly %v. broadcast.read/write are the Livestream family; "+
 			"offline.access issues a refresh token; users.read and tweet.read let GET /2/users/me "+
-			"and the broadcast.chat activity subscription succeed", granted, want)
+			"and the broadcast.chat activity subscription succeed; tweet.write and media.write post clips", granted, want)
 	}
 }
 
 // TestXScopesAreTheListTheLedgerRecords keeps Scopes and ScopeVersion honest
-// against the append-only ledger. X never shipped a version before this one, so
-// no account holds an older grant and the first version is 1.
+// against the append-only ledger. Version 2 added tweet.write and media.write so
+// clips can be posted; an account connected at version 1 reconnects once.
 func TestXScopesAreTheListTheLedgerRecords(t *testing.T) {
 	x := &X{}
-	if got := x.ScopeVersion(); got != 1 {
-		t.Errorf("ScopeVersion() = %d, want 1: X was never registered, so no account was "+
-			"ever granted an earlier version and nothing needs a reconnect prompt", got)
+	if got := x.ScopeVersion(); got != 2 {
+		t.Errorf("ScopeVersion() = %d, want 2: version 2 asks for the two publish scopes, and "+
+			"an account on version 1 has to be told to reconnect", got)
 	}
 	if got := x.Platform(); got != db.PlatformX {
 		t.Errorf("Platform() = %q, want db.PlatformX", got)

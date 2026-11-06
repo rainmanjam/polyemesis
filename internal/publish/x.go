@@ -40,9 +40,9 @@ type X struct {
 
 const xBase = platform.XAPIHost
 
-// XScopes are what posting a video needs beyond sign-in. The existing grant
-// asks for neither, so enabling this later needs an X scope bump and a
-// reconnect; Ready reports that rather than letting X's 403 say it.
+// XScopes are what posting a video needs beyond the Livestream sign-in. Sign-in
+// asks for them since ScopeVersion 2, so an account connected earlier reconnects
+// once; Ready reports that rather than letting X's 403 say it.
 var XScopes = platform.Must(platform.X).PublishScopes
 
 func (x *X) base() string {
@@ -60,7 +60,8 @@ func (x *X) client() *http.Client {
 }
 
 // Ready implements Adapter. Unlike the others an empty grant is not accepted:
-// X reports the scopes it granted, and these two are never in the sign-in set.
+// X reports the scopes it granted, and an account connected before ScopeVersion 2
+// does not hold these two.
 func (x *X) Ready(c Credential) *Failure {
 	have := map[string]bool{}
 	for _, f := range strings.FieldsFunc(c.Scopes, func(r rune) bool { return r == ' ' || r == ',' }) {
