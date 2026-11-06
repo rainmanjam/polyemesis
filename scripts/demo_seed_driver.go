@@ -39,6 +39,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
 // Shared with Playwright's auth.setup.ts, which signs into the install this
@@ -505,11 +507,15 @@ func reannotate(id int64, s fixSource) {
 // is being written. A file named anything else is indexed at whatever moment
 // FFmpeg finished rendering it, and five recordings that all start within the
 // same minute do not group into sessions.
+//
+// It writes the untagged name an earlier release's recorder wrote, on purpose:
+// a tagged rec-s<id>- name would attribute the demo footage to a programme ID
+// this script cannot know. The format itself is package segname's.
 func printRecordingPlan(fx *fixture) {
 	now := time.Now()
 	for _, r := range fx.Recordings {
 		started := now.Add(-time.Duration(r.StartedAgoMinutes) * time.Minute)
-		fmt.Printf("rec-%s.mkv\t%d\n", started.Format("20060102-150405"), r.Minutes*60)
+		fmt.Printf("%s%s%s\t%d\n", segname.Prefix, segname.FormatStamp(started), segname.MasterExt, r.Minutes*60)
 	}
 }
 

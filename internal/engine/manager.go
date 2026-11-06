@@ -154,8 +154,12 @@ type Manager struct {
 	// counts in the install's totals. See RetiredAlertStats. Under mu.
 	retiredAlerts alerts.Stats
 	retiring      map[*alerts.Notifier]struct{}
-	ctx           context.Context
-	started       bool
+	// stopping holds engines taken out of engines whose Stop has not returned,
+	// so RecorderRunning still sees a recorder that is finalising its last
+	// segment. Under mu.
+	stopping map[*Engine]struct{}
+	ctx      context.Context
+	started  bool
 	// stopped is set by StopWithin and cleared by Start, under mu. It is not
 	// !started: a Manager that was never started still binds on Reconcile, as
 	// it always has; one that has been STOPPED must not, because a reconcile
@@ -545,6 +549,7 @@ func (m *Manager) Sync() error {
 		if !want[id] {
 			stopping = append(stopping, eng)
 			delete(m.engines, id)
+			m.markStopping(eng)
 			// In the same critical section as the delete, so no reader of
 			// the totals ever sees this engine in neither place.
 			if n := eng.Alerts(); n != nil {
@@ -565,6 +570,7 @@ func (m *Manager) Sync() error {
 
 	for _, eng := range stopping {
 		eng.Stop()
+		m.doneStopping(eng)
 		m.retireAlerts(eng.Alerts())
 	}
 	if !started {
@@ -1311,6 +1317,7 @@ func (m *Manager) StopWithin(ctx context.Context) {
 	engines := make([]*Engine, 0, len(m.engines))
 	for _, eng := range m.engines {
 		engines = append(engines, eng)
+		m.markStopping(eng)
 	}
 	m.engines = map[int64]*Engine{}
 	m.started = false
@@ -1341,6 +1348,7 @@ func (m *Manager) StopWithin(ctx context.Context) {
 		wg.Add(1)
 		go func(eng *Engine) {
 			defer wg.Done()
+			defer m.doneStopping(eng)
 			eng.StopWithin(ctx)
 		}(eng)
 	}
@@ -1634,18 +1642,47 @@ func (m *Manager) IngestLive() bool {
 
 // RecorderRunning reports whether ANY programme has a recorder child alive.
 //
-// Any, because every programme's recorder writes rec-YYYYMMDD-HHMMSS.mkv into
-// the one recordings directory, and the name does not say whose it is: a
-// segment is only safe to unlink when no recorder on the box could hold it.
-// Engines() is read first and released, so no engine's lock is ever taken
+// Any, because every programme's recorder writes into the one recordings
+// directory. A segment's name now says whose it is (rec-s<id>-...), but the
+// untagged rec-YYYYMMDD-HHMMSS.mkv an earlier release wrote does not, so the
+// guard stays install-wide: a segment is only safe to unlink when no recorder
+// on the box could hold it.
+//
+// That includes an engine already taken out of the map but still stopping
+// (a deleted source, or the install shutting down): its recorder is
+// finalising the segment it was writing until Stop returns.
+//
+// Both sets are read first and released, so no engine's lock is ever taken
 // under m.mu.
 func (m *Manager) RecorderRunning() bool {
-	for _, eng := range m.Engines() {
+	engines := m.Engines()
+	m.mu.RLock()
+	for eng := range m.stopping {
+		engines = append(engines, eng)
+	}
+	m.mu.RUnlock()
+	for _, eng := range engines {
 		if eng.RecorderRunning() {
 			return true
 		}
 	}
 	return false
+}
+
+// markStopping records eng as taken out of the map but not yet stopped.
+// Called under mu, in the same critical section that removes it.
+func (m *Manager) markStopping(eng *Engine) {
+	if m.stopping == nil {
+		m.stopping = map[*Engine]struct{}{}
+	}
+	m.stopping[eng] = struct{}{}
+}
+
+// doneStopping forgets eng once its Stop has returned.
+func (m *Manager) doneStopping(eng *Engine) {
+	m.mu.Lock()
+	delete(m.stopping, eng)
+	m.mu.Unlock()
 }
 
 // GPUBusy reports whether any programme is using the GPU.

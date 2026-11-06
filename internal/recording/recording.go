@@ -999,9 +999,10 @@ func (m *Manager) Delete(id int64) error {
 	// recorder's own files are exempt. Only its own: a file destination writes
 	// into this same directory whether recording is on or not, and its outputs
 	// keep the guard. The engine clears its recorder slot before the child has
-	// finished exiting, so a delete in those few seconds unlinks a file the
-	// operator asked to be rid of, whose last bytes are the only thing lost,
-	// and the inode goes when ffmpeg exits.
+	// finished exiting, and a deleted source's engine leaves the manager's map
+	// before it stops, so the probe counts both until Stop returns (see
+	// engine.Engine.RecorderRunning and Manager.RecorderRunning): a recorder
+	// still finalising its segment keeps that segment guarded.
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return err
