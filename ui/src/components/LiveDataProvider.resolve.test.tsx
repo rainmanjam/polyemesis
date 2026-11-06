@@ -142,3 +142,26 @@ describe("LiveDataProvider: self-healing from the socket", () => {
     expect(list.mock.calls.length).toBe(settled);
   });
 });
+
+describe("LiveDataProvider: the source count stays true with no socket frame", () => {
+  it("notices the last source going away, because an engine-less install sends no status event", async () => {
+    // Status events are published BY an engine, so an install that loses its
+    // last source goes quiet and the last frame stays on screen. The Dashboard
+    // used to run its own 10 s poll of the count to cover this; the provider
+    // owns the count, so it owns the poll.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      list.mockResolvedValue(rows(1));
+      draw();
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+
+      list.mockResolvedValue(rows());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("0"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

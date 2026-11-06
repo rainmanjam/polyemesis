@@ -275,13 +275,20 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      died, Clips showed "No clips yet.", all against a healthy server, until
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
-  const resolveSources = useCallback(async () => {
+  const resolveSources = useCallback(async (): Promise<number | null> => {
     try {
       const rows = await api.listSources();
       const ids = rows.map((r) => r.id);
       knownIds.current = ids;
       setSourceCount(ids.length);
-      setProgrammes(rows.map((r) => ({ id: r.id, name: r.name })));
+      // Unchanged lists keep their identity: this runs on a timer, and a new
+      // array every 10 s would re-render every consumer for nothing.
+      const next = rows.map((r) => ({ id: r.id, name: r.name }));
+      setProgrammes((prev) =>
+        prev.length === next.length && prev.every((p, i) => p.id === next[i].id && p.name === next[i].name)
+          ? prev
+          : next,
+      );
       setProgramme((current) => {
         // Keep the operator on their programme while it still exists.
         // Re-resolving from scratch every time would drag a two-programme
@@ -292,10 +299,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         rememberProgramme(picked);
         return picked;
       });
+      return ids.length;
     } catch {
       // A console that will not render because it could not list sources is
       // worse than one showing the install's only programme.
       setProgramme(null);
+      return null;
     } finally {
       setProgrammeKnown(true);
     }
@@ -335,6 +344,20 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
   }, [resolveSources]);
+
+  /* THE COUNT KEEPS BEING READ, because the socket cannot say it fell to zero.
+
+     Status events are published BY an engine, so an install that loses its
+     last source stops sending them and the last frame stays on screen for
+     ever: a dashboard left open drew a publish URL and a track count for a
+     programme that no longer existed. The source list is a single cheap read,
+     and it is the one place sourceCount comes from, so the header chip and the
+     Dashboard's ingest card cannot scope by different counts. */
+  useEffect(() => {
+    if (!programmeKnown) return;
+    const poll = window.setInterval(() => void resolveSources(), 10_000);
+    return () => window.clearInterval(poll);
+  }, [programmeKnown, resolveSources]);
 
   /* SELF-HEALING, for the changes this tab did not make.
 

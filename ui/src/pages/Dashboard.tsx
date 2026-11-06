@@ -1190,7 +1190,8 @@ export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
   const narrow = useIsNarrow();
-  const { status, bitrate, snapshotKnown, programme } = useLiveData();
+  const { status, bitrate, snapshotKnown, programme, sourceCount: liveSourceCount, programmeKnown, refreshSources } =
+    useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
@@ -1260,7 +1261,13 @@ export function Dashboard() {
 
   const [pending, setPending] = useState<DestinationId[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
-  const [sourceCount, setSourceCount] = useState<number | null>(null);
+  // How many programmes exist, which is what decides whether this page shows a
+  // pipeline or an empty state. The provider owns the count (and keeps it
+  // fresh); `null` is NOT KNOWN YET, and the branch below tests `=== 0` rather
+  // than falsiness so that unknown renders the ordinary dashboard. An operator
+  // mid-broadcast must never see their dashboard replaced because a request
+  // was slow.
+  const sourceCount = programmeKnown ? liveSourceCount : null;
   /* The selected programme's status frame, its relay throughput and whether it
    * is live, held the same way and for the same reason as failoverState: the
    * socket alternates between every engine's frames and the `stats` bitrate
@@ -1273,32 +1280,6 @@ export function Dashboard() {
     live: ingestLive,
     known: ingestKnown,
   } = useProgrammeIngest(sourceCount);
-
-  // How many programmes exist, which is what decides whether this page shows a
-  // pipeline or an empty state.
-  //
-  // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
-  // falsiness precisely so that unknown renders the ordinary dashboard. The
-  // cost is that a fresh install shows the pipeline for the length of one
-  // request before the empty state replaces it; the alternative is a spinner in
-  // front of the main screen on every load of every install, for a question
-  // only one install in a thousand answers differently.
-  //
-  // A count that cannot be read leaves the page rendering as it always did. The
-  // empty state is an improvement on a working dashboard, never a replacement
-  // for one, and drawing it because a request failed would tell an operator
-  // mid-broadcast that their programme is gone.
-  const readSourceCount = useCallback(async (): Promise<number | null> => {
-    try {
-      const { sources } = await api.setupStatus();
-      const n = sources ?? null;
-      setSourceCount(n);
-      return n;
-    } catch {
-      setSourceCount(null);
-      return null;
-    }
-  }, []);
 
   useEffect(() => {
     api
@@ -1314,23 +1295,7 @@ export function Dashboard() {
         // claiming an exposure it could not verify.
         setFailover(null);
       });
-    readSourceCount();
-    // AND KEEP READING IT. The count used to be read once per refreshKey, and
-    // every control that bumps refreshKey is inside the pipeline this page
-    // stops drawing the moment the count reaches zero -- so a dashboard left
-    // open while the last source went away kept rendering a publish URL, a
-    // track count and a relay subscriber for a programme that no longer
-    // existed, with nothing on the page able to notice. The status socket
-    // cannot rescue it either: status events are published BY an engine, so an
-    // install with none simply stops sending them and the last frame stays on
-    // screen for ever.
-    //
-    // The setup status rather than the source list: it is the one endpoint
-    // whose entire job is this number, it is a single row count, and it is what
-    // the empty state was given a count for in the first place.
-    const poll = setInterval(readSourceCount, 10_000);
-    return () => clearInterval(poll);
-  }, [refreshKey, readSourceCount]);
+  }, [refreshKey]);
 
   // See the failoverState declaration for why this filters by programme rather
   // than reading the snapshot straight through. `?? null` matters as much as
@@ -1421,7 +1386,7 @@ export function Dashboard() {
         // So the refusal is a prompt to ask, not an answer. Zero draws the
         // empty state; anything else says the true thing.
         if (isNoSource(err)) {
-          const n = await readSourceCount();
+          const n = await refreshSources();
           if (n !== 0) toast.error(t("dash.noEngineRunning"));
           return false;
         }
@@ -1431,7 +1396,7 @@ export function Dashboard() {
         setBusyId(null);
       }
     },
-    [readSourceCount, t],
+    [refreshSources, t],
   );
 
   const openEdit = async (id: DestinationId) => {
