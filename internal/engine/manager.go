@@ -529,6 +529,10 @@ func (m *Manager) Sync() error {
 	// wide enough for a second caller to decide the same thing.
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
+	// Entries a concurrent recorder stop kept past their engine's Stop are
+	// dropped here as well as in RecorderRunning, so a set the delete guard
+	// never reads cannot grow.
+	m.pruneStopping()
 
 	rows, err := m.store.ListSources()
 	if err != nil {
@@ -598,22 +602,34 @@ func (m *Manager) Sync() error {
 		// Before Start, so no destination this engine starts can miss a drain
 		// of the same id in another programme.
 		eng.drains = m.drains
-		if err := eng.Start(ctx); err != nil {
-			m.log.Error("cannot start engine for source", "source", id, "err", err)
-			// Start may already have started a recorder, and this engine is in
-			// no map, so it is tracked as stopping like a retired one.
-			m.mu.Lock()
-			m.markStopping(eng)
-			m.mu.Unlock()
-			m.stopEngine(eng)
+		if !m.startTracked(ctx, eng, eng.Start) {
 			continue
 		}
 		// Registering and re-pushing are ONE step, because a save that ran
 		// while this engine was starting could not have seen it. See
 		// publishEngine.
 		m.publishEngine(id, eng)
+		m.mu.Lock()
+		delete(m.stopping, eng)
+		m.mu.Unlock()
 	}
 	return nil
+}
+
+// startTracked runs start for an engine that is in no map yet, and reports
+// whether it succeeded. Start can launch a recorder before it fails, so the
+// engine is tracked as stopping from BEFORE start until either the caller has
+// published it (and drops the entry) or it has been stopped here.
+func (m *Manager) startTracked(ctx context.Context, eng *Engine, start func(context.Context) error) bool {
+	m.mu.Lock()
+	m.markStopping(eng)
+	m.mu.Unlock()
+	if err := start(ctx); err != nil {
+		m.log.Error("cannot start engine for source", "source", eng.SourceID(), "err", err)
+		m.stopEngine(eng)
+		return false
+	}
+	return true
 }
 
 // reconcileSharedIngest brings the one-port listeners up or down to match the
@@ -1355,7 +1371,7 @@ func (m *Manager) StopWithin(ctx context.Context) {
 		wg.Add(1)
 		go func(eng *Engine) {
 			defer wg.Done()
-			defer m.doneStopping(eng)
+			defer m.finishStopping(eng)
 			eng.StopWithin(ctx)
 		}(eng)
 	}
@@ -1694,11 +1710,38 @@ func (m *Manager) markStopping(eng *Engine) {
 }
 
 // stopEngine stops eng and records that its Stop has returned, even through
-// a panic. The entry itself is dropped by RecorderRunning once eng reports no
-// recorder, not here: see the stopping field.
+// a panic, then drops the entry if eng has no recorder left. One a concurrent
+// stop still holds is dropped later, by RecorderRunning or Sync's prune: see
+// the stopping field.
 func (m *Manager) stopEngine(eng *Engine) {
-	defer m.doneStopping(eng)
+	defer m.finishStopping(eng)
 	eng.Stop()
+}
+
+// finishStopping records that eng's Stop has returned and drops the entry at
+// once if eng has no recorder left. eng's lock is taken with m.mu released.
+func (m *Manager) finishStopping(eng *Engine) {
+	m.doneStopping(eng)
+	if !eng.RecorderRunning() {
+		m.forgetStopped(eng)
+	}
+}
+
+// pruneStopping drops every stopped engine that no longer reports a recorder.
+func (m *Manager) pruneStopping() {
+	m.mu.RLock()
+	var done []*Engine
+	for eng, stopped := range m.stopping {
+		if stopped {
+			done = append(done, eng)
+		}
+	}
+	m.mu.RUnlock()
+	for _, eng := range done {
+		if !eng.RecorderRunning() {
+			m.forgetStopped(eng)
+		}
+	}
 }
 
 // doneStopping records that eng's Stop has returned.

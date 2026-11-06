@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -137,29 +138,119 @@ func TestManagerRecorderRunningCountsEnginesStillStopping(t *testing.T) {
 	}
 }
 
-// An engine that fails to start may already have started its recorder, and it
-// is in no map: it is stopped through the same tracked path, so the entry is
-// marked done and dropped once it reports no recorder.
-func TestStopEngineMarksTheStopDone(t *testing.T) {
+// stopEngine keeps an entry whose recorder a concurrent stop still holds,
+// marked done so RecorderRunning or Sync's prune can drop it once that stop
+// returns.
+func TestStopEngineKeepsAnEngineWhoseRecorderIsStillStopping(t *testing.T) {
 	e, _ := storeEngine(t)
 	m := &Manager{engines: map[int64]*Engine{}}
 	m.mu.Lock()
 	m.markStopping(e)
 	m.mu.Unlock()
+	e.mu.Lock()
+	e.recorderStopping = 1
+	e.mu.Unlock()
+
 	m.stopEngine(e)
 	m.mu.RLock()
-	done := m.stopping[e]
+	done, tracked := m.stopping[e]
 	m.mu.RUnlock()
-	if !done {
-		t.Fatal("stopEngine returned without recording that the engine's Stop returned")
+	if !tracked || !done {
+		t.Fatalf("after stopEngine with a recorder stop still running: tracked=%v done=%v, "+
+			"want tracked and done", tracked, done)
+	}
+	if !m.RecorderRunning() {
+		t.Fatal("RecorderRunning() = false while a recorder stop is still running")
+	}
+	e.recorderStopped()
+	if m.RecorderRunning() || stoppingLen(m) != 0 {
+		t.Error("the entry outlived the last recorder stop")
+	}
+}
+
+func stoppingLen(m *Manager) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.stopping)
+}
+
+// A SOURCE THAT KEEPS FAILING TO START must not pin one engine per reconcile.
+// Start can launch the recorder before it fails, and the engine is in no map
+// yet, so it is tracked from before Start: a delete in that window sees the
+// recorder. Once stopped with no recorder left, the entry goes at once rather
+// than waiting for the delete guard to be asked.
+//
+// Mutation: mark the engine stopping only after start returns. Observed to
+// fail with "false while a failing start has launched a recorder".
+// Mutation: drop the forget in finishStopping. Observed to fail with "the
+// stopping set grew".
+func TestARepeatedlyFailingStartIsTrackedAndDoesNotGrowTheStoppingSet(t *testing.T) {
+	m := &Manager{log: testLogger(), engines: map[int64]*Engine{}}
+	for i := 0; i < 3; i++ {
+		e, _ := storeEngine(t)
+		ok := m.startTracked(context.Background(), e, func(context.Context) error {
+			e.mu.Lock()
+			e.recorder = loudTestProc()
+			e.mu.Unlock()
+			if !m.RecorderRunning() {
+				t.Error("RecorderRunning() = false while a failing start has launched a recorder")
+			}
+			return errors.New("reconcile failed")
+		})
+		if ok {
+			t.Fatal("startTracked reported success for a start that failed")
+		}
+		if n := stoppingLen(m); n != 0 {
+			t.Fatalf("after %d failed starts the stopping set grew to %d", i+1, n)
+		}
 	}
 	if m.RecorderRunning() {
-		t.Fatal("RecorderRunning() = true for a stopped engine with no recorder")
+		t.Error("RecorderRunning() = true after every failed start was stopped")
+	}
+}
+
+// A successful start leaves the entry for the caller to drop once it has
+// published the engine, so there is no instant at which it is in neither.
+func TestASuccessfulStartStaysTrackedUntilPublished(t *testing.T) {
+	m := &Manager{log: testLogger(), engines: map[int64]*Engine{}}
+	e := lifeEngine(t)
+	if !m.startTracked(context.Background(), e, func(context.Context) error { return nil }) {
+		t.Fatal("startTracked reported failure for a start that succeeded")
 	}
 	m.mu.RLock()
-	_, kept := m.stopping[e]
+	done, tracked := m.stopping[e]
 	m.mu.RUnlock()
-	if kept {
-		t.Error("a stopped engine with no recorder was not forgotten")
+	if !tracked || done {
+		t.Fatalf("after a successful start: tracked=%v done=%v, want tracked and not done", tracked, done)
+	}
+}
+
+// Sync prunes too, so an entry a concurrent stop kept alive is dropped even
+// on an install where nobody ever asks the delete guard.
+//
+// Mutation: drop the pruneStopping call. Observed to fail with "kept".
+func TestPruneStoppingDropsOnlyStoppedEnginesWithNoRecorder(t *testing.T) {
+	e := lifeEngine(t)
+	m := &Manager{engines: map[int64]*Engine{}}
+	m.mu.Lock()
+	m.markStopping(e)
+	m.mu.Unlock()
+	e.mu.Lock()
+	e.recorderStopping = 1
+	e.mu.Unlock()
+
+	m.pruneStopping()
+	if stoppingLen(m) != 1 {
+		t.Fatal("pruneStopping dropped an engine whose Stop has not returned")
+	}
+	m.doneStopping(e)
+	m.pruneStopping()
+	if stoppingLen(m) != 1 {
+		t.Fatal("pruneStopping dropped an engine whose recorder is still stopping")
+	}
+	e.recorderStopped()
+	m.pruneStopping()
+	if stoppingLen(m) != 0 {
+		t.Error("a stopped engine with no recorder was kept")
 	}
 }
