@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // AN HEVC OR AV1 INGEST IS STREAM-COPIED TO RTMP DESTINATIONS THAT REJECT IT. #627
@@ -31,10 +31,10 @@ import (
 // save to refuse. The reachable rung is to say so at the moment it becomes true,
 // before the operator hears it from the platform.
 //
-// WHAT IS SOURCED AND WHAT IS NOT. services.json carries videoCodecs for four
+// WHAT IS SOURCED AND WHAT IS NOT. the platform registry carries videoCodecs for four
 // services (twitch, youtube, facebook, kick) out of far more presets. Where the
 // registry has an opinion this names the platform; where it does not,
-// services.Lookup returns false and that is reported as UNKNOWN rather than
+// the list is empty and that is reported as UNKNOWN rather than
 // guessed. A confident wrong answer here is worse than no answer: it would send
 // an operator to change an encoder setting that was never the problem.
 
@@ -64,15 +64,16 @@ func videoCodecConcerns(codec string, rows []*db.Destination) []videoCodecConcer
 		if row == nil || row.Kind != db.DestRTMP {
 			continue
 		}
-		svc, ok := services.Lookup(string(row.Platform))
-		if ok && accepts(svc.VideoCodecs, c) {
+		known, _ := platform.ByEnum(string(row.Platform))
+		ok := len(known.VideoCodecs) > 0
+		if ok && accepts(known.VideoCodecs, c) {
 			continue // the registry says this platform takes it
 		}
 		out = append(out, videoCodecConcern{
 			dest:     row.Name,
 			platform: string(row.Platform),
-			accepts:  svc.VideoCodecs,
-			known:    ok && len(svc.VideoCodecs) > 0,
+			accepts:  known.VideoCodecs,
+			known:    ok,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].dest < out[j].dest })
@@ -99,7 +100,7 @@ func (e *Engine) warnVideoCodec(codec string, rows []*db.Destination) {
 				"accepts", strings.Join(c.accepts, ","))
 			continue
 		}
-		// SAID AS UNKNOWN, NOT AS A VERDICT. services.json has no entry for this
+		// SAID AS UNKNOWN, NOT AS A VERDICT. the platform registry has no codec list for this
 		// platform, so naming it a failure would be inventing a fact.
 		e.log.Warn("the ingest video codec is not H.264 and this platform's support "+
 			"is not recorded; if it is rejected, this is why",

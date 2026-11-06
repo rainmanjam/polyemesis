@@ -52,14 +52,6 @@
         { "name": "US West: San Jose, CA", "url": "rtmp://live-sjc.twitch.tv/app" },
         { "name": "US West: Seattle, WA", "url": "rtmp://live-sea.twitch.tv/app" }
       ],
-      "recommended": {
-        "keyintSeconds": 2,
-        "maxVideoKbps": 6000,
-        "maxAudioKbps": 320,
-        "x264opts": "scenecut=0"
-      },
-      "videoCodecs": ["h264"],
-      "audioCodecs": ["aac"],
       "streamKeyLink": "https://dashboard.twitch.tv/settings/stream"
     },
     {
@@ -71,13 +63,6 @@
         { "name": "Primary (legacy RTMP)", "url": "rtmp://a.rtmp.youtube.com/live2" },
         { "name": "Backup (legacy RTMP)", "url": "rtmp://b.rtmp.youtube.com/live2?backup=1" }
       ],
-      "recommended": {
-        "keyintSeconds": 2,
-        "maxVideoKbps": 51000,
-        "maxAudioKbps": 160
-      },
-      "videoCodecs": ["h264", "hevc", "av1"],
-      "audioCodecs": ["aac"],
       "streamKeyLink": "https://www.youtube.com/live_dashboard"
     },
     {
@@ -87,29 +72,12 @@
         { "name": "Default", "url": "rtmps://rtmp-api.facebook.com:443/rtmp/" },
         { "name": "Live API (used by polyemesis OAuth)", "url": "rtmps://live-api-s.facebook.com:443/rtmp" }
       ],
-      "recommended": {
-        "keyintSeconds": 2,
-        "maxVideoKbps": 9000,
-        "maxAudioKbps": 128,
-        "maxFps": 60
-      },
-      "videoCodecs": ["h264"],
-      "audioCodecs": ["aac"],
       "streamKeyLink": "https://www.facebook.com/live/producer?ref=OBS"
     },
     {
       "id": "kick",
       "name": "Kick",
-      "perChannelIngest": true,
       "servers": [],
-      "recommended": {
-        "keyintSeconds": 2,
-        "maxVideoKbps": 8000,
-        "maxAudioKbps": 160,
-        "maxFps": 60
-      },
-      "videoCodecs": ["h264"],
-      "audioCodecs": ["aac"],
       "streamKeyLink": "https://kick.com/dashboard/settings/stream",
       "note": "Kick issues a per-channel Amazon IVS ingest host, so there is no server to choose. Copy the Stream URL from Kick's Stream Settings and APPEND /app -- the dashboard shows it without one, and a URL with no application path cannot be published to. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app"
     }

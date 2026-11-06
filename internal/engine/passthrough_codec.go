@@ -5,6 +5,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // A destination that copies the ingest's video sends whatever bitstream the
@@ -55,7 +56,7 @@ const h264Codec = "h264"
 // a destination with a rendition says nothing (the rendition re-encodes, so the
 // ingest's codec never reaches the platform), and a non-RTMP destination says
 // nothing (SRT, file and HLS carry HEVC without complaint).
-func passthroughCodecWarning(kind db.DestKind, platform db.Platform, renditionID *int64, video *ffmpeg.VideoStream) string {
+func passthroughCodecWarning(kind db.DestKind, plat db.Platform, renditionID *int64, video *ffmpeg.VideoStream) string {
 	if kind != db.DestRTMP || renditionID != nil {
 		return ""
 	}
@@ -67,13 +68,13 @@ func passthroughCodecWarning(kind db.DestKind, platform db.Platform, renditionID
 		return ""
 	}
 
-	// Kick is the only platform in the tree with a SOURCED refusal:
+	// Kick is the only platform in the registry with a SOURCED refusal:
 	// internal/db/platforms.go cites Kick's own help page, checked 2026-08-06,
 	// for "H.264 only -- Kick refuses H.265". That page says nothing about AV1,
 	// so the certain wording is spent only where the evidence reaches.
-	if platform == db.PlatformKick && video.Codec == "hevc" {
+	if row, ok := platform.ByEnum(string(plat)); ok && video.Codec == "hevc" && accepts(row.RefusesVideoCodecs, "hevc") {
 		return "The ingest is sending HEVC and this destination copies it. " +
-			"Kick documents that it accepts H.264 only and refuses H.265, so " +
+			row.Name + " documents that it accepts H.264 only and refuses H.265, so " +
 			"this stream will be rejected. Switch the encoder to H.264, or give " +
 			"this destination an H.264 rendition."
 	}

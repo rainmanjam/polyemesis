@@ -250,3 +250,14 @@ func TestTheRegistryStaysCurated(t *testing.T) {
 		}
 	}
 }
+
+func TestServicesCarryTheRegistryFacts(t *testing.T) {
+	k, ok := Lookup("kick")
+	if !ok || !k.PerChannelIngest || k.Recommended.MaxAudioKbps != 160 || len(k.VideoCodecs) != 1 {
+		t.Fatalf("kick = %+v", k)
+	}
+	y, _ := Lookup("youtube")
+	if y.Recommended.MaxVideoKbps != 51000 || len(y.VideoCodecs) != 3 {
+		t.Fatalf("youtube = %+v", y)
+	}
+}

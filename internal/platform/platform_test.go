@@ -101,3 +101,43 @@ func TestIsIVSIngestHost(t *testing.T) {
 		}
 	}
 }
+
+// The engine's checks read these fields, and each is a platform fact somebody
+// sourced. Pinned here so a row edit that changes behaviour is a visible test
+// change rather than a quiet one.
+func TestFactsTheEngineReads(t *testing.T) {
+	for _, r := range All() {
+		wantTracks := 0
+		if r.Enum == Twitch {
+			wantTracks = 1
+		}
+		if r.AudioTracksMax != wantTracks {
+			t.Errorf("%s AudioTracksMax = %d, want %d", r.Key, r.AudioTracksMax, wantTracks)
+		}
+		if r.HealthAPI != (r.Enum == YouTube) {
+			t.Errorf("%s HealthAPI = %v", r.Key, r.HealthAPI)
+		}
+		refuses := len(r.RefusesVideoCodecs) > 0
+		if refuses != (r.Enum == Kick) {
+			t.Errorf("%s RefusesVideoCodecs = %v", r.Key, r.RefusesVideoCodecs)
+		}
+	}
+	// Every refused codec is also absent from the accepted list.
+	k := Must(Kick)
+	for _, c := range k.RefusesVideoCodecs {
+		for _, a := range k.VideoCodecs {
+			if a == c {
+				t.Errorf("kick both accepts and refuses %s", c)
+			}
+		}
+	}
+}
+
+func TestMustPanicsOnAMissingRow(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Must(unknown) should panic")
+		}
+	}()
+	Must("nope")
+}
