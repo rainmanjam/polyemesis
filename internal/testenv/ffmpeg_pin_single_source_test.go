@@ -58,7 +58,7 @@ func ffmpegPin(t *testing.T) map[string]string {
 // The build every CI job and the images install: the 8.1 line.
 var ffmpegPinned = []string{
 	"FFMPEG_8_1_LINUX_AMD64", "FFMPEG_8_1_LINUX_ARM64", "FFMPEG_8_1_WINDOWS_AMD64",
-	"FFMPEG_9_0_LINUX_AMD64",
+	"FFMPEG_9_0_LINUX_AMD64", "FFMPEG_9_0_LINUX_ARM64",
 }
 
 func TestFFmpegPinFileIsWellFormed(t *testing.T) {

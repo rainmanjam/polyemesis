@@ -124,16 +124,15 @@ jobs:
       # process that could not have reported two, and the assertion it exists to
       # make becomes vacuous while staying green.
       #
-      # Ubuntu's 6.1.1 is exactly that build — ci.yml says so in its own words,
-      # "6.1.1 cannot demux multitrack FLV at all" — so `apt-get install ffmpeg`
-      # is not an option here even though it is what the acceptance matrix uses.
+      # Ubuntu's 6.1.1 is exactly that build (it cannot demux multitrack FLV at
+      # all), so `apt-get install ffmpeg` is not an option here even though it is what the acceptance matrix uses.
       # The suite refuses to run on it now, which turns this from a silent
       # wrong answer into a red step; installing 8.1 is what keeps it green for
       # the right reason.
       #
-      # Same pinned artefact, same cache key, same retry shape as ci.yml. The
-      # key is copied deliberately: a matching key restores that cache instead
-      # of writing a second copy of a 130 MB download.
+      # The install-ffmpeg action owns the pinned artefact, the cache key and the
+      # retry shape; a matching key restores the cache other workflows warmed
+      # instead of writing a second copy of a 130 MB download.
       - name: Install FFmpeg
         timeout-minutes: 6
         uses: ./.github/actions/install-ffmpeg

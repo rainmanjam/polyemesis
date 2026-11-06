@@ -148,8 +148,8 @@ ENV POLYEMESIS_IMAGE_VARIANT=cuda
 # Pinned rather than floating, for the same reason the Alpine image pins: an
 # unpinned transcoder makes a rebuild six months from now a different product
 # under the same tag. .github/ffmpeg-pin.env is the source of these three
-# values and a test fails if they differ. To bump, follow "TO BUMP" above FFMPEG_BTBN_TAG in
-# scripts/install.sh and change all three ARGs together.
+# values and a test fails if they differ. To bump, follow "TO BUMP" at the top of
+# .github/ffmpeg-pin.env and change all three ARGs together.
 ARG FFMPEG_BTBN_TAG=autobuild-2026-09-30-13-08
 ARG FFMPEG_ASSET=ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
 ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79

@@ -64,6 +64,10 @@ on:
     paths:
       - "web/**"
       - "docs/**"
+      - "README.md"
+      - "integrations/streamdeck/README.md"
+      - "integrations/streamdeck/package.json"
+      - "integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/manifest.json"
       - ".github/workflows/pages.yml"
   # A RELEASE REDEPLOYS THE SITE (#559). Tagging used to rebuild nothing:
   # `branches` and `paths` are AND-ed, so a tag push matched no filter here at
@@ -155,11 +159,14 @@ jobs:
           fi
           CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
-          # The same three globs the `pull_request:` filter used to carry. Note
+          # The globs the `pull_request:` filter used to carry, plus the files
+          # web/scripts/check-build.mjs reads from outside web/ and docs/ (the
+          # root README and the Stream Deck plugin's three Node-floor files); the
+          # push: paths above list the same ones. Note
           # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
           # /docs/${slug} onto the repository's own docs/, so a docs-only change
           # IS a site change. See the comment on the triggers above.
-          if grep -qE '^(web/|docs/|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
+          if grep -qE '^(web/|docs/|README\.md$|integrations/streamdeck/(README\.md|package\.json|com\.polyemesis\.streamdeck\.sdPlugin/manifest\.json)$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
             echo "site=true" >> "$GITHUB_OUTPUT"
             echo "touches the site: building"
           else

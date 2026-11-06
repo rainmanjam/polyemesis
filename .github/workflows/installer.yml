@@ -362,11 +362,11 @@ jobs:
       # correctly refused: "no ffmpeg on PATH". That refusal is the installer
       # working, so the job has to bring one.
       #
-      # The same pinned build and cache key ci.yml uses, deliberately rather than
-      # `apt install ffmpeg`: #430 is open about apt being the largest source of
-      # red CI, and a cache stops asking a mirror that is refusing. Reusing the
-      # key means this job shares ci.yml's warm cache instead of populating a
-      # second one.
+      # The pinned build through the install-ffmpeg action, deliberately rather
+      # than `apt install ffmpeg`: #430 is open about apt being the largest
+      # source of red CI, and a cache stops asking a mirror that is refusing. The
+      # action's cache key is shared with every other workflow that uses it, so
+      # this job reuses their warm cache instead of populating a second one.
       - name: Install FFmpeg
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg

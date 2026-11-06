@@ -105,6 +105,10 @@ build web/ and publish to Cloudflare Pages
 
 # prometheus rules
 #
+# NOT YET ON THE GITHUB RULESET (as of 2026-11-06 the live list lacks it). The job
+# name below is the real one, answered on every pull request; the maintainer adds
+# it to the ruleset by hand. Remove this note in the commit that does.
+#
 # Added 2026-10-30. promtool checks that deploy/prometheus/alerts.yml parses,
 # that its unit tests in alerts_test.yml pass, and that every query on the
 # shipped Grafana dashboard parses as PromQL. It has no `needs: changes` and no
@@ -119,6 +123,10 @@ build web/ and publish to Cloudflare Pages
 prometheus rules
 
 # streamdeck typecheck, test, build
+#
+# NOT YET ON THE GITHUB RULESET (as of 2026-11-06 the live list lacks it). The job
+# name below is the real one, answered on every pull request; the maintainer adds
+# it to the ruleset by hand. Remove this note in the commit that does.
 #
 # Added 2026-11-06. The Stream Deck plugin's typecheck, unit tests, bundle and
 # Elgato validator ran on every pull request and could not block one -- the job
