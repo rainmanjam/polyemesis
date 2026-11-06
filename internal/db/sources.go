@@ -1156,7 +1156,11 @@ func backfillSourceIDs(tx *sql.Tx, tables []string, id int64) error {
 		return nil
 	}
 	for _, table := range tables {
-		if _, err := tx.Exec(backfillSourceIDSQL[table], id); err != nil {
+		stmt, ok := backfillSourceIDSQL[table]
+		if !ok {
+			return fmt.Errorf("backfill %s.source_id: no statement for table", table)
+		}
+		if _, err := tx.Exec(stmt, id); err != nil {
 			return fmt.Errorf("backfill %s.source_id: %w", table, err)
 		}
 	}
