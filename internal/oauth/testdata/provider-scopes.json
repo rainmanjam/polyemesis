@@ -59,13 +59,15 @@
   },
   {
     "platform": "x",
-    "scopeVersion": 1,
+    "scopeVersion": 2,
     "scopes": [
       "broadcast.read",
       "broadcast.write",
       "offline.access",
       "users.read",
-      "tweet.read"
+      "tweet.read",
+      "tweet.write",
+      "media.write"
     ],
     "manualKeyReason": "Paste the server URL and stream key from X's producer tooling. Once X has whitelisted polyemesis's app, polyemesis can create the stream source itself. Sign-in works without that."
   },

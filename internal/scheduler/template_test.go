@@ -47,10 +47,10 @@ func TestRenderTitleSubstitutesDateAndTimeInTheSchedulesZone(t *testing.T) {
 // with it, not after the platform has refused the write and left the event
 // page half-built.
 func TestTemplateValidateRefusesATitleThatWouldBeTooLongOnceRendered(t *testing.T) {
-	long := strings.Repeat("x", MaxTitleLen-len("2026-11-03")+1) + "{date}"
+	long := strings.Repeat("x", 100-len("2026-11-03")+1) + "{date}"
 	tpl := BroadcastTemplate{ScheduleID: 7, TitlePattern: long}.Normalized()
 	if err := tpl.Validate(); err == nil {
-		t.Fatalf("Validate accepted a title pattern whose rendered title is over %d characters", MaxTitleLen)
+		t.Fatalf("Validate accepted a title pattern whose rendered title is over 100 characters")
 	}
 }
 
@@ -154,5 +154,30 @@ func TestTemplateValidateNeedsATitlePattern(t *testing.T) {
 	tpl := BroadcastTemplate{ScheduleID: 7, TitlePattern: "   "}.Normalized()
 	if err := tpl.Validate(); err == nil {
 		t.Fatalf("Validate accepted a blank title pattern")
+	}
+}
+
+func TestTemplateLimitsAreYouTubes(t *testing.T) {
+	if MaxTitleLen != 100 || MaxDescriptionLen != 5000 {
+		t.Errorf("limits = %d/%d, want 100/5000", MaxTitleLen, MaxDescriptionLen)
+	}
+	ok := BroadcastTemplate{ScheduleID: 7, TitlePattern: "x", Description: strings.Repeat("d", 5000)}.Normalized()
+	if err := ok.Validate(); err != nil {
+		t.Errorf("5000-byte description refused: %v", err)
+	}
+	bad := BroadcastTemplate{ScheduleID: 7, TitlePattern: "x", Description: strings.Repeat("d", 5001)}.Normalized()
+	if bad.Validate() == nil {
+		t.Error("5001-byte description accepted")
+	}
+}
+
+func TestTemplateTitleIsCountedInUTF16(t *testing.T) {
+	ok := BroadcastTemplate{ScheduleID: 7, TitlePattern: strings.Repeat("😀", 50)}.Normalized()
+	if err := ok.Validate(); err != nil {
+		t.Errorf("50 emoji (100 UTF-16 units) refused: %v", err)
+	}
+	bad := BroadcastTemplate{ScheduleID: 7, TitlePattern: strings.Repeat("😀", 51)}.Normalized()
+	if bad.Validate() == nil {
+		t.Error("51 emoji (102 UTF-16 units) accepted")
 	}
 }

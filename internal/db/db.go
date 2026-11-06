@@ -366,6 +366,11 @@ var migrationSteps = []migrationStep{
 	{fn: (*DB).MigrateWave3XTweet},
 	{fn: (*DB).MigrateChatSanctions},
 
+	// destinations.preset_id, with a one-time backfill from the ingest URL.
+	// Placed with the other destinations columns, before MigrateSources and the
+	// steps that read the table whole. See MigrateDestinationPresetID.
+	{fn: (*DB).MigrateDestinationPresetID},
+
 	// Wave 4 #4: cross-platform analytics -- streams, viewer samples and
 	// chat tallies. New tables only; see analytics.go.
 	{fn: (*DB).MigrateWave4Analytics},

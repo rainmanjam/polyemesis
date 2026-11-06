@@ -2719,6 +2719,10 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	row.ID = 0
+	if p := row.PresetProblem(); p != "" {
+		writeError(w, http.StatusBadRequest, p)
+		return
+	}
 	if !s.requireNamedSource(w, row.SourceID) {
 		return
 	}
@@ -2845,6 +2849,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
+	// The stored preset, so only a save that CHANGES it is checked: an id the
+	// catalogue no longer has must not make the row unsaveable.
+	storedPresetID := existing.PresetID
 	// PRE_PUBLISHED counts as live here: the PUBLISH has already gone to X with
 	// the title it carried, so a change now could not reach X either.
 	xBroadcastLive := existing.Platform == db.PlatformX &&
@@ -2855,6 +2862,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	existing.ID = id
+	if existing.PresetID != storedPresetID {
+		if p := existing.PresetProblem(); p != "" {
+			writeError(w, http.StatusBadRequest, p)
+			return
+		}
+	}
 	if existing.URL != storedURL && refuseIVSWithoutApp(w, existing.URL) {
 		return
 	}

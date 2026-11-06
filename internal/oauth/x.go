@@ -38,10 +38,11 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // xAPIBase is the production host for tokens and data.
-const xAPIBase = "https://api.x.com"
+const xAPIBase = platform.XAPIHost
 
 // xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
 // token and data host so a change to one does not move the other.
@@ -53,7 +54,7 @@ const xAPIBase = "https://api.x.com"
 // spec's host does not show the consent page, set these two to the guide's
 // "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
 const (
-	xAuthorizeBase = "https://api.x.com"
+	xAuthorizeBase = platform.XAPIHost
 	xAuthorizePath = "/2/oauth2/authorize"
 )
 
@@ -120,20 +121,25 @@ func (x *X) Platform() db.Platform { return db.PlatformX }
 
 // Scopes is the list the consent screen shows. See the file header for why each
 // one is here.
+//
+// The last two are what clip publishing needs (tweet.write, media.write), read
+// from the platform registry so publish and sign-in cannot disagree.
 func (x *X) Scopes() []string {
-	return []string{
+	return append([]string{
 		"broadcast.read",
 		"broadcast.write",
 		"offline.access",
 		"users.read",
 		"tweet.read",
-	}
+	}, platform.Must(platform.X).PublishScopes...)
 }
 
-// ScopeVersion is 1. X was never registered before this, so no account holds an
-// earlier grant and nothing needs a reconnect prompt. Bump it by hand when Scopes
-// changes; the scope ledger in testdata/scope-versions.json must match.
-func (x *X) ScopeVersion() int { return 1 }
+// ScopeVersion is 2. Version 1 was the five Livestream scopes; version 2 adds
+// tweet.write and media.write so clips can be posted, which an account connected
+// at version 1 does not hold and has to reconnect once to get. Bump it by hand
+// when Scopes changes; the scope ledger in testdata/scope-versions.json must
+// match.
+func (x *X) ScopeVersion() int { return 2 }
 
 // PKCE is ON. X's Livestream authentication guide recommends the PKCE flow for
 // every new integration; the challenge is sent at authorize and the verifier at

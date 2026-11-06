@@ -185,3 +185,18 @@ func TestEveryProviderDeclaresAPositiveScopeVersion(t *testing.T) {
 		}
 	}
 }
+
+// An X account connected at scope version 1 is told to reconnect, and told that
+// only posting clips needs it, so a livestream-only operator is not alarmed.
+func TestAnXAccountOnScopeVersion1IsToldReconnectingOnlyMattersForClips(t *testing.T) {
+	r := AccountNeedsReconnect(db.PlatformAccount{Platform: db.PlatformX, ScopeVer: 1})
+	if !r.Needed {
+		t.Fatal("an X account on scope version 1 holds no publish scopes and should be told to reconnect")
+	}
+	if !strings.Contains(r.Reason, "only matters for posting clips") || !strings.Contains(r.Reason, "livestreaming and chat are unaffected") {
+		t.Errorf("reason = %q", r.Reason)
+	}
+	if other := AccountNeedsReconnect(db.PlatformAccount{Platform: db.PlatformKick, ScopeVer: 1}); strings.Contains(other.Reason, "clips") {
+		t.Errorf("the clips note belongs to X only: %q", other.Reason)
+	}
+}

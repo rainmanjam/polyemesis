@@ -30,6 +30,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	pf "github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // metadataState is one account's row in the result list.
@@ -498,7 +499,13 @@ func precheck(meta oauth.Metadata, platform db.Platform, caps oauth.MetadataCaps
 		}
 	}
 
-	if n := utf8.RuneCountInString(meta.Title); caps.TitleMax > 0 && n > caps.TitleMax {
+	// YouTube counts a title in UTF-16 units, as the publisher and the web UI do;
+	// every other platform is counted in characters.
+	titleLen := utf8.RuneCountInString(meta.Title)
+	if platform == db.PlatformYouTube {
+		titleLen = pf.UTF16Len(meta.Title)
+	}
+	if n := titleLen; caps.TitleMax > 0 && n > caps.TitleMax {
 		return skipped, fmt.Sprintf("%s titles are limited to %d characters; yours is %d.",
 			platform, caps.TitleMax, n)
 	}

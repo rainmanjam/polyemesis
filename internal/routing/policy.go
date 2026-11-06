@@ -1,6 +1,10 @@
 package routing
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
+)
 
 // Music-rights policy.
 //
@@ -20,18 +24,17 @@ import "strings"
 
 // Platform identifies where a destination publishes, for policy purposes.
 //
-// The string values match internal/db's Platform so a stored destination's
-// platform can be handed straight to PolicyFor. It is a separate type rather
-// than an import because db imports routing, and because routing is meant to
-// stay a pure, dependency-free package.
+// The string values come from internal/platform, as internal/db's Platform
+// values do, so a stored destination's platform can be handed straight to
+// PolicyFor. It is a separate type rather than db's because db imports routing.
 type Platform string
 
 const (
-	PlatformCustom   Platform = "custom"
-	PlatformYouTube  Platform = "youtube"
-	PlatformTwitch   Platform = "twitch"
-	PlatformKick     Platform = "kick"
-	PlatformFacebook Platform = "facebook"
+	PlatformCustom   Platform = platform.Custom
+	PlatformYouTube  Platform = platform.YouTube
+	PlatformTwitch   Platform = platform.Twitch
+	PlatformKick     Platform = platform.Kick
+	PlatformFacebook Platform = platform.Facebook
 	// PlatformFile is a local recording. In db's model that is a destination
 	// *kind* rather than a platform, but where the bytes land is the only thing
 	// a rights policy cares about, so PlatformFor folds the two together.
@@ -58,37 +61,33 @@ type PlatformPolicy struct {
 }
 
 // platformPolicies is the table. Ordered for the UI: the platforms that
-// restrict music first, then the ones that do not.
-var platformPolicies = []PlatformPolicy{
-	{
-		Platform:     PlatformYouTube,
-		Name:         "YouTube",
-		ExcludeMusic: true,
-		Reason:       "YouTube Content ID",
-		TargetLUFS:   LUFSStreaming,
-	},
-	{
-		Platform:     PlatformTwitch,
-		Name:         "Twitch",
-		ExcludeMusic: true,
-		Reason:       "Twitch DMCA policy",
-		TargetLUFS:   LUFSStreaming,
-	},
-	{
-		Platform:     PlatformKick,
-		Name:         "Kick",
-		ExcludeMusic: true,
-		Reason:       "Kick DMCA policy",
-		TargetLUFS:   LUFSStreaming,
-	},
-	{
-		Platform:     PlatformFacebook,
-		Name:         "Facebook",
-		ExcludeMusic: true,
-		Reason:       "Facebook Rights Manager",
-		TargetLUFS:   LUFSStreaming,
-	},
-	{
+// restrict music first, then the ones that do not. The platform rows come from
+// internal/platform; the local recording and the custom row are not platforms
+// and stay here. A platform with no Music policy in the registry is simply
+// absent, and PolicyFor gives it the custom row.
+var platformPolicies = buildPolicies()
+
+func buildPolicies() []PlatformPolicy {
+	var out []PlatformPolicy
+	var custom PlatformPolicy
+	for _, row := range platform.All() {
+		if row.Music == nil {
+			continue
+		}
+		pol := PlatformPolicy{
+			Platform:     Platform(row.Enum),
+			Name:         row.ShortName,
+			ExcludeMusic: row.Music.Exclude,
+			Reason:       row.Music.Reason,
+			TargetLUFS:   row.Music.TargetLUFS,
+		}
+		if row.Enum == platform.Custom {
+			custom = pol
+			continue
+		}
+		out = append(out, pol)
+	}
+	out = append(out, PlatformPolicy{
 		Platform:     PlatformFile,
 		Name:         "Local recording",
 		ExcludeMusic: false,
@@ -96,14 +95,8 @@ var platformPolicies = []PlatformPolicy{
 		// An archive keeps the dynamics the operator sent it. Loudness
 		// normalization is a delivery decision, and a file is not a delivery.
 		TargetLUFS: 0,
-	},
-	{
-		Platform:     PlatformCustom,
-		Name:         "Custom",
-		ExcludeMusic: false,
-		Reason:       "custom destination",
-		TargetLUFS:   0,
-	},
+	})
+	return append(out, custom)
 }
 
 // PlatformPolicies returns the whole table, for the settings UI to render and

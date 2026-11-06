@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // fbGraphBase and fbDialogBase are Facebook's production hosts. They are
@@ -63,8 +64,8 @@ import (
 // differently on a Tuesday is not a failure mode worth having. v24.0 is also
 // the first version that removed overlay_url, which we deliberately never send.
 const (
-	fbGraphBase  = "https://graph.facebook.com/v24.0"
-	fbDialogBase = "https://www.facebook.com/v24.0/dialog/oauth"
+	fbGraphBase  = platform.GraphAPIRoot
+	fbDialogBase = platform.GraphDialogURL
 )
 
 // Facebook implements Facebook Login plus the Live Video API.

@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 //go:embed services.json
@@ -86,6 +88,26 @@ func load() (registry, error) {
 	loadOnce.Do(func() {
 		if err := json.Unmarshal(registryJSON, &loaded); err != nil {
 			loadErr = fmt.Errorf("services registry is malformed: %w", err)
+			return
+		}
+		// The ingest servers are this file's; every other fact about the
+		// platform is internal/platform's, merged in here so the wire shape of
+		// a Service does not change.
+		for i := range loaded.Services {
+			s := &loaded.Services[i]
+			row, ok := platform.ByEnum(s.ID)
+			if !ok {
+				continue
+			}
+			s.PerChannelIngest = row.PerChannelIngest
+			s.VideoCodecs = row.VideoCodecs
+			s.AudioCodecs = row.AudioCodecs
+			if c := row.Ceilings; c != nil {
+				s.Recommended = Recommended{
+					KeyintSeconds: c.KeyintSeconds, MaxVideoKbps: c.MaxVideoKbps,
+					MaxAudioKbps: c.MaxAudioKbps, MaxFps: c.MaxFps, X264Opts: c.X264Opts,
+				}
+			}
 		}
 	})
 	return loaded, loadErr
@@ -196,21 +218,9 @@ func AnalyseURL(raw string) []URLProblem {
 	return probs
 }
 
-// ivsIngestHostSuffix is Amazon IVS's contribute domain, which Kick and Twitch
-// both publish through. THE LEADING DOT IS LOAD-BEARING, as it is in
-// internal/multitrack: without it "evilglobal-contribute.live-video.net", a
-// different registrable domain, would match too.
-const ivsIngestHostSuffix = ".global-contribute.live-video.net"
-
-// ivsApp is the one RTMP application an IVS ingest accepts.
-const ivsApp = "app"
-
 // IsIVSIngestHost reports whether host -- a hostname, without a port -- is an
 // Amazon IVS contribute endpoint.
-func IsIVSIngestHost(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	return len(h) > len(ivsIngestHostSuffix) && strings.HasSuffix(h, ivsIngestHostSuffix)
-}
+func IsIVSIngestHost(host string) bool { return platform.IsIVSIngestHost(host) }
 
 // IVSAppPathFix reports whether raw is an RTMP(S) URL to an Amazon IVS ingest
 // whose application path is not /app, and if so the server URL that works.
@@ -246,14 +256,14 @@ func ivsAppPathProblem(u *url.URL) (URLProblem, bool) {
 	}
 	path := strings.Trim(u.Path, "/")
 	first, _, _ := strings.Cut(path, "/")
-	if first == ivsApp {
+	if first == platform.IVSApp {
 		return URLProblem{}, false
 	}
 	host := u.Host
 	if u.Port() == "" && u.Scheme == "rtmps" {
 		host += ":443"
 	}
-	fix := u.Scheme + "://" + host + "/" + ivsApp
+	fix := u.Scheme + "://" + host + "/" + platform.IVSApp
 	detail := "this is an Amazon IVS ingest (Kick and Twitch both use them), and IVS " +
 		"only accepts the application path /app. "
 	if path == "" {

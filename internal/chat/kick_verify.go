@@ -40,6 +40,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // The header names Kick sends. Spelled once, here, because a typo in any of
@@ -53,7 +55,7 @@ const (
 
 // KickPublicKeyURL is where Kick publishes the key that matches the private one
 // it signs with.
-const KickPublicKeyURL = "https://api.kick.com/public/v1/public-key"
+const KickPublicKeyURL = platform.KickAPIHost + "/public/v1/public-key"
 
 // ErrKickSignature is returned for every verification failure.
 //

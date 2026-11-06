@@ -23,9 +23,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 )
 
@@ -69,11 +69,11 @@ type Meta struct {
 
 // Limits, in the platform's own units.
 const (
-	maxYouTubeTitle       = 100
-	maxYouTubeDescription = 5000
+	maxYouTubeTitle       = platform.YouTubeTitleMax
+	maxYouTubeDescription = platform.YouTubeDescriptionMax
 	maxYouTubeTagsChars   = 450 // YouTube allows 500; leave room for the quoting it adds
-	maxTikTokCaption      = 2200
-	maxXPost              = 280
+	maxTikTokCaption      = platform.TikTokCaptionMax
+	maxXPost              = platform.XPostMax
 	maxTags               = 30
 )
 
@@ -148,7 +148,7 @@ func Normalize(platform string, m Meta) (Meta, error) {
 	return m, nil
 }
 
-func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
+func utf16Len(s string) int { return platform.UTF16Len(s) }
 
 // hashtags renders tags as "#a #b".
 func hashtags(tags []string) string {

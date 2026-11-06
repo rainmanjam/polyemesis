@@ -148,6 +148,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
 	"destination.goLiveTitle":                        sPublic, // the X broadcast title, published to viewers by design
 	"destination.xGoLiveTweet":                       sPublic, // first / every / never: when X posts its go-live announcement
+	"destination.presetId":                           sPublic, // a catalogue preset id ("instagram"); names no account and holds no secret
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,

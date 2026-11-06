@@ -1059,6 +1059,17 @@ destination: the fields above plus `"outcome": "dumped"`, or `"skipped"` or
 need an admin token. Each dump raises the `delay.dumped` audit alert
 ([MONITORING.md](MONITORING.md)).
 
+**`presetId`** is the destination-preset id (an `id` from `GET /platforms/presets`)
+the destination was created from, and is absent for one typed in by hand. It is
+optional on `POST` and `PUT`. A `POST` or a `PUT` that **sets** it checks that the
+catalogue has the preset and that the preset saves as the destination's
+`platform` (every preset that is only a URL and a note saves as `custom`), and
+answers `400` otherwise. A `PUT` that leaves it out keeps the stored value; one
+that sends `"presetId": ""` clears it. It exists so the platform's own encoder
+guidance can be found for Instagram, LinkedIn, Dailymotion, Owncast and Rumble,
+whose destinations have `platform: "custom"`. It is advisory and gates nothing.
+A stored id the catalogue no longer has is ignored, never an error.
+
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
@@ -1236,12 +1247,16 @@ log, dump or stats. Anything else is refused rather than guessed at. `dry-run` t
 | `GET` | `/renditions/{id}/concerns` |
 | `GET` | `/encoders` |
 
-`GET /renditions/{id}/concerns?platform=<id>` compares a rendition against that
-platform's published figures from `internal/db/platforms.go` and returns one
+`GET /renditions/{id}/concerns?platform=<id>[&preset=<presetId>]` compares a
+rendition against that platform's published figures and returns one
 entry per concern, each carrying the `detail`, the documentation `source` and the
 date it was `checked`. An unknown or empty platform is an empty list, not an
 error: a custom RTMP destination has nothing published to be outside of, and the
-console asks the same question either way.
+console asks the same question either way. The optional `preset` is a
+destination's `presetId`: it is tried first and finds the figures for a platform
+that saves as `custom` (`platform=custom&preset=instagram`). A preset that saves
+as a different platform than `platform`, or one the catalogue does not have, is
+ignored and the platform's own figures are used.
 
 `DELETE /renditions/{id}` answers `{"status", "destinations",
 "enabledDestinations", "playoutVariants", "enabledPlayoutVariants"}` and a

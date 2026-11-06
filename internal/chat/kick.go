@@ -33,11 +33,15 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// KickMaxMessage is Kick's published limit on chat content. The adapter
+// enforces it in Send; the registry carries the same figure for everyone else,
+// and TestRegistryAgreesWithTheChatAdapters holds the two together.
+const KickMaxMessage = 500
+
 const (
-	// KickMaxMessage is Kick's published limit on chat content.
-	KickMaxMessage = 500
 	// kickSilenceAfter is how long a connected-and-reachable adapter waits
 	// before it starts telling the operator that nothing has arrived. Long
 	// enough that a genuinely quiet ten minutes is not called an error, short
@@ -108,7 +112,7 @@ func NewKick(cfg KickConfig) (*KickAdapter, error) {
 		return nil, fmt.Errorf("kick chat is not configured: no access token, so connect the Kick account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://api.kick.com"
+		cfg.APIBase = platform.KickAPIHost
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

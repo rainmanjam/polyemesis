@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube publishes a clip as a YouTube Short with the Data API's resumable
@@ -40,18 +41,13 @@ type YouTube struct {
 // https://developers.google.com/youtube/v3/docs/videos/insert. The existing
 // "youtube" scope is one of them, which is why an account connected before this
 // feature does not need reconnecting.
-var AcceptedYouTubeScopes = []string{
-	"https://www.googleapis.com/auth/youtube.upload",
-	"https://www.googleapis.com/auth/youtube",
-	"https://www.googleapis.com/auth/youtube.force-ssl",
-	"https://www.googleapis.com/auth/youtubepartner",
-}
+var AcceptedYouTubeScopes = platform.Must(platform.YouTube).PublishAnyScope
 
 const (
-	youTubeBase = "https://www.googleapis.com"
+	youTubeBase = platform.YouTubeAPIHost
 	// youTubeUploadCost is videos.insert in quota units, from the same daily
 	// allowance live chat polling spends.
-	youTubeUploadCost = 1600
+	youTubeUploadCost = platform.YouTubeCostUploadVideo
 )
 
 func (y *YouTube) base() string {

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // MetadataField names one thing a platform may accept.
@@ -315,7 +316,7 @@ func firstNonEmpty(a, b string) string {
 // instance. It used to be a var whose comment claimed it pointed "the whole
 // provider" at a stub, and that claim was false -- Account and Ingest wrote
 // googleapis.com inline and ignored it.
-const ytAPIBase = "https://www.googleapis.com/youtube/v3"
+const ytAPIBase = platform.YouTubeAPIRoot
 
 // ytCategoryRegion decides which localised category list we match names
 // against. YouTube's assignable categories are the same set worldwide; the
@@ -337,8 +338,8 @@ func (y *YouTube) MetadataCaps() MetadataCaps {
 		CategoryLabel: "Category",
 		CategoryHint:  "A YouTube video category, e.g. Gaming, Music, Science & Technology.",
 		// YouTube's documented snippet limits.
-		TitleMax:       100,
-		DescriptionMax: 5000,
+		TitleMax:       platform.YouTubeTitleMax,
+		DescriptionMax: platform.YouTubeDescriptionMax,
 		Scope:          "https://www.googleapis.com/auth/youtube",
 	}
 }
@@ -584,7 +585,7 @@ func normaliseCategory(s string) string {
 
 // twitchHelixBase is the production Helix API; see ytAPIBase above for why this
 // is a const. Reach it through (*Twitch).apiEndpoint, never directly.
-const twitchHelixBase = "https://api.twitch.tv/helix"
+const twitchHelixBase = platform.TwitchAPIRoot
 
 func (t *Twitch) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
@@ -594,7 +595,7 @@ func (t *Twitch) MetadataCaps() MetadataCaps {
 		Fields:        []MetadataField{FieldTitle, FieldCategory},
 		CategoryLabel: "Category",
 		CategoryHint:  "A Twitch category or game, e.g. Just Chatting, Software and Game Development.",
-		TitleMax:      140,
+		TitleMax:      platform.TwitchTitleMax,
 		Scope:         "channel:manage:broadcast",
 	}
 }

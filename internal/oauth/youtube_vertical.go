@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast.
@@ -36,10 +38,8 @@ func ytVerticalStreamTitle(label string) string {
 	if l := strings.TrimSpace(label); l != "" {
 		body = ytStreamTitleBase + " - " + l
 	}
-	room := ytStreamTitleMax - len([]rune(ytVerticalMarker))
-	if r := []rune(body); len(r) > room {
-		body = string(r[:room])
-	}
+	room := ytStreamTitleMax - platform.UTF16Len(ytVerticalMarker)
+	body = platform.UTF16Truncate(body, room)
 	return body + ytVerticalMarker
 }
 

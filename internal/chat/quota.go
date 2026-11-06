@@ -19,6 +19,8 @@ package chat
 import (
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // Quota unit costs, and NOT ALL OF THEM ARE SOURCED THE SAME WAY. #735.
@@ -57,25 +59,25 @@ import (
 // TestIdleDiscoveryCannotEatTheDay pins that arithmetic so the claim and the
 // constants cannot drift apart in silence.
 const (
-	QuotaCostListMessages = 5
+	QuotaCostListMessages = platform.YouTubeCostListMessages
 	// QuotaCostListBroadcasts is UNVERIFIED. See the note above before relying
 	// on it, and before changing the poll interval that multiplies it.
-	QuotaCostListBroadcasts = 1
+	QuotaCostListBroadcasts = platform.YouTubeCostListBroadcasts
 	// QuotaCostListLiveStreams is liveStreams.list. Correction 6 of the YouTube truth sheet
 	// (docs-youtube.md) says list operations cost one unit. Unlike the listBroadcasts guess
 	// above, this one is taken from that sheet, so it is cited rather than measured.
-	QuotaCostListLiveStreams = 1
-	QuotaCostSendMessage     = 50
+	QuotaCostListLiveStreams = platform.YouTubeCostListLiveStreams
+	QuotaCostSendMessage     = platform.YouTubeCostSendMessage
 	// Moderation writes. Charged like any other write, but NEVER refused for
 	// want of budget -- see the reserve note below and the check in Delete.
 	// Declining to remove a message because arithmetic said the quota was low
 	// would leave that message on stream, which is the one outcome worse than
 	// spending the units.
-	QuotaCostDeleteMessage = 50
-	QuotaCostBan           = 50
+	QuotaCostDeleteMessage = platform.YouTubeCostDeleteMessage
+	QuotaCostBan           = platform.YouTubeCostBan
 
 	// DefaultQuotaUnits is a Google Cloud project's default daily allowance.
-	DefaultQuotaUnits = 10000
+	DefaultQuotaUnits = platform.YouTubeDefaultDailyUnits
 	// DefaultQuotaReserve is held back so that sending never becomes
 	// impossible because reading spent everything. Two hundred units is four
 	// messages — enough to say "we are moving to Twitch" when it matters.

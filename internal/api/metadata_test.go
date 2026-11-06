@@ -1387,3 +1387,22 @@ func TestAnEmptyComposerWithNoStoredComplianceIsStillRefused(t *testing.T) {
 			"has no work to do and should say so (body %s)", w.Code, w.Body.String())
 	}
 }
+
+// YouTube counts a title in UTF-16 units, the way the clip publisher and the
+// web UI do: an emoji outside the BMP is two. 50 of them are exactly 100 units
+// and pass; 51 are 102 and fail, though only 51 characters long. Twitch's
+// limit stays in characters.
+func TestYouTubeTitlesAreCountedInUTF16(t *testing.T) {
+	yt := oauth.NewYouTube().MetadataCaps()
+	if _, problem := precheck(oauth.Metadata{Title: strings.Repeat("😀", 50)}, db.PlatformYouTube, yt); problem != "" {
+		t.Errorf("50 emoji (100 UTF-16 units) refused: %s", problem)
+	}
+	_, problem := precheck(oauth.Metadata{Title: strings.Repeat("😀", 51)}, db.PlatformYouTube, yt)
+	if problem == "" || !strings.Contains(problem, "yours is 102") {
+		t.Errorf("51 emoji (102 UTF-16 units) problem = %q, want it refused as 102", problem)
+	}
+	tw := oauth.NewTwitch().MetadataCaps()
+	if _, problem := precheck(oauth.Metadata{Title: strings.Repeat("😀", 100)}, db.PlatformTwitch, tw); problem != "" {
+		t.Errorf("100 emoji is 100 characters and Twitch allows 140: %s", problem)
+	}
+}

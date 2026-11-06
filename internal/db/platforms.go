@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -624,16 +625,13 @@ func (p DestinationPreset) Supported() bool { return p.Kind != "" }
 // used for years, or a template whose {placeholders} make it obvious the
 // operator must finish it. Anything else is empty on purpose; see the note at
 // the top of this section.
-var destinationPresets = []DestinationPreset{
+var destinationPresets = withRegistry([]DestinationPreset{
 	// ---------------------------------------------------------------- major
 	{
-		ID: "youtube", Name: "YouTube Live", Group: GroupMajor,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
-			Note:   "12000 is YouTube's RECOMMENDED H.264 figure for 1080p60, not a ceiling -- OBS's services.json carries 51000 as YouTube's maximum, a different fact rather than a contradiction. Keyframes must not exceed 4s -- beyond that YouTube reports gopSizeLong and the stream buffers. CBR.",
-			Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformYouTube,
+		ID: "youtube", Group: GroupMajor,
+		Video: guidance("youtube",
+			"12000 is YouTube's RECOMMENDED H.264 figure for 1080p60, not a ceiling -- OBS's services.json carries 51000 as YouTube's maximum, a different fact rather than a contradiction. Keyframes must not exceed 4s -- beyond that YouTube reports gopSizeLong and the stream buffers. CBR."),
+		Transport: PresetRTMP, Kind: DestRTMP,
 		URL:         "rtmp://a.rtmp.youtube.com/live2",
 		SeparateKey: true,
 		HelpURL:     "https://support.google.com/youtube/answer/2907883",
@@ -644,12 +642,9 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "youtube-rtmps", Name: "YouTube Live (RTMPS)", Group: GroupMajor,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
-			Note:   "The same figures as YouTube's RTMP ingest, from the same page -- which recommends RTMPS over RTMP.",
-			Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformYouTube,
+		Video: guidance("youtube-rtmps",
+			"The same figures as YouTube's RTMP ingest, from the same page -- which recommends RTMPS over RTMP."),
+		Transport: PresetRTMPS, Kind: DestRTMP,
 		URL:         "rtmps://a.rtmps.youtube.com/live2",
 		SeparateKey: true,
 		HelpURL:     "https://support.google.com/youtube/answer/2907883",
@@ -658,13 +653,10 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"google", "yt", "tls"},
 	},
 	{
-		ID: "twitch", Name: "Twitch", Group: GroupMajor,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 6000, KbpsMax: 6000, GOPSeconds: 2,
-			Note:   "Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published. The two sources disagree on audio: Twitch's help page says 160 kbps maximum, OBS's services.json says 320.",
-			Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformTwitch,
+		ID: "twitch", Group: GroupMajor,
+		Video: guidance("twitch",
+			"Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published; 6000 is advice, not a limit. Audio is 160 kbps maximum, from Twitch's help page."),
+		Transport: PresetRTMP, Kind: DestRTMP,
 		URL:         "rtmp://live.twitch.tv/app",
 		SeparateKey: true,
 		HelpURL:     "https://help.twitch.tv/s/article/broadcast-guidelines",
@@ -675,7 +667,7 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "twitch-rtmps", Name: "Twitch (RTMPS)", Group: GroupMajor,
-		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformTwitch,
+		Transport: PresetRTMPS, Kind: DestRTMP,
 		URL:         "rtmps://live.twitch.tv/app",
 		SeparateKey: true,
 		HelpURL:     "https://help.twitch.tv/s/article/broadcast-guidelines",
@@ -684,13 +676,10 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"ttv", "tls"},
 	},
 	{
-		ID: "kick", Name: "Kick", Group: GroupMajor,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 1000, KbpsMax: 8000, GOPSeconds: 2,
-			Note:   "H.264 only -- Kick refuses H.265 -- and CBR only; it does not accept VBR. 1920x1080 and 8000 kbps are stated as platform caps rather than advice. No audio bitrate is published: Kick's own FAQ asks the question twice and answers with sample rate and channels.",
-			Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformKick,
+		ID: "kick", Group: GroupMajor,
+		Video: guidance("kick",
+			"H.264 only -- Kick refuses H.265 -- and CBR only; it does not accept VBR. 1920x1080 and 8000 kbps are stated as platform caps rather than advice. No audio bitrate is published: Kick's own FAQ asks the question twice and answers with sample rate and channels."),
+		Transport: PresetRTMPS, Kind: DestRTMP,
 		// EMPTY, and it must stay empty. Kick issues the ingest host per
 		// channel, so anything hardcoded here is one particular person's --
 		// and for a while this field held a real one, shipped in a public
@@ -718,13 +707,10 @@ var destinationPresets = []DestinationPreset{
 			"rtmps://<your-host>.global-contribute.live-video.net:443/app",
 	},
 	{
-		ID: "facebook", Name: "Facebook Live", Group: GroupMajor,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4500, KbpsMax: 9000, GOPSeconds: 2,
-			Note:   "H.264 video and AAC audio only; other formats may be rejected. Aspect ratio must be near 16:9 or the stream may not be supported. Keyframes must not exceed 4s. Eight hours maximum.",
-			Source: "https://www.facebook.com/business/help/162540111070395", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformFacebook,
+		ID: "facebook", Group: GroupMajor,
+		Video: guidance("facebook",
+			"H.264 video and AAC audio only; other formats may be rejected. Aspect ratio must be near 16:9 or the stream may not be supported. Keyframes must not exceed 4s. Eight hours maximum."),
+		Transport: PresetRTMPS, Kind: DestRTMP,
 		URL:         "rtmps://live-api-s.facebook.com:443/rtmp/",
 		SeparateKey: true,
 		HelpURL:     "https://www.facebook.com/live/producer",
@@ -741,15 +727,12 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"meta", "fb"},
 	},
 	{
-		ID: "instagram", Name: "Instagram Live", Group: GroupMajor,
+		ID: "instagram", Group: GroupMajor,
 		// Restream's figures, not Meta's: Instagram publishes no encoder page of
 		// its own, and Restream's help is where the numbers are written down.
 		// No keyframe interval is stated there, so none is offered.
-		Video: &VideoGuidance{
-			Width: 720, Height: 1280, FPS: 30, KbpsMin: 2250, KbpsMax: 6000,
-			Note:   "Vertical 9:16 (720×1280) is recommended rather than required. 30 fps recommended, 60 maximum — the preview shows 30 either way. Audio: 44.1 kHz stereo, at most 256 kbps. A live video ends after one hour. These are Restream's published figures; Meta does not publish its own.",
-			Source: "https://support.restream.io/en/articles/18180232-stream-to-instagram-with-a-stream-key", Checked: "2026-11-05",
-		},
+		Video: guidance("instagram",
+			"Vertical 9:16 (720×1280) is recommended rather than required. 30 fps recommended, 60 maximum — the preview shows 30 either way. Audio: 44.1 kHz stereo, at most 256 kbps. A live video ends after one hour. These are Restream's published figures; Meta does not publish its own."),
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		// Empty on purpose, as with Kick. The ingest host Instagram shows
 		// carries a region (rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/),
@@ -773,7 +756,7 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"meta", "ig"},
 	},
 	{
-		ID: "tiktok", Name: "TikTok LIVE", Group: GroupMajor,
+		ID: "tiktok", Group: GroupMajor,
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "TikTok issues the server URL and key per broadcast, and only to accounts granted LIVE access. Create " +
@@ -782,12 +765,9 @@ var destinationPresets = []DestinationPreset{
 
 	// ------------------------------------------------------- video platforms
 	{
-		ID: "x", Name: "X (Twitter) Live", Group: GroupVideo, Platform: PlatformX,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 3,
-			Note:   "Live Studio's figures. X's older Media Studio Producer page is still published and disagrees materially (9000 recommended, 720p60), so no maximum is offered until the two reconcile. X ignores variants whose codec or bitrate it does not accept.",
-			Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
-		},
+		ID: "x", Group: GroupVideo,
+		Video: guidance("x",
+			"Live Studio's figures. X's older Media Studio Producer page is still published and disagrees materially (9000 recommended, 720p60), so no maximum is offered until the two reconcile. X ignores variants whose codec or bitrate it does not accept."),
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Paste the server URL and stream key from X's producer tooling. X's Livestream API can also " +
@@ -796,12 +776,9 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"twitter", "periscope"},
 	},
 	{
-		ID: "linkedin", Name: "LinkedIn Live", Group: GroupVideo,
-		Video: &VideoGuidance{
-			Width: 1280, Height: 720, FPS: 30, KbpsMin: 3500, KbpsMax: 6000, GOPSeconds: 2,
-			Note:   "720p is LinkedIn's recommendation and 1080p its maximum. Published as guidance for cloud services rather than for a direct encoder, and the page carries only a relative date, so it will drift silently.",
-			Source: "https://www.linkedin.com/help/linkedin/answer/a567498/", Checked: "2026-08-06",
-		},
+		ID: "linkedin", Group: GroupVideo,
+		Video: guidance("linkedin",
+			"720p is LinkedIn's recommendation and 1080p its maximum. Published as guidance for cloud services rather than for a direct encoder, and the page carries only a relative date, so it will drift silently."),
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "LinkedIn issues the ingest URL and key per event, either from LinkedIn's own event creation flow or " +
@@ -816,12 +793,9 @@ var destinationPresets = []DestinationPreset{
 			"published to integrate against.",
 	},
 	{
-		ID: "rumble", Name: "Rumble", Group: GroupVideo,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
-			Note:   "8000 kbps is Rumble's stated ceiling. Its language above the recommended range is degradation, not refusal.",
-			Source: "https://rumble.support/help/livestream-settings", Checked: "2026-08-06",
-		},
+		ID: "rumble", Group: GroupVideo,
+		Video: guidance("rumble",
+			"8000 kbps is Rumble's stated ceiling. Its language above the recommended range is degradation, not refusal."),
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Manual key only. Rumble Studio issues an ingest URL and key per stream — set the stream up there and " +
@@ -837,14 +811,13 @@ var destinationPresets = []DestinationPreset{
 		Aliases: []string{"lbry"},
 	},
 	{
-		ID: "vimeo", Name: "Vimeo Livestream", Group: GroupVideo,
+		ID: "vimeo", Group: GroupVideo,
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
 		// KEEP THIS IN STEP WITH oauth.PlatformCapabilities()'s vimeo row, the
 		// same way the kick preset above asks to be. The key really is still
 		// pasted -- Platform being set here does NOT mean polyemesis fetches
 		// one, and that is the misreading this note exists to head off.
-		Platform: PlatformVimeo,
 		Notes: "Vimeo issues an RTMPS URL and key per live event. Open the event in Vimeo and copy the server URL " +
 			"and stream key from its setup panel — connecting a Vimeo account does not change that, because " +
 			"Vimeo's live API is available only to Vimeo Enterprise customers and a key belongs to an event. " +
@@ -853,12 +826,9 @@ var destinationPresets = []DestinationPreset{
 			"RECURRING event — Vimeo is deprecating one-time live events and recommends avoiding them.",
 	},
 	{
-		ID: "dailymotion", Name: "Dailymotion", Group: GroupVideo,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 10000, KbpsMax: 10000, GOPSeconds: 2,
-			Note:   "H.264 High profile only, and live streaming is gated behind a paid plan. Dailymotion's 1080p figure is a steep jump from its 720p one (2500 kbps); reproduced as published.",
-			Source: "https://faq.dailymotion.com/hc/en-us/articles/203655666-Encoding-parameters", Checked: "2026-08-06",
-		},
+		ID: "dailymotion", Group: GroupVideo,
+		Video: guidance("dailymotion",
+			"H.264 High profile only, and live streaming is gated behind a paid plan. Dailymotion's 1080p figure is a steep jump from its 720p one (2500 kbps); reproduced as published."),
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Dailymotion Studio issues an ingest URL and key per live video. Copy both from the live video's " +
@@ -877,12 +847,9 @@ var destinationPresets = []DestinationPreset{
 			"so check that instance's live configuration.",
 	},
 	{
-		ID: "owncast", Name: "Owncast", Group: GroupSelfHosted,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 5000, KbpsMax: 5000, GOPSeconds: 2,
-			Note:   "Owncast asks for an explicit 2s keyframe interval rather than auto. It does not re-encode audio, so whatever you send is what viewers get.",
-			Source: "https://owncast.online/docs/broadcasting/", Checked: "2026-08-06",
-		},
+		ID: "owncast", Group: GroupSelfHosted,
+		Video: guidance("owncast",
+			"Owncast asks for an explicit 2s keyframe interval rather than auto. It does not re-encode audio, so whatever you send is what viewers get."),
 		Transport: PresetRTMP, Kind: DestRTMP,
 		URL:         "rtmp://{owncast-host}:1935/live",
 		SeparateKey: true,
@@ -1018,7 +985,7 @@ var destinationPresets = []DestinationPreset{
 			"Choosing this preset leaves the transport alone.",
 		Aliases: []string{"http", "m3u8"},
 	},
-}
+})
 
 // DestinationPresets returns the catalogue in display order. The slice is
 // copied because a caller that reorders or edits it would corrupt it for every
@@ -1075,4 +1042,41 @@ func (d *DB) MigratePlatformAccountScopeVer() error {
 	}
 	_, err = d.sql.Exec(`ALTER TABLE platform_accounts ADD COLUMN scope_ver INTEGER NOT NULL DEFAULT 0`)
 	return err
+}
+
+// guidance builds a preset's VideoGuidance from the platform registry, which
+// owns the figures and where they were read. The note stays here, beside the
+// preset it qualifies: it is English prose the figures cannot carry.
+func guidance(presetID, note string) *VideoGuidance {
+	row, ok := platform.ByPreset(presetID)
+	if !ok || row.Guidance == nil {
+		panic("db: preset " + presetID + " has no guidance in the platform registry")
+	}
+	g := row.Guidance
+	return &VideoGuidance{
+		Width: g.Width, Height: g.Height, FPS: g.FPS,
+		KbpsMin: g.KbpsMin, KbpsMax: g.KbpsMax, GOPSeconds: g.GOPSeconds,
+		Note: note, Source: g.Source, Checked: g.Checked,
+	}
+}
+
+// withRegistry fills what the platform registry owns into the catalogue: the
+// display name of a platform's primary preset, and the Platform a preset saves
+// as. Presets the registry has no row for (every URL-and-a-note preset) pass
+// through untouched.
+func withRegistry(presets []DestinationPreset) []DestinationPreset {
+	for i := range presets {
+		p := &presets[i]
+		row, ok := platform.ByPreset(p.ID)
+		if !ok {
+			continue
+		}
+		if p.ID == row.Key {
+			p.Name = row.Name
+		}
+		if row.PresetsSaveAsEnum {
+			p.Platform = Platform(row.Enum)
+		}
+	}
+	return presets
 }

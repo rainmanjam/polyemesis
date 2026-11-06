@@ -43,11 +43,24 @@ type RenditionConcern struct {
 //
 // A rendition field of 0 means "keep the source's", and the source is not known
 // until something is streaming, so those are skipped rather than guessed at.
-func RenditionConcerns(r *Rendition, platform Platform) []RenditionConcern {
+func RenditionConcerns(r *Rendition, plat Platform, presetID string) []RenditionConcern {
 	if r == nil {
 		return nil
 	}
-	preset, ok := DestinationPresetByID(string(platform))
+	// The destination's own preset id comes first: it is what finds Instagram,
+	// LinkedIn, Dailymotion, Owncast and Rumble, whose destinations save as
+	// "custom". Failing that the platform string stands in for a preset id, which
+	// is how a destination with no stored preset finds its platform's figures,
+	// and how a query for "youtube-rtmps" finds its own figures and its own name.
+	// A preset that publishes none ("twitch-rtmps") falls through to the platform.
+	// The figures on the preset come from the platform registry.
+	preset, ok := DestinationPresetByID(presetID)
+	// A preset names guidance only for the platform it saves as: youtube with
+	// preset=instagram is a mismatch and is ignored, like an id the catalogue
+	// no longer has.
+	if !ok || preset.Video == nil || !presetFitsPlatform(preset, plat) {
+		preset, ok = DestinationPresetByID(string(plat))
+	}
 	if !ok || preset.Video == nil {
 		return nil
 	}

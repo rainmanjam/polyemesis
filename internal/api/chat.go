@@ -8,6 +8,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // The chat API is a thin window onto internal/chat's Hub. It deliberately owns
@@ -79,15 +80,16 @@ type chatSendResponse struct {
 }
 
 // chatSendLimits is the published maximum for each platform polyemesis can talk
-// back to. Facebook is absent because it is receive-only, which is a property of
-// the adapter rather than a number we are missing.
+// back to, from the platform registry. Facebook is absent because it is
+// receive-only, which is a property of the adapter rather than a number we are
+// missing; chat's TestRegistryAgreesWithTheChatAdapters keeps the registry's
+// idea of who can send equal to the adapters'.
 func chatSendLimits() []chatLimit {
-	return []chatLimit{
-		{Platform: db.PlatformKick, MaxChars: chat.KickMaxMessage},
-		{Platform: db.PlatformTwitch, MaxChars: chat.TwitchMaxMessage},
-		{Platform: db.PlatformYouTube, MaxChars: chat.YouTubeMaxMessage},
-		{Platform: db.PlatformX, MaxChars: chat.XMaxMessage},
+	var out []chatLimit
+	for _, row := range platform.ChatSenders() {
+		out = append(out, chatLimit{Platform: db.Platform(row.Enum), MaxChars: row.Chat.SendMax})
 	}
+	return out
 }
 
 // requireChat guards a handler that cannot work without a Hub.

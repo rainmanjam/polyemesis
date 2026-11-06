@@ -979,3 +979,25 @@ func TestTheDestinationsSentenceIsUnchangedWhenNoRungIsHit(t *testing.T) {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
+
+// A "custom" destination made from the Instagram preset is found by its preset
+// id, and a query without one still gets the empty answer.
+func TestConcernsFindAPlatformThatSavesAsCustomByItsPreset(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	created, err := store.CreateRendition(&db.Rendition{
+		Name: "big", Width: 3840, Height: 2160, FPS: 60, VideoBitrate: 40000, GOPSeconds: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v1/renditions/" + strconv.FormatInt(created.ID, 10) + "/concerns?platform=custom"
+	var plain, withPreset []db.RenditionConcern
+	decodeInto(t, send(t, h, sign, http.MethodGet, base, nil, http.StatusOK), &plain)
+	decodeInto(t, send(t, h, sign, http.MethodGet, base+"&preset=instagram", nil, http.StatusOK), &withPreset)
+	if len(plain) != 0 {
+		t.Errorf("a custom destination with no preset raised %+v", plain)
+	}
+	if len(withPreset) == 0 || !strings.Contains(withPreset[0].Detail, "Instagram Live") {
+		t.Errorf("preset=instagram raised %+v, want concerns naming Instagram Live", withPreset)
+	}
+}

@@ -20,11 +20,14 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
+// YouTubeMaxMessage is the published limit on a live chat message, enforced by
+// Send and mirrored in the platform registry (see KickMaxMessage).
+const YouTubeMaxMessage = 200
+
 const (
-	// YouTubeMaxMessage is the published limit on a live chat message.
-	YouTubeMaxMessage = 200
 	// ytBroadcastPoll is how often we look for a broadcast to attach to when
 	// there is none, and ytBroadcastPollMax is where that backs off to. Each
 	// look costs a unit, so a machine left connected overnight must not spend
@@ -100,7 +103,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 		return nil, fmt.Errorf("youtube chat is not configured: no access token, so connect the YouTube account in Settings → Platforms")
 	}
 	if cfg.APIBase == "" {
-		cfg.APIBase = "https://www.googleapis.com/youtube/v3"
+		cfg.APIBase = platform.YouTubeAPIRoot
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
