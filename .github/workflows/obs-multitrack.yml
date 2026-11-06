@@ -135,6 +135,7 @@ jobs:
       # key is copied deliberately: a matching key restores that cache instead
       # of writing a second copy of a 130 MB download.
       - name: Install FFmpeg
+        timeout-minutes: 6
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg
         run: |
