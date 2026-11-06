@@ -57,7 +57,7 @@ func TestTheUpgradingBootNamesTheSourcesItSetToSRT(t *testing.T) {
 		var logs bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		captureStdout(t, func() {
-			if err := reportStartup(log, cfg, provider, store, &ffmpeg.Tools{Version: "test-ffmpeg"}); err != nil {
+			if err := reportStartup(log, cfg, provider, store, settingsOf(t, store), &ffmpeg.Tools{Version: "test-ffmpeg"}); err != nil {
 				t.Errorf("reportStartup: %v", err)
 			}
 		})

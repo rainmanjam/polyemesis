@@ -195,7 +195,7 @@ func startStoppablePostProd(t *testing.T, store *db.DB, dir string) postProd {
 	// real listener. startPostProd only captures its method values.
 	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
 	ctx, cancel := context.WithCancel(context.Background())
-	pp := startPostProd(ctx, log, cfg, store, nil, eng, &ffmpeg.Tools{
+	pp := startPostProd(ctx, log, cfg, settingsOf(t, store), store, nil, eng, &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
 	})
@@ -233,7 +233,7 @@ func TestStartPostProdReleasesTheDatabaseWhenItStops(t *testing.T) {
 	cfg := config.Config{DataDir: dir}
 	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
 	ctx, cancel := context.WithCancel(context.Background())
-	pp := startPostProd(ctx, log, cfg, store, nil, eng, &ffmpeg.Tools{
+	pp := startPostProd(ctx, log, cfg, settingsOf(t, store), store, nil, eng, &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
 	})

@@ -237,7 +237,7 @@ func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, store, tools := bannerFixture(t, tc.modes...)
 			out := captureStdout(t, func() {
-				if err := reportStartup(newLogger("error"), cfg, provider, store, tools); err != nil {
+				if err := reportStartup(newLogger("error"), cfg, provider, store, settingsOf(t, store), tools); err != nil {
 					t.Errorf("reportStartup: %v", err)
 				}
 			})
@@ -309,7 +309,7 @@ func TestStartupBannerDoesNotAdvertiseAnIngestWithNoProgrammeBehindIt(t *testing
 	cfg.DataDir = dir
 
 	out := captureStdout(t, func() {
-		if err := reportStartup(newLogger("error"), cfg, provider, store,
+		if err := reportStartup(newLogger("error"), cfg, provider, store, settingsOf(t, store),
 			&ffmpeg.Tools{Version: "test-ffmpeg"}); err != nil {
 			t.Errorf("reportStartup: %v", err)
 		}

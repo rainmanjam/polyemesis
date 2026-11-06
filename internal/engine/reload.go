@@ -89,6 +89,16 @@ func ClassOf(path string) (ReloadRule, bool) {
 	return r, ok
 }
 
+// The out-of-band appliers live in internal/api, which imports this package, so
+// a rule cannot hold the function itself. Each name is written once, here, and
+// TestEveryReloadRuleNamesAFunctionThatExists resolves it against the source.
+const (
+	applyChatRetention = "ApplyChatRetention"
+	applyYouTubeQuota  = "ApplyYouTubeQuota"
+	applyAutomod       = "ApplyAutomod"
+	applyAlertSettings = "ApplyAlertSettings"
+)
+
 // settingsReload is keyed by the dotted json path of every leaf in db.Settings.
 // TestEverySettingsFieldHasAReloadRule fails when a field is added without one.
 var settingsReload = map[string]ReloadRule{
@@ -220,17 +230,17 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.ingestLingerSeconds":   {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
 
 	// ------------------------------------------------------------------ mqtt
-	"mqtt.enabled":          {ClassLive, "ApplyAutomod", "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
-	"mqtt.brokerUrl":        {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.username":         {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.hasPassword":      {ClassLive, "ApplyAutomod", "reported by the runner, set through its own endpoint"},
-	"mqtt.prefix":           {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.instance":         {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.clientId":         {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.intervalSeconds":  {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.keepAliveSeconds": {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.tlsSkipVerify":    {ClassLive, "ApplyAutomod", "polled by the runner"},
-	"mqtt.discovery":        {ClassLive, "ApplyAutomod", "polled by the runner"},
+	"mqtt.enabled":          {ClassLive, applyAutomod, "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
+	"mqtt.brokerUrl":        {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.username":         {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.hasPassword":      {ClassLive, applyAutomod, "reported by the runner, set through its own endpoint"},
+	"mqtt.prefix":           {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.instance":         {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.clientId":         {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.intervalSeconds":  {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.keepAliveSeconds": {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.tlsSkipVerify":    {ClassLive, applyAutomod, "polled by the runner"},
+	"mqtt.discovery":        {ClassLive, applyAutomod, "polled by the runner"},
 
 	// ---------------------------------------------------------- destinations
 	"destinations.staggerMs": {ClassLive, "startDestinations", "read per sweep and applied only to processes started in that sweep; it can never affect one already running"},
@@ -263,9 +273,9 @@ var settingsReload = map[string]ReloadRule{
 	"analytics.enabled":         {ClassLive, "AnalyticsLoop", "the sampler reads the stored settings at every tick"},
 	"analytics.intervalSeconds": {ClassLive, "AnalyticsLoop", "re-read after every tick, so the next wait uses it"},
 	"analytics.retentionDays":   {ClassLive, "AnalyticsLoop", "the hourly prune reads it at every tick"},
-	"chat.retentionHours":       {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
-	"chat.keepMessages":         {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
-	"chat.purgeMinutes":         {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chat.retentionHours":       {ClassLive, applyChatRetention, "pushed into the Hub out of band by handlePutSettings"},
+	"chat.keepMessages":         {ClassLive, applyChatRetention, "pushed into the Hub out of band"},
+	"chat.purgeMinutes":         {ClassLive, applyChatRetention, "pushed into the Hub out of band"},
 
 	// THIS TABLE IS WHY THESE TWO ARE LIVE. #732 wired the operator's allowance
 	// into NewYouTube, which is read once per adapter, and chatAdapter runs once
@@ -273,19 +283,19 @@ var settingsReload = map[string]ReloadRule{
 	// as saved, and not paced against until a restart. Writing that down made it
 	// obviously the same defect #732 was filed for, one step later, and pushing
 	// it into the running adapter was smaller than the admission would have been.
-	"chat.youtubeQuotaUnits":   {ClassLive, "ApplyYouTubeQuota", "pushed into every attached adapter that paces against an allowance; today that is YouTube"},
-	"chat.youtubeQuotaReserve": {ClassLive, "ApplyYouTubeQuota", "the floor held back for sends, pushed with the allowance so the two can never disagree"},
+	"chat.youtubeQuotaUnits":   {ClassLive, applyYouTubeQuota, "pushed into every attached adapter that paces against an allowance; today that is YouTube"},
+	"chat.youtubeQuotaReserve": {ClassLive, applyYouTubeQuota, "the floor held back for sends, pushed with the allowance so the two can never disagree"},
 
-	"automod.enabled":              {ClassLive, "ApplyAutomod", "rebuilds the automod engine out of band"},
+	"automod.enabled":              {ClassLive, applyAutomod, "rebuilds the automod engine out of band"},
 	"automod.highlightScoring":     {ClassOnDemand, "highlightModelConfig", "read when a highlight scan asks for scoring; nothing running holds it"},
-	"automod.platformEnabled":      {ClassLive, "ApplyAutomod", "rebuilds the automod engine"},
-	"automod.on":                   {ClassLive, "ApplyAutomod", "rebuilds the matrix"},
-	"automod.rules.id":             {ClassLive, "ApplyAutomod", "recompiles the patterns"},
-	"automod.rules.name":           {ClassLive, "ApplyAutomod", "recompiles the patterns"},
-	"automod.rules.enabled":        {ClassLive, "ApplyAutomod", "recompiles the patterns"},
-	"automod.rules.pattern":        {ClassLive, "ApplyAutomod", "recompiles the patterns"},
-	"automod.rules.action":         {ClassLive, "ApplyAutomod", "recompiles the patterns"},
-	"automod.rules.timeoutSeconds": {ClassLive, "ApplyAutomod", "recompiles the patterns"},
+	"automod.platformEnabled":      {ClassLive, applyAutomod, "rebuilds the automod engine"},
+	"automod.on":                   {ClassLive, applyAutomod, "rebuilds the matrix"},
+	"automod.rules.id":             {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.name":           {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.enabled":        {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.pattern":        {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.action":         {ClassLive, applyAutomod, "recompiles the patterns"},
+	"automod.rules.timeoutSeconds": {ClassLive, applyAutomod, "recompiles the patterns"},
 
 	// ------------------------------------------------- ingest track annotations
 	// Each leaf recompiles every routing graph, so it moves compiled.FilterComplex
@@ -320,51 +330,51 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.kinds.windows.tz":           {ClassLive, "handlePutJobPolicy", "evaluated per admission"},
 
 	// ------------------------------------------------------------- chat + alerts
-	"chat.historyMessages": {ClassLive, "ApplyChatRetention", "resizes the in-memory ring on the running Hub via SetHistory"},
-	"alerts.retryAttempts": {ClassLive, "ApplyAlertSettings", "pushed into every engine's Notifier, and remembered for engines created later"},
+	"chat.historyMessages": {ClassLive, applyChatRetention, "resizes the in-memory ring on the running Hub via SetHistory"},
+	"alerts.retryAttempts": {ClassLive, applyAlertSettings, "pushed into every engine's Notifier, and remembered for engines created later"},
 
 	// ------------------------------------------------------- automod: history
-	"automod.history.maxMessages":           {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.windowSeconds":         {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.maxRepeats":            {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.maxLinks":              {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.maxMentionsPerMessage": {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.maxCapsRatio":          {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.minLengthForCaps":      {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.retainPerAuthor":       {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.idleEvictionSeconds":   {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.action":                {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
-	"automod.history.timeoutSeconds":        {ClassLive, "ApplyAutomod", "rebuilds the history checker"},
+	"automod.history.maxMessages":           {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.windowSeconds":         {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.maxRepeats":            {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.maxLinks":              {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.maxMentionsPerMessage": {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.maxCapsRatio":          {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.minLengthForCaps":      {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.retainPerAuthor":       {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.idleEvictionSeconds":   {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.action":                {ClassLive, applyAutomod, "rebuilds the history checker"},
+	"automod.history.timeoutSeconds":        {ClassLive, applyAutomod, "rebuilds the history checker"},
 
 	// --------------------------------------------------------- automod: model
-	"automod.model.enabled":             {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.endpoint":            {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.model":               {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.hasApiKey":           {ClassLive, "ApplyAutomod", "reported by the checker; the key itself is sealed and set through its own endpoint"},
-	"automod.model.instruction":         {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.minConfidence":       {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.maxCallsPerHour":     {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.timeoutSeconds":      {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.action":              {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.timeoutForBan":       {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
-	"automod.model.protocol":            {ClassLive, "ApplyAutomod", "rebuilds the primary checker on the other connector"},
-	"automod.model.preset":              {ClassLive, "ApplyAutomod", "rebuilds the checker with the preset's JSON mode, reasoning setting and flag-only lock"},
-	"automod.model.categoryActions":     {ClassLive, "ApplyAutomod", "rebuilds both model checkers with the new per-category actions"},
-	"automod.model.tested":              {ClassLive, "ApplyAutomod", "derived from the Test pass table on the way out; never stored"},
-	"automod.secondary.enabled":         {ClassLive, "ApplyAutomod", "builds or drops the secondary checker"},
-	"automod.secondary.endpoint":        {ClassLive, "ApplyAutomod", "rebuilds the secondary checker"},
-	"automod.secondary.model":           {ClassLive, "ApplyAutomod", "rebuilds the secondary checker"},
-	"automod.secondary.hasApiKey":       {ClassLive, "ApplyAutomod", "reported by the checker; the key itself is sealed and set through its own endpoint"},
-	"automod.secondary.timeoutSeconds":  {ClassLive, "ApplyAutomod", "rebuilds the secondary checker"},
-	"automod.secondary.maxCallsPerHour": {ClassLive, "ApplyAutomod", "rebuilds the secondary checker against its own long-lived budget"},
-	"automod.secondary.action":          {ClassLive, "ApplyAutomod", "not read: the primary's policy applies to both checkers"},
-	"automod.secondary.timeoutForBan":   {ClassLive, "ApplyAutomod", "not read: the primary's policy applies to both checkers"},
-	"automod.secondary.minConfidence":   {ClassLive, "ApplyAutomod", "rebuilds the secondary checker"},
-	"automod.secondary.instruction":     {ClassLive, "ApplyAutomod", "not read: the primary's instruction applies to both checkers"},
-	"automod.secondary.protocol":        {ClassLive, "ApplyAutomod", "rebuilds the secondary checker on the other connector"},
-	"automod.secondary.preset":          {ClassLive, "ApplyAutomod", "rebuilds the secondary checker with the preset's wire details"},
-	"automod.secondary.categoryActions": {ClassLive, "ApplyAutomod", "not read: the primary's table applies to both checkers"},
-	"automod.secondary.tested":          {ClassLive, "ApplyAutomod", "derived from the Test pass table on the way out; never stored"},
+	"automod.model.enabled":             {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.endpoint":            {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.model":               {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.hasApiKey":           {ClassLive, applyAutomod, "reported by the checker; the key itself is sealed and set through its own endpoint"},
+	"automod.model.instruction":         {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.minConfidence":       {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.maxCallsPerHour":     {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.timeoutSeconds":      {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.action":              {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.timeoutForBan":       {ClassLive, applyAutomod, "rebuilds the model checker"},
+	"automod.model.protocol":            {ClassLive, applyAutomod, "rebuilds the primary checker on the other connector"},
+	"automod.model.preset":              {ClassLive, applyAutomod, "rebuilds the checker with the preset's JSON mode, reasoning setting and flag-only lock"},
+	"automod.model.categoryActions":     {ClassLive, applyAutomod, "rebuilds both model checkers with the new per-category actions"},
+	"automod.model.tested":              {ClassLive, applyAutomod, "derived from the Test pass table on the way out; never stored"},
+	"automod.secondary.enabled":         {ClassLive, applyAutomod, "builds or drops the secondary checker"},
+	"automod.secondary.endpoint":        {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.model":           {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.hasApiKey":       {ClassLive, applyAutomod, "reported by the checker; the key itself is sealed and set through its own endpoint"},
+	"automod.secondary.timeoutSeconds":  {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.maxCallsPerHour": {ClassLive, applyAutomod, "rebuilds the secondary checker against its own long-lived budget"},
+	"automod.secondary.action":          {ClassLive, applyAutomod, "not read: the primary's policy applies to both checkers"},
+	"automod.secondary.timeoutForBan":   {ClassLive, applyAutomod, "not read: the primary's policy applies to both checkers"},
+	"automod.secondary.minConfidence":   {ClassLive, applyAutomod, "rebuilds the secondary checker"},
+	"automod.secondary.instruction":     {ClassLive, applyAutomod, "not read: the primary's instruction applies to both checkers"},
+	"automod.secondary.protocol":        {ClassLive, applyAutomod, "rebuilds the secondary checker on the other connector"},
+	"automod.secondary.preset":          {ClassLive, applyAutomod, "rebuilds the secondary checker with the preset's wire details"},
+	"automod.secondary.categoryActions": {ClassLive, applyAutomod, "not read: the primary's table applies to both checkers"},
+	"automod.secondary.tested":          {ClassLive, applyAutomod, "derived from the Test pass table on the way out; never stored"},
 }
 
 // ------------------------------------------------------------ what a reconcile did

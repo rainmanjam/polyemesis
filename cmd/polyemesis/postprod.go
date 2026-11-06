@@ -91,14 +91,7 @@ func (p postProd) waitWithin(ctx context.Context) bool {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
-	settings, err := store.GetSettings()
-	if err != nil {
-		// Falling back to defaults rather than giving up: the stored policy is
-		// how strictly this tier yields, and the default is the strictest one.
-		log.Warn("cannot read the post-production policy; using defaults", "error", err)
-		settings = db.DefaultSettings()
-	}
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, settings db.Settings, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 
 	// Whisper is detected once, at startup, and a machine without it is an
 	// ordinary machine. Every method on *Tools is nil-receiver safe precisely so

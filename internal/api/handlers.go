@@ -2077,31 +2077,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// it has to be applied HERE rather than at the next restart. A retention
 	// setting that stores, returns 200 and keeps sweeping on the old numbers is
 	// the same silent no-op the ingest block above documents.
-	// The LOG follows the display zone from the next line, not the next
-	// restart. Same argument as the two below: a setting that stores, returns
-	// 200 and changes nothing until somebody reboots the box is the silent
-	// no-op this file warns about twice already -- and here it is the operator
-	// still doing timezone arithmetic in their head while reading the log they
-	// just reconfigured.
-	logtz.Set(displayLocation(settings.Display.TimeZone))
-	ApplyChatRetention(s.chat, settings.Chat)
-	ApplyYouTubeQuota(s.chat, settings.Chat)
-	// The shared allowance the sampler, the vertical read and the request
-	// meter draw on, and the sampler's own interval: both applied now, not at
-	// the next tick (PR #950 review, #2 and #15).
-	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
-	if s.audience != nil {
-		s.audience.Wake()
-	}
-	// Same argument for automod: a matrix that stores, returns 200 and keeps
-	// deciding on the old cells is the silent no-op this file already warns
-	// about twice. Rebuilding the engine here is also what recompiles a changed
-	// rule -- without it a new pattern would not apply until the next restart.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
-	// And the same for alert delivery: a retry budget that stores, returns 200
-	// and keeps chasing on the old count is the third instance of the silent
-	// no-op this handler now guards against three times.
-	ApplyAlertSettings(s.mgr, settings.Alerts)
+	// Everything the document configures in a running process goes through the
+	// one function boot uses too, so the two cannot drift apart.
+	s.ApplySettings(settings)
 
 	// The refusal, LAST, after everything the same document asked for has
 	// actually been applied.
@@ -2170,6 +2148,36 @@ type storedSettingsError struct {
 	Version string `json:"version,omitempty"`
 }
 
+// ApplySettings pushes the stored settings into the running process: the log's
+// time zone, chat retention and history, the YouTube allowance, automod and
+// alert delivery. Boot calls it once after the server is built and the save
+// handler calls it after every commit, so a setting that needs applying is
+// listed here and nowhere else.
+//
+// A save that stores, returns 200 and changes nothing until somebody reboots
+// the box is the silent no-op this list exists to prevent; the same goes for a
+// boot that forgets what the last save applied.
+func (s *Server) ApplySettings(settings db.Settings) {
+	loc, err := resolveDisplayZone(settings.Display.TimeZone)
+	if err != nil {
+		s.log.Warn("display time zone does not resolve; logging in UTC",
+			"zone", settings.Display.TimeZone, "err", err)
+	}
+	logtz.Set(loc)
+	ApplyChatRetention(s.chat, settings.Chat)
+	ApplyYouTubeQuota(s.chat, settings.Chat)
+	// The shared allowance the sampler, the vertical read and the request
+	// meter draw on, and the sampler's own interval: applied now, not at the
+	// next tick.
+	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
+	if s.audience != nil {
+		s.audience.Wake()
+	}
+	// Rebuilding the automod engine is also what recompiles a changed rule.
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
+	ApplyAlertSettings(s.mgr, settings.Alerts)
+}
+
 // ApplyChatRetention pushes the stored bounds into a running Hub.
 //
 // Shared by the settings handler and startup so the two cannot disagree about
@@ -2196,14 +2204,9 @@ func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
 // ApplyYouTubeQuota pushes the operator's stated daily allowance into every
 // chat connection that paces against one.
 //
-// NOT SHARED WITH STARTUP, which is where it differs from ApplyChatRetention
-// next door. That one configures the Hub itself, which exists before anything
-// is attached to it; this one pushes into adapters, and at the point main
-// applies chat settings there are none -- StartChat runs sixty-odd lines later.
-// A call there would read as though it did something and would apply to zero
-// connections every time. The startup path is already covered, by chatAdapter
-// reading the stored allowance when it constructs the adapter; this method is
-// what the SAVE path needs, and only that.
+// At startup it is a no-op by construction -- no adapter is attached yet, and
+// chatAdapter reads the stored allowance when it builds one -- but it is called
+// from ApplySettings at boot all the same, so boot and save stay one list.
 //
 // WHY THIS IS NOT SIMPLY READ WHEN NEEDED. The allowance is the denominator of
 // the pacing calculation, and the thing that spends against it is a budget that
@@ -3730,21 +3733,21 @@ func (s *Server) requireNamedSource(w http.ResponseWriter, id *int64) bool {
 	return false
 }
 
-// displayLocation resolves the configured display zone, falling back to UTC.
+// resolveDisplayZone resolves the configured display zone. An empty zone is
+// UTC; a zone that does not load is UTC plus the error, for the caller to say.
 //
 // Settings.Validate has already refused a zone that cannot be loaded, so the
-// error path here is only reachable if the two disagree -- and UTC is the
-// honest answer then, rather than a log with no timestamps at all.
-func displayLocation(tz string) *time.Location {
+// error is only reachable if the two disagree (a host without tzdata, say).
+func resolveDisplayZone(tz string) (*time.Location, error) {
 	tz = strings.TrimSpace(tz)
 	if tz == "" {
-		return time.UTC
+		return time.UTC, nil
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return time.UTC
+		return time.UTC, err
 	}
-	return loc
+	return loc, nil
 }
 
 // sameAutomodRules reports whether two rule lists are identical.
