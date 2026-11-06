@@ -267,6 +267,11 @@ func (s *Sampler) Wake() {
 	}
 }
 
+// WakePending reports whether a Wake is queued that no loop has taken yet. A
+// queued wake makes Run skip its initial delay, so a caller that must not
+// start sampling early (boot) can check it left none behind.
+func (s *Sampler) WakePending() bool { return len(s.wake) > 0 }
+
 // New builds a sampler. now may be nil for time.Now.
 func New(src Source, store Store, cfg func() Config, now func() time.Time, log *slog.Logger) *Sampler {
 	if now == nil {

@@ -102,14 +102,15 @@ function RouteFallback() {
 
 /** The install's display zone, read once as the console starts and BEFORE any
  *  page draws, so every clock is in it on the first paint -- including on a
- *  cold load onto a page that never reads settings itself. A read that fails
- *  leaves UTC, which is also the default; it must not keep the console from
- *  opening. A save updates the zone itself (api.putSettings). */
+ *  cold load onto a page that never reads settings itself. api.getSettings
+ *  sets it. A read that fails resets it to UTC, the default, rather than
+ *  leaving the previous session's zone on the screen after a re-login; it must
+ *  not keep the console from opening. */
 async function loadDisplayZone(): Promise<void> {
   try {
-    setDisplayTimeZone((await api.getSettings()).display?.timeZone);
+    await api.getSettings();
   } catch {
-    // UTC until the next save.
+    setDisplayTimeZone("UTC");
   }
 }
 

@@ -524,6 +524,12 @@ export function uploadMedia(
  *  else moves the stored version past the one recorded, and still conflicts. */
 const settingsVersionsReplacedHere = new Map<string, SettingsVersion>();
 
+/** The one place settings set the console's display zone. */
+function noteDisplayZone(s: Settings): Settings {
+  setDisplayTimeZone(s.display?.timeZone);
+  return s;
+}
+
 export const api = {
   // --- automod ---
   automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
@@ -692,13 +698,13 @@ export const api = {
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
   // --- settings ---
-  /* A plain read. The console's display zone is NOT set here: App reads it
-   * once at start (see loadDisplayZone), before any page draws a clock, so it
-   * no longer depends on which page happened to call this first. A save does
-   * update it, in putSettings below, so the screen that made the change reads
-   * in the new zone at once. */
+  /* THE CLOCKS FOLLOW THE SETTINGS: every settings read and every save sets the
+   * display zone, through the one function below, so a zone changed from
+   * another browser or an API client shows up as soon as this console fetches
+   * settings again. App also reads it once at start, before any page draws, so
+   * the first paint does not depend on which page happens to read settings. */
   getSettings: async (): Promise<Settings> => {
-    return get<Settings>("/settings");
+    return noteDisplayZone(await get<Settings>("/settings"));
   },
   /** Saves the settings and returns THE SETTINGS, not the whole response.
    *
@@ -737,10 +743,7 @@ export const api = {
       throw err;
     }
     const { reload: _reload, ...saved } = result;
-    // The screen that made the change reads in the new zone immediately,
-    // rather than at the next reload.
-    setDisplayTimeZone((saved as Settings).display?.timeZone);
-    return saved as Settings;
+    return noteDisplayZone(saved as Settings);
   },
   /** The MQTT broker password, on its own route.
    *

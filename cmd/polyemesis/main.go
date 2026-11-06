@@ -923,14 +923,21 @@ func listenPort(addr string) string { return config.ListenPort(addr) }
 //
 // The error says how to get out, because the operator reading it has a server
 // that will not start: docs/CONFIGURATION.md, "The data directory".
+// shellQuote single-quotes a path so a data directory with a space in it can be
+// pasted into the recovery command as written.
+func shellQuote(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
 func bootSettings(store *db.DB, dbPath string) (db.Settings, error) {
 	s, err := store.GetSettings()
 	if err != nil {
+		quoted := shellQuote(dbPath)
 		return db.Settings{}, fmt.Errorf("the stored settings cannot be read, so polyemesis will not start on guessed ones: %w. "+
 			"To recover, stop the server and either restore %s from a backup (check the copy with `polyemesis -verify-backup <dir>`), "+
 			"or reset only the settings to their defaults, keeping sources and destinations, with "+
 			"`sqlite3 %s \"DELETE FROM settings WHERE id = 1\"` and start again. See docs/CONFIGURATION.md, \"The data directory\"",
-			err, dbPath, dbPath)
+			err, quoted, quoted)
 	}
 	return s, nil
 }

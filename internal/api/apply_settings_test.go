@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -85,4 +86,38 @@ func TestApplySettingsToleratesNothingToApplyTo(t *testing.T) {
 	restoreLogZone(t)
 	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	s.ApplySettings(db.DefaultSettings()) // no hub, no manager, no quota: must not panic
+}
+
+// Boot applies the stored settings before AnalyticsLoop starts. A wake queued
+// then makes the sampler skip its initial delay and sample before chat has
+// attached, so boot must leave none behind.
+func TestApplySettingsAtBootQueuesNoSamplerWake(t *testing.T) {
+	restoreLogZone(t)
+	s, _ := applyServer(t)
+	if s.audience == nil {
+		t.Fatal("the server has no audience sampler, so this test would prove nothing")
+	}
+
+	s.ApplySettings(db.DefaultSettings())
+
+	if s.audience.WakePending() {
+		t.Error("ApplySettings queued a sampler wake, so the first sample would skip its initial delay")
+	}
+}
+
+// A save still wakes the running sampler: a lowered interval applies at once.
+func TestASettingsSaveWakesTheSampler(t *testing.T) {
+	restoreLogZone(t)
+	s, h, _, sign := engineServer(t, defaultTools(), Options{})
+	var cur map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &cur)
+	if s.audience.WakePending() {
+		t.Fatal("a wake was already pending before the save")
+	}
+
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", cur, http.StatusOK)
+
+	if !s.audience.WakePending() {
+		t.Error("a settings save did not wake the sampler")
+	}
 }

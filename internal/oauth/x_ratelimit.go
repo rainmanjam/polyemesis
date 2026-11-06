@@ -35,6 +35,10 @@ const xUserCacheTTL = 10 * time.Minute
 // this is the backstop for a burst of distinct tokens inside one TTL.
 const xUserCacheMax = 64
 
+// xHoldsMax bounds the hold map the same way: expired holds are dropped on every
+// read and write, and the one that ends last survives a burst of distinct tokens.
+const xHoldsMax = 64
+
 // xCallState is what one X provider remembers between calls, keyed by a fingerprint of the access token so no token
 // is held as a map key.
 type xCallState struct {
@@ -66,12 +70,9 @@ func xTokenFingerprint(accessToken, base string) string {
 func (s *xCallState) heldUntil(fp string) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	until, ok := s.holds[fp]
 	if !ok {
-		return time.Time{}, false
-	}
-	if !s.clock().Before(until) {
-		delete(s.holds, fp)
 		return time.Time{}, false
 	}
 	return until, true
@@ -83,22 +84,48 @@ func (s *xCallState) hold(fp string, until time.Time) {
 	if s.holds == nil {
 		s.holds = map[string]time.Time{}
 	}
-	now := s.clock()
-	for k, end := range s.holds {
-		if !now.Before(end) {
-			delete(s.holds, k)
+	s.pruneLocked()
+	for len(s.holds) >= xHoldsMax {
+		if _, have := s.holds[fp]; have {
+			break
 		}
+		// Every hold left is live; the one ending soonest is the cheapest to lose.
+		var soonest string
+		var soonestAt time.Time
+		for k, end := range s.holds {
+			if soonest == "" || end.Before(soonestAt) {
+				soonest, soonestAt = k, end
+			}
+		}
+		delete(s.holds, soonest)
 	}
 	if until.After(s.holds[fp]) {
 		s.holds[fp] = until
 	}
 }
 
+// pruneLocked drops every hold that has ended and every cached user older than
+// the TTL. Callers hold s.mu.
+func (s *xCallState) pruneLocked() {
+	now := s.clock()
+	for k, end := range s.holds {
+		if !now.Before(end) {
+			delete(s.holds, k)
+		}
+	}
+	for k, c := range s.users {
+		if now.Sub(c.at) >= xUserCacheTTL {
+			delete(s.users, k)
+		}
+	}
+}
+
 func (s *xCallState) cachedUser(fp string) (xUser, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	c, ok := s.users[fp]
-	if !ok || s.clock().Sub(c.at) >= xUserCacheTTL {
+	if !ok {
 		return xUser{}, false
 	}
 	return c.user, true
@@ -111,11 +138,7 @@ func (s *xCallState) rememberUser(fp string, u xUser) {
 		s.users = map[string]xCachedUser{}
 	}
 	now := s.clock()
-	for k, c := range s.users {
-		if now.Sub(c.at) >= xUserCacheTTL {
-			delete(s.users, k)
-		}
-	}
+	s.pruneLocked()
 	for len(s.users) >= xUserCacheMax {
 		var oldest string
 		var oldestAt time.Time

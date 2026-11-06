@@ -2075,6 +2075,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// Everything the document configures in a running process goes through the
 	// one function boot uses too, so the two cannot drift apart.
 	s.ApplySettings(settings)
+	// The sampler re-times its wait from the new interval at once. Only a save
+	// does this: at boot nothing is running to tell.
+	if s.audience != nil {
+		s.audience.Wake()
+	}
 
 	// The refusal, LAST, after everything the same document asked for has
 	// actually been applied.
@@ -2162,12 +2167,10 @@ func (s *Server) ApplySettings(settings db.Settings) {
 	ApplyChatRetention(s.chat, settings.Chat)
 	ApplyYouTubeQuota(s.chat, settings.Chat)
 	// The shared allowance the sampler, the vertical read and the request
-	// meter draw on, and the sampler's own interval: applied now, not at the
-	// next tick.
+	// meter draw on: applied now, not at the next tick. The sampler itself is
+	// NOT woken here -- a wake queued before AnalyticsLoop starts makes its first
+	// sample skip the initial delay. handlePutSettings wakes it after a save.
 	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
-	if s.audience != nil {
-		s.audience.Wake()
-	}
 	// Rebuilding the automod engine is also what recompiles a changed rule.
 	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
 	ApplyAlertSettings(s.mgr, settings.Alerts)

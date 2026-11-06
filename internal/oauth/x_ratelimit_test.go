@@ -262,3 +262,46 @@ func TestTheXUserCacheIsCappedEvenWhileEveryEntryIsFresh(t *testing.T) {
 		t.Errorf("user cache holds %d entries (cap %d), newest kept = %v", n, xUserCacheMax, newest)
 	}
 }
+
+// The last hold of a burst, with no later hold to sweep it: the next READ of
+// either cache drops what has expired, so nothing lingers until restart.
+func TestExpiredXEntriesAreDroppedByAReadNotOnlyByALaterWrite(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &xCallState{now: func() time.Time { return now }}
+	for i := range 10 {
+		fp := fmt.Sprintf("fp-%d", i)
+		s.hold(fp, now.Add(time.Minute))
+		s.rememberUser(fp, xUser{})
+	}
+	now = now.Add(xUserCacheTTL + time.Hour)
+
+	if _, held := s.heldUntil("someone-else"); held {
+		t.Fatal("an unknown token reads as held")
+	}
+	if _, ok := s.cachedUser("someone-else"); ok {
+		t.Fatal("an unknown token has a cached user")
+	}
+
+	s.mu.Lock()
+	holds, users := len(s.holds), len(s.users)
+	s.mu.Unlock()
+	if holds != 0 || users != 0 {
+		t.Errorf("after expiry and one read the caches hold %d holds and %d users, want 0", holds, users)
+	}
+}
+
+func TestTheXHoldMapIsCappedEvenWhileEveryHoldIsLive(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &xCallState{now: func() time.Time { return now }}
+	for i := range xHoldsMax * 3 {
+		now = now.Add(time.Millisecond)
+		s.hold(fmt.Sprintf("fp-%d", i), now.Add(time.Hour+time.Duration(i)*time.Second))
+	}
+	s.mu.Lock()
+	n := len(s.holds)
+	_, newest := s.holds[fmt.Sprintf("fp-%d", xHoldsMax*3-1)]
+	s.mu.Unlock()
+	if n > xHoldsMax || !newest {
+		t.Errorf("hold map has %d entries (cap %d), newest kept = %v", n, xHoldsMax, newest)
+	}
+}

@@ -52,6 +52,11 @@ func TestAnUnreadableSettingsRowStopsTheBoot(t *testing.T) {
 			t.Errorf("the error does not say how to recover (missing %q): %v", want, err)
 		}
 	}
+	// A data directory with a space in it: the command has to be pasteable.
+	_, spaced := bootSettings(store, "/data dir/it's.db")
+	if spaced == nil || !strings.Contains(spaced.Error(), `sqlite3 '/data dir/it'\''s.db' "DELETE`) {
+		t.Errorf("the recovery command does not quote a path with a space and an apostrophe: %v", spaced)
+	}
 	// And the reset it names works: the next read writes the defaults.
 	if _, err := store.SQL().Exec(`DELETE FROM settings WHERE id = 1`); err != nil {
 		t.Fatal(err)

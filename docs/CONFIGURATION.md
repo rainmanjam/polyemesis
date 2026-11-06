@@ -548,10 +548,10 @@ standing at a terminal reading an error.
 
 | Variable | What it does |
 |---|---|
-| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read by `internal/chat/rumble.go`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
+| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read once at startup by `internal/startupenv`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
 | `RUMBLE_CHAT_CHANNEL` | Which channel to read, when the key alone does not say |
 
-Both are read at startup by `internal/api/chat_wiring.go`. See
+Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and `Env.RumbleChatChannel`) and handed to the chat wiring in `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
 ### FFmpeg
