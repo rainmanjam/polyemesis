@@ -126,6 +126,14 @@ test.describe("the console theme", () => {
     await bodyLuminance(page, { min: 0.85 });
   });
 
+  test("at 700px (sm..md, drawer open) exactly one theme control is visible", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 800 });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Toggle navigation" }).first().click();
+    await expect(page.getByTestId("theme-toggle").locator("visible=true")).toHaveCount(1);
+    await expect(toggle(page)).toBeVisible();
+  });
+
   test("never themes the public player, whatever the operator chose", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "light" });
     await page.addInitScript((k) => localStorage.setItem(k, "light"), KEY);
@@ -147,6 +155,33 @@ test.describe("the console theme", () => {
   const SHOTS = process.env.THEME_SHOTS_DIR;
   test.describe("screenshots", () => {
     test.skip(!SHOTS, "set THEME_SHOTS_DIR to write them");
+    // The meters with live levels: the harness can feed the console's own
+    // WebSocket (routeWebSocket), so the canvases draw real bars in each theme.
+    for (const mode of ["light", "dark"] as const) {
+      test(`meters with live levels in ${mode}`, async ({ page }) => {
+        mkdirSync(SHOTS!, { recursive: true });
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.addInitScript(([k, m]) => localStorage.setItem(k, m), [KEY, mode]);
+        await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+          const send = () =>
+            ws.send(
+              JSON.stringify({
+                type: "levels",
+                data: {
+                  peak: [[-6, -7], [-14, -15], [-3, -2.5], [-24, -26], [-40, -41], [-1, -0.5]],
+                  rms: [[-12, -13], [-20, -21], [-8, -9], [-30, -32], [-48, -49], [-5, -6]],
+                },
+              }),
+            );
+          send();
+          setInterval(send, 200);
+        });
+        await page.goto("/meters");
+        await expect(toggle(page)).toBeVisible();
+        await page.waitForTimeout(1500);
+        await page.screenshot({ path: join(SHOTS!, `meters-live-${mode}.png`) });
+      });
+    }
     for (const mode of ["light", "dark"] as const) {
       for (const [name, path] of [
         ["dashboard", "/"],

@@ -173,15 +173,12 @@ describe("public/theme-init.js agrees with lib/theme.ts", () => {
   ];
 
   it.each(cases)("picks the same theme as the module: %j", (c) => {
+    // run() seeds localStorage (and, for storageThrows, leaves the throwing
+    // spy in place), so the REAL readStoredChoice sees what the script saw.
     const fromScript = run(c);
-    const want = isThemedPath(c.path, "") ? resolveTheme(readStoredChoiceFor(c), c.prefersLight) : null;
+    const want = isThemedPath(c.path, "") ? resolveTheme(readStoredChoice(), c.prefersLight) : null;
     expect(fromScript).toBe(want);
   });
-
-  function readStoredChoiceFor(c: { stored?: string | null; storageThrows?: boolean }) {
-    if (c.storageThrows) return "system" as const;
-    return c.stored === "light" || c.stored === "dark" ? c.stored : ("system" as const);
-  }
 
   it("does not touch the meta tags on a page it does not theme", () => {
     run({ path: "/watch", stored: "light", prefersLight: true });

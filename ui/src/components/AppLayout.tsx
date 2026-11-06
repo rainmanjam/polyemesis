@@ -699,9 +699,11 @@ export function AppLayout({
             ))}
 
             {/* The theme control on a phone, where the header has no room for it
-                (see the one up there). Its own mt-auto: the collapse button
-                below is hidden under md, so this is the bottom of the drawer. */}
-            <ThemeToggle className="mt-auto self-start md:hidden" />
+                (see the one up there). Shown only below sm, exactly where the
+                header copy is hidden, so the two are never on screen together.
+                Its own mt-auto: the collapse button below is hidden under md,
+                so on a phone this is the bottom of the drawer. */}
+            <ThemeToggle className="mt-auto self-start sm:hidden" />
 
             {/* Pinned to the bottom, so the target does not move as the width
                 changes. mt-auto rather than a spacer div. */}

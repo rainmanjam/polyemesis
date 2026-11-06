@@ -52,8 +52,27 @@ describe("authorInk", () => {
   });
 
   it("hands back what it cannot parse, rather than inventing a colour", () => {
-    for (const c of ["", "rebeccapurple", "rgb(1,2,3)", "#12", "#gggggg", "#12345678"]) {
+    for (const c of ["", "#12", "#gggggg", "#12345678", "rgb(1,2)", "hsl(x)"]) {
       expect(authorInk(c, "light")).toBe(c);
     }
+  });
+});
+
+describe("authorInk with colours written other ways than hex", () => {
+  it.each(["rgb(255, 255, 0)", "rgb(255 255 0)", "rgba(255,255,0,0.9)", "hsl(60, 100%, 50%)", "hsl(60 100% 50%)", "RGB(255,255,0)"])(
+    "darkens %s, which is pure yellow",
+    (c) => {
+      const out = authorInk(c, "light");
+      expect(out).toMatch(/^#[0-9a-f]{6}$/);
+      expect(contrast(out)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it("leaves a dark rgb() colour as it came", () => {
+    expect(authorInk("rgb(30, 58, 138)", "light")).toBe("rgb(30, 58, 138)");
+  });
+
+  it("leaves these alone on the dark theme", () => {
+    expect(authorInk("rgb(255,255,0)", "dark")).toBe("rgb(255,255,0)");
   });
 });

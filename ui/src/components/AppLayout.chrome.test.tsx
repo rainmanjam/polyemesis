@@ -216,7 +216,10 @@ describe("the chrome's theme control", () => {
     const { container } = renderChrome();
     const nav = container.querySelector("nav")!;
     expect(within(nav).getAllByRole("radio")).toHaveLength(3);
-    // And the header copy is the one that drops out below sm.
+    // The two are complementary: the header copy appears FROM sm, the drawer
+    // copy only BELOW sm, so no width shows both.
     expect(container.querySelector("header [data-testid=theme-toggle]")!.className).toContain("hidden sm:inline-flex");
+    expect(nav.querySelector("[data-testid=theme-toggle]")!.className).toContain("sm:hidden");
+    expect(nav.querySelector("[data-testid=theme-toggle]")!.className).not.toContain("md:hidden");
   });
 });
