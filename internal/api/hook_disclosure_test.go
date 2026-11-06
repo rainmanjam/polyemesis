@@ -82,7 +82,7 @@ func hookTransportFailures() []struct {
 		},
 		{
 			// Not a transport failure at all: the endpoint answered, and put
-			// the credential in its OWN body. This is the shape alerts.Redact
+			// the credential in its OWN body. This is the shape redact.Redact
 			// is worst at -- JSON -- and the reason the exact SecretSet exists
 			// alongside ClientErrorText rather than instead of it.
 			name: "the endpoint echoes the credential back in a JSON body",
@@ -169,7 +169,7 @@ func TestHookDeliveriesDoNotDiscloseTheEndpointPath(t *testing.T) {
 			for _, bad := range []string{discloseSecret, disclosePath, discloseSigning} {
 				if strings.Contains(raw, bad) {
 					t.Errorf("GET %s disclosed %q to a READ-scoped token:\n%s\n\n"+
-						"The endpoint's path IS its credential. alerts.Redact does not mask "+
+						"The endpoint's path IS its credential. redact.Redact does not mask "+
 						"an https path segment and never did (#162 limit 2), so the Redact "+
 						"call that used to stand here was a no-op on exactly this shape.",
 						path, bad, raw)

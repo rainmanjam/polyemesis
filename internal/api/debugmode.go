@@ -7,11 +7,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Debug mode: the toggle, and the export.
@@ -125,7 +125,7 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 		// is covered by a set assembled from the destinations as they are now.
 		//
 		// THE RESIDUAL IS A KEY ROTATED WHILE RECORDING IS ALREADY ON. That
-		// literal is one this set has never held, and alerts.Redact is what
+		// literal is one this set has never held, and redact.Redact is what
 		// stands behind it -- see diag.Recorder.SetSecrets, which exists so
 		// whatever reconciles destinations can close the gap.
 		if *body.Recording {
@@ -135,7 +135,7 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 			// routinely carries credentials (rtsp://user:pass@, a CDN token in
 			// the query), engine.go logs that URL, and everything in it therefore
 			// reached the exported bundle behind nothing but the residual
-			// alerts.Redact pass. The publish token goes in for the same reason:
+			// redact.Redact pass. The publish token goes in for the same reason:
 			// a token in a bundle sent to a stranger is a stranger who can
 			// publish.
 			// AND ACCOUNTS, WHICH WERE THE THIRD OMISSION IN A ROW. This started
@@ -149,7 +149,7 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 			// The pattern worth naming is that each omission was an inventory
 			// nobody enumerated, not a mistake in the code that was written.
 			if lits, err := s.diagSecretLiterals(); err == nil {
-				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
+				s.diag.SetSecrets(redact.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
 				// scrub cannot be built is how a bundle full of stream keys
@@ -263,7 +263,7 @@ func (s *Server) refreshDiagSecrets() {
 		return
 	}
 	if lits, err := s.diagSecretLiterals(); err == nil {
-		s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
+		s.diag.SetSecrets(redact.NewSecretSet(s.log, lits...))
 	} else {
 		s.log.Warn("could not rebuild the debug recording's redaction set", "err", err)
 	}

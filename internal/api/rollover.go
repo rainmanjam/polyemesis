@@ -31,10 +31,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -255,7 +255,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
 		start, err := c.sessionStart(ctx, d, bid, cfg.LastRolloverAt, now)
 		if err != nil {
-			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", alerts.Redact(err.Error()))
+			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", redact.Redact(err.Error()))
 			return false, err
 		}
 		if start.IsZero() && !force {
@@ -376,7 +376,7 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 
 	if err != nil {
 		// Redacted before it is clipped: a clip can cut a credential in half, and the pattern then misses it.
-		msg := clipDetail(alerts.Redact(err.Error()))
+		msg := clipDetail(redact.Redact(err.Error()))
 		if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), rolloverFailedPrefix+msg, now); rerr != nil {
 			c.log.Warn("planned rollover: could not record the failure", "destination", d.Name, "err", rerr)
 		}
@@ -406,7 +406,7 @@ func (c *rolloverCoordinator) sendChatNotice(ctx context.Context, d *db.Destinat
 	}
 	if err != nil {
 		c.log.Warn("planned rollover: the chat notice was not sent; the rollover goes ahead",
-			"destination", d.Name, "platform", d.Platform, "err", alerts.Redact(err.Error()))
+			"destination", d.Name, "platform", d.Platform, "err", redact.Redact(err.Error()))
 	}
 }
 
@@ -461,7 +461,7 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 	}
 	// Platform text, so it is redacted before it reaches the fault, the result, the webhook or the timeline, the same
 	// as a failure's reason is.
-	warnings := alerts.Redact(strings.Join(out.Warnings, "; "))
+	warnings := redact.Redact(strings.Join(out.Warnings, "; "))
 	if _, err := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
 		cur.Lifecycle.BroadcastID = out.NewBroadcastID
 		cur.Lifecycle.Phase = phaseLive

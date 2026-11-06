@@ -33,8 +33,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -54,7 +54,7 @@ const wireSentinel = "SENTINEL-dest-wire-4c7ae91f38"
 //
 // NO APPLICATION PATH, and that is what makes this test measure the boundary
 // rather than the residual. supervisor.(*Process).scrub is
-// alerts.Redact(secrets.Scrub(s)): two passes, and Redact would mask the last
+// redact.Redact(secrets.Scrub(s)): two passes, and Redact would mask the last
 // segment of an rtmp URL all by itself -- but only when the path has TWO
 // non-empty segments, because alerts.maskLastSegment returns the path untouched
 // below that. `rtmp://host/app/KEY` is therefore covered twice over and proves
@@ -106,15 +106,15 @@ func TestAKeyTruncatedAtAControlCharacterReachesNeitherProcessLogNorRing(t *test
 				destIngestURL + "/" + tc.used
 
 			// THE FIXTURE GUARD. supervisor.(*Process).scrub runs the declared
-			// secrets AND alerts.Redact, so a line Redact can mask on its own
+			// secrets AND redact.Redact, so a line Redact can mask on its own
 			// would come back clean no matter what destSecrets emitted, and this
 			// test would assert nothing while looking green. Measure it here
 			// instead of reasoning about it: if Redact ever grows to cover this
 			// shape, this fails and says the test stopped being a test.
-			if !strings.Contains(alerts.Redact(failure), tc.used) {
-				t.Fatalf("alerts.Redact removes the key from this line on its own, so nothing "+
+			if !strings.Contains(redact.Redact(failure), tc.used) {
+				t.Fatalf("redact.Redact removes the key from this line on its own, so nothing "+
 					"below measures the declared-secret pass.\n  line:  %s\n  redact: %s\n"+
-					"Pick a line shape the residual pass cannot see.", failure, alerts.Redact(failure))
+					"Pick a line shape the residual pass cannot see.", failure, redact.Redact(failure))
 			}
 
 			dir := t.TempDir()
@@ -203,7 +203,7 @@ func TestAKeyTruncatedAtAControlCharacterReachesNeitherProcessLogNorRing(t *test
 					masked = l.Text
 				}
 			}
-			if !strings.Contains(masked, alerts.Mask) {
+			if !strings.Contains(masked, redact.Mask) {
 				t.Errorf("the key is gone from %q but nothing says a redaction happened, which "+
 					"usually means the text was destroyed rather than masked", masked)
 			}

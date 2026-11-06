@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Every field the read-safe views in internal/api blank or mask refuses the
@@ -26,15 +26,15 @@ func TestADestinationFieldCarryingTheRedactionPlaceholderIsRefusedByName(t *test
 		path string
 		set  func(*Destination)
 	}{
-		{"streamKey", func(d *Destination) { d.StreamKey = alerts.Mask }},
+		{"streamKey", func(d *Destination) { d.StreamKey = redact.Mask }},
 		{"backupStreamKey", func(d *Destination) {
 			d.BackupURL = "rtmp://backup.example/live"
-			d.BackupStreamKey = alerts.Mask
+			d.BackupStreamKey = redact.Mask
 		}},
-		{"url", func(d *Destination) { d.URL = "rtmp://ingest.example/" + alerts.Mask }},
-		{"backupUrl", func(d *Destination) { d.BackupURL = "rtmp://" + alerts.Mask + "@backup.example/live" }},
-		{"extraInputArgs", func(d *Destination) { d.ExtraInputArgs = alerts.Mask }},
-		{"extraOutputArgs", func(d *Destination) { d.ExtraOutputArgs = alerts.Mask }},
+		{"url", func(d *Destination) { d.URL = "rtmp://ingest.example/" + redact.Mask }},
+		{"backupUrl", func(d *Destination) { d.BackupURL = "rtmp://" + redact.Mask + "@backup.example/live" }},
+		{"extraInputArgs", func(d *Destination) { d.ExtraInputArgs = redact.Mask }},
+		{"extraOutputArgs", func(d *Destination) { d.ExtraOutputArgs = redact.Mask }},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			d := validDest()
@@ -55,15 +55,15 @@ func TestASettingsFieldCarryingTheRedactionPlaceholderIsRefusedByName(t *testing
 		path string
 		set  func(*Settings)
 	}{
-		{"ingest.srt.passphrase", func(s *Settings) { s.Ingest.SRT.Passphrase = alerts.Mask }},
-		{"ingest.rtmp.streamKey", func(s *Settings) { s.Ingest.RTMP.StreamKey = alerts.Mask }},
-		{"ingest.pull.url", func(s *Settings) { s.Ingest.Pull.URL = "srt://cam.example:9000?passphrase=" + alerts.Mask }},
-		{"failover.backup.srt.passphrase", func(s *Settings) { s.Failover.Backup.SRT.Passphrase = alerts.Mask }},
-		{"failover.backup.rtmp.streamKey", func(s *Settings) { s.Failover.Backup.RTMP.StreamKey = alerts.Mask }},
-		{"failover.backup.pull.url", func(s *Settings) { s.Failover.Backup.Pull.URL = "rtsp://" + alerts.Mask + "@cam.example/live" }},
-		{"mqtt.brokerUrl", func(s *Settings) { s.MQTT.BrokerURL = "mqtt://" + alerts.Mask + "@broker.example:1883" }},
+		{"ingest.srt.passphrase", func(s *Settings) { s.Ingest.SRT.Passphrase = redact.Mask }},
+		{"ingest.rtmp.streamKey", func(s *Settings) { s.Ingest.RTMP.StreamKey = redact.Mask }},
+		{"ingest.pull.url", func(s *Settings) { s.Ingest.Pull.URL = "srt://cam.example:9000?passphrase=" + redact.Mask }},
+		{"failover.backup.srt.passphrase", func(s *Settings) { s.Failover.Backup.SRT.Passphrase = redact.Mask }},
+		{"failover.backup.rtmp.streamKey", func(s *Settings) { s.Failover.Backup.RTMP.StreamKey = redact.Mask }},
+		{"failover.backup.pull.url", func(s *Settings) { s.Failover.Backup.Pull.URL = "rtsp://" + redact.Mask + "@cam.example/live" }},
+		{"mqtt.brokerUrl", func(s *Settings) { s.MQTT.BrokerURL = "mqtt://" + redact.Mask + "@broker.example:1883" }},
 		{"automod.model.endpoint", func(s *Settings) {
-			s.Automod.Model.Endpoint = "https://llm.example/v1/chat/completions?api_key=" + alerts.Mask
+			s.Automod.Model.Endpoint = "https://llm.example/v1/chat/completions?api_key=" + redact.Mask
 		}},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -84,7 +84,7 @@ func TestASourceIngestCarryingTheRedactionPlaceholderIsRefused(t *testing.T) {
 	if err := validateSource(src); err != nil {
 		t.Fatalf("control: %v", err)
 	}
-	src.Ingest.RTMP.StreamKey = alerts.Mask
+	src.Ingest.RTMP.StreamKey = redact.Mask
 	if err := validateSource(src); err == nil || !strings.Contains(err.Error(), "ingest.rtmp.streamKey") {
 		t.Fatalf("validateSource() = %v, want a refusal naming ingest.rtmp.streamKey", err)
 	}
@@ -93,7 +93,7 @@ func TestASourceIngestCarryingTheRedactionPlaceholderIsRefused(t *testing.T) {
 // The message never carries the rest of the value: a partly masked URL still
 // holds the parts that were not masked, and this lands in a 400 body and a log.
 func TestTheRefusalDoesNotEchoTheValue(t *testing.T) {
-	probs := redactionPlaceholderProblems(credentialField{"url", "rtmp://visible-host.example/" + alerts.Mask})
+	probs := redactionPlaceholderProblems(credentialField{"url", "rtmp://visible-host.example/" + redact.Mask})
 	if len(probs) != 1 {
 		t.Fatalf("got %d problems, want 1", len(probs))
 	}

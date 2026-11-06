@@ -2232,7 +2232,7 @@ var readScopeWritePatterns = map[string]bool{
 //
 //	THE RESPONSE IS A CREDENTIAL. GET /destinations/{id}/expert returns the
 //	resolved argv, whose output target is rtmps://host/app/<streamKey>. Every
-//	other egress of an argv in this process is masked by alerts.Redact inside
+//	other egress of an argv in this process is masked by redact.Redact inside
 //	supervisor; this one is deliberately raw because expert mode's whole
 //	promise is that the command an operator approves is the command that runs.
 //	Masking it would break that approval, so the route is denied instead.

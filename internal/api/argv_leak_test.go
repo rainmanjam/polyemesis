@@ -12,17 +12,17 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The recurrence guard for #150's argv disclosure.
 //
 // The credential travelled from db.Destination.ExtraInputArgs, through
 // expertArgv, into the destination's spawn argv, and out through FOUR read-
-// reachable egresses whose only masking was alerts.Redact applied PER ARGUMENT:
+// reachable egresses whose only masking was redact.Redact applied PER ARGUMENT:
 //
 //	GET /api/v1/processes              processSummary -> CommandString
 //	GET /api/v1/processes/{name}/logs  processDetail  -> CommandString AND Logs
@@ -118,7 +118,7 @@ func TestTheCommandFieldLeaksBeforeTheChildEverSpawns(t *testing.T) {
 }
 
 // TestSecretSetIsExactNotHeuristic tables the FFmpeg credential idioms and, as
-// its discriminator, asserts that alerts.Redact ALONE still fails the marked
+// its discriminator, asserts that redact.Redact ALONE still fails the marked
 // ones.
 //
 // The discriminator is the load-bearing half. Without it this suite could go
@@ -151,7 +151,7 @@ func TestSecretSetIsExactNotHeuristic(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SplitArgs(%q): %v", c.raw, err)
 			}
-			set := alerts.NewSecretSet(nil, alerts.OpaqueArgvValues(argv)...)
+			set := redact.NewSecretSet(nil, redact.OpaqueArgvValues(argv)...)
 			if set.Len() == 0 {
 				t.Fatalf("the secret set built from %q is EMPTY, so the assertion below "+
 					"would pass without masking anything", c.raw)
@@ -165,11 +165,11 @@ func TestSecretSetIsExactNotHeuristic(t *testing.T) {
 			// The discriminator.
 			perArgument := ""
 			for _, a := range argv {
-				perArgument += alerts.Redact(a) + " "
+				perArgument += redact.Redact(a) + " "
 			}
 			leaked := strings.Contains(perArgument, secret)
 			if leaked != c.redactAloneFails {
-				t.Errorf("alerts.Redact applied per argument leaked=%v, want %v.\n"+
+				t.Errorf("redact.Redact applied per argument leaked=%v, want %v.\n"+
 					"raw:    %q\nmasked: %q\n"+
 					"If this now masks the credential, the matcher has grown a rule. That "+
 					"does not make it a boundary -- FFmpeg's flag namespace is open and the "+

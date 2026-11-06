@@ -22,10 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // State is a process's lifecycle state. These map directly onto the UI's
@@ -115,7 +115,7 @@ type Spec struct {
 	// Status.LastError -- removes these by exact substring match before anything
 	// else looks at the text. See (*Process).scrub.
 	//
-	// It exists because alerts.Redact, which was the only masking on those
+	// It exists because redact.Redact, which was the only masking on those
 	// egresses, is a GRAMMAR over an open namespace. FFmpeg takes arbitrary
 	// `-flag value` pairs, so `-rtmp_conn S:<key>` is invisible to it and
 	// `Authorization:Bearer\ <key>` splits into argv entries where it masks the
@@ -384,7 +384,7 @@ type Process struct {
 	// secrets is spec.Secrets compiled once at construction. Immutable after
 	// New, so scrub needs no lock and can be called from the stderr scan
 	// goroutine and an HTTP handler at the same time.
-	secrets *alerts.SecretSet
+	secrets *redact.SecretSet
 
 	mu    sync.RWMutex
 	state State
@@ -560,7 +560,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		log:        log.With("process", spec.Name),
 		state:      StateStopped,
 		logs:       newRing(logRingSize),
-		secrets:    alerts.NewSecretSet(log, spec.Secrets...),
+		secrets:    redact.NewSecretSet(log, spec.Secrets...),
 		grace:      graceFor(spec.Kind),
 		drain:      drainGrace,
 		stallAfter: StallAfter,
@@ -577,7 +577,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 //  1. The exact literals from Spec.Secrets. This is the boundary. It cannot be
 //     defeated by how the credential was spelled onto the command line, because
 //     it does not read the spelling at all.
-//  2. alerts.Redact, as a RESIDUAL best-effort pass, for credentials this
+//  2. redact.Redact, as a RESIDUAL best-effort pass, for credentials this
 //     process was never told about: a token an endpoint echoed back in an error
 //     string, a URL FFmpeg synthesised from parts. It is not the boundary and
 //     the four callers below must not be read as though it were.
@@ -590,7 +590,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 // the raw argv has GET /destinations/{id}/expert, which is admin-only and reads
 // Args() rather than anything on this path.
 func (p *Process) scrub(s string) string {
-	return alerts.Redact(p.secrets.Scrub(s))
+	return redact.Redact(p.secrets.Scrub(s))
 }
 
 // Normalised fills a Policy's zero fields with the defaults a running process
@@ -732,7 +732,7 @@ func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.curren
 // the unit the credential arrives in and a substring match does not care what
 // is glued to it.
 //
-// alerts.Redact then runs ONCE over the JOINED string, because applying it per
+// redact.Redact then runs ONCE over the JOINED string, because applying it per
 // argument is itself a leaking shape. `-headers Authorization: Bearer <key>` is
 // fully masked as one string -- the bearerToken rule spans the space -- and
 // leaks the key when each argv element is redacted alone, since "Bearer" and
@@ -754,7 +754,7 @@ func (p *Process) CommandString() string {
 		}
 		parts = append(parts, a)
 	}
-	return alerts.Redact(strings.Join(parts, " "))
+	return redact.Redact(strings.Join(parts, " "))
 }
 
 // Start begins supervising. Calling it on an already-running process is a
@@ -2112,7 +2112,7 @@ func (p *Process) Status() Status {
 // a future writer to the ring forgets. Redact is idempotent, so running it over
 // already-clean text costs a scan and changes nothing.
 //
-// What "masked" means here is scrub, NOT alerts.Redact. The process's exact
+// What "masked" means here is scrub, NOT redact.Redact. The process's exact
 // declared credential literals are removed first and Redact runs afterwards only
 // as a residual pass over whatever it can recognise. The distinction is the
 // whole of #150's argv finding: Redact alone left `-rtmp_conn S:<key>` and the

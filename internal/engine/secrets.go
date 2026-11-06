@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The exact credentials that reach an FFmpeg command line, collected per
@@ -87,7 +87,7 @@ func destSecrets(row *db.Destination, extra ...string) []string {
 //
 // THREE expansions, and the second is the one that carries the measurement:
 //
-//   - THE TRIMMED FORM. alerts.NewSecretSet trims every value it is handed
+//   - THE TRIMMED FORM. redact.NewSecretSet trims every value it is handed
 //     today, so this is currently redundant THERE -- it is emitted because what
 //     destSecrets promises its callers is "every spelling", not "every spelling
 //     given what one particular consumer happens to do first".
@@ -181,7 +181,7 @@ func expertArgsSecrets(raw string) []string {
 	if err != nil {
 		return nil
 	}
-	return alerts.OpaqueArgvValues(argv)
+	return redact.OpaqueArgvValues(argv)
 }
 
 // urlSecrets pulls the credential-bearing PARTS out of a DESTINATION URL rather
@@ -190,7 +190,7 @@ func expertArgsSecrets(raw string) []string {
 // The whole URL is not a secret and masking it would cost the operator the host
 // and the application, which is most of what a failing destination's log line is
 // for. What is secret is the userinfo and, for the key-carrying schemes, the
-// last path segment -- which is precisely what alerts.RedactURL already knows,
+// last path segment -- which is precisely what redact.RedactURL already knows,
 // except that RedactURL only fires when the text is recognisably a URL and the
 // stderr path frequently mangles it past recognition.
 //
@@ -211,7 +211,7 @@ func urlSecrets(raw string) []string {
 	var out []string
 	out = append(out, userinfoSecrets(raw, u)...)
 	for k, vs := range u.Query() {
-		if alerts.SecretName(k) {
+		if redact.SecretName(k) {
 			out = append(out, vs...)
 		}
 	}
@@ -238,7 +238,7 @@ func urlSecrets(raw string) []string {
 //
 // Both spellings are emitted rather than only the raw one. They are identical
 // whenever the password needs no encoding, and SecretSet already de-duplicates
-// and drops anything under alerts.MinSecretLen; where they differ, the decoded
+// and drops anything under redact.MinSecretLen; where they differ, the decoded
 // form is what a log line built from url.URL rather than from argv would carry.
 // Over-masking is the safe direction here and is the direction the ledger's own
 // note on MinSecretLen argues for.
@@ -297,16 +297,16 @@ func rawUserinfo(raw string) (user, pass string) {
 // authority is a credential until proven otherwise.
 //
 // #229. urlSecrets' rule -- userinfo, the LAST path segment, and the query
-// parameters alerts.SecretName recognises -- is a rule about where a credential
+// parameters redact.SecretName recognises -- is a rule about where a credential
 // lives in an RTMP PUBLISH URL: host + application + key, key last. A pull URL
 // is not that shape. An RTSP camera or an Akamai/Wowza-style CDN puts the
 // credential in the MIDDLE of the path and the FILENAME last, and names its
 // query token whatever that CDN chose -- authcode, hdnts, policy -- none of
-// which are in alerts.secretParam's twenty-name table, which is an exact lookup
+// which are in redact.secretParam's twenty-name table, which is an exact lookup
 // with no fallback.
 //
 // MEASURED on main at cffd20c, rendered exactly as GET /api/v1/processes
-// renders it (Spec.Secrets scrubbed per argument, then alerts.Redact over the
+// renders it (Spec.Secrets scrubbed per argument, then redact.Redact over the
 // joined line):
 //
 //	in : rtsp://cam.example/live/SUPERSECRETPATHSEG/stream1
@@ -321,8 +321,8 @@ func rawUserinfo(raw string) (user, pass string) {
 //
 // THE LITERAL IS THE WHOLE SUBSTRING BELOW THE AUTHORITY, not the segments and
 // values one at a time, and that is the load-bearing part rather than a
-// stylistic choice. alerts.NewSecretSet REFUSES anything shorter than
-// alerts.MinSecretLen (8), so a set built segment-by-segment drops a
+// stylistic choice. redact.NewSecretSet REFUSES anything shorter than
+// redact.MinSecretLen (8), so a set built segment-by-segment drops a
 // six-character path segment on the floor and the mask relocates to the
 // neighbouring filename -- the leak, still wearing a "[redacted]" beside it.
 // One long literal spanning the path and the query carries the short pieces
@@ -336,7 +336,7 @@ func rawUserinfo(raw string) (user, pass string) {
 // THE SEGMENTS AND QUERY VALUES ARE NOT ALSO DECLARED, and that is a decision
 // rather than an omission. They were, in the first draft, as a belt for the
 // stderr path. Then the mutation that should have justified them -- put the
-// query back under alerts.SecretName's twenty-name table, keeping the whole
+// query back under redact.SecretName's twenty-name table, keeping the whole
 // path literal -- was applied and the guard STILL PASSED, because the mask
 // already written into the middle of the URL makes it unparseable and
 // alerts.maskUnparseable blanks everything from the '?' on. Nothing this
@@ -347,7 +347,7 @@ func rawUserinfo(raw string) (user, pass string) {
 //
 // The accepted cost is that GET /processes shows `rtsp://cam.example[redacted]`
 // for a pull source instead of the path. That is the direction this codebase
-// has already chosen twice -- see alerts.OpaqueArgvValues on expert argv text --
+// has already chosen twice -- see redact.OpaqueArgvValues on expert argv text --
 // and a pull URL's path is not what an operator reads that page for: the scheme
 // and the host survive, which is what says which camera is refusing them, and
 // an admin still reads the configured URL back through GET /api/v1/settings.
@@ -418,7 +418,7 @@ func ingestSecrets(srt db.SRTSettings, rtmp db.RTMPSettings, pull db.PullSetting
 //
 // EXPORTED FOR THE DEBUG RECORDER, which needs the declared secrets and cannot
 // reach destSecrets. internal/diag's scrubbing is only as good as the set it is
-// given: alerts.Redact is a residual pass over shapes, and the exact-literal
+// given: redact.Redact is a residual pass over shapes, and the exact-literal
 // masking that actually removes a stream key needs the literal.
 //
 // The rows are read, never mutated. Callers pass whatever ListDestinations
@@ -442,7 +442,7 @@ func DestinationSecrets(rows []*db.Destination) []string {
 // where a stream goes and nothing about where it comes from. A pull source is
 // addressed by a URL that routinely carries credentials -- rtsp://user:pass@,
 // or a CDN token in the query -- and engine.go logs that URL. Everything in it
-// therefore reached the exported bundle with only the residual alerts.Redact
+// therefore reached the exported bundle with only the residual redact.Redact
 // pass behind it, which matches shapes rather than literals.
 //
 // The publish TOKEN is collected for the same reason: it is what an encoder
@@ -482,7 +482,7 @@ func SettingsSecrets(s db.Settings) []string {
 // (oauth.tokenStatusError) and logged at internal/api/oauth_handlers.go. A
 // provider -- or a proxy in front of one -- that echoes the token in an error
 // body puts that literal in the ring, where the declared set has never heard of
-// it and alerts.Redact does not recognise arbitrary token shapes.
+// it and redact.Redact does not recognise arbitrary token shapes.
 func AccountSecrets(rows []db.PlatformAccount) []string {
 	var out []string
 	for _, a := range rows {

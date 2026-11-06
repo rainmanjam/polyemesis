@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // A document a read token was shown cannot be written back over the real
 // credentials. Readiness review row 16.
 //
 // readSafeDestination hands a read token backupStreamKey as the literal
-// alerts.Mask, and docs/API.md invites read -> edit -> PUT. Replayed with an
+// redact.Mask, and docs/API.md invites read -> edit -> PUT. Replayed with an
 // admin credential, that PUT sealed "[redacted]" as the backup key and answered
 // 200; nothing failed until a failover needed the backup. Now it is a 400 that
 // names the field, and the stored key is untouched.
@@ -45,11 +45,11 @@ func TestAPUTCarryingTheRedactionPlaceholderIsRefusedAndKeepsTheRealKey(t *testi
 		field string
 		value string
 	}{
-		{"backupStreamKey", alerts.Mask},
+		{"backupStreamKey", redact.Mask},
 		// A URL is masked in part, so a value CONTAINING the placeholder is
 		// the same round-trip.
-		{"backupUrl", "rtmp://backup.example/" + alerts.Mask},
-		{"streamKey", alerts.Mask},
+		{"backupUrl", "rtmp://backup.example/" + redact.Mask},
+		{"streamKey", redact.Mask},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			msg := mustJSONError(t, h, sign, http.MethodPut, destPath(id),

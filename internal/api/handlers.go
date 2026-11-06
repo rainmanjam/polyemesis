@@ -609,7 +609,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	// CONSTRUCTED one, which is why struct tags could never have covered it:
 	// PublicIngestURL renders srt://host:port?...&passphrase=<cleartext> in SRT
 	// mode and returns the pull URL verbatim, userinfo and all, in pull mode.
-	// alerts.RedactURL masks both shapes, and it is the same function
+	// redact.RedactURL masks both shapes, and it is the same function
 	// supervisor already runs over every FFmpeg argv -- which is exactly why
 	// GET /processes was clean through this whole review and this route was
 	// not.

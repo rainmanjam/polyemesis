@@ -63,7 +63,7 @@ const (
 // destFileName is a file destination's filename, and it is here as a
 // NON-secret sentinel: the one thing the sweep must find INTACT.
 //
-// alerts.RedactURL is conservative about anything it cannot parse as a URL,
+// redact.RedactURL is conservative about anything it cannot parse as a URL,
 // which is right for a log line and wrong for this field: "shows/monday-night.
 // mp4" came back as the bare word "[redacted]". Destination.url is a filename
 // for kind:file and for the file form of kind:audio, so redacting it destroyed
@@ -295,7 +295,7 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 // edit to the PRODUCTION line named, reverted immediately after, and each was
 // observed to fail by route name:
 //
-//	alerts.RedactWebhookURL -> scheme+host+u.Path (the mask dropped)
+//	redact.RedactWebhookURL -> scheme+host+u.Path (the mask dropped)
 //	  FAILS 4 routes: /alerts/rules, /alerts/rules/1, /hooks, /hooks/1
 //	  "handed a read-scoped token the credential SENTINEL-destination-streamkey-9f3a"
 //	hooks.Hook.MarshalJSON -> h.URL instead of h.RedactedURL()
@@ -381,7 +381,7 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 	}
 
 	// A Slack-shaped webhook URL: the secret is the last path segment, and
-	// alerts.RedactWebhookURL drops the whole path. See the note above.
+	// redact.RedactWebhookURL drops the whole path. See the note above.
 	if _, err := store.CreateAlertRule(&alerts.Rule{
 		Name:    "ledger",
 		Enabled: false,
@@ -661,7 +661,7 @@ func leakRoutes() []string {
 		// which under the discharge rule one screen up leaves no excuse
 		// available for them. Two of them -- the alert rule and the hook -- now
 		// carry a planted webhook secret in the URL path, so their sweep is an
-		// assertion about alerts.RedactWebhookURL and not merely about a 200.
+		// assertion about redact.RedactWebhookURL and not merely about a 200.
 		"/api/v1/alerts/rules/1",
 		"/api/v1/clipper/recordings/1",
 		"/api/v1/hooks/1",
@@ -810,7 +810,7 @@ func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
 // whether something that was never a secret got DESTROYED, and the answer
 // shipped as no. Destination.url is a URL for kind rtmp and srt and a FILENAME
 // for kind:file and for the file form of kind:audio, and readSafeDestination
-// ran the whole field through alerts.RedactURL. That function is deliberately
+// ran the whole field through redact.RedactURL. That function is deliberately
 // conservative about strings it cannot parse -- right for a log line, and here
 // it turned "shows/monday-night-9f3a.mp4" into the bare word "[redacted]". A
 // read-only console showed a file destination with no filename.

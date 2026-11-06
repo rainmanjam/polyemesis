@@ -1330,7 +1330,7 @@ func proveWebsocketFrames(t *testing.T) proofResult {
 
 // proveHookDeliveries writes the fixture the old excuse deferred.
 //
-// Written now rather than filed because it is alerts.Redact consumer #5 and
+// Written now rather than filed because it is redact.Redact consumer #5 and
 // therefore the one deferred excuse that shares the argv leak's dependency
 // class: a delivery record's request and response bodies are free text scrubbed
 // by the same best-effort matcher that provably failed on the command line.
@@ -3845,9 +3845,9 @@ func ledgerNoteWith(regen string) string {
 		"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
 		"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
 		"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
-		"MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter " +
+		"MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter " +
 		"credential, which is a real permanent residual on the stderr path for very short " +
-		"secrets, covered only by the best-effort alerts.Redact pass. Every credential this " +
+		"secrets, covered only by the best-effort redact.Redact pass. Every credential this " +
 		"system mints or accepts is longer (SRT refuses a passphrase under 10, publish " +
 		"tokens are 24), and the failure direction of the floor itself is over-masking, " +
 		"never disclosure."
@@ -4066,7 +4066,7 @@ func deferredWithReasons() []coverageDefer {
 		},
 		{
 			ID: "redact-per-argument",
-			What: "alerts.Redact remains available to future callers now that " +
+			What: "redact.Redact remains available to future callers now that " +
 				"CommandString has stopped applying it per argument.",
 			WhySafe: "no caller loops it over tokens today; its doc comment now says " +
 				"whole-text-only and that it is never a boundary.",
@@ -4077,7 +4077,7 @@ func deferredWithReasons() []coverageDefer {
 		},
 		{
 			ID: "redact-consumers",
-			What: "the remaining best-effort alerts.Redact consumers with no " +
+			What: "the remaining best-effort redact.Redact consumers with no " +
 				"principal-varying counterpart: the retained MQTT IngestError topic, and " +
 				"the server's own slog output.",
 			WhySafe: "both are scrubbed at source now by supervisor.scrub, which removes " +
@@ -4130,7 +4130,7 @@ func deferredWithReasons() []coverageDefer {
 				"left, the claim is no longer a 404 at all -- it is the ordinary sweep, " +
 				"which is strictly stronger, and two of them (the alert rule and the " +
 				"hook) carry a planted webhook secret in the URL path so that " +
-				"alerts.RedactWebhookURL is under the sweep rather than merely under " +
+				"redact.RedactWebhookURL is under the sweep rather than merely under " +
 				"review.",
 			WhatWouldMakeItUnsafe: "a fixture row being deleted. That is not silent " +
 				"either: leakRoutes() requires a 200 from every path it names, so losing " +

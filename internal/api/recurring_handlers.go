@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -244,7 +244,7 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 				"its destination is live, or the platform will not delete it; the platform keeps it as it is")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+alerts.Redact(err.Error()))
+		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+redact.Redact(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": scheduler.OccurrenceSkipped})
@@ -331,7 +331,7 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	acct, err := s.tokenFor(ctx, *d.AccountID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "the connected account could not be used: "+alerts.Redact(err.Error()))
+		writeError(w, http.StatusBadGateway, "the connected account could not be used: "+redact.Redact(err.Error()))
 		return
 	}
 	warnings, err := ed.EditScheduledBroadcast(ctx, acct.AccessToken, occ.PlatformEventID, oauth.ScheduledEdit{
@@ -341,11 +341,11 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		Category:    tpl.Category,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "the platform refused the new title: "+alerts.Redact(err.Error()))
+		writeError(w, http.StatusBadGateway, "the platform refused the new title: "+redact.Redact(err.Error()))
 		return
 	}
 	for i := range warnings {
-		warnings[i] = alerts.Redact(warnings[i])
+		warnings[i] = redact.Redact(warnings[i])
 	}
 	if err := s.store.SetOccurrenceTitle(id, title); err != nil {
 		writeStoreError(w, err)

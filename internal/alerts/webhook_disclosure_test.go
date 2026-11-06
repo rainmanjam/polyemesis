@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The Slack shape: the ENTIRE credential is the path. Anything that can post to
@@ -115,7 +117,7 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 // shape that matters. This test exists so nobody records it as coverage.
 func TestRedactIsANoOpOnAWebhookPathSecret(t *testing.T) {
 	raw := (&url.Error{Op: "Post", URL: slackURL, Err: errors.New("connection refused")}).Error()
-	if got := Redact(raw); !strings.Contains(got, slackSecret) {
+	if got := redact.Redact(raw); !strings.Contains(got, slackSecret) {
 		t.Fatalf("Redact now masks an https path segment (%q). That is a behaviour change "+
 			"with much wider consequences than this test -- it would blank half of every "+
 			"diagnostic in the process -- so verify it was intended before updating "+
@@ -236,7 +238,7 @@ func TestEndpointSecretsExcludesTheHost(t *testing.T) {
 		}
 	}
 
-	set := NewSecretSet(nil, got...)
+	set := redact.NewSecretSet(nil, got...)
 	if set.Len() == 0 {
 		t.Fatal("every literal was refused, so the set masks nothing")
 	}
@@ -253,7 +255,7 @@ func TestEndpointSecretsExcludesTheHost(t *testing.T) {
 	}
 
 	// A query-carried token is the other provider shape.
-	q := NewSecretSet(nil, EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
+	q := redact.NewSecretSet(nil, EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
 	if out := q.Scrub(`{"error":"bad token QUERYSECRET123456"}`); strings.Contains(out, "QUERYSECRET123456") {
 		t.Errorf("a query-carried credential survived: %q", out)
 	}

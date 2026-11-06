@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Timings.
@@ -546,11 +546,11 @@ func (e *Engine) sendEach(ctx context.Context, textFor func(db.Platform, string)
 	res, err := e.send.SendEach(ctx, textFor)
 	if err != nil {
 		e.log.Warn("polls: announce", "err", err)
-		return []Announcement{{OK: false, Detail: alerts.Redact(err.Error())}}
+		return []Announcement{{OK: false, Detail: redact.Redact(err.Error())}}
 	}
 	out := make([]Announcement, 0, len(res))
 	for _, r := range res {
-		out = append(out, Announcement{Platform: string(r.Platform), OK: r.OK, Skipped: r.Skipped, Detail: alerts.Redact(r.Detail)})
+		out = append(out, Announcement{Platform: string(r.Platform), OK: r.OK, Skipped: r.Skipped, Detail: redact.Redact(r.Detail)})
 	}
 	return out
 }
@@ -634,7 +634,7 @@ func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end 
 		}
 		c, live, err := a.mirror.Read(ctx, m, end)
 		if err != nil {
-			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", alerts.Redact(err.Error()))
+			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", redact.Redact(err.Error()))
 		}
 		res[i] = got{counts: c, live: live, err: err, read: true}
 	}

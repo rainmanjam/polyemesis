@@ -381,7 +381,7 @@ func quoteArgv(bin string, args []string) string {
 // caller.
 //
 // What those four do is NOT what the previous version of this comment implied.
-// They do not run alerts.Redact and call it masked -- that is what shipped, and
+// They do not run redact.Redact and call it masked -- that is what shipped, and
 // it left `-rtmp_conn S:<key>` and `Authorization:Bearer\ <key>` in the clear on
 // three read-reachable egresses. They remove the destination's EXACT credential
 // literals first, declared on the Spec, and run Redact only as a residual pass

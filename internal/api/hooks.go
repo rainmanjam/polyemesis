@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The HTTP surface for lifecycle webhooks.
@@ -50,7 +50,7 @@ func (q hookRequest) applyTo(h hooks.Hook) hooks.Hook {
 		// has. Storing that would point the hook at a URL that has never
 		// existed and stop it firing silently, so a value still carrying the
 		// mask means "unchanged".
-		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, alerts.Mask) {
+		if u := strings.TrimSpace(*q.URL); !strings.Contains(u, redact.Mask) {
 			h.URL = u
 		}
 	}

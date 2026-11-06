@@ -65,6 +65,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 func main() {
@@ -702,7 +703,7 @@ func transportRefused() {
 // echoBack is the credential class the transport scrub cannot reach: one the
 // ENDPOINT chose to quote back in its own body.
 //
-// The body below is JSON, which is the shape alerts.Redact is worst at -- its
+// The body below is JSON, which is the shape redact.Redact is worst at -- its
 // own doc records that it cannot see inside one -- so anything that survives
 // here survived because the per-hook SecretSet ran, not because the generic
 // redactor got lucky. It quotes both credentials, since an endpoint that
@@ -898,7 +899,7 @@ func remote() {
 	}
 	disclosed := false
 	for _, lit := range alerts.EndpointSecrets(raw) {
-		if len(lit) >= alerts.MinSecretLen && strings.Contains(text, lit) {
+		if len(lit) >= redact.MinSecretLen && strings.Contains(text, lit) {
 			disclosed = true
 		}
 	}

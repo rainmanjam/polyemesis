@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // The model checker: an external API, asked about a message the free checkers
@@ -528,7 +528,7 @@ func redactEndpoint(err error) error {
 	// stopped needs to know WHICH endpoint stopped answering, and an error that
 	// said only "the request failed" would trade one silent failure for
 	// another.
-	return &url.Error{Op: ue.Op, URL: alerts.RedactURL(ue.URL), Err: ue.Err}
+	return &url.Error{Op: ue.Op, URL: redact.RedactURL(ue.URL), Err: ue.Err}
 }
 
 // responseFormat is the response_format for the preset's JSON mode.

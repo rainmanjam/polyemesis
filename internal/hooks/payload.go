@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // SpecVersion is the envelope contract version. A receiver is written against
@@ -108,17 +108,17 @@ func NewSecret() (string, error) {
 // redacted scrubs the free text on an event.
 //
 // Applied by Dispatcher.Publish rather than left to the watcher, for the reason
-// stated at alerts/redact.go:179 -- the strings arrive from a dozen places and
+// stated on alerts.Event.Redacted -- the strings arrive from a dozen places and
 // exactly one careless one puts a stream key in somebody's automation log.
 // Error in particular is FFmpeg stderr, which prints the full publish URL.
 func (e Event) redacted() Event {
-	e.Reason = alerts.Redact(e.Reason)
-	e.Error = alerts.Redact(e.Error)
+	e.Reason = redact.Redact(e.Reason)
+	e.Error = redact.Redact(e.Error)
 	if e.Destination != nil {
 		d := *e.Destination
-		d.Name = alerts.Redact(d.Name)
+		d.Name = redact.Redact(d.Name)
 		e.Destination = &d
 	}
-	e.Source.Name = alerts.Redact(e.Source.Name)
+	e.Source.Name = redact.Redact(e.Source.Name)
 	return e
 }

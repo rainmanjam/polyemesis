@@ -21,8 +21,8 @@
 // the ring reaches them. Everything in the buffer has already been through the
 // secret set.
 //
-// AND THE SECRET SET IS THE MECHANISM; alerts.Redact IS THE BACKSTOP. That is
-// not a preference, it is what internal/alerts says about itself: "The correct
+// AND THE SECRET SET IS THE MECHANISM; redact.Redact IS THE BACKSTOP. That is
+// not a preference, it is what internal/redact says about itself: "The correct
 // reading of a Redact call is 'the declared secrets are already gone; this is
 // the best-effort pass over what is left'." TestRedactIsCalledOnlyFromTheAllowlist
 // fails the build on callers who forget it. So Recorder takes a *SecretSet built
@@ -40,7 +40,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // DefaultCapacity is how many records the ring holds.
@@ -120,7 +120,7 @@ type Recorder struct {
 	next    int
 	full    bool
 	on      bool
-	secrets *alerts.SecretSet
+	secrets *redact.SecretSet
 	// dropped counts records discarded because recording was off. Reported in
 	// the bundle so a thin capture is visibly a thin capture rather than
 	// silently one.
@@ -137,7 +137,7 @@ type Recorder struct {
 }
 
 // NewRecorder returns a recorder holding at most capacity records.
-func NewRecorder(capacity int, secrets *alerts.SecretSet) *Recorder {
+func NewRecorder(capacity int, secrets *redact.SecretSet) *Recorder {
 	if capacity <= 0 {
 		capacity = DefaultCapacity
 	}
@@ -153,7 +153,7 @@ func NewRecorder(capacity int, secrets *alerts.SecretSet) *Recorder {
 // CALLED WHEN RECORDING STARTS, and NOT on every destination change -- an
 // earlier version of this comment claimed the latter and no caller ever did it.
 // The window that leaves open is a key rotated WHILE recording is already on,
-// which is covered only by the residual alerts.Redact pass. Wiring this to the
+// which is covered only by the residual redact.Redact pass. Wiring this to the
 // destination write would close it, and nothing does yet.
 //
 // The reason it matters at all: a stream key
@@ -161,7 +161,7 @@ func NewRecorder(capacity int, secrets *alerts.SecretSet) *Recorder {
 // the new one in the clear while the old one -- the one nobody is using any more
 // -- is the only value being masked. A set built once at startup is a set that
 // is wrong by the end of the first key refresh.
-func (r *Recorder) SetSecrets(s *alerts.SecretSet) {
+func (r *Recorder) SetSecrets(s *redact.SecretSet) {
 	r.mu.Lock()
 	r.secrets = s
 	r.mu.Unlock()
@@ -198,14 +198,14 @@ func (r *Recorder) Reset() {
 //
 // BOTH, IN THIS ORDER, AND NEITHER ALONE. The set removes what polyemesis KNOWS
 // is a credential -- exact literals, longest first, so a key that is a substring
-// of the URL carrying it does not survive half-masked. alerts.Redact then covers
+// of the URL carrying it does not survive half-masked. redact.Redact then covers
 // the shapes nobody declared: a bearer token in an upstream error, a URL with
 // credentials in it, a key=value pair from a platform's own message.
 func (r *Recorder) scrub(s string) string {
 	if s == "" {
 		return s
 	}
-	return alerts.Redact(r.secrets.Scrub(s))
+	return redact.Redact(r.secrets.Scrub(s))
 }
 
 // Observe captures one record. Called from the handler; must not block.

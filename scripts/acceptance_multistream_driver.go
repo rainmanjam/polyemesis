@@ -555,7 +555,7 @@ func leakScan(envs []string) {
 	for _, e := range envs {
 		v := strings.TrimSpace(os.Getenv(e))
 		// A short or empty value cannot be searched for honestly: engine's own
-		// alerts.MinSecretLen refuses to mask anything under 8 characters, so a
+		// redact.MinSecretLen refuses to mask anything under 8 characters, so a
 		// "SAFE" here would mean "we did not look" rather than "it is not
 		// there". Said out loud rather than passed over.
 		if len(v) < 8 {

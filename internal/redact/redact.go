@@ -1,4 +1,8 @@
-package alerts
+// Package redact is the leaf that masks secrets in text, URLs and decoded JSON
+// payloads. It imports nothing from this module, so the storage, process and
+// engine layers can redact without depending on a feature package such as
+// internal/alerts.
+package redact
 
 import (
 	"net/url"
@@ -235,7 +239,7 @@ func splitTrailer(raw string) (string, string) {
 // Redact scrubs free text: every URL in it, plus any credential written as a
 // bare key=value pair.
 //
-// IT IS A RESIDUAL PASS, NOT A BOUNDARY. The boundary is alerts.SecretSet,
+// IT IS A RESIDUAL PASS, NOT A BOUNDARY. The boundary is redact.SecretSet,
 // which removes the EXACT literals a process was configured with and cannot be
 // defeated by how they were spelled. Redact runs after that, over the same
 // bytes, for the credentials nobody could have declared: a token an endpoint
@@ -307,27 +311,4 @@ func Redact(s string) string {
 		}
 		return m[:i+1] + " " + Mask
 	})
-}
-
-// Redacted returns a copy of the event with nothing secret left in it.
-//
-// Applied by Publish rather than left to callers: the engine builds these
-// events in a dozen places and exactly one of them has to be careless for a
-// stream key to end up in a chat room that outlives the broadcast.
-func (e Event) Redacted() Event {
-	e.Title = Redact(e.Title)
-	e.Text = Redact(e.Text)
-	if len(e.Fields) == 0 {
-		return e
-	}
-	fields := make([]Field, len(e.Fields))
-	for i, f := range e.Fields {
-		if SecretName(f.Name) {
-			fields[i] = Field{Name: f.Name, Value: Mask}
-			continue
-		}
-		fields[i] = Field{Name: f.Name, Value: Redact(f.Value)}
-	}
-	e.Fields = fields
-	return e
 }

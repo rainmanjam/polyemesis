@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Read-safe views of the credential-bearing stored types.
@@ -44,7 +44,7 @@ import (
 //     any of these secrets anyway -- withholding them from it would be a lock
 //     with the key taped to the front.
 //
-// The masking of URLs reuses alerts.RedactURL rather than inventing a second
+// The masking of URLs reuses redact.RedactURL rather than inventing a second
 // spelling: it already masks userinfo, the passphrase/streamid/token query
 // parameters and the key-carrying last path segment, and it is already what
 // supervisor.CommandString and Process.Logs run. GET /processes was clean
@@ -76,7 +76,7 @@ func isReadScopedToken(r *http.Request) bool {
 
 // maskURL masks the credential parts of a URL, leaving an empty string empty.
 //
-// The empty check is not cosmetic: alerts.RedactURL turns "" into "[redacted]",
+// The empty check is not cosmetic: redact.RedactURL turns "" into "[redacted]",
 // and a settings blob whose unset pull URL came back as a literal
 // "[redacted]" would be PUT straight back by the settings page and stored.
 func maskURL(raw string) string {
@@ -88,7 +88,7 @@ func maskURL(raw string) string {
 	// and only for rtmp/rtsp/srt-like schemes, so an https HLS pull URL whose
 	// credential sits mid-path came back verbatim. That is what fed a pull
 	// credential to a read token through GET /api/v1/sources.
-	return alerts.RedactURLForPrincipal(raw)
+	return redact.RedactURLForPrincipal(raw)
 }
 
 // maskDestinationTarget masks a destination's url or backupUrl, EXCEPT when
@@ -101,7 +101,7 @@ func maskURL(raw string) string {
 // kind:audio it is EITHER an Icecast mount OR, in exactly the same field, an
 // output filename with the same confinement.
 //
-// alerts.RedactURL is conservative about strings it cannot parse, which is the
+// redact.RedactURL is conservative about strings it cannot parse, which is the
 // right call for a log line and destroys a filename: "shows/monday-night.mp4"
 // comes back as the bare word "[redacted]", and so does "radio-archive.mp3".
 // Both were measured. That is not masking, it is deletion of a field that never
@@ -190,7 +190,7 @@ func readSafeSource(src db.Source) db.Source {
 // https://host/v1/chat/completions?api_key=sk-..., which this endpoint handed
 // to a read token verbatim. A key in a query string is still a key; the sealed
 // table protects the key the operator entered THERE, not the one they pasted
-// into the URL field. alerts.RedactURL already masks api_key, so this is a
+// into the URL field. redact.RedactURL already masks api_key, so this is a
 // gap in coverage rather than a new rule.
 //
 // The MQTT password and the automod model key ARE deliberately absent: those
@@ -212,7 +212,7 @@ func readSafeSettings(s db.Settings) db.Settings {
 //
 // url is MASKED rather than left alone because for an audio destination it is
 // an Icecast mount of the form icecast://user:pass@host/mount -- the userinfo
-// IS the publish credential there, and for every other kind alerts.RedactURL
+// IS the publish credential there, and for every other kind redact.RedactURL
 // leaves the recognisable part of the endpoint intact. backupUrl gets the same
 // treatment for the same reason.
 //
@@ -260,7 +260,7 @@ func readSafeDestination(d db.Destination) db.Destination {
 // identical to every principal, and putting "[redacted]" where there was
 // nothing would invent a credential that does not exist.
 //
-// alerts.Mask rather than a sentinel of this package's own, so the string an
+// redact.Mask rather than a sentinel of this package's own, so the string an
 // operator sees here is the string they already see in a log line and an alert
 // -- and the string the write side refuses: db's redactionPlaceholderProblems
 // checks this same constant, so a read token's document PUT back cannot store
@@ -269,7 +269,7 @@ func redactInPlace(s string) string {
 	if s == "" {
 		return s
 	}
-	return alerts.Mask
+	return redact.Mask
 }
 
 // principalVaryingResponse marks a response whose BODY DEPENDS ON WHO ASKED.

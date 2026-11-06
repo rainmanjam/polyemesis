@@ -15,11 +15,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/playout"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/stats"
@@ -838,7 +838,7 @@ func (e *Engine) destByID(list []*destination, id int64) *destination {
 // The two passes are the same shape and the same order as
 // supervisor.(*Process).scrub, for the same reasons: the exact set is the
 // boundary and cannot be defeated by how the credential was spelled; Redact is
-// the residual for what nobody declared. See the doc on alerts.Redact for what
+// the residual for what nobody declared. See the doc on redact.Redact for what
 // that second pass can and cannot do.
 //
 // Applied at the PUBLISH SITE rather than inside Status, deliberately. The same
@@ -879,12 +879,12 @@ func (e *Engine) ScrubDestinationText(id int64, text string) string {
 	}
 	e.mu.RUnlock()
 	if row == nil {
-		return alerts.Redact(text)
+		return redact.Redact(text)
 	}
-	// destSecrets and alerts.NewSecretSet both drop an empty literal, so the
+	// destSecrets and redact.NewSecretSet both drop an empty literal, so the
 	// overwhelmingly common case -- a destination that never negotiated -- is
 	// unchanged.
-	return alerts.Redact(alerts.NewSecretSet(nil, destSecrets(row, minted)...).Scrub(text))
+	return redact.Redact(redact.NewSecretSet(nil, destSecrets(row, minted)...).Scrub(text))
 }
 
 // Processes returns every supervised process, for the monitoring page.

@@ -116,7 +116,7 @@ func TestEverySupervisorSpecDeclaresItsSecrets(t *testing.T) {
 					"Everything the supervisor renders for a reader -- the command line on "+
 					"GET /processes, the log ring, the on-disk process.log, the /ws log "+
 					"frames and Status.LastError -- removes ONLY the exact literals this "+
-					"field declares. A site that omits it is masked by alerts.Redact alone, "+
+					"field declares. A site that omits it is masked by redact.Redact alone, "+
 					"which is a grammar over FFmpeg's open flag namespace and provably does "+
 					"not hold: that is #150's argv disclosure, verbatim.\n"+
 					"Either populate Secrets, or add an entry here saying which arguments "+

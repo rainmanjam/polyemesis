@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // Trigger names a lifecycle transition. These strings are stored configuration
@@ -314,7 +314,7 @@ func SecretUnreadableReason() string { return secretUnreadableReason }
 var ErrSecretUnreadable = errors.New(secretUnreadableReason)
 
 // RedactedURL is what a response or a log line may show.
-func (h Hook) RedactedURL() string { return alerts.RedactWebhookURL(h.URL) }
+func (h Hook) RedactedURL() string { return redact.RedactWebhookURL(h.URL) }
 
 // MarshalJSON adds the masked endpoint and a boolean for the secret, so a
 // handler that simply encodes a Hook cannot leak either one.

@@ -331,7 +331,7 @@ fi
 # connection, a certificate that will not verify -- differ only in wording.
 #
 # Proven able to fail against the committed tree by changing deliver's
-# `rec.Error = alerts.Redact(secrets.Scrub(alerts.ClientErrorText(err)))` to
+# `rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))` to
 # `rec.Error = ""`. THAT MUTATION PASSES EVERY "carries no credential" CHECK IN
 # STEP 6, which is the entire reason this check exists beside them.
 if between "$(num "$T" timeoutErrLen)" 1 100000 && is "$T" timeoutErrNamesHost true; then
@@ -374,8 +374,8 @@ fi
 # still name its host, so a scrub that blanked the field cannot pass here.
 #
 # Proven able to fail against the committed tree in both directions: by changing
-# deliver's `rec.Error = alerts.Redact(secrets.Scrub(alerts.ClientErrorText(err)))`
-# to `alerts.Redact(err.Error())` (both HasSecret go true), and by setting it to
+# deliver's `rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))`
+# to `redact.Redact(err.Error())` (both HasSecret go true), and by setting it to
 # "" (both lose the host). BOTH LAYERS HAVE TO GO for the credential to appear:
 # ClientErrorText rebuilds the URL and the SecretSet then removes the literal, so
 # dropping either one alone leaves this green -- which is defence in depth
@@ -425,7 +425,7 @@ fi
 # the driver was reading Deliveries after stopping the dispatcher, which deletes
 # the worker. `[]` contains no credential and proves nothing.
 #
-# Proven able to fail against the committed tree by the `alerts.Redact(err.Error())`
+# Proven able to fail against the committed tree by the `redact.Redact(err.Error())`
 # mutation named two checks above: hasSecret=true, len=277.
 if is "$T" timeoutDeliveriesJSONHasSecret false \
    && is "$T" timeoutDeliveriesJSONHasHost true \
@@ -453,12 +453,12 @@ step "7. An endpoint that quotes credentials back does not get them stored"
 # A DIFFERENT CLASS FROM STEP 6, and the reason dispatch.go applies two passes
 # rather than one. Step 6's credential arrives inside a string net/http built,
 # in a shape ClientErrorText knows. This one arrives inside a body a STRANGER
-# built, in whatever shape they chose -- here JSON, which alerts.Redact's own
+# built, in whatever shape they chose -- here JSON, which redact.Redact's own
 # doc says it cannot see into. Only the per-hook exact SecretSet covers it.
 E="$(drive echo)"
 
 # Proven able to fail against the committed tree by changing attempt's
-# `snippet = alerts.Redact(string(raw))` to read `raw[:0]`: len=0, keptText=false.
+# `snippet = redact.Redact(string(raw))` to read `raw[:0]`: len=0, keptText=false.
 # The two checks below stay GREEN through it, which is exactly what makes this
 # one necessary rather than decorative.
 if is "$E" recs 1 && is "$E" respKeptText true \
@@ -470,7 +470,7 @@ fi
 
 # Both proven able to fail against the committed tree by changing deliver's
 # `rec.Status, rec.Response = status, secrets.Scrub(snippet)` to drop the Scrub.
-# alerts.Redact alone -- which still runs -- does not catch either of them: the
+# redact.Redact alone -- which still runs -- does not catch either of them: the
 # body is JSON, and "signing" is not a name in its bareSecret table.
 if is "$E" respHasPathSecret false; then
   ok "its echo of the URL path was scrubbed out of the stored response"
@@ -531,7 +531,7 @@ fi
 # check that keeps that claim true.
 #
 # Proven able to fail against the committed tree by changing Test's
-# `err = errors.New(alerts.Redact(secrets.Scrub(alerts.ClientErrorText(err))))`
+# `err = errors.New(redact.Redact(secrets.Scrub(alerts.ClientErrorText(err))))`
 # to `err = errors.New(err.Error())`: hasSecret goes true. Its own control --
 # testDeadRawHasSecret -- proven by the rawErrorCarries mutation in step 6.
 if is "$B" testDeadRawHasSecret true && is "$B" testDeadFailed true \

@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 )
 
 // commonArgs are the flags every polyemesis child gets.
@@ -538,7 +538,7 @@ func (s IngestSpec) IngestURL() string {
 // a camera password or a CDN path token lives.
 //
 // ASSEMBLED, NOT PATTERN-MATCHED, and that is the difference from
-// alerts.RedactURL. Redaction is the residual pass, written for strings nobody
+// redact.RedactURL. Redaction is the residual pass, written for strings nobody
 // constructed; its keyCarrying table is rtmp/rtsp/srt/udp/rtp, so an https CDN
 // URL of the shape https://cdn.example/live/<TOKEN>/index.m3u8 goes through it
 // untouched. Here the URL was BUILT from known fields, so the safe rendering
@@ -560,14 +560,14 @@ func (s IngestSpec) IngestURLForLog(host string) string {
 		if err != nil || u.Host == "" {
 			// Unparseable: say the shape and nothing else, rather than falling
 			// back to printing it.
-			return alerts.Mask
+			return redact.Mask
 		}
 		out := u.Scheme + "://" + u.Hostname()
 		if p := u.Port(); p != "" {
 			out += ":" + p
 		}
 		if u.Path != "" && u.Path != "/" || u.RawQuery != "" {
-			out += "/" + alerts.Mask
+			out += "/" + redact.Mask
 		}
 		return out
 	case IngestRTMP:
@@ -580,7 +580,7 @@ func (s IngestSpec) IngestURLForLog(host string) string {
 		if s.SRTPassphrase == "" {
 			return full
 		}
-		return strings.ReplaceAll(full, s.SRTPassphrase, alerts.Mask)
+		return strings.ReplaceAll(full, s.SRTPassphrase, redact.Mask)
 	}
 }
 

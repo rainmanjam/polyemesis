@@ -1,5 +1,5 @@
 {
-  "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
+  "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort redact.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 60,
   "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 10,
@@ -3327,14 +3327,14 @@
     },
     {
       "id": "redact-per-argument",
-      "what": "alerts.Redact remains available to future callers now that CommandString has stopped applying it per argument.",
+      "what": "redact.Redact remains available to future callers now that CommandString has stopped applying it per argument.",
       "whySafe": "no caller loops it over tokens today; its doc comment now says whole-text-only and that it is never a boundary.",
       "whatWouldMakeItUnsafe": "a new caller applying it per token. The canonical `-headers Authorization: Bearer X` is clean whole-string and LEAKS per-argument, so this is a shape, not a hypothetical.",
       "issue": "#162"
     },
     {
       "id": "redact-consumers",
-      "what": "the remaining best-effort alerts.Redact consumers with no principal-varying counterpart: the retained MQTT IngestError topic, and the server's own slog output.",
+      "what": "the remaining best-effort redact.Redact consumers with no principal-varying counterpart: the retained MQTT IngestError topic, and the server's own slog output.",
       "whySafe": "both are scrubbed at source now by supervisor.scrub, which removes the exact declared literals before Redact ever runs.",
       "whatWouldMakeItUnsafe": "a credential that reaches those sinks WITHOUT passing through a supervised process -- an OAuth refresh error, a hook delivery body. The hook-deliveries fixture is written in this PR; the broader consumer audit is not.",
       "issue": "#160"
@@ -3349,7 +3349,7 @@
     {
       "id": "empty-fixture-rows",
       "what": "SEVEN OF THE NINE ARE GONE. plantRows now creates a row of each kind, so clipper recordings, library recordings and sessions, alert rules, hooks, schedules and renditions answer 200 and are value-swept rather than excused; their bodies are read by three principals and scanned for every planted sentinel, which is the coverage this row used to record as missing. What is left is TWO routes that no row can drive. GET /metadata/push/{id} reads an in-process registry entry created by a real outbound platform call, whose snapshot moves while the push runs. GET /playout/poster.jpg renders a JPEG out of an MPEG-TS segment, and there is no segment on disk without running FFmpeg in a unit test. Both keep a driven excuse. Separately, /hooks/1/deliveries stays INERT: the row exists now, but a delivery record does not, and manufacturing one means an outbound HTTP attempt.",
-      "whySafe": "the 404 was already an assertion and still is for the two that remain: if either starts answering a read token with a body, the excuse drive fails naming the route and the observed status. For the seven that left, the claim is no longer a 404 at all -- it is the ordinary sweep, which is strictly stronger, and two of them (the alert rule and the hook) carry a planted webhook secret in the URL path so that alerts.RedactWebhookURL is under the sweep rather than merely under review.",
+      "whySafe": "the 404 was already an assertion and still is for the two that remain: if either starts answering a read token with a body, the excuse drive fails naming the route and the observed status. For the seven that left, the claim is no longer a 404 at all -- it is the ordinary sweep, which is strictly stronger, and two of them (the alert rule and the hook) carry a planted webhook secret in the URL path so that redact.RedactWebhookURL is under the sweep rather than merely under review.",
       "whatWouldMakeItUnsafe": "a fixture row being deleted. That is not silent either: leakRoutes() requires a 200 from every path it names, so losing a row fails by name rather than quietly reverting these routes to unread. The residual cost is the two routes above, whose leaf fields are still traced by reading the handler rather than by reading bytes.",
       "issue": "#163"
     },

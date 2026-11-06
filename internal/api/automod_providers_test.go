@@ -17,6 +17,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/diag"
+	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -251,7 +252,7 @@ func TestApplyAutomodBuildsBothCheckersAndKeepsTheirBudgets(t *testing.T) {
 // events, and an exported debug bundle.
 func TestNeitherModelKeyLeaksIntoSettingsResponsesLogsEventsOrTheDebugBundle(t *testing.T) {
 	var logBuf bytes.Buffer
-	rec := diag.NewRecorder(256, alerts.NewSecretSet(nil))
+	rec := diag.NewRecorder(256, redact.NewSecretSet(nil))
 	store := dbtest.OpenCheap(t)
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatal(err)
