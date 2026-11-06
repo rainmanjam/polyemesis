@@ -10,6 +10,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -94,8 +95,8 @@ func liveGainsSupported() bool {
 // volume stage. Callers have already established that the graphs are equal
 // once levels are masked; this only answers "did a level move".
 func levelsDiffer(running, want string) bool {
-	a := ffmpeg.LiveVolumeLevels(running)
-	b := ffmpeg.LiveVolumeLevels(want)
+	a := livevolume.Levels(running)
+	b := livevolume.Levels(want)
 	if len(a) != len(b) {
 		return true
 	}
@@ -112,8 +113,8 @@ func levelsDiffer(running, want string) bool {
 // running process, in a stable order. It stops at the first refusal and returns
 // it, and the caller then restarts the process.
 func applyLiveLevels(proc liveSetter, before, after string) error {
-	a := ffmpeg.LiveVolumeLevels(before)
-	b := ffmpeg.LiveVolumeLevels(after)
+	a := livevolume.Levels(before)
+	b := livevolume.Levels(after)
 	names := make([]string, 0, len(b))
 	for name := range b {
 		names = append(names, name)
@@ -123,8 +124,8 @@ func applyLiveLevels(proc liveSetter, before, after string) error {
 		if av, ok := a[name]; ok && av == b[name] {
 			continue
 		}
-		if err := proc.SetVolume("volume@"+name, b[name]); err != nil {
-			return fmt.Errorf("volume@%s: %w", name, err)
+		if err := proc.SetVolume(livevolume.Instance(name), b[name]); err != nil {
+			return fmt.Errorf("%s: %w", livevolume.Instance(name), err)
 		}
 	}
 	return nil

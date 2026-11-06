@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 	"github.com/rainmanjam/polyemesis/internal/procname"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -715,7 +716,7 @@ func destArgvSig(s ffmpeg.DestSpec) string {
 	s.RelayURL = ""
 	// A named volume level is applied live (see live_gains.go), so a change of
 	// level alone must not move the signature. Anything else still does.
-	s.FilterComplex = ffmpeg.MaskLiveVolumes(s.FilterComplex)
+	s.FilterComplex = livevolume.Mask(s.FilterComplex)
 	return hashStrings(ffmpeg.DestinationArgs(s))
 }
 

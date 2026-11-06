@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 )
 
 // Live commands: changing a running child's filter level without restarting it.
@@ -93,14 +95,6 @@ func parseReply(line string) (stream, ret int, ok bool) {
 	return stream, ret, true
 }
 
-// liveInstanceRE is the only target a command may name: a volume filter
-// instance. The rest of the grammar is fixed, so there is nothing else to name.
-var liveInstanceRE = regexp.MustCompile(`^volume@[A-Za-z0-9_]+$`)
-
-// maxLiveTarget is the longest target FFmpeg reads whole: it scans the target
-// with %63[^ ], so a longer one would be cut and its tail read as the time.
-const maxLiveTarget = 63
-
 // maxLiveLevel bounds a volume level. The profile validator caps per-cell gain
 // well below this; the bound here only refuses a value no profile could have.
 const maxLiveLevel = 100
@@ -111,11 +105,11 @@ const maxLiveLevel = 100
 // would start a second command, and a stray `q` quits FFmpeg, so validation
 // comes before any byte is written.
 func volumeLine(instance string, level float64) (string, error) {
-	if !liveInstanceRE.MatchString(instance) {
+	if !livevolume.ValidInstance(instance) {
 		return "", fmt.Errorf("live command target %q is not a volume instance", instance)
 	}
-	if len(instance) > maxLiveTarget {
-		return "", fmt.Errorf("live command target %q is longer than FFmpeg reads (%d bytes)", instance, maxLiveTarget)
+	if len(instance) > livevolume.MaxInstance {
+		return "", fmt.Errorf("live command target %q is longer than FFmpeg reads (%d bytes)", instance, livevolume.MaxInstance)
 	}
 	if math.IsNaN(level) || math.IsInf(level, 0) {
 		return "", fmt.Errorf("live command level %v is not finite", level)

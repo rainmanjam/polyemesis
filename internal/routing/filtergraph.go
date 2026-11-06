@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/livevolume"
 )
 
 // OutLabel is the filter_complex label carrying the finished stereo mix. The
@@ -407,17 +409,13 @@ func unityTracks(in []TrackSel) []TrackSel {
 	return out
 }
 
-// liveVolume is the filter instance name of track t's volume stage in a
-// graph compiled under namespace n. The name is the contract with the live
-// path in internal/ffmpeg: it addresses the stage by this name on the command
-// channel, so it must not change without that package changing with it.
-func (n ns) liveVolume(t int) string {
-	return "volume@" + n.of(fmt.Sprintf("trk%d", t))
-}
-
-// volumeStage renders track t's named volume filter at level v.
+// volumeStage renders track t's named volume filter at level v. The stage's
+// spelling belongs to internal/livevolume, which the live path reads it back
+// with: the name is the contract with that path, because it addresses the stage
+// by this name on the command channel, so it must not change without the
+// readers changing with it.
 func volumeStage(n ns, t int, v float64) string {
-	return fmt.Sprintf("%s=volume=%s", n.liveVolume(t), fmtCoeff(v))
+	return livevolume.Stage(n.of(fmt.Sprintf("trk%d", t)), fmtCoeff(v))
 }
 
 // withStage appends an optional stage to a chain.
