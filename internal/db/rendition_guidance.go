@@ -1,10 +1,6 @@
 package db
 
-import (
-	"fmt"
-
-	"github.com/rainmanjam/polyemesis/internal/platform"
-)
+import "fmt"
 
 // THE CATALOGUE WAS RESEARCHED AND NOTHING READ IT. #661
 //
@@ -51,14 +47,17 @@ func RenditionConcerns(r *Rendition, plat Platform) []RenditionConcern {
 	if r == nil {
 		return nil
 	}
-	// Keyed by the platform string. Five presets with dated guidance (Instagram,
-	// LinkedIn, Dailymotion, Owncast, Rumble) save as "custom", so no stored
-	// destination ever names their row and they are never reached from here.
-	row, ok := platform.ByKey(string(plat))
-	if !ok || row.Guidance == nil {
+	// Looked up by PRESET id, with the platform string standing in for one: that
+	// is how "youtube-rtmps" finds its figures and its own name, and how
+	// "twitch-rtmps", which publishes none, finds nothing. The figures on the
+	// preset come from the platform registry. Five presets with dated guidance
+	// (Instagram, LinkedIn, Dailymotion, Owncast, Rumble) save as "custom", so no
+	// stored destination ever names them and they are never reached from here.
+	preset, ok := DestinationPresetByID(string(plat))
+	if !ok || preset.Video == nil {
 		return nil
 	}
-	g := row.Guidance
+	g := preset.Video
 	var out []RenditionConcern
 	add := func(field, detail string) {
 		out = append(out, RenditionConcern{
@@ -68,15 +67,15 @@ func RenditionConcerns(r *Rendition, plat Platform) []RenditionConcern {
 
 	if g.Width > 0 && r.Width > g.Width {
 		add("width", fmt.Sprintf("%s publishes %d wide; this rendition is %d",
-			row.Name, g.Width, r.Width))
+			preset.Name, g.Width, r.Width))
 	}
 	if g.Height > 0 && r.Height > g.Height {
 		add("height", fmt.Sprintf("%s publishes %dp; this rendition is %dp",
-			row.Name, g.Height, r.Height))
+			preset.Name, g.Height, r.Height))
 	}
 	if g.FPS > 0 && r.FPS > g.FPS {
 		add("fps", fmt.Sprintf("%s publishes %d fps; this rendition is %d",
-			row.Name, g.FPS, r.FPS))
+			preset.Name, g.FPS, r.FPS))
 	}
 
 	// THE BITRATE, and the one place the catalogue's own shape matters. Equal
@@ -91,19 +90,19 @@ func RenditionConcerns(r *Rendition, plat Platform) []RenditionConcern {
 	case g.KbpsMax > 0 && rate > g.KbpsMax:
 		if g.KbpsMin == g.KbpsMax {
 			add("bitrate", fmt.Sprintf("%s publishes %d kbps; this rendition peaks at %d",
-				row.Name, g.KbpsMax, rate))
+				preset.Name, g.KbpsMax, rate))
 		} else {
 			add("bitrate", fmt.Sprintf("%s publishes up to %d kbps; this rendition peaks at %d",
-				row.Name, g.KbpsMax, rate))
+				preset.Name, g.KbpsMax, rate))
 		}
 	case g.KbpsMin > 0 && r.VideoBitrate > 0 && r.VideoBitrate < g.KbpsMin:
 		add("bitrate", fmt.Sprintf("%s publishes at least %d kbps; this rendition is %d",
-			row.Name, g.KbpsMin, r.VideoBitrate))
+			preset.Name, g.KbpsMin, r.VideoBitrate))
 	}
 
 	if g.GOPSeconds > 0 && r.GOPSeconds > 0 && r.GOPSeconds > g.GOPSeconds {
 		add("gop", fmt.Sprintf("%s asks for a %gs keyframe interval; this rendition uses %gs",
-			row.Name, g.GOPSeconds, r.GOPSeconds))
+			preset.Name, g.GOPSeconds, r.GOPSeconds))
 	}
 	return out
 }

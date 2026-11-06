@@ -185,3 +185,31 @@ func TestABitrateBelowThePublishedFloorIsFlagged(t *testing.T) {
 	t.Fatal("no preset publishes a bitrate RANGE (KbpsMin < KbpsMax), so the floor " +
 		"comparison is untested. Check the catalogue rather than dropping this.")
 }
+
+// GET /renditions/{id}/concerns?platform= takes a preset id as readily as a
+// platform. "youtube-rtmps" has its own guidance and its own name, "twitch-rtmps"
+// has none, and both behaved this way before the registry. The wording is the
+// preset's name, so it is pinned literally.
+func TestAPresetIdQueryKeepsItsOwnNameAndFigures(t *testing.T) {
+	r := &Rendition{Width: 3840, Height: 2160, FPS: 60, VideoBitrate: 40000}
+	got := RenditionConcerns(r, Platform("youtube-rtmps"))
+	want := []string{
+		"YouTube Live (RTMPS) publishes 1920 wide; this rendition is 3840",
+		"YouTube Live (RTMPS) publishes 1080p; this rendition is 2160p",
+		"YouTube Live (RTMPS) publishes 12000 kbps; this rendition peaks at 40000",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("youtube-rtmps concerns = %+v, want %d", got, len(want))
+	}
+	for i, c := range got {
+		if c.Detail != want[i] {
+			t.Errorf("concern %d = %q, want %q", i, c.Detail, want[i])
+		}
+		if c.Source != "https://support.google.com/youtube/answer/2853702" || c.Checked != "2026-08-06" {
+			t.Errorf("concern %d evidence = %q %q", i, c.Source, c.Checked)
+		}
+	}
+	if got := RenditionConcerns(r, Platform("twitch-rtmps")); len(got) != 0 {
+		t.Errorf("twitch-rtmps publishes no guidance and must raise nothing, got %+v", got)
+	}
+}

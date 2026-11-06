@@ -54,6 +54,9 @@ func (PlatformCaps) Can(p db.Platform, a Action) (bool, string) {
 		return false, "only Facebook can hide a message upstream; use the local hide instead"
 
 	case ActionDelete:
+		if !moderationOf(p).Delete {
+			return false, "this platform cannot delete a chat message"
+		}
 		return true, ""
 
 	case ActionTimeout, ActionBan:

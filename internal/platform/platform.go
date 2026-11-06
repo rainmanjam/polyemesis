@@ -23,20 +23,9 @@
 // a product decision and is listed in the refactor report, not made here.
 package platform
 
-import "sort"
-
-// Count says how a limit is counted. The same limit is counted differently by
-// different callers (YouTube's title is checked in runes at the metadata API
-// and in UTF-16 units by the clip publisher), so a row names the unit rather
-// than leaving it to each caller.
-type Count string
-
-const (
-	Runes Count = "runes"
-	UTF16 Count = "utf16"
-	// Bytes is len() of the Go string. The clip publisher counts YouTube's
-	// description this way while its error text calls it a character limit.
-	Bytes Count = "bytes"
+import (
+	"slices"
+	"sort"
 )
 
 // Guidance is a platform's own published encoder advice, with where it was
@@ -84,31 +73,12 @@ type Moderation struct {
 
 // Chat is the platform's chat-send side.
 type Chat struct {
-	// SendMax is the longest message the platform accepts, in SendUnit. Zero
+	// SendMax is the longest message the platform accepts, in runes. Zero
 	// means polyemesis cannot send to this platform's chat.
-	SendMax  int
-	SendUnit Count
+	SendMax int
 	// Order is the platform's position in the chat send-limits list, whose
 	// order is part of the API response.
 	Order int
-}
-
-// Text is the title and description limits at go-live.
-type Text struct {
-	TitleMax, DescriptionMax int
-	// StreamTitleMax is the title of the live stream resource, where the
-	// platform distinguishes it from the broadcast's (YouTube: 128).
-	StreamTitleMax int
-	// GoLiveTitleMax is the title sent with a go-live announcement (X: 280).
-	GoLiveTitleMax int
-	// CaptionMax is a clip's caption or post text (TikTok).
-	CaptionMax int
-	// MetadataUnit is how the metadata API (api/metadata.go) counts title and
-	// description. The clip publisher counts the YouTube title in
-	// PublishTitleUnit and the description in PublishDescriptionUnit, and
-	// neither is MetadataUnit. The web UI counts the title in UTF-16 too.
-	MetadataUnit                             Count
-	PublishTitleUnit, PublishDescriptionUnit Count
 }
 
 // What a duration limit measures. Plain strings: internal/oauth serves them to
@@ -159,7 +129,6 @@ type Row struct {
 
 	// Ingest shape.
 	PerChannelIngest bool // the host is issued per channel; nothing to prefill
-	IVS              bool // ingests through Amazon IVS: application path must be /app
 
 	Guidance *Guidance
 	Ceilings *Ceilings
@@ -187,14 +156,7 @@ type Row struct {
 	Music      *Music
 	Moderation *Moderation
 	Chat       Chat
-	Text       Text
 	Limits     []Limit
-
-	// APIHost is the scheme and host; APIPath the versioned prefix beneath it
-	// ("/youtube/v3", "/v24.0", "/helix"), empty where there is none. APIVersion
-	// is the pinned version on its own, for the callers that spell it elsewhere
-	// (Facebook's OAuth dialog URL). APIRoot joins the first two.
-	APIHost, APIPath, APIVersion string
 }
 
 // Platform enum values. Untyped so db and routing can type them to their own
@@ -214,19 +176,49 @@ const (
 
 var rows = buildRows()
 
-// All returns every row in registry order. The slice is a copy; the rows share
-// their inner slices with the registry and must be treated as read-only.
+// All returns every row in registry order. Every row is a deep copy.
 func All() []Row {
 	out := make([]Row, len(rows))
-	copy(out, rows)
+	for i, r := range rows {
+		out[i] = r.clone()
+	}
 	return out
+}
+
+// clone deep-copies a row, so no caller can reach back into the registry by
+// editing a slice or struct it was handed.
+func (r Row) clone() Row {
+	r.Presets = slices.Clone(r.Presets)
+	r.VideoCodecs = slices.Clone(r.VideoCodecs)
+	r.AudioCodecs = slices.Clone(r.AudioCodecs)
+	r.RefusesVideoCodecs = slices.Clone(r.RefusesVideoCodecs)
+	r.PublishScopes = slices.Clone(r.PublishScopes)
+	r.PublishAnyScope = slices.Clone(r.PublishAnyScope)
+	r.Limits = slices.Clone(r.Limits)
+	if r.Guidance != nil {
+		g := *r.Guidance
+		r.Guidance = &g
+	}
+	if r.Ceilings != nil {
+		c := *r.Ceilings
+		r.Ceilings = &c
+	}
+	if r.Music != nil {
+		m := *r.Music
+		r.Music = &m
+	}
+	if r.Moderation != nil {
+		m := *r.Moderation
+		r.Moderation = &m
+	}
+	return r
 }
 
 // ByKey finds a row by its key.
 func ByKey(key string) (Row, bool) {
 	for _, r := range rows {
 		if r.Key == key {
-			return r, true
+			return r.clone(), true
 		}
 	}
 	return Row{}, false
@@ -240,7 +232,7 @@ func ByEnum(enum string) (Row, bool) {
 	}
 	for _, r := range rows {
 		if r.Enum == enum {
-			return r, true
+			return r.clone(), true
 		}
 	}
 	return Row{}, false
@@ -261,7 +253,7 @@ func ByPreset(id string) (Row, bool) {
 	for _, r := range rows {
 		for _, p := range r.Presets {
 			if p == id {
-				return r, true
+				return r.clone(), true
 			}
 		}
 	}
@@ -279,9 +271,6 @@ func Enums() []string {
 	}
 	return out
 }
-
-// APIRoot is the API root callers append resource paths to.
-func (r Row) APIRoot() string { return r.APIHost + r.APIPath }
 
 // LUFSStreaming is the programme loudness YouTube, Twitch, Spotify and the
 // other streaming normalizers target. routing re-exports it for the mixer.
@@ -310,7 +299,7 @@ func ordered(key func(Row) (int, bool)) []Row {
 	var out []Row
 	for _, r := range rows {
 		if _, ok := key(r); ok {
-			out = append(out, r)
+			out = append(out, r.clone())
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

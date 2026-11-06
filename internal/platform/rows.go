@@ -1,8 +1,11 @@
 package platform
 
 const (
-	obsSource  = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
-	kickSource = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13"
+	obsSource = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
+	// kickSource covers Kick's video figures only. Kick's page gives no audio
+	// bitrate; the 160 kbps audio ceiling came in with the services.json seed
+	// and has no source of its own (the preset note says none is published).
+	kickSource = "Kick's own Stream Settings page, Recommended Encoding Settings, fetched 2026-08-13 (video bitrate, fps, keyframe interval); the 160 kbps audio ceiling is from the services.json seed, not from that page"
 )
 
 // API roots. Constants, because callers declare their own constants from them
@@ -26,7 +29,11 @@ const (
 )
 
 // Text limits, as constants for the callers that declare their own constants
-// from them. Counted in each consumer's unit; see Text.
+// from them. The unit is each consumer's, and they differ: the YouTube title is
+// counted in runes by the metadata API and the scheduler, in UTF-16 units by the
+// clip publisher and the web UI; the YouTube description in runes by the
+// metadata API and in BYTES (len) by the publisher and the scheduler; Twitch's
+// title and the X post in runes at the API, TikTok's caption in UTF-16 units.
 const (
 	YouTubeTitleMax       = 100
 	YouTubeDescriptionMax = 5000
@@ -72,16 +79,11 @@ func buildRows() []Row {
 			},
 			Music:      &Music{Exclude: true, Reason: "YouTube Content ID", TargetLUFS: LUFSStreaming},
 			Moderation: &Moderation{Delete: true, TimeoutBan: true, Order: 1},
-			Chat:       Chat{SendMax: YouTubeChatMax, SendUnit: Runes, Order: 3},
-			Text: Text{
-				TitleMax: YouTubeTitleMax, DescriptionMax: YouTubeDescriptionMax, StreamTitleMax: YouTubeStreamTitleMax,
-				MetadataUnit: Runes, PublishTitleUnit: UTF16, PublishDescriptionUnit: Bytes,
-			},
+			Chat:       Chat{SendMax: YouTubeChatMax, Order: 3},
 			Limits: []Limit{{
 				Kind: LimitArchiveDuration, Hours: 12, Status: LimitDocumented,
 				Source: "https://support.google.com/youtube/answer/6247592?hl=en",
 			}},
-			APIHost: YouTubeAPIHost, APIPath: "/youtube/v3", APIVersion: "v3",
 		},
 		{
 			Key: Twitch, Enum: Twitch, Name: "Twitch", ShortName: "Twitch",
@@ -97,18 +99,16 @@ func buildRows() []Row {
 			AudioTracksMax: 1,
 			Music:          &Music{Exclude: true, Reason: "Twitch DMCA policy", TargetLUFS: LUFSStreaming},
 			Moderation:     &Moderation{Delete: true, TimeoutBan: true, Order: 2},
-			Chat:           Chat{SendMax: 500, SendUnit: Runes, Order: 2},
-			Text:           Text{TitleMax: TwitchTitleMax, MetadataUnit: Runes},
+			Chat:           Chat{SendMax: 500, Order: 2},
 			Limits: []Limit{{
 				Kind: LimitBroadcastDuration, Hours: 48, Status: LimitReported,
 				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines?language=en_US",
 			}},
-			APIHost: "https://api.twitch.tv", APIPath: "/helix", APIVersion: "helix",
 		},
 		{
 			Key: Kick, Enum: Kick, Name: "Kick", ShortName: "Kick",
 			Presets: []string{"kick"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
-			PerChannelIngest: true, IVS: true,
+			PerChannelIngest: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 1000, KbpsMax: 8000, GOPSeconds: 2,
 				Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
@@ -118,9 +118,8 @@ func buildRows() []Row {
 			RefusesVideoCodecs: []string{"hevc"},
 			Music:              &Music{Exclude: true, Reason: "Kick DMCA policy", TargetLUFS: LUFSStreaming},
 			Moderation:         &Moderation{Delete: true, TimeoutBan: true, Order: 3},
-			Chat:               Chat{SendMax: 500, SendUnit: Runes, Order: 1},
+			Chat:               Chat{SendMax: 500, Order: 1},
 			Limits:             []Limit{{Kind: LimitBroadcastDuration, Status: LimitUnverified}},
-			APIHost:            KickAPIHost,
 		},
 		{
 			Key: Facebook, Enum: Facebook, Name: "Facebook Live", ShortName: "Facebook",
@@ -139,7 +138,6 @@ func buildRows() []Row {
 				Kind: LimitBroadcastDuration, Hours: 8, Status: LimitDocumented,
 				Source: "https://developers.facebook.com/docs/live-video-api/reference",
 			}},
-			APIHost: GraphAPIHost, APIPath: "/" + GraphVersion, APIVersion: GraphVersion,
 		},
 		{
 			Key: X, Enum: X, Name: "X (Twitter) Live", ShortName: "X",
@@ -149,10 +147,8 @@ func buildRows() []Row {
 				Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
 			},
 			Moderation:    &Moderation{Delete: true, TimeoutBan: true, Order: 5},
-			Chat:          Chat{SendMax: 140, SendUnit: Runes, Order: 4},
-			Text:          Text{GoLiveTitleMax: XGoLiveTitleMax},
+			Chat:          Chat{SendMax: 140, Order: 4},
 			PublishScopes: []string{"tweet.write", "media.write"},
-			APIHost:       XAPIHost,
 		},
 		{
 			// Rumble's enum exists for chat only; the preset saves as custom.
@@ -175,9 +171,7 @@ func buildRows() []Row {
 			// TikTok exists to publish clips; destinations on it are refused.
 			Key: TikTok, Enum: TikTok, Name: "TikTok LIVE", ShortName: "TikTok",
 			Presets:       []string{"tiktok"},
-			Text:          Text{CaptionMax: TikTokCaptionMax},
 			PublishScopes: []string{TikTokPublishScope},
-			APIHost:       TikTokAPIHost,
 		},
 
 		// Presets that save as custom. No Enum: see Row.

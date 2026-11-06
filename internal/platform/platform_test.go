@@ -28,7 +28,7 @@ func TestRowsAreUnique(t *testing.T) {
 }
 
 func TestLookups(t *testing.T) {
-	if r, ok := ByEnum(Kick); !ok || r.Key != Kick || !r.IVS || !r.PerChannelIngest {
+	if r, ok := ByEnum(Kick); !ok || r.Key != Kick || !r.PerChannelIngest {
 		t.Errorf("ByEnum(kick) = %+v, %v", r, ok)
 	}
 	if r, ok := ByPreset("youtube-rtmps"); !ok || r.Enum != YouTube {
@@ -65,23 +65,6 @@ func TestEnumsAreTheOnesDestinationsMayCarry(t *testing.T) {
 	}
 	if seen[TikTok] {
 		t.Error("tiktok exists for clip publishing; destinations on it are refused")
-	}
-}
-
-func TestAPIRoot(t *testing.T) {
-	cases := map[string]string{
-		Facebook: "https://graph.facebook.com/v24.0",
-		YouTube:  "https://www.googleapis.com/youtube/v3",
-		Twitch:   "https://api.twitch.tv/helix",
-		Kick:     "https://api.kick.com",
-		X:        "https://api.x.com",
-		TikTok:   "https://open.tiktokapis.com",
-	}
-	for enum, want := range cases {
-		r, _ := ByEnum(enum)
-		if got := r.APIRoot(); got != want {
-			t.Errorf("%s APIRoot = %q, want %q", enum, got, want)
-		}
 	}
 }
 
@@ -142,25 +125,38 @@ func TestMustPanicsOnAMissingRow(t *testing.T) {
 	Must("nope")
 }
 
-func TestTextLimitsMatchTheirConstants(t *testing.T) {
-	y := Must(YouTube).Text
-	if y.TitleMax != YouTubeTitleMax || y.DescriptionMax != YouTubeDescriptionMax {
-		t.Errorf("youtube text = %+v", y)
-	}
-	if y.MetadataUnit != Runes || y.PublishTitleUnit != UTF16 || y.PublishDescriptionUnit != Bytes {
-		t.Errorf("youtube units = %+v: the metadata API counts runes, the publisher UTF-16 for the title and bytes for the description", y)
-	}
-	if Must(Twitch).Text.TitleMax != TwitchTitleMax || Must(X).Text.GoLiveTitleMax != XGoLiveTitleMax ||
-		Must(TikTok).Text.CaptionMax != TikTokCaptionMax {
-		t.Error("a Text limit no longer matches its constant")
-	}
-}
-
 func TestPublishScopes(t *testing.T) {
 	if got := Must(TikTok).PublishScopes; len(got) != 1 || got[0] != TikTokPublishScope {
 		t.Errorf("tiktok publish scopes = %v", got)
 	}
 	if got := Must(X).PublishScopes; len(got) != 2 {
 		t.Errorf("x publish scopes = %v", got)
+	}
+}
+
+// RenditionConcerns and the lookups by platform string rely on a row's key
+// being its enum value.
+func TestEveryEnumRowIsKeyedByItsEnum(t *testing.T) {
+	for _, r := range All() {
+		if r.Enum != "" && r.Key != r.Enum {
+			t.Errorf("row %q has enum %q", r.Key, r.Enum)
+		}
+	}
+}
+
+func TestRowsAreCopies(t *testing.T) {
+	r := Must(Twitch)
+	r.VideoCodecs[0] = "mutated"
+	r.Guidance.KbpsMax = 1
+	r.Ceilings.MaxAudioKbps = 1
+	r.Music.Exclude = false
+	if again := Must(Twitch); again.VideoCodecs[0] != "h264" || again.Guidance.KbpsMax != 6000 ||
+		again.Ceilings.MaxAudioKbps != 320 || !again.Music.Exclude {
+		t.Errorf("editing a returned row reached the registry: %+v", again)
+	}
+	x := Must(X).PublishScopes
+	x[0] = "mutated"
+	if Must(X).PublishScopes[0] != "tweet.write" {
+		t.Error("editing PublishScopes reached the registry")
 	}
 }
