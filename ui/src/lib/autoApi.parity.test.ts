@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-/* autoApi used to be a second HTTP client that had drifted from lib/api.ts.
- * These pin the behaviours it lacked, through the client the clip, automation
- * and recording pages actually call, so the two can never part again. */
+/* The clip, automation and recording pages call `http`. These pin the
+ * error handling it shares with the named `api` wrappers: a plain-text body
+ * quoted, an HTML page not, a settings conflict's stored version, and the
+ * saved-but-not-applied warning. (A second client that had drifted from these
+ * is why they exist.) */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, http } from "./api";
@@ -19,7 +21,7 @@ afterEach(() => {
   toast.warning.mockReset();
 });
 
-describe("autoApi error handling matches lib/api.ts", () => {
+describe("http error handling matches the named api wrappers", () => {
   it("quotes a plain-text error body", async () => {
     reply("clip window too wide", 400);
     await expect(http.get("/x")).rejects.toMatchObject({ message: "clip window too wide" });

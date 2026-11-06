@@ -12,8 +12,8 @@ import { onSessionEnded } from "./session";
  * clicking. Sessions last seven days, so this is a weekly event on a console
  * that is left open.
  *
- * BOTH CLIENTS, because lib/autoApi.ts is the only way some routes are
- * reached and a contract honoured by one of them reads as honoured. */
+ * BOTH CALL STYLES, because routes with no named wrapper go through `http` and
+ * a contract honoured by the wrappers alone reads as honoured. */
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -46,7 +46,7 @@ describe("a 401 in the middle of a session", () => {
     stop();
   });
 
-  it("ends the session from lib/autoApi.ts", async () => {
+  it("ends the session from the generic http verbs", async () => {
     respond(401, { error: "not signed in" });
     const { heard, stop } = listen();
     await expect(http.get("/alerts")).rejects.toThrow();

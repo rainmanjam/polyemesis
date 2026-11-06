@@ -987,7 +987,7 @@ export const api = {
   // renditions, recordings -- belongs to exactly one of them. Unscoped calls
   // act on the default source, which is what keeps every other page working
   // without knowing sources exist.
-  listSources: () => get<SourceView[]>("/sources"),
+  listSources: (signal?: AbortSignal) => request<SourceView[]>("/sources", { signal }),
   getSource: (id: SourceId) => get<SourceView>(`/sources/${id}`),
   createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
   updateSource: (id: SourceId, s: Partial<Source>) =>

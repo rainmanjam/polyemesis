@@ -26,7 +26,11 @@ import type {
    =========================================================================== */
 
 /** One programme as /sources lists it: what the Dashboard and the switcher
- *  need, with the publish addresses (token excluded) for the checklist. */
+ *  need, with the publish addresses for the checklist.
+ *
+ *  publishUrls CARRY THE SOURCE'S TOKEN where the protocol puts it in the
+ *  address (the SRT streamid, the RTMP stream key). Hold them in memory only:
+ *  never log, persist or send them anywhere but the clipboard on a copy. */
 export interface Programme {
   id: number;
   name: string;

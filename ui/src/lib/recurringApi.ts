@@ -1,7 +1,7 @@
 /* ===========================================================================
    The client for the recurring-event (#18) and planned-rollover (#19) routes.
 
-   It is built on autoApi for JSON, with one exception: the thumbnail is a raw
+   It is built on `http` for JSON, with one exception: the thumbnail is a raw
    image body. The JSON verbs encode every body and force application/json, and
    the server checks image/png or image/jpeg against the bytes' magic numbers,
    so that call goes through requestRaw with the real type.
@@ -10,7 +10,7 @@
    named by the client could only be a stale copy of it, and requireSource
    checks only that an engine exists, so it would be ignored anyway.
 
-   Errors are the same ApiError autoApi throws, so a caller branches on
+   Errors are the same ApiError `http` throws, so a caller branches on
    `status`, and the server's sentence stays the message.
    =========================================================================== */
 

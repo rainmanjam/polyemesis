@@ -33,6 +33,9 @@ import type {
  *  buffer; this bounds the browser's so a long session cannot grow forever. */
 const LOG_LIMIT = 600;
 
+/** How long one /sources read may take before it is abandoned, so the next poll can run. */
+const SOURCES_READ_TIMEOUT_MS = 10_000;
+
 export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
@@ -299,8 +302,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
      someone reloaded the page. Every one of those is a plausible idle state,
      which is why it was never reported as a bug. #646. */
   const resolveOnce = useCallback(async (gen: number): Promise<number | null> => {
+    // A request that never settles would hold readInFlight, and with it every
+    // later poll, for ever: the Dashboard reads its programmes only from here.
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), SOURCES_READ_TIMEOUT_MS);
     try {
-      const rows = await api.listSources();
+      const rows = await api.listSources(abort.signal);
       const ids = rows.map((r) => r.id);
       // Superseded while in flight: answer with what the newer read applied,
       // not with this stale list.
@@ -342,6 +349,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (!resolvedOnce.current) setProgramme(null);
       return null;
     } finally {
+      window.clearTimeout(timeout);
       if (gen === resolveGen.current) readInFlight.current = false;
       setProgrammeKnown(true);
     }

@@ -20,11 +20,10 @@ import { ApiError, NO_SOURCE, api, isNoSource, http } from "./api";
  * request() actually lifts the field off the body, and that the string the UI
  * will compare against is the one Go emits.
  *
- * BOTH CLIENTS, and that is the third half. This app has two: lib/api.ts and
- * lib/autoApi.ts, and the second is not a legacy corner -- POST /clips, PUT
- * /clips/buffer, DELETE /clips/{name} and PUT /loudness are reachable from the
- * UI through it and no other way. A contract that holds on one client and not
- * the other reads as satisfied, because the test only ever asked the one.
+ * BOTH ENTRY POINTS, and that is the third half. Routes with no named wrapper go
+ * through `http`, and the programme-scoped clip and loudness routes through
+ * lib/autoApi.ts; both sit on api.ts's one transport. A contract checked on one
+ * entry point reads as satisfied, because the test only ever asked the one.
  */
 
 afterEach(() => {

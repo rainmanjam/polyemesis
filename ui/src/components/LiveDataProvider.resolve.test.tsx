@@ -272,6 +272,34 @@ describe("LiveDataProvider: reads do not pile up", () => {
     }
   });
 
+  it("recovers when the first /sources read never settles", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The first read honours its abort signal and otherwise hangs for ever;
+      // the later ones answer.
+      list.mockImplementationOnce(
+        (signal?: AbortSignal) =>
+          new Promise((_, reject) => signal?.addEventListener("abort", () => reject(new Error("aborted")))),
+      );
+      list.mockResolvedValue(rows(1, 2));
+      draw();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_500);
+      });
+      expect(screen.getByTestId("known").textContent).toBe("true");
+      expect(screen.getByTestId("countKnown").textContent).toBe("false");
+
+      // The abandoned read frees the poll; the next tick reads the list.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"));
+      expect(screen.getByTestId("countKnown").textContent).toBe("true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("answers a superseded refresh with the count the newer read applied", async () => {
     list.mockResolvedValueOnce(rows(1));
     let refresh!: () => Promise<number | null>;
