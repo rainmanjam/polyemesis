@@ -466,9 +466,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------- system
 
-// storeSettingsWithDefaultIngest is what an unscoped endpoint means by "the
-// settings": the stored document, with the DEFAULT SOURCE's ingest block laid
-// over the singleton one.
+// storeSettingsForSource is what an endpoint means by "the settings": the
+// stored document, with a source's ingest block laid over the singleton one.
+// id names the programme the caller means; nil is the default source. It
+// returns the source it used, nil on an install with none.
 //
 // It reproduces engine.effectiveSettings (engine.go, `settings.Ingest =
 // src.Ingest`) deliberately, because that overlay is the whole difference
@@ -481,17 +482,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // snapshot is whatever its last reconcile installed, so GET /system described
 // the previous listener ports until something reconciled.
 //
-// A source that cannot be read leaves the singleton block in place, which is
-// the same fallback the engine takes and for the same reason: describing the
-// stale thing beats failing the whole endpoint.
-func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
-	settings, _, err := s.storeSettingsForSource(nil)
-	return settings, err
-}
-
-// storeSettingsForSource is storeSettingsWithDefaultIngest for a caller that
-// KNOWS which programme it means, and it returns the source it used.
-//
 // The returned row is not a convenience: /system renders an ingest URL and an
 // SRT passphrase out of that block, and an operator who copies it has no way to
 // tell which programme's encoder it configures. Handing the caller the source
@@ -501,19 +491,8 @@ func (s *Server) storeSettingsForSource(id *int64) (db.Settings, *db.Source, err
 	if err != nil {
 		return settings, nil, err
 	}
-	if id == nil {
-		def, err := s.defaultSourceID()
-		if err != nil {
-			return settings, nil, nil
-		}
-		id = &def
-	}
-	src, err := s.store.GetSource(*id)
-	if err != nil {
-		return settings, nil, nil
-	}
-	settings.Ingest = src.Ingest
-	return settings, src, nil
+	src, err := s.overlaySourceIngest(&settings, id)
+	return settings, src, err
 }
 
 // defaultSourceID is which source an unscoped endpoint speaks for: the one the
@@ -1379,7 +1358,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	// The ingest the server is USING, not the blob's copy of it. Before the
 	// redaction below, so a read-scoped token is blanked on the served block.
-	if err := s.overlayDefaultSourceIngest(&settings); err != nil {
+	if _, err := s.overlaySourceIngest(&settings, nil); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -1503,8 +1482,10 @@ const settingsConflictMsg = "these settings were changed by someone else after t
 // the interleaving this exists to stop.
 var errSettingsConflict = errors.New("settings conflict")
 
-// overlayDefaultSourceIngest makes settings.ingest a VIEW of the default
-// source's ingest rather than a second copy of it.
+// overlaySourceIngest makes settings.ingest a VIEW of a source's ingest (the
+// default one when id is nil) rather than a second copy of it. Only "no such
+// source" leaves the blob in place; any other store error is returned, so every
+// caller fails the same way instead of describing a stale block.
 //
 // The engine reads its ingest from the source row, and the Sources page writes
 // that row directly without touching the settings blob. So the blob's ingest
@@ -1524,23 +1505,26 @@ var errSettingsConflict = errors.New("settings conflict")
 //
 // With no source there is nothing to view, and the blob stays authoritative;
 // that is the install handlePutSettings refuses ingest changes on anyway.
-func (s *Server) overlayDefaultSourceIngest(settings *db.Settings) error {
-	id, err := s.defaultSourceID()
+func (s *Server) overlaySourceIngest(settings *db.Settings, id *int64) (*db.Source, error) {
+	if id == nil {
+		def, err := s.defaultSourceID()
+		if errors.Is(err, db.ErrSourceNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		id = &def
+	}
+	src, err := s.store.GetSource(*id)
 	if errors.Is(err, db.ErrSourceNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
-	}
-	src, err := s.store.GetSource(id)
-	if errors.Is(err, db.ErrSourceNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
+		return nil, err
 	}
 	settings.Ingest = src.Ingest
-	return nil
+	return src, nil
 }
 
 // handlePutMQTTPassword sets or clears the broker password.
@@ -1661,10 +1645,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		// The merge base for ingest is the SOURCE, not the blob -- before
 		// anything below snapshots "what was stored". See
-		// overlayDefaultSourceIngest: with the blob as the base, a client that
+		// overlaySourceIngest: with the blob as the base, a client that
 		// PUT back exactly what it GOT wrote the blob's stale ingest over the
 		// live source.
-		if err := s.overlayDefaultSourceIngest(settings); err != nil {
+		if _, err := s.overlaySourceIngest(settings, nil); err != nil {
 			return err
 		}
 		// A SAVE FROM A STALE READ IS REFUSED, not merged.
@@ -3078,8 +3062,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// READ BEFORE THE DELETE, because the question is about the row and about its
 	// siblings, and after DeleteDestination neither the key nor the id ordering
-	// that answers it exists any more. A failed read is not worth a failed
-	// delete: the notice is a courtesy and the deletion is what was asked for.
+	// that answers it exists any more. A row that does not exist falls through
+	// to the delete's own 404; any other failed read refuses the delete, because
+	// the confirmation below is a guard and an unread row may be carrying a
+	// broadcast.
 	//
 	// It does NOT remove the platform's ingest stream, and the long comment at
 	// noteOrphanedIngestStream says why that is the answer rather than a gap.
@@ -3101,7 +3087,12 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// What the delete could not take with it, said in the response. Empty in
 	// the ordinary case, and then the body is exactly {"status":"deleted"}.
 	var leftovers []string
-	if dest, err := s.store.GetDestination(id); err == nil {
+	dest, err := s.store.GetDestination(id)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		writeStoreError(w, err)
+		return
+	}
+	if err == nil {
 		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
 		// exactly "will this delete end a broadcast" -- not a local notion of
 		// "live" that could drift from what the coordinator then does.

@@ -130,7 +130,7 @@ func nonGetDifferentialCensus() []nonGetDifferentialRow {
 			// source with whatever the blob held. That was the bug, not a side
 			// effect -- the settings page PUTs the whole document on every
 			// save. settings.ingest is now read from the source at both ends
-			// (overlayDefaultSourceIngest), so an empty body changes nothing
+			// (overlaySourceIngest), so an empty body changes nothing
 			// and the source's credentials are what it echoes.
 			Why: "inlines the whole stored db.Settings at the top level of the 200",
 		},

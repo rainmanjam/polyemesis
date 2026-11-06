@@ -125,7 +125,7 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	// No sentinel in st.Ingest, and that is not an omission. While a source
 	// exists, settings.ingest is a VIEW of the default source's ingest --
 	// GET /settings serves the source row's block and PUT /settings merges over
-	// it (see overlayDefaultSourceIngest) -- so the blob's own copy is a column
+	// it (see overlaySourceIngest) -- so the blob's own copy is a column
 	// nothing serves. A sentinel planted there is witnessed on no route, which
 	// is exactly the vacuous absence assertion the ledger preflight refuses.
 	// The source sentinels above are what GET /settings carries now.
