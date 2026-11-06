@@ -184,6 +184,22 @@ func ParseRecordingTarget(target string) (id int64, ok bool) {
 	return n, true
 }
 
+// UploadTarget is the canonical Target for a job about one stored upload (a
+// playlist normalisation, an upload re-verification). It names the UPLOAD, so
+// the queue's Unique fold deduplicates on it, and it cannot collide with a
+// recording target because Unique folds on Kind AND Target.
+func UploadTarget(name string) string { return "upload:" + name }
+
+// ParseUploadTarget is the inverse. ok is false for a target that names
+// something other than an upload.
+func ParseUploadTarget(target string) (name string, ok bool) {
+	name, ok = strings.CutPrefix(target, "upload:")
+	if !ok || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // Job is one unit of durable background work.
 type Job struct {
 	ID   int64 `json:"id"`

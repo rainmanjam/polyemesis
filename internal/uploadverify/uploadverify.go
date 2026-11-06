@@ -98,10 +98,10 @@ const ProbeTimeout = 10 * time.Minute
 //
 // It names the UPLOAD, which is what makes the queue's Unique fold do the
 // deduplication: pressing "Check again" twice produces one job. The spelling is
-// shared with playlistmedia.NormaliseTarget on purpose -- the two are about the
+// jobs.UploadTarget's, shared with playlistmedia.NormaliseTarget on purpose -- the two are about the
 // same thing and an operator reading the jobs page should see one noun -- and
 // they cannot collide, because Unique folds on Kind AND Target.
-func Target(upload string) string { return "upload:" + upload }
+func Target(upload string) string { return jobs.UploadTarget(upload) }
 
 // Registry is the part of *jobs.Queue this package needs.
 type Registry interface {

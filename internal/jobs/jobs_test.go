@@ -260,3 +260,20 @@ func TestExhaustedComparesStartsAgainstTheCeiling(t *testing.T) {
 		})
 	}
 }
+
+func TestUploadTargetRoundTripsAndIsNotARecording(t *testing.T) {
+	for _, name := range []string{"intro.mp4", "a b.ts", "x:y"} {
+		got, ok := ParseUploadTarget(UploadTarget(name))
+		if !ok || got != name {
+			t.Errorf("round trip of %q gave %q, %v", name, got, ok)
+		}
+	}
+	for _, target := range []string{"", "upload:", RecordingTarget(7), "recording:upload:x"} {
+		if name, ok := ParseUploadTarget(target); ok {
+			t.Errorf("ParseUploadTarget(%q) = %q, true", target, name)
+		}
+	}
+	if _, ok := ParseRecordingTarget(UploadTarget("7")); ok {
+		t.Error("an upload target parsed as a recording")
+	}
+}
