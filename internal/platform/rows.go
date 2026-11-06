@@ -1,8 +1,5 @@
 package platform
 
-// rowsCheckedOn is the date the platform rows below were last checked against each source.
-const rowsCheckedOn = "2026-08-06"
-
 const (
 	obsSource = "obsproject/obs-studio plugins/rtmp-services/data/services.json (schema v5), fetched 2026-08-13"
 	// kickSource is Kick's Stream Settings page. It states no audio bitrate and
@@ -68,7 +65,7 @@ func buildRows() []Row {
 			Presets: []string{"youtube", "youtube-rtmps"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
-				Source: "https://support.google.com/youtube/answer/2853702", Checked: rowsCheckedOn,
+				Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06", // NOSONAR S1192: each row's check date is its own fact; they only coincide today
 			},
 			// 51000 is YouTube's MAXIMUM video bitrate (OBS's data); the 12000 in
 			// Guidance is its RECOMMENDED figure for 1080p60. Different facts, kept
@@ -96,7 +93,7 @@ func buildRows() []Row {
 			Presets: []string{"twitch", "twitch-rtmps"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 6000, KbpsMax: 6000, GOPSeconds: 2,
-				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: rowsCheckedOn,
+				Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: "2026-08-06",
 			},
 			// Audio 160 kbps is Twitch's own figure. 6000 kbps video is advice, the
 			// Guidance above, and Twitch states no maximum, so there is no video
@@ -121,7 +118,7 @@ func buildRows() []Row {
 			PerChannelIngest: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 1000, KbpsMax: 8000, GOPSeconds: 2,
-				Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: rowsCheckedOn,
+				Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
 			},
 			Ceilings:    &Ceilings{KeyintSeconds: 2, MaxVideoKbps: 8000, MaxFps: 60, Source: kickSource},
 			VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
@@ -136,7 +133,7 @@ func buildRows() []Row {
 			Presets: []string{"facebook"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4500, KbpsMax: 9000, GOPSeconds: 2,
-				Source: "https://www.facebook.com/business/help/162540111070395", Checked: rowsCheckedOn,
+				Source: "https://www.facebook.com/business/help/162540111070395", Checked: "2026-08-06",
 			},
 			Ceilings: &Ceilings{
 				KeyintSeconds: 2, MaxVideoKbps: 9000, MaxAudioKbps: 128, MaxFps: 60, Source: obsSource,
@@ -155,7 +152,7 @@ func buildRows() []Row {
 			Presets: []string{"x"}, PresetsSaveAsEnum: true, AcceptsDestinations: true,
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 3,
-				Source: "https://help.x.com/en/using-x/live-studio", Checked: rowsCheckedOn,
+				Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
 			},
 			Moderation:    &Moderation{Delete: true, TimeoutBan: true, Order: 5},
 			Chat:          Chat{SendMax: 140, Order: 4, OverlayOrder: 6},
@@ -171,7 +168,7 @@ func buildRows() []Row {
 			Chat:       Chat{OverlayOrder: 5},
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
-				Source: "https://rumble.support/help/livestream-settings", Checked: rowsCheckedOn,
+				Source: "https://rumble.support/help/livestream-settings", Checked: "2026-08-06",
 			},
 		},
 		{
@@ -208,7 +205,7 @@ func buildRows() []Row {
 			Presets: []string{"linkedin"},
 			Guidance: &Guidance{
 				Width: 1280, Height: 720, FPS: 30, KbpsMin: 3500, KbpsMax: 6000, GOPSeconds: 2,
-				Source: "https://www.linkedin.com/help/linkedin/answer/a567498/", Checked: rowsCheckedOn,
+				Source: "https://www.linkedin.com/help/linkedin/answer/a567498/", Checked: "2026-08-06",
 			},
 		},
 		{
@@ -217,7 +214,7 @@ func buildRows() []Row {
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 10000, KbpsMax: 10000, GOPSeconds: 2,
 				Source:  "https://faq.dailymotion.com/hc/en-us/articles/203655666-Encoding-parameters",
-				Checked: rowsCheckedOn,
+				Checked: "2026-08-06",
 			},
 		},
 		{
@@ -225,7 +222,7 @@ func buildRows() []Row {
 			Presets: []string{"owncast"},
 			Guidance: &Guidance{
 				Width: 1920, Height: 1080, FPS: 60, KbpsMin: 5000, KbpsMax: 5000, GOPSeconds: 2,
-				Source: "https://owncast.online/docs/broadcasting/", Checked: rowsCheckedOn,
+				Source: "https://owncast.online/docs/broadcasting/", Checked: "2026-08-06",
 			},
 		},
 	}
