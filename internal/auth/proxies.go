@@ -46,8 +46,27 @@ func NewProxies(trust bool, extra []netip.Prefix, onIgnored func(peer string)) *
 
 // Trusts reports whether r's own peer is a proxy whose forwarding headers
 // (X-Forwarded-For, X-Real-IP, X-Forwarded-Proto, X-Forwarded-Host) are
-// believed. Every reader of those headers asks this one rule.
-func (p *Proxies) Trusts(r *http.Request) bool { return p.trusts(socketHost(r)) }
+// believed. Every reader of those headers asks this one rule. When it says no
+// to a request that carried one of them, onIgnored hears about it once.
+func (p *Proxies) Trusts(r *http.Request) bool {
+	peer := socketHost(r)
+	if p.trusts(peer) {
+		return true
+	}
+	if p != nil && p.onIgnored != nil && forwarded(r) && p.told.CompareAndSwap(false, true) {
+		p.onIgnored(peer)
+	}
+	return false
+}
+
+func forwarded(r *http.Request) bool {
+	for _, h := range []string{"X-Forwarded-For", "X-Real-IP", "X-Forwarded-Proto", "X-Forwarded-Host"} {
+		if r.Header.Get(h) != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // trusts reports whether peer, a socket host with no port, is a proxy whose
 // headers are believed.
@@ -95,17 +114,11 @@ func (p *Proxies) trusts(peer string) bool {
 // client's own bytes. #647.
 func ClientIP(r *http.Request, p *Proxies) string {
 	peer := socketHost(r)
-	if p == nil {
+	if !p.Trusts(r) {
 		return peer
 	}
 	xff := r.Header.Get("X-Forwarded-For")
 	xri := strings.TrimSpace(r.Header.Get("X-Real-IP"))
-	if !p.trusts(peer) {
-		if (xff != "" || xri != "") && p.onIgnored != nil && p.told.CompareAndSwap(false, true) {
-			p.onIgnored(peer)
-		}
-		return peer
-	}
 	if xff != "" {
 		if i := strings.LastIndexByte(xff, ','); i >= 0 {
 			if last := strings.TrimSpace(xff[i+1:]); last != "" {

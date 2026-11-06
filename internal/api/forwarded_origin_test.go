@@ -35,15 +35,24 @@ func TestOAuthOriginBelievesForwardedHeadersOnlyFromAListedProxy(t *testing.T) {
 	}
 }
 
-func TestPlayoutOriginBelievesForwardedProtoOnlyFromAListedProxy(t *testing.T) {
+// With forwarding trust configured, X-Forwarded-Proto is believed only from
+// loopback or a listed proxy. Without it the header is believed as before: a
+// forged value only changes the forger's own response, and refusing it would
+// give http:// embed links behind a TLS proxy.
+func TestPlayoutOriginBelievesForwardedProtoOnlyFromAListedProxyWhenTrustIsConfigured(t *testing.T) {
 	p := auth.NewProxies(true, nil, nil)
-	if got := requestOrigin(forwardedReq("203.0.113.9:4000"), p); got != "http://internal:8080" {
-		t.Errorf("unlisted peer: origin = %q", got)
-	}
-	if got := requestOrigin(forwardedReq("127.0.0.1:4000"), p); got != "https://internal:8080" {
-		t.Errorf("trusted proxy: origin = %q", got)
-	}
-	if got := requestOrigin(forwardedReq("127.0.0.1:4000"), nil); got != "http://internal:8080" {
-		t.Errorf("no proxies configured: origin = %q", got)
+	for _, tc := range []struct {
+		name    string
+		peer    string
+		proxies *auth.Proxies
+		want    string
+	}{
+		{"unlisted peer, trust configured", "203.0.113.9:4000", p, "http://internal:8080"},
+		{"trusted proxy", "127.0.0.1:4000", p, "https://internal:8080"},
+		{"no trust configured keeps believing it", "203.0.113.9:4000", nil, "https://internal:8080"},
+	} {
+		if got := requestOrigin(forwardedReq(tc.peer), tc.proxies); got != tc.want {
+			t.Errorf("%s: origin = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

@@ -1085,7 +1085,7 @@ func requestOrigin(r *http.Request, proxies *auth.Proxies) string {
 	}
 	// Behind a terminating proxy r.TLS is nil even though the viewer is on
 	// https, and a link that downgrades them is worse than one that guesses.
-	if p := r.Header.Get("X-Forwarded-Proto"); p != "" && proxies.Trusts(r) {
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" && (proxies == nil || proxies.Trusts(r)) {
 		if i := strings.IndexByte(p, ','); i > 0 {
 			p = p[:i]
 		}

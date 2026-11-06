@@ -30,7 +30,7 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			guides[i].RedirectPath = origin + guides[i].RedirectPath
 			// Preflight the URI we are about to tell them to register, rather
 			// than letting the platform reject it after the fact.
-			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
+			guides[i].RedirectWarnings = redirectWarnings(s.cfg, s.proxies, r, guides[i].RedirectPath)
 		}
 		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
 	}

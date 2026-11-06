@@ -1,6 +1,8 @@
 // Package backoff is the one doubling-and-capped retry delay. MQTT reconnects,
 // webhook deliveries, offload retries and analytics polling each had their own
-// copy; what differed between them (jitter, a server's Retry-After, "no wait
+// copy. The offload multipart part retry (offload/multipart.go) deliberately
+// stays on its own doubling: it has no cap, a partBackoff the tests set to
+// microseconds, and a try count that bounds it instead. What differed between them (jitter, a server's Retry-After, "no wait
 // after the first failure") stays with the caller, because each has a reason.
 package backoff
 

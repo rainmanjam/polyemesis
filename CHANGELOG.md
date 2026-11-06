@@ -10,16 +10,15 @@ its first tagged release.
 
 ### Fixed
 
-- **Security: the session cookie's `Secure` flag and the client address now trust forwarded headers by
-  the same rule.** With `trustProxyHeaders` on, `X-Forwarded-For` was believed only from loopback and
-  the addresses in `trustedProxies`, but `X-Forwarded-Proto` was believed from any peer, so a client
-  reaching the listener directly could choose its own cookie flags. Both headers are now believed
-  only from those listed proxies. A proxy in another container or on another host must be listed in
-  `trustedProxies`, or the session cookie loses its `Secure` flag.
-  The same rule now decides the scheme and host of the OAuth redirect URI shown in Settings
-  (`X-Forwarded-Proto` / `X-Forwarded-Host`, previously believed from any peer whenever
-  `trustProxyHeaders` was on) and the scheme of the playout viewer links (`X-Forwarded-Proto`,
-  previously believed from any peer even with `trustProxyHeaders` off).
+- **The session cookie's `Secure` flag, the OAuth redirect URI and the client address now trust
+  forwarded headers by one rule.** With `trustProxyHeaders` on, `X-Forwarded-For` was believed only
+  from loopback and the addresses in `trustedProxies`, while `X-Forwarded-Proto` (cookie flag) and
+  `X-Forwarded-Proto` / `X-Forwarded-Host` (OAuth redirect URI) were believed from any peer. All
+  four headers are now believed only from loopback and `trustedProxies`, and the playout viewer
+  links follow the same rule once `trustProxyHeaders` is on. A proxy in another container or on
+  another host, including nginx or Caddy on the Docker host (`172.17.0.1`), must be listed in
+  `trustedProxies`, or the cookie loses its `Secure` flag and OAuth redirect URIs fall back to the
+  internal `http://` address; the startup log now says so.
 - **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
   login throttle already does. Keyed on the full address, a client holding one /64 could rotate
   addresses and never reach the limit.

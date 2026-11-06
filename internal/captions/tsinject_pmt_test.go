@@ -147,3 +147,17 @@ func TestAccessUnitsHeldWhenTheVideoPIDMovesGoOutOnTheirOwnPID(t *testing.T) {
 		t.Fatalf("held video went out after the PMT that moved it (video at %d, PMT at %d)", lastVideo, secondPMT)
 	}
 }
+
+// A PAT whose first program points at PMT PID 0 names nothing usable: PID 0 is
+// the PAT itself. The injector keeps the PMT PID it already learned.
+func TestAPATNamingPMTPIDZeroIsIgnored(t *testing.T) {
+	inj := NewInjector(NewSchedule(0))
+	inj.Write(psiPacket(mpegts.PIDPAT, 0, patSection(testPMTPID)))
+	if inj.pmtPID != testPMTPID {
+		t.Fatalf("setup: pmtPID = %#x, want %#x", inj.pmtPID, testPMTPID)
+	}
+	inj.Write(psiPacket(mpegts.PIDPAT, 1, patSection(0)))
+	if inj.pmtPID != testPMTPID {
+		t.Fatalf("pmtPID = %#x after a PAT naming PID 0, want it left at %#x", inj.pmtPID, testPMTPID)
+	}
+}

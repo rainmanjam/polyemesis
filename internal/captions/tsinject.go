@@ -19,8 +19,6 @@ import "github.com/rainmanjam/polyemesis/internal/mpegts"
 // untouched and counted in Stats, because the A/53 SEI this path carries is an
 // H.264 construct.
 
-const ()
-
 // InjectorStats counts what the injector did. Pictures is every access unit
 // that had a picture start on the H.264 PID, and Injected is how many of those
 // received an SEI. Unsupported is the number of non-H.264 video streams found in

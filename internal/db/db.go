@@ -286,8 +286,7 @@ func Open(path string, opts ...Option) (*DB, error) {
 
 // migrationStep is one idempotent schema or data step run by Open, in the order of migrationSteps.
 type migrationStep struct {
-	name string
-	fn   func(*DB) error
+	fn func(*DB) error
 	// bare returns the step's error as it is, without the "migrate:" prefix.
 	bare bool
 }
@@ -299,98 +298,98 @@ var migrationSteps = []migrationStep{
 
 	// Adds destinations.rendition_id to a database created before renditions
 	// existed; CREATE TABLE IF NOT EXISTS cannot do it.
-	{name: "MigrateRenditions", fn: (*DB).MigrateRenditions},
+	{fn: (*DB).MigrateRenditions},
 
 	// Same story one release later: the expert-mode columns, plus draining the
 	// sidecar table they were first stored in.
-	{name: "MigrateDestinationExpertArgs", fn: (*DB).MigrateDestinationExpertArgs},
+	{fn: (*DB).MigrateDestinationExpertArgs},
 
 	// platform_accounts.scope_ver, so a token minted before a scope was added is
 	// re-consented rather than silently used with the narrower grant it has.
-	{name: "MigratePlatformAccountScopeVer", fn: (*DB).MigratePlatformAccountScopeVer},
+	{fn: (*DB).MigratePlatformAccountScopeVer},
 
 	// And once more for the rendition aspect-conversion columns.
-	{name: "MigrateRenditionAspect", fn: (*DB).MigrateRenditionAspect},
+	{fn: (*DB).MigrateRenditionAspect},
 
 	// users.token_epoch, so a password change can revoke sessions that are
 	// already signed and in somebody's cookie jar.
-	{name: "MigrateUserTokenEpoch", fn: (*DB).MigrateUserTokenEpoch},
+	{fn: (*DB).MigrateUserTokenEpoch},
 
 	// users.tour_completed_at, so the onboarding tour is offered once per
 	// INSTALL rather than once per browser -- see MigrateUserTourCompleted.
-	{name: "MigrateUserTourCompleted", fn: (*DB).MigrateUserTourCompleted},
+	{fn: (*DB).MigrateUserTourCompleted},
 
 	// api_tokens.scope, so a token minted for a monitoring script is not
 	// automatically a token that can delete a destination. Tokens that predate
 	// the column are backfilled to 'admin', which is what they already were.
-	{name: "MigrateAPITokenScope", fn: (*DB).MigrateAPITokenScope},
+	{fn: (*DB).MigrateAPITokenScope},
 
 	// hooks.allow_private_target, so a hook aimed at a private address is
 	// refused at save time unless the operator opted in on that hook.
-	{name: "MigrateHookAllowPrivateTarget", fn: (*DB).MigrateHookAllowPrivateTarget},
+	{fn: (*DB).MigrateHookAllowPrivateTarget},
 
 	// alert_rules.allow_private_target, the same guard one table over: an alert
 	// rule aimed at a private address is refused at save time, and at dial
 	// time, unless the operator opted in on that rule.
-	{name: "MigrateAlertRuleAllowPrivateTarget", fn: (*DB).MigrateAlertRuleAllowPrivateTarget},
+	{fn: (*DB).MigrateAlertRuleAllowPrivateTarget},
 
 	// timeline_events.subject, the alert key a timeline row is about, so the
 	// Monitoring timeline can link a row to that subject's log (A13).
-	{name: "MigrateTimelineSubject", fn: (*DB).MigrateTimelineSubject},
+	{fn: (*DB).MigrateTimelineSubject},
 
 	// platform_creds' last-verdict columns, so the settings page can show
 	// whether a stored pair was accepted without re-running the outbound check
 	// on every load (settings-council R10). See MigratePlatformCredsCheck.
-	{name: "MigratePlatformCredsCheck", fn: (*DB).MigratePlatformCredsCheck},
+	{fn: (*DB).MigratePlatformCredsCheck},
 
 	// schedules.all_destinations, the explicit "every destination", and the
 	// fold of every empty start/stop row into it (app-council A54). See
 	// MigrateScheduleAllDestinations.
-	{name: "MigrateScheduleAllDestinations", fn: (*DB).MigrateScheduleAllDestinations},
+	{fn: (*DB).MigrateScheduleAllDestinations},
 
 	// The partial unique index that makes two active jobs for one unique target
 	// impossible. A migration rather than a line in schema.sql because the rule
 	// is partial and because an install that already holds a duplicate pair
 	// needs them folded before the index can exist -- see MigrateJobUniqueTarget.
-	{name: "MigrateJobUniqueTarget", fn: (*DB).MigrateJobUniqueTarget},
+	{fn: (*DB).MigrateJobUniqueTarget},
 
 	// Wave 3 reserved slots (wave3_reserved.go). Placed BEFORE MigrateSources
 	// and the backfill, because a slot that adds a column to destinations,
 	// renditions or recordings must land before the steps that read those tables
 	// are written against their final shape. Empty until a lane fills one in.
-	{name: "MigrateWave3RolloverState", fn: (*DB).MigrateWave3RolloverState},
-	{name: "MigrateWave3RecurringTemplates", fn: (*DB).MigrateWave3RecurringTemplates},
-	{name: "MigrateWave3CaptionSettings", fn: (*DB).MigrateWave3CaptionSettings},
-	{name: "MigrateWave3VODTrack", fn: (*DB).MigrateWave3VODTrack},
-	{name: "MigrateWave3YouTubeVertical", fn: (*DB).MigrateWave3YouTubeVertical},
-	{name: "MigrateWave3XTitle", fn: (*DB).MigrateWave3XTitle},
-	{name: "MigrateWave3XTweet", fn: (*DB).MigrateWave3XTweet},
-	{name: "MigrateChatSanctions", fn: (*DB).MigrateChatSanctions},
+	{fn: (*DB).MigrateWave3RolloverState},
+	{fn: (*DB).MigrateWave3RecurringTemplates},
+	{fn: (*DB).MigrateWave3CaptionSettings},
+	{fn: (*DB).MigrateWave3VODTrack},
+	{fn: (*DB).MigrateWave3YouTubeVertical},
+	{fn: (*DB).MigrateWave3XTitle},
+	{fn: (*DB).MigrateWave3XTweet},
+	{fn: (*DB).MigrateChatSanctions},
 
 	// Wave 4 #4: cross-platform analytics -- streams, viewer samples and
 	// chat tallies. New tables only; see analytics.go.
-	{name: "MigrateWave4Analytics", fn: (*DB).MigrateWave4Analytics},
+	{fn: (*DB).MigrateWave4Analytics},
 
 	// Highlight suggestions and vertical-export templates (Wave 4 #5).
-	{name: "MigrateClipHighlights", fn: (*DB).MigrateClipHighlights},
+	{fn: (*DB).MigrateClipHighlights},
 
 	// The clip publishing ledger (Wave 4 #5c). New table only; see
 	// clip_publications.go.
-	{name: "MigrateClipPublications", fn: (*DB).MigrateClipPublications},
+	{fn: (*DB).MigrateClipPublications},
 
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
-	{name: "MigrateSources", fn: (*DB).MigrateSources},
+	{fn: (*DB).MigrateSources},
 
 	// AFTER MigrateSources, which can create Main with an unset mode. A source
 	// the console created on 0.10.0 or earlier has mode "" and received SRT on
 	// the shared port; the port now admits only SRT-mode sources, so the mode
 	// they ran with is written down or their encoders are refused on the first
 	// boot after the upgrade. See MigrateUnsetSourceIngestMode.
-	{name: "MigrateUnsetSourceIngestMode", fn: (*DB).MigrateUnsetSourceIngestMode},
+	{fn: (*DB).MigrateUnsetSourceIngestMode},
 
 	// BEFORE the backfill below, because a key this clears is a key that does
 	// not then need sealing, and because both of them end in the same
@@ -398,12 +397,12 @@ var migrationSteps = []migrationStep{
 	// refuses a stream key on a kind that cannot carry one, so a row upgraded
 	// into this release carrying one would be unsaveable -- and unfixable, since
 	// no screen shows a key field for those kinds. See MigrateStrandedStreamKeys.
-	{name: "MigrateStrandedStreamKeys", fn: (*DB).MigrateStrandedStreamKeys},
+	{fn: (*DB).MigrateStrandedStreamKeys},
 
 	// Destinations on a platform that has shut down (Trovo, 30 June 2026) are
 	// switched off and kept, and that platform's tokens and app credentials are
 	// dropped. See MigrateRetiredPlatforms.
-	{name: "MigrateRetiredPlatforms", fn: (*DB).MigrateRetiredPlatforms},
+	{fn: (*DB).MigrateRetiredPlatforms},
 
 	// AFTER every migration, because it writes to two columns the migrations
 	// above are what create, and because it is the one step that needs the
@@ -413,15 +412,15 @@ var migrationSteps = []migrationStep{
 	// with the ALTERs: it is guarded by "is there still plaintext here", not by
 	// "did this pass add the column", so it stays correct if it is interrupted
 	// and correct if it runs a thousand times.
-	{name: "backfillDestinationStreamKeys", fn: (*DB).backfillDestinationStreamKeys},
+	{fn: (*DB).backfillDestinationStreamKeys},
 
 	// Every automod model key bound to the endpoint it has been sent to. See
 	// MigrateAutomodKeyBinding.
-	{name: "MigrateAutomodKeyBinding", fn: (*DB).MigrateAutomodKeyBinding},
+	{fn: (*DB).MigrateAutomodKeyBinding},
 
 	// LAST of all -- see MigrateSchemaVersion's comment for why the order
 	// matters and what this does and does not protect (issue #498).
-	{name: "MigrateSchemaVersion", fn: (*DB).MigrateSchemaVersion, bare: true},
+	{fn: (*DB).MigrateSchemaVersion, bare: true},
 }
 
 // currentSchemaVersion is stamped into PRAGMA user_version by every

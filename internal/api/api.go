@@ -872,9 +872,10 @@ func New(o Options) *Server {
 		// container, or on another box, never listed -- would otherwise log
 		// on every request, or worse, say nothing while every client behind
 		// that proxy shares one throttle key.
-		s.log.Warn("ignored X-Forwarded-For from a peer that is not a trusted proxy",
+		s.log.Warn("ignored X-Forwarded-* / X-Real-IP headers from a peer that is not a trusted proxy",
 			"peer", peer,
-			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml")
+			"cost", "OAuth redirect URIs show the internal http:// address and fail at the provider, the session cookie is not marked Secure, and every client behind the proxy shares one throttle key",
+			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml (nginx or Caddy on the Docker host appears as 172.17.0.1, not loopback)")
 	})
 	s = &Server{
 		log:           o.Log,

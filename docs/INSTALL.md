@@ -895,8 +895,12 @@ Three details in that unit are load-bearing:
 If nginx, Caddy or Traefik already terminates TLS, set `trustProxyHeaders: true`
 and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
 does not bind `:80` and does not compete with the proxy for ACME challenges.
-Forwarded client addresses are believed only from loopback and from
-`trustedProxies`; list the proxy there if it is not on the same host.
+The forwarded headers (`X-Forwarded-Proto`, `-Host`, `-For`, `X-Real-IP`) are
+believed only from loopback and from `trustedProxies`; list the proxy there if
+it is not on the same host. In Docker mode a proxy on the host reaches the
+container as `172.17.0.1`, not loopback, so it must be listed. An unlisted proxy
+leaves the session cookie without `Secure` and OAuth redirect URIs on the
+internal `http://` address.
 
 **Bind the plaintext port to loopback, in the unit, not only in
 `config.yaml`.** The shipped `polyemesis.service` passes `--addr :8080`, and a

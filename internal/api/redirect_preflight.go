@@ -25,10 +25,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
 )
 
-func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []string {
+func redirectWarnings(cfg config.Config, proxies *auth.Proxies, r *http.Request, redirectURI string) []string {
 	u, err := url.Parse(redirectURI)
 	if err != nil || u.Host == "" {
 		// Nothing useful to say about a URI we cannot read. Saying nothing
@@ -65,10 +66,12 @@ func redirectWarnings(cfg config.Config, r *http.Request, redirectURI string) []
 			host, configured, configured))
 	}
 
-	// Only when the headers are NOT trusted. With trustProxyHeaders on, origin()
-	// has already reconstructed the browser-visible address from them, so the
-	// URI shown is the right one and a warning would be noise.
-	if !cfg.TrustProxyHeaders && r.Header.Get("X-Forwarded-Host") != "" {
+	// Only when this request's peer is NOT a trusted proxy. From one, origin()
+	// has already reconstructed the browser-visible address from the headers,
+	// so the URI shown is the right one and a warning would be noise. A proxy
+	// that trustProxyHeaders is on for but that is not listed in trustedProxies
+	// is exactly the case this exists for.
+	if !proxies.Trusts(r) && r.Header.Get("X-Forwarded-Host") != "" {
 		out = append(out, fmt.Sprintf(
 			"A reverse proxy is forwarding this request, but trustProxyHeaders is off, "+
 				"so polyemesis cannot see the address your browser actually used. The "+
