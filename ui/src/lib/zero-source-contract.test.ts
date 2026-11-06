@@ -188,7 +188,7 @@ describe("the screens that meet an install with no source", () => {
       "re-reading it, so an install whose engines did not start is told it has no source")
       .not.toMatch(/isNoSource\(err\)\)\s*\{\s*setSourceCount\(0\)/);
     expect(src, "the refusal branch does not re-read the count")
-      .toMatch(/isNoSource\(err\)\)\s*\{\s*const n = await readSourceCount\(\)/);
+      .toMatch(/isNoSource\(err\)\)\s*\{\s*const n = await refreshSources\(\)/);
   });
 
   it("the destination dialog does not raise a fault toast for an empty install", () => {
