@@ -100,7 +100,7 @@ var redactAllowlist = map[string]string{
 		"alerts.Event.Redacted. Whole strings, never argv elements.",
 	"internal/hooks/dispatch.go": "residual only. The boundary on this path is the per-worker " +
 		"redact.SecretSet seeded from the hook's URL path+query and signing secret (#160), " +
-		"and the transport error goes through alerts.ClientErrorText first because Redact " +
+		"and the transport error goes through ClientErrorText first because Redact " +
 		"is a NO-OP on an https path secret.",
 
 	// --- the read-scoped WebSocket view ---

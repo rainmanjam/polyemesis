@@ -72,7 +72,7 @@ func TestRedactKnownResiduals(t *testing.T) {
 			want: "https://host/a/b/" + k,
 			why: "only the keyCarrying schemes have their last segment blanked. A " +
 				"Slack/Discord webhook secret lives exactly here -- use " +
-				"RedactWebhookURL, and see alerts.ClientErrorText for the error " +
+				"RedactWebhookURL, and see ClientErrorText for the error " +
 				"path. Running Redact over this string is a NO-OP and must never " +
 				"be recorded as a fix",
 		},

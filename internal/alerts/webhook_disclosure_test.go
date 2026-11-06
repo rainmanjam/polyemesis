@@ -74,7 +74,7 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 				t.Fatalf("the fixture does not reproduce the leak: %v", tc.err)
 			}
 
-			got := ClientErrorText(tc.err)
+			got := redact.ClientErrorText(tc.err)
 			if strings.Contains(got, slackSecret) || strings.Contains(got, slackPath) {
 				t.Errorf("ClientErrorText leaked the webhook path: %q", got)
 			}
@@ -97,15 +97,15 @@ func TestClientErrorTextKeepsTheHostAndLosesThePath(t *testing.T) {
 
 	t.Run("a non-url.Error is passed through unchanged", func(t *testing.T) {
 		err := errors.New("endpoint returned 404")
-		if got := ClientErrorText(err); got != err.Error() {
-			t.Errorf("ClientErrorText(%v) = %q, want it unchanged: there is no URL "+
+		if got := redact.ClientErrorText(err); got != err.Error() {
+			t.Errorf("redact.ClientErrorText(%v) = %q, want it unchanged: there is no URL "+
 				"wrapper here and inventing one would lose the message", err, got)
 		}
 	})
 
 	t.Run("nil is empty", func(t *testing.T) {
-		if got := ClientErrorText(nil); got != "" {
-			t.Errorf("ClientErrorText(nil) = %q, want \"\"", got)
+		if got := redact.ClientErrorText(nil); got != "" {
+			t.Errorf("redact.ClientErrorText(nil) = %q, want \"\"", got)
 		}
 	})
 }
@@ -226,7 +226,7 @@ func TestNotifierTestReturnsAMaskedError(t *testing.T) {
 // from a DNS problem. The host is published deliberately by RedactedURL, so it
 // must not be in the set.
 func TestEndpointSecretsExcludesTheHost(t *testing.T) {
-	got := EndpointSecrets(slackURL)
+	got := redact.EndpointSecrets(slackURL)
 	if len(got) == 0 {
 		t.Fatal("EndpointSecrets returned nothing for a Slack webhook URL")
 	}
@@ -255,7 +255,7 @@ func TestEndpointSecretsExcludesTheHost(t *testing.T) {
 	}
 
 	// A query-carried token is the other provider shape.
-	q := redact.NewSecretSet(nil, EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
+	q := redact.NewSecretSet(nil, redact.EndpointSecrets("https://example.test/hook?token=QUERYSECRET123456")...)
 	if out := q.Scrub(`{"error":"bad token QUERYSECRET123456"}`); strings.Contains(out, "QUERYSECRET123456") {
 		t.Errorf("a query-carried credential survived: %q", out)
 	}

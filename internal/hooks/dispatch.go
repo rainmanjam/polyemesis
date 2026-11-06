@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -140,7 +139,7 @@ type DeliveryRecord struct {
 	// its entire credential in that URL's PATH. redact.Redact does not mask an
 	// https path and never did, so this field disclosed a working webhook
 	// secret at GET /api/v1/hooks/{id}/deliveries to any token that could read
-	// it. It now goes through alerts.ClientErrorText, then this hook's exact
+	// it. It now goes through redact.ClientErrorText, then this hook's exact
 	// SecretSet, then Redact as the residual.
 	//
 	// Response is the ENDPOINT's own body, i.e. somebody else's text, where the
@@ -551,7 +550,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 	// path+query, which is where a Slack or Discord webhook keeps its entire
 	// credential, and the signing secret, which an endpoint that verifies
 	// signatures may quote back when verification fails.
-	secrets := redact.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
+	secrets := redact.NewSecretSet(d.log, append(redact.EndpointSecrets(hook.URL), hook.Secret)...)
 
 	started := d.now()
 	rec := DeliveryRecord{
@@ -578,7 +577,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		// Redact call that used to be here masked nothing at all on the one
 		// failure mode that mattered. Redact still runs, last and as the
 		// residual, for a credential neither of the other two could know about.
-		rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))
+		rec.Error = redact.Redact(secrets.Scrub(redact.ClientErrorText(err)))
 		if !retry || attempt == hook.MaxAttempts {
 			break
 		}
@@ -711,7 +710,7 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 	// handleTestHook put it straight into a 502 body. A false statement of
 	// coverage is worse than no statement, because it is the thing the next
 	// reader relies on.
-	secrets := redact.NewSecretSet(d.log, append(alerts.EndpointSecrets(hook.URL), hook.Secret)...)
+	secrets := redact.NewSecretSet(d.log, append(redact.EndpointSecrets(hook.URL), hook.Secret)...)
 
 	started := d.now()
 	status, snippet, _, err := d.attempt(ctx, hook, body, env)
@@ -725,7 +724,7 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 		res.Signature = Sign(hook.Secret, d.now().Unix(), body)
 	}
 	if err != nil {
-		err = errors.New(redact.Redact(secrets.Scrub(alerts.ClientErrorText(err))))
+		err = errors.New(redact.Redact(secrets.Scrub(redact.ClientErrorText(err))))
 	}
 	return res, err
 }
