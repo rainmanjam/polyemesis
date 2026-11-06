@@ -326,12 +326,12 @@ fi
 
 # NON-VACUITY FOR EVERYTHING IN STEP 6. A blank error would satisfy every "no
 # credential" check below while telling the operator nothing, which is the trade
-# alerts.ClientErrorText's doc comment explicitly refuses: the three failures
+# redact.ClientErrorText's doc comment explicitly refuses: the three failures
 # anyone has to tell apart -- a name that will not resolve, a refused
 # connection, a certificate that will not verify -- differ only in wording.
 #
 # Proven able to fail against the committed tree by changing deliver's
-# `rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))` to
+# `rec.Error = redact.Redact(secrets.Scrub(redact.ClientErrorText(err)))` to
 # `rec.Error = ""`. THAT MUTATION PASSES EVERY "carries no credential" CHECK IN
 # STEP 6, which is the entire reason this check exists beside them.
 if between "$(num "$T" timeoutErrLen)" 1 100000 && is "$T" timeoutErrNamesHost true; then
@@ -374,7 +374,7 @@ fi
 # still name its host, so a scrub that blanked the field cannot pass here.
 #
 # Proven able to fail against the committed tree in both directions: by changing
-# deliver's `rec.Error = redact.Redact(secrets.Scrub(alerts.ClientErrorText(err)))`
+# deliver's `rec.Error = redact.Redact(secrets.Scrub(redact.ClientErrorText(err)))`
 # to `redact.Redact(err.Error())` (both HasSecret go true), and by setting it to
 # "" (both lose the host). BOTH LAYERS HAVE TO GO for the credential to appear:
 # ClientErrorText rebuilds the URL and the SecretSet then removes the literal, so
@@ -531,7 +531,7 @@ fi
 # check that keeps that claim true.
 #
 # Proven able to fail against the committed tree by changing Test's
-# `err = errors.New(redact.Redact(secrets.Scrub(alerts.ClientErrorText(err))))`
+# `err = errors.New(redact.Redact(secrets.Scrub(redact.ClientErrorText(err))))`
 # to `err = errors.New(err.Error())`: hasSecret goes true. Its own control --
 # testDeadRawHasSecret -- proven by the rawErrorCarries mutation in step 6.
 if is "$B" testDeadRawHasSecret true && is "$B" testDeadFailed true \
