@@ -798,7 +798,7 @@ func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
 	if len(kicks) == 0 {
 		return nil, false
 	}
-	if r.Method != http.MethodPost || len(kicks) == 1 {
+	if r.Method != http.MethodPost {
 		return kicks[0].Handler(), true
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))

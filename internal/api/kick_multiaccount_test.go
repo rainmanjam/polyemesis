@@ -99,3 +99,56 @@ func TestKickWebhookReachesTheAdapterForItsBroadcaster(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// One connected account is no exception: a delivery for a channel that is not
+// attached here is dropped, not credited to the only account there is.
+func TestKickWebhookForAForeignChannelIsDroppedEvenWithOneAdapter(t *testing.T) {
+	s, _, _ := testServer(t, config.Config{})
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	a, err := chat.NewKick(chat.KickConfig{
+		BroadcasterUserID: 111, Channel: "only", Token: chat.StaticToken("t"),
+		CallbackSecret: s.kickCallbackSecret(),
+		Verify:         func(*http.Request, []byte) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.chat.Attach(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(3 * time.Second); a.Health().State == chat.StateConnecting; {
+		if time.Now().After(deadline) {
+			t.Fatal("adapter never left connecting")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	ev := func(id, bid, text string) string {
+		return `{"message_id":"` + id + `","broadcaster":{"user_id":` + bid +
+			`,"channel_slug":"x"},"sender":{"user_id":7,"username":"v"},"content":"` + text + `"}`
+	}
+	if code := kickDelivery(t, s, ev("f1", "999", "foreign")); code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	if code := kickDelivery(t, s, ev("f2", "111", "mine")); code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		hist := s.chat.History(0)
+		if len(hist) >= 1 {
+			for _, m := range hist {
+				if m.Text == "foreign" {
+					t.Fatal("a foreign channel's chat was credited to the only account")
+				}
+			}
+			if len(hist) == 1 && hist[0].Text == "mine" {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("history = %v, want only 'mine'", hist)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

@@ -634,6 +634,7 @@ func TestYouTubeLimitsAreToldApart(t *testing.T) {
 	}{
 		{"quotaExceeded", CauseQuota, false, "midnight Pacific"},
 		{"dailyLimitExceeded", CauseQuota, false, "midnight Pacific"},
+		{"dailyLimitExceededUnreg", CauseQuota, false, "midnight Pacific"},
 		{"rateLimitExceeded", CauseRateLimited, true, "slow down"},
 		{"userRateLimitExceeded", CauseRateLimited, true, "slow down"},
 		{"uploadLimitExceeded", CauseUploadLimited, false, "per-channel limit"},
