@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.15.0] — 2026-11-06
+
 ### Changed
 
 - **A Kick or Twitch ingest URL without `/app` is refused when it is saved.** Kick's dashboard
@@ -35,7 +39,7 @@ its first tagged release.
   application, so repeated quick refusals now hold the destination instead of restarting it for
   ever. For an IVS URL without `/app`, the failure reason also carries a new `urlFix` field with
   the URL that works. The card then shows **Server URL is missing /app** with that URL, the alert
-  and webhook sentence names it, and both replace the stream-key advice. Three new FFmpeg 9
+  sentence names it, and both replace the stream-key advice. Three new FFmpeg 9
   fixtures, captured against a local listener that drops the connection after the RTMP connect,
   pin this (`internal/failreason/testdata`).
 - **A destination card no longer shows LIVE before anything is on air.** The server reports a
@@ -7097,7 +7101,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/rainmanjam/polyemesis/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/rainmanjam/polyemesis/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/rainmanjam/polyemesis/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/rainmanjam/polyemesis/compare/v0.11.0...v0.12.0
