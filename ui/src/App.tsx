@@ -7,6 +7,7 @@ import { LazyBoundary } from "@/components/ErrorBoundary";
 import { api, ApiError } from "@/lib/api";
 import { onSessionEnded } from "@/lib/session";
 import { overlayLocation } from "@/lib/overlay";
+import { setDisplayTimeZone } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
@@ -99,6 +100,19 @@ function RouteFallback() {
   );
 }
 
+/** The install's display zone, read once as the console starts and BEFORE any
+ *  page draws, so every clock is in it on the first paint -- including on a
+ *  cold load onto a page that never reads settings itself. A read that fails
+ *  leaves UTC, which is also the default; it must not keep the console from
+ *  opening. A save updates the zone itself (api.putSettings). */
+async function loadDisplayZone(): Promise<void> {
+  try {
+    setDisplayTimeZone((await api.getSettings()).display?.timeZone);
+  } catch {
+    // UTC until the next save.
+  }
+}
+
 type Gate =
   | { phase: "loading" }
   | { phase: "setup" }
@@ -121,6 +135,7 @@ export default function App() {
         return;
       }
       const me = await api.me();
+      await loadDisplayZone();
       setGate({ phase: "ready", username: me.username });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {

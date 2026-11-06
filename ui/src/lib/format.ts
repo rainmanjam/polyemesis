@@ -112,6 +112,22 @@ export function clockTime(iso: string): string {
   return d.toLocaleTimeString(undefined, { timeZone: displayZone, hour12: false });
 }
 
+/** The clock to the minute, in the console's zone ("14:02"). */
+export function clockMinutes(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { timeZone: displayZone, hour12: false, hour: "2-digit", minute: "2-digit" });
+}
+
+/** The calendar date alone, in the console's zone. */
+export function dateOnly(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { timeZone: displayZone });
+}
+
 /** A moment worth reading at a glance: the clock alone when it falls on
  *  today's date in the console's zone, otherwise the date as well. A one-day
  *  timeout ending tomorrow, or a ban placed last week, must not read as a bare

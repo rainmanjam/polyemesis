@@ -692,20 +692,13 @@ export const api = {
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
   // --- settings ---
-  /* THE CLOCKS FOLLOW THE SETTINGS, and this is the only place they can.
-   *
-   * Five pages fetch settings independently. Wiring the display zone into any
-   * one of them would leave the console reading in a different zone depending
-   * on which page you happened to land on first -- which is a more confusing
-   * version of the problem the setting exists to solve. Doing it in the client
-   * means no caller can forget, including one written later.
-   *
-   * On the write path too, so a save takes effect on the screen that made it
-   * rather than at the next reload. */
+  /* A plain read. The console's display zone is NOT set here: App reads it
+   * once at start (see loadDisplayZone), before any page draws a clock, so it
+   * no longer depends on which page happened to call this first. A save does
+   * update it, in putSettings below, so the screen that made the change reads
+   * in the new zone at once. */
   getSettings: async (): Promise<Settings> => {
-    const s = await get<Settings>("/settings");
-    setDisplayTimeZone(s.display?.timeZone);
-    return s;
+    return get<Settings>("/settings");
   },
   /** Saves the settings and returns THE SETTINGS, not the whole response.
    *
@@ -745,7 +738,7 @@ export const api = {
     }
     const { reload: _reload, ...saved } = result;
     // The screen that made the change reads in the new zone immediately,
-    // rather than at the next reload -- see getSettings above.
+    // rather than at the next reload.
     setDisplayTimeZone((saved as Settings).display?.timeZone);
     return saved as Settings;
   },

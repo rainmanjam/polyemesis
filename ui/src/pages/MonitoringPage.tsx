@@ -954,7 +954,7 @@ export function MonitoringPage() {
                   dataKey="t"
                   type="number"
                   domain={["dataMin", "dataMax"]}
-                  tickFormatter={(v) => new Date(v).toLocaleTimeString(undefined, { hour12: false }).slice(0, 5)}
+                  tickFormatter={(v) => clockTime(new Date(v).toISOString()).slice(0, 5)}
                   stroke="var(--subtle-foreground)"
                   tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }}
                   tickLine={false}
@@ -980,7 +980,7 @@ export function MonitoringPage() {
                     fontSize: 12,
                     fontFamily: "var(--font-mono)",
                   }}
-                  labelFormatter={(v) => new Date(v as number).toLocaleTimeString(undefined, { hour12: false })}
+                  labelFormatter={(v) => clockTime(new Date(v as number).toISOString())}
                   formatter={(v) => [kbps(v as number), t("chrome.ingest")]}
                 />
                 {bitrateFloor != null && (
