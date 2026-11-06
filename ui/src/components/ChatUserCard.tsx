@@ -18,6 +18,7 @@ import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { chatActionSupport } from "@/lib/chatModeration";
 import { chatSanctionStatus } from "@/lib/status";
 import { clockTime, dayAwareTime } from "@/lib/format";
+import { useAuthorInk } from "@/hooks/useAppliedTheme";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
 
@@ -77,6 +78,7 @@ export function ChatUserCard({
    * automation lists were moved onto. */
   const [read, setRead] = useState<ReadState<CardData>>(pendingRead());
   const card = mayClaim(read) ? read.value : null;
+  const cardColour = useAuthorInk(card?.color);
   const failed = readFailed(read);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
@@ -230,7 +232,7 @@ export function ChatUserCard({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span style={card?.color ? { color: card.color } : undefined}>
+            <span style={cardColour ? { color: cardColour } : undefined}>
               {card?.name || authorName}
             </span>
             {card?.broadcaster && <Badge variant="armed">{t("chatCard.broadcaster")}</Badge>}

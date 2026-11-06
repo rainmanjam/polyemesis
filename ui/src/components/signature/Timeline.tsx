@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { useAppliedTheme } from "@/hooks/useAppliedTheme";
 // The timecode and sprite functions this component draws with live in lib
 // because the clip editor needs them too. See lib/timeline.ts for why they are
 // not here.
@@ -188,6 +189,10 @@ export function Timeline({
   const dragRef = useRef<DragKind>(null);
   const dragOffsetRef = useRef(0);
 
+  // The canvas reads its palette inside draw(); depending on the theme makes
+  // the draw effect below run again when it flips, repainting at once.
+  const theme = useAppliedTheme();
+
   const detail = variant === "detail";
   const height = detail ? DETAIL_HEIGHT : OVERVIEW_HEIGHT;
   const span = Math.max(1, viewEndMs - viewStartMs);
@@ -237,6 +242,7 @@ export function Timeline({
       windowMs,
     });
   }, [
+    theme,
     width,
     height,
     detail,
