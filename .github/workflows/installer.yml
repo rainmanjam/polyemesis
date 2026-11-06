@@ -17,11 +17,13 @@ on:
     paths:
       - "scripts/install.sh"
       - "scripts/acceptance-install.sh"
+      - "scripts/check-installer-flags.sh"
       - ".github/workflows/installer.yml"
   pull_request:
     paths:
       - "scripts/install.sh"
       - "scripts/acceptance-install.sh"
+      - "scripts/check-installer-flags.sh"
       - ".github/workflows/installer.yml"
   # Distributions change under us; a monthly run catches a moved floor before a
   # user does.
@@ -59,18 +61,12 @@ jobs:
           echo "$out" | head -3
           echo "$out" | grep -q -- "--check" || { echo "usage does not document --check"; exit 1; }
 
+      # Each bad flag must FAIL. A validator that accepts nonsense is worse than
+      # none, because the nonsense surfaces later as a broken install. The list
+      # is scripts/check-installer-flags.sh's, shared with release.yml's
+      # installer-gate.
       - name: bad arguments are rejected
-        run: |
-          # Each of these must FAIL. A validator that accepts nonsense is worse
-          # than none, because the nonsense surfaces later as a broken install.
-          for bad in "--mode nonsense" "--tls bogus" "--http-port abc" "--srt-port x" "--wat"; do
-            # shellcheck disable=SC2086
-            if bash scripts/install.sh $bad >/dev/null 2>&1; then
-              echo "accepted bad arguments: $bad"
-              exit 1
-            fi
-          done
-          echo "all five rejected"
+        run: scripts/check-installer-flags.sh
 
       - name: root is required, and says so
         run: |
