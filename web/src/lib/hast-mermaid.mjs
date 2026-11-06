@@ -46,7 +46,8 @@ function classList(v) {
 }
 
 /** A fence's source minus its trailing newlines. A scan, not /\n+$/, which is
- *  quadratic on a long run of newlines. */
+ *  quadratic on a long run of newlines.
+ *  @param {string} s @returns {string} */
 function trimTrailingNewlines(s) {
   let end = s.length;
   while (end > 0 && s[end - 1] === "\n") end--;
