@@ -20,6 +20,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { api } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
 import type { SignalTone } from "@/lib/signal";
+import { useAuthorInk } from "@/hooks/useAppliedTheme";
 import { cn } from "@/lib/utils";
 // Presentation and text-splitting live in lib/chat.ts; the refcounted socket in
 // hooks/useChatFeed.ts. See either file for why they are not in here.
@@ -178,6 +179,9 @@ function MessageRow({
       }
     : undefined;
 
+  // The platform's colour for this author, darkened on the light theme.
+  const authorColour = useAuthorInk(m.author.color);
+
   return (
     <div
       role="group"
@@ -236,7 +240,7 @@ function MessageRow({
             ? "cursor-pointer hover:underline"
             : "cursor-default",
         )}
-        style={m.author.color ? { color: m.author.color } : undefined}
+        style={authorColour ? { color: authorColour } : undefined}
       >
         {m.author.name}
       </button>
@@ -247,7 +251,7 @@ function MessageRow({
           m.action && "italic",
           m.action && !m.author.color && nameTone(m.author.name),
         )}
-        style={m.action && m.author.color ? { color: m.author.color } : undefined}
+        style={m.action && authorColour ? { color: authorColour } : undefined}
       >
         <MessageBody m={m} />
       </span>

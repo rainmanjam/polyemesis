@@ -20,6 +20,26 @@
     <!-- Paint the shell colour before the bundle loads, so a slow first load
          does not flash white in a dark room. -->
     <meta name="theme-color" content="#0f1115" />
+    <!-- THE THEME, BEFORE FIRST PAINT. The console is light, dark or follows the
+         system (see src/lib/theme.ts); this sets <html data-theme> from the
+         remembered choice or prefers-color-scheme, synchronously, so neither
+         theme ever flashes the other. Dark above is the default for every page
+         it does not run on: the public player and the OBS overlay are never
+         themed. An EXTERNAL file, not an inline script, because the server's
+         Content-Security-Policy has no 'unsafe-inline' for scripts and this is
+         not worth loosening it for. It must come after the two metas it
+         updates, and must NOT be async, deferred or a module: any of those
+         runs it after the first paint, which is the flash it exists to stop. -->
+    <script src="/theme-init.js"></script>
+    <!-- The page colour before the stylesheet arrives. It is the canvas
+         (<html>), not the body: an overlay is served with its own inline
+         transparent background, which beats this rule, so an OBS browser source
+         still paints nothing. Hexes are --surface in each theme; held to the
+         tokens by src/lib/palette-contrast.test.ts. -->
+    <style>
+      html { background-color: #0f1115; }
+      html[data-theme="light"] { background-color: #f1f3f7; }
+    </style>
     <!-- The two faces the console renders in, discovered here rather than four
          round trips later. The @font-face rules live in src/index.css, which is
          inside the bundle: without these the browser cannot know a font is
@@ -36,7 +56,7 @@
     <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
     <title>polyemesis</title>
   </head>
-  <body style="background:#0f1115">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

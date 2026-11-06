@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { railTextClass } from "./musicRail";
 
@@ -10,8 +10,14 @@ import { railTextClass } from "./musicRail";
 
 const CSS = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 
+/* The two palettes. Dark is the first block that declares a token (bare :root);
+ * light is read from its own block, which restates every colour. */
+const LIGHT_AT = CSS.search(/^:root\[data-theme="light"\]/m);
+const PALETTES = { dark: CSS.slice(0, LIGHT_AT), light: CSS.slice(LIGHT_AT, CSS.indexOf("\n}\n", LIGHT_AT)) };
+let theme: keyof typeof PALETTES = "dark";
+
 function token(name: string): [number, number, number] {
-  const m = CSS.match(new RegExp(`--${name}:\\s*oklch\\(([\\d.]+)%\\s+([\\d.]+)\\s+([\\d.]+)\\)`));
+  const m = PALETTES[theme].match(new RegExp(`--${name}:\\s*oklch\\(([\\d.]+)%\\s+([\\d.]+)\\s+([\\d.]+)\\)`));
   if (!m) throw new Error(`token --${name} not found`);
   return [Number(m[1]) / 100, Number(m[2]), Number(m[3])];
 }
@@ -38,8 +44,12 @@ function ratio(fg: string, bg: string): number {
 
 const tokenOf = (cls: string) => cls.replace(/^text-/, "");
 
-describe("routing rail text contrast", () => {
-  it("the measurement reproduces the failing pair it replaces", () => {
+describe.each(["dark", "light"] as const)("[%s] routing rail text contrast", (name) => {
+  beforeEach(() => {
+    theme = name;
+  });
+
+  it.runIf(name === "dark")("the measurement reproduces the failing pair it replaces", () => {
     // Positive control: the old class on the selected fill really was under AA.
     expect(ratio("muted-foreground", "primary-dim")).toBeLessThan(4.5);
   });

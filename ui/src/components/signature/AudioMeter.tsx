@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { useAppliedTheme } from "@/hooks/useAppliedTheme";
 import {
   dbFraction,
   formatPeakDb,
@@ -210,6 +211,14 @@ export function AudioMeter({
   dataRef.current = { rms, peak };
   const stateRef = useRef<ChannelState[]>([]);
   const paletteRef = useRef<Palette | null>(null);
+
+  // The canvas read its colours once, and the theme can change under it:
+  // re-read them, and the running frame loop picks the new ones up on its next
+  // frame. No remount, so the meter's decay and peak hold carry on untouched.
+  const theme = useAppliedTheme();
+  useEffect(() => {
+    paletteRef.current = readPalette();
+  }, [theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

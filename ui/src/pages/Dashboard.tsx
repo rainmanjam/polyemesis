@@ -2221,7 +2221,7 @@ export function Dashboard() {
                            collapsing: the programme exists, and a lane that
                            vanished until a tile arrived would read as a
                            programme that does not. */
-                        <div className="flex aspect-video w-full items-center justify-center rounded-md border border-border bg-black text-tiny text-muted-foreground">
+                        <div className="flex aspect-video w-full items-center justify-center rounded-md border border-border bg-black text-tiny text-on-video-dim">
                           {t("dash.laneNoPreview")}
                         </div>
                       )}
