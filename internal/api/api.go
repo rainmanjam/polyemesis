@@ -2601,16 +2601,13 @@ func writeNoSourceStored(w http.ResponseWriter, version string) {
 // the registration site is the statement, so a route added without one is a
 // route somebody has to have thought about.
 //
-// WHAT IT DOES NOT PROMISE, stated because the next reader will assume
-// otherwise. This is a check on the engine set at the moment the request
-// enters, and the handler behind it re-reads that set when it dereferences --
-// the two reads are not atomic, and Manager.reconcile deletes from the map when
-// a source goes away. Today the window cannot open: the store refuses to delete
-// the last source, so the set cannot empty under a request. When that guard is
-// removed the window becomes real for exactly the mutating handlers here, and
-// the fix is to carry the engine this middleware READ into the handler rather
-// than to re-derive it. See engOrNil, which is the same distinction one level
-// down.
+// IT HANDS THE ENGINE IT RESOLVED TO THE HANDLER. The last source may be
+// deleted (db.DeleteSource), and Manager.reconcile then deletes from the engine
+// map, so a handler that re-read the set after this check could find nothing
+// where the check found a programme. The engine read here travels in the
+// request context and scopedEngine returns it for a request that names no
+// programme, so the check and the use are one read. A request that names one
+// (?source=) resolves that engine and still refuses with 409 if it has gone.
 //
 // It is deliberately NOT applied to the routes an operator recovers through --
 // /setup, /auth/*, /sources*, /settings, /status, /system, /stats, /levels,
@@ -2623,12 +2620,23 @@ func writeNoSourceStored(w http.ResponseWriter, version string) {
 // only fills.
 func (s *Server) requireSource(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.engOrNil() == nil {
+		e := s.engOrNil()
+		if e == nil {
 			writeNoSource(w)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), resolvedEngineKey{}, e)))
 	})
+}
+
+// resolvedEngineKey carries the engine requireSource resolved.
+type resolvedEngineKey struct{}
+
+// resolvedEngine is the engine requireSource handed down, or nil on a route
+// that carries no guard.
+func resolvedEngine(r *http.Request) *engine.Engine {
+	e, _ := r.Context().Value(resolvedEngineKey{}).(*engine.Engine)
+	return e
 }
 
 // writeCreateError renders a create failure, lifting "there is no source" out

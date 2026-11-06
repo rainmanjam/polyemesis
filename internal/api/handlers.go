@@ -658,15 +658,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 // a different one is the whole defect; silently ignoring the parameter would be
 // that defect with the operator's own request as the evidence they were heard.
 func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int64, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw == "" {
-		return nil, true
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-			`"`+sourceParam+`" must be a source id.`+s.availableSources())
-		return nil, false
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok || !named {
+		return nil, ok
 	}
 	if _, err := s.store.GetSource(id); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
@@ -1529,7 +1523,7 @@ var errSettingsConflict = errors.New("settings conflict")
 // With no source there is nothing to view, and the blob stays authoritative;
 // that is the install handlePutSettings refuses ingest changes on anyway.
 func (s *Server) overlayDefaultSourceIngest(settings *db.Settings) error {
-	id, err := s.store.DefaultSourceID()
+	id, err := s.defaultSourceID()
 	if errors.Is(err, db.ErrSourceNotFound) {
 		return nil
 	}
@@ -1898,7 +1892,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// refusing that would make every unrelated setting unreachable until a
 		// source exists.
 		if !ingestEqual(storedIngest, settings.Ingest) {
-			switch _, err := s.store.DefaultSourceID(); {
+			switch _, err := s.defaultSourceID(); {
 			case err == nil:
 			case errors.Is(err, db.ErrSourceNotFound):
 				settings.Ingest = storedIngest
@@ -1999,7 +1993,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	//                   answered 200 for a save that silently never reached the
 	//                   pipeline, which is the failure this whole block exists
 	//                   to have stopped happening.
-	switch id, err := s.store.DefaultSourceID(); {
+	switch id, err := s.defaultSourceID(); {
 	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			// What GET will serve if the write-through fails: the blob as
@@ -2247,6 +2241,23 @@ func (s *Server) sourceForDestination(sourceID *int64) (routing.Source, bool) {
 // once so that six routes cannot drift into six spellings of it.
 const sourceParam = "source"
 
+// parseSourceParam is the one reader of `?source=<id>`: named reports whether
+// the request carried one, and a malformed or non-positive id is answered 400
+// here, for every route that accepts the parameter.
+func (s *Server) parseSourceParam(w http.ResponseWriter, r *http.Request) (id int64, named, ok bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
+	if raw == "" {
+		return 0, false, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			`"`+sourceParam+`" must be a source id.`+s.availableSources())
+		return 0, false, false
+	}
+	return id, true, true
+}
+
 // scopedEngine is the engine a request NAMES, and the point of it is what it
 // refuses.
 //
@@ -2277,14 +2288,11 @@ const sourceParam = "source"
 // purpose and must keep doing so, which is why the count of zero takes the
 // same branch as the count of one rather than being refused here.
 func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.Engine, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
-	if raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
-				`"`+sourceParam+`" must be a source id.`+s.availableSources())
-			return nil, false
-		}
+	id, named, ok := s.parseSourceParam(w, r)
+	if !ok {
+		return nil, false
+	}
+	if named {
 		eng := s.engineForSource(&id)
 		if eng == nil {
 			// Named a programme that is not running: deleted under this
@@ -2316,6 +2324,9 @@ func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.E
 	// clip listing, the loudness read -- where eng() panics inside
 	// Manager.Default before there is an engine to test. The answer is
 	// identical everywhere else.
+	if e := resolvedEngine(r); e != nil {
+		return e, true
+	}
 	return s.engOrNil(), true
 }
 
