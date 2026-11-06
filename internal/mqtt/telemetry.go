@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,6 +45,12 @@ type Telemetry struct {
 	topics *Topics
 	log    *slog.Logger
 
+	// every is the publish interval, in nanoseconds, read by Loop. It is set
+	// from the stored settings and may change while the loop runs; retick wakes
+	// the loop so a shorter interval does not wait out the old one.
+	every  atomic.Int64
+	retick chan struct{}
+
 	mu sync.Mutex
 	// discovered is the component key -> platform set of the last discovery
 	// payload, so a republish can tell Home Assistant which entities went.
@@ -76,12 +83,34 @@ type Telemetry struct {
 
 // NewTelemetry wires a publisher to a topic tree.
 func NewTelemetry(pub Publisher, topics *Topics, log *slog.Logger) *Telemetry {
-	return &Telemetry{
+	t := &Telemetry{
 		pub: pub, topics: topics, log: log,
 		published: map[string][]byte{},
 		forceAll:  true,
+		retick:    make(chan struct{}, 1),
+	}
+	t.every.Store(int64(DefaultEvery))
+	return t
+}
+
+// DefaultEvery is the publish interval until SetEvery says otherwise.
+const DefaultEvery = 10 * time.Second
+
+// SetEvery changes the publish interval, including for a Loop already running.
+// A value of zero or less means DefaultEvery.
+func (t *Telemetry) SetEvery(d time.Duration) {
+	if d <= 0 {
+		d = DefaultEvery
+	}
+	t.every.Store(int64(d))
+	select {
+	case t.retick <- struct{}{}:
+	default:
 	}
 }
+
+// Every is the publish interval in force.
+func (t *Telemetry) Every() time.Duration { return time.Duration(t.every.Load()) }
 
 // Resync forces the next Publish to resend every topic.
 //
@@ -303,8 +332,8 @@ func stripTimestamp(body []byte) []byte {
 // function rather than a channel because assembling a Snapshot walks every
 // engine, and doing that work while the broker is unreachable would be paid for
 // nothing.
-func (t *Telemetry) Loop(ctx context.Context, every time.Duration, snapshot func() Snapshot) {
-	tick := time.NewTicker(every)
+func (t *Telemetry) Loop(ctx context.Context, snapshot func() Snapshot) {
+	tick := time.NewTicker(t.Every())
 	defer tick.Stop()
 
 	wasUp := false
@@ -312,6 +341,8 @@ func (t *Telemetry) Loop(ctx context.Context, every time.Duration, snapshot func
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.retick:
+			tick.Reset(t.Every())
 		case <-tick.C:
 			if !t.pub.Connected() {
 				wasUp = false
