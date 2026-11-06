@@ -33,6 +33,13 @@ its first tagged release.
 - **Security: the RTMP and SRT wrong-credential backoff folds an IPv6 peer to its /64**, as the web
   login throttle already does. Keyed on the full address, a client holding one /64 could rotate
   addresses and never reach the limit.
+- **Security: the Streamer.bot pack no longer sends the API token in the clear.** `Polyemesis.cs`
+  sent the bearer token to whatever `polyemesisUrl` held, `http://` to a remote host included.
+  It now applies the rule the Stream Deck plugin and the OBS script already had: `https://` to
+  any host, `http://` only to this machine, anything else refused with a warning in the
+  Streamer.bot log and no request made. A pack pointed at a plain-`http://` remote host stops
+  working until its URL is changed to `https://`. The pack's manifest also listed Status without
+  the `?source=` it sends; it now matches the code.
 
 ## [0.15.0] — 2026-11-06
 

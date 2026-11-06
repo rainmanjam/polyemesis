@@ -806,9 +806,14 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: ffprobe -hide_banner -version
 
-      - if: needs.changes.outputs.code == 'true'
+      # Not on Linux: the `go` job runs this same `go build ./...` and `go vet
+      # ./...` on ubuntu-latest, same toolchain, no tags, and no env that either
+      # command reads (its POLYEMESIS_REQUIRE_FFMPEG is read by go test only), so
+      # the Linux leg would repeat them. macOS and Windows compile different
+      # files and keep both.
+      - if: needs.changes.outputs.code == 'true' && runner.os != 'Linux'
         run: go build ./...
-      - if: needs.changes.outputs.code == 'true'
+      - if: needs.changes.outputs.code == 'true' && runner.os != 'Linux'
         run: go vet ./...
       # Go's default timeout is 10 minutes PER PACKAGE, and internal/db lands
       # close enough to it on Windows that ordinary runner variance decides the
@@ -1711,7 +1716,8 @@ jobs:
   # The Stream Deck plugin, integrations/streamdeck. Typecheck, unit tests and
   # the bundle. Gated like `ui`: the job always reports, and every STEP reads the
   # `changes` output. A job-level `if:` here would be the outage the `changes`
-  # comment describes. Not a required check; add it to the ruleset deliberately.
+  # comment describes. Listed in .github/required-checks.txt, which only MIRRORS branch protection; the
+  # setting itself is changed by hand on GitHub.
   streamdeck:
     name: streamdeck typecheck, test, build
     permissions:

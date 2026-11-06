@@ -86,6 +86,24 @@ var gateCommands = []gateCommand{
 			"of `go test ./...` will find.",
 	},
 	{
+		name: "npm run typecheck",
+		re:   regexp.MustCompile(`\bnpm run typecheck\b`),
+		costs: "the Stream Deck plugin's type error, which the UI's `tsc -b` does not read: " +
+			"it is a separate package with its own tsconfig.",
+	},
+	{
+		name: "npm run validate",
+		re:   regexp.MustCompile(`\bnpm run validate\b`),
+		costs: "Elgato's manifest validator over the built plugin: a bad manifest or a " +
+			"missing image fails CI's streamdeck job and nothing else catches it.",
+	},
+	{
+		name: "npm run pack",
+		re:   regexp.MustCompile(`\bnpm run pack\b`),
+		costs: "the .streamDeckPlugin file a release attaches; pack validates again and " +
+			"refuses on error.",
+	},
+	{
 		name: "npm run lint",
 		re:   regexp.MustCompile(`\bnpm run lint\b`),
 		costs: "the frontend lint gate. CONTRIBUTING.md told contributors to run `make lint` " +
@@ -252,6 +270,12 @@ var (
 // and whose comment had not.
 func parityReachableFromCheck(t *testing.T) (reached []string, recipes []string) {
 	t.Helper()
+	return parityReachable(t, parityGateTarget)
+}
+
+// parityReachable is parityReachableFromCheck for any root target.
+func parityReachable(t *testing.T, root string) (reached []string, recipes []string) {
+	t.Helper()
 
 	raw, err := os.ReadFile(parityMakefile)
 	if err != nil {
@@ -316,6 +340,9 @@ func parityReachableFromCheck(t *testing.T) (reached []string, recipes []string)
 		}
 	}
 
+	if _, ok := prereqs[root]; !ok && root != parityGateTarget {
+		t.Fatalf("no `%s:` rule found in %s", root, parityMakefile)
+	}
 	if _, ok := prereqs[parityGateTarget]; !ok {
 		t.Fatalf("no `%s:` rule found in %s. Either the local gate has been renamed or this "+
 			"test's Makefile parsing has stopped working -- and in both cases it is now "+
@@ -324,7 +351,7 @@ func parityReachableFromCheck(t *testing.T) (reached []string, recipes []string)
 	}
 
 	seen := map[string]bool{}
-	queue := []string{parityGateTarget}
+	queue := []string{root}
 	for len(queue) > 0 {
 		tgt := queue[0]
 		queue = queue[1:]
@@ -347,7 +374,7 @@ func parityReachableFromCheck(t *testing.T) (reached []string, recipes []string)
 	}
 	sort.Strings(reached)
 
-	if len(reached) < 4 {
+	if root == parityGateTarget && len(reached) < 4 {
 		t.Fatalf("`%s` reaches only %v. That is far short of what it has ever gated, so the "+
 			"parsing above has broken and this test would pass against a Makefile with no "+
 			"gate in it at all.", parityGateTarget, reached)
@@ -361,10 +388,17 @@ func parityReachableFromCheck(t *testing.T) (reached []string, recipes []string)
 // and is skipped.
 func parityCIJobRunSteps(t *testing.T) []string {
 	t.Helper()
+	return parityJobRunSteps(t, parityCI, parityCIJob)
+}
 
-	raw, err := os.ReadFile(parityCI)
+// parityJobRunSteps is parityCIJobRunSteps for any job of any workflow file.
+func parityJobRunSteps(t *testing.T, file, job string) []string {
+	t.Helper()
+	parityCIJob := job
+
+	raw, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("read %s: %v", parityCI, err)
+		t.Fatalf("read %s: %v", file, err)
 	}
 	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
 
@@ -378,7 +412,7 @@ func parityCIJobRunSteps(t *testing.T) []string {
 	if start < 0 {
 		t.Fatalf("no `%s:` job in %s. The job has been renamed and this test is now "+
 			"comparing `make %s` against nothing -- repoint it at whatever runs the "+
-			"frontend gates now.", parityCIJob, parityCI, parityGateTarget)
+			"frontend gates now.", parityCIJob, file, parityGateTarget)
 	}
 
 	indentOf := func(s string) int { return len(s) - len(strings.TrimLeft(s, " ")) }
@@ -419,4 +453,69 @@ func parityCIJobRunSteps(t *testing.T) []string {
 		steps = append(steps, strings.Join(block, "\n"))
 	}
 	return steps
+}
+
+// THE OTHER PACKAGES' JOBS. `check` was compared against ci.yml's `ui` job only,
+// so the Stream Deck plugin (a separate package, with its own typecheck, tests,
+// bundle and validator) and the marketing site gated every pull request in CI
+// and in no local target. Each is a make target reachable from `check`, and
+// each CI job below is held to the target named beside it: every gate command
+// the job runs must be in that target's own recipe, not merely somewhere in
+// `check`.
+//
+// strict: the job may run nothing but gates, exclusions and setup, as the `ui`
+// job is held to. The site's deploy job also publishes and drives a browser, so
+// only the gate commands in it are compared.
+var parityPackageJobs = []struct {
+	file, job, target string
+	strict            bool
+}{
+	{parityCI, "streamdeck", "streamdeck", true},
+	{"../.github/workflows/pages.yml", "deploy", "web", false},
+}
+
+func TestMakeCheckGatesEachPackageCIGates(t *testing.T) {
+	reached, _ := parityReachableFromCheck(t)
+	in := map[string]bool{}
+	for _, r := range reached {
+		in[r] = true
+	}
+	for _, j := range parityPackageJobs {
+		if !in[j.target] {
+			t.Errorf("`make %s` does not reach the `%s` target, which mirrors the `%s` job of %s",
+				parityGateTarget, j.target, j.job, j.file)
+			continue
+		}
+		_, recipes := parityReachable(t, j.target)
+		own := strings.Join(recipes, "\n")
+		steps := parityJobRunSteps(t, j.file, j.job)
+		if len(steps) < 2 {
+			t.Fatalf("found %d run steps in %s's `%s` job; it has been restructured and this "+
+				"test compares nothing -- repoint it", len(steps), j.file, j.job)
+		}
+	next:
+		for _, step := range steps {
+			for _, s := range parityCISetupSteps {
+				if s.MatchString(step) {
+					continue next
+				}
+			}
+			matched := false
+			for _, g := range gateCommands {
+				if !g.re.MatchString(step) {
+					continue
+				}
+				matched = true
+				if !g.re.MatchString(own) {
+					t.Errorf("%s's `%s` job runs %q (%s) and `make %s` does not.\n\n  What that costs: %s",
+						j.file, j.job, step, g.name, j.target, g.costs)
+				}
+			}
+			if !matched && j.strict {
+				t.Errorf("%s's `%s` job has a step this repository has no opinion about:\n\n    %s\n\n"+
+					"Decide out loud: a gate (add it to gateCommands and to `make %s`), or setup "+
+					"(parityCISetupSteps).", j.file, j.job, strings.TrimSpace(step), j.target)
+			}
+		}
+	}
 }

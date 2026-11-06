@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "coverage": "vitest run --coverage",
     "validate": "streamdeck validate com.polyemesis.streamdeck.sdPlugin --no-update-check",
-    "pack": "streamdeck pack com.polyemesis.streamdeck.sdPlugin --output dist --force --no-update-check"
+    "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
     "@elgato/streamdeck": "3.0.4",

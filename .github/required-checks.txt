@@ -117,3 +117,14 @@ build web/ and publish to Cloudflare Pages
 # which is the advisory-check gap the entries above describe, in its plainest
 # form. scripts/promtool-check.sh now makes the directory readable first.
 prometheus rules
+
+# streamdeck typecheck, test, build
+#
+# Added 2026-11-06. The Stream Deck plugin's typecheck, unit tests, bundle and
+# Elgato validator ran on every pull request and could not block one -- the job
+# carried the comment "Not a required check; add it to the ruleset deliberately".
+# It always reports: its steps read the `changes` output, with no job-level `if:`,
+# so the name is answered on every pull request and a documentation-only change
+# is a green no-op rather than an absent check. scripts/check_parity_test.go holds
+# `make streamdeck` to this job's commands.
+streamdeck typecheck, test, build

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -239,6 +241,53 @@ func TestTheOBSScriptsPostDrivesTheBridgeAndReachesTheEventStream(t *testing.T) 
 		t.Fatalf("scene.changed: %d", w.Code)
 	}
 	streamtest.ExpectSSE(t, r, eventstream.TypeOBSScene)
+}
+
+// THE SCRIPT'S VOCABULARY IS THE ROUTER'S. integrations/obs/polyemesis_obs.py
+// types its path and its three event names; this reads them out of the script
+// and replays each against the real router with an obs-scoped token, so a
+// rename on either side fails here instead of in an operator's OBS. The names
+// are also held to obsbridge's constants.
+func TestTheOBSScriptsEventsAndPathAreTheRoutersOwn(t *testing.T) {
+	raw, err := os.ReadFile("../../integrations/obs/polyemesis_obs.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	pm := regexp.MustCompile(`_server \+ "(/api/v1/[^"]+)"`).FindStringSubmatch(src)
+	if pm == nil {
+		t.Fatal("no request path in polyemesis_obs.py; the pattern is looking at the wrong thing")
+	}
+	kinds := map[string]bool{}
+	for _, m := range regexp.MustCompile(`"event": "([^"]+)"`).FindAllStringSubmatch(src, -1) {
+		kinds[m[1]] = true
+	}
+	want := map[string]bool{
+		string(obsbridge.KindStreamStarted): true,
+		string(obsbridge.KindStreamStopped): true,
+		string(obsbridge.KindSceneChanged):  true,
+	}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("the script sends events %v; the bridge knows %v", kinds, want)
+	}
+
+	o := obsServer(t)
+	sel := o.createDest(t, "kick")
+	src0 := onlySourceID(t, o.h, o.sign)
+	obsTok := createScopedToken(t, o.h, o.sign, "obs script", db.ScopeOBS)
+	o.putConfig(t, map[string]any{
+		"enabled": true, "sourceId": src0, "destinations": []int64{sel}, "startOnStream": false,
+	}, http.StatusOK)
+	for kind := range kinds {
+		body := map[string]string{"event": kind}
+		if kind == string(obsbridge.KindSceneChanged) {
+			body["scene"] = "Just Chatting"
+		}
+		w := do(t, o.h, withBearer(jsonRequest(t, http.MethodPost, pm[1], body), obsTok))
+		if w.Code != http.StatusAccepted {
+			t.Errorf("the script's %s to %s answered %d %s; the router does not accept it", kind, pm[1], w.Code, w.Body.String())
+		}
+	}
 }
 
 // THE OBS SCOPE REACHES ONE ROUTE. Walked over the real router, every method
