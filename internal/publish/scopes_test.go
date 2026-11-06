@@ -2,6 +2,7 @@ package publish
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -41,3 +42,14 @@ func TestXPublishScopesAreNotAskedForAtSignIn(t *testing.T) {
 		t.Errorf("XScopes = %v", XScopes)
 	}
 }
+
+// YouTube needs any one of four scopes, and the sign-in already asks for one of
+// them, which is why an account connected before clip publishing needs no
+// reconnect.
+func TestYouTubeSignInSatisfiesPublishing(t *testing.T) {
+	if !HasAnyScope(joinScopes(oauth.NewYouTube().Scopes()), AcceptedYouTubeScopes) {
+		t.Errorf("YouTube sign-in scopes %v satisfy none of %v", oauth.NewYouTube().Scopes(), AcceptedYouTubeScopes)
+	}
+}
+
+func joinScopes(s []string) string { return strings.Join(s, " ") }

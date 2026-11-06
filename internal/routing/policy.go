@@ -24,10 +24,9 @@ import (
 
 // Platform identifies where a destination publishes, for policy purposes.
 //
-// The string values match internal/db's Platform so a stored destination's
-// platform can be handed straight to PolicyFor. It is a separate type rather
-// than an import because db imports routing, and because routing is meant to
-// stay a pure, dependency-free package.
+// The string values come from internal/platform, as internal/db's Platform
+// values do, so a stored destination's platform can be handed straight to
+// PolicyFor. It is a separate type rather than db's because db imports routing.
 type Platform string
 
 const (

@@ -52,8 +52,9 @@ const (
 	twitchMaxLine = 16 << 10
 )
 
-// TwitchMaxMessage is Twitch's published chat message limit.
-var TwitchMaxMessage = platform.Must(platform.Twitch).Chat.SendMax
+// TwitchMaxMessage is Twitch's published chat message limit, enforced by Send
+// and mirrored in the platform registry (see KickMaxMessage).
+const TwitchMaxMessage = 500
 
 // TwitchConfig configures the IRC adapter.
 type TwitchConfig struct {

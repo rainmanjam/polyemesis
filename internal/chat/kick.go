@@ -36,8 +36,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
-// KickMaxMessage is Kick's published limit on chat content.
-var KickMaxMessage = platform.Must(platform.Kick).Chat.SendMax
+// KickMaxMessage is Kick's published limit on chat content. The adapter
+// enforces it in Send; the registry carries the same figure for everyone else,
+// and TestRegistryAgreesWithTheChatAdapters holds the two together.
+const KickMaxMessage = 500
 
 const (
 	// kickSilenceAfter is how long a connected-and-reachable adapter waits

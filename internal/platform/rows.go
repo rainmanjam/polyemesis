@@ -30,9 +30,12 @@ const (
 const (
 	YouTubeTitleMax       = 100
 	YouTubeDescriptionMax = 5000
-	TwitchTitleMax        = 140
-	TikTokCaptionMax      = 2200
-	XGoLiveTitleMax       = 280
+	YouTubeStreamTitleMax = 128
+	// YouTubeChatMax is the live chat message limit, in runes.
+	YouTubeChatMax   = 200
+	TwitchTitleMax   = 140
+	TikTokCaptionMax = 2200
+	XGoLiveTitleMax  = 280
 
 	// TikTokPublishScope is what Direct Post needs, and is also asked for at
 	// sign-in.
@@ -58,13 +61,19 @@ func buildRows() []Row {
 			},
 			Ceilings:    &Ceilings{KeyintSeconds: 2, MaxVideoKbps: 51000, MaxAudioKbps: 160, Source: obsSource},
 			VideoCodecs: []string{"h264", "hevc", "av1"}, AudioCodecs: []string{"aac"},
-			HealthAPI:  true,
+			HealthAPI: true,
+			PublishAnyScope: []string{
+				"https://www.googleapis.com/auth/youtube.upload",
+				"https://www.googleapis.com/auth/youtube",
+				"https://www.googleapis.com/auth/youtube.force-ssl",
+				"https://www.googleapis.com/auth/youtubepartner",
+			},
 			Music:      &Music{Exclude: true, Reason: "YouTube Content ID", TargetLUFS: LUFSStreaming},
 			Moderation: &Moderation{Delete: true, TimeoutBan: true, Order: 1},
-			Chat:       Chat{SendMax: 200, SendUnit: Runes, Order: 3},
+			Chat:       Chat{SendMax: YouTubeChatMax, SendUnit: Runes, Order: 3},
 			Text: Text{
-				TitleMax: YouTubeTitleMax, DescriptionMax: YouTubeDescriptionMax, StreamTitleMax: 128,
-				MetadataUnit: Runes, PublishUnit: UTF16,
+				TitleMax: YouTubeTitleMax, DescriptionMax: YouTubeDescriptionMax, StreamTitleMax: YouTubeStreamTitleMax,
+				MetadataUnit: Runes, PublishTitleUnit: UTF16, PublishDescriptionUnit: Bytes,
 			},
 			Limits: []Limit{{
 				Kind: LimitArchiveDuration, Hours: 12, Status: LimitDocumented,

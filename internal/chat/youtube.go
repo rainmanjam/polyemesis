@@ -23,8 +23,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
-// YouTubeMaxMessage is the published limit on a live chat message.
-var YouTubeMaxMessage = platform.Must(platform.YouTube).Chat.SendMax
+// YouTubeMaxMessage is the published limit on a live chat message, enforced by
+// Send and mirrored in the platform registry (see KickMaxMessage).
+const YouTubeMaxMessage = 200
 
 const (
 	// ytBroadcastPoll is how often we look for a broadcast to attach to when

@@ -41,12 +41,7 @@ type YouTube struct {
 // https://developers.google.com/youtube/v3/docs/videos/insert. The existing
 // "youtube" scope is one of them, which is why an account connected before this
 // feature does not need reconnecting.
-var AcceptedYouTubeScopes = []string{
-	"https://www.googleapis.com/auth/youtube.upload",
-	"https://www.googleapis.com/auth/youtube",
-	"https://www.googleapis.com/auth/youtube.force-ssl",
-	"https://www.googleapis.com/auth/youtubepartner",
-}
+var AcceptedYouTubeScopes = platform.Must(platform.YouTube).PublishAnyScope
 
 const (
 	youTubeBase = platform.YouTubeAPIHost

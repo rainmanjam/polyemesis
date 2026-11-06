@@ -42,7 +42,7 @@ import (
 
 // XMaxMessage is X's chat limit. SendBroadcastChatRequest.text carries maxLength
 // 140 in the served spec.
-var XMaxMessage = platform.Must(platform.X).Chat.SendMax
+const XMaxMessage = 140
 
 const xAPIBaseDefault = platform.XAPIHost
 

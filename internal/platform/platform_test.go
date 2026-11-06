@@ -147,8 +147,8 @@ func TestTextLimitsMatchTheirConstants(t *testing.T) {
 	if y.TitleMax != YouTubeTitleMax || y.DescriptionMax != YouTubeDescriptionMax {
 		t.Errorf("youtube text = %+v", y)
 	}
-	if y.MetadataUnit != Runes || y.PublishUnit != UTF16 {
-		t.Errorf("youtube counts titles in %s at the metadata API and %s in the publisher", y.MetadataUnit, y.PublishUnit)
+	if y.MetadataUnit != Runes || y.PublishTitleUnit != UTF16 || y.PublishDescriptionUnit != Bytes {
+		t.Errorf("youtube units = %+v: the metadata API counts runes, the publisher UTF-16 for the title and bytes for the description", y)
 	}
 	if Must(Twitch).Text.TitleMax != TwitchTitleMax || Must(X).Text.GoLiveTitleMax != XGoLiveTitleMax ||
 		Must(TikTok).Text.CaptionMax != TikTokCaptionMax {

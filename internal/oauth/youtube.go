@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // YouTube implements Google OAuth 2.0 plus the Live Streaming API lookup that
@@ -401,7 +402,7 @@ const (
 	// It is CHARACTERS, so the cut is by rune. Cutting 128 bytes out of a
 	// destination named in Japanese would send a title ending in half a
 	// character.
-	ytStreamTitleMax = 128
+	ytStreamTitleMax = platform.YouTubeStreamTitleMax
 )
 
 // ytStreamTitle names a created stream after the destination that will publish

@@ -34,6 +34,9 @@ type Count string
 const (
 	Runes Count = "runes"
 	UTF16 Count = "utf16"
+	// Bytes is len() of the Go string. The clip publisher counts YouTube's
+	// description this way while its error text calls it a character limit.
+	Bytes Count = "bytes"
 )
 
 // Guidance is a platform's own published encoder advice, with where it was
@@ -100,9 +103,12 @@ type Text struct {
 	GoLiveTitleMax int
 	// CaptionMax is a clip's caption or post text (TikTok).
 	CaptionMax int
-	// MetadataUnit is how the metadata API (api/metadata.go) counts; PublishUnit
-	// is how the clip publisher counts. They differ for YouTube today.
-	MetadataUnit, PublishUnit Count
+	// MetadataUnit is how the metadata API (api/metadata.go) counts title and
+	// description. The clip publisher counts the YouTube title in
+	// PublishTitleUnit and the description in PublishDescriptionUnit, and
+	// neither is MetadataUnit. The web UI counts the title in UTF-16 too.
+	MetadataUnit                             Count
+	PublishTitleUnit, PublishDescriptionUnit Count
 }
 
 // What a duration limit measures. Plain strings: internal/oauth serves them to
@@ -173,6 +179,10 @@ type Row struct {
 	// sign-in. For X they are NOT the ones the sign-in asks for, which is why X
 	// publishing cannot be enabled by reconnecting.
 	PublishScopes []string
+	// PublishAnyScope is the other shape: any ONE of these is enough (YouTube's
+	// videos.insert documents four sufficient scopes, one of which the sign-in
+	// already asks for).
+	PublishAnyScope []string
 
 	Music      *Music
 	Moderation *Moderation

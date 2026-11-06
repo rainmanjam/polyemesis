@@ -16,10 +16,10 @@ import (
 // one text fits everywhere and every platform's viewers read the same words.
 //
 // X now sends too and stops at 140, so a start or end text of 141 to 200
-// characters is refused there. It reads YouTube's row, not the minimum over the
+// characters is refused there. It takes YouTube's figure, not the minimum over the
 // senders, because the minimum would change what operators see today; moving
 // to it is a product decision.
-var MaxAnnouncement = platform.Must(platform.YouTube).Chat.SendMax
+const MaxAnnouncement = platform.YouTubeChatMax
 
 // truncate cuts s to n characters, marking the cut.
 func truncate(s string, n int) string {
