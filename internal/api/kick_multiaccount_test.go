@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,5 +151,30 @@ func TestKickWebhookForAForeignChannelIsDroppedEvenWithOneAdapter(t *testing.T) 
 			t.Fatalf("history = %v, want only 'mine'", hist)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A delivery for a channel nobody here listens to is still signature-checked:
+// a forgery earns the same 401 whether or not its channel is connected.
+func TestKickWebhookForAnUnconnectedChannelStillRejectsABadSignature(t *testing.T) {
+	s, _, _ := testServer(t, config.Config{})
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	for _, id := range []int{111, 222} {
+		a, err := chat.NewKick(chat.KickConfig{
+			BroadcasterUserID: id, Token: chat.StaticToken("t"),
+			CallbackSecret: s.kickCallbackSecret(),
+			Verify:         func(*http.Request, []byte) error { return errors.New("bad signature") },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.chat.Attach(context.Background(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := `{"message_id":"z","broadcaster":{"user_id":999},"sender":{"user_id":7},"content":"forged"}`
+	if code := kickDelivery(t, s, body); code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for a bad signature on an unconnected channel", code)
 	}
 }

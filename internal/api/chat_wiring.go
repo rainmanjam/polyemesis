@@ -778,7 +778,7 @@ func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 // Kick posts every connected channel to one callback URL and the adapter stamps
 // its own account on what it ingests, so a delivery has to reach the adapter for
 // the broadcaster it names. A delivery for a channel with no adapter here is
-// dropped (the caller answers 200); one that names no channel at all goes to the
+// dropped after its signature is checked; one that names no channel at all goes to the
 // first adapter, which counts it as unreadable. GET probes carry no body and go
 // to the first adapter, as before.
 func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
@@ -815,7 +815,15 @@ func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
 			return k.Handler(), true
 		}
 	}
-	return nil, false
+	// Nobody here listens to that channel. It is still checked, so a forged
+	// delivery earns the same 401 it would for a connected one.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := kicks[0].VerifyDelivery(r, body); err != nil {
+			http.Error(w, "signature rejected", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}), true
 }
 
 // KickChatCallbackURL is what the operator pastes into their Kick app. Empty

@@ -35,11 +35,12 @@ Nothing yet.
   broadcaster it names; one for a channel that is not connected here is acknowledged and dropped.
 - **A spent YouTube quota is read the same way everywhere.** Deleting or banning in YouTube chat
   recognised only `quotaExceeded`, so `dailyLimitExceeded` (and `dailyLimitExceededUnreg`) read as
-  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons.
-- **The broadcast a destination is on is resolved one way.** Facebook stream health and end-broadcast
-  read only the announcement mirror, and the connected-account list and rollover read it for X too,
-  where it is stale by construction. All of them now take the lifecycle's recorded id first, and
-  never fall back to the mirror for X.
+  "you are not a moderator". Chat, clip publishing and the quota meter now share one set of reasons,
+  and clip publishing tells `dailyLimitExceededUnreg` (unauthenticated use) apart, advising a reconnect
+  rather than waiting for midnight.
+- **X no longer shows a stale broadcast id.** The connected-account list and planned rollover fell
+  back to the announcement mirror for X, which X never writes from a schedule, so an ended
+  broadcast could reappear as the one on air. They now use the lifecycle's recorded id only.
 
 - **A Kick destination with no `/app` in its URL no longer reads as a TLS failure.** IVS opens TLS,
   completes the RTMP handshake, then resets the connection when the stream key arrives as the

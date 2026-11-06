@@ -124,6 +124,10 @@ func ytFailure(code int, body []byte) *Failure {
 	// (poka-yoke audit 2026-11-04). A short-window rateLimitExceeded was
 	// reported as "used up until midnight Pacific" and never retried, so a
 	// clip that a minute's backoff would have published was dropped.
+	case reason == "dailyLimitExceededUnreg":
+		// Unauthenticated use, not a spent allowance: the request went out without
+		// usable credentials, and waiting for midnight will not change that.
+		return fail(CauseNeedsReconnect, false, "YouTube treated this upload as unauthenticated (%s); reconnect the YouTube account and publish again", reason)
 	case oauth.IsSpentQuotaReason(reason):
 		return fail(CauseQuota, false, "YouTube's daily allowance is used up (%s). It resets at midnight Pacific; publish again then", reason)
 	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded":

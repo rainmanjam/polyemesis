@@ -131,6 +131,16 @@ func (k *KickAdapter) Account() string       { return k.cfg.AccountRef }
 // BroadcasterUserID is the Kick channel this adapter listens for.
 func (k *KickAdapter) BroadcasterUserID() int { return k.cfg.BroadcasterUserID }
 
+// VerifyDelivery checks a delivery's signature with this adapter's verifier.
+// Kick signs every channel's deliveries with one key, so any adapter can vouch
+// for a delivery that belongs to none of them. A missing verifier fails closed.
+func (k *KickAdapter) VerifyDelivery(r *http.Request, body []byte) error {
+	if k.cfg.Verify == nil {
+		return fmt.Errorf("webhook verification is not configured")
+	}
+	return k.cfg.Verify(r, body)
+}
+
 // KickDeliveryBroadcaster names the channel a webhook body is about, or 0 when
 // the body does not say. Kick has one callback URL per app, so every connected
 // channel's chat arrives together and this is what tells them apart. The body
