@@ -138,6 +138,7 @@ jobs:
         timeout-minutes: 6
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           ffmpeg -hide_banner -version | head -1

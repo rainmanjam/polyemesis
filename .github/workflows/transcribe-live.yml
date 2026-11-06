@@ -141,6 +141,7 @@ jobs:
         timeout-minutes: 6
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           # THE THREE THINGS THIS SUITE ACTUALLY NEEDS, asserted rather than

@@ -326,6 +326,7 @@ jobs:
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg and install caption fonts
         if: needs.changes.outputs.code == 'true'
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           # Fail loudly rather than silently testing a build without SRT.
@@ -334,7 +335,8 @@ jobs:
           # fontconfig, and with no font installed a short's Arabic or Hebrew
           # caption draws as boxes -- which the caption tests now detect
           # (TestARealVerticalExportOfOtherScripts). Retried like every apt
-          # fetch in this file; the step ceiling bounds it.
+          # fetch in this file; this step's own 6-minute timeout bounds it (the FFmpeg
+          # install above has its own).
           for attempt in 1 2 3; do
             sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
             echo "apt attempt $attempt failed"
@@ -757,7 +759,8 @@ jobs:
           # fontconfig, and with no font installed a short's Arabic or Hebrew
           # caption draws as boxes -- which the caption tests now detect
           # (TestARealVerticalExportOfOtherScripts). Retried like every apt
-          # fetch in this file; the step ceiling bounds it.
+          # fetch in this file; this step's own 6-minute timeout bounds it (the FFmpeg
+          # install above has its own).
           for attempt in 1 2 3; do
             sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
             echo "apt attempt $attempt failed"
@@ -1830,6 +1833,7 @@ jobs:
           save: "false"
       - name: Check FFmpeg
         if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           ffmpeg -hide_banner -version | head -1
@@ -2540,6 +2544,7 @@ jobs:
         uses: ./.github/actions/install-ffmpeg
       - name: Check FFmpeg
         if: needs.changes.outputs.code == 'true'
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
