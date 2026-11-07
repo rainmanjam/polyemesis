@@ -2496,6 +2496,12 @@ export interface SetupGuide {
   /** "open" or "closed" for a platform whose live API the operator switches on
    *  (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM); absent for the rest. */
   livestreamGate?: "open" | "closed";
+  /** Kick only: the webhook URL the operator pastes into their Kick app so Kick
+   *  can deliver chat. It carries a secret, so the server sends it only to the
+   *  signed-in operator and admin tokens; otherwise `webhookUrlReason` says why
+   *  there is none (no public HTTPS hostname, or a read-only token). */
+  webhookUrl?: string;
+  webhookUrlReason?: string;
 }
 
 /** The verdict on a pasted client ID and secret.

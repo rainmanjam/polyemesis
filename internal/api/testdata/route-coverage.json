@@ -7,7 +7,7 @@
   "nonGetDifferentialFloor": 18,
   "unstableCeiling": 4,
   "inertCeiling": 6,
-  "varianceExemptCeiling": 6,
+  "varianceExemptCeiling": 7,
   "shapeFloor": 29,
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
@@ -22,9 +22,9 @@
   },
   "partition": {
     "differential": 10,
-    "invariant": 64,
+    "invariant": 63,
     "inertSubsetOfInvariant": 6,
-    "explainedVariance": 2,
+    "explainedVariance": 3,
     "unstable": 4
   },
   "routes": [
@@ -2129,7 +2129,10 @@
     {
       "path": "/api/v1/platforms/guides",
       "pattern": "GET /api/v1/platforms/guides",
-      "class": "invariant"
+      "class": "explained-variance",
+      "pointers": [
+        "/3/webhookUrlReason"
+      ]
     },
     {
       "path": "/api/v1/platforms/presets",

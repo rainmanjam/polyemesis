@@ -10,6 +10,23 @@ its first tagged release.
 
 ### Added
 
+- **Kick chat now sets itself up, and the console shows the webhook URL Kick needs.** Staging found
+  Kick chat could not work: nothing showed the operator the webhook URL to paste into their Kick app,
+  and nothing created the event subscription. Settings → Platform credentials → Kick now shows
+  "Webhook URL to paste into your Kick app" with a copy button (or the reason there is none, such as
+  no public HTTPS hostname), and the Kick setup guide has the step to enable webhooks. The URL
+  carries a secret, so it is sent only to the signed-in operator and admin tokens (a read token gets
+  the reason instead), is masked by the log redactor, and no longer appears in chat health text. When
+  Kick chat attaches, polyemesis lists the app's event subscriptions and creates `chat.message.sent`
+  only if missing, re-checks every 30 minutes (Kick auto-disables a subscription after a day of
+  failed deliveries, and disabling webhooks drops them all) and says so on the Kick chat card if Kick
+  refuses ("Kick webhook not enabled for your app"). Subscriptions are not deleted on shutdown.
+- **Twitch tokens are validated at startup and hourly, as Twitch requires.** Each connected
+  account's token is checked with `GET id.twitch.tv/oauth2/validate`; on a 401 one refresh is tried,
+  and if Twitch still refuses the account's IRC session is stopped and the account shows as needing a
+  reconnect. A Twitch revoked refresh token ("Invalid refresh token") is now recognised as a
+  reconnect-required grant.
+
 - **A light theme for the operator console, and a Light / Dark / System control in the header.** The
   console follows the operating system's `prefers-color-scheme` until the operator picks, then
   remembers the pick in that browser (no server setting; it still works when storage is blocked).
@@ -22,6 +39,13 @@ its first tagged release.
   changes. The public player (`/watch`) and the OBS overlay pages are never themed.
 
 ### Fixed
+
+- **Kick chat messages are limited the way Kick limits them.** Kick counts 500 grapheme clusters
+  and also caps the content at 2048 bytes of UTF-8; polyemesis counted runes and had no byte cap,
+  so emoji-heavy text passed the check and was refused by Kick. Both limits are enforced and a refusal says which was exceeded.
+- **Kick category search uses `GET /public/v2/categories`** (the v1 `?q=` search is deprecated).
+  Terms under three characters are not sent, as v2 rejects them.
+- **docs/PLATFORMS.md** no longer claims Kick's Get Channels page does not list `streamkey:read`.
 
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that

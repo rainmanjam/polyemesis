@@ -406,6 +406,9 @@ func (s *Server) mcpSecrets() []string {
 			addIngest(src.Ingest.SRT, src.Ingest.RTMP, src.Ingest.Pull)
 		}
 	}
+	// The Kick chat webhook's path secret: the URL is a credential, and a tool
+	// response that echoed it (an error quoting the URL) would leak it.
+	add(s.kickCallbackSecret())
 	if st, err := s.store.GetSettings(); err == nil {
 		addIngest(st.Ingest.SRT, st.Ingest.RTMP, st.Ingest.Pull)
 		b := st.Failover.Backup

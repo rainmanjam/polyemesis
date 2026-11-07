@@ -544,6 +544,9 @@ func run(h *hooks) error {
 	if n := srv.StartChat(ctx); n > 0 {
 		log.Info("chat connected", "platforms", n)
 	}
+	// Twitch requires every app holding a user token to validate it at start
+	// and hourly, and to end the sessions of one that is no longer valid.
+	srv.StartTwitchValidation(ctx)
 	// A no-op except in an e2echat test build (e2echat_on.go).
 	startE2EChat(ctx, hub, log)
 

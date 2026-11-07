@@ -85,6 +85,43 @@ func publicBaseURL(cfg config.Config) string {
 	return "https://" + host
 }
 
+// KickChatCallbackURL is the webhook URL the operator pastes into their Kick app
+// (Kick -> Settings -> Developer -> the app -> Enable webhooks), or "" when this
+// server has no public HTTPS hostname or no key to derive the secret from.
+//
+// It is built from the same two pieces the Kick adapter is (publicBaseURL and
+// kickWebhookPath over kickCallbackSecret), so the URL shown in the console is
+// the URL the adapter probes and the route serves. It carries the path secret:
+// it is a credential. The only caller that puts it in a response is
+// kickWebhookForGuide, behind the session and withheld from read tokens; it is
+// never logged (request logs use the route pattern, see loggedPath) and
+// redact.Redact masks it wherever free text reaches a log or a socket frame.
+func (s *Server) KickChatCallbackURL() string {
+	base := publicBaseURL(s.cfg)
+	secret := s.kickCallbackSecret()
+	if base == "" || secret == "" {
+		return ""
+	}
+	return base + kickWebhookPath(secret)
+}
+
+// kickWebhookForGuide is the (url, reason) pair for the Kick setup guide: the
+// URL when this caller may see it, otherwise why there is none.
+func (s *Server) kickWebhookForGuide(r *http.Request) (url, reason string) {
+	if credentialsWithheld(r) {
+		return "", "The webhook URL contains a secret, so it is shown to the signed-in operator and to admin tokens only."
+	}
+	if publicBaseURL(s.cfg) == "" {
+		return "", "Kick delivers chat to a public HTTPS hostname, and this server does not have one yet. " +
+			"Set a public hostname with TLS under Settings \u2192 Server (TLS), then come back for the URL."
+	}
+	u := s.KickChatCallbackURL()
+	if u == "" {
+		return "", "The webhook URL cannot be derived because this server has no encryption key loaded."
+	}
+	return u, ""
+}
+
 // StartChat attaches an adapter for every connected account. Failures are
 // logged and skipped; the return value is the number attached, for the caller's
 // startup line.
@@ -233,6 +270,9 @@ func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
 	if !found {
 		return
 	}
+	// A reconnect is the cure for a token Twitch's validation found revoked:
+	// the new grant gets a clean slate, and the next hourly pass judges it.
+	s.acctHealth.clearRevoked(a.ID)
 	s.connectChat(s.chatLife, a, withCreds)
 }
 
@@ -507,6 +547,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
 			CallbackPath:      kickWebhookPath,
+			Log:               s.log,
 			// The signature check. Without this line the adapter refuses every
 			// delivery — which is the point: the previous version of this
 			// construction site simply omitted it, and the handler's nil guard

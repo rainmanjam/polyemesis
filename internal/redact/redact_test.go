@@ -152,3 +152,23 @@ func TestRedactScrubsFreeText(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactMasksTheKickWebhookPathSecret(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	for name, in := range map[string]string{
+		"a bare path":      "/api/v1/chat/kick/" + secret,
+		"a full url":       "https://stream.example.com/api/v1/chat/kick/" + secret,
+		"in a sentence":    "paste https://stream.example.com/api/v1/chat/kick/" + secret + " into Kick.",
+		"with a probe key": "https://h/api/v1/chat/kick/" + secret + "?probe=abc",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Redact(in)
+			if strings.Contains(got, secret) {
+				t.Fatalf("Redact(%q) = %q, the secret survived", in, got)
+			}
+			if !strings.Contains(got, "/chat/kick/") {
+				t.Fatalf("Redact(%q) = %q, the route is no longer recognisable", in, got)
+			}
+		})
+	}
+}

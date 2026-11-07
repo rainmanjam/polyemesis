@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rivo/uniseg"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -40,7 +43,16 @@ import (
 // KickMaxMessage is Kick's published limit on chat content. The adapter
 // enforces it in Send; the registry carries the same figure for everyone else,
 // and TestRegistryAgreesWithTheChatAdapters holds the two together.
+//
+// Kick counts user-perceived characters (grapheme clusters), not runes, so a
+// family emoji or a letter with a combining mark is one. It ALSO caps the
+// content at KickMaxBytes of UTF-8 (docs.kick.com/apis/chat), and a run of
+// emoji hits that long before the character limit. Send enforces both and
+// refuses, rather than truncating, matching every other adapter's too-long path.
 const KickMaxMessage = 500
+
+// KickMaxBytes is the UTF-8 byte cap Kick puts on chat content.
+const KickMaxBytes = 2048
 
 const (
 	// kickSilenceAfter is how long a connected-and-reachable adapter waits
@@ -55,6 +67,18 @@ const (
 	kickProbeTimeout = 8 * time.Second
 	// kickBodyLimit bounds a webhook body.
 	kickBodyLimit = 1 << 20
+	// kickSubRecheck is how often a live adapter confirms its chat
+	// subscription still exists. Kick auto-disables a subscription after a day
+	// of failed deliveries, and switching webhooks off for the app drops every
+	// subscription at once (Kick changelog, 12/12/2025 and 19/12/2025), so
+	// "created at start" is not "still there an hour later".
+	kickSubRecheck = 30 * time.Minute
+	// kickSubRetry is how soon a check that FAILED is tried again: a network
+	// blip at start must not leave chat unsubscribed for half an hour.
+	kickSubRetry = 2 * time.Minute
+	// The one event this adapter needs.
+	kickChatEventName    = "chat.message.sent"
+	kickChatEventVersion = 1
 )
 
 // KickConfig configures the webhook adapter.
@@ -87,6 +111,12 @@ type KickConfig struct {
 	// can be read against Kick's documentation side by side.
 	Verify func(r *http.Request, body []byte) error
 
+	// Tick is how often Run wakes to refresh health and decide whether the
+	// subscription is due a check. Zero means kickHealthTick; tests shorten it.
+	Tick time.Duration
+	// Log receives the subscription outcome. It never receives the webhook URL.
+	Log *slog.Logger
+
 	// Probe replaces the reachability check, for tests.
 	Probe   func(ctx context.Context, endpoint string) (string, error)
 	APIBase string
@@ -109,6 +139,12 @@ type KickAdapter struct {
 	delivered    int64
 	unparseable  int64
 	beforeAttach int64
+
+	// The chat subscription's last check: when, and what it found. subProblem
+	// is empty when the subscription exists (or has not been checked yet).
+	subCheckedAt time.Time
+	subChecked   bool
+	subProblem   string
 }
 
 // NewKick builds the adapter.
@@ -124,6 +160,12 @@ func NewKick(cfg KickConfig) (*KickAdapter, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.Tick <= 0 {
+		cfg.Tick = kickHealthTick
+	}
+	if cfg.Log == nil {
+		cfg.Log = slog.Default()
 	}
 	if cfg.Sleep == nil {
 		cfg.Sleep = backoff.SleepCtx
@@ -199,9 +241,16 @@ func (k *KickAdapter) setHealth(state State, detail string) {
 	k.mu.Unlock()
 }
 
-// Run registers the sink, checks that the callback can actually be reached and
-// then holds the registration open until ctx ends, keeping the health honest
-// about how long it has been since anything arrived.
+// Run registers the sink, checks that the callback can actually be reached,
+// makes sure Kick is subscribed to deliver chat to it, and then holds the
+// registration open until ctx ends, keeping the health honest about how long
+// it has been since anything arrived and re-confirming the subscription.
+//
+// Nothing is unsubscribed when ctx ends. Kick subscriptions persist per app and
+// broadcaster, so deleting on every shutdown would drop every chat message Kick
+// delivers while polyemesis restarts, and the next Run would only have to
+// create it again. A subscription for a channel that has been disconnected is
+// harmless: the delivery is verified, matches no adapter, and is acknowledged.
 func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 	k.mu.Lock()
 	k.sink = sink
@@ -217,9 +266,10 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 	k.mu.Lock()
 	k.reachable, k.reachDetail = reachable, detail
 	k.mu.Unlock()
+	k.ensureSubscription(ctx)
 	k.refreshHealth()
 
-	tick := time.NewTicker(kickHealthTick)
+	tick := time.NewTicker(k.cfg.Tick)
 	defer tick.Stop()
 	for {
 		select {
@@ -227,9 +277,130 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 			k.setHealth(StateStopped, "")
 			return nil
 		case <-tick.C:
+			if k.subscriptionDue() {
+				k.ensureSubscription(ctx)
+			}
 			k.refreshHealth()
 		}
 	}
+}
+
+// subscriptionDue reports whether it is time to look at the subscription again:
+// every kickSubRecheck while it is fine, kickSubRetry after a failure.
+func (k *KickAdapter) subscriptionDue() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if !k.subChecked {
+		return true
+	}
+	wait := kickSubRecheck
+	if k.subProblem != "" {
+		wait = kickSubRetry
+	}
+	return k.cfg.Now().Sub(k.subCheckedAt) >= wait
+}
+
+// ensureSubscription makes sure Kick has a chat.message.sent webhook
+// subscription for this channel, creating it only when missing, and records
+// the outcome for the health line and the log.
+//
+// Idempotent by construction: GET the subscriptions first and POST only on
+// absence, because a duplicate subscription is a second delivery of every chat
+// message.
+func (k *KickAdapter) ensureSubscription(ctx context.Context) {
+	problem := k.syncSubscription(ctx)
+	if ctx.Err() != nil {
+		// Shutting down: the failure is the cancellation, not Kick.
+		return
+	}
+	k.mu.Lock()
+	changed := !k.subChecked || k.subProblem != problem
+	k.subChecked, k.subCheckedAt, k.subProblem = true, k.cfg.Now(), problem
+	k.mu.Unlock()
+	// Logged when the outcome changes, not every thirty minutes. The message
+	// never carries the callback URL: its path is a secret.
+	if changed {
+		if problem != "" {
+			k.cfg.Log.Warn("kick chat: chat subscription is not in place", "account", k.cfg.AccountRef, "problem", problem)
+		} else {
+			k.cfg.Log.Info("kick chat: subscribed to chat messages", "account", k.cfg.AccountRef)
+		}
+	}
+}
+
+// kickWebhookHint is what to do when Kick will not take the subscription.
+const kickWebhookHint = "Enable webhooks for your Kick app (Kick → Settings → Developer → your app → Enable webhooks, " +
+	"with the webhook URL shown under Settings → Platform credentials → Kick), and reconnect the Kick account if it " +
+	"was connected before the events:subscribe permission existed."
+
+// syncSubscription returns "" when the chat subscription exists afterwards and
+// a sentence for the operator when it does not.
+func (k *KickAdapter) syncSubscription(ctx context.Context) string {
+	if k.cfg.BroadcasterUserID <= 0 {
+		return "Kick chat has no broadcaster id recorded, so it cannot subscribe to chat messages; reconnect the Kick account in Settings → Platforms."
+	}
+	endpoint := k.cfg.APIBase + "/public/v1/events/subscriptions"
+
+	var existing struct {
+		Data []struct {
+			Event   string `json:"event"`
+			Version int    `json:"version"`
+			Method  string `json:"method"`
+		} `json:"data"`
+	}
+	q := url.Values{"broadcaster_user_id": {strconv.Itoa(k.cfg.BroadcasterUserID)}}
+	if err := doJSON(ctx, k.cfg.HTTP, http.MethodGet, endpoint+"?"+q.Encode(), k.cfg.Token, nil, &existing); err != nil {
+		return k.subscriptionProblem("could not read its Kick event subscriptions", err)
+	}
+	for _, s := range existing.Data {
+		if s.Event == kickChatEventName && s.Version == kickChatEventVersion &&
+			(s.Method == "" || s.Method == "webhook") {
+			return ""
+		}
+	}
+
+	body := map[string]any{
+		"events": []map[string]any{{"name": kickChatEventName, "version": kickChatEventVersion}},
+		"method": "webhook",
+		// Ignored for a user token (Kick infers the broadcaster from it), sent
+		// anyway so the request says what it means.
+		"broadcaster_user_id": k.cfg.BroadcasterUserID,
+	}
+	var created struct {
+		Data []struct {
+			Name  string `json:"name"`
+			Error string `json:"error"`
+		} `json:"data"`
+	}
+	if err := doJSON(ctx, k.cfg.HTTP, http.MethodPost, endpoint, k.cfg.Token, body, &created); err != nil {
+		return k.subscriptionProblem("could not subscribe to Kick chat messages", err)
+	}
+	// A 200 can still carry a per-event refusal.
+	for _, d := range created.Data {
+		if strings.TrimSpace(d.Error) != "" {
+			return "Kick refused the chat subscription: " + d.Error + ". " + kickWebhookHint
+		}
+	}
+	return ""
+}
+
+// subscriptionProblem turns a failed call into the sentence the operator sees.
+func (k *KickAdapter) subscriptionProblem(what string, err error) string {
+	switch statusOf(err) {
+	case http.StatusUnauthorized:
+		return "Kick rejected the access token while checking the chat subscription; reconnect the Kick account in Settings → Platforms."
+	case http.StatusForbidden, http.StatusBadRequest:
+		return "Kick webhook not enabled for your app: " + what + " (Kick said " + kickSaid(err) + "). " + kickWebhookHint
+	}
+	return what + ": " + kickSaid(err) + ". polyemesis will retry shortly."
+}
+
+// kickSaid is the platform's own words for a failed call, without the URL.
+func kickSaid(err error) string {
+	if ae, ok := err.(*apiError); ok {
+		return fmt.Sprintf("%d %s", ae.Status, strings.TrimSpace(ae.Body))
+	}
+	return err.Error()
 }
 
 // refreshHealth recomputes the one sentence the operator sees.
@@ -245,38 +416,47 @@ func (k *KickAdapter) refreshHealth() {
 	)
 	k.mu.Unlock()
 
+	k.mu.Lock()
+	subProblem := k.subProblem
+	k.mu.Unlock()
+
 	switch {
 	case !reachable:
+		if subProblem != "" {
+			detail += " Also: " + subProblem
+		}
 		k.setHealth(StateDegraded, detail)
+	case subProblem != "":
+		// Outranks the silence message below: while the subscription is not in
+		// place, silence is the expected result and the subscription is the cause.
+		k.setHealth(StateDegraded, subProblem+" Sending still works.")
 	case count == 0 && k.cfg.Now().Sub(started) > kickSilenceAfter:
-		// Reachable, running, and nothing has ever arrived. The overwhelmingly
-		// likely cause is that no webhook subscription exists, which polyemesis
-		// cannot create on the operator's behalf.
+		// Reachable, subscribed, and nothing has ever arrived. polyemesis
+		// created the subscription itself, so what is left is Kick not reaching
+		// the URL in the app's webhook field.
 		k.setHealth(StateDegraded, fmt.Sprintf(
-			"no Kick chat events have arrived in %s. Check that your Kick app has a webhook subscription "+
-				"for chat messages pointing at %s. Sending still works.",
-			k.cfg.Now().Sub(started).Round(time.Minute), k.displayCallback()))
+			"no Kick chat events have arrived in %s. polyemesis is subscribed to chat messages, so check that "+
+				"your Kick app has webhooks enabled and its webhook URL is the one shown under Settings → Platform "+
+				"credentials → Kick. Sending still works.",
+			k.cfg.Now().Sub(started).Round(time.Minute)))
 	case bad > 0 && count == 0:
 		k.setHealth(StateDegraded, fmt.Sprintf(
 			"Kick is delivering events (%d so far) that polyemesis could not read as chat messages. "+
 				"Chat is otherwise connected.", bad))
 	case last.IsZero():
-		k.setHealth(StateLive, "listening for Kick chat events at "+k.displayCallback())
+		k.setHealth(StateLive, "subscribed to Kick chat messages; waiting for the first one")
 	default:
 		k.setHealth(StateLive, "")
 	}
 }
 
-// displayCallback is the callback URL for a human, or a description of why
-// there is not one. It contains the path secret, which is deliberate: the
-// operator has to paste it into Kick, and it is not a credential anyone else's
-// screen will show.
-func (k *KickAdapter) displayCallback() string {
-	if u := k.CallbackURL(); u != "" {
-		return u
-	}
-	return "this server's public URL + " + k.CallbackPath()
-}
+// callbackWhere is how a health or warning sentence refers to the webhook URL.
+//
+// It NEVER contains the URL. The path carries the secret that authenticates a
+// delivery, health text is broadcast to every chat pane and written to logs,
+// and the URL has one proper home: Settings → Platform credentials → Kick,
+// behind the operator's session (Server.KickChatCallbackURL).
+const callbackWhere = "the webhook URL shown under Settings → Platform credentials → Kick"
 
 // checkReachable establishes whether Kick has any chance of delivering here.
 //
@@ -289,7 +469,7 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 	raw := strings.TrimSpace(k.cfg.PublicURL)
 	if raw == "" {
 		return false, "Kick chat needs a publicly reachable callback URL, and polyemesis does not know its own " +
-			"public address. Set the public URL in Settings → Server, then add " + k.CallbackPath() +
+			"public address. Set a public HTTPS hostname in Settings → Server, then add " + callbackWhere +
 			" as the webhook URL in your Kick app. Until then, sending to Kick works but nothing is received."
 	}
 	u, err := url.Parse(raw)
@@ -325,7 +505,7 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 		return true, ""
 	}
 	return false, "Kick chat may not be received: " + strings.Join(warn, "; ") +
-		". The webhook URL to configure in your Kick app is " + k.displayCallback() +
+		". The webhook URL to configure in your Kick app is " + callbackWhere +
 		". polyemesis is listening anyway, in case it is reachable in a way it cannot see from here."
 }
 
@@ -565,8 +745,11 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 	if text == "" {
 		return Message{}, fmt.Errorf("nothing to send")
 	}
-	if n := len([]rune(text)); n > KickMaxMessage {
+	if n := uniseg.GraphemeClusterCount(text); n > KickMaxMessage {
 		return Message{}, fmt.Errorf("Kick accepts %d characters and this message is %d", KickMaxMessage, n)
+	}
+	if n := len(text); n > KickMaxBytes {
+		return Message{}, fmt.Errorf("Kick accepts %d bytes of UTF-8 and this message is %d (emoji are several bytes each)", KickMaxBytes, n)
 	}
 	if k.cfg.BroadcasterUserID <= 0 {
 		return Message{}, fmt.Errorf("Kick chat has no broadcaster id recorded; reconnect the Kick account in Settings → Platforms")

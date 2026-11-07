@@ -57,6 +57,13 @@ var urlish = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+`)
 // URL, which is how it would arrive if it came from an FFmpeg log line.
 var bareSecret = regexp.MustCompile(`(?i)\b(stream[_-]?key|stream[_-]?id|api[_-]?key|access[_-]?token|refresh[_-]?token|passphrase|password|secret|token|authorization)\b\s*[:=]\s*("[^"]*"|'[^']*'|\S+)`)
 
+// kickWebhookPath catches the path secret of the Kick chat webhook URL,
+// /api/v1/chat/kick/<secret>. The URL is what the operator pastes into their
+// Kick app, so it is a credential: whoever holds it can inject chat lines up to
+// the signature check. It is matched by its path rather than by a host because
+// the host is the operator's own.
+var kickWebhookPath = regexp.MustCompile(`(/chat/kick/)[^\s/?#"'<>]+`)
+
 // bearerToken catches an HTTP credential, where the scheme word sits between
 // the label and the secret and would otherwise be all that gets masked.
 var bearerToken = regexp.MustCompile(`(?i)\b(bearer|basic)\s+\S+`)
@@ -298,6 +305,7 @@ func Redact(s string) string {
 	if s == "" {
 		return s
 	}
+	s = kickWebhookPath.ReplaceAllString(s, "${1}"+Mask)
 	s = urlish.ReplaceAllStringFunc(s, RedactURL)
 	// Before the key=value pass, so "Authorization: Bearer xyz" loses the token
 	// rather than only the word "Bearer".

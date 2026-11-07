@@ -106,6 +106,13 @@ var nonCredentialVariance = map[string]string{
 	"GET /api/v1/auth/connection#/scope": "the caller's own token scope, a property of the " +
 		"credential the caller already holds.",
 	"GET /api/v1/auth/connection#/adminScope": "derived from the caller's own scope.",
+	// The Kick guide's webhook URL IS a credential (a path secret), and it is
+	// proved withheld from a read token by TestKickGuideWithholdsTheWebhookURLFromAReadToken,
+	// which asserts the derived secret is absent from the read body. The sweep
+	// fixture has no public hostname, so here only the REASON sentence differs.
+	"GET /api/v1/platforms/guides#/3/webhookUrlReason": "the sentence saying why the Kick webhook " +
+		"URL is not shown: \"signed-in operator only\" for a read token, \"needs a public HTTPS " +
+		"hostname\" for the operator on this fixture. Fixed text, no stored value in it.",
 }
 
 // unstableSweeps are the swept paths whose bytes move between two samples with

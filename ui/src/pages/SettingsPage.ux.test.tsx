@@ -332,6 +332,34 @@ describe("Platforms as rows (settings-council R1, R2, R10, R16)", () => {
     expect(screen.getByText(T("settingsUx.appCredentials")).closest("details")?.open).toBe(true);
   });
 
+  it("shows Kick's webhook URL to paste into the Kick app, with a copy button", async () => {
+    const url = "https://stream.example.com/api/v1/chat/kick/0123456789abcdef0123456789abcdef";
+    guides = [guide("kick", "Kick", { webhookUrl: url })];
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.setUp")}: Kick` }));
+    const block = await screen.findByTestId("kick-webhook-url");
+    expect(within(block).getByText(T("set.webhookUrl"))).toBeTruthy();
+    expect(within(block).getByText(url)).toBeTruthy();
+    expect(within(block).getByRole("button", { name: T("set.copy") })).toBeTruthy();
+  });
+
+  it("says why there is no Kick webhook URL instead of showing an empty box", async () => {
+    guides = [guide("kick", "Kick", { webhookUrlReason: "Kick delivers chat to a public HTTPS hostname, and this server does not have one yet." })];
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.setUp")}: Kick` }));
+    const block = await screen.findByTestId("kick-webhook-url");
+    expect(block.textContent).toContain("public HTTPS hostname");
+    expect(within(block).queryByRole("button", { name: T("set.copy") })).toBeNull();
+  });
+
+  it("draws no webhook block for a platform that has none", async () => {
+    guides = [guide("twitch", "Twitch")];
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.setUp")}: Twitch` }));
+    await screen.findByText(T("settingsUx.setupGuide", { n: 3 }));
+    expect(screen.queryByTestId("kick-webhook-url")).toBeNull();
+  });
+
   it("shows the verdict the last check reached after a reload", async () => {
     guides = [guide("twitch", "Twitch")];
     creds = [

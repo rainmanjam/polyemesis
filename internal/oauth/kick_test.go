@@ -459,12 +459,38 @@ func TestKickCategorySearchQueriesTheDirectory(t *testing.T) {
 	if len(got) != 2 || got[0].ID != 15 || got[0].Name != "Just Chatting" {
 		t.Fatalf("categories = %#v", got)
 	}
-	c := find(log, http.MethodGet, "/public/v1/categories")
+	if old := find(log, http.MethodGet, "/public/v1/categories"); old != nil {
+		t.Fatalf("the deprecated v1 categories endpoint was called: %#v", old)
+	}
+	c := find(log, http.MethodGet, "/public/v2/categories")
 	if c == nil {
 		t.Fatalf("no category search was made: %#v", log)
 	}
-	if q, _ := url.ParseQuery(c.Query); q.Get("q") != "just ch" {
-		t.Errorf("category query = %q, want the search term", c.Query)
+	q, _ := url.ParseQuery(c.Query)
+	if q.Get("name") != "just ch" {
+		t.Errorf("category query = %q, want the search term in name", c.Query)
+	}
+	if q.Get("q") != "" {
+		t.Errorf("category query = %q still carries the v1 q parameter", c.Query)
+	}
+	if q.Get("limit") != "100" {
+		t.Errorf("category query = %q, want limit=100 (v1 returned up to 100)", c.Query)
+	}
+}
+
+// v2 rejects a name shorter than three characters with a 400, so a short
+// search term must not reach Kick at all.
+func TestKickCategorySearchSkipsTermsKickWouldReject(t *testing.T) {
+	var log []capture
+	k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	got, err := k.SearchCategories(context.Background(), "cid", "tok", "ab")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %#v, %v; want an empty result and no error", got, err)
+	}
+	if c := find(log, http.MethodGet, "/public/v2/categories"); c != nil {
+		t.Errorf("a 2-character term was sent to Kick: %#v", c)
 	}
 }
 
@@ -534,7 +560,7 @@ func TestKickPushMetadataWritesWhatKickAcceptsAndWarnsAboutTheRest(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			var log []capture
 			k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/public/v1/categories") {
+				if strings.HasPrefix(r.URL.Path, "/public/v2/categories") {
 					body := tc.categories
 					if body == "" {
 						body = `{"data":[]}`

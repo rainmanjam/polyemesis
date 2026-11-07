@@ -142,8 +142,11 @@ was understandable but wrong. Kick publishes no `/streamkey` endpoint, so
 reading the endpoint list finds nothing. The key is a field —
 `stream.key` — on the **channels resource polyemesis already fetches** for
 identity and live state, withheld unless the token carries the `streamkey:read`
-scope, which Kick's own Get Channels page does not list among its required
-scopes. Invisible twice over.
+scope. Kick's Get Channels page now lists that scope in its scope catalogue
+("Read a user's stream URL and stream key"), although the operation itself
+still names only `channel:read` as required. This page used to say the page did
+not mention it at all; that is no longer true, but the key is still withheld
+without the scope, so the advice is unchanged.
 
 **An account connected before this landed must be disconnected and reconnected
 once.** Granting a scope never upgrades a token that has already been issued —
@@ -746,6 +749,40 @@ than grown as features land.
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a
 public HTTPS URL Kick can reach. Without one it says so rather than sitting
 silently.
+
+**Setting up Kick chat takes two things, and polyemesis does the second.**
+
+1. In your Kick app (Kick → Settings → Developer → your app) switch on
+   **Enable webhooks** and paste the **Webhook URL to paste into your Kick app**
+   shown under Settings → Platform credentials → Kick. The URL carries a secret
+   derived from the data key, so it is shown only to a signed-in operator or an
+   admin token, never to a read-only token, and never in a log or a support
+   bundle. With no public HTTPS hostname configured the panel says that instead.
+2. polyemesis subscribes the app to `chat.message.sent` itself, with the
+   connected account's `events:subscribe` permission: when Kick chat attaches,
+   it lists the app's subscriptions for the channel and creates the missing one
+   (never a duplicate). Kick disables a subscription after a day of failed
+   deliveries, and switching webhooks off drops every subscription, so it
+   checks again every 30 minutes (2 minutes after a failed check) and creates
+   it again if it has gone. If Kick refuses, the Kick chat card says so, for
+   example "Kick webhook not enabled for your app". Nothing is deleted on
+   shutdown: subscriptions persist per app and channel, and deleting one on
+   every restart would drop the chat Kick delivers in between.
+
+Kick caps a chat message at 500 user-perceived characters **and** 2048 bytes of
+UTF-8, so a run of emoji is refused on bytes long before it reaches 500
+characters; polyemesis counts both and refuses with the number that was exceeded.
+
+## Twitch token validation
+
+Twitch requires every app that holds a user's token to validate it at startup
+and every hour (`GET https://id.twitch.tv/oauth2/validate`) and to end the
+sessions of a token that is no longer valid. polyemesis does this for each
+connected Twitch account. On a 401 it spends one refresh to rule out a merely
+stale token; if Twitch still refuses (or refuses the refresh itself), the
+account's chat session is stopped and the account shows as needing a reconnect
+in Settings → Platforms. Reconnecting clears it. A Twitch outage or network
+failure is never treated as a revocation.
 
 ## Multiple accounts
 

@@ -21,6 +21,48 @@ import (
 type accountHealthBook struct {
 	mu sync.Mutex
 	m  map[int64]refreshOutcome
+	// revoked is the accounts whose platform said the token is no longer valid
+	// (Twitch's hourly /validate), with the sentence to show. Kept beside the
+	// refresh book for the same reason it is in memory: it is a reading, and
+	// the next validation pass or a reconnect replaces it.
+	revoked map[int64]revocation
+}
+
+type revocation struct {
+	reason string
+	at     time.Time
+}
+
+// markRevoked records that the platform no longer honours this account's
+// token. Reports whether it is news (it was not already marked).
+func (b *accountHealthBook) markRevoked(id int64, reason string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.revoked == nil {
+		b.revoked = make(map[int64]revocation)
+	}
+	_, had := b.revoked[id]
+	b.revoked[id] = revocation{reason: reason, at: time.Now()}
+	return !had
+}
+
+func (b *accountHealthBook) clearRevoked(id int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.revoked, id)
+}
+
+func (b *accountHealthBook) revokedReason(id int64) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.revoked[id].reason
+}
+
+func (b *accountHealthBook) revokedAt(id int64) (revocation, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	r, ok := b.revoked[id]
+	return r, ok
 }
 
 // refreshOutcome is one account's run of failed refreshes. Absent from the

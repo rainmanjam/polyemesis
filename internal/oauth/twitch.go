@@ -2,7 +2,11 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -425,4 +429,55 @@ func (t *Twitch) CheckCredentials(ctx context.Context, clientID, clientSecret st
 		"grant_type":    {"client_credentials"},
 	}, nil)
 	return classifyCheckError(err)
+}
+
+// Validate asks Twitch whether an access token is still valid, through
+// GET https://id.twitch.tv/oauth2/validate.
+//
+// Twitch REQUIRES this of every app that holds a user's token: at startup and
+// hourly thereafter, because a user can disconnect the integration (or the
+// token can be revoked) without the app calling any API that would notice, and
+// the app must then end every session that uses the token. A 401 is the only
+// verdict: nil means valid, IsTokenInvalid(err) means revoked or disconnected,
+// and any other error (a 5xx, a network failure) is "could not tell", which a
+// caller must not treat as a revocation.
+//
+// The token goes in the Authorization header with the OAuth scheme the docs
+// show, never in the URL.
+func (t *Twitch) Validate(ctx context.Context, accessToken string) error {
+	var out struct {
+		ClientID string `json:"client_id"`
+	}
+	return t.getJSONScheme(ctx, t.tokenValidateEndpoint(), "OAuth", accessToken, &out)
+}
+
+func (t *Twitch) tokenValidateEndpoint() string { return t.authBase(twitchIDBase) + "/oauth2/validate" }
+
+func (t *Twitch) getJSONScheme(ctx context.Context, endpoint, scheme, accessToken string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", scheme+" "+accessToken)
+	req.Header.Set("Accept", mimeJSON)
+	resp, err := t.doRequest(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		return newStatusError(resp, body, "Twitch reports this access token is no longer valid (401)")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
+	}
+	return json.Unmarshal(body, out)
+}
+
+// IsTokenInvalid reports whether err is a platform's 401 on a token check: the
+// token was revoked or the user disconnected the integration.
+func IsTokenInvalid(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Status == http.StatusUnauthorized
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -375,7 +376,7 @@ func TestKickKeepsListeningEvenWhenItLooksUnreachable(t *testing.T) {
 	}
 }
 
-func TestKickSilenceIsReportedWithTheURLToConfigure(t *testing.T) {
+func TestKickSilenceIsReportedAndPointsAtTheURL(t *testing.T) {
 	clock := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	a := kickAdapter(t, func(c *KickConfig) { c.Now = func() time.Time { return clock } })
 
@@ -391,8 +392,13 @@ func TestKickSilenceIsReportedWithTheURLToConfigure(t *testing.T) {
 	if h.State != StateDegraded {
 		t.Fatalf("state = %q, want degraded after a long silence", h.State)
 	}
-	if !strings.Contains(h.Detail, a.CallbackURL()) {
-		t.Fatalf("detail %q does not include the URL to paste into Kick", h.Detail)
+	// The URL carries the path secret and health text is broadcast to every
+	// chat pane, so the sentence points at where the URL is shown instead.
+	if strings.Contains(h.Detail, a.CallbackPath()) || strings.Contains(h.Detail, "/chat/kick/") {
+		t.Fatalf("detail %q carries the webhook secret path", h.Detail)
+	}
+	if !strings.Contains(h.Detail, "Settings") {
+		t.Fatalf("detail %q does not say where the URL to paste into Kick is shown", h.Detail)
 	}
 	if !strings.Contains(h.Detail, "Sending still works") {
 		t.Fatalf("detail %q does not say what still works", h.Detail)
@@ -604,5 +610,336 @@ func TestNewKickWithoutACallbackPathBuilderIsRefused(t *testing.T) {
 	_, err := NewKick(KickConfig{Token: StaticToken("t")})
 	if err == nil || !strings.Contains(err.Error(), "callback path") {
 		t.Fatalf("a missing callback path builder was accepted: %v", err)
+	}
+}
+
+// Kick counts 500 grapheme clusters AND caps the content at 2048 UTF-8 bytes
+// (docs.kick.com/apis/chat). Counting runes gets both wrong on emoji.
+func TestKickSendLengthIsGraphemesAndBytes(t *testing.T) {
+	const (
+		family = "\U0001F468‍\U0001F469‍\U0001F467‍\U0001F466" // 1 grapheme, 7 runes, 25 bytes
+		flag   = "\U0001F1FA\U0001F1F8"                        // 1 grapheme, 2 runes, 8 bytes
+		eAcute = "é"                                          // 1 grapheme, 2 runes, 3 bytes
+	)
+	tests := []struct {
+		name    string
+		text    string
+		wantErr string // empty = accepted
+	}{
+		{"500 ascii is the limit", strings.Repeat("a", 500), ""},
+		{"501 ascii is refused on characters", strings.Repeat("a", 501), "500 characters"},
+		{"combining marks count once, so 500 clusters of 2 runes pass", strings.Repeat(eAcute, 500), ""},
+		{"501 combining clusters are refused on characters", strings.Repeat(eAcute, 501), "500 characters"},
+		{"500 flags (4000 bytes) are under 500 clusters but over the byte cap", strings.Repeat(flag, 500), "2048 bytes"},
+		{"250 flags are 2000 bytes and pass", strings.Repeat(flag, 250), ""},
+		{"257 flags are 2056 bytes and are refused", strings.Repeat(flag, 257), "2048 bytes"},
+		{"82 family emoji are 2050 bytes and are refused", strings.Repeat(family, 82), "2048 bytes"},
+		{"81 family emoji are 2025 bytes and pass", strings.Repeat(family, 81), ""},
+		{"500 four-byte emoji are 2000 bytes and pass", strings.Repeat("\U0001F600", 500), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sent = true
+				fmt.Fprint(w, `{"data":{"is_sent":true,"message_id":"m"}}`)
+			}))
+			defer srv.Close()
+			a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL })
+			_, err := a.Send(context.Background(), tc.text)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("an over-limit message was accepted")
+			}
+			if sent {
+				t.Error("an over-limit message reached Kick")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// ------------------------------------------------------------ subscription
+
+// fakeKickEvents is Kick's /public/v1/events/subscriptions: it remembers what
+// was created, can be told to forget it (Kick auto-disables subscriptions after
+// a day of failed deliveries, and disabling webhooks drops every one), and
+// records every request so a test can say what did and did not happen.
+type fakeKickEvents struct {
+	mu       sync.Mutex
+	subs     []map[string]any
+	requests []string
+	posts    []map[string]any
+	// postStatus/postBody override the POST answer; 0 means 200 and success.
+	postStatus int
+	postBody   string
+	getStatus  int
+	auth       []string
+}
+
+func (f *fakeKickEvents) forget() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subs = nil
+}
+
+func (f *fakeKickEvents) count(prefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, r := range f.requests {
+		if strings.HasPrefix(r, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakeKickEvents) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	f.auth = append(f.auth, r.Header.Get("Authorization"))
+	if r.URL.Path != "/public/v1/events/subscriptions" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if f.getStatus != 0 {
+			w.WriteHeader(f.getStatus)
+			fmt.Fprint(w, `{"message":"nope"}`)
+			return
+		}
+		if r.URL.Query().Get("broadcaster_user_id") != "99" {
+			http.Error(w, "wrong broadcaster", http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": f.subs, "message": "OK"})
+	case http.MethodPost:
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		f.posts = append(f.posts, body)
+		if f.postStatus != 0 {
+			w.WriteHeader(f.postStatus)
+			fmt.Fprint(w, f.postBody)
+			return
+		}
+		if f.postBody != "" {
+			fmt.Fprint(w, f.postBody)
+			return
+		}
+		evs, _ := body["events"].([]any)
+		var data []map[string]any
+		for i, e := range evs {
+			em := e.(map[string]any)
+			f.subs = append(f.subs, map[string]any{
+				"id": fmt.Sprintf("sub-%d-%d", len(f.posts), i), "event": em["name"], "version": em["version"],
+				"method": "webhook", "broadcaster_user_id": 99, "app_id": "app",
+			})
+			data = append(data, map[string]any{"name": em["name"], "version": em["version"], "subscription_id": "x", "error": ""})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": data, "message": "OK"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// runKick starts the adapter's Run and returns a stop that waits for it.
+func runKick(t *testing.T, a *KickAdapter) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = a.Run(ctx, SinkFunc(func(Message) {})) }()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("Run did not return after its context ended")
+		}
+	}
+}
+
+func TestKickRunCreatesTheChatSubscriptionWhenMissing(t *testing.T) {
+	f := &fakeKickEvents{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 5 * time.Millisecond })
+	stop := runKick(t, a)
+	defer stop()
+
+	waitFor(t, "the subscription POST", func() bool { return f.count("POST ") == 1 })
+	f.mu.Lock()
+	post := f.posts[0]
+	auth := f.auth[0]
+	f.mu.Unlock()
+	if auth != "Bearer kick-token" {
+		t.Errorf("authorization = %q", auth)
+	}
+	if post["method"] != "webhook" {
+		t.Errorf("method = %v, want webhook", post["method"])
+	}
+	evs, _ := post["events"].([]any)
+	if len(evs) != 1 {
+		t.Fatalf("events = %v, want exactly chat.message.sent", post["events"])
+	}
+	ev := evs[0].(map[string]any)
+	if ev["name"] != "chat.message.sent" || fmt.Sprint(ev["version"]) != "1" {
+		t.Errorf("event = %v", ev)
+	}
+	if fmt.Sprint(post["broadcaster_user_id"]) != "99" {
+		t.Errorf("broadcaster_user_id = %v", post["broadcaster_user_id"])
+	}
+	// GET came first: creation is conditional on absence.
+	f.mu.Lock()
+	first := f.requests[0]
+	f.mu.Unlock()
+	if first != "GET /public/v1/events/subscriptions" {
+		t.Errorf("first request = %q, want the GET", first)
+	}
+	waitFor(t, "a live state", func() bool { return a.Health().State == StateLive })
+}
+
+func TestKickRunDoesNotDuplicateAnExistingSubscription(t *testing.T) {
+	f := &fakeKickEvents{subs: []map[string]any{
+		{"id": "s1", "event": "chat.message.sent", "version": 1, "method": "webhook", "broadcaster_user_id": 99},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 5 * time.Millisecond })
+	stop := runKick(t, a)
+	waitFor(t, "the subscription lookup", func() bool { return f.count("GET ") >= 1 })
+	waitFor(t, "live", func() bool { return a.Health().State == StateLive })
+	stop()
+	if n := f.count("POST "); n != 0 {
+		t.Fatalf("%d POSTs against an existing subscription; creation is not idempotent", n)
+	}
+}
+
+// Another event type (or an older chat version) is not a chat subscription.
+func TestKickRunIgnoresSubscriptionsThatAreNotChatV1(t *testing.T) {
+	f := &fakeKickEvents{subs: []map[string]any{
+		{"id": "s1", "event": "channel.followed", "version": 1, "method": "webhook", "broadcaster_user_id": 99},
+		{"id": "s2", "event": "chat.message.sent", "version": 2, "method": "webhook", "broadcaster_user_id": 99},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 5 * time.Millisecond })
+	stop := runKick(t, a)
+	defer stop()
+	waitFor(t, "the POST", func() bool { return f.count("POST ") == 1 })
+}
+
+func TestKickRunSurfacesAWebhookNotEnabledFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"403 from Kick":                  {http.StatusForbidden, `{"message":"webhooks are not enabled for this app"}`},
+		"400 naming webhooks":            {http.StatusBadRequest, `{"message":"app webhook is not enabled"}`},
+		"200 with a per-event error":     {0, `{"data":[{"name":"chat.message.sent","version":1,"error":"webhook not enabled"}],"message":"OK"}`},
+		"500 is reported, not swallowed": {http.StatusInternalServerError, `{"message":"boom"}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeKickEvents{postStatus: tc.status, postBody: tc.body}
+			srv := httptest.NewServer(f)
+			defer srv.Close()
+			a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 5 * time.Millisecond })
+			stop := runKick(t, a)
+			defer stop()
+			waitFor(t, "a degraded state naming the subscription", func() bool {
+				h := a.Health()
+				return h.State == StateDegraded && strings.Contains(h.Detail, "subscri")
+			})
+			h := a.Health()
+			if tc.status == http.StatusForbidden || tc.status == http.StatusBadRequest || tc.status == 0 {
+				if !strings.Contains(h.Detail, "Enable webhooks") {
+					t.Errorf("detail %q does not say how to enable webhooks", h.Detail)
+				}
+			}
+			if strings.Contains(h.Detail, "/api/v1/chat/kick/") {
+				t.Errorf("detail %q carries the webhook secret path", h.Detail)
+			}
+		})
+	}
+}
+
+func TestKickRunRecreatesAVanishedSubscription(t *testing.T) {
+	f := &fakeKickEvents{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	var mu sync.Mutex
+	clock := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	now := func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
+
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.APIBase = srv.URL
+		c.Tick = 5 * time.Millisecond
+		c.Now = now
+	})
+	stop := runKick(t, a)
+	defer stop()
+	waitFor(t, "the first POST", func() bool { return f.count("POST ") == 1 })
+
+	// Inside the recheck window nothing more happens, however many ticks pass.
+	f.forget()
+	advance(10 * time.Minute)
+	time.Sleep(60 * time.Millisecond)
+	if n := f.count("POST "); n != 1 {
+		t.Fatalf("%d POSTs before the recheck interval elapsed", n)
+	}
+
+	// Past it the vanished subscription is found missing and created again.
+	advance(25 * time.Minute)
+	waitFor(t, "the re-creation", func() bool { return f.count("POST ") == 2 })
+}
+
+// A failed check is retried far sooner than the 30-minute cadence, so a
+// network blip at start does not leave chat unsubscribed for half an hour.
+func TestKickRunRetriesAFailedCheckSoon(t *testing.T) {
+	f := &fakeKickEvents{getStatus: http.StatusInternalServerError}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	var mu sync.Mutex
+	clock := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.APIBase = srv.URL
+		c.Tick = 5 * time.Millisecond
+		c.Now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	})
+	stop := runKick(t, a)
+	defer stop()
+	waitFor(t, "the first lookup", func() bool { return f.count("GET ") == 1 })
+	f.mu.Lock()
+	f.getStatus = 0
+	f.mu.Unlock()
+	mu.Lock()
+	clock = clock.Add(3 * time.Minute)
+	mu.Unlock()
+	waitFor(t, "the retry to create it", func() bool { return f.count("POST ") == 1 })
+}
+
+// Subscriptions persist per app and broadcaster, so deleting on every restart
+// would drop chat events delivered in between. Nothing is deleted on shutdown.
+func TestKickRunNeverDeletesTheSubscriptionOnShutdown(t *testing.T) {
+	f := &fakeKickEvents{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 5 * time.Millisecond })
+	stop := runKick(t, a)
+	waitFor(t, "the POST", func() bool { return f.count("POST ") == 1 })
+	stop()
+	if n := f.count("DELETE "); n != 0 {
+		t.Fatalf("%d DELETE requests on shutdown", n)
 	}
 }
