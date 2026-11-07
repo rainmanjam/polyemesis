@@ -44,13 +44,13 @@ const chatSettle = 2 * time.Minute
 // message to exactly one file instead of none or two.
 const chatSeam = 5 * time.Second
 
-// ChatWindow is the arrival-time window [startMS, endMS) of the chat that
+// ChatWindow is the message-time window [startMS, endMS) of the chat that
 // belongs to rec, and where its end came from. all is every indexed recording,
 // used to find the next segment of the same programme. mtime is the file's last
 // write, the end of a segment that was never measured.
 //
 // The window is the one the highlight scanner reads for a recording part
-// (StartedAt .. StartedAt+Duration, on the arrival clock), plus the seam rule
+// (StartedAt .. StartedAt+Duration, on the at_ms clock), plus the seam rule
 // above. A programme recorded as several files is therefore several windows
 // that tile the session. Two programmes recording at once have OVERLAPPING
 // windows, and chat_messages carries no programme, so each file's sidecar holds
@@ -138,6 +138,16 @@ func (m *Manager) ChatSidecar(filename string, vtt bool) (string, bool) {
 	return path, err == nil && fi.Mode().IsRegular()
 }
 
+// chatSidecarInfo is the JSON sidecar's file info, when it exists.
+func (m *Manager) chatSidecarInfo(filename string) (os.FileInfo, bool) {
+	path, ok := m.ChatSidecar(filename, false)
+	if !ok {
+		return nil, false
+	}
+	fi, err := os.Stat(path)
+	return fi, err == nil
+}
+
 // HasChatSidecar reports whether chat was saved with the recording. The JSON
 // file is written last, so its presence means the pair is complete.
 func (m *Manager) HasChatSidecar(filename string) bool {
@@ -156,9 +166,6 @@ func (m *Manager) writeChatSidecars() bool {
 	now := time.Now()
 	changed := false
 	for _, rec := range recs {
-		if m.chatSettled(rec.Filename) {
-			continue
-		}
 		path, err := m.Resolve(rec.Filename)
 		if err != nil {
 			continue
@@ -167,8 +174,14 @@ func (m *Manager) writeChatSidecars() bool {
 		if err != nil || !fi.Mode().IsRegular() || now.Sub(fi.ModTime()) < chatSettle {
 			continue
 		}
-		if m.HasChatSidecar(rec.Filename) {
-			m.markChatSettled(rec.Filename)
+		if m.chatSettled(rec.Filename, fi.ModTime()) {
+			continue
+		}
+		// A sidecar older than its master is stale: the file was written to
+		// again after the chat was saved (a recorder that sat idle for longer
+		// than chatSettle and then carried on), so it is saved again.
+		if sc, ok := m.chatSidecarInfo(rec.Filename); ok && !sc.ModTime().Before(fi.ModTime()) {
+			m.markChatSettled(rec.Filename, fi.ModTime())
 			continue
 		}
 		plan, err := m.chatPlan(rec, recs, fi.ModTime())
@@ -179,14 +192,14 @@ func (m *Manager) writeChatSidecars() bool {
 		if plan.Header.MessageCount == 0 {
 			// Nothing to keep, and asking again every 30 s would be a query per
 			// quiet recording for ever. A restart asks once more.
-			m.markChatSettled(rec.Filename)
+			m.markChatSettled(rec.Filename, fi.ModTime())
 			continue
 		}
 		if err := m.saveChat(rec.Filename, plan); err != nil {
 			m.log.Warn("cannot save a recording's chat", "file", rec.Filename, "err", err)
 			continue
 		}
-		m.markChatSettled(rec.Filename)
+		m.markChatSettled(rec.Filename, fi.ModTime())
 		m.log.Info("saved chat with recording", "file", rec.Filename,
 			"messages", plan.Header.MessageCount, "complete", plan.Header.Complete)
 		changed = true
@@ -194,19 +207,23 @@ func (m *Manager) writeChatSidecars() bool {
 	return changed
 }
 
-func (m *Manager) chatSettled(name string) bool {
+// chatSettled reports whether the chat of name needs no more attention as of
+// the file's last write. Keyed on the write time, so a file written to again
+// is looked at again.
+func (m *Manager) chatSettled(name string, mtime time.Time) bool {
 	m.chatMu.Lock()
 	defer m.chatMu.Unlock()
-	return m.chatDone[name]
+	at, ok := m.chatDone[name]
+	return ok && at.Equal(mtime)
 }
 
-func (m *Manager) markChatSettled(name string) {
+func (m *Manager) markChatSettled(name string, mtime time.Time) {
 	m.chatMu.Lock()
 	defer m.chatMu.Unlock()
 	if m.chatDone == nil {
-		m.chatDone = map[string]bool{}
+		m.chatDone = map[string]time.Time{}
 	}
-	m.chatDone[name] = true
+	m.chatDone[name] = mtime
 }
 
 // saveChat writes the VTT, then the JSON. Each goes to a dot-prefixed temporary

@@ -2024,6 +2024,8 @@ platform here publishes an API for a user's message history, Twitch included.
 Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
+The scrollback is a bounded replay buffer. For a durable copy of a recorded
+stream's chat, see [CHAT-EXPORT.md](CHAT-EXPORT.md).
 
 The card also carries `sanction`: the ban or timeout in force on that person,
 **as polyemesis recorded it**. Every successful `POST /chat/bans` — the
@@ -2126,9 +2128,9 @@ and both set a `Content-Disposition` filename.
 
 `from` and `to` are RFC 3339 times or Unix milliseconds, `to` must be after
 `from`, and every bad parameter is a `400` before any byte is sent. The window
-is on the **arrival clock**: the time this server received each message, which
-is the clock the highlight scanner lines chat up with a recording by, not the
-platform's own timestamp. Messages polyemesis sent itself are never included,
+is on the **stored message time** (`at_ms`): the platform's own timestamp where
+its adapter supplies one, otherwise the moment this server received the message.
+It is the clock the highlight scanner lines chat up with a recording by. Messages polyemesis sent itself are never included,
 and neither are messages a moderator deleted or the operator hid (both remove
 the stored row).
 

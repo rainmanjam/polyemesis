@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Tidak dapat mengunduh obrolan: {reason}",
   "chatExport.open": "Ekspor obrolan",
   "chatExport.title": "Ekspor obrolan",
-  "chatExport.desc": "Unduh obrolan yang tersimpan untuk rentang waktu tertentu. Waktu mengikuti zona waktu Anda dan menandai kapan server ini menerima setiap pesan.",
+  "chatExport.desc": "Unduh obrolan yang tersimpan untuk rentang waktu tertentu. Waktu mengikuti zona waktu Anda dan memakai waktu yang disimpan bersama setiap pesan.",
   "chatExport.from": "Dari",
   "chatExport.to": "Sampai",
   "chatExport.platform": "Platform",

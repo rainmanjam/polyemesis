@@ -29,11 +29,13 @@ there first).
 
 ### Timing
 
-Every offset and absolute time is the **arrival time**: when this server
-received the message, not the platform's own timestamp. It is the same clock the
-highlight scanner uses to line chat up with a recording. Platform clocks drift,
-differ from each other and say nothing about where a message sits against
-footage this server recorded.
+Every offset and absolute time is the **stored message time** (`at_ms`), the
+same clock the highlight scanner uses to line chat up with a recording. It is
+what the platform adapter put on the message: the platform's own sent time where
+it supplies one (Twitch does), and the moment this server received the message
+where it does not. So it is *not* uniformly arrival time, and a platform clock
+that runs fast or slow shifts that platform's messages against the video by the
+same amount. Nothing here corrects for it.
 
 The recording's start is the timestamp in its file name, **whole seconds**, so
 offsets are good to about a second against the video (`startPrecision` says
@@ -64,16 +66,18 @@ or two.
 {"schema":1,"generator":"polyemesis v1.2.3","generatedAt":"2026-03-04T21:12:09Z",
 "recording":{"file":"rec-s1-20260304-200000.mkv","startedAt":"2026-03-04T20:00:00Z","durationMs":3600000,"endSource":"probe","startPrecision":"1s"},
 "from":"2026-03-04T20:00:00Z","to":"2026-03-04T21:00:00Z","platforms":["twitch","youtube"],"messageCount":2,
-"clock":"arrival: the time this server received each message, not the platform's own timestamp",
+"clock":"stored message time (at_ms): the platform's own timestamp where its adapter supplies one, otherwise when this server received the message; the clock the highlight scanner uses",
 "excludes":["echo","moderation-removed"],"complete":true,"messages":[
 {"offsetMs":2500,"at":"2026-03-04T20:00:02.5Z","atMs":1772654402500,"platform":"twitch","account":"acct","messageId":"m1","authorId":"u1","author":"Gull Watcher","text":"seven gulls <3","roles":["subscriber"],"badges":[{"id":"subscriber","version":"12"}]},
 {"offsetMs":61000,"at":"2026-03-04T20:01:01Z","atMs":1772654461000,"platform":"youtube","account":"chan","messageId":"m2","authorId":"u2","author":"Sam","text":"first line","roles":[],"badges":[]}
 ]}
 ```
 
-`complete` says whether the chat history still reached back to the start of the
-window when the file was written. When it is `false` the file holds only the
-tail and `retainedFrom` says from when. `schema` changes only when a field changes meaning.
+`complete` is `true` only when the chat history still held something from
+before the window started, which proves nothing in it was purged. When it is
+`false` polyemesis cannot show that (the purge may have taken the start, or this
+is simply the first stream on a new install) and `retainedFrom` is the oldest
+message it still had. `schema` changes only when a field changes meaning.
 
 ### The VTT file
 
@@ -98,7 +102,7 @@ Text is escaped and line breaks become spaces.
 
 - **A recording that spans a purge.** The file is written when the recording
   finishes, from whatever the chat history still holds, and says so
-  (`complete: false`, `retainedFrom`). Keep the history longer than one segment
+  (`complete: false`, `retainedFrom`; false means unproven, not necessarily lost). Keep the history longer than one segment
   (3600 seconds by default) plus a few minutes and every file is complete; the
   default two hours is.
 - **Two programmes recording at once.** `chat_messages` records no programme, so

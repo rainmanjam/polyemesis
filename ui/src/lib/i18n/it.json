@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Impossibile scaricare la chat: {reason}",
   "chatExport.open": "Esporta chat",
   "chatExport.title": "Esporta chat",
-  "chatExport.desc": "Scarica la chat memorizzata per un intervallo di tempo. Gli orari sono nel tuo fuso orario e indicano quando questo server ha ricevuto ogni messaggio.",
+  "chatExport.desc": "Scarica la chat memorizzata per un intervallo di tempo. Gli orari sono nel tuo fuso orario e usano l'ora memorizzata con ogni messaggio.",
   "chatExport.from": "Da",
   "chatExport.to": "A",
   "chatExport.platform": "Piattaforma",

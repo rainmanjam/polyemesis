@@ -144,7 +144,8 @@ func TestAWindowWithNoChatGetsNoSidecarAndIsNotAskedAgain(t *testing.T) {
 	if m.writeChatSidecars() || m.HasChatSidecar(rec.Filename) {
 		t.Error("an empty window must not leave an empty file that reads as 'nobody chatted'")
 	}
-	if !m.chatSettled(rec.Filename) {
+	fi, _ := os.Stat(filepath.Join(dir, rec.Filename))
+	if !m.chatSettled(rec.Filename, fi.ModTime()) {
 		t.Error("a quiet recording should be remembered, not re-queried every scan")
 	}
 }
@@ -252,5 +253,41 @@ func TestChatPlanForAnUnmeasuredLiveSegmentEndsAtItsLastWrite(t *testing.T) {
 	}
 	if plan.Header.Recording == nil || plan.Header.Recording.EndSource != "mtime" {
 		t.Errorf("recording = %+v", plan.Header.Recording)
+	}
+}
+
+// A recorder that sat idle past the settle window and then carried on writing
+// leaves a sidecar older than its master; the next scan saves the chat again.
+func TestASidecarOlderThanItsMasterIsSavedAgain(t *testing.T) {
+	m, dir, store := newManager(t)
+	start := time.Now().Add(-5 * time.Hour).Truncate(time.Second)
+	rec := seedFinished(t, m, dir, start, 0) // mtime = start+30m
+	say(t, store, "1", start.Add(10*time.Minute), "ana", "early")
+	if !m.writeChatSidecars() {
+		t.Fatal("first save")
+	}
+	// The recorder wakes up and appends: the master is now newer than the sidecar.
+	// (The sidecar was written "now"; put its time where it would have been, an
+	// hour after the segment first went quiet.)
+	sidecar := filepath.Join(dir, strings.TrimSuffix(rec.Filename, ".mkv")+".chat.json")
+	written := start.Add(time.Hour)
+	if err := os.Chtimes(sidecar, written, written); err != nil {
+		t.Fatal(err)
+	}
+	say(t, store, "2", start.Add(2*time.Hour), "bo", "after the pause")
+	master := filepath.Join(dir, rec.Filename)
+	later := start.Add(3 * time.Hour)
+	if err := os.Chtimes(master, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if !m.writeChatSidecars() {
+		t.Fatal("a master newer than its sidecar should be saved again")
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, strings.TrimSuffix(rec.Filename, ".mkv")+".chat.json"))
+	if !strings.Contains(string(raw), "after the pause") {
+		t.Errorf("the rewrite did not pick up the later chat: %s", raw)
+	}
+	if m.writeChatSidecars() {
+		t.Error("and then it is settled again")
 	}
 }

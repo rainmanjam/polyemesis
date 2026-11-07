@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Sohbet indirilemedi: {reason}",
   "chatExport.open": "Sohbeti dışa aktar",
   "chatExport.title": "Sohbeti dışa aktar",
-  "chatExport.desc": "Bir zaman aralığı için saklanan sohbeti indirin. Saatler saat diliminizdedir ve bu sunucunun her mesajı ne zaman aldığını gösterir.",
+  "chatExport.desc": "Bir zaman aralığı için saklanan sohbeti indirin. Saatler saat diliminizdedir ve her mesajla birlikte saklanan zamanı kullanır.",
   "chatExport.from": "Başlangıç",
   "chatExport.to": "Bitiş",
   "chatExport.platform": "Platform",

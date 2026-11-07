@@ -21,7 +21,7 @@ const chatExportPage = 1000
 // (echo) are never part of it: they are the operator's, not the audience's, and
 // the highlight scanner leaves them out of the same window for the same reason.
 type ChatRange struct {
-	// FromMS is inclusive and ToMS exclusive, Unix ms of ARRIVAL (at_ms) -- the
+	// FromMS is inclusive and ToMS exclusive, Unix ms of the stored message time (at_ms) -- the
 	// clock the highlight scanner lines chat up with a recording by.
 	FromMS, ToMS int64
 	// Platform narrows to one platform; empty means all.
@@ -122,7 +122,7 @@ func (d *DB) chatRangePage(q ChatRange, maxID, afterAt, afterID int64) ([]ChatMe
 	return out, rows.Err()
 }
 
-// ChatOldest is the arrival time of the oldest stored message, and false when
+// ChatOldest is the stored time of the oldest stored message, and false when
 // the table is empty.
 //
 // It is how an export tells a window that was fully retained from one the purge

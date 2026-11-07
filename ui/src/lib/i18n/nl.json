@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Chat kon niet worden gedownload: {reason}",
   "chatExport.open": "Chat exporteren",
   "chatExport.title": "Chat exporteren",
-  "chatExport.desc": "Download de opgeslagen chat voor een tijdsbereik. De tijden staan in jouw tijdzone en geven aan wanneer deze server elk bericht ontving.",
+  "chatExport.desc": "Download de opgeslagen chat voor een tijdsbereik. De tijden staan in jouw tijdzone en gebruiken de tijd die bij elk bericht is opgeslagen.",
   "chatExport.from": "Van",
   "chatExport.to": "Tot",
   "chatExport.platform": "Platform",

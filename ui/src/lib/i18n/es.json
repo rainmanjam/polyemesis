@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "No se pudo descargar el chat: {reason}",
   "chatExport.open": "Exportar chat",
   "chatExport.title": "Exportar chat",
-  "chatExport.desc": "Descarga el chat guardado de un intervalo de tiempo. Las horas están en tu zona horaria e indican cuándo recibió este servidor cada mensaje.",
+  "chatExport.desc": "Descarga el chat guardado de un intervalo de tiempo. Las horas están en tu zona horaria y usan la hora guardada con cada mensaje.",
   "chatExport.from": "Desde",
   "chatExport.to": "Hasta",
   "chatExport.platform": "Plataforma",

@@ -70,7 +70,7 @@ type Manager struct {
 	// attention -- saved already, or nothing to save -- so the scan does not
 	// query the chat table for it every 30 s. See writeChatSidecars.
 	chatMu   sync.Mutex
-	chatDone map[string]bool
+	chatDone map[string]time.Time
 	// markerUnwritable is set when VolumeMarker could not be created, so
 	// HoldForMissing falls back to the all-missing rule. See there.
 	markerUnwritable atomic.Bool

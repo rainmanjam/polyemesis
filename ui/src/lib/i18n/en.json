@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Could not download chat: {reason}",
   "chatExport.open": "Export chat",
   "chatExport.title": "Export chat",
-  "chatExport.desc": "Download the stored chat for a time range. Times are in your time zone and mark when this server received each message.",
+  "chatExport.desc": "Download the stored chat for a time range. Times are in your time zone and use the time stored with each message.",
   "chatExport.from": "From",
   "chatExport.to": "To",
   "chatExport.platform": "Platform",

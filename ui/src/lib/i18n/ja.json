@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "チャットをダウンロードできませんでした: {reason}",
   "chatExport.open": "チャットをエクスポート",
   "chatExport.title": "チャットをエクスポート",
-  "chatExport.desc": "指定した期間に保存されているチャットをダウンロードします。時刻はお使いのタイムゾーンで、このサーバーが各メッセージを受信した時刻を表します。",
+  "chatExport.desc": "指定した期間に保存されているチャットをダウンロードします。時刻はお使いのタイムゾーンで、各メッセージと一緒に保存された時刻を使います。",
   "chatExport.from": "開始",
   "chatExport.to": "終了",
   "chatExport.platform": "プラットフォーム",

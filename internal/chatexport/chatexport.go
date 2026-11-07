@@ -6,12 +6,13 @@
 // reads through Source one page at a time and writes straight to an io.Writer,
 // so a day-long recording never sits in memory.
 //
-// THE CLOCK IS ARRIVAL. Every offset and every absolute time is when this
-// server received the message (chat_messages.at_ms), not the platform's own
-// timestamp -- the same clock the highlight scanner lines chat up with a
-// recording by. Platform clocks differ from ours and from each other, and a
-// platform's own time can say nothing about where the message sits against
-// footage this server recorded.
+// THE CLOCK IS THE STORED MESSAGE TIME. Every offset and every absolute time is
+// chat_messages.at_ms, the same clock the highlight scanner lines chat up with a
+// recording by. It is what the adapter put in Message.At: the platform's own
+// sent time where the adapter has one (Twitch's tmi-sent-ts, for one), and the
+// moment this server received the message where it has none (Normalise). So it
+// is NOT uniformly the arrival time, and platform clocks differ from ours and
+// from each other by whatever skew they carry.
 package chatexport
 
 import (
@@ -118,7 +119,7 @@ type Header struct {
 
 // Entry is one message in an export.
 type Entry struct {
-	// OffsetMs is the arrival time minus the recording's start. Absent in an
+	// OffsetMs is the stored message time minus the recording's start. Absent in an
 	// export that is not tied to a recording.
 	OffsetMs  *int64    `json:"offsetMs,omitempty"`
 	At        time.Time `json:"at"`
@@ -224,7 +225,7 @@ func plan(src Source, q db.ChatRange, startMS int64, withOffset bool, now time.T
 		Schema: SchemaVersion, Generator: generator, GeneratedAt: now.UTC(),
 		From: time.UnixMilli(q.FromMS).UTC(), To: time.UnixMilli(q.ToMS).UTC(),
 		Platforms: []string{}, MessageCount: sum.Count,
-		Clock:    "arrival: the time this server received each message, not the platform's own timestamp",
+		Clock:    "stored message time (at_ms): the platform's own timestamp where its adapter supplies one, otherwise when this server received the message; the clock the highlight scanner uses",
 		Excludes: []string{"echo", "moderation-removed"},
 		// Retained chat is always a suffix of time (see db.ChatOldest), so a
 		// window that starts at or after the oldest row lost nothing to the purge.

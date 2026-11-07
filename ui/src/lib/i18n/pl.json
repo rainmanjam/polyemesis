@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Nie udało się pobrać czatu: {reason}",
   "chatExport.open": "Eksportuj czat",
   "chatExport.title": "Eksportuj czat",
-  "chatExport.desc": "Pobierz zapisany czat z wybranego przedziału czasu. Godziny są w Twojej strefie czasowej i oznaczają moment, w którym ten serwer odebrał każdą wiadomość.",
+  "chatExport.desc": "Pobierz zapisany czat z wybranego przedziału czasu. Godziny są w Twojej strefie czasowej i wynikają z czasu zapisanego przy każdej wiadomości.",
   "chatExport.from": "Od",
   "chatExport.to": "Do",
   "chatExport.platform": "Platforma",

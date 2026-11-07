@@ -21,7 +21,7 @@ its first tagged release.
   are refused to `read` tokens like `GET /chat/messages`, and CSV cells beginning `= + - @` are
   neutralised. `GET /recordings` reports `chatSaved`. The Recordings page has a Chat menu per
   recording, the Chat page an Export chat button, and Settings → Pipeline → Chat history says chat is
-  saved with each recording. Times are the arrival clock the highlight scanner uses; see
+  saved with each recording. Times are the stored message time (`at_ms`) the highlight scanner uses; see
   `docs/CHAT-EXPORT.md`. No schema change.
 - **Kick chat now sets itself up, and the console shows the webhook URL Kick needs.** Staging found
   Kick chat could not work: nothing showed the operator the webhook URL to paste into their Kick app,

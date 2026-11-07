@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Impossible de télécharger le chat : {reason}",
   "chatExport.open": "Exporter le chat",
   "chatExport.title": "Exporter le chat",
-  "chatExport.desc": "Téléchargez le chat stocké pour une période. Les heures sont dans votre fuseau horaire et indiquent quand ce serveur a reçu chaque message.",
+  "chatExport.desc": "Téléchargez le chat stocké pour une période. Les heures sont dans votre fuseau horaire et reprennent l'heure enregistrée avec chaque message.",
   "chatExport.from": "Du",
   "chatExport.to": "Au",
   "chatExport.platform": "Plateforme",

@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "无法下载聊天：{reason}",
   "chatExport.open": "导出聊天",
   "chatExport.title": "导出聊天",
-  "chatExport.desc": "下载某个时间段内已存储的聊天。时间采用你所在的时区，表示此服务器收到每条消息的时间。",
+  "chatExport.desc": "下载某个时间段内已存储的聊天。时间采用你所在的时区，使用每条消息一并存储的时间。",
   "chatExport.from": "开始",
   "chatExport.to": "结束",
   "chatExport.platform": "平台",

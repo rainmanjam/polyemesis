@@ -3992,7 +3992,7 @@
   "rec.chatFailed": "Chat konnte nicht heruntergeladen werden: {reason}",
   "chatExport.open": "Chat exportieren",
   "chatExport.title": "Chat exportieren",
-  "chatExport.desc": "Lade den gespeicherten Chat für einen Zeitraum herunter. Die Zeiten gelten in deiner Zeitzone und geben an, wann dieser Server jede Nachricht empfangen hat.",
+  "chatExport.desc": "Lade den gespeicherten Chat für einen Zeitraum herunter. Die Zeiten gelten in deiner Zeitzone und verwenden den bei jeder Nachricht gespeicherten Zeitpunkt.",
   "chatExport.from": "Von",
   "chatExport.to": "Bis",
   "chatExport.platform": "Plattform",
