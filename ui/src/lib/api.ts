@@ -1,3 +1,4 @@
+import { chatExportUrl, type ChatExportFormat } from "@/lib/chatExport";
 import { WIRE } from "@/lib/contract/wire";
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
@@ -1124,6 +1125,12 @@ export const api = {
   recordingUsage: () => get<DiskUsage>("/recordings/usage"),
   deleteRecording: (id: number) => del<{ status: string }>(`/recordings/${id}`),
   downloadUrl: (id: number) => `${BASE}/recordings/${id}/download`,
+  /** One recording's chat as saved beside it (or built from the chat history
+   *  when none was saved). Fetched, not navigated: see lib/chatExport.ts. */
+  recordingChatUrl: (id: number, format: "json" | "vtt") => `${BASE}/recordings/${id}/chat?format=${format}`,
+  /** Any window of stored chat, streamed. A plain URL for the browser to save. */
+  chatExportUrl: (p: { from: Date; to: Date | null; platform: string; format: ChatExportFormat }) =>
+    chatExportUrl(BASE, p),
 
   // --- go-live metadata ---
   // The composer's own fetch used to live in Dashboard.tsx, and it parsed a

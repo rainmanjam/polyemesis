@@ -59,7 +59,11 @@ const (
 	// quiet channel still has something to show.
 	DefaultRetention     = 2 * time.Hour
 	DefaultRetentionKeep = 2000
-	DefaultPurgeEvery    = 5 * time.Minute
+
+	// maxPurgeHold is the furthest a WithPurgeFloor hold may reach behind the
+	// retention cutoff.
+	maxPurgeHold      = 24 * time.Hour
+	DefaultPurgeEvery = 5 * time.Minute
 )
 
 // Hub supervises the adapters and owns everything they must not duplicate:
@@ -125,7 +129,9 @@ type Hub struct {
 	sendTimeout time.Duration
 	retention   time.Duration
 	retainKeep  int
-	purgeEvery  time.Duration
+	// purgeFloor, when set, holds the purge cutoff back. See WithPurgeFloor.
+	purgeFloor func(now time.Time) (time.Time, bool)
+	purgeEvery time.Duration
 
 	stop chan struct{}
 	// flushNow lets a burst of chat reach the database without waiting out the
@@ -214,6 +220,14 @@ func WithRetention(age time.Duration, keep int) Option {
 			h.retainKeep = keep
 		}
 	}
+}
+
+// WithPurgeFloor keeps the purge from passing a time the caller names. The
+// recording manager uses it to hold back the chat of a recording whose sidecar
+// is not written yet; see recording.Manager.ChatHold. The hold never reaches
+// more than a day behind the retention cutoff.
+func WithPurgeFloor(fn func(now time.Time) (time.Time, bool)) Option {
+	return func(h *Hub) { h.purgeFloor = fn }
 }
 
 // WithSendTimeout bounds one platform's send inside a fan-out.
@@ -1148,7 +1162,17 @@ func (h *Hub) purge() {
 	if !ok || retention <= 0 {
 		return
 	}
-	if _, err := p.PurgeChatMessages(h.now().Add(-retention), keep); err != nil {
+	now := h.now()
+	cutoff := now.Add(-retention)
+	if h.purgeFloor != nil {
+		if floor, ok := h.purgeFloor(now); ok && floor.Before(cutoff) {
+			cutoff = floor
+			if lim := now.Add(-retention - maxPurgeHold); cutoff.Before(lim) {
+				cutoff = lim
+			}
+		}
+	}
+	if _, err := p.PurgeChatMessages(cutoff, keep); err != nil {
 		h.log.Warn("chat history not purged", "err", err)
 	}
 }

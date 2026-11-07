@@ -1468,6 +1468,7 @@ function PipelineSettings({
           </span>
           <span className="text-sm text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
           <span className="text-sm text-muted-foreground">{t("set.chatSmall")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.chatSavedWithRecordings")}</span>
           <span className="text-sm text-muted-foreground">
             {tn("set.chatSendOnConnectWhy", {
               name: <strong>{t("set.chatSendOnConnectShort")}</strong>,
