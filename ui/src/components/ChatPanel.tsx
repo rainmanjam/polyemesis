@@ -664,6 +664,22 @@ export function ChatComposer({
 
 // --------------------------------------------------------------- status rail
 
+/** "12 watching · 3,400 followers · 210 subscribers", with whichever figures the
+ *  platform reported; empty when it reported none. */
+function audienceLine(s: ChatStatus, t: ReturnType<typeof useT>): string {
+  const parts: string[] = [];
+  if (s.viewers !== undefined) {
+    parts.push(t("chatpage.countViewers", { n: s.viewers.toLocaleString() }));
+  }
+  if (s.followers !== undefined) {
+    parts.push(t("chatpage.countFollowers", { n: s.followers.toLocaleString() }));
+  }
+  if (s.subscribers !== undefined) {
+    parts.push(t("chatpage.countSubscribers", { n: s.subscribers.toLocaleString() }));
+  }
+  return parts.join(" · ");
+}
+
 /** Per-platform connection state, with the reason attached.
  *
  *  The whole point of this block is the sentence. "YouTube: quota exhausted,
@@ -704,6 +720,11 @@ export function ChatStatusList({
               </div>
               {detail && (
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{detail}</p>
+              )}
+              {audienceLine(s, t) && (
+                <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
+                  {audienceLine(s, t)}
+                </p>
               )}
               {quota && (
                 <p className="mt-0.5 text-sm leading-snug text-muted-foreground">

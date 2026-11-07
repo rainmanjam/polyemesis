@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "Client Key",
   "credLabels.tiktok.idWhere": "Öffne im TikTok-Entwicklerportal deine App und kopiere den Client Key von der Seite App-Details.",
   "credLabels.tiktok.secretWhere": "Zeige auf derselben Seite App-Details das Client Secret an und kopiere es.",
-  "publish.ackOutcome": "Ich habe {platform} geprüft, der Beitrag ist dort nicht vorhanden."
+  "publish.ackOutcome": "Ich habe {platform} geprüft, der Beitrag ist dort nicht vorhanden.",
+  "chatpage.countViewers": "{n} schauen zu",
+  "chatpage.countFollowers": "{n} Follower",
+  "chatpage.countSubscribers": "{n} Abonnenten",
+  "caps.rumble.viewerStats": "Gebaut, aber noch nicht an einem Live-Konto geprüft. Zuschauerzahl (watching_now), Follower- und Abonnentenzahl kommen mit derselben get-data-Abfrage wie der Chat und erscheinen neben dem Rumble-Chatstatus und in den Analysen. Rumble hat keine Anmeldung, daher ist das nicht die kontobezogene Statistikroute; die Zelle bleibt „Ungeprüft“, bis eine Live-Sendung sie bestätigt. Der Chat ist auf die letzten 50 Nachrichten pro Abfrage begrenzt; überholt ein reger Chat das, weist der Status darauf hin, dass Nachrichten fehlen können."
 }

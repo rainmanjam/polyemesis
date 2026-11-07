@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "Dans le portail développeur TikTok, ouvrez votre application et copiez la Client key depuis sa page de détails.",
   "credLabels.tiktok.secretWhere": "Sur la même page de détails, affichez puis copiez le Client secret.",
-  "publish.ackOutcome": "J'ai vérifié {platform} et la publication n'y est pas."
+  "publish.ackOutcome": "J'ai vérifié {platform} et la publication n'y est pas.",
+  "chatpage.countViewers": "{n} spectateurs",
+  "chatpage.countFollowers": "{n} followers",
+  "chatpage.countSubscribers": "{n} abonnés",
+  "caps.rumble.viewerStats": "Développé mais pas encore vérifié sur un compte en direct. Le nombre de spectateurs (watching_now), d'abonnés (followers) et d'abonnés payants arrive avec la même requête get-data que le chat et s'affiche à côté de l'état du chat Rumble et dans les analyses. Rumble n'a pas de connexion, ce n'est donc pas la route de statistiques par compte ; la case reste « Non vérifié » tant qu'un direct ne l'a pas confirmé. Le chat est limité aux 50 derniers messages par requête ; si un chat très actif dépasse cette limite, l'état signale que des messages ont pu être manqués."
 }

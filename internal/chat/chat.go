@@ -255,6 +255,11 @@ type Health struct {
 	// on RumbleAdapter.setLive for why a platform with no sign-in cannot report
 	// through that interface at all.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are the channel's counts where the same poll
+	// carries them (Rumble). Nil is "not reported", never zero, for the same
+	// reason as Viewers.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // Status is one platform's chat connection as reported to the UI.
@@ -281,6 +286,10 @@ type Status struct {
 	// that on the wire -- the key is absent when the platform said nothing, so a
 	// client cannot read a silence as a number.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are Health's, reported to the UI with the same
+	// absent-means-not-reported rule.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // SendResult is one platform's outcome from a fan-out send. Partial failure is

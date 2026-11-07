@@ -2726,6 +2726,11 @@ export interface ChatStatus {
   lastError?: string;
   canSend: boolean;
   quota?: ChatQuota | null;
+  /** Audience figures where the chat transport carries them (Rumble). Absent
+   *  means the platform did not report one; it is never zero. */
+  viewers?: number;
+  followers?: number;
+  subscribers?: number;
 }
 
 /** One platform's outcome from a fan-out send. `skipped` is "this platform

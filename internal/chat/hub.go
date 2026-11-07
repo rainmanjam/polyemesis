@@ -1351,6 +1351,8 @@ func (r *runner) status() Status {
 		// stopped or failed adapter would put a number beside a pane that is
 		// not receiving anything.
 		st.Viewers = hl.Viewers
+		st.Followers = hl.Followers
+		st.Subscribers = hl.Subscribers
 	}
 	return st
 }

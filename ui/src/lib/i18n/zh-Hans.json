@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "客户端密钥标识",
   "credLabels.tiktok.idWhere": "在 TikTok 开发者门户中打开你的应用，从应用详情页复制客户端密钥标识。",
   "credLabels.tiktok.secretWhere": "在同一应用详情页中显示并复制客户端密钥。",
-  "publish.ackOutcome": "我已查看 {platform}，那里没有这条发布内容。"
+  "publish.ackOutcome": "我已查看 {platform}，那里没有这条发布内容。",
+  "chatpage.countViewers": "{n} 人观看",
+  "chatpage.countFollowers": "{n} 位关注者",
+  "chatpage.countSubscribers": "{n} 位订阅者",
+  "caps.rumble.viewerStats": "已实现，但尚未在实时账号上验证。观看人数(watching_now)、关注者数和订阅者数与聊天来自同一次 get-data 轮询,显示在 Rumble 聊天状态旁和分析中。Rumble 没有登录,因此这不是按账号的统计路由;在直播验证之前,该单元格保持“未验证”。聊天每次轮询最多返回最近 50 条消息;当繁忙的聊天超出该上限时,状态会提示可能漏掉了部分消息。"
 }

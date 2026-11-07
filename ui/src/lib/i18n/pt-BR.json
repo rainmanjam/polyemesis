@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "No portal de desenvolvedores do TikTok, abra seu app e copie a Client key na página de detalhes do app.",
   "credLabels.tiktok.secretWhere": "Na mesma página de detalhes, exiba e copie o Client secret.",
-  "publish.ackOutcome": "Verifiquei o {platform} e a publicação não está lá."
+  "publish.ackOutcome": "Verifiquei o {platform} e a publicação não está lá.",
+  "chatpage.countViewers": "{n} assistindo",
+  "chatpage.countFollowers": "{n} seguidores",
+  "chatpage.countSubscribers": "{n} assinantes",
+  "caps.rumble.viewerStats": "Implementado, mas ainda não verificado com uma conta ao vivo. O número de espectadores (watching_now), seguidores e assinantes chega na mesma consulta get-data do chat e aparece ao lado do status do chat da Rumble e na análise. A Rumble não tem login, então esta não é a rota de estatísticas por conta; a célula continua como “Não verificado” até uma transmissão ao vivo confirmar. O chat é limitado às últimas 50 mensagens por consulta; se um chat movimentado ultrapassar isso, o status avisa que mensagens podem ter sido perdidas."
 }

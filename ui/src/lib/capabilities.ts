@@ -403,6 +403,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     },
     reasons: {
       chatRead: "caps.rumble.chatRead",
+      viewerStats: "caps.rumble.viewerStats",
       chatSend: "caps.rumble.chatSend",
       streamKey: "caps.rumble.streamKey",
     },

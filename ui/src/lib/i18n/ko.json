@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "클라이언트 키",
   "credLabels.tiktok.idWhere": "TikTok 개발자 포털에서 앱을 열고 앱 세부 정보 페이지의 클라이언트 키를 복사하세요.",
   "credLabels.tiktok.secretWhere": "같은 앱 세부 정보 페이지에서 클라이언트 시크릿을 표시한 뒤 복사하세요.",
-  "publish.ackOutcome": "{platform}을(를) 확인했으며 게시물이 없습니다."
+  "publish.ackOutcome": "{platform}을(를) 확인했으며 게시물이 없습니다.",
+  "chatpage.countViewers": "시청 중 {n}",
+  "chatpage.countFollowers": "팔로워 {n}",
+  "chatpage.countSubscribers": "구독자 {n}",
+  "caps.rumble.viewerStats": "구현은 되었지만 라이브 계정으로는 아직 확인하지 않았습니다. 시청자 수(watching_now), 팔로워 수, 구독자 수는 채팅과 같은 get-data 조회로 들어오며 Rumble 채팅 상태 옆과 분석에 표시됩니다. Rumble에는 로그인이 없으므로 계정별 통계 경로가 아니며, 라이브 방송으로 확인될 때까지 이 칸은 '미확인'으로 남습니다. 채팅은 조회당 최근 50개로 제한되며, 활발한 채팅이 이를 넘으면 메시지가 누락되었을 수 있다고 상태에 표시됩니다."
 }

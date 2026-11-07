@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "Di portal pengembang TikTok, buka aplikasi Anda dan salin Client key dari halaman detail aplikasi.",
   "credLabels.tiktok.secretWhere": "Di halaman detail yang sama, tampilkan dan salin Client secret.",
-  "publish.ackOutcome": "Saya sudah memeriksa {platform} dan kiriman itu tidak ada di sana."
+  "publish.ackOutcome": "Saya sudah memeriksa {platform} dan kiriman itu tidak ada di sana.",
+  "chatpage.countViewers": "{n} menonton",
+  "chatpage.countFollowers": "{n} pengikut",
+  "chatpage.countSubscribers": "{n} pelanggan",
+  "caps.rumble.viewerStats": "Sudah dibuat tetapi belum diperiksa dengan akun yang sedang live. Jumlah penonton (watching_now), pengikut, dan pelanggan datang pada polling get-data yang sama dengan chat dan tampil di samping status chat Rumble serta di analitik. Rumble tidak punya login, jadi ini bukan rute statistik per akun; sel ini tetap Belum diverifikasi sampai siaran langsung mengonfirmasinya. Chat dibatasi 50 pesan terbaru per polling; jika chat yang ramai melampauinya, status akan menyebut bahwa sebagian pesan mungkin terlewat."
 }

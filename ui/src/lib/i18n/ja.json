@@ -3983,5 +3983,9 @@
   "credLabels.clientKey": "クライアントキー",
   "credLabels.tiktok.idWhere": "TikTok の開発者ポータルでアプリを開き、アプリの詳細ページからクライアントキーをコピーします。",
   "credLabels.tiktok.secretWhere": "同じアプリの詳細ページでクライアントシークレットを表示してコピーします。",
-  "publish.ackOutcome": "{platform} を確認しました。投稿は見当たりません。"
+  "publish.ackOutcome": "{platform} を確認しました。投稿は見当たりません。",
+  "chatpage.countViewers": "視聴中 {n}",
+  "chatpage.countFollowers": "フォロワー {n}",
+  "chatpage.countSubscribers": "登録者 {n}",
+  "caps.rumble.viewerStats": "実装済みですが、ライブ中のアカウントではまだ確認していません。視聴者数(watching_now)、フォロワー数、登録者数はチャットと同じ get-data の取得で届き、Rumble のチャット状態の横と分析に表示されます。Rumble にはサインインがないため、アカウント別の統計ルートではありません。ライブ配信で確認できるまで、このセルは「未確認」のままです。チャットは1回の取得につき直近50件までで、混雑したチャットがそれを超えると、メッセージが欠けた可能性があると状態に表示されます。"
 }
