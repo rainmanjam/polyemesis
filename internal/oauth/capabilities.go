@@ -429,9 +429,10 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 		ReadFirst: "The Livestream API needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1). X's Livestream guide asks for a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder; it no longer asks for an access form. Until it is switched on, or when the account cannot use the API, the Livestream features stay off and pasting the server URL and stream key from X's producer tooling works on its own. Sign-in works without it.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
-			// Sign-in is built (PKCE, the five scopes) but no live authorize
-			// request has run, so it stays Unknown until one does.
-			CapSSO: SupportUnknown,
+			// Sign-in has run live: an account connected on 2026-11-06,
+			// reconnected on 2026-11-07, and its token refreshes. The rest of
+			// the family below is still unverified.
+			CapSSO: SupportYes,
 			// The stream key is pasted until the Livestream gate opens. Once it
 			// does, polyemesis mints the source itself; the cell stays Manual
 			// because the operator must still switch Livestream on by hand.
@@ -450,7 +451,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge.",
+			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge. Verified live: an account connected on 2026-11-06, reconnected on 2026-11-07, and the token refreshes.",
 			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/sources, then GET /2/sources/{id}/stream_key). That needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1), so until then, or when the account cannot use the API, this is a paste from X's producer tooling.",
 			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
 			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, which X delivers only to a webhook. polyemesis registers https://<tls.hostname>/api/v1/webhooks/x, so reading chat needs the app's bearer token (POLYEMESIS_X_APP_BEARER), a public trusted HTTPS hostname without a port (tls.mode acme, inbound 443), and the X client secret saved here. Without them the chat pane stays empty, says what is missing, and sending still works. Not yet checked against a live X account.",

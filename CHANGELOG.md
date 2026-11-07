@@ -49,6 +49,17 @@ its first tagged release.
 
 ### Fixed
 
+- **An X destination can be linked to the connected X account.** Staging found Add destination →
+  "X (Twitter) Live" showed only Transport, RTMP URL and Stream key, with no "Connected account"
+  picker, so the Livestream features had no account to act on. The X row in the destination
+  dialog's capability table declared no sign-in, and the dialog also showed the picker only when
+  the row's sign-in cell read "yes"; X's read "unverified". Sign-in has now run live (an account
+  connected on 2026-11-06, reconnected on 2026-11-07, and the token refreshes), so that cell is
+  "yes"; the other X cells stay unverified. The picker now follows whether the platform has a sign-in
+  flow, not how far it has been verified. With X Livestream on and an account linked, the URL and
+  stream key may be left empty: creating the destination makes the stream source and stores its URL
+  and key. With Livestream off, or no account, they are still required, and the refusal names the
+  switch. The step-2 and preset copy no longer says X has no endpoint to fetch an ingest from.
 - **Kick chat messages are limited the way Kick limits them.** Kick counts 500 grapheme clusters
   and also caps the content at 2048 bytes of UTF-8; polyemesis counted runes and had no byte cap,
   so emoji-heavy text passed the check and was refused by Kick. Both limits are enforced and a refusal says which was exceeded.

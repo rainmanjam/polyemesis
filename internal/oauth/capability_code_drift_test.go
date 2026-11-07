@@ -65,14 +65,6 @@ func capabilityJoins() []capabilityJoin {
 		{
 			cap: CapSSO, label: "Sign in",
 			implemented: registered,
-			exceptions: map[db.Platform]string{
-				// X's Livestream family sits behind polyemesis's opt-in switch: while the gate is closed
-				// (POLYEMESIS_X_LIVESTREAM unset) the code refuses without a request, so the
-				// cell reads Unknown until a live X account verifies it. Delete the
-				// exception once the cell is set to Yes.
-
-				db.PlatformX: "X Livestream gate: built, switched off until the operator sets POLYEMESIS_X_LIVESTREAM=1",
-			},
 		},
 		{
 			cap: CapStreamKey, label: "Stream key",

@@ -34,7 +34,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |

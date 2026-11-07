@@ -357,11 +357,13 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
   {
     presetId: "x",
     name: "X (Twitter) Live",
+    connect: "x",
     tier: "manual",
     summary: "wave3.x.summary",
     readFirst: "wave3.x.readFirst",
     caps: {
-      sso: "unknown",
+      // Sign-in has run live; every other cell is still unverified.
+      sso: "yes",
       streamKey: "manual",
       metadata: "unknown",
       chatRead: "unknown",
