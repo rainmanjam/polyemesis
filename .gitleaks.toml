@@ -74,6 +74,23 @@ commits = [
   # (--log-opts HEAD). Dropping them would turn main red on the next push.
   "9405ae12ceede97db38a12e772cbea6d99e1be5c",
   "720ac4bdf3c12107a64dfd492b4a44107f212a7e",
+  # The Kick chat-webhook path-secret SAMPLES in kick_webhook_guide_test.go,
+  # kick_test.go and redact_test.go (0f26a57c): a 32-character hex string bound
+  # to a constant called `secret`, which exists so the redaction, the guide
+  # visibility and the health-text tests can assert that exactly that string
+  # never reaches a log, a socket frame or a read token's response. It was
+  # invented for those tests and is no one's credential: the webhook secret a
+  # real install uses is derived from its own data key at run time.
+  #
+  # The working tree no longer contains it -- a later commit assembles the
+  # value at run time -- but a diff that REMOVES a value still contains it,
+  # which is the property the range scan exists to enforce and is not one worth
+  # weakening. So the COMMIT is exempted rather than the path or the value: the
+  # path would exempt redact_test.go (where a real key is most likely to be
+  # pasted) and the other two test files for ever, and the value would have to
+  # be repeated here, putting the string back into the tree this removed it
+  # from. The commit is one immutable, already-reviewed diff.
+  "0f26a57cd6c71e36162da58a1c08e1c474140085",
 ]
 
 # AND THE GENERATED CODE INDEX, WHICH IS NOT SOURCE.

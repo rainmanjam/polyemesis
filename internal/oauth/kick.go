@@ -279,6 +279,9 @@ func (k *Kick) Ingest(ctx context.Context, clientID, accessToken string) (*Inges
 
 // ---------------------------------------------------------------- categories
 
+// kickCategoryMinName is the shortest name filter /public/v2/categories accepts.
+const kickCategoryMinName = 3
+
 // KickCategory is one entry in Kick's category directory.
 type KickCategory struct {
 	ID        int    `json:"id"`
@@ -290,11 +293,24 @@ type KickCategory struct {
 // numeric category_id and nothing else, so without this the operator has to
 // find an integer by hand — which in practice means not setting a category at
 // all.
+//
+// It uses GET /public/v2/categories (the v1 ?q= search is deprecated). v2's
+// name filter is documented with a three-character minimum and Kick answers a
+// shorter one with a 400, so a shorter term returns no matches without a
+// request; categoryID then reports it as "no category matching", the same
+// answer a term Kick does not know gets. limit=100 keeps v1's page size.
 func (k *Kick) SearchCategories(ctx context.Context, clientID, accessToken, query string) ([]KickCategory, error) {
+	query = strings.TrimSpace(query)
+	if len([]rune(query)) < kickCategoryMinName {
+		return nil, nil
+	}
 	var out struct {
 		Data []KickCategory `json:"data"`
 	}
-	err := k.getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
+	v := url.Values{}
+	v.Set("name", query)
+	v.Set("limit", "100")
+	err := k.getJSON(ctx, k.apiEndpoint()+"/public/v2/categories?"+v.Encode(), accessToken, nil, &out)
 	if err != nil {
 		return nil, err
 	}

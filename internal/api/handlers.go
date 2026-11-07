@@ -2897,6 +2897,62 @@ func (s *Server) destinationWriteWarnings(row *db.Destination) ([]string, error)
 	return warnings, nil
 }
 
+// mintXSourceOnCreate fills an X destination's ingest URL and stream key from its
+// linked account when the create names neither, and reports whether it answered
+// the request instead (an error written, so the caller returns).
+//
+// With X Livestream on and an account linked, polyemesis creates the stream
+// source itself (oauth.X.Ingest), so a create that leaves the paste fields empty
+// is the intended shape, not an omission. The fetch is the one Refresh stream key
+// makes, done here so the row is stored whole: Validate still requires an RTMP
+// URL, and a row without one would never have been saveable to refresh.
+//
+// Everything else is left to the checks that follow. A closed gate, no linked
+// account, or a URL or key the operator did type is not this function's case,
+// except that a closed gate is refused here with its own copy rather than the
+// bare "an RTMP URL is required", which would send the operator hunting for a
+// field the gate is the reason for. The paste stays the fallback.
+func (s *Server) mintXSourceOnCreate(w http.ResponseWriter, r *http.Request, row *db.Destination) bool {
+	if row.Platform != db.PlatformX || row.AccountID == nil || row.Kind != db.DestRTMP ||
+		strings.TrimSpace(row.URL) != "" || strings.TrimSpace(row.StreamKey) != "" {
+		return false
+	}
+	if s.livestreamGate(db.PlatformX) != "open" {
+		writeError(w, http.StatusBadRequest,
+			"the server URL and stream key are required: "+oauth.ErrXLivestreamOff.Error()+
+				". Paste both from X's producer tooling, or switch X Livestream on.")
+		return true
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	acct, err := s.tokenFor(ctx, *row.AccountID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return true
+	}
+	if acct.Platform != db.PlatformX {
+		writeError(w, http.StatusBadRequest, "this destination is X, and the linked account is "+string(acct.Platform))
+		return true
+	}
+	provider, err := s.providers.Get(acct.Platform)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return true
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
+	if err != nil {
+		writeError(w, http.StatusPreconditionFailed, "developer credentials are missing for "+string(acct.Platform))
+		return true
+	}
+	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, oauth.IngestOptions{})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return true
+	}
+	row.URL, row.StreamKey = b.Ingest.URL, b.Ingest.Key
+	return false
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
@@ -2913,6 +2969,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
+	if s.mintXSourceOnCreate(w, r, &row) {
+		return
+	}
 	if s.refuseBadDestinationWrite(w, &row, nil) {
 		return
 	}

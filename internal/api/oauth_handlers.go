@@ -33,7 +33,16 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			guides[i].RedirectWarnings = redirectWarnings(s.cfg, s.proxies, r, guides[i].RedirectPath)
 		}
 		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
+		if guides[i].Platform == db.PlatformKick {
+			guides[i].WebhookURL, guides[i].WebhookURLReason = s.kickWebhookForGuide(r)
+		}
 	}
+	// The body depends on who asks: the Kick webhook URL carries a secret and
+	// is withheld from a read token. No shared cache may keep one principal's
+	// copy and serve it to another.
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", "Cookie")
 	writeJSON(w, http.StatusOK, guides)
 }
 
@@ -238,16 +247,27 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	out := make([]accountView, 0, len(accts))
 	now := time.Now()
 	for _, a := range accts {
-		out = append(out, accountView{
-			PlatformAccount: a,
-			Reconnect:       oauth.AccountNeedsReconnect(a),
-			// The same derivation the Stream Deck's key reads, through
-			// accountHealthCache: see destsignals.go.
-			Health: s.accountHealthNow(a, now),
-			IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
-		})
+		out = append(out, s.accountViewFor(a, now))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// accountViewFor is one account as the console reads it.
+func (s *Server) accountViewFor(a db.PlatformAccount, now time.Time) accountView {
+	v := accountView{
+		PlatformAccount: a,
+		Reconnect:       oauth.AccountNeedsReconnect(a),
+		// The same derivation the Stream Deck's key reads, through
+		// accountHealthCache: see destsignals.go.
+		Health: s.accountHealthNow(a, now),
+		IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
+	}
+	// The platform itself said this token is dead (Twitch's hourly validation):
+	// that is a reconnect, whatever the stored scopes say.
+	if reason := s.acctHealth.revokedReason(revokedKey(a.Platform, a.AccountRef)); reason != "" {
+		v.Reconnect = oauth.ReconnectReason{Needed: true, Reason: reason}
+	}
+	return v
 }
 
 // accountDestination is one destination that a disconnect would cut loose,

@@ -161,6 +161,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "platforms", key: "settingsUx.addPlatform" },
   { tab: "platforms", key: "set.whatPlatformsDo" },
   { tab: "platforms", key: "set.redirectUri", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "set.webhookUrl", card: "settingsUx.addPlatform" },
   { tab: "platforms", key: "set.clientId", card: "settingsUx.addPlatform" },
   { tab: "platforms", key: "set.clientSecret", card: "settingsUx.addPlatform" },
   // Each card names its pair in the platform's own words (lib/

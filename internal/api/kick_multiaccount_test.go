@@ -39,6 +39,7 @@ func TestKickWebhookReachesTheAdapterForItsBroadcaster(t *testing.T) {
 		slug string
 	}{{111, "first"}, {222, "second"}} {
 		a, err := chat.NewKick(chat.KickConfig{
+			APIBase:           kickStubAPI(t),
 			BroadcasterUserID: c.id,
 			Channel:           c.slug,
 			Token:             chat.StaticToken("t"),
@@ -109,6 +110,7 @@ func TestKickWebhookForAForeignChannelIsDroppedEvenWithOneAdapter(t *testing.T) 
 	s.chat = chat.New()
 	t.Cleanup(s.chat.Close)
 	a, err := chat.NewKick(chat.KickConfig{
+		APIBase:           kickStubAPI(t),
 		BroadcasterUserID: 111, Channel: "only", Token: chat.StaticToken("t"),
 		CallbackSecret: s.kickCallbackSecret(),
 		CallbackPath:   kickWebhookPath,
@@ -164,6 +166,7 @@ func TestKickWebhookForAnUnconnectedChannelStillRejectsABadSignature(t *testing.
 	t.Cleanup(s.chat.Close)
 	for _, id := range []int{111, 222} {
 		a, err := chat.NewKick(chat.KickConfig{
+			APIBase:           kickStubAPI(t),
 			BroadcasterUserID: id, Token: chat.StaticToken("t"),
 			CallbackSecret: s.kickCallbackSecret(),
 			CallbackPath:   kickWebhookPath,
@@ -180,4 +183,16 @@ func TestKickWebhookForAnUnconnectedChannelStillRejectsABadSignature(t *testing.
 	if code := kickDelivery(t, s, body); code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for a bad signature on an unconnected channel", code)
 	}
+}
+
+// kickStubAPI stands in for api.kick.com for a test that Runs a real Kick
+// adapter, which now looks up (and would create) its chat subscription. Without
+// it the adapter would send its test token to the real API.
+func kickStubAPI(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"event":"chat.message.sent","version":1,"method":"webhook"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }

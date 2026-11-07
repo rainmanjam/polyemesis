@@ -12,6 +12,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/shirou/gopsutil/v4 v4.26.10
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0

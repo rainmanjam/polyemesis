@@ -2983,6 +2983,11 @@ export function PlatformCredCard({
   const copyRedirect = async () => {
     await copyText(guide.redirectPath);
   };
+  // Kick's webhook URL carries a secret; copied the same way, never logged.
+  const { copy: copyWebhookText, copied: webhookCopied } = useCopy(1500, () => toast.error(t("dash.clipboardUnavailable")));
+  const copyWebhook = async () => {
+    if (guide.webhookUrl) await copyWebhookText(guide.webhookUrl);
+  };
 
   const verdictBadge = check && (
     <Badge
@@ -3206,6 +3211,26 @@ export function PlatformCredCard({
                       </Button>
                     </div>
                     <span className="text-sm text-muted-foreground">{t("set.redirectNote")}</span>
+                  </div>
+                )}
+                {(guide.webhookUrl || guide.webhookUrlReason) && (
+                  <div className="flex flex-col gap-1" data-testid="kick-webhook-url">
+                    <Label>{t("set.webhookUrl")}</Label>
+                    {guide.webhookUrl ? (
+                      <>
+                        <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
+                          <code className="min-w-0 flex-1 break-all font-mono text-sm">{guide.webhookUrl}</code>
+                          <Button variant="ghost" size="icon-sm" onClick={copyWebhook} aria-label={t("set.copy")}>
+                            {webhookCopied ? <Check className="text-ok" /> : <Copy />}
+                          </Button>
+                        </div>
+                        <span className="text-sm text-muted-foreground">{t("set.webhookNote")}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        <strong>{t("set.webhookUnavailable")}.</strong> {guide.webhookUrlReason}
+                      </span>
+                    )}
                   </div>
                 )}
                 {guide.scopes && guide.scopes.length > 0 && (

@@ -899,3 +899,26 @@ func TestXUnavailableResetsWhenANewRunStarts(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done })
 	xWaitFor(t, "a starting Run to read as coming up", func() bool { return !a.Unavailable(10 * time.Minute) })
 }
+
+// The Hub never sets a runner live on its own; X has to say so through Health, or the pane reads "connecting"
+// for as long as chat is arriving.
+func TestXHealthReportsLiveOnceRegisteredAndDegradedWhileTheWebhookIsInvalid(t *testing.T) {
+	st := newXChatStub(t)
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, WebhookURL: xStubHookURL, WebhookRecheck: 10 * time.Millisecond})
+	if got := a.Health().State; got != "" {
+		t.Fatalf("State before Run = %q, want empty (the Hub's connecting)", got)
+	}
+	stop := xRun(t, a, SinkFunc(func(Message) {}))
+	defer stop()
+	if got := a.Health().State; got != StateLive {
+		t.Fatalf("State once registered and subscribed = %q, want live", got)
+	}
+	id := st.webhookList()[0].ID
+	st.putFixes = false
+	st.setValid(id, false)
+	xWaitFor(t, "degraded for the invalid webhook", func() bool { return a.Health().State == StateDegraded })
+	st.putFixes = true
+	st.setValid(id, true)
+	xWaitFor(t, "live again", func() bool { return a.Health().State == StateLive })
+}
