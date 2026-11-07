@@ -557,8 +557,8 @@ the same daily allowance, so a poller left to spend the whole of it leaves a
 moderator unable to type — and the message that could not be sent is the
 timeout, at the moment it was needed. The pacer therefore subtracts the reserve
 before dividing what is left by the 5 units a poll costs: (10,000 − 200) ÷ 5 =
-1,960. At 50 units a message, 200 units is four messages — enough to say "we
-are moving to Twitch" when it matters. Sending, deleting and banning spend
+1,960. At 20 units a message, 200 units is ten messages, or a single ban — enough
+to say "we are moving to Twitch" when it matters. Sending, deleting and banning spend
 *into* the reserve rather than being refused by it; that is the whole point of
 it.
 

@@ -384,7 +384,8 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 			if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
 				retractUser(sink, d.BannedUserDetails.ChannelID)
 			}
-			continue
+			// Falls through: the event line is still delivered, so a ban placed
+			// by another moderator or in Studio leaves a visible record.
 		}
 		if it.Snippet.PollDetails != nil {
 			y.notePoll(it)

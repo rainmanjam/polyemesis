@@ -24,6 +24,22 @@ describe("the YouTube moderators card", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("renders one card per connected YouTube account, labelled", async () => {
+    const read = vi.spyOn(api, "chatModerators").mockResolvedValue({ moderators: [mod] });
+    render(
+      <ChatModerators
+        statuses={[
+          { platform: "youtube", account: "UC-one", state: "live" } as ChatStatus,
+          { platform: "youtube", account: "UC-two", state: "live" } as ChatStatus,
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId("chat-moderators")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Load moderators" })[1]);
+    await waitFor(() => expect(read).toHaveBeenCalledWith({ platform: "youtube", account: "UC-two" }));
+    expect(screen.getByText(/UC-two/)).toBeTruthy();
+  });
+
   it("reads nothing until asked, then lists the moderators", async () => {
     const read = vi.spyOn(api, "chatModerators").mockResolvedValue({ moderators: [mod] });
     render(<ChatModerators statuses={statuses} />);

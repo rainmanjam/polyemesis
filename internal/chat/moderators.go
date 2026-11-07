@@ -85,9 +85,11 @@ func (y *YouTubeAdapter) Moderators(ctx context.Context) ([]ChatModerator, error
 	if err != nil {
 		return nil, err
 	}
-	if !y.budget.allow(platform.YouTubeCostModeratorList) {
+	// allowRead, not allow: the reserve is held so a send, delete or ban stays
+	// possible, and this call must not spend it.
+	if !y.budget.allowRead(platform.YouTubeCostModeratorList) {
 		q := y.budget.status()
-		return nil, fmt.Errorf("YouTube's daily API quota is spent; it resets at %s", q.ResetAt.Format(ytClockLayout))
+		return nil, fmt.Errorf("YouTube's daily API quota is spent, or what is left is held back for chat and bans; it resets at %s", q.ResetAt.Format(ytClockLayout))
 	}
 	var out struct {
 		Items []ytModeratorItem `json:"items"`
@@ -115,9 +117,11 @@ func (y *YouTubeAdapter) AddModerator(ctx context.Context, channelID string) (Ch
 	if err != nil {
 		return ChatModerator{}, err
 	}
-	if !y.budget.allow(platform.YouTubeCostModeratorEdit) {
+	// allowRead, not allow: the reserve is held so a send, delete or ban stays
+	// possible, and this call must not spend it.
+	if !y.budget.allowRead(platform.YouTubeCostModeratorEdit) {
 		q := y.budget.status()
-		return ChatModerator{}, fmt.Errorf("YouTube's daily API quota is spent; it resets at %s", q.ResetAt.Format(ytClockLayout))
+		return ChatModerator{}, fmt.Errorf("YouTube's daily API quota is spent, or what is left is held back for chat and bans; it resets at %s", q.ResetAt.Format(ytClockLayout))
 	}
 	payload := map[string]any{"snippet": map[string]any{
 		"liveChatId":       chatID,

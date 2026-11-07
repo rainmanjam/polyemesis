@@ -84,7 +84,8 @@ const (
 	DefaultQuotaUnits = platform.YouTubeDefaultDailyUnits
 	// DefaultQuotaReserve is held back so that sending never becomes
 	// impossible because reading spent everything. Two hundred units is ten
-	// messages — enough to say "we are moving to Twitch" when it matters.
+	// messages, or exactly one ban (200) — enough to say "we are moving to
+	// Twitch" when it matters. Raising it makes the reserve deeper than one ban.
 	DefaultQuotaReserve = 200
 
 	// MinPollInterval floors the poll rate however generous the budget looks.

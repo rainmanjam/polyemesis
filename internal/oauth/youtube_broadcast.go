@@ -74,6 +74,85 @@ type BroadcastSettings struct {
 	// liveBroadcasts.update demands on every call.
 	EnableMonitorStream *bool `json:"enableMonitorStream,omitempty"`
 	StreamDelayMs       *int  `json:"streamDelayMs,omitempty"`
+
+	// Defaults are the destination's STORED controls. They fill only the
+	// contentDetails fields the operator left unset in this push, so a value
+	// chosen in the composer always beats a stored one; and they are dropped
+	// on a broadcast that has left created/ready, where YouTube would refuse
+	// every push that carried a differing value. Not part of the wire shape.
+	Defaults *BroadcastSettings `json:"-"`
+}
+
+// BroadcastSettingsFromControls converts a destination's stored controls into
+// settings. Nil when there is nothing stored.
+func BroadcastSettingsFromControls(c *db.YouTubeBroadcastControls) *BroadcastSettings {
+	if c.Empty() {
+		return nil
+	}
+	s := &BroadcastSettings{
+		EnableDvr: c.EnableDvr, EnableAutoStart: c.EnableAutoStart,
+		EnableAutoStop: c.EnableAutoStop, RecordFromStart: c.RecordFromStart,
+	}
+	if c.LatencyPreference != "" {
+		v := c.LatencyPreference
+		s.LatencyPreference = &v
+	}
+	if c.ClosedCaptionsType != "" {
+		v := c.ClosedCaptionsType
+		s.ClosedCaptionsType = &v
+	}
+	return s
+}
+
+// withDefaults resolves s.Defaults against the broadcast about to be written.
+// Composer values win; on a frozen broadcast the stored ones are skipped, with
+// a warning only when one of them differs from what the broadcast has now.
+func (s BroadcastSettings) withDefaults(b *ytBroadcast, res *MetadataResult) BroadcastSettings {
+	d := s.Defaults
+	s.Defaults = nil
+	if d == nil {
+		return s
+	}
+	cd := b.ContentDetails
+	if contentDetailsFrozen(b.Status.LifeCycleStatus) {
+		differs := false
+		boolDiff := func(want *bool, cur bool) { differs = differs || (want != nil && *want != cur) }
+		boolDiff(d.EnableDvr, cd.EnableDvr)
+		boolDiff(d.EnableAutoStart, cd.EnableAutoStart)
+		boolDiff(d.EnableAutoStop, cd.EnableAutoStop)
+		if d.RecordFromStart != nil && cd.RecordFromStart != nil {
+			boolDiff(d.RecordFromStart, *cd.RecordFromStart)
+		}
+		if d.LatencyPreference != nil && cd.LatencyPreference != "" && *d.LatencyPreference != cd.LatencyPreference {
+			differs = true
+		}
+		if d.ClosedCaptionsType != nil && cd.ClosedCaptionsType != "" && *d.ClosedCaptionsType != cd.ClosedCaptionsType {
+			differs = true
+		}
+		if differs {
+			res.Skipped = append(res.Skipped, FieldContentDetails)
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"broadcast controls: this broadcast is %q, and the stored controls apply only before going live, so they were not sent",
+				b.Status.LifeCycleStatus))
+		}
+		return s
+	}
+	fill := func(dst **bool, src *bool) {
+		if *dst == nil {
+			*dst = src
+		}
+	}
+	fill(&s.EnableDvr, d.EnableDvr)
+	fill(&s.EnableAutoStart, d.EnableAutoStart)
+	fill(&s.EnableAutoStop, d.EnableAutoStop)
+	fill(&s.RecordFromStart, d.RecordFromStart)
+	if s.LatencyPreference == nil {
+		s.LatencyPreference = d.LatencyPreference
+	}
+	if s.ClosedCaptionsType == nil {
+		s.ClosedCaptionsType = d.ClosedCaptionsType
+	}
+	return s
 }
 
 // Empty reports whether there is nothing to write.
@@ -156,7 +235,7 @@ func (y *YouTube) BroadcastWindow(ctx context.Context, accessToken string) (*Bro
 // scheduling and the contentDetails toggles are on the BROADCAST, while
 // category and tags are on the VIDEO of the same id.
 func (y *YouTube) PushBroadcastSettings(ctx context.Context, clientID, accessToken string, s BroadcastSettings) (*MetadataResult, error) {
-	if s.Empty() {
+	if s.Empty() && s.Defaults == nil {
 		return &MetadataResult{}, nil
 	}
 	b, err := y.liveBroadcast(ctx, accessToken)
@@ -164,6 +243,10 @@ func (y *YouTube) PushBroadcastSettings(ctx context.Context, clientID, accessTok
 		return nil, err
 	}
 	res := &MetadataResult{Target: b.Snippet.Title}
+	s = s.withDefaults(b, res)
+	if s.Empty() {
+		return res, nil
+	}
 
 	if s.ScheduledStart != nil || s.TouchesContentDetails() {
 		if err := y.writeBroadcastParts(ctx, accessToken, b, s, res); err != nil {
@@ -282,8 +365,49 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 	if s.ScheduledStart != nil {
 		res.Applied = append(res.Applied, FieldScheduledStart)
 	}
-	if s.TouchesContentDetails() {
+	if !s.TouchesContentDetails() {
+		return nil
+	}
+	// latencyPreference and closedCaptionsType are not on the liveBroadcasts
+	// update page's settable list, so a 2xx proves nothing about them. Read the
+	// broadcast back (1 unit) and report what did not change, as the Facebook
+	// privacy read-back does. Everything else in the part is documented as
+	// settable and stays trusted on 2xx.
+	var unapplied []string
+	var latencyBad, captionsBad bool
+	verified := true
+	if s.LatencyPreference != nil || s.ClosedCaptionsType != nil {
+		nb, rerr := y.liveBroadcast(ctx, accessToken)
+		if rerr != nil || nb.ID != b.ID {
+			verified = false
+		} else {
+			if s.LatencyPreference != nil && nb.ContentDetails.LatencyPreference != *s.LatencyPreference {
+				latencyBad = true
+				unapplied = append(unapplied, fmt.Sprintf("latency (wanted %q, YouTube has %q)",
+					*s.LatencyPreference, nb.ContentDetails.LatencyPreference))
+			}
+			if s.ClosedCaptionsType != nil && nb.ContentDetails.ClosedCaptionsType != *s.ClosedCaptionsType {
+				captionsBad = true
+				unapplied = append(unapplied, fmt.Sprintf("closed captions (wanted %q, YouTube has %q)",
+					*s.ClosedCaptionsType, nb.ContentDetails.ClosedCaptionsType))
+			}
+		}
+	}
+	if !verified {
+		res.Warnings = append(res.Warnings, "broadcast controls: YouTube accepted the update but the broadcast could not be read back to confirm latency or captions changed")
+	}
+	if len(unapplied) > 0 {
+		res.Warnings = append(res.Warnings,
+			"broadcast controls: YouTube accepted the update but did not apply "+strings.Join(unapplied, " or "))
+	}
+	other := s.EnableDvr != nil || s.EnableAutoStart != nil || s.EnableAutoStop != nil ||
+		s.RecordFromStart != nil || s.EnableMonitorStream != nil || s.StreamDelayMs != nil
+	latencyOK := s.LatencyPreference != nil && !latencyBad
+	captionsOK := s.ClosedCaptionsType != nil && !captionsBad
+	if other || latencyOK || captionsOK {
 		res.Applied = append(res.Applied, FieldContentDetails)
+	} else {
+		res.Skipped = append(res.Skipped, FieldContentDetails)
 	}
 	return nil
 }

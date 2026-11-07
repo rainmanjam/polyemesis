@@ -66,6 +66,11 @@ type CompliancePusher interface {
 
 // PushCompliance writes YouTube's privacy status and COPPA declaration.
 //
+// The destination's stored contentDetails controls (c.YouTube) are NOT written
+// here. They travel as BroadcastSettings.Defaults through PushBroadcastSettings,
+// so one write merges them under the composer's values instead of a second
+// write overwriting them.
+//
 // Two calls, to two different endpoints, because YouTube puts them in two
 // different places:
 //
@@ -79,7 +84,9 @@ type CompliancePusher interface {
 // tgt is unused: the Live Streaming API scopes every call to the token's own
 // channel, so there is nothing in it for YouTube to address.
 func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken string, tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error) {
-	if c.Empty() {
+	if c.Empty() || (c.Privacy == db.PrivacyUnchanged && c.MadeForKids == nil) {
+		// Nothing for this call to write; the stored contentDetails controls
+		// go through PushBroadcastSettings.
 		return &MetadataResult{}, nil
 	}
 	b, err := y.liveBroadcast(ctx, accessToken)
@@ -122,34 +129,7 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			res.Applied = append(res.Applied, FieldMadeForKids)
 		}
 	}
-	if !c.YouTube.Empty() {
-		y.pushBroadcastControls(ctx, accessToken, b, c.YouTube, res)
-	}
 	return res, nil
-}
-
-// pushBroadcastControls writes the destination's contentDetails controls
-// through liveBroadcasts.update, by the same read-then-write as every other
-// contentDetails write. A refusal is reported rather than fatal, like the
-// COPPA write above: YouTube freezes these once the broadcast is testing or
-// live, and the privacy change before it may already have landed.
-func (y *YouTube) pushBroadcastControls(ctx context.Context, accessToken string, b *ytBroadcast,
-	c *db.YouTubeBroadcastControls, res *MetadataResult) {
-	s := BroadcastSettings{
-		EnableDvr: c.EnableDvr, EnableAutoStart: c.EnableAutoStart,
-		EnableAutoStop: c.EnableAutoStop, RecordFromStart: c.RecordFromStart,
-	}
-	if c.LatencyPreference != "" {
-		s.LatencyPreference = &c.LatencyPreference
-	}
-	if c.ClosedCaptionsType != "" {
-		s.ClosedCaptionsType = &c.ClosedCaptionsType
-	}
-	// writeBroadcastParts appends FieldContentDetails itself on success.
-	if err := y.writeBroadcastParts(ctx, accessToken, b, s, res); err != nil {
-		res.Skipped = append(res.Skipped, FieldContentDetails)
-		res.Warnings = append(res.Warnings, "broadcast controls: "+err.Error())
-	}
 }
 
 // PushCompliance writes Twitch's content classification labels.

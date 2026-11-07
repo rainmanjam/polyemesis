@@ -219,6 +219,21 @@ func TestYouTubeModeratorRefusalsAreSaidInPlainWords(t *testing.T) {
 	}
 }
 
+// Listing and adding moderators must not spend the reserve held for a ban.
+func TestYouTubeModeratorCallsLeaveTheReserveForABan(t *testing.T) {
+	f := &modServer{body: `{"items":[]}`}
+	a := modAdapter(t, f)
+	st := a.budget.status()
+	// Leave room for the call itself but not for the reserve on top of it.
+	a.budget.spend(st.Limit - 200 - 100)
+	if _, err := a.AddModerator(context.Background(), "UC"); err == nil || !strings.Contains(err.Error(), "quota is spent") {
+		t.Errorf("add into the reserve = %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("calls reached YouTube: %v", f.calls)
+	}
+}
+
 func TestYouTubeModeratorCallsStopWhenTheBudgetCannotPayForThem(t *testing.T) {
 	f := &modServer{body: `{"items":[]}`}
 	a := modAdapter(t, f)
@@ -319,7 +334,8 @@ func TestYouTubeBanSendsPermanentOrTemporaryAsAsked(t *testing.T) {
 }
 
 // Another moderator's (or Studio's) ban arrives as a userBannedEvent; the
-// banned person's earlier messages leave the pane, and the event is not shown.
+// banned person's earlier messages leave the pane, and the event line itself
+// is still delivered (when YouTube gave it text) as the record of the ban.
 func TestAYouTubeBanByAnotherModeratorRetractsTheBannedUsersMessages(t *testing.T) {
 	a := ytAdapter(t, "http://example.invalid", nil)
 	sink := &recordingSink{}
@@ -332,8 +348,9 @@ func TestAYouTubeBanByAnotherModeratorRetractsTheBannedUsersMessages(t *testing.
 		} `json:"bannedUserDetails"`
 	}{}
 	ban.Snippet.UserBannedDetails.BannedUserDetails.ChannelID = "UC-banned"
+	ban.Snippet.DisplayMessage = "Someone was banned"
 	n := a.deliverPage([]ytChatItem{ban, empty}, time.Time{}, sink)
-	if _, users := sink.snapshot(); n != 0 || len(users) != 1 || users[0] != "UC-banned" {
+	if _, users := sink.snapshot(); n != 1 || len(users) != 1 || users[0] != "UC-banned" {
 		t.Fatalf("delivered %d, retracted users %v", n, users)
 	}
 }

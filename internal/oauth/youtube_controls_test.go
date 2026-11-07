@@ -2,9 +2,11 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +20,38 @@ const ytControlsBroadcast = `{"items":[{"id":"bcast",
 		"enableEmbed":true,"recordFromStart":true,"latencyPreference":"normal",
 		"closedCaptionsType":"closedCaptionsDisabled",
 		"monitorStream":{"enableMonitorStream":false,"broadcastStreamDelayMs":0}}}]}`
+
+// ytStatefulStub serves the controls broadcast and applies a PUT's
+// contentDetails to it, except the keys in ignore, which models YouTube
+// accepting a call and silently not honouring a field.
+func ytStatefulStub(t *testing.T, log *[]capture, body string, ignore ...string) *YouTube {
+	t.Helper()
+	var cur map[string]any
+	if err := json.Unmarshal([]byte(body), &cur); err != nil {
+		t.Fatal(err)
+	}
+	item := cur["items"].([]any)[0].(map[string]any)
+	srv := httptest.NewServer(recordAll(t, log, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(cur)
+		case r.Method == http.MethodPut:
+			put := (*log)[len(*log)-1].Body
+			if cd, ok := put["contentDetails"].(map[string]any); ok {
+				have := item["contentDetails"].(map[string]any)
+				for k, v := range cd {
+					if !slices.Contains(ignore, k) {
+						have[k] = v
+					}
+				}
+			}
+			_, _ = io.WriteString(w, `{"id":"bcast"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewYouTube(WithBaseURL(srv.URL))
+}
 
 func updateBody(t *testing.T, log []capture) map[string]any {
 	t.Helper()
@@ -35,13 +69,13 @@ func updateBody(t *testing.T, log []capture) map[string]any {
 // (enableEmbed, recordFromStart) and never the deprecated enableClosedCaptions.
 func TestYouTubeBroadcastControlsAreWrittenFromTheDestination(t *testing.T) {
 	var log []capture
-	y, _ := ytStub(t, &log, ytControlsBroadcast)
+	y := ytStatefulStub(t, &log, ytControlsBroadcast)
 	on, off := true, false
-	res, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{}, db.Compliance{
-		YouTube: &db.YouTubeBroadcastControls{
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{
+		Defaults: BroadcastSettingsFromControls(&db.YouTubeBroadcastControls{
 			LatencyPreference: db.YTLatencyLow, EnableDvr: &off, RecordFromStart: &on,
 			EnableAutoStart: &on, ClosedCaptionsType: db.YTCaptionsEmbedded,
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,26 +116,76 @@ func TestYouTubeBroadcastUpdateNeverInventsEmbedOrRecording(t *testing.T) {
 	}
 }
 
-func TestYouTubeBroadcastControlsFailureIsAWarningNotAFailure(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet:
-			_, _ = io.WriteString(w, strings.Replace(ytControlsBroadcast, `"ready"`, `"live"`, 1))
-		default:
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, `{"error":{"code":403,"errors":[{"reason":"enableDvrModificationNotAllowed"}]}}`)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	y := NewYouTube(WithBaseURL(srv.URL))
+// A stored control that differs from a frozen broadcast is skipped with ONE
+// warning and no call, rather than a refused update on every push.
+func TestYouTubeStoredControlsAreSkippedOnAFrozenBroadcast(t *testing.T) {
+	var log []capture
+	y := ytStatefulStub(t, &log, strings.Replace(ytControlsBroadcast, `"ready"`, `"live"`, 1))
 	off := false
-	res, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{}, db.Compliance{
-		YouTube: &db.YouTubeBroadcastControls{EnableDvr: &off},
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{
+		Defaults: BroadcastSettingsFromControls(&db.YouTubeBroadcastControls{EnableDvr: &off}),
 	})
 	if err != nil {
-		t.Fatalf("a frozen broadcast failed the whole push: %v", err)
+		t.Fatal(err)
 	}
 	if len(res.Skipped) != 1 || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], `"live"`) {
+		t.Errorf("result = %+v", res)
+	}
+	if find(log, "PUT", "/liveBroadcasts") != nil {
+		t.Error("sent an update to a frozen broadcast")
+	}
+	// Matching stored values say nothing.
+	on := true
+	res, err = y.PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{
+		Defaults: BroadcastSettingsFromControls(&db.YouTubeBroadcastControls{EnableDvr: &on}),
+	})
+	if err != nil || len(res.Warnings) != 0 || len(res.Skipped) != 0 {
+		t.Errorf("matching stored controls warned: %+v %v", res, err)
+	}
+}
+
+// The composer's value beats the destination's stored one in the same write.
+func TestYouTubeComposerControlsBeatStoredOnes(t *testing.T) {
+	var log []capture
+	y := ytStatefulStub(t, &log, ytControlsBroadcast)
+	on, off := true, false
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{
+		EnableDvr: &on,
+		Defaults: BroadcastSettingsFromControls(&db.YouTubeBroadcastControls{
+			EnableDvr: &off, EnableAutoStart: &on,
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cd := updateBody(t, log)
+	if cd["enableDvr"] != true || cd["enableAutoStart"] != true {
+		t.Errorf("controls = %v", cd)
+	}
+	puts := 0
+	for _, c := range log {
+		if c.Method == "PUT" {
+			puts++
+		}
+	}
+	if puts != 1 || len(res.Warnings) != 0 {
+		t.Errorf("puts = %d, result = %+v", puts, res)
+	}
+}
+
+// latencyPreference and closedCaptionsType are not on the update page's
+// settable list: a 2xx that changed nothing must not read as applied.
+func TestYouTubeUnhonouredLatencyAndCaptionsAreReportedNotApplied(t *testing.T) {
+	var log []capture
+	y := ytStatefulStub(t, &log, ytControlsBroadcast, "latencyPreference", "closedCaptionsType")
+	low, emb := db.YTLatencyLow, db.YTCaptionsEmbedded
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{LatencyPreference: &low, ClosedCaptionsType: &emb})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 || len(res.Skipped) != 1 || res.Skipped[0] != FieldContentDetails ||
+		len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "did not apply") {
 		t.Errorf("result = %+v", res)
 	}
 }

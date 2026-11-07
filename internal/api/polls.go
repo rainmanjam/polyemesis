@@ -392,7 +392,7 @@ func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []p
 		out = append(out, polls.Mirrored{
 			Account: p.Account(),
 			Result: polls.NativeResult{Platform: string(db.PlatformYouTube), Status: polls.NativeMirrored,
-				Reason: "YouTube reports a live poll's count only when it closes; it is added then"},
+				Reason: "YouTube's count is shown when the chat carries one, and is final when the poll closes"},
 			Ref: youTubePollRef{poller: p, pollID: id},
 		})
 	}

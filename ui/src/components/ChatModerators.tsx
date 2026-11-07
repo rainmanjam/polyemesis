@@ -24,14 +24,28 @@ import type { ChatModerator, ChatPlatform, ChatStatus } from "@/lib/types";
    =========================================================================== */
 
 export function ChatModerators({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
-  const yt = statuses.find((s) => s.platform === ("youtube" as ChatPlatform));
-  if (!yt) return null;
-  // Keyed on the account, so switching accounts never shows one channel's
-  // moderators against another's chat.
-  return <ChatModeratorsForAccount key={yt.account ?? ""} account={yt.account} />;
+  const yts = statuses.filter((s) => s.platform === ("youtube" as ChatPlatform));
+  if (yts.length === 0) return null;
+  // One card per connected YouTube account, each keyed on its account so one
+  // channel's moderators are never shown against another's chat. The account
+  // label is shown only when there is more than one to tell apart.
+  return (
+    <>
+      {yts.map((yt) => (
+        <ChatModeratorsForAccount
+          key={yt.account ?? ""}
+          account={yt.account}
+          label={yts.length > 1 ? (yt.account ?? "") : ""}
+        />
+      ))}
+    </>
+  );
 }
 
-function ChatModeratorsForAccount({ account }: Readonly<{ account: string | undefined }>) {
+function ChatModeratorsForAccount({
+  account,
+  label,
+}: Readonly<{ account: string | undefined; label: string }>) {
   const t = useT();
   const [mods, setMods] = useState<ChatModerator[] | null>(null);
   const [channelId, setChannelId] = useState("");
@@ -74,6 +88,7 @@ function ChatModeratorsForAccount({ account }: Readonly<{ account: string | unde
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-medium">
           <Users className="h-3.5 w-3.5" /> {t("chatMods.title")}
+          {label !== "" && <span className="font-normal text-muted-foreground"> · {label}</span>}
         </p>
         <Button size="sm" variant="secondary" disabled={busy !== ""} onClick={load}>
           {busy === "load" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
