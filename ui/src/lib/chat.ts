@@ -72,7 +72,7 @@ const ACCENT: Record<
     text: "text-cat-cyan",
     chipOn: "border-cat-cyan/40 bg-cat-cyan-dim text-cat-cyan",
   },
-  /* X (Twitter) Live chat, read from X's activity stream once X Livestream
+  /* X (Twitter) Live chat, delivered to polyemesis's webhook once X Livestream
      access is on. Neutral, like every platform beyond the four with an accent
      of their own: the palette has no colour to spare. */
   x: {

@@ -889,7 +889,7 @@ func guides() []SetupGuide {
 				"Go to a destination and click Connect account. X will ask you to grant access.",
 				"If the account cannot use the Livestream API, or you have not switched it on, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
 				"To use the Livestream API, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, takes each broadcast live with the destination's go-live title once your encoder is sending, ends it, and sends and moderates chat.",
-				"To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com. It is a secret: keep it out of shared files and screenshots.",
+				"To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com (a secret: keep it out of shared files and screenshots), and serve polyemesis on a public HTTPS hostname with no port (tls.mode acme, inbound 443) so X can deliver chat to its webhook.",
 			},
 		},
 		{

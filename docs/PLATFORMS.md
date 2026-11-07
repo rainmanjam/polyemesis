@@ -230,10 +230,26 @@ documents. The consent page is X's spec address `api.x.com/2/oauth2/authorize`;
 X's guide shows `x.com/i/oauth2/authorize` instead, and the two are one constant
 apart in `internal/oauth/x.go` (PROVISIONAL).
 
-Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
-token from console.x.com, which X's activity stream requires. It is a secret.
-Without it the chat pane stays empty and sending still works. The X console and
-the setup guide show whether the Livestream switch is on.
+Live chat needs three more things, because X delivers `broadcast.chat` **only to
+a webhook** ([Accessing Live Chat](https://docs.x.com/livestream-api/chat/accessing-live-chat),
+[Webhooks](https://docs.x.com/x-api/webhooks/introduction)):
+
+1. `POLYEMESIS_X_APP_BEARER`, the app's app-only bearer token from console.x.com,
+   which the webhook calls need. It is a secret.
+2. A **public, trusted HTTPS address without a port**: `tls.hostname` a public
+   DNS name, `tls.mode: acme`, and inbound **443** reachable from the internet.
+   X rejects a webhook URL with a port and cannot validate a self-signed
+   certificate.
+3. The app's OAuth 2.0 client secret saved in Settings → Platforms. It keys the
+   challenge-response check and the signature on each delivery.
+
+When chat starts, polyemesis registers `https://<tls.hostname>/api/v1/webhooks/x`
+with X (reusing it if X already lists it, and re-validating it if X lists it
+invalid), subscribes `broadcast.chat` and `broadcast.chat.remove` for the
+account to that webhook with the user's token, and removes its subscriptions
+when chat stops. Without the bearer or the address the chat pane stays empty,
+says what is missing, and sending still works. The X console and the setup guide
+show whether the Livestream switch is on.
 
 Every cell in the X row stays *Unverified* except the stream key, which is
 *By hand*. That is deliberate: no live request from a connected X account has

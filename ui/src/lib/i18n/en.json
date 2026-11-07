@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X posts an announcement when a broadcast goes live. A show lasts while this destination is on; if X ends the broadcast mid-show, polyemesis opens a new one, and by default that one goes live without a post.",
   "wave3.x.provisional": "Built from X's documentation and not yet checked against a live X account.",
   "wave3.x.metadata": "X takes a title only when the broadcast is published, so polyemesis sends the go-live title then. Changing it is not available while live.",
-  "wave3.x.chatRead": "Live chat comes from X's activity stream and needs the app's bearer token in POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works.",
+  "wave3.x.chatRead": "Live chat is delivered to a webhook polyemesis registers with X. It needs the app's bearer token in POLYEMESIS_X_APP_BEARER and a public HTTPS hostname without a port (tls.mode acme, inbound 443). Without them the chat pane stays empty and sending still works.",
   "wave3.x.chatSend": "Sends to the live broadcast's chat, up to 140 characters. Needs X Livestream switched on.",
   "wave3.x.moderation": "Mute and unmute a viewer, and delete a message. X has no hide action, so a removed message is gone.",
   "wave3.x.viewerStats": "X reports viewer numbers without saying what they count, so no viewer count is shown.",

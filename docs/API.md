@@ -435,6 +435,8 @@ tokens are for.
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
 | `POST` | `/playout/beacon` | The public player's QoE beacon. `204`; see [QoE beacons](#qoe-beacons) |
 | `GET` | `/playout/offline-clip` | The offline card's looping clip, when the operator chose one |
+| `GET` | `/webhooks/x` | X's webhook check (CRC). Answers `{"response_token": "sha256=…"}` for `?crc_token=`; `400` for a missing or unusable token, `503` with no X client secret saved. Throttled per client address |
+| `POST` | `/webhooks/x` | X's event deliveries (live chat). The credential is the `X-Twitter-Webhooks-Signature-OAuth2` HMAC over the raw body, keyed by the X client secret: `401` without a valid one, `413` over 1 MiB. Answers `200` at once and queues the event. Throttled per client address |
 | `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
 | `GET` | `/overlay/events` | A chat overlay's display stream (SSE), including the poll widget's `poll.display`. Needs its overlay key in `X-Overlay-Key` |
 
