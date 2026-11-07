@@ -18,6 +18,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -236,8 +237,56 @@ func (t *TwitchAdapter) helix(ctx context.Context, method, path string, q url.Va
 	if len(q) > 0 {
 		endpoint += "?" + q.Encode()
 	}
-	return doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, t.cfg.HelixToken,
-		map[string]string{twitchClientIDHeader: t.cfg.ClientID}, body, out)
+	// After a 429, further calls inside Twitch's stated window would all fail
+	// the same way; answer them here instead of spending more of the bucket.
+	if wait, why := t.limit.wait(); wait > 0 {
+		return &apiError{Status: http.StatusTooManyRequests, URL: stripQuery(endpoint), RetryAfter: wait,
+			Body: why, Message: why}
+	}
+	headers := map[string]string{twitchClientIDHeader: t.cfg.ClientID}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, t.cfg.HelixToken, headers, body, out)
+	if statusOf(err) == http.StatusUnauthorized && t.cfg.HelixRefresh != nil && !missingScope(err) {
+		// Not a scope problem, so the token is stale, revoked or invalid. One
+		// forced refresh settles which: if it works the call is retried, and if
+		// it does not the original 401 stands for unauthorizedAdvice to explain.
+		if tok, rerr := t.cfg.HelixRefresh(ctx); rerr == nil && tok != "" {
+			err = doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, StaticToken(tok), headers, body, out)
+		}
+	}
+	if statusOf(err) == http.StatusTooManyRequests {
+		t.limit.note(err)
+	}
+	return err
+}
+
+// missingScope reports whether a Helix 401 says the token lacks a scope, as
+// opposed to being invalid ("Invalid OAuth token") -- the two need different
+// operator action, and only the second is worth a refresh.
+func missingScope(err error) bool {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ae.Message), "scope")
+}
+
+// unauthorizedAdvice words a Helix 401 by its real cause.
+func unauthorizedAdvice(err error) string {
+	if missingScope(err) {
+		return "This account was connected before that permission was requested — disconnect and " +
+			"reconnect it in Settings → Platforms to grant it."
+	}
+	return "Twitch no longer accepts this account's access token (it expired or was revoked) and " +
+		"refreshing it did not help — disconnect and reconnect it in Settings → Platforms."
+}
+
+// waitAdvice says how long to wait after a 429, when Twitch said.
+func waitAdvice(err error) string {
+	var ae *apiError
+	if errors.As(err, &ae) && ae.RetryAfter > 0 {
+		return fmt.Sprintf(" Try again in %d seconds.", int(ae.RetryAfter.Round(time.Second)/time.Second))
+	}
+	return " Wait a little and try again."
 }
 
 // modQuery is the pair of ids most moderation endpoints want.
@@ -272,13 +321,12 @@ func (t *TwitchAdapter) toolError(err error, verb string, hints map[int]string) 
 	}
 	switch st {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("Twitch refused to %s. This account was connected before that permission "+
-			"was requested — disconnect and reconnect it in Settings → Platforms: %w", verb, err)
+		return fmt.Errorf("Twitch refused to %s. %s %w", verb, unauthorizedAdvice(err), err)
 	case http.StatusForbidden:
 		return fmt.Errorf("Twitch says this account does not moderate %s, so it may not %s: %w",
 			firstNonEmpty(t.cfg.Channel, "that channel"), verb, err)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("Twitch is rate-limiting this action. Wait a little and try again: %w", err)
+		return fmt.Errorf("Twitch is rate-limiting this action.%s %w", waitAdvice(err), err)
 	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity, 425:
 		return fmt.Errorf("Twitch would not %s: %w", verb, err)
 	}

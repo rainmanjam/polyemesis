@@ -659,7 +659,20 @@ func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, he
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
+}
+
+// decodeResponse unmarshals a 2xx body, naming the call when it is not the JSON
+// promised (an HTML error page from a proxy, a truncated body). Without it the
+// operator sees "invalid character '<'" and nothing about which platform call.
+func decodeResponse(endpoint string, body []byte, out any) error {
+	if err := json.Unmarshal(body, out); err != nil {
+		if i := strings.IndexByte(endpoint, '?'); i >= 0 {
+			endpoint = endpoint[:i]
+		}
+		return fmt.Errorf("%s returned an unreadable response: %w", endpoint, err)
+	}
+	return nil
 }
 
 func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
@@ -689,7 +702,7 @@ func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, p
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
 }
 
 func snippet(b []byte) string {

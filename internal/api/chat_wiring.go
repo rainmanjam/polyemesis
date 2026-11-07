@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -461,10 +462,36 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 	return func(ctx context.Context) (string, error) {
 		acct, err := s.tokenFor(ctx, id)
 		if err != nil {
-			return "", err
+			return "", chatTokenError(err)
 		}
 		return acct.AccessToken, nil
 	}
+}
+
+// chatTokenRefresh is chatToken that refreshes first, for an adapter whose
+// platform just rejected the token the store believed was good. refreshNow
+// leaves the row alone if someone else already replaced the token.
+func (s *Server) chatTokenRefresh(id int64) chat.TokenFunc {
+	return func(ctx context.Context) (string, error) {
+		acct, err := s.store.GetPlatformAccount(s.box, id)
+		if err != nil {
+			return "", err
+		}
+		fresh, err := s.refreshNow(ctx, acct)
+		if err != nil {
+			return "", chatTokenError(err)
+		}
+		return fresh.AccessToken, nil
+	}
+}
+
+// chatTokenError carries a dead grant across the package boundary: chat cannot
+// import oauth, so the sentinel it understands is attached alongside the cause.
+func chatTokenError(err error) error {
+	if errors.Is(err, oauth.ErrReconnectRequired) {
+		return fmt.Errorf("%w: %w", chat.ErrReconnectRequired, err)
+	}
+	return err
 }
 
 // chatAdapter builds the adapter for one account, or explains why it cannot.
@@ -526,7 +553,10 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:      acct.AccessToken,
 			PassToken:  s.chatToken(a.ID),
 			HelixToken: s.chatToken(a.ID),
-			ClientID:   clientID,
+			// A Helix 401 gets one forced refresh and a retry before it is
+			// called a reconnect.
+			HelixRefresh: s.chatTokenRefresh(a.ID),
+			ClientID:     clientID,
 			// Channel is set from AccountName just above, so the account IS the
 			// broadcaster and the two ids are the same. They are separate fields
 			// because that stops being true the moment someone reads a channel

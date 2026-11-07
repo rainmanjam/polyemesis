@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -511,7 +510,7 @@ func (t *Twitch) getJSONScheme(ctx context.Context, endpoint, scheme, accessToke
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
 }
 
 // IsTokenInvalid reports whether err is a platform's 401 on a token check: the

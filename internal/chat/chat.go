@@ -323,6 +323,14 @@ func (f fatal) Is(target error) bool {
 // IsFatal reports whether retrying is pointless.
 func IsFatal(err error) bool { return errors.Is(err, ErrFatal) }
 
+// ErrReconnectRequired is what a TokenFunc wraps when the account's grant is
+// gone -- revoked, disconnected on the platform's side, or never refreshable --
+// so only the operator reconnecting the account fixes it. This package does
+// not import internal/oauth, so the API layer translates oauth's sentinel into
+// this one; an adapter that sees it stops retrying instead of re-posting a dead
+// refresh token every thirty seconds.
+var ErrReconnectRequired = errors.New("the platform no longer accepts this account; reconnect it in Settings → Platforms")
+
 // Publisher is the event bus, narrowed to what this package uses so a test does
 // not need one. *events.Broker satisfies it.
 type Publisher interface {

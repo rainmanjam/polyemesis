@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -44,6 +46,12 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// Message is the plain-text reason from Twitch's {"error","status","message"}
+	// envelope, which errorReason's nested envelopes do not cover.
+	Message string
+	// RetryAfter is how long the platform said to wait (Retry-After, or Twitch's
+	// Ratelimit-Reset epoch), zero when it said nothing.
+	RetryAfter time.Duration
 }
 
 func (e *apiError) Error() string {
@@ -54,7 +62,8 @@ func (e *apiError) Error() string {
 }
 
 func statusOf(err error) int {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Status
 	}
 	return 0
@@ -132,16 +141,58 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &apiError{
-			Status: resp.StatusCode,
-			URL:    stripQuery(endpoint),
-			Body:   shorten(raw),
-			Reason: errorReason(raw),
+			Status:     resp.StatusCode,
+			URL:        stripQuery(endpoint),
+			Body:       shorten(raw),
+			Reason:     errorReason(raw),
+			Message:    envelopeMessage(raw),
+			RetryAfter: retryAfterOf(resp.Header, time.Now()),
 		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	if err := json.Unmarshal(raw, out); err != nil {
+		// A 200 that is not the JSON promised (an HTML error page from a proxy,
+		// a truncated body) would otherwise surface as "invalid character '<'"
+		// with nothing saying which call produced it.
+		return fmt.Errorf("%s returned an unreadable response: %w", stripQuery(endpoint), err)
+	}
+	return nil
+}
+
+// maxRetryAfter caps any wait a platform asks for: a bad header must not park
+// a caller for hours.
+const maxRetryAfter = 15 * time.Minute
+
+// retryAfterOf reads how long to wait from a response: Retry-After (seconds or
+// an HTTP date), else Twitch's Ratelimit-Reset, a Unix epoch of when the bucket
+// refills (dev.twitch.tv/docs/api/guide, "Keeping track of your usage").
+func retryAfterOf(h http.Header, now time.Time) time.Duration {
+	var d time.Duration
+	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			d = time.Duration(secs) * time.Second
+		} else if at, err := http.ParseTime(ra); err == nil {
+			d = at.Sub(now)
+		}
+	} else if rs := strings.TrimSpace(h.Get("Ratelimit-Reset")); rs != "" {
+		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
+			d = time.Unix(epoch, 0).Sub(now)
+		}
+	}
+	return min(max(d, 0), maxRetryAfter)
+}
+
+// envelopeMessage digs the "message" out of Twitch's flat error envelope.
+func envelopeMessage(raw []byte) string {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	return env.Message
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes

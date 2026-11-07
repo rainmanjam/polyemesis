@@ -108,6 +108,9 @@ func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
 	return httpClient.Do(r)
 }
 
+// maxRetryAfter caps any wait a platform asks for.
+const maxRetryAfter = 15 * time.Minute
+
 // StatusError is a non-2xx answer from a platform API, typed so a caller can
 // tell a spent quota and a rate limit from any other refusal (item 5).
 // Error() is the wording the untyped error used to carry, unchanged.
@@ -131,7 +134,15 @@ func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
 		} else if at, err := http.ParseTime(ra); err == nil {
 			e.RetryAfter = max(0, time.Until(at))
 		}
+	} else if rs := strings.TrimSpace(resp.Header.Get("Ratelimit-Reset")); rs != "" {
+		// Twitch's 429 carries no Retry-After: Ratelimit-Reset is a Unix epoch
+		// of when the bucket refills (dev.twitch.tv/docs/api/guide).
+		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
+			e.RetryAfter = max(0, time.Until(time.Unix(epoch, 0)))
+		}
 	}
+	// A bad header must not park the caller for hours.
+	e.RetryAfter = min(e.RetryAfter, maxRetryAfter)
 	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
 }

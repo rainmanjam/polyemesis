@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -395,7 +396,13 @@ func (a analyticsSource) platformError(t analytics.Target, err error) error {
 		}
 		return fmt.Errorf("%w: %v", analytics.ErrQuota, err)
 	case se.Status == http.StatusTooManyRequests:
-		return &analytics.RetryAfterError{After: max(se.RetryAfter, time.Minute)}
+		// Twitch says exactly when its bucket refills (Ratelimit-Reset, parsed
+		// into RetryAfter); a platform that says nothing gets the minute floor.
+		after := se.RetryAfter
+		if after <= 0 {
+			after = time.Minute
+		}
+		return &analytics.RetryAfterError{After: after + time.Duration(rand.Int64N(int64(time.Second)))}
 	}
 	return err
 }
