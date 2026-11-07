@@ -519,3 +519,41 @@ func TestTwitchWithNothingItAcceptsMakesNoWrite(t *testing.T) {
 		t.Fatalf("skipped = %v", res.Skipped)
 	}
 }
+
+// A nil Fields slice marshals as JSON null, and the console calls
+// caps.fields.includes(...) on it: the Dashboard crashed once an X account
+// (which writes no fields) was connected. The wire contract is "fields is
+// always an array", enforced on the type so no provider can forget it.
+func TestEveryProvidersCapsServeFieldsAsAnArrayNeverNull(t *testing.T) {
+	checked := 0
+	for platform, pr := range NewSet().All() {
+		mp, ok := pr.(MetadataPusher)
+		if !ok {
+			continue
+		}
+		checked++
+		b, err := json.Marshal(mp.MetadataCaps())
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", platform, err)
+		}
+		if !strings.Contains(string(b), `"fields":[`) {
+			t.Errorf("%s caps serialise fields as non-array: %s", platform, b)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no registered provider is a MetadataPusher; the test checked nothing")
+	}
+}
+
+func TestNilMetadataCapsFieldsMarshalAsEmptyArray(t *testing.T) {
+	for name, caps := range map[string]MetadataCaps{"value": {}, "scope only": {Scope: "x"}} {
+		b, err := json.Marshal(caps)
+		if err != nil || !strings.Contains(string(b), `"fields":[]`) {
+			t.Errorf("%s: %s, %v", name, b, err)
+		}
+		b, err = json.Marshal(&caps)
+		if err != nil || !strings.Contains(string(b), `"fields":[]`) {
+			t.Errorf("%s (pointer): %s, %v", name, b, err)
+		}
+	}
+}
