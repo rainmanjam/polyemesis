@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,7 +91,7 @@ func TestChatTokenRefreshForcesARefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, err := s.chatTokenRefresh(a.ID)(context.Background())
+	tok, err := s.chatTokenRefresh(a.ID)(context.Background(), "at-revoked-early")
 	if err != nil || !strings.HasPrefix(tok, "at-new-") {
 		t.Fatalf("forced refresh gave %q, %v", tok, err)
 	}
@@ -100,7 +102,7 @@ func TestChatTokenRefreshForcesARefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.chatTokenRefresh(b.ID)(context.Background()); !errors.Is(err, chat.ErrReconnectRequired) {
+	if _, err := s.chatTokenRefresh(b.ID)(context.Background(), "at-x"); !errors.Is(err, chat.ErrReconnectRequired) {
 		t.Fatalf("revoked grant on forced refresh = %v, want chat.ErrReconnectRequired", err)
 	}
 }
@@ -119,5 +121,54 @@ func TestSamplerHonoursTwitchRateLimitReset(t *testing.T) {
 		&oauth.StatusError{Status: http.StatusTooManyRequests})
 	if !errors.As(err, &ra) || ra.After < time.Minute {
 		t.Fatalf("no header: err = %v, want the one-minute floor", err)
+	}
+}
+
+// Two calls that were both refused token A: only one may spend the refresh
+// token. The second sees the row already holds B.
+func TestChatTokenRefreshOnlyOnceForTheSameRejectedToken(t *testing.T) {
+	var refreshes atomic.Int32
+	inner := twitchTokenEndpoint(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshes.Add(1)
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	s, _, store := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+	if err := store.PutPlatformCreds(s.box, db.PlatformTwitch, "cid", "csecret"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformTwitch, AccountName: "dallas", AccountRef: "4242",
+		AccessToken: "token-A", RefreshToken: "rt-good", ExpiresAt: time.Now().Add(2 * time.Hour), Scopes: "chat:read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	toks := make([]string, 2)
+	for i := range toks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			toks[i], _ = s.chatTokenRefresh(a.ID)(context.Background(), "token-A")
+		}()
+	}
+	wg.Wait()
+	if refreshes.Load() != 1 {
+		t.Fatalf("provider.Refresh ran %d times for one rejected token, want 1", refreshes.Load())
+	}
+	if toks[0] != toks[1] || toks[0] == "" {
+		t.Errorf("callers got different tokens: %q", toks)
+	}
+}
+
+func TestSamplerRateLimitKeepsAFloorForEveryPlatform(t *testing.T) {
+	var a analyticsSource
+	err := a.platformError(analytics.Target{Platform: string(db.PlatformYouTube)},
+		&oauth.StatusError{Status: http.StatusTooManyRequests, RetryAfter: time.Second})
+	var ra *analytics.RetryAfterError
+	if !errors.As(err, &ra) || ra.After < minRateLimitWait {
+		t.Fatalf("err = %v, want at least %v", err, minRateLimitWait)
 	}
 }

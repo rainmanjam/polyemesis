@@ -52,6 +52,10 @@ type apiError struct {
 	// RetryAfter is how long the platform said to wait (Retry-After, or Twitch's
 	// Ratelimit-Reset epoch), zero when it said nothing.
 	RetryAfter time.Duration
+	// RateRemaining is Twitch's Ratelimit-Remaining as sent, empty when absent.
+	// A 429 with tokens left in the bucket is an endpoint's own cooldown, not an
+	// empty bucket.
+	RateRemaining string
 }
 
 func (e *apiError) Error() string {
@@ -147,6 +151,8 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			Reason:     errorReason(raw),
 			Message:    envelopeMessage(raw),
 			RetryAfter: retryAfterOf(resp.Header, time.Now()),
+
+			RateRemaining: strings.TrimSpace(resp.Header.Get("Ratelimit-Remaining")),
 		}
 	}
 	if out == nil || len(raw) == 0 {

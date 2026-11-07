@@ -471,11 +471,16 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 // chatTokenRefresh is chatToken that refreshes first, for an adapter whose
 // platform just rejected the token the store believed was good. refreshNow
 // leaves the row alone if someone else already replaced the token.
-func (s *Server) chatTokenRefresh(id int64) chat.TokenFunc {
-	return func(ctx context.Context) (string, error) {
+func (s *Server) chatTokenRefresh(id int64) func(ctx context.Context, rejected string) (string, error) {
+	return func(ctx context.Context, rejected string) (string, error) {
 		acct, err := s.store.GetPlatformAccount(s.box, id)
 		if err != nil {
 			return "", err
+		}
+		// The token that was actually refused, not a fresh read of the row, so
+		// refreshNow can see that someone else already replaced it.
+		if rejected != "" {
+			acct.AccessToken = rejected
 		}
 		fresh, err := s.refreshNow(ctx, acct)
 		if err != nil {

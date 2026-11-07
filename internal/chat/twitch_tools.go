@@ -244,13 +244,28 @@ func (t *TwitchAdapter) helix(ctx context.Context, method, path string, q url.Va
 			Body: why, Message: why}
 	}
 	headers := map[string]string{twitchClientIDHeader: t.cfg.ClientID}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, t.cfg.HelixToken, headers, body, out)
-	if statusOf(err) == http.StatusUnauthorized && t.cfg.HelixRefresh != nil && !missingScope(err) {
+	// Remember which token this request used, so a refresh can tell whether
+	// another call already replaced it.
+	var used string
+	capture := func(ctx context.Context) (string, error) {
+		tok, err := t.cfg.HelixToken(ctx)
+		used = tok
+		return tok, err
+	}
+	var tokenFn TokenFunc
+	if t.cfg.HelixToken != nil {
+		tokenFn = capture
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, tokenFn, headers, body, out)
+	if statusOf(err) == http.StatusUnauthorized && t.cfg.HelixRefresh != nil && !missingScope(err) && !clientMismatch(err) {
 		// Not a scope problem, so the token is stale, revoked or invalid. One
 		// forced refresh settles which: if it works the call is retried, and if
 		// it does not the original 401 stands for unauthorizedAdvice to explain.
-		if tok, rerr := t.cfg.HelixRefresh(ctx); rerr == nil && tok != "" {
+		tok, rerr := t.cfg.HelixRefresh(ctx, used)
+		if rerr == nil && tok != "" {
 			err = doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, StaticToken(tok), headers, body, out)
+		} else if rerr != nil {
+			err = &refreshFailedError{err: err, cause: rerr}
 		}
 	}
 	if statusOf(err) == http.StatusTooManyRequests {
@@ -270,11 +285,42 @@ func missingScope(err error) bool {
 	return strings.Contains(strings.ToLower(ae.Message), "scope")
 }
 
+// clientMismatch reports a 401 that blames the Client-Id, which no token
+// refresh can fix.
+func clientMismatch(err error) bool {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	m := strings.ToLower(ae.Message)
+	return strings.Contains(m, "client id") || strings.Contains(m, "client-id")
+}
+
+// refreshFailedError is a Helix 401 whose forced refresh then failed. It stays
+// the 401 for statusOf and errors.As, and carries the refresh failure so the
+// advice can tell a dead grant from a passing blip.
+type refreshFailedError struct {
+	err   error
+	cause error
+}
+
+func (e *refreshFailedError) Error() string   { return e.err.Error() }
+func (e *refreshFailedError) Unwrap() []error { return []error{e.err, e.cause} }
+
 // unauthorizedAdvice words a Helix 401 by its real cause.
 func unauthorizedAdvice(err error) string {
 	if missingScope(err) {
 		return "This account was connected before that permission was requested — disconnect and " +
 			"reconnect it in Settings → Platforms to grant it."
+	}
+	var rf *refreshFailedError
+	if errors.As(err, &rf) && !errors.Is(rf.cause, ErrReconnectRequired) {
+		return fmt.Sprintf("Twitch no longer accepts this account's access token, and refreshing it "+
+			"failed for now (%v) — wait a little and try again.", rf.cause)
+	}
+	if clientMismatch(err) {
+		return "Twitch says the access token does not belong to this app's Client ID — check the " +
+			"Twitch credentials in Settings → Platforms."
 	}
 	return "Twitch no longer accepts this account's access token (it expired or was revoked) and " +
 		"refreshing it did not help — disconnect and reconnect it in Settings → Platforms."

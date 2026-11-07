@@ -381,6 +381,10 @@ func (s *Server) forgetYouTubeVideo(accountID int64) {
 	s.ytVideosMu.Unlock()
 }
 
+// minRateLimitWait is the shortest a rate-limited sampler waits, whatever the
+// platform's own header said.
+const minRateLimitWait = 5 * time.Second
+
 // platformError maps a platform's typed refusal onto the sampler's kinds.
 func (a analyticsSource) platformError(t analytics.Target, err error) error {
 	var se *oauth.StatusError
@@ -398,11 +402,14 @@ func (a analyticsSource) platformError(t analytics.Target, err error) error {
 	case se.Status == http.StatusTooManyRequests:
 		// Twitch says exactly when its bucket refills (Ratelimit-Reset, parsed
 		// into RetryAfter); a platform that says nothing gets the minute floor.
+		// Every platform keeps a small floor so a "Retry-After: 1" cannot
+		// reschedule the sampler into a hot loop.
 		after := se.RetryAfter
 		if after <= 0 {
 			after = time.Minute
 		}
-		return &analytics.RetryAfterError{After: after + time.Duration(rand.Int64N(int64(time.Second)))}
+		after = max(after, minRateLimitWait)
+		return &analytics.RetryAfterError{After: after + time.Duration(rand.Int64N(int64(after/10)+1))}
 	}
 	return err
 }

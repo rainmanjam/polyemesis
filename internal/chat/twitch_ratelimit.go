@@ -27,6 +27,13 @@ func (h *helixLimit) note(err error) {
 	if !errors.As(err, &ae) {
 		return
 	}
+	// Only an empty bucket holds off the whole adapter. A 429 with tokens left
+	// is one endpoint's own cooldown (shoutout's 2- and 60-minute limits), and
+	// must not stop an unrelated ban or delete. A missing header is unknown, so
+	// it is treated as empty.
+	if ae.RateRemaining != "" && ae.RateRemaining != "0" {
+		return
+	}
 	d := ae.RetryAfter
 	if d <= 0 {
 		d = 2 * time.Second

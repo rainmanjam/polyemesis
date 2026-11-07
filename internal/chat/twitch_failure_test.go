@@ -121,7 +121,7 @@ func helixRefreshRig(t *testing.T, firstStatus int, firstBody string, refreshErr
 	t.Cleanup(srv.Close)
 	a := twitchForDelete(t, srv.URL)
 	a.cfg.HelixToken = StaticToken("stale-secret-token")
-	a.cfg.HelixRefresh = func(context.Context) (string, error) {
+	a.cfg.HelixRefresh = func(context.Context, string) (string, error) {
 		refreshes.Add(1)
 		if refreshErr != nil {
 			return "", refreshErr
@@ -281,5 +281,66 @@ func TestTwitchHelixErrorsAreWordedAndNeverLeak(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A shoutout cooldown is a 429 with tokens left in the bucket. It must not stop
+// an unrelated Ban from reaching Twitch.
+func TestTwitchEndpointCooldown429DoesNotBlockOtherCalls(t *testing.T) {
+	var shoutouts, others atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "shoutouts") {
+			shoutouts.Add(1)
+			w.Header().Set("Ratelimit-Remaining", "799")
+			w.Header().Set("Ratelimit-Reset", strconv.FormatInt(time.Now().Add(20*time.Second).Unix(), 10))
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":"Too Many Requests","status":429,"message":"shoutout cooldown"}`)
+			return
+		}
+		others.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	a := twitchForDelete(t, srv.URL)
+	if err := a.helix(context.Background(), http.MethodPost, "/chat/shoutouts", nil, nil, nil); statusOf(err) != http.StatusTooManyRequests {
+		t.Fatalf("shoutout = %v, want 429", err)
+	}
+	if err := a.Delete(context.Background(), "msg-1"); err != nil {
+		t.Fatalf("a delete after a shoutout cooldown was refused: %v", err)
+	}
+	if others.Load() != 1 {
+		t.Errorf("the delete reached Twitch %d times, want 1", others.Load())
+	}
+}
+
+// A refresh that failed for a passing reason must not be worded as a revoked grant.
+func TestTwitchHelix401TransientRefreshFailureIsNotCalledRevoked(t *testing.T) {
+	a, _, _ := helixRefreshRig(t, 401, twitchInvalidToken, errors.New("id.twitch.tv returned 503"))
+	_, err := a.ReadChatSettings(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "disconnect and reconnect") || !strings.Contains(msg, "try again") || !strings.Contains(msg, "503") {
+		t.Errorf("transient refresh failure misworded: %s", msg)
+	}
+	if statusOf(err) != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 preserved", statusOf(err))
+	}
+}
+
+// The refresh is told which token was refused.
+func TestTwitchHelix401PassesTheRejectedTokenToRefresh(t *testing.T) {
+	a, _, _ := helixRefreshRig(t, 401, twitchInvalidToken, nil)
+	var got string
+	a.cfg.HelixRefresh = func(_ context.Context, rejected string) (string, error) {
+		got = rejected
+		return "fresh-token", nil
+	}
+	if _, err := a.ReadChatSettings(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "stale-secret-token" {
+		t.Errorf("refresh got %q, want the rejected token", got)
 	}
 }

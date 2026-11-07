@@ -98,8 +98,9 @@ type TwitchConfig struct {
 	// A Helix 401 that is not about a missing scope is retried ONCE with it: the
 	// stored expiry is only a guess, and a token Twitch invalidated early is
 	// otherwise reported as a scope problem. It wraps ErrReconnectRequired when
-	// the grant itself is gone.
-	HelixRefresh TokenFunc
+	// the grant itself is gone. It receives the token that was rejected, so a
+	// caller whose token someone else already replaced does not refresh again.
+	HelixRefresh func(ctx context.Context, rejected string) (string, error)
 	// ClientID is required on every Helix request alongside the bearer token.
 	// A request with a valid token and no Client-Id is rejected.
 	ClientID string
