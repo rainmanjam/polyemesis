@@ -46,6 +46,11 @@ its first tagged release.
 - **Kick category search uses `GET /public/v2/categories`** (the v1 `?q=` search is deprecated).
   Terms under three characters are not sent, as v2 rejects them.
 - **docs/PLATFORMS.md** no longer claims Kick's Get Channels page does not list `streamkey:read`.
+- **The console Dashboard crashed as soon as an X account was connected.** X writes no metadata fields,
+  and its capabilities carried a nil list that the API served as `"fields": null`; the Dashboard then
+  called `.includes` on it ("Cannot read properties of null"). `MetadataCaps` now always serialises
+  `fields` as an array for every provider (enforced on the type, with a test over every registered
+  provider), X reports an explicit empty list, and the Dashboard's field filters tolerate a null list.
 
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
