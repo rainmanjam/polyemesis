@@ -260,6 +260,7 @@ func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, 
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	x.calls.noteDate(fp, resp.Header.Get("Date"))
 
 	if until, limited := x.calls.rateHoldFrom(resp); limited {
 		x.calls.hold(fp, until)
@@ -701,7 +702,7 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 		st.Status, st.BoundStreamID = XStateNotStarted, sourceID
 		// Only a broadcast polyemesis started may be adopted. With no go-live attempt on record nothing of ours can
 		// exist, so the list is not even read. With one, a broadcast on the source counts only if X created it at or
-		// after the attempt (less xAdoptSkewMS for the two clocks); anything older is somebody else's and is left alone.
+		// after the attempt (in X's time, inside xInGoLiveWindow); anything outside it is somebody else's and is left alone.
 		if attemptMS > 0 {
 			bs, err := x.Broadcasts(ctx, "", accessToken)
 			if err != nil {
@@ -711,7 +712,7 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 				if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
 					continue
 				}
-				if !xCreatedSince(b.CreatedAtMS, attemptMS) {
+				if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
 					continue
 				}
 				id := b.ID
@@ -774,18 +775,39 @@ func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *Broadc
 var ErrXSourceGone = errors.New("X no longer has the stream source this destination was set up on; it may have been " +
 	"deleted in X. Reconnect the X account in polyemesis so it can create a new one")
 
-// xAdoptSkewMS is how far before a go-live attempt a broadcast's created_at_ms may be and still count as the one that
-// attempt made. X stamps created_at_ms with its own clock, not ours.
-const xAdoptSkewMS = 30000
+// XClockOffsetMS is X's clock minus the local clock, in milliseconds, from the Date header of the freshest answer for
+// this token (at most two minutes old). The lifecycle coordinator adds it to the local time to record a go-live attempt
+// in X's time. ok is false when there is no recent reading, and the attempt then cannot be verified later.
+func (x *X) XClockOffsetMS(accessToken string) (int64, bool) {
+	off, ok := x.calls.clockOffset(xTokenFingerprint(accessToken, x.apiEndpoint()))
+	if !ok {
+		return 0, false
+	}
+	return off.Milliseconds(), true
+}
 
-// xCreatedSince reports whether createdAtMS (X's created_at_ms) is at or after attemptMS less the skew allowance. A
-// value that is missing or not a number cannot be verified and is never "since".
-func xCreatedSince(createdAtMS string, attemptMS int64) bool {
+const (
+	// xGoLiveSkewMS is how far before the attempt, in X's own time, a broadcast's created_at_ms may be and still be the
+	// one that attempt made: the error of reading X's clock from a Date header with one-second resolution.
+	xGoLiveSkewMS = 5000
+	// xGoLiveTimeoutMS is the request timeout of a go-live (the coordinator's lifecycleCallTimeout): the longest a
+	// request that created the broadcast can have been in flight.
+	xGoLiveTimeoutMS = 20000
+)
+
+// xInGoLiveWindow reports whether createdAtMS (X's created_at_ms) lies in [attempt - 5s, attempt + timeout + 5s], with
+// attemptMS in X's own time. The window is two-sided on purpose: a broadcast created minutes AFTER the attempt is as
+// foreign as one created before it. A created_at_ms that is missing or not a number cannot be verified, and neither
+// can an attempt of zero.
+func xInGoLiveWindow(createdAtMS string, attemptMS int64) bool {
+	if attemptMS <= 0 {
+		return false
+	}
 	created, err := strconv.ParseInt(strings.TrimSpace(createdAtMS), 10, 64)
 	if err != nil || created <= 0 {
 		return false
 	}
-	return created >= attemptMS-xAdoptSkewMS
+	return created >= attemptMS-xGoLiveSkewMS && created <= attemptMS+xGoLiveTimeoutMS+xGoLiveSkewMS
 }
 
 // ------------------------------------------------------------ go live
@@ -1057,7 +1079,12 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 		// recorded go-live attempt and the broadcast's created_at_ms decide. Otherwise it is somebody else's show:
 		// refused in words, never adopted, and so never ended by a later switch-off.
 		b, err := x.BroadcastByID(ctx, "", accessToken, id)
-		if err != nil || attemptMS <= 0 || !xCreatedSince(b.CreatedAtMS, attemptMS) {
+		if err != nil || attemptMS <= 0 {
+			return nil, &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "unconfirmedBroadcast",
+				Platform: "X", err: errors.New("could not confirm the broadcast on this source was started by " +
+					"polyemesis (X's clock could not be read), so polyemesis will not take it over or end it")}
+		}
+		if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
 			return nil, &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "foreignBroadcast",
 				Platform: "X", err: errors.New("a broadcast not started by polyemesis is live on this source; " +
 					"polyemesis will not take it over or end it")}

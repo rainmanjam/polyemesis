@@ -3063,9 +3063,16 @@ export interface BroadcastControl {
    *  broadcast yet. X creates the broadcast when it goes live, so until video
    *  arrives `broadcastId` is empty and this names the source instead. */
   pendingSource?: string;
-  /** X only: when (ms since the epoch) the first go-live was sent for `pendingSource`, kept while
-   *  its answer is unknown. Zero or absent means no attempt is outstanding. */
+  /** X only: when the go-live for `pendingSource` was sent, in X's own clock (ms since the epoch),
+   *  kept while its answer is unknown. Zero or absent means none, or X's clock could not be read. */
   goLiveAttemptMs?: number;
+  /** X only: the local time (ms) a go-live was sent whose outcome is not yet known. Set means a
+   *  broadcast may exist behind it, so a reconnect leaves the destination alone. */
+  goLiveSentMs?: number;
+  /** Counts resets from outside the sweep that holds a copy of the row; bookkeeping only. */
+  generation?: number;
+  /** True when `fault` cannot clear by retrying, so nothing retries it automatically. */
+  terminal?: boolean;
   /** The platform's own word for where the broadcast is — for YouTube:
    *  created, ready, testing, testStarting, live, liveStarting, complete,
    *  revoked. Passed through unmapped so it can be compared against what the

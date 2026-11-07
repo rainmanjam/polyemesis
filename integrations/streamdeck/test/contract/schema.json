@@ -508,7 +508,17 @@
                     "string"
                   ]
                 },
+                "generation": {
+                  "types": [
+                    "number"
+                  ]
+                },
                 "goLiveAttemptMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "goLiveSentMs": {
                   "types": [
                     "number"
                   ]
@@ -524,6 +534,11 @@
                   ]
                 },
                 "renewed": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "terminal": {
                   "types": [
                     "boolean"
                   ]

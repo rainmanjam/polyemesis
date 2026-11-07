@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The ids and key the fake X holds. The source id is 19 digits and is NOT the stream key, as on the /2/sources routes.
@@ -48,6 +49,8 @@ type xFake struct {
 	// liveStatus and liveBody, when set, make POST /2/broadcasts answer that status and body.
 	liveStatus int
 	liveBody   string
+	// dateSkew is how far the fake's clock (its Date header) is from the real one.
+	dateSkew time.Duration
 	// createdAtMS is created_at_ms on GET /2/broadcasts/{id}; empty means xFakeCreatedMS.
 	createdAtMS string
 	// liveExisting makes POST /2/broadcasts answer 200 (the source already has a live broadcast) instead of 201.
@@ -113,6 +116,7 @@ var xDigitID = regexp.MustCompile(`^[0-9]{1,19}$`)
 
 func (f *xFake) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Date", time.Now().Add(f.dateSkew).UTC().Format(http.TimeFormat))
 	path := r.URL.Path
 	if path == "/2/users/me" {
 		f.meHits.Add(1)

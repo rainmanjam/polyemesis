@@ -162,6 +162,10 @@ type fakeLifecycleStore struct {
 	// after the go-live was stamped, as a database that went away mid-sweep would.
 	failUpdatesAfterGoLive bool
 	stamped                bool
+	// onUpdate runs, keyed by the 1-based number of the UpdateLifecycle call, on the stored row before that call
+	// applies, so a test can move the world (a reconnect, a source cleared) at the exact write it wants to race.
+	onUpdate map[int]func(row *db.Destination)
+	updates  int
 }
 
 // GetDestination answers what the real store answers: the row, or
@@ -201,6 +205,10 @@ func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destinatio
 	row, ok := f.rows[id]
 	if !ok {
 		return nil, db.ErrNotFound
+	}
+	f.updates++
+	if h := f.onUpdate[f.updates]; h != nil {
+		h(row)
 	}
 	cur := *row
 	if f.beforeUpdate != nil {

@@ -45,7 +45,12 @@ its first tagged release.
   `lifecycle.broadcastId` is empty and `lifecycle.pendingSource` names the source. A go-live whose answer
   was lost is adopted on the next read, a deleted row right after go-live still ends the broadcast, a source
   deleted on X raises a fault, an account X will not let go live is a terminal fault, and a 409 for a source
-  that is not receiving video yet costs nothing.
+  that is not receiving video yet costs nothing. Adoption compares X's `created_at_ms` with the go-live
+  attempt in X's own time (from the `Date` header), inside a two-sided window, so a wrong clock on the host
+  neither blocks nor misfires it. A reconnect leaves a destination with an unresolved go-live alone, a late
+  result from an older row cannot restore a cleared source, a deleted or switched-off destination keeps looking
+  for a broadcast a lost go-live may have made, and a non-terminal X fault that has used its budget is retried
+  every two minutes instead of waiting for a manual toggle.
 
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
