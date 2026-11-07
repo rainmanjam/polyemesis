@@ -70,7 +70,8 @@ hot. One upload, one video encode, different audio per platform.
   X sign-in, go-live and chat are built and on by default; set
   `POLYEMESIS_X_LIVESTREAM=0` to switch them off. Instagram Live streams with a
   persistent key pasted from instagram.com; you click Go live in Instagram,
-  and each live video runs up to an hour. [→ PLATFORMS.md](docs/PLATFORMS.md)
+  and each live video runs up to an hour. [→ PLATFORMS.md](docs/PLATFORMS.md),
+  and [→ CONNECTING-PLATFORMS.md](docs/CONNECTING-PLATFORMS.md) for setup end to end
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
   card showing what one person has said across every platform at once, which no
   single platform's own tooling does.
@@ -269,6 +270,7 @@ most:
 | [Stream Deck](docs/STREAM-DECK.md) | The plugin: install, pairing, each key |
 | [Audio routing](docs/AUDIO-ROUTING.md) | The mix matrix, clip protection, loudness |
 | [Renditions](docs/RENDITIONS.md) | Shared video encodes and hardware encoders |
+| [Connecting platforms](docs/CONNECTING-PLATFORMS.md) | From an installed server to streaming and chat on X, Twitch, Kick, YouTube and Facebook |
 | [Platforms](docs/PLATFORMS.md) | What each platform's API allows, and OAuth setup |
 | [TLS](docs/TLS.md) | Certificates, reverse proxies, and the SSH tunnel |
 | [Configuration](docs/CONFIGURATION.md) | `config.yaml` vs the UI, and which is which |
