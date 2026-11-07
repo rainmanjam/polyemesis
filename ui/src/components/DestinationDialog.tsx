@@ -579,9 +579,11 @@ function urlPlaceholderFor(kind: DestKind): string {
   return kind === "srt" ? "srt://host:9000?streamid=..." : "rtmp://host/app";
 }
 
-function manualKeyNote(caps: PlatformCapability, showOAuth: boolean, t: Translator): string {
+function manualKeyNote(caps: PlatformCapability, showOAuth: boolean, mintsKey: boolean, t: Translator): string {
   const reason = caps.reasons?.streamKey ? t(caps.reasons.streamKey) : null;
-  if (showOAuth) return t("addDest.typeKeyAnyway", { reason: reason ?? "" });
+  // The reason already says the paste is the fallback; "type this one in even
+  // with an account connected" would contradict a key polyemesis creates.
+  if (showOAuth && !mintsKey) return t("addDest.typeKeyAnyway", { reason: reason ?? "" });
   return reason ?? t("addDest.noKeyApi", { platform: caps.name });
 }
 
@@ -1151,7 +1153,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // signs in for chat, moderation, metadata and viewer stats, and the key is
   // still typed by hand. Both affordances are shown at once, each labelled for
   // what it does, rather than one of them being hidden as if it did not exist.
-  const showOAuth = caps?.connect !== undefined && supportOf(caps, "sso") === "yes";
+  //
+  // Keyed on the row having a connect flow, not on its "sso" label. The label
+  // says how far that flow has been verified, and the picker is how an
+  // unverified flow ever gets verified: gating on "yes" made X, whose sign-in
+  // was built but unchecked, impossible to link at all. A row declares a
+  // connect id only for a platform that signs in, so the label adds nothing.
+  const showOAuth = caps?.connect !== undefined;
+  // X Livestream is switched on: with an account linked, the server creates the
+  // stream source itself and the URL and key may be left empty.
+  const xMintsKey =
+    platform === "x" && rowsOf(guidesRead).find((g) => g.platform === "x")?.livestreamGate === "open";
   const manualKey = caps ? supportOf(caps, "streamKey") === "manual" : false;
   const unsupported = caps?.tier === "unsupported";
 
@@ -1617,7 +1629,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   I get my key" will conclude the feature is broken when the key
                   field stays empty. */}
               <span className="text-sm text-muted-foreground">
-                {manualKey
+                {/* X has no verified chat, moderation, metadata or stats cell
+                    yet, so "signing in gets you ." would list nothing. With the
+                    gate open the link does fetch the key; with it closed the
+                    key note under the key field says why it is still pasted. */}
+                {platform === "x" && !xMintsKey
+                  ? null
+                  : manualKey && !xMintsKey
                   ? t("addDest.signInGets", {
                       features: [
                         supportOf(caps, "chatRead") === "yes" && t("addDest.featureChat"),
@@ -1734,7 +1752,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   it so this does not read as an apology. */}
               {manualKey && caps && (
                 <span className="text-sm text-muted-foreground">
-                  {manualKeyNote(caps, showOAuth, t)}
+                  {manualKeyNote(caps, showOAuth, xMintsKey, t)}
                 </span>
               )}
             </div>

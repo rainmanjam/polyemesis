@@ -45,8 +45,8 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		// SupportYes for an hour, which was the opposite error: the API exists,
 		// the provider is not registered, and a "Works" an operator cannot act
 		// on is worse than an "Unverified" that invites them to try.
-		{"x sign-in is documented at the platform and unbuilt here", "x", CapSSO, SupportUnknown,
-			"the API is real; nothing wires it yet, and the enum cannot say that directly"},
+		{"x sign-in has run against a live account", "x", CapSSO, SupportYes,
+			"connected 2026-11-06, reconnected 2026-11-07, token refreshes; the other X cells stay unverified"},
 		{"x key is pasted", "x", CapStreamKey, SupportManual,
 			"the destination still works; only the automation is absent"},
 
