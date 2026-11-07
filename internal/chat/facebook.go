@@ -55,6 +55,13 @@ type FacebookConfig struct {
 	LiveVideoID string
 	// Interval overrides the poll spacing.
 	Interval time.Duration
+	// PageAccess resolves the Page this account is connected as, with that
+	// Page's access token. Blocking a person and running a poll on a Page's
+	// live video both need it: the user token the chat is read with is refused
+	// by the Page-only edges. Nil, or an error, means the account is a profile
+	// (or the Page is no longer managed), and the actions that need a Page say
+	// so instead of trying the user token.
+	PageAccess func(ctx context.Context) (pageID, token string, err error)
 
 	APIBase string
 	HTTP    *http.Client

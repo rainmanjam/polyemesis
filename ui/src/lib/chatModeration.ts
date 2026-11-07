@@ -89,14 +89,15 @@ const english: Translator = (key, params) => translate("en", key, params);
  *  an is_hidden field. Nothing else here has anywhere to hide a message to. */
 const ADAPTERS: Record<
   string,
-  { delete: boolean; ban: boolean; hideUpstream: boolean }
+  { delete: boolean; ban: boolean; timeout: boolean; hideUpstream: boolean }
 > = {
-  youtube: { delete: true, ban: true, hideUpstream: false },
-  twitch: { delete: true, ban: true, hideUpstream: false },
-  kick: { delete: true, ban: true, hideUpstream: false },
-  // No Banner. Not an oversight and not a scope we could request: Facebook
-  // publishes no chat ban API at all.
-  facebook: { delete: true, ban: false, hideUpstream: true },
+  youtube: { delete: true, ban: true, timeout: true, hideUpstream: false },
+  twitch: { delete: true, ban: true, timeout: true, hideUpstream: false },
+  kick: { delete: true, ban: true, timeout: true, hideUpstream: false },
+  // A Banner that cannot time anyone out: the Page block list
+  // (POST /{page-id}/blocked) has no duration, so Facebook can block a person
+  // permanently and nothing shorter. Mirrors chat.NoTimeouter.
+  facebook: { delete: true, ban: true, timeout: false, hideUpstream: true },
 };
 
 /** The platform's name as an operator would write it.
@@ -159,10 +160,20 @@ export function chatActionSupport(
           };
 
     case "timeout":
+      // Both route through Hub.Ban, which type-asserts chat.Banner, but a
+      // Banner may be unable to time anyone out (chat.NoTimeouter): Facebook
+      // blocks a person permanently and has no shorter form.
+      if (row.ban && !row.timeout) {
+        return { ok: false, reason: t("chatMod.noTimeout", { platform: noun(platform) }) };
+      }
+      return row.ban && row.timeout
+        ? YES
+        : {
+            ok: false,
+            reason: t("chatMod.noBan", { platform: noun(platform) }),
+          };
+
     case "ban":
-      // Both route through Hub.Ban, which type-asserts chat.Banner, so they
-      // stand or fall together. Answering them separately would invite a
-      // caller to gate one and not the other.
       return row.ban
         ? YES
         : {

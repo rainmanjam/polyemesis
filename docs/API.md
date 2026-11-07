@@ -2276,8 +2276,12 @@ live, and polyemesis does not estimate them.
 
 ```json
 {"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
- "mirrorTwitch": true, "mirrorYouTube": false}
+ "mirrorTwitch": true, "mirrorYouTube": false, "mirrorFacebook": false}
 ```
+
+`mirrorFacebook` also runs it as a native poll on every connected Facebook live
+video. Facebook accepts a poll only while the video is live, and answers a poll
+started earlier with a refusal that is reported per account in the result.
 
 A second poll while one runs is `409`; a question, option or duration outside
 the limits is `400`. `POST /polls/{id}/end` ends it early (`409` if that poll

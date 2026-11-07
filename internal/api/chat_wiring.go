@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -597,6 +598,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Channel:     a.AccountName,
 			Token:       s.chatToken(a.ID),
 			LiveVideoID: s.facebookLiveVideoID(a.ID),
+			PageAccess:  s.facebookPageAccess(a.ID, a.AccountRef),
 		})
 	}
 	return nil, fmt.Errorf("polyemesis has no chat adapter for %s", a.Platform)
@@ -709,6 +711,31 @@ func (s *Server) facebookLiveVideoID(accountID int64) string {
 		return ""
 	}
 	return s.adoptFacebookLiveVideo(accountID)
+}
+
+// facebookPageAccess is how the chat adapter acts as the Page this account is
+// connected as: blocking a person and running a live poll both take a Page
+// token, which is minted from the user token on each use so a refreshed login
+// is picked up. A profile account answers oauth.ErrNotAPage.
+func (s *Server) facebookPageAccess(accountID int64, ref string) func(context.Context) (string, string, error) {
+	return func(ctx context.Context) (string, string, error) {
+		if !oauth.IsPageRef(ref) {
+			return "", "", oauth.ErrNotAPage
+		}
+		p, err := s.providers.Get(db.PlatformFacebook)
+		if err != nil {
+			return "", "", err
+		}
+		fb, ok := p.(*oauth.Facebook)
+		if !ok || fb == nil {
+			return "", "", errors.New("facebook provider is not available")
+		}
+		acct, err := s.tokenFor(ctx, accountID)
+		if err != nil {
+			return "", "", err
+		}
+		return fb.PageAccess(ctx, acct.AccessToken, ref)
+	}
 }
 
 // adoptFacebookLiveVideo asks the platform which broadcast this account is

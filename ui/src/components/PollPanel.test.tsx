@@ -89,7 +89,7 @@ describe("starting a poll", () => {
     await waitFor(() => expect(start).toHaveBeenCalled());
     expect(start.mock.calls[0][0]).toEqual({
       question: "Next map?", options: ["Dust", "Mirage"], durationSeconds: 45, mirrorTwitch: false,
-      mirrorYouTube: true,
+      mirrorYouTube: true, mirrorFacebook: false,
     });
   });
 

@@ -291,6 +291,11 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// comment POST. The generic /{object-id}/comments page lists Live
 			// Video among its nodes, but it never writes that path and a
 			// page-level implication does not outrank a per-endpoint refusal.
+			// Re-read 2026-11-07: the Video node's /{video-id}/comments edge
+			// does document a POST (message, attachment_url...), but no page
+			// says it works on a live video, and the LiveVideo node reference
+			// that would say so could not be read. Kept No, and not built,
+			// until a live account shows whether the same id takes it.
 			CapChatSend:           SupportNo,
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportUnknown,
@@ -315,7 +320,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
 				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
-				"so an app that shows you the thread can still be refused when you act on it.",
+				"so an app that shows you the thread can still be refused when you act on it." +
+				" Banning a viewer BLOCKS them from the Page (POST /{page-id}/blocked), permanently: Facebook has no timeout, so only the ban is offered. Blocking needs a Page connection and has not been exercised against a live account.",
 			CapMetadata: "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
 			CapChatRead: "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was FETCHED carries the live-video id inside the key. " +
 				"One whose key was PASTED does not, so polyemesis asks the connected account which broadcast it is running — which works because Facebook allows a persistent key one live video at a time. " +

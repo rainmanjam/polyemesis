@@ -39,6 +39,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -279,6 +280,31 @@ func (f *Facebook) pages(ctx context.Context, accessToken string) ([]fbPage, err
 		return nil, fbAdvice(err, "list Facebook Pages", []string{"pages_show_list"})
 	}
 	return out.Data, nil
+}
+
+// ErrNotAPage is PageAccess given a ref that names a profile rather than a Page.
+var ErrNotAPage = errors.New("this Facebook account is a personal profile, not a Page")
+
+// PageAccess returns the id and the Page access token of the Page a "page:<id>"
+// account ref names, for the calls Graph only takes from a Page: blocking a
+// person (POST /{page-id}/blocked) answers only to a Page token, and a poll on
+// a Page's live video only to the token that created the video.
+//
+// A profile ref is ErrNotAPage rather than the user token under another name:
+// handing a user token to a Page-only edge is the failure this exists to prevent,
+// and the caller can say so in one sentence.
+func (f *Facebook) PageAccess(ctx context.Context, accessToken, ref string) (pageID, pageToken string, err error) {
+	if !IsPageRef(ref) {
+		return "", "", ErrNotAPage
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, ref)
+	if err != nil {
+		return "", "", err
+	}
+	if tgt.token == "" {
+		return "", "", fmt.Errorf("Facebook returned no Page access token for Page %s; reconnect the account and grant access to it", tgt.node)
+	}
+	return tgt.node, tgt.token, nil
 }
 
 // Targets lists the profile first, then every Page.

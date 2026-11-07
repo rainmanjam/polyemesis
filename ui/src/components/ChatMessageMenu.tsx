@@ -92,10 +92,13 @@ export function ChatMessageMenu({
   // particular message arrived without a user id to address.
   const noAuthor = authorReason(message, t);
 
-  // Timeouts and a permanent ban are ONE question. Both route through Hub.Ban,
-  // which type-asserts chat.Banner, so gating them separately would only invite
-  // the two gates to drift apart.
+  // Timeouts and a permanent ban both route through Hub.Ban, which type-asserts
+  // chat.Banner, so they share this answer -- except where the Banner cannot
+  // time anyone out (Facebook's Page block has no duration), asked below.
   const person = personActionSupport(message, "ban", t);
+  // Not quite one question after all: Facebook can ban (block) a person and
+  // cannot time one out.
+  const timeoutPerson = personActionSupport(message, "timeout", t);
 
   // Deleting a message is a DIFFERENT question, and deliberately not folded in
   // with the two above: it addresses a message rather than a person, so it does
@@ -119,7 +122,7 @@ export function ChatMessageMenu({
   //                that a future adapter with the reverse shape is explained
   //                rather than silently greyed.
   const blanket = person.reason !== "" && person.reason === del.reason ? person.reason : "";
-  const personReason = blanket === "" && noAuthor === "" ? person.reason : "";
+  const personReason = blanket === "" && noAuthor === "" ? person.reason || timeoutPerson.reason : "";
   const deleteReason = blanket === "" ? del.reason : "";
 
   const run = async (
@@ -238,8 +241,8 @@ export function ChatMessageMenu({
         {TIMEOUTS.map((to) => (
           <DropdownMenuItem
             key={to.seconds}
-            disabled={!person.ok}
-            title={person.reason}
+            disabled={!timeoutPerson.ok}
+            title={timeoutPerson.reason}
             onSelect={() => {
               close();
               void run(
