@@ -653,7 +653,7 @@ func TestXRefusedCreateWhoseDetailEchoesTheKeyLeaksItNowhere(t *testing.T) {
 // every sweep for ever. The hold is released by an UP edge, which arrives through Observe
 // and must survive the untrack that branch does first.
 func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
-	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	fake := &xcFake{active: true, createStatus: http.StatusBadRequest}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
 
 	for i := 0; i < lifecycleGiveUpAfter+5; i++ {
@@ -675,7 +675,7 @@ func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
 // fresh budget. Without it a held X row nobody tracks could stay held for good, because
 // an untracked row opens no observe gate and so may never see an UP edge.
 func TestXHeldCreateIsReleasedWhenTheOperatorDisablesTheDestination(t *testing.T) {
-	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	fake := &xcFake{active: true, createStatus: http.StatusBadRequest}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{Attempts: lifecycleGiveUpAfter, Fault: "refused"}))
 	c.noteRearm(5) // held in this process just now, so the re-arm interval is running
 
