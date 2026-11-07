@@ -166,7 +166,7 @@ func (y *YouTubeAdapter) CreatePoll(ctx context.Context, question string, option
 	var out struct {
 		ID string `json:"id"`
 	}
-	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChatMessages?part=snippet",
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChat/messages?part=snippet",
 		y.cfg.Token, payload, &out)
 	y.budget.spend(QuotaCostPollCreate)
 	if err != nil {
@@ -211,7 +211,7 @@ func (y *YouTubeAdapter) ClosePoll(ctx context.Context, pollID string) ([]int, e
 		ytPollItem
 		Items []ytPollItem `json:"items"`
 	}
-	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChatMessages/transition?"+q.Encode(),
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChat/messages/transition?"+q.Encode(),
 		y.cfg.Token, nil, &raw)
 	y.budget.spend(QuotaCostPollClose)
 	if err != nil {

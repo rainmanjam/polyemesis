@@ -29,14 +29,14 @@ func (f *ytPollServer) handler(w http.ResponseWriter, r *http.Request, _ int64) 
 	f.paths = append(f.paths, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
 	f.bodies = append(f.bodies, string(b))
 	switch r.URL.Path {
-	case "/liveChatMessages":
+	case "/liveChat/messages":
 		if f.fail != 0 {
 			w.WriteHeader(f.fail)
 			_, _ = w.Write([]byte(`{"error":{"code":403,"errors":[{"reason":"liveChatDisabled"}]}}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":"poll-msg-1","snippet":{"type":"pollEvent"}}`))
-	case "/liveChatMessages/transition":
+	case "/liveChat/messages/transition":
 		_, _ = w.Write([]byte(f.close))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -92,7 +92,7 @@ func TestYouTubeCreatesAndClosesALivePollAndReadsTheTally(t *testing.T) {
 	if err != nil || len(votes) != 2 || votes[0] != 12 || votes[1] != 3 {
 		t.Fatalf("ClosePoll = %v, %v", votes, err)
 	}
-	if !strings.HasPrefix(f.paths[1], "POST /liveChatMessages/transition?") || !strings.Contains(f.paths[1], "status=closed") ||
+	if !strings.HasPrefix(f.paths[1], "POST /liveChat/messages/transition?") || !strings.Contains(f.paths[1], "status=closed") ||
 		!strings.Contains(f.paths[1], "id=poll-msg-1") || !strings.Contains(f.paths[1], "part=snippet") {
 		t.Errorf("transition = %q", f.paths[1])
 	}

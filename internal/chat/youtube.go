@@ -12,6 +12,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -292,10 +293,17 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 		idle        = 1.0
 		first       = true
 		apiInterval time.Duration
+		// failures counts consecutive transient failures, so the in-place
+		// wait grows and eventually hands over to the Hub's own backoff.
+		failures int
+		// authRetried allows one reactive retry of a 401: the TokenFunc is
+		// asked again, so a token that expired between refresh and call is
+		// replaced. A second 401 is the account's, not the clock's.
+		authRetried bool
 	)
 
 	for ctx.Err() == nil {
-		endpoint := y.cfg.APIBase + "/liveChatMessages?part=snippet,authorDetails&maxResults=200" +
+		endpoint := y.cfg.APIBase + "/liveChat/messages?part=snippet,authorDetails&maxResults=200" +
 			"&liveChatId=" + url.QueryEscape(chatID)
 		if pageToken != "" {
 			endpoint += "&pageToken=" + url.QueryEscape(pageToken)
@@ -307,7 +315,12 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 		y.budget.spend(QuotaCostListMessages)
 
 		if err != nil {
-			done, retry, cerr := y.handleListError(ctx, err)
+			if statusOf(err) == http.StatusUnauthorized && !authRetried {
+				authRetried = true
+				continue
+			}
+			failures++
+			done, retry, cerr := y.handleListError(ctx, err, failures)
 			if cerr != nil {
 				return cerr
 			}
@@ -320,6 +333,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 			return err
 		}
 
+		failures, authRetried = 0, false
 		cutoff := time.Time{}
 		if first {
 			cutoff = y.cfg.Now().Add(-ytDefaultBackfill)
@@ -409,7 +423,11 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 // non-nil error is fatal. Anything unrecognised falls through to the caller's
 // plain error, which the Hub retries with backoff — the fail-open direction,
 // since a status we have never seen is more likely transient than terminal.
-func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, retry bool, fatal error) {
+func (y *YouTubeAdapter) handleListError(ctx context.Context, err error, failures int) (done, retry bool, fatal error) {
+	if ferr := y.fatalFor(err); ferr != nil {
+		y.setHealth(StateFailed, ferr.Error())
+		return false, false, ferr
+	}
 	switch reason := reasonOf(err); {
 	case oauth.IsSpentQuotaReason(reason):
 		// The platform has corrected our estimate. Stop until the reset
@@ -420,8 +438,13 @@ func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, 
 		}
 		return false, true, nil
 	case reason == "rateLimitExceeded", reason == "userRateLimitExceeded", reason == "backendError":
-		// Transient. Wait out a poll interval and carry on.
-		if !y.cfg.Sleep(ctx, MinPollInterval*2) {
+		// Transient. Wait as long as Google asked (Retry-After), or longer
+		// each time it repeats, with jitter so accounts do not retry in
+		// lockstep; after ytMaxInPlaceRetries the Hub's backoff takes over.
+		if failures > ytMaxInPlaceRetries {
+			return false, false, nil
+		}
+		if !y.cfg.Sleep(ctx, ytRateWait(failures, retryAfterFrom(err))) {
 			return true, false, nil
 		}
 		return false, true, nil
@@ -431,14 +454,59 @@ func (y *YouTubeAdapter) handleListError(ctx context.Context, err error) (done, 
 	}
 
 	switch statusOf(err) {
-	case http.StatusUnauthorized:
-		y.setHealth(StateFailed, "YouTube rejected the access token; reconnect the YouTube account in Settings → Platforms")
-		return false, false, Fatal(fmt.Errorf("youtube rejected the access token; reconnect the YouTube account in Settings → Platforms"))
-	case http.StatusNotFound:
+	case http.StatusGone:
 		y.setHealth(StateStopped, "the YouTube live chat has closed")
 		return true, false, nil
 	}
+	// A bare 404 is NOT "the chat closed": a closed chat answers 404 with the
+	// liveChatNotFound reason (handled above), whereas a 404 without it means
+	// the route or resource is wrong, and calling that a finished chat hid a
+	// wrong path behind a chat that looked like it was cycling. It falls
+	// through as a plain error the Hub retries and shows.
 	return false, false, nil
+}
+
+const (
+	// ytMaxInPlaceRetries is how many consecutive rate-limit or backend
+	// failures pump waits out itself before returning to the Hub.
+	ytMaxInPlaceRetries = 5
+	// ytRateWaitCap bounds one in-place wait, however long Retry-After asks.
+	ytRateWaitCap = 2 * time.Minute
+)
+
+// ytRateWait is how long to wait before retrying a rate-limited poll: the
+// larger of what Google asked for and an escalating floor, capped, plus up to
+// a quarter again of jitter.
+func ytRateWait(failures int, retryAfter time.Duration) time.Duration {
+	if failures < 1 {
+		failures = 1
+	}
+	w := backoff.Exponential(failures-1, MinPollInterval*2, ytRateWaitCap)
+	if retryAfter > w {
+		w = retryAfter
+	}
+	if w > ytRateWaitCap {
+		w = ytRateWaitCap
+	}
+	return w + time.Duration(rand.Int64N(int64(w)/4+1))
+}
+
+// fatalFor returns a Fatal error, with an instruction the operator can act
+// on, for a failure no retry can fix, and nil otherwise.
+func (y *YouTubeAdapter) fatalFor(err error) error {
+	if IsFatal(err) {
+		return err
+	}
+	switch reason := reasonOf(err); {
+	case reason == "insufficientPermissions", reason == "insufficientScope", reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT":
+		return Fatal(fmt.Errorf("the connected YouTube account has not granted the permission this needs; reconnect the YouTube account in Settings → Platforms and approve every permission"))
+	case reason == "liveStreamingNotEnabled":
+		return Fatal(fmt.Errorf("live streaming is not enabled on this YouTube channel; enable it in YouTube Studio (it can take up to 24 hours), then restart chat"))
+	}
+	if statusOf(err) == http.StatusUnauthorized {
+		return Fatal(fmt.Errorf("youtube rejected the access token; reconnect the YouTube account in Settings → Platforms"))
+	}
+	return nil
 }
 
 // waitForQuota parks until the allowance resets, checking often enough that a
@@ -573,7 +641,7 @@ func (y *YouTubeAdapter) Send(ctx context.Context, text string) (Message, error)
 			PublishedAt string `json:"publishedAt"`
 		} `json:"snippet"`
 	}
-	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChatMessages?part=snippet",
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost, y.cfg.APIBase+"/liveChat/messages?part=snippet",
 		y.cfg.Token, payload, &out)
 	y.budget.spend(QuotaCostSendMessage)
 	if err != nil {
@@ -617,7 +685,7 @@ func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
 		return fmt.Errorf("no message id to delete")
 	}
 	err := doJSON(ctx, y.cfg.HTTP, http.MethodDelete,
-		y.cfg.APIBase+"/liveChatMessages?id="+url.QueryEscape(messageID),
+		y.cfg.APIBase+"/liveChat/messages?id="+url.QueryEscape(messageID),
 		y.cfg.Token, nil, nil)
 	y.budget.spend(QuotaCostDeleteMessage)
 	if err != nil {
@@ -673,7 +741,7 @@ func (y *YouTubeAdapter) Ban(ctx context.Context, userID string, d time.Duration
 	}
 
 	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost,
-		y.cfg.APIBase+"/liveChatBans?part=snippet", y.cfg.Token,
+		y.cfg.APIBase+"/liveChat/bans?part=snippet", y.cfg.Token,
 		map[string]any{"snippet": snippet}, nil)
 	y.budget.spend(QuotaCostBan)
 	if err != nil {
@@ -702,8 +770,8 @@ func (y *YouTubeAdapter) classify(err error) error {
 		q := y.budget.status()
 		return fmt.Errorf("YouTube's daily API quota is spent; chat resumes at %s", q.ResetAt.Format(ytClockLayout))
 	}
-	if statusOf(err) == http.StatusUnauthorized {
-		return Fatal(fmt.Errorf("youtube rejected the access token; reconnect the YouTube account in Settings → Platforms"))
+	if ferr := y.fatalFor(err); ferr != nil {
+		return ferr
 	}
 	return err
 }

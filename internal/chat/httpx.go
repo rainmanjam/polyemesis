@@ -8,11 +8,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // defaultHTTPTimeout bounds one API call. Chat polling runs on a schedule
@@ -44,13 +48,58 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// Message is the platform's own sentence from its error envelope
+	// (Google's error.message). It, not Body, is what Error() shows: a
+	// proxy's HTML page or a diagnostic dump has no business in the
+	// operator-visible health line.
+	Message string
+	// RetryAfter is the wait the platform asked for in a Retry-After header,
+	// zero when it sent none.
+	RetryAfter time.Duration
 }
 
+// Error never carries the raw body. Body stays on the struct for the callers
+// that match on it (Kick's duplicate detection) and for debugging; what an
+// operator reads is the status, the reason code and the envelope's message.
 func (e *apiError) Error() string {
-	if e.Reason != "" {
-		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Body)
+	switch {
+	case e.Reason != "" && e.Message != "":
+		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Message)
+	case e.Reason != "":
+		return fmt.Sprintf("%s returned %d (%s)", e.URL, e.Status, e.Reason)
+	case e.Message != "":
+		return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Message)
 	}
-	return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Body)
+	return fmt.Sprintf("%s returned %d", e.URL, e.Status)
+}
+
+// retryAfterOf reads a Retry-After header, either delta-seconds or an HTTP
+// date, and returns zero for anything it cannot make sense of.
+func retryAfterOf(h http.Header) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 {
+			return 0
+		}
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func retryAfterFrom(err error) time.Duration {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.RetryAfter
+	}
+	return 0
 }
 
 func statusOf(err error) int {
@@ -103,6 +152,13 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	if token != nil {
 		tok, err := token(ctx)
 		if err != nil {
+			// A refresh the platform refused because the grant is gone
+			// (revoked, expired for good) cannot be fixed by trying again.
+			// Left as a plain error, the Hub would redial the token endpoint
+			// every few seconds for ever, showing raw token-endpoint JSON.
+			if errors.Is(err, oauth.ErrReconnectRequired) {
+				return Fatal(fmt.Errorf("the account's authorization was revoked or has expired; reconnect it in Settings → Platforms: %w", oauth.ErrReconnectRequired))
+			}
 			return fmt.Errorf("no usable access token: %w", err)
 		}
 		if tok == "" {
@@ -136,6 +192,9 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			URL:    stripQuery(endpoint),
 			Body:   shorten(raw),
 			Reason: errorReason(raw),
+
+			Message:    errorMessage(raw),
+			RetryAfter: retryAfterOf(resp.Header),
 		}
 	}
 	if out == nil || len(raw) == 0 {
@@ -171,6 +230,32 @@ func errorReason(raw []byte) string {
 		return env.Error.Type
 	}
 	return ""
+}
+
+// errorMessage is the human sentence inside a Google/Twitch-style error
+// envelope, shortened, with any URL scrubbed so a link carrying a query string
+// never reaches a health line. Empty when the body is not such an envelope.
+func errorMessage(raw []byte) string {
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	return shorten([]byte(scrubURLs(env.Error.Message)))
+}
+
+// scrubURLs drops the query string from any http(s) URL in s.
+func scrubURLs(s string) string {
+	fields := strings.Fields(s)
+	for i, f := range fields {
+		if strings.HasPrefix(f, "http://") || strings.HasPrefix(f, "https://") {
+			fields[i] = stripQuery(f)
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 // stripQuery keeps a query string out of an error message. Nothing here puts a
