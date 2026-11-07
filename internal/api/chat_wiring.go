@@ -714,14 +714,13 @@ func (s *Server) facebookLiveVideoID(accountID int64) string {
 }
 
 // facebookPageAccess is how the chat adapter acts as the Page this account is
-// connected as: blocking a person and running a live poll both take a Page
-// token, which is minted from the user token on each use so a refreshed login
-// is picked up. A profile account answers oauth.ErrNotAPage.
+// connected as: blocking a person, running a live poll and reading comment
+// authors all take a Page token, which is minted from the user token (the
+// adapter caches it briefly) so a refreshed login is picked up. A ref with no
+// "page:" prefix is resolved like a broadcast target would be; only a ref that
+// resolves to the profile answers oauth.ErrNotAPage.
 func (s *Server) facebookPageAccess(accountID int64, ref string) func(context.Context) (string, string, error) {
 	return func(ctx context.Context) (string, string, error) {
-		if !oauth.IsPageRef(ref) {
-			return "", "", oauth.ErrNotAPage
-		}
 		p, err := s.providers.Get(db.PlatformFacebook)
 		if err != nil {
 			return "", "", err

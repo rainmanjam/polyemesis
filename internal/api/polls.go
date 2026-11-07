@@ -513,8 +513,8 @@ func (m nativePollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool)
 		if !end {
 			// Facebook reports a running poll's count, unlike YouTube.
 			if r, ok := ref.poller.(chat.PollReader); ok {
-				votes, err := r.PollVotes(ctx, ref.pollID)
-				return votes, err == nil, err
+				votes, open, err := r.PollVotes(ctx, ref.pollID)
+				return votes, err == nil && open, err
 			}
 			return nil, true, nil
 		}

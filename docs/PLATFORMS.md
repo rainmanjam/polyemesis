@@ -747,11 +747,17 @@ permission it needs (it names `pages_read_engagement`, which polyemesis already
 asks for, among several), so no scope was added; if Facebook answers with a
 permission error, reconnect the Page and accept everything on the consent
 screen.
+Ban needs the comment to carry its author's id. A Page account reads comments
+with its Page token because, as polyemesis understands Meta's rule, `from` on
+Page content is only returned to a Page token; a comment with no author id has
+Ban unavailable in the console, and that is unconfirmed against a live account.
 
 **Polls.** *Also run as a native Facebook poll* in the polls panel creates a
 poll on the live video with `POST /{live-video-id}/polls` and closes it with
 `POST /{poll-id}?action=CLOSE`. It uses the permissions the broadcast already
-has. Facebook only takes a poll while the video is live.
+has. Facebook only takes a poll while the video is live. `options` is sent as
+a JSON array, as Meta's polls guide shows, and the poll's `status` is read so a
+poll closed on Facebook returns that chat to number votes.
 
 None of these three has been run against a live Facebook account; they are built
 from Meta's documentation. polyemesis pins Graph API **v26.0**, the newest

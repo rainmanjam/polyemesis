@@ -13,12 +13,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
+
+// notLiveRe matches Graph's wording for a video that is not live.
+var notLiveRe = regexp.MustCompile(`(?i)not\s+(currently\s+)?live|isn'?t\s+live|live\s+video\s+(is\s+)?not|status\s+(is\s+)?not\s+live|must\s+be\s+live`)
 
 var (
 	_ NativePoller = (*FacebookAdapter)(nil)
@@ -56,7 +60,7 @@ func (f *FacebookAdapter) page(ctx context.Context) (id, token string, err error
 	if f.cfg.PageAccess == nil {
 		return "", "", fmt.Errorf("Facebook only lets a Page block people, and this account is not connected as a Page")
 	}
-	id, token, err = f.cfg.PageAccess(ctx)
+	id, token, err = f.cachedPageAccess(ctx)
 	switch {
 	case errors.Is(err, oauth.ErrNotAPage):
 		return "", "", fmt.Errorf("Facebook only lets a Page block people, and this account is a personal profile. " +
@@ -67,6 +71,65 @@ func (f *FacebookAdapter) page(ctx context.Context) (id, token string, err error
 		return "", "", fmt.Errorf("Facebook returned no Page access for this account; reconnect it in Settings → Platforms")
 	}
 	return id, token, nil
+}
+
+// pageTokenTTL is how long a resolved Page token is reused. Resolving one costs
+// a GET /me/accounts with the user token, and the poll mirror reads every few
+// seconds, so without this a running poll would spend hundreds of the app's
+// per-user calls an hour.
+const pageTokenTTL = 10 * time.Minute
+
+// cachedPageAccess is cfg.PageAccess behind a short cache. A success and
+// ErrNotAPage are kept; every other error is asked again.
+func (f *FacebookAdapter) cachedPageAccess(ctx context.Context) (string, string, error) {
+	f.mu.Lock()
+	if f.pageTok != "" && f.cfg.Now().Before(f.pageExpiry) {
+		id, tok := f.pageID, f.pageTok
+		f.mu.Unlock()
+		return id, tok, nil
+	}
+	notPage := f.cfg.Now().Before(f.notPageUntil)
+	f.mu.Unlock()
+	if notPage {
+		return "", "", oauth.ErrNotAPage
+	}
+	id, tok, err := f.cfg.PageAccess(ctx)
+	if errors.Is(err, oauth.ErrNotAPage) {
+		// A profile stays one; remembering it keeps a legacy ref that needs a
+		// Page lookup from repeating it on every comment poll.
+		f.mu.Lock()
+		f.notPageUntil = f.cfg.Now().Add(pageTokenTTL)
+		f.mu.Unlock()
+	}
+	if err == nil && id != "" && tok != "" {
+		f.mu.Lock()
+		f.pageID, f.pageTok, f.pageExpiry = id, tok, f.cfg.Now().Add(pageTokenTTL)
+		f.mu.Unlock()
+	}
+	return id, tok, err
+}
+
+// dropPageToken forgets the cached Page token when Graph rejected a token, so
+// the next call mints a fresh one.
+func (f *FacebookAdapter) dropPageToken(err error) {
+	if statusOf(err) == http.StatusUnauthorized || graphCode(err) == 190 || graphCode(err) == 102 {
+		f.mu.Lock()
+		f.pageID, f.pageTok, f.pageExpiry = "", "", time.Time{}
+		f.mu.Unlock()
+	}
+}
+
+// commentToken is the token the thread is read and moderated with. Graph only
+// returns a comment's author (`from`) on Page content to a Page access token,
+// and Ban needs that id, so a Page account reads with its Page token. A
+// profile, or a Page whose token cannot be minted, keeps the user token.
+func (f *FacebookAdapter) commentToken(ctx context.Context) TokenFunc {
+	if f.cfg.PageAccess != nil {
+		if _, tok, err := f.cachedPageAccess(ctx); err == nil && tok != "" {
+			return StaticToken(tok)
+		}
+	}
+	return f.cfg.Token
 }
 
 // Ban blocks a person from the Page: POST /{page-id}/blocked?user={id}.
@@ -130,6 +193,7 @@ func (f *FacebookAdapter) Unban(ctx context.Context, userID string) error {
 // 368 the action was deemed abusive, 283 and 200 a missing permission, 210 the
 // person is not visible to this Page.
 func (f *FacebookAdapter) blockError(err error, verb string) error {
+	f.dropPageToken(err)
 	switch graphCode(err) {
 	case 3801:
 		return fmt.Errorf("Facebook would not block that person: this Page has blocked the maximum number of people. "+
@@ -163,8 +227,9 @@ func (f *FacebookAdapter) blockError(err error, verb string) error {
 // does not implement this; Facebook can.
 type PollReader interface {
 	NativePoller
-	// PollVotes returns the running count of each option, in order.
-	PollVotes(ctx context.Context, pollID string) ([]int, error)
+	// PollVotes returns the running count of each option, in order, and
+	// whether the poll is still open on the platform.
+	PollVotes(ctx context.Context, pollID string) (votes []int, open bool, err error)
 }
 
 // pollToken is the token a poll is created and read with: the token that
@@ -172,7 +237,7 @@ type PollReader interface {
 // the user's.
 func (f *FacebookAdapter) pollToken(ctx context.Context) (TokenFunc, error) {
 	if f.cfg.PageAccess != nil {
-		_, tok, err := f.cfg.PageAccess(ctx)
+		_, tok, err := f.cachedPageAccess(ctx)
 		switch {
 		case err == nil && tok != "":
 			return StaticToken(tok), nil
@@ -198,10 +263,13 @@ func (f *FacebookAdapter) CreatePoll(ctx context.Context, question string, optio
 	if err != nil {
 		return "", err
 	}
-	q := url.Values{"question": {question}}
-	for _, o := range options {
-		q.Add("options[]", o)
+	// Graph takes `options` as a JSON array in one parameter, as the Live
+	// Video API polls guide's example does, not as PHP-style options[].
+	opts, err := json.Marshal(options)
+	if err != nil {
+		return "", err
 	}
+	q := url.Values{"question": {question}, "options": {string(opts)}}
 	var out struct {
 		ID string `json:"id"`
 	}
@@ -215,13 +283,16 @@ func (f *FacebookAdapter) CreatePoll(ctx context.Context, question string, optio
 	return out.ID, nil
 }
 
-// PollVotes reads the running count: GET /{poll-id}?fields=poll_options{...}.
-func (f *FacebookAdapter) PollVotes(ctx context.Context, pollID string) ([]int, error) {
+// PollVotes reads the running count and status:
+// GET /{poll-id}?fields=status,poll_options{...}. open is false once the poll
+// is closed on Facebook's side.
+func (f *FacebookAdapter) PollVotes(ctx context.Context, pollID string) ([]int, bool, error) {
 	tok, err := f.pollToken(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out struct {
+		Status      string `json:"status"`
 		PollOptions struct {
 			Data []struct {
 				Order      int `json:"order"`
@@ -230,20 +301,20 @@ func (f *FacebookAdapter) PollVotes(ctx context.Context, pollID string) ([]int, 
 		} `json:"poll_options"`
 	}
 	endpoint := f.cfg.APIBase + "/" + url.PathEscape(pollID) + "?" +
-		url.Values{"fields": {"poll_options{order,total_votes}"}}.Encode()
+		url.Values{"fields": {"status,poll_options{order,total_votes}"}}.Encode()
 	if err := doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, tok, nil, &out); err != nil {
-		return nil, f.pollError(err, "read")
+		return nil, false, f.pollError(err, "read")
 	}
 	opts := out.PollOptions.Data
 	if len(opts) == 0 {
-		return nil, fmt.Errorf("Facebook returned no options for the poll")
+		return nil, false, fmt.Errorf("Facebook returned no options for the poll")
 	}
 	sort.SliceStable(opts, func(i, j int) bool { return opts[i].Order < opts[j].Order })
 	votes := make([]int, len(opts))
 	for i, o := range opts {
 		votes[i] = max(o.TotalVotes, 0)
 	}
-	return votes, nil
+	return votes, !strings.EqualFold(strings.TrimSpace(out.Status), "closed"), nil
 }
 
 // ClosePoll closes the poll (POST /{poll-id}?action=CLOSE) and returns the
@@ -258,13 +329,15 @@ func (f *FacebookAdapter) ClosePoll(ctx context.Context, pollID string) ([]int, 
 	if err := doJSON(ctx, f.cfg.HTTP, http.MethodPost, endpoint, tok, nil, nil); err != nil {
 		return nil, f.pollError(err, "close")
 	}
-	return f.PollVotes(ctx, pollID)
+	votes, _, err := f.PollVotes(ctx, pollID)
+	return votes, err
 }
 
 // pollError names what the poll endpoints need. Meta's reference lists only
 // error 200 (permissions) for them, and the guide says a poll can only be
 // created on a live video whose status is LIVE.
 func (f *FacebookAdapter) pollError(err error, verb string) error {
+	f.dropPageToken(err)
 	switch graphCode(err) {
 	case 200:
 		return fmt.Errorf("Facebook refused to %s the poll for lack of a permission. Polls need the same access the "+
@@ -274,8 +347,12 @@ func (f *FacebookAdapter) pollError(err error, verb string) error {
 		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
 	}
 	if verb == "start" && statusOf(err) == http.StatusBadRequest {
-		return fmt.Errorf("Facebook did not start the poll. It only accepts a poll on a live video that is live right now, "+
-			"so the stream has to be up before the poll starts: %w", err)
+		var ae *apiError
+		if errors.As(err, &ae) && notLiveRe.MatchString(ae.Body) {
+			return fmt.Errorf("Facebook did not start the poll. It only accepts a poll on a live video that is live right now, "+
+				"so the stream has to be up before the poll starts: %w", err)
+		}
+		return fmt.Errorf("Facebook did not start the poll: %w", err)
 	}
 	return err
 }

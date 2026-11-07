@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -217,7 +218,10 @@ func TestFacebookPollLifecycle(t *testing.T) {
 	if err != nil || id != "poll-7" {
 		t.Fatalf("create = %q, %v", id, err)
 	}
-	votes, err := a.PollVotes(ctx, id)
+	votes, open, err := a.PollVotes(ctx, id)
+	if !open {
+		t.Errorf("a poll with no status should read as open")
+	}
 	if err != nil || len(votes) != 2 || votes[0] != 3 || votes[1] != 5 {
 		t.Fatalf("votes = %v, %v; want [3 5] in option order", votes, err)
 	}
@@ -228,7 +232,7 @@ func TestFacebookPollLifecycle(t *testing.T) {
 
 	got := reqs()
 	create := got[0]
-	if create.query.Get("question") != "Next map?" || strings.Join(create.query["options[]"], ",") != "Dust,Mirage" {
+	if create.query.Get("question") != "Next map?" || !optionsAre(create.query.Get("options"), "Dust", "Mirage") {
 		t.Errorf("create query = %v", create.query)
 	}
 	if create.auth != "Bearer page-tok" {
@@ -291,12 +295,12 @@ func TestFacebookPollRefusals(t *testing.T) {
 	}
 	// Token.
 	status, body = 401, `{"error":{"code":190,"message":"tok"}}`
-	if _, err := a.PollVotes(ctx, "p"); !IsFatal(err) {
+	if _, _, err := a.PollVotes(ctx, "p"); !IsFatal(err) {
 		t.Errorf("expired token should be fatal: %v", err)
 	}
 	// No options in the read.
 	status, body = 200, `{"poll_options":{"data":[]}}`
-	if _, err := a.PollVotes(ctx, "p"); err == nil || !strings.Contains(err.Error(), "no options") {
+	if _, _, err := a.PollVotes(ctx, "p"); err == nil || !strings.Contains(err.Error(), "no options") {
 		t.Errorf("no options: %v", err)
 	}
 	// No live video, and a resolver that fails.
@@ -309,11 +313,83 @@ func TestFacebookPollRefusals(t *testing.T) {
 	})
 	for name, err := range map[string]error{
 		"create": func() error { _, e := a3.CreatePoll(ctx, "q", []string{"a", "b"}); return e }(),
-		"votes":  func() error { _, e := a3.PollVotes(ctx, "p"); return e }(),
+		"votes":  func() error { _, _, e := a3.PollVotes(ctx, "p"); return e }(),
 		"close":  func() error { _, e := a3.ClosePoll(ctx, "p"); return e }(),
 	} {
 		if err == nil || err.Error() != "boom" {
 			t.Errorf("%s with a failing resolver: %v", name, err)
 		}
+	}
+}
+
+// optionsAre reports whether v is the JSON array Graph documents for `options`.
+func optionsAre(v string, want ...string) bool {
+	var got []string
+	return json.Unmarshal([]byte(v), &got) == nil && strings.Join(got, ",") == strings.Join(want, ",")
+}
+
+func TestFacebookPollVotesReportsAClosedPoll(t *testing.T) {
+	srv, _ := fbServer(t, func(*http.Request) (int, string) {
+		return 200, `{"status":"closed","poll_options":{"data":[{"order":1,"total_votes":2}]}}`
+	})
+	a := fbAdapter(t, srv.URL, nil)
+	if _, open, err := a.PollVotes(context.Background(), "p"); err != nil || open {
+		t.Errorf("open = %v, err = %v; a closed poll must read as not open", open, err)
+	}
+}
+
+func TestFacebookPageTokenIsCachedAcrossPollReads(t *testing.T) {
+	srv, _ := fbServer(t, func(*http.Request) (int, string) {
+		return 200, `{"poll_options":{"data":[{"order":1,"total_votes":1}]}}`
+	})
+	calls := 0
+	a := fbAdapter(t, srv.URL, func(c *FacebookConfig) {
+		c.PageAccess = func(context.Context) (string, string, error) { calls++; return "123", "page-tok", nil }
+	})
+	for i := 0; i < 5; i++ {
+		if _, _, err := a.PollVotes(context.Background(), "p"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("PageAccess called %d times, want 1", calls)
+	}
+}
+
+func TestFacebookPollNotLiveSentenceOnlyWhenGraphSaysSo(t *testing.T) {
+	status, body := 400, `{"error":{"code":100,"message":"options is required"}}`
+	srv, _ := fbServer(t, func(*http.Request) (int, string) { return status, body })
+	a := fbAdapter(t, srv.URL, nil)
+	_, err := a.CreatePoll(context.Background(), "q", []string{"a", "b"})
+	if err == nil || strings.Contains(err.Error(), "stream has to be up") {
+		t.Errorf("unrelated 400 blamed the stream: %v", err)
+	}
+	body = `{"error":{"code":100,"message":"The live video is not live"}}`
+	_, err = a.CreatePoll(context.Background(), "q", []string{"a", "b"})
+	if err == nil || !strings.Contains(err.Error(), "stream has to be up") {
+		t.Errorf("not-live 400: %v", err)
+	}
+}
+
+// Comments on a Page's video are read with the Page token, so `from` is
+// returned; a fixture that omits `from` for the user token shows the gap.
+func TestFacebookPageAccountReadsCommentsWithThePageToken(t *testing.T) {
+	srv, reqs := fbServer(t, func(r *http.Request) (int, string) {
+		from := ""
+		if r.Header.Get("Authorization") == "Bearer page-tok" {
+			from = `"from":{"id":"u9","name":"Ann"},`
+		}
+		return 200, `{"data":[{"id":"c1",` + from + `"message":"hi","created_time":"2026-03-01T19:59:00+0000"}]}`
+	})
+	a := fbAdapter(t, srv.URL, func(c *FacebookConfig) { c.PageAccess = fbPage("123", "page-tok") })
+	var got []Message
+	if _, err := a.poll(context.Background(), "live-1", SinkFunc(func(m Message) { got = append(got, m) })); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Author.ID != "u9" {
+		t.Fatalf("messages = %+v, want the author id from the Page-token read", got)
+	}
+	if r := reqs()[0]; r.auth != "Bearer page-tok" {
+		t.Errorf("comment read auth = %q", r.auth)
 	}
 }

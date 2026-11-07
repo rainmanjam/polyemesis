@@ -294,12 +294,18 @@ var ErrNotAPage = errors.New("this Facebook account is a personal profile, not a
 // handing a user token to a Page-only edge is the failure this exists to prevent,
 // and the caller can say so in one sentence.
 func (f *Facebook) PageAccess(ctx context.Context, accessToken, ref string) (pageID, pageToken string, err error) {
-	if !IsPageRef(ref) {
+	// An explicit "user:" ref (or none) is a profile with no lookup. A legacy
+	// ref with no prefix may name a Page, so it goes through the same
+	// resolution a broadcast uses and is a profile only if that says so.
+	if kind, _ := parseTargetRef(ref); kind == fbKindUser {
 		return "", "", ErrNotAPage
 	}
 	tgt, err := f.resolveTarget(ctx, accessToken, ref)
 	if err != nil {
 		return "", "", err
+	}
+	if tgt.kind != fbKindPage {
+		return "", "", ErrNotAPage
 	}
 	if tgt.token == "" {
 		return "", "", fmt.Errorf("Facebook returned no Page access token for Page %s; reconnect the account and grant access to it", tgt.node)

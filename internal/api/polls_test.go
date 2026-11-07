@@ -464,8 +464,8 @@ func (a *fbPollerAdapter) CreatePoll(_ context.Context, q string, _ []string) (s
 	a.created = append(a.created, q)
 	return "fbp-1", nil
 }
-func (a *fbPollerAdapter) PollVotes(context.Context, string) ([]int, error) {
-	return a.votes, a.voteErr
+func (a *fbPollerAdapter) PollVotes(context.Context, string) ([]int, bool, error) {
+	return a.votes, true, a.voteErr
 }
 func (a *fbPollerAdapter) ClosePoll(context.Context, string) ([]int, error) {
 	a.mu.Lock()
