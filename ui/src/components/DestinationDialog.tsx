@@ -73,6 +73,7 @@ import type {
   DestResilience,
   AudioEncoding,
   Compliance,
+  YouTubeBroadcastControls,
   FacebookSettings,
   PrivacyStatus,
   DestKind,
@@ -602,6 +603,21 @@ function kbpsText(video: VideoGuidance): string | null {
 function codecNote(copyOn: boolean, kind: DestKind, t: Translator): string {
   if (copyOn) return t("addDest.codecUnusedCopy");
   return kind === "rtmp" ? t("addDest.codecRtmpAac") : t("addDest.codecOpusHint");
+}
+
+/** The YouTube controls block after one field changes. Everything back at
+ *  "leave alone" collapses to null, which the server reads as no block. */
+function withYouTubeControl(
+  c: Compliance,
+  patch: Partial<YouTubeBroadcastControls>,
+): Compliance {
+  const next: YouTubeBroadcastControls = { ...(c.youtube ?? {}), ...patch };
+  const empty = Object.values(next).every((v) => v === undefined);
+  return { ...c, youtube: empty ? null : next };
+}
+
+function triState(v: boolean | undefined): "" | "on" | "off" {
+  return v === undefined ? "" : v ? "on" : "off";
 }
 
 function madeForKidsValue(v: boolean | null | undefined): "unset" | "yes" | "no" {
@@ -2313,6 +2329,83 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                       </SelectContent>
                     </Select>
                     <span className="text-sm text-muted-foreground">{t("addDest.kidsHelp")}</span>
+                  </div>
+
+                  <div className="flex flex-col gap-2" data-testid="yt-broadcast-controls">
+                    <Label>{t("dest.ytControls")}</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          ["enableDvr", t("i18nSweep.dvr")],
+                          ["recordFromStart", t("dest.ytRecordFromStart")],
+                          ["enableAutoStart", t("i18nSweep.autoStart")],
+                          ["enableAutoStop", t("i18nSweep.autoStop")],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <div key={key} className="flex flex-col gap-1">
+                          <Label htmlFor={`yt-${key}`}>{label}</Label>
+                          <select
+                            id={`yt-${key}`}
+                            className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                            value={triState(compliance.youtube?.[key])}
+                            onChange={(e) =>
+                              setCompliance(
+                                withYouTubeControl(compliance, {
+                                  [key]: e.target.value === "" ? undefined : e.target.value === "on",
+                                }),
+                              )
+                            }
+                          >
+                            <option value="">{t("dash.leaveUnchanged")}</option>
+                            <option value="on">{t("i18nSweep.on")}</option>
+                            <option value="off">{t("dash.off")}</option>
+                          </select>
+                        </div>
+                      ))}
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="yt-latency">{t("dest.ytLatency")}</Label>
+                        <select
+                          id="yt-latency"
+                          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                          value={compliance.youtube?.latencyPreference ?? ""}
+                          onChange={(e) =>
+                            setCompliance(
+                              withYouTubeControl(compliance, {
+                                latencyPreference:
+                                  (e.target.value as YouTubeBroadcastControls["latencyPreference"]) || undefined,
+                              }),
+                            )
+                          }
+                        >
+                          <option value="">{t("dash.leaveUnchanged")}</option>
+                          <option value="normal">{t("dest.ytLatencyNormal")}</option>
+                          <option value="low">{t("dest.ytLatencyLow")}</option>
+                          <option value="ultraLow">{t("dest.ytLatencyUltraLow")}</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="yt-captions">{t("dest.ytCaptions")}</Label>
+                        <select
+                          id="yt-captions"
+                          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                          value={compliance.youtube?.closedCaptionsType ?? ""}
+                          onChange={(e) =>
+                            setCompliance(
+                              withYouTubeControl(compliance, {
+                                closedCaptionsType:
+                                  (e.target.value as YouTubeBroadcastControls["closedCaptionsType"]) || undefined,
+                              }),
+                            )
+                          }
+                        >
+                          <option value="">{t("dash.leaveUnchanged")}</option>
+                          <option value="closedCaptionsDisabled">{t("dest.ytCaptionsOff")}</option>
+                          <option value="closedCaptionsEmbedded">{t("dest.ytCaptionsEmbedded")}</option>
+                          <option value="closedCaptionsHttpPost">{t("dest.ytCaptionsPost")}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <span className="text-sm text-muted-foreground">{t("dest.ytControlsHelp")}</span>
                   </div>
                 </>
               )}

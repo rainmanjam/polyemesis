@@ -34,6 +34,7 @@ import type {
   BulkDestReport,
   DelayDumpResult,
   ChatModerationResult,
+  ChatModerator,
   ChatOverview,
   ChatPlatform,
   ChatSearchResult,
@@ -1424,6 +1425,24 @@ export const api = {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     return del<ChatModerationResult>(`/chat/bans?${q.toString()}`);
+  },
+
+  /** Who may moderate a YouTube live chat. Costs 50 quota units a read, so it
+   *  is only ever called on an explicit request. */
+  chatModerators: (m: { platform: ChatPlatform; account?: string }) => {
+    const q = new URLSearchParams({ platform: m.platform });
+    if (m.account) q.set("account", m.account);
+    return get<{ moderators: ChatModerator[] }>(`/chat/moderators?${q.toString()}`);
+  },
+  addChatModerator: (m: { platform: ChatPlatform; account?: string; channelId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, channelId: m.channelId });
+    if (m.account) q.set("account", m.account);
+    return post<ChatModerator>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeChatModerator: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return del<ChatModerationResult>(`/chat/moderators?${q.toString()}`);
   },
 
   /** One person's recent messages, from this server's own scrollback. No

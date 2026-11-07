@@ -1,0 +1,108 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
+
+// chatModeratorsPlanted is a moderator name only this proof plants.
+const chatModeratorsPlanted = "planted-moderator-4099"
+
+// moderatorsAdapter is a connected YouTube chat whose owner may manage moderators.
+type moderatorsAdapter struct {
+	moderatableAdapter
+	added, removed string
+}
+
+func (a *moderatorsAdapter) Moderators(context.Context) ([]chat.ChatModerator, error) {
+	return []chat.ChatModerator{{ID: "m1", ChannelID: "UC-m", DisplayName: chatModeratorsPlanted}}, nil
+}
+
+func (a *moderatorsAdapter) AddModerator(_ context.Context, channelID string) (chat.ChatModerator, error) {
+	a.added = channelID
+	return chat.ChatModerator{ID: "m2", ChannelID: channelID, DisplayName: "new"}, nil
+}
+
+func (a *moderatorsAdapter) RemoveModerator(_ context.Context, id string) error {
+	a.removed = id
+	return nil
+}
+
+var _ chat.ModeratorManager = (*moderatorsAdapter)(nil)
+
+func moderatorsFixture(t *testing.T) (http.Handler, *moderatorsAdapter) {
+	t.Helper()
+	s, h, _ := testServer(t, config.Config{})
+	hub := chat.New()
+	t.Cleanup(hub.Close)
+	s.chat = hub
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ad := &moderatorsAdapter{moderatableAdapter: moderatableAdapter{platform: db.PlatformYouTube, account: "acct"}}
+	if err := hub.Attach(ctx, ad); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	return h, ad
+}
+
+// proveChatModerators is GET /chat/moderators' counterpart: the admin reads the
+// planted roster, the read token is refused it.
+func proveChatModerators(t *testing.T) proofResult {
+	h, _ := moderatorsFixture(t)
+	sign := login(t, h)
+	read := createScopedToken(t, h, sign, "ledger-chat-moderators", db.ScopeRead)
+
+	const path = "/api/v1/chat/moderators?platform=youtube&account=acct"
+	code, high := rawBodyOf(t, h, sign, path)
+	if code != http.StatusOK || !strings.Contains(high, chatModeratorsPlanted) {
+		t.Fatalf("the admin's moderator read answered %d without the planted name: %s", code, truncateForFailure(high))
+	}
+	code, low := rawBodyOf(t, h, bearer(read), path)
+	if code != http.StatusForbidden {
+		t.Errorf("the read token's moderator read answered %d, want 403", code)
+	}
+	return proofResult{
+		Pattern:   patternDriven(t, h, http.MethodGet, "/api/v1/chat/moderators"),
+		High:      high,
+		Read:      low,
+		Sentinels: []string{chatModeratorsPlanted},
+	}
+}
+
+func TestChatModeratorRoutesListAddRemoveAndRefuse(t *testing.T) {
+	h, ad := moderatorsFixture(t)
+	sign := login(t, h)
+
+	var list struct {
+		Moderators []chat.ChatModerator `json:"moderators"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=youtube&account=acct", nil, http.StatusOK), &list)
+	if len(list.Moderators) != 1 || list.Moderators[0].ID != "m1" {
+		t.Fatalf("list = %+v", list)
+	}
+
+	var added chat.ChatModerator
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/chat/moderators?platform=youtube&account=acct&channelId=UC-new", nil, http.StatusOK), &added)
+	if added.ChannelID != "UC-new" || ad.added != "UC-new" {
+		t.Fatalf("added %+v (%q)", added, ad.added)
+	}
+
+	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=youtube&account=acct&id=m1", nil, http.StatusOK)
+	if ad.removed != "m1" {
+		t.Errorf("removed %q", ad.removed)
+	}
+
+	// Missing parameters, a platform that is not connected, and one that cannot.
+	send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodPost, "/api/v1/chat/moderators?platform=youtube", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=youtube", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=twitch&account=x", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodPost, "/api/v1/chat/moderators?platform=twitch&channelId=u", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=twitch&id=u", nil, http.StatusBadRequest)
+}

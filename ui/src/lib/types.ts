@@ -2761,6 +2761,17 @@ export interface ChatStats {
   adapters: number;
 }
 
+/** One person who can moderate a live chat (YouTube liveChatModerators). `id`
+ *  is the moderator-in-this-chat id that removing one addresses; `channelId`
+ *  is what adding one takes. */
+export interface ChatModerator {
+  id: string;
+  channelId: string;
+  displayName: string;
+  channelUrl?: string;
+  profileImageUrl?: string;
+}
+
 /** What a moderation call did, in the server's own words.
  *
  *  `detail` is not decoration and must be shown. It carries the difference
@@ -3026,6 +3037,21 @@ export interface Compliance {
   labels?: Record<string, boolean>;
   /** Facebook's audience for a live video. undefined leaves it alone. */
   facebookPrivacy?: string;
+  /** YouTube broadcast contentDetails controls. null clears the block (an
+   *  update is decoded over the stored row, so undefined would keep it). */
+  youtube?: YouTubeBroadcastControls | null;
+}
+
+/** YouTube's liveBroadcasts contentDetails toggles, per destination. Every
+ *  field omitted means "leave it as YouTube has it". YouTube freezes them once
+ *  a broadcast is testing or live. Mirrors db.YouTubeBroadcastControls. */
+export interface YouTubeBroadcastControls {
+  latencyPreference?: "normal" | "low" | "ultraLow";
+  enableDvr?: boolean;
+  recordFromStart?: boolean;
+  enableAutoStart?: boolean;
+  enableAutoStop?: boolean;
+  closedCaptionsType?: "closedCaptionsDisabled" | "closedCaptionsHttpPost" | "closedCaptionsEmbedded";
 }
 
 /** One Page a Facebook broadcast crossposts to at create time, and whether it

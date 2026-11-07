@@ -60,6 +60,16 @@ type BroadcastSettings struct {
 	EnableDvr       *bool `json:"enableDvr,omitempty"`
 	EnableAutoStart *bool `json:"enableAutoStart,omitempty"`
 	EnableAutoStop  *bool `json:"enableAutoStop,omitempty"`
+	// RecordFromStart is whether recording begins when the broadcast goes live.
+	// YouTube lets it be false only for a channel allowed to disable recordings.
+	RecordFromStart *bool `json:"recordFromStart,omitempty"`
+	// LatencyPreference is normal, low or ultraLow (the deprecated
+	// enableLowLatency boolean cannot say ultraLow and is never sent). Ultra-low
+	// does not support closed captions or resolutions above 1080p.
+	LatencyPreference *string `json:"latencyPreference,omitempty"`
+	// ClosedCaptionsType is closedCaptionsDisabled, closedCaptionsHttpPost or
+	// closedCaptionsEmbedded. The deprecated enableClosedCaptions is never sent.
+	ClosedCaptionsType *string `json:"closedCaptionsType,omitempty"`
 	// MonitorStream is the review feed. Its two fields are among the four
 	// liveBroadcasts.update demands on every call.
 	EnableMonitorStream *bool `json:"enableMonitorStream,omitempty"`
@@ -70,12 +80,14 @@ type BroadcastSettings struct {
 func (b BroadcastSettings) Empty() bool {
 	return b.Tags == nil && b.ScheduledStart == nil &&
 		b.EnableDvr == nil && b.EnableAutoStart == nil && b.EnableAutoStop == nil &&
+		b.RecordFromStart == nil && b.LatencyPreference == nil && b.ClosedCaptionsType == nil &&
 		b.EnableMonitorStream == nil && b.StreamDelayMs == nil
 }
 
 // TouchesContentDetails reports whether this write needs the part that freezes.
 func (b BroadcastSettings) TouchesContentDetails() bool {
 	return b.EnableDvr != nil || b.EnableAutoStart != nil || b.EnableAutoStop != nil ||
+		b.RecordFromStart != nil || b.LatencyPreference != nil || b.ClosedCaptionsType != nil ||
 		b.EnableMonitorStream != nil || b.StreamDelayMs != nil
 }
 
@@ -247,6 +259,21 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 	if v := b.ContentDetails.LatencyPreference; v != "" {
 		cd["latencyPreference"] = v
 	}
+	// enableEmbed and recordFromStart are required on every contentDetails
+	// update (liveBroadcasts reference), so they are carried when YouTube
+	// reported them, and overridden by the operator's choice.
+	if v := b.ContentDetails.EnableEmbed; v != nil {
+		cd["enableEmbed"] = *v
+	}
+	if v := pickBoolPtr(s.RecordFromStart, b.ContentDetails.RecordFromStart); v != nil {
+		cd["recordFromStart"] = *v
+	}
+	if s.LatencyPreference != nil {
+		cd["latencyPreference"] = *s.LatencyPreference
+	}
+	if s.ClosedCaptionsType != nil {
+		cd["closedCaptionsType"] = *s.ClosedCaptionsType
+	}
 
 	if err := y.requestJSON(ctx, http.MethodPut,
 		y.apiEndpoint()+"/liveBroadcasts?part="+parts, accessToken, body, nil, nil); err != nil {
@@ -319,10 +346,22 @@ func broadcastWriteAdvice(err error, lifeCycleStatus string, s BroadcastSettings
 	if !s.TouchesContentDetails() {
 		return err
 	}
-	return fmt.Errorf("%w — this broadcast is %q, and YouTube freezes DVR, auto-start, "+
-		"auto-stop and monitor-stream once a broadcast leaves \"created\" or \"ready\". "+
+	if v := s.RecordFromStart; v != nil && !*v && !contentDetailsFrozen(lifeCycleStatus) {
+		return fmt.Errorf("%w — YouTube lets recording be switched off only on a channel that is "+
+			"allowed to disable recordings; turn recordFromStart back on, or ask YouTube to enable "+
+			"that for the channel", err)
+	}
+	return fmt.Errorf("%w — this broadcast is %q, and YouTube freezes DVR, recording, latency, captions, "+
+		"auto-start, auto-stop and monitor-stream once a broadcast leaves \"created\" or \"ready\". "+
 		"Change these before going live, or start a new broadcast",
 		err, lifeCycleStatus)
+}
+
+func pickBoolPtr(override, current *bool) *bool {
+	if override != nil {
+		return override
+	}
+	return current
 }
 
 func pickBool(override *bool, current bool) bool {

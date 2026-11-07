@@ -37,7 +37,11 @@ import (
 //
 //   - listMessages, send, delete and ban are in Google's published quota table.
 //     They can change, but somebody wrote them down.
-//   - listBroadcasts is NOT. Google's quota calculator omits the Live Streaming
+//   - listBroadcasts: the table at
+//     https://developers.google.com/youtube/v3/determine_quota_cost (read
+//     2026-11-07) now lists liveBroadcasts.list at 1, which agrees with the
+//     guess below. The note that follows was written when Google's quota
+//     calculator omitted the Live Streaming
 //     endpoints entirely, so this number has no source at all. One is the value
 //     list operations historically carried, which is why it is the guess; it is
 //     still a guess, and no amount of reading settles it. It needs one measured
@@ -60,8 +64,8 @@ import (
 // constants cannot drift apart in silence.
 const (
 	QuotaCostListMessages = platform.YouTubeCostListMessages
-	// QuotaCostListBroadcasts is UNVERIFIED. See the note above before relying
-	// on it, and before changing the poll interval that multiplies it.
+	// QuotaCostListBroadcasts is liveBroadcasts.list: 1 in the quota table. See
+	// the note above before changing the poll interval that multiplies it.
 	QuotaCostListBroadcasts = platform.YouTubeCostListBroadcasts
 	// QuotaCostListLiveStreams is liveStreams.list. Correction 6 of the YouTube truth sheet
 	// (docs-youtube.md) says list operations cost one unit. Unlike the listBroadcasts guess

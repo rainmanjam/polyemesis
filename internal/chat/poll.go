@@ -27,6 +27,15 @@ type NativePoller interface {
 	ClosePoll(ctx context.Context, pollID string) ([]int, error)
 }
 
+// PollTallyReader is the optional half of NativePoller for a platform whose
+// running poll can be counted without ending it. YouTube's list pages carry the
+// poll message with its option tallies when the request is the channel owner's.
+type PollTallyReader interface {
+	// PollTally is the latest count seen for pollID, in option order. ok is
+	// false when none has been seen yet.
+	PollTally(pollID string) (votes []int, live, ok bool)
+}
+
 // ErrPollQuota is CreatePoll refusing because the daily quota above the send
 // reserve cannot cover the poll's create and close. The chat poll then runs
 // without the native one.
@@ -188,9 +197,9 @@ type ytPollItem struct {
 // reads the final tally from the response, which part=snippet makes the
 // poll's own resource.
 //
-// THE ONLY READ THERE IS. The API has no call that reads one live chat message
-// by id, so a running YouTube poll's count cannot be read without closing it;
-// the YouTube share of a mirrored poll is therefore merged once, at close.
+// The API has no call that reads one live chat message by id, so the count of
+// a RUNNING poll comes from PollTally (the list pages the chat already polls),
+// and this close is the authoritative final read.
 //
 // Never refused for want of quota, like Delete: a poll left open on YouTube
 // after the chat poll ended is worse than 20 units past the reserve.

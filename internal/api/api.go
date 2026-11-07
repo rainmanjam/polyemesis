@@ -1774,6 +1774,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Patch("/chat/settings", s.handleChatSettings)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
+			// Who may moderate the chat: YouTube's liveChatModerators, which
+			// only the chat's channel owner may call.
+			api.Get(r, "/chat/moderators", s.handleListChatModerators, readDenied)
+			r.Post("/chat/moderators", s.handleAddChatModerator)
+			r.Delete("/chat/moderators", s.handleRemoveChatModerator)
 			r.Post("/chat/send", s.handleChatSend)
 
 			// Chat polls (#14). Results are counts with no voter in them, so

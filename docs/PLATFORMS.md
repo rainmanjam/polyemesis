@@ -526,7 +526,16 @@ every poll spends from a daily allowance:
 |---|---|---|
 | `liveChatMessages.list` | 5 | every chat poll while a broadcast is live |
 | Looking for a broadcast to attach to | 1 | every 30s when nothing is live, backing off to every 5 minutes |
-| Sending, deleting or banning | 50 | per action |
+| Sending or deleting a chat message | 20 | per action |
+| Banning or timing out a viewer | 200 | per action |
+| Adding or removing a chat moderator | 200 | per action |
+| Listing the chat moderators | 50 | only when you press Load |
+| Any broadcast or stream call (create, update, bind, transition) | 1 | per call |
+
+These prices are from Google's quota table
+(<https://developers.google.com/youtube/v3/determine_quota_cost>). An upload
+(`videos.insert`) costs 1 unit from a **bucket of its own** (100 uploads a day),
+so it does not draw on this allowance at all.
 
 A Google Cloud project starts with **10,000 units a day**, resetting at midnight
 Pacific. That is roughly 1,960 chat polls — so polyemesis paces itself across
@@ -655,6 +664,32 @@ YouTube keeps whatever it has; choosing *Off* actively turns the feature off.
 The distinction matters because the API is destructive by part: a field omitted
 from a part that IS being sent reverts to its default, so polyemesis reads the
 current broadcast and carries every untouched field through on every write.
+
+**Built, not yet exercised against a live account.** These are implemented from
+YouTube's published reference and have not been run against a real channel, so
+they are *Unverified* and no cell in the matrix above claims otherwise:
+
+* **Chat moderators** (`liveChatModerators` list, insert, delete): add or remove a
+  moderator on the Chat page. Only the owner of the chat's channel may; YouTube
+  answers anyone else with a 403 and polyemesis says so in words. Needs no new
+  scope.
+* **Deleted messages** leave the chat pane when a list page carries a
+  `tombstone` for them (the message's id and publish time, nothing else). The
+  `messageDeletedEvent` and `messageRetractedEvent` types were removed from the
+  reference and are not read. The reference says a tombstone marks where
+  the message used to be and is not sent at the moment of deletion. The poll only
+  moves forward, so it is seen mainly when the chat is read from the start (the
+  first page after a reconnect); whether YouTube also reports a later deletion
+  in a forward page is not confirmed.
+* **Poll tallies** are read from the poll message in the chat pages, while the
+  poll runs, when the connected account is the channel owner's. YouTube sends no
+  tally to anyone else.
+* **Broadcast controls** per destination (*Compliance*, YouTube): latency
+  (normal, low, ultra-low), DVR, record from start, auto-start, auto-stop and
+  closed-caption type. Recording can be switched off only on channels YouTube
+  allows to. They freeze once a broadcast is testing or live. polyemesis never
+  sets `madeForKids` (read-only) or the deprecated `enableClosedCaptions`; the
+  made-for-kids setting is the self-declaration.
 
 ### Twitch
 

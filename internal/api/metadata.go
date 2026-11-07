@@ -650,6 +650,9 @@ func complianceFields(c db.Compliance) []oauth.MetadataField {
 	if len(c.Labels) > 0 {
 		out = append(out, oauth.FieldLabels)
 	}
+	if !c.YouTube.Empty() {
+		out = append(out, oauth.FieldContentDetails)
+	}
 	return out
 }
 

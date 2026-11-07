@@ -795,6 +795,9 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
 	"GET /api/v1/chat/users":    denied(),
+	// Who moderates a YouTube chat: the owner's roster, and a read costs the
+	// owner 50 quota units, so a read token has no business spending them.
+	"GET /api/v1/chat/moderators": deniedWithCounterpart("chatModerators"),
 	// UX Council A48: the flagged list carries the flagged message's text,
 	// which is the same content as the scrollback.
 	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),
@@ -1292,6 +1295,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"chatFlags":                             proveChatFlags,
 	"chatSettings":                          proveChatSettings,
+	"chatModerators":                        proveChatModerators,
 	"analyticsLive":                         proveAnalyticsLive,
 	"analyticsStreams":                      proveAnalyticsStreams,
 	"analyticsReport":                       proveAnalyticsReport,

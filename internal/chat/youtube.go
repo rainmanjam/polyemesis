@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,9 @@ type YouTubeAdapter struct {
 	mu     sync.Mutex
 	health Health
 	chatID string
+	// tallies is the last count each poll message was seen with in a list page;
+	// see PollTally.
+	tallies map[string]ytTally
 }
 
 // NewYouTube builds the adapter. As everywhere else here, a missing token is a
@@ -243,6 +247,17 @@ type ytChatItem struct {
 		Type           string `json:"type"`
 		PublishedAt    string `json:"publishedAt"`
 		DisplayMessage string `json:"displayMessage"`
+		// PollDetails is present on a poll message. The reference names the
+		// type "pollDetails" in one place and "pollEvent" in another, so a poll
+		// is recognised by this object rather than by the type string.
+		PollDetails *struct {
+			Metadata struct {
+				Status  string `json:"status"`
+				Options []struct {
+					Tally string `json:"tally"`
+				} `json:"options"`
+			} `json:"metadata"`
+		} `json:"pollDetails"`
 	} `json:"snippet"`
 	AuthorDetails struct {
 		ChannelID       string `json:"channelId"`
@@ -342,6 +357,18 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Sink) int {
 	delivered := 0
 	for _, it := range items {
+		// A tombstone is how the API reports a deletion: the message's id and
+		// publish time with nothing else. The messageDeletedEvent and
+		// messageRetractedEvent types it once documented were removed from the
+		// reference (2026-06-23) because it never returned them, and nothing
+		// here ever read them. https://developers.google.com/youtube/v3/live/docs/liveChatMessages
+		if it.Snippet.Type == "tombstone" {
+			retract(sink, it.ID)
+			continue
+		}
+		if it.Snippet.PollDetails != nil {
+			y.notePoll(it)
+		}
 		m, ok := y.messageFrom(it)
 		if !ok {
 			continue
@@ -487,7 +514,7 @@ func ytEventLabel(kind string) string {
 
 // Send posts to the live chat.
 //
-// It costs fifty units against the same daily allowance, which is why the
+// It costs 20 units (liveChatMessages.insert) against the same daily allowance, which is why the
 // budget holds a reserve back from polling: an operator who cannot reply
 // because the chat pane spent everything reading would rightly consider the
 // feature broken.
@@ -560,7 +587,7 @@ func (y *YouTubeAdapter) Send(ctx context.Context, text string) (Message, error)
 // claimed it was impossible.
 //
 // Unlike Send, this does NOT refuse when the budget looks spent. A message a
-// moderator has decided to remove stays on stream while we decline to spend 50
+// moderator has decided to remove stays on stream while we decline to spend 20
 // units, and the API's own 403 remains the authority on when the quota is
 // actually gone. Spending is still recorded, so the pacer keeps reading honestly.
 func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
@@ -697,4 +724,52 @@ func adapterBudget(cfg YouTubeConfig) *budget {
 		return cfg.Quota.b
 	}
 	return newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now)
+}
+
+// ytTally is a poll's counts as last seen in a list page.
+type ytTally struct {
+	votes []int
+	live  bool
+}
+
+// ytMaxTallies bounds the poll cache. A stream runs a handful of polls.
+const ytMaxTallies = 32
+
+// notePoll remembers the tally a list page carried for a poll message. The
+// reference says the tally is present only when the request is authorised by
+// the channel owner; a poll seen without one is not recorded, so PollTally
+// reports "nothing yet" rather than a row of zeros.
+func (y *YouTubeAdapter) notePoll(it ytChatItem) {
+	md := it.Snippet.PollDetails.Metadata
+	if it.ID == "" || len(md.Options) == 0 {
+		return
+	}
+	votes := make([]int, len(md.Options))
+	for i, o := range md.Options {
+		n, err := strconv.Atoi(o.Tally)
+		if err != nil || n < 0 {
+			return
+		}
+		votes[i] = n
+	}
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if y.tallies == nil || len(y.tallies) >= ytMaxTallies {
+		y.tallies = map[string]ytTally{}
+	}
+	y.tallies[it.ID] = ytTally{votes: votes, live: md.Status != "closed"}
+}
+
+// PollTally returns the latest count seen for a running poll, read from the
+// chat the adapter is already polling -- no extra API call. ok is false until a
+// list page has carried a tally for it. live is false once the page said the
+// poll is closed.
+func (y *YouTubeAdapter) PollTally(pollID string) (votes []int, live, ok bool) {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	t, found := y.tallies[pollID]
+	if !found {
+		return nil, false, false
+	}
+	return append([]int(nil), t.votes...), t.live, true
 }

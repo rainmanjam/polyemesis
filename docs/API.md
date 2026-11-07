@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-seven `GET`s among the twenty-nine refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-eight routes are refused outright**, for three different reasons. Masking
+**Twenty-nine routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last nineteen are `403` because of what
+are `403` because of what they *do*. The last twenty are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -166,6 +166,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 | `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
+| `GET /chat/moderators` | the YouTube chat's moderator roster, read with the owner's token; each read spends 50 of the day's YouTube quota units |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
@@ -1946,11 +1947,13 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
+| `GET` | `/chat/moderators` — who may moderate a YouTube live chat (`liveChatModerators.list`); `platform` (YouTube only) and `account` in the query. A read costs 50 YouTube quota units |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
 | `POST` `DELETE` | `/chat/bans` |
+| `POST` `DELETE` | `/chat/moderators` — make a channel a YouTube chat moderator (`channelId`), or remove one (`id`, as the list returned it). 200 quota units each; only the chat's channel owner may |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
@@ -2097,6 +2100,9 @@ segment reliably.
 | `POST /chat/messages/hide` | `platform`, `id` (both required), `account`, `scope`, `hidden` |
 | `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason` |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
+| `GET /chat/moderators` | `platform` (required), `account` |
+| `POST /chat/moderators` | `platform`, `channelId` (both required), `account` |
+| `DELETE /chat/moderators` | `platform`, `id` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
 | `GET /chat/users` | `platform`, `authorId` (both required), `account`, `limit` |
 | `GET /chat/flags` | `platform`, `limit` |

@@ -122,7 +122,34 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			res.Applied = append(res.Applied, FieldMadeForKids)
 		}
 	}
+	if !c.YouTube.Empty() {
+		y.pushBroadcastControls(ctx, accessToken, b, c.YouTube, res)
+	}
 	return res, nil
+}
+
+// pushBroadcastControls writes the destination's contentDetails controls
+// through liveBroadcasts.update, by the same read-then-write as every other
+// contentDetails write. A refusal is reported rather than fatal, like the
+// COPPA write above: YouTube freezes these once the broadcast is testing or
+// live, and the privacy change before it may already have landed.
+func (y *YouTube) pushBroadcastControls(ctx context.Context, accessToken string, b *ytBroadcast,
+	c *db.YouTubeBroadcastControls, res *MetadataResult) {
+	s := BroadcastSettings{
+		EnableDvr: c.EnableDvr, EnableAutoStart: c.EnableAutoStart,
+		EnableAutoStop: c.EnableAutoStop, RecordFromStart: c.RecordFromStart,
+	}
+	if c.LatencyPreference != "" {
+		s.LatencyPreference = &c.LatencyPreference
+	}
+	if c.ClosedCaptionsType != "" {
+		s.ClosedCaptionsType = &c.ClosedCaptionsType
+	}
+	// writeBroadcastParts appends FieldContentDetails itself on success.
+	if err := y.writeBroadcastParts(ctx, accessToken, b, s, res); err != nil {
+		res.Skipped = append(res.Skipped, FieldContentDetails)
+		res.Warnings = append(res.Warnings, "broadcast controls: "+err.Error())
+	}
 }
 
 // PushCompliance writes Twitch's content classification labels.

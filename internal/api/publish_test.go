@@ -547,7 +547,7 @@ func TestTargetsQuoteTheUploadCostTheRegistryCharges(t *testing.T) {
 	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/targets?clip="+strconv.FormatInt(f.clip, 10), nil, http.StatusOK), &targets)
 	for _, p := range targets.Platforms {
 		if p.ID == "youtube" {
-			want := 1600
+			want := 1
 			if p.QuotaUnits != want {
 				t.Fatalf("quotaUnits = %d, want %d", p.QuotaUnits, want)
 			}

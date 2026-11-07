@@ -54,14 +54,15 @@ func WithQuotaCharged(ctx context.Context) context.Context {
 	return context.WithValue(ctx, quotaChargedKey{}, true)
 }
 
-// Unit costs from the YouTube Data API quota table: every list is 1, and
-// every write this package makes -- insert, update, delete, bind,
-// transition, thumbnails.set, playlistItems.insert -- is 50.
+// Unit costs from the YouTube Data API quota table
+// (https://developers.google.com/youtube/v3/determine_quota_cost): every list
+// is 1, a liveBroadcasts or liveStreams write is 1, and every other write this
+// package makes -- thumbnails.set, playlistItems.insert, videos.update -- is 50.
+// videos.insert has its own bucket and is not counted here at all.
 const (
-	ytCostList  = platform.YouTubeCostList
-	ytCostWrite = platform.YouTubeCostWrite
-	// ytCostUploadVideo is videos.insert.
-	ytCostUploadVideo = platform.YouTubeCostUploadVideo
+	ytCostList      = platform.YouTubeCostList
+	ytCostWrite     = platform.YouTubeCostWrite
+	ytCostLiveWrite = platform.YouTubeCostLiveWrite
 )
 
 // youTubeCost is the unit cost of a request, and whether it is a YouTube
@@ -69,21 +70,31 @@ const (
 // at a test stub is not spending anybody's quota.
 //
 // /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
-// 50, and videos.insert is 1,600. The clip publisher (internal/publish) makes
-// that call itself and charges it through its own Meter field.
+// 50. videos.insert is 1 unit in a bucket of its own (100 calls a day), so it
+// does not spend the shared allowance and is not metered.
 func youTubeCost(r *http.Request) (int, bool) {
 	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
 	}
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/videos"):
-		return ytCostUploadVideo, true
+		return 0, false
 	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/"):
 		return ytCostWrite, true
 	case !strings.HasPrefix(r.URL.Path, "/youtube/v3/"):
 		return 0, false
 	}
+	if r.Method != http.MethodGet && ytLiveResource(r.URL.Path) {
+		return ytCostLiveWrite, true
+	}
 	return costByMethod(r.Method), true
+}
+
+// ytLiveResource reports whether a /youtube/v3/ path is liveBroadcasts or
+// liveStreams, whose every method the table prices at 1.
+func ytLiveResource(path string) bool {
+	rest := strings.TrimPrefix(path, "/youtube/v3/")
+	return strings.HasPrefix(rest, "liveBroadcasts") || strings.HasPrefix(rest, "liveStreams")
 }
 
 func costByMethod(method string) int {
