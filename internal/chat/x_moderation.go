@@ -45,7 +45,8 @@ type ChatModerator struct {
 // MuteLister is the optional capability to read who is muted and until when.
 type MuteLister interface {
 	Adapter
-	ListMutes(ctx context.Context) ([]ChatMute, error)
+	// ListMutes returns the list, and truncated when the platform had more than it was willing to page through.
+	ListMutes(ctx context.Context) (mutes []ChatMute, truncated bool, err error)
 }
 
 // MessageBanner is the optional capability to mute a viewer AND remove one of their messages in a single call.
@@ -137,10 +138,11 @@ func nonEmpty(ss ...string) []string {
 // ListMutes reads the broadcaster's muted viewers with the end of each timed mute. end_at_ms is selected by
 // broadcast_chat_mute.fields; without it every timed mute would read as indefinite. Only the broadcaster's own mutes
 // are listed, so a moderator's token cannot use this for another host.
-func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, error) {
+func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, bool, error) {
 	var (
-		out   []ChatMute
-		token string
+		out       []ChatMute
+		token     string
+		truncated bool
 	)
 	for page := 0; page < xMuteListPages; page++ {
 		q := url.Values{
@@ -169,7 +171,7 @@ func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, error) {
 			} `json:"meta"`
 		}
 		if err := x.xCall(ctx, http.MethodGet, xBroadcastsPath+"chat/mutes?"+q.Encode(), false, nil, &resp); err != nil {
-			return nil, fmt.Errorf("X would not list the muted viewers: %s", xRefusal(err))
+			return nil, false, fmt.Errorf("X would not list the muted viewers: %s", xRefusal(err))
 		}
 		users := make(map[string]int, len(resp.Includes.Users))
 		for i, u := range resp.Includes.Users {
@@ -191,8 +193,10 @@ func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, error) {
 			break
 		}
 		token = resp.Meta.NextToken
+		// The last page allowed still points at another: the list is cut off, and says so.
+		truncated = page == xMuteListPages-1
 	}
-	return out, nil
+	return out, truncated, nil
 }
 
 // ------------------------------------------------------- mute and delete

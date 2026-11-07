@@ -18,8 +18,8 @@ type xModAdapter struct {
 	failAdd error
 }
 
-func (a *xModAdapter) ListMutes(context.Context) ([]ChatMute, error) {
-	return []ChatMute{{UserID: "1"}}, nil
+func (a *xModAdapter) ListMutes(context.Context) ([]ChatMute, bool, error) {
+	return []ChatMute{{UserID: "1"}}, true, nil
 }
 func (a *xModAdapter) BanDeleting(_ context.Context, userID string, _ time.Duration, _, messageID string) error {
 	a.banned = append(a.banned, userID+"/"+messageID)
@@ -43,8 +43,8 @@ func TestHubXModerationRoutesToTheAdapter(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 	ctx := context.Background()
-	if m, err := h.ListMutes(ctx, db.PlatformX, "acct"); err != nil || len(m) != 1 {
-		t.Errorf("ListMutes = %v, %v", m, err)
+	if m, trunc, err := h.ListMutes(ctx, db.PlatformX, "acct"); err != nil || len(m) != 1 || !trunc {
+		t.Errorf("ListMutes = %v, %v, %v; want one mute, truncated passed through", m, trunc, err)
 	}
 	if err := h.BanDeleting(ctx, db.PlatformX, "acct", "555", time.Minute, "spam", "99"); err != nil || len(a.banned) != 1 || a.banned[0] != "555/99" {
 		t.Errorf("BanDeleting = %v, banned %v", err, a.banned)
@@ -75,7 +75,7 @@ func TestHubXModerationRefusesWhatThePlatformCannotDo(t *testing.T) {
 	}
 	ctx := context.Background()
 	calls := map[string]func() error{
-		"mutes":     func() error { _, err := h.ListMutes(ctx, db.PlatformTwitch, "acct"); return err },
+		"mutes":     func() error { _, _, err := h.ListMutes(ctx, db.PlatformTwitch, "acct"); return err },
 		"banDelete": func() error { return h.BanDeleting(ctx, db.PlatformTwitch, "acct", "1", 0, "", "2") },
 		"listMods":  func() error { _, err := h.ListModerators(ctx, db.PlatformTwitch, "acct"); return err },
 		"addMod":    func() error { _, err := h.AddModerator(ctx, db.PlatformTwitch, "acct", "1"); return err },
@@ -87,7 +87,7 @@ func TestHubXModerationRefusesWhatThePlatformCannotDo(t *testing.T) {
 		}
 	}
 	// Not connected at all.
-	if _, err := h.ListMutes(ctx, db.PlatformX, "none"); err == nil || !strings.Contains(err.Error(), "not connected") {
+	if _, _, err := h.ListMutes(ctx, db.PlatformX, "none"); err == nil || !strings.Contains(err.Error(), "not connected") {
 		t.Errorf("unconnected ListMutes = %v", err)
 	}
 	if err := h.BanDeleting(ctx, db.PlatformX, "none", "1", 0, "", "2"); err == nil {

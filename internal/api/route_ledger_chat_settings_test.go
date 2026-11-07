@@ -80,8 +80,8 @@ const (
 	xLedgerModerator = "ledger-mod-4093"
 )
 
-func (a *xModerationAdapter) ListMutes(context.Context) ([]chat.ChatMute, error) {
-	return []chat.ChatMute{{UserID: "4091", Username: xLedgerMuted}}, nil
+func (a *xModerationAdapter) ListMutes(context.Context) ([]chat.ChatMute, bool, error) {
+	return []chat.ChatMute{{UserID: "4091", Username: xLedgerMuted}}, false, nil
 }
 
 func (a *xModerationAdapter) ListModerators(context.Context) ([]chat.ChatModerator, error) {

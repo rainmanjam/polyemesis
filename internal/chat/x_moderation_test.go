@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -48,9 +49,9 @@ func TestXListMutesReadsExpiryUsersAndPages(t *testing.T) {
 		"p3": `{"data":[],"meta":{"next_token":"p3"}}`,
 	}
 	a := st.adapter(t, xNow)
-	got, err := a.ListMutes(context.Background())
-	if err != nil {
-		t.Fatalf("ListMutes: %v", err)
+	got, truncated, err := a.ListMutes(context.Background())
+	if err != nil || truncated {
+		t.Fatalf("ListMutes: truncated %v, err %v", truncated, err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("got %d mutes, want 3 across the pages: %+v", len(got), got)
@@ -72,11 +73,28 @@ func TestXListMutesReadsExpiryUsersAndPages(t *testing.T) {
 	}
 }
 
+// A list X still has more of after the pages polyemesis will read is returned with truncated set, not as if complete.
+func TestXListMutesSaysWhenTheListWasCutOff(t *testing.T) {
+	st := newXChatStub(t)
+	st.mutePages = map[string]string{}
+	for i := 0; i < xMuteListPages; i++ {
+		key := ""
+		if i > 0 {
+			key = fmt.Sprintf("t%d", i)
+		}
+		st.mutePages[key] = fmt.Sprintf(`{"data":[{"user_id":"%d"}],"meta":{"next_token":"t%d"}}`, i+1, i+1)
+	}
+	got, truncated, err := st.adapter(t, xNow).ListMutes(context.Background())
+	if err != nil || !truncated || len(got) != xMuteListPages {
+		t.Fatalf("ListMutes = %d mutes, truncated %v, err %v; want %d, true", len(got), truncated, err, xMuteListPages)
+	}
+}
+
 // A moderator's token is refused the owner's list, and the sentence says so in X's words.
 func TestXListMutesRefusalIsReadable(t *testing.T) {
 	st := newXChatStub(t)
 	a := st.adapter(t, xNow)
-	_, err := a.ListMutes(context.Background())
+	_, _, err := a.ListMutes(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "only the broadcast owner") || !strings.Contains(err.Error(), "moderator") {
 		t.Errorf("err = %v, want X's words and the moderator hint", err)
 	}

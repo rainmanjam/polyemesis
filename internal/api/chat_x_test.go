@@ -34,8 +34,8 @@ func xChatFixture(t *testing.T) (http.Handler, func(*http.Request), *xModeration
 func TestChatMutesAndModeratorsRoutes(t *testing.T) {
 	h, sign, _ := xChatFixture(t)
 	raw := send(t, h, sign, http.MethodGet, "/api/v1/chat/mutes?platform=x&account=acct", nil, http.StatusOK)
-	if !strings.Contains(string(raw), xLedgerMuted) {
-		t.Errorf("mutes body %s lacks the muted viewer", raw)
+	if !strings.Contains(string(raw), xLedgerMuted) || !strings.Contains(string(raw), `"truncated":false`) {
+		t.Errorf("mutes body %s lacks the muted viewer or the truncated flag", raw)
 	}
 	raw = send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=x&account=acct", nil, http.StatusOK)
 	if !strings.Contains(string(raw), `"appliesToAllBroadcasts":true`) || !strings.Contains(string(raw), xLedgerModerator) {
@@ -86,8 +86,8 @@ func TestChatXRoutesRefuseMissingAndUnsupported(t *testing.T) {
 		send(t, h, sign, c.method, c.path, nil, http.StatusBadRequest)
 	}
 	// Not connected, and connected but without the capability, answer an error in words.
-	send(t, h, sign, http.MethodGet, "/api/v1/chat/mutes?platform=twitch&account=acct", nil, http.StatusBadGateway)
-	send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=x&account=other", nil, http.StatusBadGateway)
+	send(t, h, sign, http.MethodGet, "/api/v1/chat/mutes?platform=twitch&account=acct", nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=x&account=other", nil, http.StatusBadRequest)
 	send(t, h, sign, http.MethodPost, "/api/v1/chat/moderators?platform=x&account=other&userId=1", nil, http.StatusBadRequest)
 	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=x&account=other&userId=1", nil, http.StatusBadRequest)
 }

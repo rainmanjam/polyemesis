@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Spettatori silenziati",
   "xmod.mutesEmpty": "Nessuno è silenziato.",
   "xmod.mutesOwnerOnly": "X elenca solo i silenziamenti dell'account proprietario delle dirette.",
+  "xmod.mutesTruncated": "X ha più spettatori silenziati di quanti ne mostri questo elenco. Sono elencati solo i primi {count}; usa X per vedere il resto.",
   "xmod.muteUntil": "fino a {time}",
   "xmod.muteIndefinite": "fino alla riattivazione",
   "xmod.unmute": "Riattiva",

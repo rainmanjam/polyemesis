@@ -1429,7 +1429,7 @@ export const api = {
   getChatMutes: (account: string | undefined) => {
     const q = new URLSearchParams({ platform: "x" });
     if (account) q.set("account", account);
-    return get<{ mutes: ChatMute[] }>(`/chat/mutes?${q.toString()}`);
+    return get<{ mutes: ChatMute[]; truncated?: boolean }>(`/chat/mutes?${q.toString()}`);
   },
   /** X's chat moderators. They act across every broadcast the account hosts. */
   getChatModerators: (account: string | undefined) => {

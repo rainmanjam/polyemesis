@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Susturulan izleyiciler",
   "xmod.mutesEmpty": "Kimse susturulmadı.",
   "xmod.mutesOwnerOnly": "X yalnızca yayınların sahibi hesabın susturmalarını listeler.",
+  "xmod.mutesTruncated": "X'te bu listenin gösterdiğinden daha fazla susturulmuş izleyici var. Yalnızca ilk {count} listelenir; geri kalanı için X'i kullanın.",
   "xmod.muteUntil": "{time} tarihine kadar",
   "xmod.muteIndefinite": "kaldırılana kadar",
   "xmod.unmute": "Susturmayı kaldır",

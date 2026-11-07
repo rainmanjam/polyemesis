@@ -138,7 +138,7 @@ signed-in operator in `Cookie`.
 **Thirty routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last nineteen are `403` because of what
+are `403` because of what they *do*. The last twenty-two are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -2102,7 +2102,7 @@ segment reliably.
 | `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason`, `messageId` (X only: mute and remove that message in one call) |
 | `POST /chat/moderators` | `platform`, `userId` (both required), `account`. X only. A moderator acts on every broadcast the account hosts, not one, and X allows 20 |
 | `DELETE /chat/moderators` | `platform`, `userId` (both required), `account`. X only |
-| `GET /chat/mutes` | `platform` (required), `account`. X only; only the broadcast owner's own mutes are listed |
+| `GET /chat/mutes` | `platform` (required), `account`. X only; only the broadcast owner's own mutes are listed. `truncated` is `true` when X held more than the first 2,000 |
 | `GET /chat/moderators` | `platform` (required), `account`. X only |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |

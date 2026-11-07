@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 // X publishes no rate limits for any Livestream endpoint (docs-x section 9, "read the x-rate-limit-* headers and
 // back off"). So the limits are learned from the answers: a 429, or a 2xx whose x-rate-limit-remaining is 0, holds
-// every further call for that token until x-rate-limit-reset, and a call made during the hold is refused here,
+// every further call to that endpoint (same token, method and route) until x-rate-limit-reset, and a call made during the hold is refused here,
 // without a request. Before this, a throttled account was asked again on every fifteen-second sweep, regardless of
 // the reset time, and each 429 was counted as an ordinary failure against the lifecycle's give-up budget.
 
@@ -108,6 +109,21 @@ func (s *xCallState) clock() time.Time {
 func xTokenFingerprint(accessToken, base string) string {
 	sum := sha256.Sum256([]byte(base + "\x00" + accessToken))
 	return hex.EncodeToString(sum[:12])
+}
+
+// xHoldKey keys a hold by token fingerprint, method and route template, because X's limits are per endpoint. The
+// path is /2/<resource>[/<id>[/<action>]]; the id segment becomes ":id" so every broadcast shares one window. The
+// query string is dropped.
+func xHoldKey(fp, method, endpoint string) string {
+	path := endpoint
+	if u, err := url.Parse(endpoint); err == nil {
+		path = u.EscapedPath()
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) > 2 {
+		parts[2] = ":id"
+	}
+	return fp + " " + method + " /" + strings.Join(parts, "/")
 }
 
 // heldUntil reports the end of a hold on this token, if one is running.

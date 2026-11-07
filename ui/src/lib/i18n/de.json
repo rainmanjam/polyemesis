@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Stummgeschaltete Zuschauer",
   "xmod.mutesEmpty": "Niemand ist stummgeschaltet.",
   "xmod.mutesOwnerOnly": "X listet nur die Stummschaltungen des Kontos, dem die Übertragungen gehören.",
+  "xmod.mutesTruncated": "X hat mehr stummgeschaltete Zuschauer, als diese Liste zeigt. Nur die ersten {count} stehen hier; den Rest siehst du bei X.",
   "xmod.muteUntil": "bis {time}",
   "xmod.muteIndefinite": "bis zur Freigabe",
   "xmod.unmute": "Freigeben",

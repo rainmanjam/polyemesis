@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Wyciszeni widzowie",
   "xmod.mutesEmpty": "Nikt nie jest wyciszony.",
   "xmod.mutesOwnerOnly": "X pokazuje tylko wyciszenia konta, do którego należą transmisje.",
+  "xmod.mutesTruncated": "X ma więcej wyciszonych widzów, niż pokazuje ta lista. Wymieniono tylko pierwszych {count}; resztę zobaczysz w X.",
   "xmod.muteUntil": "do {time}",
   "xmod.muteIndefinite": "do odciszenia",
   "xmod.unmute": "Odcisz",

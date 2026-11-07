@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Spectateurs muets",
   "xmod.mutesEmpty": "Personne n'est muet.",
   "xmod.mutesOwnerOnly": "X ne liste que les sourdines du compte propriétaire des diffusions.",
+  "xmod.mutesTruncated": "X compte plus de spectateurs en sourdine que cette liste n'en montre. Seuls les {count} premiers sont listés ; consultez X pour le reste.",
   "xmod.muteUntil": "jusqu'à {time}",
   "xmod.muteIndefinite": "jusqu'à la levée",
   "xmod.unmute": "Lever la sourdine",

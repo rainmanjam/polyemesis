@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "被禁言的观众",
   "xmod.mutesEmpty": "没有人被禁言。",
   "xmod.mutesOwnerOnly": "X 只列出拥有这些直播的账号的禁言。",
+  "xmod.mutesTruncated": "X 上被静音的观众比此列表显示的更多。这里只列出前 {count} 位，其余请在 X 中查看。",
   "xmod.muteUntil": "直到 {time}",
   "xmod.muteIndefinite": "直到解除",
   "xmod.unmute": "解除禁言",

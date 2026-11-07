@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Espectadores silenciados",
   "xmod.mutesEmpty": "Nadie está silenciado.",
   "xmod.mutesOwnerOnly": "X solo lista los silencios de la cuenta propietaria de las emisiones.",
+  "xmod.mutesTruncated": "X tiene más espectadores silenciados de los que muestra esta lista. Solo se listan los primeros {count}; usa X para ver el resto.",
   "xmod.muteUntil": "hasta {time}",
   "xmod.muteIndefinite": "hasta quitar el silencio",
   "xmod.unmute": "Quitar silencio",

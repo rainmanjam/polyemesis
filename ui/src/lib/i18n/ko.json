@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "음소거된 시청자",
   "xmod.mutesEmpty": "음소거된 사람이 없습니다.",
   "xmod.mutesOwnerOnly": "X는 방송을 소유한 계정의 음소거만 보여 줍니다.",
+  "xmod.mutesTruncated": "X에는 이 목록에 표시된 것보다 더 많은 음소거된 시청자가 있습니다. 처음 {count}명만 표시됩니다. 나머지는 X에서 확인하세요.",
   "xmod.muteUntil": "{time}까지",
   "xmod.muteIndefinite": "해제할 때까지",
   "xmod.unmute": "음소거 해제",

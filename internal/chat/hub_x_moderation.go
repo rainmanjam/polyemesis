@@ -8,26 +8,37 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
+// RefusedLocally is an error the hub raised itself, before any call to a platform: the chat is not connected, or the
+// platform has no such capability. A caller tells it from a failure of the platform with errors.As.
+type RefusedLocally struct{ msg string }
+
+func (e *RefusedLocally) Error() string { return e.msg }
+
+func refusedf(format string, args ...any) error {
+	return &RefusedLocally{msg: fmt.Sprintf(format, args...)}
+}
+
 // runnerFor finds the connected runner for one account, or says the platform is not connected.
 func (h *Hub) runnerFor(p db.Platform, account string) (*runner, error) {
 	h.mu.Lock()
 	r := h.runners[runnerKey(p, account)]
 	h.mu.Unlock()
 	if r == nil {
-		return nil, fmt.Errorf("chat: %s is not connected", p)
+		return nil, refusedf("chat: %s is not connected", p)
 	}
 	return r, nil
 }
 
-// ListMutes reads who the account has muted, where the platform publishes that.
-func (h *Hub) ListMutes(ctx context.Context, p db.Platform, account string) ([]ChatMute, error) {
+// ListMutes reads who the account has muted, where the platform publishes that. truncated is true when the platform
+// had more than the list holds.
+func (h *Hub) ListMutes(ctx context.Context, p db.Platform, account string) (mutes []ChatMute, truncated bool, err error) {
 	r, err := h.runnerFor(p, account)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	l, ok := r.adapter.(MuteLister)
 	if !ok {
-		return nil, fmt.Errorf("chat: %s publishes no list of muted viewers; use the %s dashboard", p, p)
+		return nil, false, refusedf("chat: %s publishes no list of muted viewers; use the %s dashboard", p, p)
 	}
 	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
 	defer cancel()
@@ -68,7 +79,7 @@ func (h *Hub) moderatorManager(p db.Platform, account string) (ModeratorManager,
 	}
 	m, ok := r.adapter.(ModeratorManager)
 	if !ok {
-		return nil, fmt.Errorf("chat: %s publishes no chat moderator API; use the %s dashboard", p, p)
+		return nil, refusedf("chat: %s publishes no chat moderator API; use the %s dashboard", p, p)
 	}
 	return m, nil
 }

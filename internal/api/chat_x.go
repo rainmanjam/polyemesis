@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -22,21 +23,33 @@ func (s *Server) chatTarget(w http.ResponseWriter, r *http.Request) (db.Platform
 	return platform, strings.TrimSpace(q.Get("account")), true
 }
 
+// writeChatXError answers 400 for a refusal the hub made before calling the platform (not connected, or no such
+// capability), as the add and remove routes do, and 502 for a failure of the platform itself.
+func writeChatXError(w http.ResponseWriter, err error) {
+	var local *chat.RefusedLocally
+	if errors.As(err, &local) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeError(w, http.StatusBadGateway, err.Error())
+}
+
 // handleChatMutes lists the viewers an account has muted, with the end of each timed mute. Only X publishes it.
 func (s *Server) handleChatMutes(w http.ResponseWriter, r *http.Request) {
 	platform, account, ok := s.chatTarget(w, r)
 	if !ok {
 		return
 	}
-	mutes, err := s.chat.ListMutes(r.Context(), platform, account)
+	mutes, truncated, err := s.chat.ListMutes(r.Context(), platform, account)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeChatXError(w, err)
 		return
 	}
 	if mutes == nil {
 		mutes = []chat.ChatMute{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mutes": mutes})
+	// truncated says the list is only the first part of what X holds; a client must not present it as complete.
+	writeJSON(w, http.StatusOK, map[string]any{"mutes": mutes, "truncated": truncated})
 }
 
 // moderatorListBody is GET /chat/moderators' answer. Moderators has no omitempty: an empty list is "[]", which a
@@ -61,7 +74,7 @@ func (s *Server) handleChatModerators(w http.ResponseWriter, r *http.Request) {
 	}
 	mods, err := s.chat.ListModerators(r.Context(), platform, account)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeChatXError(w, err)
 		return
 	}
 	if mods == nil {

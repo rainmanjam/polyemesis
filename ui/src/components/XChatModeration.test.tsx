@@ -75,4 +75,24 @@ describe("X muted viewers and moderators", () => {
     await screen.findByText(/only the broadcast owner can list mutes/);
     expect(screen.queryByText("Nobody is muted.")).toBeNull();
   });
+
+  it("says when X holds more mutes than the list shows", async () => {
+    mutes.mockResolvedValue({ mutes: [{ userId: "11", username: "loud" }], truncated: true });
+    render(<XChatModeration statuses={statuses} />);
+    await screen.findByText(/more muted viewers than this list shows/);
+  });
+
+  it("shows a card for every connected X account, each reading its own lists", async () => {
+    render(
+      <XChatModeration
+        statuses={[
+          { platform: "x", account: "one", state: "live" } as ChatStatus,
+          { platform: "x", account: "two", state: "live" } as ChatStatus,
+        ]}
+      />,
+    );
+    await waitFor(() => expect(mutes).toHaveBeenCalledWith("one"));
+    await waitFor(() => expect(mutes).toHaveBeenCalledWith("two"));
+    expect(screen.getAllByRole("region").length).toBe(2);
+  });
 });

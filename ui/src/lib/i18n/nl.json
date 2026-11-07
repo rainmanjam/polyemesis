@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Gedempte kijkers",
   "xmod.mutesEmpty": "Niemand is gedempt.",
   "xmod.mutesOwnerOnly": "X toont alleen de demping van het account dat de uitzendingen bezit.",
+  "xmod.mutesTruncated": "X heeft meer gedempte kijkers dan deze lijst toont. Alleen de eerste {count} staan erin; bekijk de rest op X.",
   "xmod.muteUntil": "tot {time}",
   "xmod.muteIndefinite": "tot opgeheven",
   "xmod.unmute": "Opheffen",

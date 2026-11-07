@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "ミュート中の視聴者",
   "xmod.mutesEmpty": "ミュート中の人はいません。",
   "xmod.mutesOwnerOnly": "X が一覧にするのは、配信を所有するアカウントのミュートだけです。",
+  "xmod.mutesTruncated": "X にはこの一覧より多くのミュート中の視聴者がいます。表示しているのは最初の {count} 件だけです。残りは X で確認してください。",
   "xmod.muteUntil": "{time} まで",
   "xmod.muteIndefinite": "解除するまで",
   "xmod.unmute": "ミュート解除",

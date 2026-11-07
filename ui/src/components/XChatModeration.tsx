@@ -35,14 +35,26 @@ function who(m: { userId: string; username?: string; name?: string }): string {
 }
 
 export function XChatModeration({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
-  const x = statuses.find((s) => s.platform === ("x" as ChatPlatform));
-  if (!x) return null;
-  return <XChatModerationForAccount key={x.account ?? ""} account={x.account} />;
+  // One card per connected X account: the hub keeps a runner for each, and each has its own mutes and moderators.
+  const xs = statuses.filter((s) => s.platform === ("x" as ChatPlatform));
+  if (xs.length === 0) return null;
+  return (
+    <>
+      {xs.map((x) => (
+        <XChatModerationForAccount
+          key={x.account ?? ""}
+          account={x.account}
+          label={xs.length > 1 ? (x.account ?? "") : ""}
+        />
+      ))}
+    </>
+  );
 }
 
-function XChatModerationForAccount({ account }: Readonly<{ account: string | undefined }>) {
+function XChatModerationForAccount({ account, label }: Readonly<{ account: string | undefined; label: string }>) {
   const t = useT();
   const [mutes, setMutes] = useState<ChatMute[] | null>(null);
+  const [mutesTruncated, setMutesTruncated] = useState(false);
   const [mods, setMods] = useState<ChatModerator[] | null>(null);
   const [mutesError, setMutesError] = useState("");
   const [modsError, setModsError] = useState("");
@@ -55,6 +67,7 @@ function XChatModerationForAccount({ account }: Readonly<{ account: string | und
     const [m, mo] = await Promise.allSettled([api.getChatMutes(account), api.getChatModerators(account)]);
     if (m.status === "fulfilled") {
       setMutes(m.value.mutes);
+      setMutesTruncated(m.value.truncated === true);
       setMutesError("");
     } else {
       setMutesError(m.reason instanceof Error ? m.reason.message : String(m.reason));
@@ -88,11 +101,15 @@ function XChatModerationForAccount({ account }: Readonly<{ account: string | und
   const idOk = /^[1-9][0-9]{0,18}$/.test(newId.trim());
 
   return (
-    <section className="flex flex-col gap-2 rounded-md border border-border bg-card p-2" aria-label={t("xmod.title")}>
+    <section
+      className="flex flex-col gap-2 rounded-md border border-border bg-card p-2"
+      aria-label={label ? `${t("xmod.title")} ${label}` : t("xmod.title")}
+    >
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-1 text-sm font-medium">
           <ShieldCheck className="h-3.5 w-3.5" />
           {t("xmod.title")}
+          {label && <span className="text-xs font-normal text-muted-foreground">{label}</span>}
         </h3>
         <Button
           size="sm"
@@ -140,6 +157,9 @@ function XChatModerationForAccount({ account }: Readonly<{ account: string | und
             ))}
           </ul>
         )}
+        {!mutesError && mutesTruncated && (
+          <p className="text-sm text-warn">{t("xmod.mutesTruncated", { count: (mutes ?? []).length })}</p>
+        )}
         <p className="text-xs text-muted-foreground">{t("xmod.mutesOwnerOnly")}</p>
       </div>
 
@@ -167,12 +187,12 @@ function XChatModerationForAccount({ account }: Readonly<{ account: string | und
             ))}
           </ul>
         )}
-        <Label htmlFor="x-mod-id" className="text-xs">
+        <Label htmlFor={`x-mod-id-${account ?? ""}`} className="text-xs">
           {t("xmod.addLabel")}
         </Label>
         <div className="flex gap-1">
           <Input
-            id="x-mod-id"
+            id={`x-mod-id-${account ?? ""}`}
             inputMode="numeric"
             value={newId}
             placeholder={t("xmod.addPlaceholder")}

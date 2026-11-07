@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Muted viewers",
   "xmod.mutesEmpty": "Nobody is muted.",
   "xmod.mutesOwnerOnly": "X lists only the mutes of the account that owns the broadcasts.",
+  "xmod.mutesTruncated": "X has more muted viewers than this list shows. Only the first {count} are listed; use X to see the rest.",
   "xmod.muteUntil": "until {time}",
   "xmod.muteIndefinite": "until unmuted",
   "xmod.unmute": "Unmute",

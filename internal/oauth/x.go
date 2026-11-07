@@ -234,7 +234,10 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 // doStatus is do, and it also returns the HTTP status of an answer that was read (0 when none was).
 func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, payload, out any) (int, error) {
 	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
-	if until, held := x.calls.heldUntil(fp); held {
+	// X's limits are per endpoint, so a hold is kept per token and route: a read window that ran out must not
+	// refuse the go-live or END call.
+	holdKey := xHoldKey(fp, method, endpoint)
+	if until, held := x.calls.heldUntil(holdKey); held {
 		return 0, &xRateLimitedError{Until: until, Held: true}
 	}
 	var body io.Reader
@@ -263,7 +266,7 @@ func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, 
 	x.calls.noteDate(fp, resp.Header.Get("Date"))
 
 	if until, limited := x.calls.rateHoldFrom(resp); limited {
-		x.calls.hold(fp, until)
+		x.calls.hold(holdKey, until)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			return resp.StatusCode, &xRateLimitedError{Until: until, Problems: xProblemText(raw)}
 		}

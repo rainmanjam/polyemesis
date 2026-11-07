@@ -3992,6 +3992,7 @@
   "xmod.mutesTitle": "Penonton yang dibisukan",
   "xmod.mutesEmpty": "Tidak ada yang dibisukan.",
   "xmod.mutesOwnerOnly": "X hanya mencantumkan bisu dari akun pemilik siaran.",
+  "xmod.mutesTruncated": "X memiliki lebih banyak penonton yang dibisukan daripada yang ditampilkan daftar ini. Hanya {count} pertama yang tercantum; gunakan X untuk melihat sisanya.",
   "xmod.muteUntil": "sampai {time}",
   "xmod.muteIndefinite": "sampai dibuka bisunya",
   "xmod.unmute": "Buka bisu",
