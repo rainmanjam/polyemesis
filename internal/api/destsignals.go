@@ -25,7 +25,7 @@ func (s *Server) accountHealthNow(a db.PlatformAccount, now time.Time) AccountHe
 	// refresh outcome or expiry reading is as final. Reported as the state the
 	// console already renders for an account that needs attention, with the
 	// reason in the platform's terms.
-	if r, revoked := s.acctHealth.revokedAt(a.ID); revoked {
+	if r, revoked := s.acctHealth.revokedAt(revokedKey(a.Platform, a.AccountRef)); revoked {
 		at := r.at
 		return AccountHealth{State: AccountHealthRefreshFailing, Failures: 1, LastError: r.reason, FailedAt: &at}
 	}

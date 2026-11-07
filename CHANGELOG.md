@@ -20,7 +20,7 @@ its first tagged release.
   Kick chat attaches, polyemesis lists the app's event subscriptions and creates `chat.message.sent`
   only if missing, re-checks every 30 minutes (Kick auto-disables a subscription after a day of
   failed deliveries, and disabling webhooks drops them all) and says so on the Kick chat card if Kick
-  refuses ("Kick webhook not enabled for your app"). Subscriptions are not deleted on shutdown.
+  refuses ("Kick webhook not enabled for your app"). Subscriptions are not deleted on shutdown, and an empty listing is not taken as proof one is gone (Kick issue #419). Guides responses are `private, no-store`, and chat state sent to read-only sockets is redacted.
 - **Twitch tokens are validated at startup and hourly, as Twitch requires.** Each connected
   account's token is checked with `GET id.twitch.tv/oauth2/validate`; on a 401 one refresh is tried,
   and if Twitch still refuses the account's IRC session is stopped and the account shows as needing a

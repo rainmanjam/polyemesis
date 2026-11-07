@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -76,6 +77,14 @@ const (
 	// kickSubRetry is how soon a check that FAILED is tried again: a network
 	// blip at start must not leave chat unsubscribed for half an hour.
 	kickSubRetry = 2 * time.Minute
+	// kickSubEmptyBackoff is how long, once polyemesis has created the
+	// subscription itself, an EMPTY listing is trusted before it is created
+	// again. KickEngineering/KickDevDocs issue #419: GET /events/subscriptions
+	// can omit a chat.message.sent subscription that exists, so an empty list
+	// alone is not evidence it is gone, and re-POSTing on every check would
+	// stack duplicates (a second delivery of every chat message). A listing
+	// that is NON-empty but lacks ours is evidence, and is acted on at once.
+	kickSubEmptyBackoff = 6 * time.Hour
 	// The one event this adapter needs.
 	kickChatEventName    = "chat.message.sent"
 	kickChatEventVersion = 1
@@ -145,6 +154,12 @@ type KickAdapter struct {
 	subCheckedAt time.Time
 	subChecked   bool
 	subProblem   string
+	// subID is the subscription id Kick gave us (or listed for us), and
+	// subPostedAt when polyemesis last created one. In memory only: there is no
+	// per-account column worth a migration for this, and a restart costs one
+	// GET and, at worst, one POST that Kick answers as a duplicate.
+	subID       string
+	subPostedAt time.Time
 }
 
 // NewKick builds the adapter.
@@ -333,8 +348,8 @@ const kickWebhookHint = "Enable webhooks for your Kick app (Kick → Settings �
 	"with the webhook URL shown under Settings → Platform credentials → Kick), and reconnect the Kick account if it " +
 	"was connected before the events:subscribe permission existed."
 
-// syncSubscription returns "" when the chat subscription exists afterwards and
-// a sentence for the operator when it does not.
+// syncSubscription returns "" when the chat subscription is believed to exist
+// afterwards and a sentence for the operator when it is not.
 func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	if k.cfg.BroadcasterUserID <= 0 {
 		return "Kick chat has no broadcaster id recorded, so it cannot subscribe to chat messages; reconnect the Kick account in Settings → Platforms."
@@ -343,9 +358,11 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 
 	var existing struct {
 		Data []struct {
-			Event   string `json:"event"`
-			Version int    `json:"version"`
-			Method  string `json:"method"`
+			ID                string `json:"id"`
+			Event             string `json:"event"`
+			Version           int    `json:"version"`
+			Method            string `json:"method"`
+			BroadcasterUserID int    `json:"broadcaster_user_id"`
 		} `json:"data"`
 	}
 	q := url.Values{"broadcaster_user_id": {strconv.Itoa(k.cfg.BroadcasterUserID)}}
@@ -353,10 +370,29 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 		return k.subscriptionProblem("could not read its Kick event subscriptions", err)
 	}
 	for _, s := range existing.Data {
+		// The request filters by broadcaster, but the answer is checked too: a
+		// subscription for another channel is not ours.
+		if s.BroadcasterUserID != 0 && s.BroadcasterUserID != k.cfg.BroadcasterUserID {
+			continue
+		}
 		if s.Event == kickChatEventName && s.Version == kickChatEventVersion &&
 			(s.Method == "" || s.Method == "webhook") {
+			k.mu.Lock()
+			k.subID = s.ID
+			k.mu.Unlock()
 			return ""
 		}
+	}
+
+	// Not listed. An empty listing after polyemesis has already created the
+	// subscription is NOT evidence it is gone (issue #419 above), so it is
+	// trusted until the long backoff. Anything else (never created here, or a
+	// non-empty listing that lacks ours) is created now.
+	k.mu.Lock()
+	posted, postedAt := !k.subPostedAt.IsZero(), k.subPostedAt
+	k.mu.Unlock()
+	if posted && len(existing.Data) == 0 && k.cfg.Now().Sub(postedAt) < kickSubEmptyBackoff {
+		return ""
 	}
 
 	body := map[string]any{
@@ -368,29 +404,58 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	}
 	var created struct {
 		Data []struct {
-			Name  string `json:"name"`
-			Error string `json:"error"`
+			Name           string `json:"name"`
+			SubscriptionID string `json:"subscription_id"`
+			Error          string `json:"error"`
 		} `json:"data"`
 	}
+	k.mu.Lock()
+	k.subPostedAt = k.cfg.Now()
+	k.mu.Unlock()
 	if err := doJSON(ctx, k.cfg.HTTP, http.MethodPost, endpoint, k.cfg.Token, body, &created); err != nil {
+		// A duplicate is the subscription we wanted, which the listing failed
+		// to show: success.
+		if ae, ok := err.(*apiError); ok && (ae.Status == http.StatusBadRequest || ae.Status == http.StatusConflict) && kickSaysDuplicate(ae.Body) {
+			return ""
+		}
 		return k.subscriptionProblem("could not subscribe to Kick chat messages", err)
 	}
 	// A 200 can still carry a per-event refusal.
 	for _, d := range created.Data {
-		if strings.TrimSpace(d.Error) != "" {
-			return "Kick refused the chat subscription: " + d.Error + ". " + kickWebhookHint
+		if msg := strings.TrimSpace(d.Error); msg != "" {
+			if kickSaysDuplicate(msg) {
+				return ""
+			}
+			return "Kick refused the chat subscription: " + msg + ". " + kickWebhookHint
+		}
+		if d.SubscriptionID != "" {
+			k.mu.Lock()
+			k.subID = d.SubscriptionID
+			k.mu.Unlock()
 		}
 	}
 	return ""
 }
 
+// kickSaysDuplicate reports whether Kick's words say the subscription is
+// already there.
+func kickSaysDuplicate(text string) bool {
+	t := strings.ToLower(text)
+	return strings.Contains(t, "already") || strings.Contains(t, "duplicate") || strings.Contains(t, "exists")
+}
+
 // subscriptionProblem turns a failed call into the sentence the operator sees.
+// 403 and 400 are different faults and read differently: a 403 is Kick
+// declining the app or the permission (webhooks off, or no events:subscribe),
+// a 400 is Kick objecting to the request and its own text is the explanation.
 func (k *KickAdapter) subscriptionProblem(what string, err error) string {
 	switch statusOf(err) {
 	case http.StatusUnauthorized:
 		return "Kick rejected the access token while checking the chat subscription; reconnect the Kick account in Settings → Platforms."
-	case http.StatusForbidden, http.StatusBadRequest:
+	case http.StatusForbidden:
 		return "Kick webhook not enabled for your app: " + what + " (Kick said " + kickSaid(err) + "). " + kickWebhookHint
+	case http.StatusBadRequest:
+		return "Kick rejected the chat subscription request: " + what + " (Kick said " + kickSaid(err) + ")."
 	}
 	return what + ": " + kickSaid(err) + ". polyemesis will retry shortly."
 }
@@ -496,7 +561,10 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 	got, perr := probe(pctx, k.CallbackURL()+"?probe="+nonce)
 	switch {
 	case perr != nil:
-		warn = append(warn, "polyemesis could not reach its own callback URL from the outside ("+perr.Error()+")")
+		// The INNER error. *url.Error prints the whole request URL, and this
+		// URL's path is the webhook secret; the warning is published as chat
+		// health to every socket.
+		warn = append(warn, "polyemesis could not reach its own callback URL from the outside ("+innerError(perr)+")")
 	case got != nonce:
 		warn = append(warn, "the callback URL answered, but something other than polyemesis did — check what is in front of this server")
 	}
@@ -507,6 +575,15 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 	return false, "Kick chat may not be received: " + strings.Join(warn, "; ") +
 		". The webhook URL to configure in your Kick app is " + callbackWhere +
 		". polyemesis is listening anyway, in case it is reachable in a way it cannot see from here."
+}
+
+// innerError is err without the URL a *url.Error wraps it in.
+func innerError(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		return ue.Err.Error()
+	}
+	return err.Error()
 }
 
 // httpProbe fetches the callback URL and returns whatever nonce came back.

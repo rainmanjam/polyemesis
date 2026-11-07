@@ -534,15 +534,8 @@ var ErrReconnectRequired = errors.New("reconnect the account")
 // for any other reason -- invalid_client above all -- means the developer
 // credentials are wrong, which reconnecting the account cannot fix, so it is
 // NOT classed as reconnect-required (review follow-up).
-//
-// Twitch does not speak RFC 6749 here: a revoked or disconnected grant is a 400
-// {"error":"Bad Request","status":400,"message":"Invalid refresh token"}
-// (dev.twitch.tv/docs/authentication/refresh-tokens), with no invalid_grant
-// anywhere, so that phrase is recognised too. Without it a Twitch grant that
-// was revoked was retried as an ordinary failure for ever.
 func grantGone(text string) bool {
-	return strings.Contains(text, "invalid_grant") ||
-		strings.Contains(strings.ToLower(text), "invalid refresh token")
+	return strings.Contains(text, "invalid_grant")
 }
 
 // Is lets errors.Is(err, ErrReconnectRequired) see a refused grant.

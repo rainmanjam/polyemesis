@@ -318,3 +318,10 @@ func TestTwitchRefreshOfARevokedGrantRequiresReconnect(t *testing.T) {
 		t.Fatalf("err = %v, want it to match ErrReconnectRequired", err)
 	}
 }
+
+// The Twitch-specific phrase must not widen every platform's reconnect rule.
+func TestInvalidRefreshTokenPhraseIsTwitchOnly(t *testing.T) {
+	if grantGone(`{"message":"Invalid refresh token"}`) {
+		t.Fatal("grantGone, which every provider shares, matches Twitch's phrase")
+	}
+}

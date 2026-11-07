@@ -37,6 +37,12 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			guides[i].WebhookURL, guides[i].WebhookURLReason = s.kickWebhookForGuide(r)
 		}
 	}
+	// The body depends on who asks: the Kick webhook URL carries a secret and
+	// is withheld from a read token. No shared cache may keep one principal's
+	// copy and serve it to another.
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", "Cookie")
 	writeJSON(w, http.StatusOK, guides)
 }
 
@@ -258,7 +264,7 @@ func (s *Server) accountViewFor(a db.PlatformAccount, now time.Time) accountView
 	}
 	// The platform itself said this token is dead (Twitch's hourly validation):
 	// that is a reconnect, whatever the stored scopes say.
-	if reason := s.acctHealth.revokedReason(a.ID); reason != "" {
+	if reason := s.acctHealth.revokedReason(revokedKey(a.Platform, a.AccountRef)); reason != "" {
 		v.Reconnect = oauth.ReconnectReason{Needed: true, Reason: reason}
 	}
 	return v

@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -139,4 +140,53 @@ func mustKick(t *testing.T, h http.Handler, sign func(*http.Request)) kickGuide 
 		t.Fatal("no kick guide")
 	}
 	return k
+}
+
+// Chat state (platform, state word, and a free-text Detail) goes to read-only
+// sockets, and a Kick Detail can quote the webhook URL. It gets the residual
+// redaction pass rather than passing through.
+func TestChatStateIsRedactedForReadOnlySockets(t *testing.T) {
+	// Built at run time: a 32-character literal under the name "secret" is what
+	// the repository secret scan flags, and this is a made-up value.
+	secret := strings.Repeat("c0ffee", 5)
+	detail := "polyemesis could not reach https://h.example/api/v1/chat/kick/" + secret + " (refused)"
+	ev := events.Event{Type: events.TypeChatState, Data: []chat.Status{{
+		Platform: db.PlatformKick, Account: "1", State: chat.StateDegraded, Detail: detail,
+	}}}
+
+	view, ok := eventView(ev, true)
+	if !ok {
+		t.Fatal("a read-only socket no longer receives chat state")
+	}
+	b, _ := json.Marshal(view.Data)
+	if strings.Contains(string(b), secret) {
+		t.Fatalf("read-only socket got the webhook secret: %s", b)
+	}
+	if !strings.Contains(string(b), "degraded") {
+		t.Fatalf("redaction destroyed the state word: %s", b)
+	}
+	// The operator's own socket is unchanged.
+	full, _ := eventView(ev, false)
+	if fb, _ := json.Marshal(full.Data); !strings.Contains(string(fb), secret) {
+		t.Fatal("the admin view lost its detail")
+	}
+}
+
+// The guides body differs by principal (the webhook URL), so no shared cache
+// may keep one principal's copy for another.
+func TestGuidesAreNotCacheableAcrossPrincipals(t *testing.T) {
+	_, h, _ := testServerWith(t, Options{Config: testConfigWithPublicURL()})
+	sign := login(t, h)
+	r := jsonRequest(t, http.MethodGet, "/api/v1/platforms/guides", nil)
+	sign(r)
+	w := do(t, h, r)
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "private") || !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want private, no-store", cc)
+	}
+	vary := strings.ToLower(strings.Join(w.Header().Values("Vary"), ","))
+	for _, want := range []string{"authorization", "cookie"} {
+		if !strings.Contains(vary, want) {
+			t.Errorf("Vary = %q, missing %s", vary, want)
+		}
+	}
 }

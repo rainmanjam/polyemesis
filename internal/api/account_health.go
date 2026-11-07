@@ -25,7 +25,7 @@ type accountHealthBook struct {
 	// (Twitch's hourly /validate), with the sentence to show. Kept beside the
 	// refresh book for the same reason it is in memory: it is a reading, and
 	// the next validation pass or a reconnect replaces it.
-	revoked map[int64]revocation
+	revoked map[string]revocation
 }
 
 type revocation struct {
@@ -33,35 +33,44 @@ type revocation struct {
 	at     time.Time
 }
 
+// revokedKey names an account by what survives a reconnect. The row id does
+// too (an upsert keeps it), but a caller that has only (platform, account_ref)
+// -- the OAuth callback's attachAccountChat -- can clear by this without a
+// lookup that might fail.
+func revokedKey(p db.Platform, ref string) string { return string(p) + "/" + ref }
+
 // markRevoked records that the platform no longer honours this account's
 // token. Reports whether it is news (it was not already marked).
-func (b *accountHealthBook) markRevoked(id int64, reason string) bool {
+func (b *accountHealthBook) markRevoked(key string, reason string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.revoked == nil {
-		b.revoked = make(map[int64]revocation)
+		b.revoked = make(map[string]revocation)
 	}
-	_, had := b.revoked[id]
-	b.revoked[id] = revocation{reason: reason, at: time.Now()}
+	_, had := b.revoked[key]
+	b.revoked[key] = revocation{reason: reason, at: time.Now()}
 	return !had
 }
 
-func (b *accountHealthBook) clearRevoked(id int64) {
+// clearRevoked removes the mark and reports whether there was one.
+func (b *accountHealthBook) clearRevoked(key string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.revoked, id)
+	_, had := b.revoked[key]
+	delete(b.revoked, key)
+	return had
 }
 
-func (b *accountHealthBook) revokedReason(id int64) string {
+func (b *accountHealthBook) revokedReason(key string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.revoked[id].reason
+	return b.revoked[key].reason
 }
 
-func (b *accountHealthBook) revokedAt(id int64) (revocation, bool) {
+func (b *accountHealthBook) revokedAt(key string) (revocation, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	r, ok := b.revoked[id]
+	r, ok := b.revoked[key]
 	return r, ok
 }
 

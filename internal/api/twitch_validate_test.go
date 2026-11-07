@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +35,9 @@ type fakeTwitchID struct {
 	refreshTo string
 	validates []string
 	refreshes int
+	// onRefresh runs inside a token refresh, outside the lock: the moment an
+	// operator's reconnect can land between "Twitch refused" and "act on it".
+	onRefresh func()
 }
 
 func newFakeTwitchID(t *testing.T, valid ...string) *fakeTwitchID {
@@ -65,6 +70,11 @@ func (f *fakeTwitchID) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write([]byte(`{"client_id":"cid","login":"dallas","user_id":"1","scopes":[],"expires_in":9000}`))
 	case "/oauth2/token":
+		if hook := f.onRefresh; hook != nil {
+			f.mu.Unlock()
+			hook()
+			f.mu.Lock()
+		}
 		f.refreshes++
 		if f.refreshTo == "" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -128,6 +138,9 @@ func twitchValidationFixture(t *testing.T, f *fakeTwitchID, access string) (*Ser
 	return s, acct
 }
 
+// rk is the revoked-mark key of the fixture's account.
+var rk = revokedKey(db.PlatformTwitch, "4242")
+
 func twitchAttached(s *Server) bool {
 	_, ok := s.chat.Adapter(db.PlatformTwitch, "4242")
 	return ok
@@ -135,7 +148,7 @@ func twitchAttached(s *Server) bool {
 
 func TestTwitchValidationLeavesAValidAccountAlone(t *testing.T) {
 	f := newFakeTwitchID(t, "at-good")
-	s, acct := twitchValidationFixture(t, f, "at-good")
+	s, _ := twitchValidationFixture(t, f, "at-good")
 
 	s.validateTwitchTokens(context.Background())
 
@@ -145,21 +158,21 @@ func TestTwitchValidationLeavesAValidAccountAlone(t *testing.T) {
 	if !twitchAttached(s) {
 		t.Fatal("a valid token's chat was stopped")
 	}
-	if r := s.acctHealth.revokedReason(acct.ID); r != "" {
+	if r := s.acctHealth.revokedReason(rk); r != "" {
 		t.Fatalf("a valid account was marked: %q", r)
 	}
 }
 
 func TestTwitchValidationRevokedTokenStopsChatAndNeedsReconnect(t *testing.T) {
 	f := newFakeTwitchID(t) // no token is valid; the refresh is refused too
-	s, acct := twitchValidationFixture(t, f, "at-revoked")
+	s, _ := twitchValidationFixture(t, f, "at-revoked")
 
 	s.validateTwitchTokens(context.Background())
 
 	if twitchAttached(s) {
 		t.Fatal("the IRC session for a revoked token is still attached")
 	}
-	reason := s.acctHealth.revokedReason(acct.ID)
+	reason := s.acctHealth.revokedReason(rk)
 	if reason == "" {
 		t.Fatal("the account was not marked")
 	}
@@ -193,7 +206,7 @@ func TestTwitchValidation401ThenSuccessfulRefreshIsNotARevocation(t *testing.T) 
 	if !twitchAttached(s) {
 		t.Fatal("chat was stopped for a token that refreshed fine")
 	}
-	if r := s.acctHealth.revokedReason(acct.ID); r != "" {
+	if r := s.acctHealth.revokedReason(rk); r != "" {
 		t.Fatalf("marked despite a good refresh: %q", r)
 	}
 	got, err := s.store.GetPlatformAccount(s.box, acct.ID)
@@ -206,11 +219,11 @@ func TestTwitchValidation401ThenSuccessfulRefreshIsNotARevocation(t *testing.T) 
 func TestTwitchValidationServerErrorIsNotARevocation(t *testing.T) {
 	f := newFakeTwitchID(t)
 	f.validateStatus = http.StatusBadGateway
-	s, acct := twitchValidationFixture(t, f, "at-1")
+	s, _ := twitchValidationFixture(t, f, "at-1")
 
 	s.validateTwitchTokens(context.Background())
 
-	if !twitchAttached(s) || s.acctHealth.revokedReason(acct.ID) != "" {
+	if !twitchAttached(s) || s.acctHealth.revokedReason(rk) != "" {
 		t.Fatal("a 502 from Twitch ended a chat session")
 	}
 	if f.refreshes != 0 {
@@ -221,9 +234,9 @@ func TestTwitchValidationServerErrorIsNotARevocation(t *testing.T) {
 // Reconnecting clears the mark; the next valid pass keeps it clear.
 func TestTwitchValidationMarkClearsOnReconnectAndOnAValidPass(t *testing.T) {
 	f := newFakeTwitchID(t)
-	s, acct := twitchValidationFixture(t, f, "at-revoked")
+	s, _ := twitchValidationFixture(t, f, "at-revoked")
 	s.validateTwitchTokens(context.Background())
-	if s.acctHealth.revokedReason(acct.ID) == "" {
+	if s.acctHealth.revokedReason(rk) == "" {
 		t.Fatal("setup: not marked")
 	}
 
@@ -239,7 +252,7 @@ func TestTwitchValidationMarkClearsOnReconnectAndOnAValidPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.attachAccountChat(db.PlatformTwitch, "4242")
-	if r := s.acctHealth.revokedReason(acct.ID); r != "" {
+	if r := s.acctHealth.revokedReason(rk); r != "" {
 		t.Fatalf("reconnect left the mark: %q", r)
 	}
 }
@@ -247,10 +260,10 @@ func TestTwitchValidationMarkClearsOnReconnectAndOnAValidPass(t *testing.T) {
 // A mark set earlier is cleared by a pass that finds the token valid.
 func TestTwitchValidationValidPassClearsAStaleMark(t *testing.T) {
 	f := newFakeTwitchID(t, "at-good")
-	s, acct := twitchValidationFixture(t, f, "at-good")
-	s.acctHealth.markRevoked(acct.ID, "earlier")
+	s, _ := twitchValidationFixture(t, f, "at-good")
+	s.acctHealth.markRevoked(rk, "earlier")
 	s.validateTwitchTokens(context.Background())
-	if r := s.acctHealth.revokedReason(acct.ID); r != "" {
+	if r := s.acctHealth.revokedReason(rk); r != "" {
 		t.Fatalf("still marked after a valid pass: %q", r)
 	}
 }
@@ -279,5 +292,98 @@ func TestTwitchValidationLoopRunsAtStartAndHourly(t *testing.T) {
 func TestTwitchValidationIntervalIsHourly(t *testing.T) {
 	if twitchValidateEvery != time.Hour {
 		t.Fatalf("interval = %s; Twitch requires hourly", twitchValidateEvery)
+	}
+}
+
+// A token that validated again after being revoked must get its IRC session
+// back, not just lose the mark.
+func TestTwitchValidationReattachesChatWhenARevokedAccountValidatesAgain(t *testing.T) {
+	f := newFakeTwitchID(t)
+	s, _ := twitchValidationFixture(t, f, "at-revoked")
+	s.twitchChatDial = func(context.Context) (net.Conn, error) { return nil, errors.New("no network in this test") }
+	s.validateTwitchTokens(context.Background())
+	if twitchAttached(s) || s.acctHealth.revokedReason(rk) == "" {
+		t.Fatal("setup: the account was not revoked and detached")
+	}
+
+	// Twitch honours the token again (a transient revocation, or the user
+	// re-authorised the same grant).
+	f.mu.Lock()
+	f.valid["at-revoked"] = true
+	f.mu.Unlock()
+	s.validateTwitchTokens(context.Background())
+
+	if s.acctHealth.revokedReason(rk) != "" {
+		t.Fatal("the mark was not cleared")
+	}
+	if !twitchAttached(s) {
+		t.Fatal("the mark cleared but the account's chat was never reattached")
+	}
+}
+
+// A reconnect that lands between Twitch's refusal and the verdict being acted
+// on means the verdict is about a token that is gone: it must be discarded.
+func TestTwitchValidationDiscardsAVerdictAboutAReplacedToken(t *testing.T) {
+	f := newFakeTwitchID(t) // nothing valid, the refresh is refused
+	s, _ := twitchValidationFixture(t, f, "at-old")
+	s.twitchChatDial = func(context.Context) (net.Conn, error) { return nil, errors.New("no network in this test") }
+	f.onRefresh = func() {
+		// The operator reconnects while the refresh is in flight.
+		if _, err := s.store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+			Platform: db.PlatformTwitch, AccountName: "dallas", AccountRef: "4242",
+			AccessToken: "at-new", RefreshToken: "rt-new", ExpiresAt: time.Now().Add(3 * time.Hour),
+		}); err != nil {
+			t.Error(err)
+		}
+	}
+
+	s.validateTwitchTokens(context.Background())
+
+	if s.acctHealth.revokedReason(rk) != "" {
+		t.Fatal("a verdict about the OLD token marked the reconnected account")
+	}
+	if !twitchAttached(s) {
+		t.Fatal("a verdict about the OLD token ended the reconnected account's chat")
+	}
+}
+
+// The mark is cleared by a reconnect even when there is no chat to restart.
+func TestReconnectClearsTheRevokedMarkEvenWhenChatCannotRestart(t *testing.T) {
+	f := newFakeTwitchID(t)
+	s, _ := twitchValidationFixture(t, f, "at-1")
+	s.acctHealth.markRevoked(rk, "revoked")
+	s.chatLife = nil // chat has not started, so attachAccountChat returns early
+	s.attachAccountChat(db.PlatformTwitch, "4242")
+	if s.acctHealth.revokedReason(rk) != "" {
+		t.Fatal("the mark outlived the reconnect because the attach returned early")
+	}
+	s.chat = nil
+	s.acctHealth.markRevoked(rk, "revoked")
+	s.attachAccountChat(db.PlatformTwitch, "4242")
+	if s.acctHealth.revokedReason(rk) != "" {
+		t.Fatal("the mark outlived the reconnect with no Hub")
+	}
+}
+
+// A refresh made by the validation pass is a refresh like any other: it keeps
+// the account's health honest.
+func TestRefreshNowRecordsHealth(t *testing.T) {
+	f := newFakeTwitchID(t) // refresh refused
+	s, acct := twitchValidationFixture(t, f, "at-1")
+	if _, err := s.refreshNow(context.Background(), acct); err == nil {
+		t.Fatal("setup: the refresh was not refused")
+	}
+	if _, failing := s.acctHealth.get(acct.ID); !failing {
+		t.Fatal("a failed refreshNow left no trace in the account's health")
+	}
+	f.mu.Lock()
+	f.refreshTo = "at-2"
+	f.mu.Unlock()
+	cur, _ := s.store.GetPlatformAccount(s.box, acct.ID)
+	if _, err := s.refreshNow(context.Background(), cur); err != nil {
+		t.Fatal(err)
+	}
+	if _, failing := s.acctHealth.get(acct.ID); failing {
+		t.Fatal("a successful refreshNow did not clear the failure")
 	}
 }

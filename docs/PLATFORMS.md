@@ -764,7 +764,7 @@ silently.
    (never a duplicate). Kick disables a subscription after a day of failed
    deliveries, and switching webhooks off drops every subscription, so it
    checks again every 30 minutes (2 minutes after a failed check) and creates
-   it again if it has gone. If Kick refuses, the Kick chat card says so, for
+   it again if it has gone. Kick's listing can omit a subscription that exists (KickEngineering/KickDevDocs issue #419), so an empty listing is trusted for 6 hours once polyemesis has created the subscription, and a creation Kick answers as a duplicate counts as success. If Kick refuses, the Kick chat card says so, for
    example "Kick webhook not enabled for your app". Nothing is deleted on
    shutdown: subscriptions persist per app and channel, and deleting one on
    every restart would drop the chat Kick delivers in between.

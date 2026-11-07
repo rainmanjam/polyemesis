@@ -61,8 +61,10 @@ var bareSecret = regexp.MustCompile(`(?i)\b(stream[_-]?key|stream[_-]?id|api[_-]
 // /api/v1/chat/kick/<secret>. The URL is what the operator pastes into their
 // Kick app, so it is a credential: whoever holds it can inject chat lines up to
 // the signature check. It is matched by its path rather than by a host because
-// the host is the operator's own.
-var kickWebhookPath = regexp.MustCompile(`(/chat/kick/)[^\s/?#"'<>]+`)
+// the host is the operator's own. The separators also match percent-encoded
+// (%2F), which is how a URL travels inside a query string or an error that
+// quotes one.
+var kickWebhookPath = regexp.MustCompile(`(?i)((?:/|%2F)chat(?:/|%2F)kick(?:/|%2F))[^\s/?#"'<>%&]+`)
 
 // bearerToken catches an HTTP credential, where the scheme word sits between
 // the label and the secret and would otherwise be all that gets masked.

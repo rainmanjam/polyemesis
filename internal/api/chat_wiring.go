@@ -228,6 +228,13 @@ func chatFromEnv(p db.Platform) bool { return p == db.PlatformRumble }
 // with its redirect, and an adapter started under it would stop at once and
 // stay in the Hub as a chip over a chat that never arrives.
 func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
+	// A reconnect is the cure for a token the platform's validation found
+	// revoked: the new grant gets a clean slate and the next pass judges it.
+	// FIRST, before any early return below (no Hub, chat not started yet, a
+	// read that failed): the mark is about the account, not about whether its
+	// chat could be restarted just now, and a mark that outlived the reconnect
+	// would tell the operator to reconnect an account they just reconnected.
+	s.acctHealth.clearRevoked(revokedKey(p, accountRef))
 	// Rumble's chat hangs off an environment variable, not an account (see
 	// attachRumble), and no connect has any claim on it.
 	if s.chat == nil || s.store == nil || chatFromEnv(p) {
@@ -270,9 +277,6 @@ func (s *Server) attachAccountChat(p db.Platform, accountRef string) {
 	if !found {
 		return
 	}
-	// A reconnect is the cure for a token Twitch's validation found revoked:
-	// the new grant gets a clean slate, and the next hourly pass judges it.
-	s.acctHealth.clearRevoked(a.ID)
 	s.connectChat(s.chatLife, a, withCreds)
 }
 

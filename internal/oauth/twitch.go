@@ -187,12 +187,28 @@ func (t *Twitch) Refresh(ctx context.Context, clientID, clientSecret, refreshTok
 		"grant_type":    {"refresh_token"},
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, twitchRefreshError(err)
 	}
 	if tok.RefreshToken == "" {
 		tok.RefreshToken = refreshToken
 	}
 	return tok, nil
+}
+
+// twitchRefreshError marks a refused Twitch grant as reconnect-required.
+//
+// Twitch does not speak RFC 6749 here: a revoked or disconnected grant is a 400
+// {"error":"Bad Request","status":400,"message":"Invalid refresh token"}
+// (dev.twitch.tv/docs/authentication/refresh-tokens), with no invalid_grant
+// anywhere, so the shared grantGone cannot see it. The phrase is matched HERE,
+// for Twitch only, rather than widening grantGone for every provider.
+func twitchRefreshError(err error) error {
+	var te *tokenStatusError
+	if errors.As(err, &te) && te.code == http.StatusBadRequest &&
+		strings.Contains(strings.ToLower(te.body), "invalid refresh token") {
+		return fmt.Errorf("%w: %w", err, ErrReconnectRequired)
+	}
+	return err
 }
 
 // helixHeaders: Helix requires the Client-Id alongside the bearer token, which
