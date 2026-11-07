@@ -136,7 +136,7 @@ func TestASymlinkedSidecarIsNotServed(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "secret.json")
 	_ = os.WriteFile(target, []byte("secret"), 0o644)
 	if err := os.Symlink(target, filepath.Join(dir, "rec-20260101-000000.chat.json")); err != nil {
-		t.Skip("no symlinks here")
+		t.Fatal(err)
 	}
 	if m.HasChatSidecar("rec-20260101-000000.mkv") {
 		t.Error("a planted symlink counted as a sidecar")
