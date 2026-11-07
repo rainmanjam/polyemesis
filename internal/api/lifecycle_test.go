@@ -158,6 +158,10 @@ type fakeLifecycleStore struct {
 	beforeUpdate func(id int64, cur *db.Destination)
 	// failUpdates makes every UpdateLifecycle fail, as a full disk or a locked database would.
 	failUpdates bool
+	// failUpdatesAfterGoLive makes UpdateLifecycle fail once a write has carried a pending attempt, i.e. every write
+	// after the go-live was stamped, as a database that went away mid-sweep would.
+	failUpdatesAfterGoLive bool
+	stamped                bool
 }
 
 // GetDestination answers what the real store answers: the row, or
@@ -191,7 +195,7 @@ func (f *fakeLifecycleStore) ListDestinations() ([]*db.Destination, error) {
 func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failUpdates {
+	if f.failUpdates || (f.failUpdatesAfterGoLive && f.stamped) {
 		return nil, errors.New("database is locked")
 	}
 	row, ok := f.rows[id]
@@ -208,6 +212,9 @@ func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destinatio
 	}
 	if !apply(&cur) {
 		return nil, db.ErrLifecycleSkipped
+	}
+	if f.failUpdatesAfterGoLive && cur.Lifecycle.GoLiveAttemptMS > 0 {
+		f.stamped = true
 	}
 	// ONLY the lifecycle column, exactly as db.UpdateLifecycle does.
 	updated := *row

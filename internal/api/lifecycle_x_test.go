@@ -75,6 +75,13 @@ type xcFake struct {
 	listLag bool
 	// sourceDeleted makes GET /2/sources answer with no sources, as after the source was deleted on X.
 	sourceDeleted bool
+	// srcID and key override the source id and stream key the fake holds (empty means xcSourceID and xcFakeKey), so a
+	// test can replace the source as a reconnect would.
+	srcID, key string
+	// createdMS is created_at_ms of the live broadcast the list reports; zero means long ago (somebody else's).
+	createdMS int64
+	// failReads makes GET /2/sources and GET /2/broadcasts answer 500.
+	failReads bool
 	// liveCalls counts every go-live call, refused or not.
 	liveCalls int
 	// seq numbers broadcasts so a second show gets a different id.
@@ -108,6 +115,9 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 		switch {
 		case path == "/2/users/me":
 			_, _ = io.WriteString(w, `{"data":{"id":"42","username":"streamer"}}`)
+		case r.Method == http.MethodGet && (path == "/2/sources" || path == "/2/broadcasts") && f.failReads:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"title":"Internal Server Error"}`)
 		case r.Method == http.MethodGet && path == "/2/sources":
 			active := "false"
 			if f.active {
@@ -117,7 +127,7 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 				_, _ = io.WriteString(w, `{"data":[],"meta":{"result_count":0}}`)
 				return
 			}
-			_, _ = io.WriteString(w, `{"data":[{"id":"`+xcSourceID+`","name":"polyemesis","is_stream_active":`+active+
+			_, _ = io.WriteString(w, `{"data":[{"id":"`+f.sourceID()+`","name":"polyemesis","is_stream_active":`+active+
 				`}],"meta":{"result_count":1}}`)
 		case r.Method == http.MethodGet && path == "/2/broadcasts":
 			live := (f.state == oauth.XStateRunning || f.state == oauth.XStatePrePublished) && !f.listLag
@@ -125,9 +135,13 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 				_, _ = io.WriteString(w, `{"data":[],"meta":{"result_count":0}}`)
 				return
 			}
+			created := f.createdMS
+			if created == 0 {
+				created = 1000 // long ago: not started by this run
+			}
 			_, _ = io.WriteString(w, `{"data":[{"id":"`+f.id+`","broadcast_id":"`+f.id+`","state":"`+f.state+
-				`","source_id":"`+xcSourceID+`","title":""}],"meta":{"result_count":1}}`)
-		case r.Method == http.MethodGet && path == "/2/sources/"+xcSourceID+"/stream_key":
+				`","source_id":"`+xcSourceID+`","title":"","created_at_ms":"`+strconv.FormatInt(created, 10)+`"}],"meta":{"result_count":1}}`)
+		case r.Method == http.MethodGet && path == "/2/sources/"+f.sourceID()+"/stream_key":
 			f.creates++
 			if f.createStatus != 0 {
 				detail := "not permitted"
@@ -139,7 +153,7 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 					`401}],"detail":"`+detail+`"}`)
 				return
 			}
-			_, _ = io.WriteString(w, `{"data":{"id":"`+xcSourceID+`","stream_key":"`+xcFakeKey+`"}}`)
+			_, _ = io.WriteString(w, `{"data":{"id":"`+f.sourceID()+`","stream_key":"`+f.streamKey()+`"}}`)
 		case r.Method == http.MethodPost && path == "/2/broadcasts":
 			f.liveCalls++
 			if f.liveStatus != 0 {
@@ -177,6 +191,7 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			f.id = "bc-" + string(rune('0'+f.seq))
 			f.state = oauth.XStateRunning
 			f.published++
+			f.createdMS = time.Now().UnixMilli()
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, xcBroadcastJSON(f.id, f.state))
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "/2/broadcasts/"):
@@ -193,8 +208,12 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			if f.sourceGone {
 				src = ""
 			}
+			created := f.createdMS
+			if created == 0 {
+				created = 1000
+			}
 			_, _ = io.WriteString(w, `{"data":{"id":"`+f.id+`","state":"`+f.state+`","source_id":"`+
-				src+`","title":""}}`)
+				src+`","title":"","created_at_ms":"`+strconv.FormatInt(created, 10)+`"}}`)
 		case r.Method == http.MethodPut && path == "/2/broadcasts/"+f.id+"/state":
 			var raw map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&raw)
@@ -211,6 +230,20 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}
+}
+
+func (f *xcFake) sourceID() string {
+	if f.srcID != "" {
+		return f.srcID
+	}
+	return xcSourceID
+}
+
+func (f *xcFake) streamKey() string {
+	if f.key != "" {
+		return f.key
+	}
+	return xcFakeKey
 }
 
 func (f *xcFake) createCalls() int {
@@ -816,8 +849,9 @@ func TestADisabledXDestinationWhoseBroadcastNeverAiredIsNotReadEverySweep(t *tes
 // The one read after the switch-off is what catches a go-live whose record was lost: the row still holds the
 // pending handle, X has the broadcast RUNNING on that source, and the read finds it, adopts its real id and ends it.
 func TestADisabledXRowStillPendingButRunningOnXIsStillEnded(t *testing.T) {
-	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", seq: 1, active: true}
-	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", seq: 1, active: true, createdMS: time.Now().UnixMilli()}
+	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: time.Now().Add(-time.Second).UnixMilli(), Phase: phaseCreated}))
 	for range 3 {
 		xcSweep(t, c, store)
 	}
@@ -839,8 +873,9 @@ func TestADisabledXRowRecordedAsCreatedButRunningIsStillEnded(t *testing.T) {
 // A destination enabled again with the pending handle while X is RUNNING adopts the broadcast, records its real id
 // and never sends a second go-live.
 func TestAnEnabledXRowStillPendingButRunningOnXAdoptsTheBroadcast(t *testing.T) {
-	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", seq: 1, active: true}
-	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", seq: 1, active: true, createdMS: time.Now().UnixMilli()}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: time.Now().Add(-time.Second).UnixMilli(), Phase: phaseCreated}))
 	row := xcSweep(t, c, store)
 	if row.Lifecycle.BroadcastID != "bc-1" || row.Lifecycle.PendingSource != "" || row.Lifecycle.Phase != phaseLive {
 		t.Errorf("recorded = %+v, want the real id bc-1, live, and the pending source cleared", row.Lifecycle)
@@ -893,20 +928,25 @@ func TestXAFailedRecordAfterGoLiveStillLeavesTheBroadcastEndable(t *testing.T) {
 	}
 }
 
-// A pending handle whose source is gone from X can never go live. It is a counted fault the operator sees, not a
-// silent wait, and it is held after the budget like every other.
+// A pending handle whose source is gone from X can never go live. It is a fault the operator sees at once, in words
+// (see also TestXDeletedSourceIsForgottenAndTheDestinationReopensOnANewSource), and the destination is held after the
+// budget like every other fault: the dead source is forgotten, so what keeps failing is opening one, which says to
+// reconnect.
 func TestXPendingSourceDeletedOnXRaisesAFault(t *testing.T) {
 	fake := &xcFake{sourceDeleted: true}
 	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
-	var row *db.Destination
-	for range lifecycleGiveUpAfter + 5 {
-		row = xcSweep(t, c, store)
-	}
+	row := xcSweep(t, c, store)
 	if len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "no longer has the stream source") {
 		t.Fatalf("faults %d, fault %q: a source gone from X must be raised in words", len(*faults), row.Lifecycle.Fault)
 	}
-	if strings.Contains(row.Lifecycle.Fault, "pending:") {
-		t.Errorf("the fault shows the internal handle: %q", row.Lifecycle.Fault)
+	for range lifecycleGiveUpAfter + 5 {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.Fault == "" || strings.Contains(row.Lifecycle.Fault, "pending:") {
+		t.Errorf("fault %q after the budget, want a visible fault without the internal handle", row.Lifecycle.Fault)
+	}
+	if row.Lifecycle.Attempts != lifecycleGiveUpAfter {
+		t.Errorf("attempts %d, want the destination held at the give-up count", row.Lifecycle.Attempts)
 	}
 }
 
@@ -956,7 +996,7 @@ func TestXSourceNotReceivingVideoYetDoesNotSpendTheGiveUpBudget(t *testing.T) {
 // A go-live X answers 200 (the source already had a live broadcast) is adopted, and the coordinator says so at INFO.
 func TestXGoLiveAnswered200AdoptsTheLiveBroadcastAndLogsIt(t *testing.T) {
 	// The list is lagging, so the read cannot find the live broadcast and the go-live is what answers.
-	fake := &xcFake{active: true, state: oauth.XStateRunning, id: "bc-9", seq: 9, listLag: true}
+	fake := &xcFake{active: true, state: oauth.XStateRunning, id: "bc-9", seq: 9, listLag: true, createdMS: time.Now().UnixMilli()}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
 	var logs bytes.Buffer
 	c.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -1080,5 +1120,206 @@ func TestADeletedXDestinationWhoseBroadcastIsStillPublishingIsEndedOnceItRuns(t 
 func TestAPrePublishedXBroadcastIsEndableSoItsDeleteNeedsConfirmation(t *testing.T) {
 	if !endableFromPhase(phasePrePublished) {
 		t.Fatal("a broadcast this process published is not endable, so its delete would neither confirm nor end it")
+	}
+}
+
+// ----------------------------------------------------- round 2: review of the review
+
+// WRONG-BROADCAST ADOPTION. The source carries a broadcast polyemesis did not start (created long before). A go-live
+// that X refuses as "another broadcast is live" must not be followed by adopting that broadcast on the next read,
+// which would clear the fault and let a switch-off END somebody else's show.
+func TestXNeverAdoptsABroadcastItDidNotStartAfterABusyRefusal(t *testing.T) {
+	fake := &xcFake{active: true, state: oauth.XStateRunning, id: "other-1", seq: 1, listLag: false, createdMS: 0, liveStatus: http.StatusConflict}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	var row *db.Destination
+	for range 4 {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.BroadcastID != "" || row.Lifecycle.PendingSource != xcSourceID {
+		t.Fatalf("recorded = %+v, want the pending source kept and nothing adopted", row.Lifecycle)
+	}
+	if len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "another broadcast is already live") {
+		t.Errorf("faults %d fault %q, want the busy source raised", len(*faults), row.Lifecycle.Fault)
+	}
+	// Switched off, the other broadcast is still not ended: it was never ours.
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if _, _, ended, _ := fake.snapshot(); ended != 0 {
+		t.Fatalf("ended %d: polyemesis ended a broadcast it did not start", ended)
+	}
+}
+
+// A 200 for a broadcast created BEFORE this attempt is somebody else's: refused, not adopted, never ended.
+func TestXGoLiveAnswered200ForAForeignBroadcastIsRefusedNotAdopted(t *testing.T) {
+	fake := &xcFake{active: true, state: oauth.XStateRunning, id: "other-1", seq: 1, listLag: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.BroadcastID != "" || len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "not started by polyemesis") {
+		t.Fatalf("recorded %+v faults %d, want a refusal saying the broadcast was not started by polyemesis", row.Lifecycle, len(*faults))
+	}
+}
+
+// The attempt is stamped before the go-live is sent and kept when the answer is lost, so the next read can adopt what
+// that attempt made; a definite refusal clears it, because nothing was created.
+func TestXGoLiveAttemptIsStampedKeptOnALostAnswerAndClearedOnARefusal(t *testing.T) {
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	store.failUpdatesAfterGoLive = true
+	before := time.Now().UnixMilli()
+	xcSweep(t, c, store) // goes live; the record of the real id fails
+	row := store.rows[5]
+	if row.Lifecycle.GoLiveAttemptMS < before || row.Lifecycle.PendingSource != xcSourceID || row.Lifecycle.BroadcastID != "" {
+		t.Fatalf("recorded = %+v, want the pending source with the attempt stamped at or after %d", row.Lifecycle, before)
+	}
+
+	fake2 := &xcFake{active: true, liveStatus: http.StatusConflict}
+	c2, store2, _ := xcFixture(t, fake2, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	row2 := xcSweep(t, c2, store2)
+	if row2.Lifecycle.GoLiveAttemptMS != 0 {
+		t.Errorf("attempt = %d after a definite refusal, want it cleared: nothing was created", row2.Lifecycle.GoLiveAttemptMS)
+	}
+}
+
+// PROTECTION DOWNGRADE. After a go-live whose record failed, the next sweep re-tracks from the durable row, which still
+// says pending/created. That must not overwrite the verified live target: with the state read failing and the row then
+// deleted, the broadcast is still ended.
+func TestXTrackingNeverMovesBackwardsFromAVerifiedLiveBroadcast(t *testing.T) {
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	store.failUpdates = true
+	c.sweepOnce(context.Background(), sweepEverything) // live as bc-1; the record fails
+	if _, published, _, _ := fake.snapshot(); published != 1 {
+		t.Fatalf("setup: published %d", published)
+	}
+	store.mu.Lock()
+	store.failUpdates = false
+	store.mu.Unlock()
+	fake.set(func(f *xcFake) { f.failReads = true })
+	c.sweepOnce(context.Background(), sweepEverything) // re-tracks from the durable row; the state read fails
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+	fake.set(func(f *xcFake) { f.failReads = false })
+	for range 3 {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	if _, _, ended, _ := fake.snapshot(); ended != 1 {
+		t.Fatalf("ended %d: a failed read downgraded the live target and the deleted row's broadcast was dropped", ended)
+	}
+}
+
+// A renewal is not a downgrade: once X ended the broadcast and the next show is opened, the old live target is gone, so
+// deleting the row sends no END to the finished broadcast.
+func TestXRenewalForgetsTheEndedLiveTarget(t *testing.T) {
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	xcSweep(t, c, store) // live bc-1
+	fake.set(func(f *xcFake) { f.state, f.active = oauth.XStateEnded, false })
+	xcSweep(t, c, store) // ended, encoder stopped: renewed to a pending handle
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+	for range 3 {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	if _, _, ended, _ := fake.snapshot(); ended != 0 {
+		t.Fatalf("ended %d: an END was sent to a broadcast that had already finished", ended)
+	}
+}
+
+// DELETED SOURCE. The fault is raised, the dead source is forgotten so the destination is opened again, and once the
+// account is reconnected (the key refresh writes the new source's key) the next sweep opens on the NEW source and the
+// fault clears.
+func TestXDeletedSourceIsForgottenAndTheDestinationReopensOnANewSource(t *testing.T) {
+	fake := &xcFake{sourceDeleted: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.PendingSource != "" || row.Lifecycle.BroadcastID != "" {
+		t.Fatalf("recorded = %+v, want the dead source forgotten", row.Lifecycle)
+	}
+	if len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "no longer has the stream source") {
+		t.Fatalf("faults %d fault %q, want the deleted source raised", len(*faults), row.Lifecycle.Fault)
+	}
+	// Still no usable source: opening cannot succeed, the fault stays visible and nothing is pending.
+	row = xcSweep(t, c, store)
+	if row.Lifecycle.PendingSource != "" || row.Lifecycle.Fault == "" {
+		t.Fatalf("recorded = %+v, want the fault still visible while no source exists", row.Lifecycle)
+	}
+	// Reconnect: a new source, a new key stored on the destination.
+	const newSrc, newKey = "7100000000000000002", "freshkey2"
+	fake.set(func(f *xcFake) { f.sourceDeleted, f.srcID, f.key = false, newSrc, newKey })
+	store.mu.Lock()
+	store.rows[5].StreamKey = newKey
+	store.mu.Unlock()
+	var last *db.Destination
+	for range 2 {
+		last = xcSweep(t, c, store)
+	}
+	if last.Lifecycle.PendingSource != newSrc || last.Lifecycle.Fault != "" {
+		t.Fatalf("recorded = %+v, want the destination reopened on the new source %s with the fault cleared", last.Lifecycle, newSrc)
+	}
+}
+
+// RECONNECT resets the pending state of the account's X destinations, but never touches one with a real broadcast.
+func TestReconnectResetsPendingXLifecycleButNotALiveBroadcast(t *testing.T) {
+	acct := int64(9)
+	pendingRow := xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, GoLiveAttemptMS: 5, Phase: phaseCreated, Fault: "old", Attempts: 3})
+	liveRow := xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive})
+	liveRow.ID, liveRow.Name = 6, "x live"
+	otherAcct := int64(10)
+	otherRow := xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated})
+	otherRow.ID, otherRow.Name, otherRow.AccountID = 7, "x other", &otherAcct
+	store := &fakeLifecycleStore{rows: map[int64]*db.Destination{5: pendingRow, 6: liveRow, 7: otherRow}}
+	if n := resetXPendingLifecycle(store, acct); n != 1 {
+		t.Fatalf("reset %d destinations, want exactly the one pending row of the account", n)
+	}
+	if got := store.rows[5].Lifecycle; !got.Empty() {
+		t.Errorf("pending row = %+v, want the pending state cleared", got)
+	}
+	if store.rows[6].Lifecycle.BroadcastID != "bc-1" {
+		t.Errorf("a live broadcast was reset: %+v", store.rows[6].Lifecycle)
+	}
+	if store.rows[7].Lifecycle.PendingSource == "" {
+		t.Errorf("another account's destination was reset")
+	}
+}
+
+// The coordinator's logs never show the handle: the source is its own key, and broadcast is only ever a real id.
+func TestXLogsNeverShowThePendingHandle(t *testing.T) {
+	fake := &xcFake{active: true, liveStatus: http.StatusConflict}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
+	var logs bytes.Buffer
+	c.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	for range 4 {
+		xcSweep(t, c, store)
+	}
+	if strings.Contains(logs.String(), "pending:") {
+		t.Errorf("a log line shows the internal handle:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "pending_source="+xcSourceID) {
+		t.Errorf("no log line names the pending source under its own key:\n%s", logs.String())
+	}
+}
+
+// A missing-scopes 403 is terminal and tells the operator to reconnect with the scopes.
+func TestXMissingScopesIsATerminalFaultThatSaysReconnect(t *testing.T) {
+	fake := &xcFake{active: true, liveStatus: http.StatusForbidden,
+		liveBody: `{"type":"https://api.x.com/2/problems/missing-scopes","title":"Forbidden","detail":"Token lacks broadcast.write.","status":403}`}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	var row *db.Destination
+	for range lifecycleGiveUpAfter + 3 {
+		row = xcSweep(t, c, store)
+	}
+	if fake.liveCalls != 1 || len(*faults) != 1 {
+		t.Errorf("go-live calls %d faults %d, want one call and one fault: the refusal is terminal", fake.liveCalls, len(*faults))
+	}
+	for _, want := range []string{"Reconnect", "broadcast.read", "broadcast.write"} {
+		if !strings.Contains(row.Lifecycle.Fault, want) {
+			t.Errorf("fault %q does not say %q", row.Lifecycle.Fault, want)
+		}
 	}
 }

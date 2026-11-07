@@ -274,6 +274,9 @@ const (
 	// RefusalSourceBusy is X's 409 "another broadcast is live on this source". It does not clear by itself: the
 	// other broadcast has to be ended first.
 	RefusalSourceBusy TransitionRefusal = "sourceBusy"
+	// RefusalMissingScopes is X's 403 missing-scopes on go-live: the token lacks broadcast.write. Terminal until the
+	// account is reconnected with the scopes.
+	RefusalMissingScopes TransitionRefusal = "missingScopes"
 )
 
 // TransitionRefused is a refusal YouTube named. It wraps the underlying HTTP

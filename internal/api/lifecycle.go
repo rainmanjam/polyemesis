@@ -437,11 +437,11 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 		if r.Existing {
 			c.log.Info("broadcast lifecycle: X already had a live broadcast on this source, so that one was adopted "+
 				"and the request's title and options were ignored",
-				"destination", d.Name, "broadcast", r.ID)
+				"destination", d.Name, bcAttr(r.ID))
 		}
 		for _, w := range r.Warnings {
 			c.log.Warn("broadcast lifecycle: X published the broadcast with a warning",
-				"destination", d.Name, "broadcast", broadcastID, "detail", redact.Redact(w))
+				"destination", d.Name, bcAttr(broadcastID), "detail", redact.Redact(w))
 		}
 		// r.ID is the REAL broadcast id X made on go-live. broadcastID was the pending handle (or a broadcast an
 		// earlier version recorded), and the caller must record and point chat at the one that exists on X.
@@ -770,14 +770,70 @@ func (c *lifecycleCoordinator) trackAs(d *db.Destination, broadcastID, phase str
 	if d.AccountID != nil {
 		accountID = *d.AccountID
 	}
-	c.track(d.ID, lifecycleTarget{
+	next := lifecycleTarget{
 		SourceID:    sourceID,
 		Name:        d.Name,
 		Platform:    d.Platform,
 		AccountID:   accountID,
 		BroadcastID: broadcastID,
 		Phase:       phase,
-	})
+	}
+	// MERGE, DO NOT OVERWRITE. The durable row can lag a broadcast this process has verified on air: the go-live
+	// succeeded and the write that records it failed. Re-tracking from that row every sweep would move the target
+	// backwards to a pending handle and phase created, and a deleted row would then be let go of with the show still
+	// live. So a tracked target that is a real, endable broadcast is kept over a pending or never-aired one for the
+	// same row. (A renewal forgets its target explicitly, so this never holds a finished broadcast.)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cur, ok := c.tracked[d.ID]; ok && cur.Platform == next.Platform && publicBroadcastID(cur.BroadcastID) != "" &&
+		endableFromPhase(cur.Phase) {
+		_, nextPending := oauth.XPendingSource(next.BroadcastID)
+		if nextPending || (next.BroadcastID == cur.BroadcastID && !endableFromPhase(next.Phase) &&
+			(next.Phase == "" || strings.EqualFold(next.Phase, phaseCreated))) {
+			return
+		}
+	}
+	next.destinationID = d.ID
+	c.tracked[d.ID] = next
+}
+
+// forgetTarget drops the tracked target of one destination and nothing else, for a broadcast that is over.
+func (c *lifecycleCoordinator) forgetTarget(id int64) {
+	c.mu.Lock()
+	delete(c.tracked, id)
+	c.mu.Unlock()
+}
+
+// resetXPendingLifecycle forgets the pending state (a source that may no longer exist, a go-live stamp, a stale fault)
+// of an account's X destinations, so a reconnect or a stream-key refresh starts them again. A destination with a real
+// broadcast is left alone. It returns how many were reset.
+func resetXPendingLifecycle(store interface {
+	ListDestinations() ([]*db.Destination, error)
+	UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error)
+}, accountID int64) int {
+	rows, err := store.ListDestinations()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, d := range rows {
+		if d == nil || d.Platform != db.PlatformX || d.AccountID == nil || *d.AccountID != accountID ||
+			d.Lifecycle.BroadcastID != "" || (d.Lifecycle.PendingSource == "" && d.Lifecycle.Fault == "" && d.Lifecycle.Attempts == 0) {
+			continue
+		}
+		_, err := store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
+			if cur.Lifecycle.BroadcastID != "" {
+				return false
+			}
+			renewed := cur.Lifecycle.Renewed
+			cur.Lifecycle = db.BroadcastControl{Renewed: renewed}
+			return true
+		})
+		if err == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // lifecycleBroadcastID is the id the coordinator works with for d: the recorded broadcast, or, for an X destination
@@ -788,7 +844,7 @@ func lifecycleBroadcastID(d *db.Destination) string {
 		return id
 	}
 	if src := strings.TrimSpace(d.Lifecycle.PendingSource); src != "" && d.Platform == db.PlatformX {
-		return oauth.XPendingHandle(src)
+		return oauth.XPendingHandle(src, d.Lifecycle.GoLiveAttemptMS)
 	}
 	return ""
 }
@@ -796,11 +852,20 @@ func lifecycleBroadcastID(d *db.Destination) string {
 // setLifecycleBroadcastID records id in b. A pending handle is stored as its source (PendingSource) with
 // BroadcastID empty, so the API, the console and the disconnect check see no broadcast until one exists.
 func setLifecycleBroadcastID(b *db.BroadcastControl, id string) {
-	if src, ok := oauth.XPendingSource(id); ok {
-		b.BroadcastID, b.PendingSource = "", src
+	if src, attempt, ok := oauth.XPendingParts(id); ok {
+		b.BroadcastID, b.PendingSource, b.GoLiveAttemptMS = "", src, attempt
 		return
 	}
-	b.BroadcastID, b.PendingSource = id, ""
+	b.BroadcastID, b.PendingSource, b.GoLiveAttemptMS = id, "", 0
+}
+
+// bcAttr is the log attribute for a broadcast id. A pending handle is logged as pending_source=<id> with no broadcast
+// key at all, so a log line never shows an id that does not exist on X.
+func bcAttr(id string) slog.Attr {
+	if src, ok := oauth.XPendingSource(id); ok {
+		return slog.String("pending_source", src)
+	}
+	return slog.String("broadcast", id)
 }
 
 // publicBroadcastID is id for anything an operator or another system sees: empty for a pending handle.
@@ -985,6 +1050,18 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	defer cancel()
 
 	st, err := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
+	if err != nil && errors.Is(err, oauth.ErrXSourceGone) {
+		// THE SOURCE IS GONE FROM X, SO NOTHING CAN EVER GO LIVE ON IT. Forget it, and its go-live stamp, so the next
+		// sweep opens the destination again instead of asking about a dead id for ever; keep the fault visible and
+		// raised until an open succeeds (open() clears it). Opening needs a source that holds this destination's
+		// stream key, which the account reconnect and the stream-key refresh provide.
+		why := err.Error()
+		c.recordControl(d, "", func(b *db.BroadcastControl) { b.Phase, b.Attempts, b.Fault = "", 0, why })
+		c.forgetTarget(d.ID)
+		c.log.Warn("broadcast lifecycle: "+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+		c.raise(d, "", why)
+		return
+	}
 	if err != nil {
 		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
 			"%s would not say what state %s is in: %v", d.Platform, describeBroadcast(broadcastID), err), err)
@@ -994,7 +1071,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 		// The handle stood for a broadcast that is already on air: a go-live whose answer was lost, or whose id
 		// could not be recorded. Adopt the real one, and track it as what it is so a deleted row still ends it.
 		c.log.Info("broadcast lifecycle: adopted the live X broadcast behind a pending destination",
-			"destination", d.Name, "broadcast", st.BroadcastID, "state", st.Status)
+			"destination", d.Name, bcAttr(st.BroadcastID), "state", st.Status)
 		broadcastID = st.BroadcastID
 		c.trackAs(d, broadcastID, xLifecyclePhase(st.Status))
 	}
@@ -1052,7 +1129,7 @@ func (c *lifecycleCoordinator) settleUnsent(d *db.Destination, broadcastID strin
 	})
 	if plan.Wait != "" {
 		c.log.Debug("broadcast lifecycle: waiting", "destination", d.Name,
-			"broadcast", broadcastID, "phase", plan.Phase, "why", plan.Wait)
+			bcAttr(broadcastID), "phase", plan.Phase, "why", plan.Wait)
 	}
 }
 
@@ -1151,8 +1228,9 @@ func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.Broadcas
 	if cur == nil {
 		return
 	}
-	// The finished broadcast is no longer where chat goes.
+	// The finished broadcast is no longer where chat goes, and no longer a target to end if the row is deleted.
 	c.tellChat(d.Platform, d.AccountID, "")
+	c.forgetTarget(d.ID)
 	c.log.Info("broadcast lifecycle: the recorded broadcast has finished and the destination is still on air; opening the next one",
 		"destination", d.Name, "platform", d.Platform)
 	c.open(ctx, cur, creator)
@@ -1193,7 +1271,7 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 		b.Phase, b.Attempts, b.Fault = phaseCreated, 0, ""
 	})
 	c.log.Info("broadcast lifecycle: opened this destination, nothing is public until it goes live",
-		"destination", d.Name, "platform", d.Platform, "broadcast", id)
+		"destination", d.Name, "platform", d.Platform, bcAttr(id))
 }
 
 // scrubSourceKey makes a platform error safe for the fault, the log, the escalation and
@@ -1213,9 +1291,26 @@ func scrubSourceKey(detail, key string) string {
 // oauth.PhaseComplete at all.
 func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.BroadcastLifecycler,
 	acct *db.PlatformAccount, d *db.Destination, broadcastID string, plan lifecyclePlan) {
-	res, err := c.transition(ctx, prov, acct, d, broadcastID, plan.Send)
+	// STAMP THE GO-LIVE ATTEMPT BEFORE IT IS SENT. If the answer is lost, the stamp is what lets a later read adopt
+	// the broadcast this attempt made, and only that one: X's created_at_ms is compared with it. The write is best
+	// effort -- without it nothing is adopted later, which fails safe.
+	sendID := broadcastID
+	if plan.Send == oauth.PhaseLive && d.Platform == db.PlatformX {
+		if src, attempt, ok := oauth.XPendingParts(broadcastID); ok && attempt == 0 {
+			sendID = oauth.XPendingHandle(src, time.Now().UnixMilli())
+			c.recordControl(d, sendID, func(*db.BroadcastControl) {})
+		}
+	}
+	res, err := c.transition(ctx, prov, acct, d, sendID, plan.Send)
 	if err != nil {
-		c.handleRefusal(d, broadcastID, plan.Send, err)
+		// A DEFINITE REFUSAL created nothing, so it is recorded under the id without the stamp, which clears it. Any
+		// other failure (a timeout, a 5xx) might have created a broadcast, so the stamp is kept.
+		var refused *oauth.TransitionRefused
+		if errors.As(err, &refused) {
+			c.handleRefusal(d, broadcastID, plan.Send, err)
+		} else {
+			c.handleRefusal(d, sendID, plan.Send, err)
+		}
 		return
 	}
 	// A go-live can answer with a different id than the one it was asked about: X creates the broadcast at go-live,
@@ -1241,10 +1336,10 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	}) == nil {
 		c.log.Warn("broadcast lifecycle: the broadcast moved but its state could not be recorded; it stays tracked "+
 			"so it is still ended if the destination is switched off or deleted",
-			"destination", d.Name, "platform", d.Platform, "broadcast", broadcastID, "to", plan.Send)
+			"destination", d.Name, "platform", d.Platform, bcAttr(broadcastID), "to", plan.Send)
 	}
 	c.log.Info("moved a broadcast on", "destination", d.Name, "platform", d.Platform,
-		"broadcast", broadcastID, "to", plan.Send, "redundant", res.Redundant)
+		bcAttr(broadcastID), "to", plan.Send, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
 		BroadcastID: publicBroadcastID(broadcastID), Phase: recordedPhase(res.Status, plan.Phase), Redundant: res.Redundant,
@@ -1306,7 +1401,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 	case errors.Is(err, db.ErrLifecycleSkipped):
 		c.log.Info("broadcast lifecycle: the destination was re-enabled while its broadcast's "+
 			"state was being read, so nothing was ended",
-			"destination", d.Name, "broadcast", broadcastID)
+			"destination", d.Name, bcAttr(broadcastID))
 		return
 	case errors.Is(err, db.ErrNotFound):
 		// Deleted underneath us. The absent-row pass picks it up next sweep with
@@ -1329,7 +1424,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 	})
 	c.tellChat(d.Platform, d.AccountID, "")
 	c.log.Info("ended a broadcast", "destination", d.Name, "platform", d.Platform,
-		"broadcast", broadcastID, "redundant", res.Redundant)
+		bcAttr(broadcastID), "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
 		BroadcastID: publicBroadcastID(broadcastID), Phase: recordedPhase(res.Status, phaseComplete), Ended: true,
@@ -1374,7 +1469,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		c.log.Info("broadcast lifecycle: a deleted destination's broadcast was never "+
 			"confirmed on air by this process, so it was left alone rather than ended",
 			"destination", t.Name, "platform", t.Platform,
-			"broadcast", t.BroadcastID, "phase", firstNonBlank(t.Phase, "(none)"))
+			bcAttr(t.BroadcastID), "phase", firstNonBlank(t.Phase, "(none)"))
 		return
 	}
 
@@ -1392,14 +1487,14 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		if err != nil {
 			c.log.Warn("broadcast lifecycle: could not confirm a destination was deleted, "+
 				"so its broadcast is left alone",
-				"destination", t.Name, "broadcast", t.BroadcastID, "err", err)
+				"destination", t.Name, bcAttr(t.BroadcastID), "err", err)
 			return
 		}
 		// The row is there after all. The listing was incomplete, not the
 		// world -- which is exactly the case this check exists for.
 		c.log.Warn("broadcast lifecycle: a destination was missing from the listing but "+
 			"still exists, so its broadcast was NOT ended",
-			"destination", t.Name, "broadcast", t.BroadcastID)
+			"destination", t.Name, bcAttr(t.BroadcastID))
 		return
 	}
 	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {
@@ -1407,7 +1502,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		c.log.Warn("broadcast lifecycle: giving up on ending a deleted destination's broadcast; "+
 			"end it in the platform's own console, or let the platform's automatic stop close it "+
 			"when the ingest goes quiet",
-			"destination", t.Name, "platform", t.Platform, "broadcast", t.BroadcastID)
+			"destination", t.Name, "platform", t.Platform, bcAttr(t.BroadcastID))
 		return
 	}
 
@@ -1446,7 +1541,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	}
 	c.tellChat(t.Platform, &t.AccountID, "")
 	c.log.Info("ended the broadcast of a deleted destination",
-		"destination", t.Name, "platform", t.Platform, "broadcast", t.BroadcastID)
+		"destination", t.Name, "platform", t.Platform, bcAttr(t.BroadcastID))
 	c.untrack(t.destinationID)
 	c.tell(broadcastPhase{
 		DestinationID: t.destinationID, SourceID: t.SourceID, Destination: t.Name,
@@ -1695,6 +1790,16 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 			"could not move %s to %q: %v", describeBroadcast(broadcastID), to, err), err)
 		return
 	}
+	if ref.Refusal == oauth.RefusalMissingScopes {
+		why := fmt.Sprintf("X refused to take the stream source live because the connected account's token lacks "+
+			"a permission (%v). Reconnect the X account in polyemesis so it is granted broadcast.read and "+
+			"broadcast.write. polyemesis will not try again until the destination is switched off and on.", ref.Unwrap())
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+			b.Attempts, b.Fault = lifecycleGiveUpAfter, why
+		})
+		c.raise(d, broadcastID, why)
+		return
+	}
 	if ref.Refusal == oauth.RefusalNotEligible {
 		// TERMINAL. X will answer the same 403 on every try, so it is recorded at the give-up count, which stops
 		// the calls, and raised once. An UP edge, or switching the destination off and on, releases it.
@@ -1716,7 +1821,7 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 			b.Attempts, b.Fault = 0, ""
 		})
 		c.log.Debug("broadcast lifecycle: no data at the platform's ingest yet",
-			"destination", d.Name, "broadcast", broadcastID)
+			"destination", d.Name, bcAttr(broadcastID))
 		return
 	}
 	c.noteFailure(d, broadcastID, refusalMessage(ref, broadcastID))
@@ -1776,14 +1881,14 @@ func (c *lifecycleCoordinator) noteFailure(d *db.Destination, broadcastID, detai
 	}
 	if n == 1 {
 		c.log.Warn("broadcast lifecycle: "+detail, "destination", d.Name,
-			"platform", d.Platform, "broadcast", broadcastID)
+			"platform", d.Platform, bcAttr(broadcastID))
 		c.raise(d, broadcastID, detail)
 		return
 	}
 	if n == lifecycleGiveUpAfter {
 		c.log.Warn("broadcast lifecycle: giving up for now; the stream is unaffected and is "+
 			"still being delivered",
-			"destination", d.Name, "broadcast", broadcastID,
+			"destination", d.Name, bcAttr(broadcastID),
 			"consecutiveSweeps", n, "fault", detail)
 	}
 }
@@ -1811,7 +1916,7 @@ func (c *lifecycleCoordinator) noteFailureUnlessPaused(d *db.Destination, broadc
 	if until, ok := oauth.XRateLimited(err); ok {
 		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.Fault = detail })
 		c.log.Debug("broadcast lifecycle: the platform asked for a pause", "destination", d.Name,
-			"broadcast", broadcastID, "until", until)
+			bcAttr(broadcastID), "until", until)
 		return
 	}
 	c.noteFailure(d, broadcastID, detail)
@@ -1825,7 +1930,7 @@ func (c *lifecycleCoordinator) noteOrphanFailure(t lifecycleTarget, err error) {
 	if n == 1 {
 		c.log.Warn("broadcast lifecycle: could not end a deleted destination's broadcast; "+
 			"retrying",
-			"destination", t.Name, "broadcast", t.BroadcastID, "err", err)
+			"destination", t.Name, bcAttr(t.BroadcastID), "err", err)
 	}
 }
 
@@ -1891,7 +1996,7 @@ func (c *lifecycleCoordinator) forgetPlatformSwitch(d *db.Destination) {
 		"broadcasts can be commanded, so its recorded broadcast state has been cleared. If the "+
 		"broadcast named here is still live, end it in that platform's own console",
 		"destination", d.Name, "platform", d.Platform,
-		"broadcast", d.Lifecycle.BroadcastID, "phase", d.Lifecycle.Phase)
+		bcAttr(d.Lifecycle.BroadcastID), "phase", d.Lifecycle.Phase)
 	c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
 }
 
