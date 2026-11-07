@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "メッセージを削除",
   "chatMenu.reply": "返信",
   "chatMenu.replyTitle": "このメッセージにスレッド返信する",
-  "chatMenu.replyUnsupported": "{platform} の API にはスレッド返信がないため、polyemesis は通常のメッセージしか投稿できません",
+  "chatMenu.replyUnsupported": "polyemesis は現在 {platform} へのスレッド返信を送信できないため、通常のメッセージのみ投稿できます",
   "chatCard.actionApplied": "{action}：完了",
   "chatCard.actionFailed": "{action}：失敗",
   "chatCard.nothingToHideFailed": "履歴を読み込めなかったため、ここで非表示にできるものはありません。",

@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Elimina messaggio",
   "chatMenu.reply": "Rispondi",
   "chatMenu.replyTitle": "Rispondi a questo messaggio come risposta collegata",
-  "chatMenu.replyUnsupported": "{platform} non offre risposte collegate nella sua API, quindi polyemesis può pubblicare lì solo un messaggio normale",
+  "chatMenu.replyUnsupported": "polyemesis non può ancora inviare risposte collegate su {platform}, quindi lì si può pubblicare solo un messaggio normale",
   "chatCard.actionApplied": "{action}: fatto",
   "chatCard.actionFailed": "{action}: non riuscito",
   "chatCard.nothingToHideFailed": "Non è stato possibile leggere la cronologia, quindi qui non c'è nulla da nascondere.",

@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Usuń wiadomość",
   "chatMenu.reply": "Odpowiedz",
   "chatMenu.replyTitle": "Odpowiedz na tę wiadomość jako powiązaną odpowiedź",
-  "chatMenu.replyUnsupported": "{platform} nie ma w API powiązanych odpowiedzi, więc polyemesis może tam wysłać tylko zwykłą wiadomość",
+  "chatMenu.replyUnsupported": "polyemesis nie potrafi jeszcze wysyłać powiązanych odpowiedzi na {platform}, więc można tam opublikować tylko zwykłą wiadomość",
   "chatCard.actionApplied": "{action}: gotowe",
   "chatCard.actionFailed": "{action}: nie powiodło się",
   "chatCard.nothingToHideFailed": "Nie udało się odczytać historii, więc nie ma tu czego ukryć.",

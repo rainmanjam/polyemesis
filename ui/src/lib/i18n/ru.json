@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Удалить сообщение",
   "chatMenu.reply": "Ответить",
   "chatMenu.replyTitle": "Ответить на это сообщение как на связанный ответ",
-  "chatMenu.replyUnsupported": "В API {platform} нет связанных ответов, поэтому polyemesis может отправить там только обычное сообщение",
+  "chatMenu.replyUnsupported": "polyemesis пока не может отправлять связанные ответы на {platform}, поэтому там можно опубликовать только обычное сообщение",
   "chatCard.actionApplied": "{action}: готово",
   "chatCard.actionFailed": "{action}: ошибка",
   "chatCard.nothingToHideFailed": "Историю не удалось прочитать, поэтому скрывать здесь нечего.",

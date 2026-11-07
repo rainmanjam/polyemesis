@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Eliminar mensaje",
   "chatMenu.reply": "Responder",
   "chatMenu.replyTitle": "Responder a este mensaje como respuesta enlazada",
-  "chatMenu.replyUnsupported": "{platform} no ofrece respuestas enlazadas en su API, así que polyemesis solo puede publicar un mensaje normal allí",
+  "chatMenu.replyUnsupported": "polyemesis aún no puede enviar respuestas enlazadas en {platform}, así que allí solo se puede publicar un mensaje normal",
   "chatCard.actionApplied": "{action}: hecho",
   "chatCard.actionFailed": "{action}: falló",
   "chatCard.nothingToHideFailed": "No se pudo leer el historial, así que aquí no hay nada que ocultar.",

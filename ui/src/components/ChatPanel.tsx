@@ -515,11 +515,15 @@ export function ChatComposer({
   /** The message being answered. While set, Send goes to that one platform as
    *  a threaded reply instead of fanning out. */
   replyTo?: ChatMessage | null;
-  onCancelReply?: () => void;
+  /** Called with the id that was sent, so a send finishing late clears only
+   *  its own target; with no id (the cancel button) it clears unconditionally. */
+  onCancelReply?: (id?: string) => void;
 }>) {
   const t = useT();
   const [text, setText] = useState("");
   const [asBot, setAsBot] = useState(false);
+  // "Send as bot" belongs to one reply. A new target, or none, starts unticked.
+  useEffect(() => setAsBot(false), [replyTo?.id]);
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<ChatSendResult[] | null>(null);
   // The text of a send that only SOME platforms took. The box is cleared --
@@ -527,7 +531,9 @@ export function ChatComposer({
   // is kept here so it can be put back and re-sent where it failed.
   const [unsent, setUnsent] = useState("");
 
-  const senders = statuses.filter((s) => s.canSend);
+  const allSenders = statuses.filter((s) => s.canSend);
+  // A reply goes to the one platform it answers, so only that platform's limit applies.
+  const senders = replyTo ? allSenders.filter((s) => s.platform === replyTo.platform) : allSenders;
   // The strictest published limit among the platforms that will actually
   // receive this. Advisory only: over it the counter turns amber and the send
   // button still works, because the platform is the authority on its own rules
@@ -551,6 +557,7 @@ export function ChatComposer({
   const send = async () => {
     const body = text.trim();
     if (!body || sending) return;
+    const target = replyTo;
     setSending(true);
     // A stale offer must not overwrite the next draft with an older message.
     setUnsent("");
@@ -571,7 +578,7 @@ export function ChatComposer({
       // operator's next message, not this one.
       if (res.sent > 0) {
         setText((cur) => (cur.trim() === body ? "" : cur));
-        if (replyTo) onCancelReply?.();
+        if (target) onCancelReply?.(target.id);
       }
       setUnsent(!replyTo && res.sent > 0 && res.failed > 0 ? body : "");
       if (res.failed > 0) {
@@ -671,7 +678,11 @@ export function ChatComposer({
                 })
           }
           className="min-h-0 resize-none text-[12px]"
-          aria-label={t("chatpage.composerAria")}
+          aria-label={
+            replyTo
+              ? t("chatpage.replyPlaceholder", { name: replyTo.author.name })
+              : t("chatpage.composerAria")
+          }
         />
         {senders.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("chatpage.noSender")}</p>
@@ -1075,7 +1086,7 @@ export function ChatPanel({
           configured={configured}
           compact
           replyTo={replyTo}
-          onCancelReply={() => setReplyTo(null)}
+          onCancelReply={(id) => setReplyTo((cur) => (id === undefined || cur?.id === id ? null : cur))}
         />
       )}
     </div>

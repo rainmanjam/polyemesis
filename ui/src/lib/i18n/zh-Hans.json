@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "删除消息",
   "chatMenu.reply": "回复",
   "chatMenu.replyTitle": "以串联回复的方式回复此消息",
-  "chatMenu.replyUnsupported": "{platform} 的 API 不支持串联回复，polyemesis 在那里只能发送普通消息",
+  "chatMenu.replyUnsupported": "polyemesis 目前无法在 {platform} 上发送串联回复，只能在那里发送普通消息",
   "chatCard.actionApplied": "{action}：完成",
   "chatCard.actionFailed": "{action}：失败",
   "chatCard.nothingToHideFailed": "无法读取历史记录，因此这里没有可隐藏的内容。",

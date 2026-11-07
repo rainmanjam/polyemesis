@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Bericht verwijderen",
   "chatMenu.reply": "Beantwoorden",
   "chatMenu.replyTitle": "Beantwoord dit bericht als gekoppeld antwoord",
-  "chatMenu.replyUnsupported": "{platform} heeft geen gekoppelde antwoorden in de API, dus polyemesis kan daar alleen een gewoon bericht plaatsen",
+  "chatMenu.replyUnsupported": "polyemesis kan op {platform} nog geen gekoppelde antwoorden sturen, dus daar kan alleen een gewoon bericht worden geplaatst",
   "chatCard.actionApplied": "{action}: gedaan",
   "chatCard.actionFailed": "{action}: mislukt",
   "chatCard.nothingToHideFailed": "De geschiedenis kon niet worden gelezen, dus hier valt niets te verbergen.",

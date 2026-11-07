@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Supprimer le message",
   "chatMenu.reply": "Répondre",
   "chatMenu.replyTitle": "Répondre à ce message sous forme de réponse liée",
-  "chatMenu.replyUnsupported": "{platform} ne propose pas de réponses liées dans son API ; polyemesis ne peut y publier qu'un message normal",
+  "chatMenu.replyUnsupported": "polyemesis ne peut pas encore envoyer de réponses liées sur {platform} ; on n'y publie qu'un message normal",
   "chatCard.actionApplied": "{action} : effectué",
   "chatCard.actionFailed": "{action} : échec",
   "chatCard.nothingToHideFailed": "L'historique n'a pas pu être lu, il n'y a donc rien à masquer ici.",

@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Delete message",
   "chatMenu.reply": "Reply",
   "chatMenu.replyTitle": "Answer this message as a threaded reply",
-  "chatMenu.replyUnsupported": "{platform} has no threaded replies in its API, so polyemesis can only post a normal message there",
+  "chatMenu.replyUnsupported": "polyemesis cannot send threaded replies on {platform} yet, so only a normal message can be posted there",
   "chatCard.actionApplied": "{action} applied",
   "chatCard.actionFailed": "{action} failed",
   "chatCard.nothingToHideFailed": "The scrollback could not be read, so there is nothing here to hide.",

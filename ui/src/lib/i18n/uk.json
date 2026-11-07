@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Вилучити повідомлення",
   "chatMenu.reply": "Відповісти",
   "chatMenu.replyTitle": "Відповісти на це повідомлення як на пов'язану відповідь",
-  "chatMenu.replyUnsupported": "В API {platform} немає пов'язаних відповідей, тому polyemesis може надіслати там лише звичайне повідомлення",
+  "chatMenu.replyUnsupported": "polyemesis поки не може надсилати пов'язані відповіді на {platform}, тож там можна опублікувати лише звичайне повідомлення",
   "chatCard.actionApplied": "{action}: готово",
   "chatCard.actionFailed": "{action}: помилка",
   "chatCard.nothingToHideFailed": "Історію не вдалося прочитати, тож ховати тут нічого.",

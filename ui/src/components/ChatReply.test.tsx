@@ -95,8 +95,8 @@ describe("the composer while replying", () => {
         onCancelReply={onCancel}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/message/i), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByLabelText(/message/i), { key: "Enter", keyCode: 13 });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
     await waitFor(() => expect(replyChat).toHaveBeenCalled());
     expect(replyChat).toHaveBeenCalledWith(
       { platform: "kick", account: "acct", id: "m1" },
@@ -112,8 +112,8 @@ describe("the composer while replying", () => {
       <ChatComposer statuses={statuses} limits={[]} configured replyTo={msg("kick")} />,
     );
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(screen.getByLabelText(/message/i), { target: { value: "beep" } });
-    fireEvent.keyDown(screen.getByLabelText(/message/i), { key: "Enter", keyCode: 13 });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "beep" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
     await waitFor(() => expect(replyChat).toHaveBeenCalled());
     expect(replyChat.mock.calls[0][2]).toBe(true);
   });
@@ -135,8 +135,8 @@ describe("the composer while replying", () => {
         onCancelReply={onCancel}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/message/i), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByLabelText(/message/i), { key: "Enter", keyCode: 13 });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
     await waitFor(() => expect(replyChat).toHaveBeenCalled());
     expect(onCancel).not.toHaveBeenCalled();
   });
@@ -154,5 +154,52 @@ describe("the composer while replying", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /cancel reply/i }));
     expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe("reply state", () => {
+  it("does not carry Send as bot into the next reply", async () => {
+    const { rerender } = render(
+      <ChatComposer statuses={statuses} limits={[]} configured replyTo={msg("kick")} />,
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "one" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
+    await waitFor(() => expect(replyChat).toHaveBeenCalledTimes(1));
+    expect(replyChat.mock.calls[0][2]).toBe(true);
+
+    rerender(
+      <ChatComposer
+        statuses={statuses}
+        limits={[]}
+        configured
+        replyTo={{ ...msg("kick"), id: "m2" }}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "two" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
+    await waitFor(() => expect(replyChat).toHaveBeenCalledTimes(2));
+    expect(replyChat.mock.calls[1][2]).toBe(false);
+  });
+
+  it("hands back the id it sent so a late finish cannot drop a newer target", async () => {
+    const onCancel = vi.fn();
+    render(
+      <ChatComposer
+        statuses={statuses}
+        limits={[]}
+        configured
+        replyTo={msg("kick")}
+        onCancelReply={onCancel}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 });
+    await waitFor(() => expect(onCancel).toHaveBeenCalledWith("m1"));
+  });
+
+  it("labels the box as a reply, not a fan-out", () => {
+    render(<ChatComposer statuses={statuses} limits={[]} configured replyTo={msg("kick")} />);
+    expect(screen.getByRole("textbox").getAttribute("aria-label")).toBe("Reply to viewer");
   });
 });

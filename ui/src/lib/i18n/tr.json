@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Mesajı sil",
   "chatMenu.reply": "Yanıtla",
   "chatMenu.replyTitle": "Bu mesaja bağlı yanıt olarak cevap ver",
-  "chatMenu.replyUnsupported": "{platform} API'sinde bağlı yanıt yok, bu yüzden polyemesis orada yalnızca normal mesaj gönderebilir",
+  "chatMenu.replyUnsupported": "polyemesis henüz {platform} üzerinde bağlı yanıt gönderemiyor, bu yüzden orada yalnızca normal mesaj gönderilebilir",
   "chatCard.actionApplied": "{action}: tamam",
   "chatCard.actionFailed": "{action}: başarısız",
   "chatCard.nothingToHideFailed": "Geçmiş okunamadı, bu yüzden burada gizlenecek bir şey yok.",

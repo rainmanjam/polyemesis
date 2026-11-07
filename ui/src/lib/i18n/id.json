@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Hapus pesan",
   "chatMenu.reply": "Balas",
   "chatMenu.replyTitle": "Jawab pesan ini sebagai balasan berutas",
-  "chatMenu.replyUnsupported": "{platform} tidak punya balasan berutas di API-nya, jadi polyemesis hanya bisa mengirim pesan biasa di sana",
+  "chatMenu.replyUnsupported": "polyemesis belum bisa mengirim balasan berutas di {platform}, jadi hanya pesan biasa yang bisa diposting di sana",
   "chatCard.actionApplied": "{action}: selesai",
   "chatCard.actionFailed": "{action}: gagal",
   "chatCard.nothingToHideFailed": "Riwayat tidak dapat dibaca, jadi tidak ada yang bisa disembunyikan di sini.",

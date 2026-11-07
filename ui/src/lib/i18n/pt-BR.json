@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Excluir mensagem",
   "chatMenu.reply": "Responder",
   "chatMenu.replyTitle": "Responder a esta mensagem como resposta encadeada",
-  "chatMenu.replyUnsupported": "{platform} não tem respostas encadeadas na API, então o polyemesis só pode publicar uma mensagem normal lá",
+  "chatMenu.replyUnsupported": "o polyemesis ainda não consegue enviar respostas encadeadas em {platform}, então só dá para publicar uma mensagem normal lá",
   "chatCard.actionApplied": "{action}: feito",
   "chatCard.actionFailed": "{action}: falhou",
   "chatCard.nothingToHideFailed": "Não foi possível ler o histórico, então não há nada aqui para ocultar.",

@@ -2617,7 +2617,7 @@
   "chatMenu.deleteMessage": "Nachricht löschen",
   "chatMenu.reply": "Antworten",
   "chatMenu.replyTitle": "Diese Nachricht als verknüpfte Antwort beantworten",
-  "chatMenu.replyUnsupported": "{platform} bietet in seiner API keine verknüpften Antworten, polyemesis kann dort nur eine normale Nachricht senden",
+  "chatMenu.replyUnsupported": "polyemesis kann auf {platform} noch keine verknüpften Antworten senden, dort lässt sich nur eine normale Nachricht posten",
   "chatCard.actionApplied": "{action}: erledigt",
   "chatCard.actionFailed": "{action}: fehlgeschlagen",
   "chatCard.nothingToHideFailed": "Der Verlauf konnte nicht gelesen werden, daher gibt es hier nichts zu verbergen.",
