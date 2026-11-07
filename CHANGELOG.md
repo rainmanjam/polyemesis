@@ -62,6 +62,12 @@ its first tagged release.
   alone. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled from X's
   documentation and has not been confirmed against a live account.
 
+- **The console Dashboard crashed as soon as an X account was connected.** X writes no metadata fields,
+  and its capabilities carried a nil list that the API served as `"fields": null`; the Dashboard then
+  called `.includes` on it ("Cannot read properties of null"). `MetadataCaps` now always serialises
+  `fields` as an array for every provider (enforced on the type, with a test over every registered
+  provider), X reports an explicit empty list, and the Dashboard's field filters tolerate a null list.
+
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
   could take quadratic time on a hostile paste (endpoint and ingest URLs, timecodes, stream-health values,
