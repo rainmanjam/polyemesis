@@ -3984,8 +3984,8 @@
   "credLabels.tiktok.idWhere": "Nel portale sviluppatori di TikTok apri la tua app e copia la Client key dalla pagina dei dettagli.",
   "credLabels.tiktok.secretWhere": "Nella stessa pagina dei dettagli mostra e copia il Client secret.",
   "publish.ackOutcome": "Ho controllato {platform} e il post non c'è.",
-  "chatpage.countViewers": "{n} spettatori",
-  "chatpage.countFollowers": "{n} follower",
-  "chatpage.countSubscribers": "{n} abbonati",
+  "chatpage.countViewers": "Spettatori: {n}",
+  "chatpage.countFollowers": "Follower: {n}",
+  "chatpage.countSubscribers": "Abbonati: {n}",
   "caps.rumble.viewerStats": "Realizzato ma non ancora verificato con un account in diretta. Il numero di spettatori (watching_now), follower e abbonati arriva con la stessa richiesta get-data della chat e compare accanto allo stato della chat di Rumble e nelle analisi. Rumble non ha un accesso, quindi non è la rotta delle statistiche per account; la cella resta «Non verificato» finché una diretta non la conferma. La chat è limitata agli ultimi 50 messaggi per richiesta; se una chat molto attiva la supera, lo stato avvisa che alcuni messaggi potrebbero essere andati persi."
 }

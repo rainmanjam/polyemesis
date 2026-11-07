@@ -93,3 +93,30 @@ func TestRumbleKeyIsInTheDebugAndMCPRedactionSets(t *testing.T) {
 		t.Error("mcpSecrets does not hold the Rumble key")
 	}
 }
+
+// The variable may hold the whole get-data URL; the bare key inside it is what
+// goes over the wire, so it has to be redacted on its own.
+func TestRumbleKeyFromAPastedURLIsRedactedBareAndWhole(t *testing.T) {
+	key := strings.Repeat("rumblekey", 3)
+	raw := "https://rumble.com/-livestream-api/get-data?key=" + key
+	s, _, _ := testServerWith(t, Options{Env: startupenv.Env{RumbleChatKey: raw}})
+	lits, err := s.diagSecretLiterals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(set []string, want string) bool {
+		for _, v := range set {
+			if v == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(lits, key) || !has(lits, raw) {
+		t.Errorf("diagSecretLiterals missing the bare key or the pasted URL: %v", lits)
+	}
+	m := s.mcpSecrets()
+	if !has(m, key) || !has(m, raw) {
+		t.Errorf("mcpSecrets missing the bare key or the pasted URL: %v", m)
+	}
+}

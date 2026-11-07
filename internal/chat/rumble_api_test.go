@@ -74,10 +74,10 @@ func TestRumbleFlagsAFullPollWithNoOverlap(t *testing.T) {
 	if h.State != StateLive || h.Detail != rumbleDropNote {
 		t.Errorf("health = %+v, want live with the dropped-messages note", h)
 	}
-	for _, w := range waits {
-		if w != rumbleMinPoll {
-			t.Errorf("wait = %v, want the %v floor while the response is full", w, rumbleMinPoll)
-		}
+	// The first poll has nothing to compare with, so only later waits are
+	// judged: there every entry was new and older ones were cut.
+	if len(waits) < 2 || waits[1] != rumbleMinPoll {
+		t.Errorf("waits = %v, want the %v floor on the poll after a full, all-new response", waits, rumbleMinPoll)
 	}
 }
 
@@ -169,5 +169,33 @@ func TestRumbleTransportErrorCarriesNoKey(t *testing.T) {
 	}
 	if strings.Contains(a.Health().Detail, "test-api-key-abc123") {
 		t.Errorf("health leaks the key: %q", a.Health().Detail)
+	}
+}
+
+// Once a chat holds a full snapshot every poll returns 50 entries. A quiet
+// chat must not be read as saturated just because the snapshot is full.
+func TestRumbleQuietFullChatIsNotPolledAtTheFloor(t *testing.T) {
+	s := rumbleOK(t, rumbleBody(50, 0, ""))
+	a := rumbleAdapter(t, s.URL, nil)
+	var waits []time.Duration
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.cfg.Sleep = func(_ context.Context, d time.Duration) bool {
+		waits = append(waits, d)
+		if len(waits) >= 3 {
+			cancel()
+			return false
+		}
+		return true
+	}
+	_ = a.Run(ctx, SinkFunc(func(Message) {}))
+	if len(waits) < 3 {
+		t.Fatalf("waits = %v, want 3", waits)
+	}
+	// Poll 1 is the first sight (messages delivered); polls 2 and 3 add nothing.
+	for _, w := range waits[1:] {
+		if w == rumbleMinPoll {
+			t.Errorf("waits = %v: an unchanged full snapshot was polled at the %v floor", waits, rumbleMinPoll)
+		}
 	}
 }

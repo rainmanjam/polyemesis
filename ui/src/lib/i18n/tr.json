@@ -3984,8 +3984,8 @@
   "credLabels.tiktok.idWhere": "TikTok geliştirici portalında uygulamanızı açın ve uygulama ayrıntıları sayfasından Client key değerini kopyalayın.",
   "credLabels.tiktok.secretWhere": "Aynı ayrıntılar sayfasında Client secret değerini gösterip kopyalayın.",
   "publish.ackOutcome": "{platform} hesabını kontrol ettim, gönderi orada yok.",
-  "chatpage.countViewers": "{n} izliyor",
-  "chatpage.countFollowers": "{n} takipçi",
-  "chatpage.countSubscribers": "{n} abone",
+  "chatpage.countViewers": "İzleyen: {n}",
+  "chatpage.countFollowers": "Takipçi: {n}",
+  "chatpage.countSubscribers": "Abone: {n}",
   "caps.rumble.viewerStats": "Geliştirildi ancak henüz canlı bir hesapta denenmedi. İzleyici sayısı (watching_now), takipçi ve abone sayısı sohbetle aynı get-data sorgusuyla gelir ve Rumble sohbet durumunun yanında ve analizlerde görünür. Rumble'da oturum açma yoktur, bu nedenle bu hesap bazlı istatistik yolu değildir; hücre, canlı bir yayın doğrulayana kadar “Doğrulanmadı” kalır. Sohbet, sorgu başına son 50 mesajla sınırlıdır; yoğun bir sohbet bunu aşarsa durum, bazı mesajların kaçmış olabileceğini belirtir."
 }

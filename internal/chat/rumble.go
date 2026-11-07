@@ -170,21 +170,27 @@ type RumbleAdapter struct {
 
 // NewRumble builds the adapter. A missing key is a named "not configured"
 // state rather than a crash, as everywhere else in this package.
+// RumbleKey reduces what an operator put in the key variable to the key that
+// goes over the wire. Rumble's article calls the whole get-data URL the
+// credential, so the variable may hold that URL; only its key parameter is
+// sent. Anything that redacts the credential must cover this value as well as
+// the raw one.
+func RumbleKey(raw string) string {
+	k := strings.TrimSpace(raw)
+	if strings.Contains(k, "://") {
+		if u, err := url.Parse(k); err == nil && u.Query().Get("key") != "" {
+			return u.Query().Get("key")
+		}
+	}
+	return k
+}
+
 func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 	if strings.TrimSpace(cfg.Key) == "" {
 		return nil, fmt.Errorf("rumble chat is not configured: no live-stream API key, so set %s "+
 			"to the key from rumble.com/account/livestream-api", RumbleChatKeyEnv)
 	}
-	cfg.Key = strings.TrimSpace(cfg.Key)
-	// Rumble's article calls the whole get-data URL the credential, so an
-	// operator may paste it into the variable. Keep only its key parameter:
-	// the URL would otherwise be sent as a key (a 403 that reads as a revoked
-	// key) and the scrub would be matching the wrong literal.
-	if strings.Contains(cfg.Key, "://") {
-		if u, err := url.Parse(cfg.Key); err == nil && u.Query().Get("key") != "" {
-			cfg.Key = u.Query().Get("key")
-		}
-	}
+	cfg.Key = RumbleKey(cfg.Key)
 	if cfg.APIBase == "" {
 		cfg.APIBase = RumbleAPIBase
 	}
@@ -339,6 +345,12 @@ type rumbleResponse struct {
 	MaxNumResults int `json:"max_num_results"`
 	// Followers and Subscribers are the channel counts, pointers so that "not
 	// sent" stays distinct from zero. The recent lists are not decoded.
+	//
+	// AMBIGUITY: the payload also carries num_followers_total, and Rumble's
+	// article does not say how the two differ. num_followers may be a recent or
+	// windowed figure, in which case it understates the channel. Only
+	// num_followers is decoded; confirm against the channel page on the first
+	// live-account check, and switch (or decode both) if it is the smaller.
 	Followers struct {
 		Count *int `json:"num_followers"`
 	} `json:"followers"`
@@ -367,20 +379,30 @@ func (e rumbleChatEntry) entryKey() string {
 // shares no entry with the previous batch (so what lay between is gone). It
 // returns the new batch's keys for the next comparison. A first poll has no
 // previous batch and so can never report a drop.
-func droppedSince(prev map[string]struct{}, ls rumbleLivestream, limit int) (bool, map[string]struct{}) {
+//
+// The second result is how many entries are new since the previous batch. That
+// is the measure of how fast chat is moving: the snapshot always holds up to
+// the cap once a chat is busy enough, and consecutive polls overlap almost
+// completely, so len(snapshot) says nothing about the arrival rate.
+func droppedSince(prev map[string]struct{}, ls rumbleLivestream, limit int) (dropped bool, fresh int, cur map[string]struct{}) {
 	n := len(ls.Chat.RecentMessages) + len(ls.Chat.RecentRants)
-	cur := make(map[string]struct{}, n)
+	cur = make(map[string]struct{}, n)
 	overlap := false
 	for _, list := range [][]rumbleChatEntry{ls.Chat.RecentMessages, ls.Chat.RecentRants} {
 		for _, e := range list {
 			k := e.entryKey()
+			if _, dup := cur[k]; dup {
+				continue
+			}
 			cur[k] = struct{}{}
 			if _, ok := prev[k]; ok {
 				overlap = true
+			} else {
+				fresh++
 			}
 		}
 	}
-	return len(prev) > 0 && n >= limit && !overlap, cur
+	return len(prev) > 0 && n >= limit && !overlap, fresh, cur
 }
 
 // ------------------------------------------------------------- the loop
@@ -434,12 +456,18 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		}
 
 		delivered := r.deliver(live, cutoff, sink)
-		dropped, cur := droppedSince(prev, live, resp.chatCap())
+		dropped, fresh, cur := droppedSince(prev, live, resp.chatCap())
+		hadPrev := len(prev) > 0
 		prev = cur
 		if dropped {
 			r.noteDrop()
 		}
-		saturated := len(cur) >= resp.chatCap()
+		// Saturated means chat is arriving about as fast as the snapshot can
+		// hold it, judged by entries NEW since the last poll. The snapshot's
+		// own size cannot be the test: once a chat has 50 lines every poll
+		// returns 50, so a quiet chat would be polled at the floor for the
+		// rest of the broadcast.
+		saturated := dropped || (hadPrev && fresh >= resp.chatCap()*3/4)
 		// The viewer count is read from the poll that just succeeded rather
 		// than fetched, which is the entire cost of this feature: one field off
 		// a response already in hand, no second request, no second credential.
@@ -450,8 +478,8 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		// requests that told us nothing.
 		switch {
 		case saturated:
-			// A full response means older messages are already being cut, so
-			// read as fast as the floor allows. The floor is the same
+			// Most of a full response is new, so older messages are being cut
+			// (or about to be): read as fast as the floor allows. The floor is the same
 			// conservative one no configuration can go under.
 			wait = rumbleMinPoll
 		case delivered == 0:

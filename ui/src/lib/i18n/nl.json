@@ -3984,8 +3984,8 @@
   "credLabels.tiktok.idWhere": "Open in het TikTok-ontwikkelaarsportaal je app en kopieer de Client key van de pagina met app-details.",
   "credLabels.tiktok.secretWhere": "Toon op dezelfde pagina met app-details het Client secret en kopieer het.",
   "publish.ackOutcome": "Ik heb {platform} gecontroleerd en de post staat er niet.",
-  "chatpage.countViewers": "{n} kijkers",
-  "chatpage.countFollowers": "{n} volgers",
-  "chatpage.countSubscribers": "{n} abonnees",
+  "chatpage.countViewers": "Kijkers: {n}",
+  "chatpage.countFollowers": "Volgers: {n}",
+  "chatpage.countSubscribers": "Abonnees: {n}",
   "caps.rumble.viewerStats": "Gebouwd maar nog niet gecontroleerd met een live account. Het aantal kijkers (watching_now), volgers en abonnees komt mee met dezelfde get-data-poll als de chat en verschijnt naast de Rumble-chatstatus en in de analyses. Rumble heeft geen aanmelding, dus dit is niet de statistiekroute per account; de cel blijft 'Niet geverifieerd' tot een live uitzending het bevestigt. De chat is beperkt tot de laatste 50 berichten per poll; als een drukke chat dat overschrijdt, meldt de status dat er berichten gemist kunnen zijn."
 }
