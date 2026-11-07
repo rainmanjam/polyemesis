@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "파일 이름",
   "addDest.fileHint": "녹화 디렉터리에 기록됩니다. 상대 이름만 가능하며 경로는 쓸 수 없습니다.",
   "addDest.perAccountUrl": "{platform}은(는) 인제스트 URL을 계정별 또는 방송별로 발급하므로 미리 채울 값이 없습니다. 대시보드에 있는 URL을 붙여 넣으세요.",
+  "addDest.xCreatesSource": "X 계정을 연결하고 X Livestream을 켜 두면 저장할 때 polyemesis가 스트림 소스를 만들므로 URL과 키는 비워 두어도 됩니다.",
   "addDest.ivsAppPath": "이 Amazon IVS 인제스트(Kick, Twitch)에는 애플리케이션 경로 /app이 필요합니다. 없으면 스트림 키가 애플리케이션 이름으로 전송되고 모든 연결이 끊깁니다. {url}을(를) 사용하세요. 스트림 키는 별도 칸에 그대로 둡니다.",
   "addDest.ivsAppPathUse": "수정된 URL 사용",
   "addDest.keyInUrl": "{platform}은(는) 모든 것을 URL에 담습니다. 대시보드에 별도 키가 표시되지 않는 한 비워 두세요.",

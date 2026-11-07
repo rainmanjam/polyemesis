@@ -560,6 +560,9 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 
 	got, perr := probe(pctx, k.CallbackURL()+"?probe="+nonce)
 	switch {
+	case perr != nil && dialedLoopback(perr):
+		// The public hostname resolved to this machine (Ubuntu's /etc/hosts maps the box's own name to 127.0.1.1),
+		// so the probe never left it. That says nothing about whether Kick can get in: inconclusive, not degraded.
 	case perr != nil:
 		// The INNER error. *url.Error prints the whole request URL, and this
 		// URL's path is the webhook secret; the warning is published as chat
@@ -575,6 +578,22 @@ func (k *KickAdapter) checkReachable(ctx context.Context) (bool, string) {
 	return false, "Kick chat may not be received: " + strings.Join(warn, "; ") +
 		". The webhook URL to configure in your Kick app is " + callbackWhere +
 		". polyemesis is listening anyway, in case it is reachable in a way it cannot see from here."
+}
+
+// dialedLoopback reports that err is a failed dial to a loopback address: the hostname resolved to this very
+// machine, so the failure proves nothing about reachability from the outside.
+func dialedLoopback(err error) bool {
+	var oe *net.OpError
+	if !errors.As(err, &oe) || oe.Op != "dial" {
+		return false
+	}
+	switch a := oe.Addr.(type) {
+	case *net.TCPAddr:
+		return a.IP.IsLoopback()
+	case *net.IPAddr:
+		return a.IP.IsLoopback()
+	}
+	return false
 }
 
 // innerError is err without the URL a *url.Error wraps it in.

@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Nom de fichier",
   "addDest.fileHint": "Écrit dans le répertoire des enregistrements. Un nom relatif uniquement, sans chemin.",
   "addDest.perAccountUrl": "{platform} attribue son URL d'entrée par compte ou par diffusion, il n'y a donc rien à préremplir : collez celle de son tableau de bord.",
+  "addDest.xCreatesSource": "Avec votre compte X lié et X Livestream activé, polyemesis crée la source de flux à l'enregistrement : l'URL et la clé peuvent rester vides.",
   "addDest.ivsAppPath": "Cet ingest Amazon IVS (Kick, Twitch) exige le chemin d’application /app, sinon la clé de stream est envoyée comme nom d’application et chaque connexion est coupée. Utilisez {url} ; la clé de stream reste dans son propre champ.",
   "addDest.ivsAppPathUse": "Utiliser l’URL corrigée",
   "addDest.keyInUrl": "{platform} met tout dans l'URL : laissez ce champ vide sauf si son tableau de bord affiche une clé séparée.",

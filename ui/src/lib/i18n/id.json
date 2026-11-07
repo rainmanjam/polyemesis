@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Nama berkas",
   "addDest.fileHint": "Ditulis ke direktori rekaman. Hanya nama relatif — tanpa jalur.",
   "addDest.perAccountUrl": "{platform} memberikan URL ingest per akun atau per siaran, jadi tidak ada yang bisa diisi otomatis — tempel URL dari dasbornya.",
+  "addDest.xCreatesSource": "Dengan akun X tertaut dan X Livestream aktif, polyemesis membuat sumber stream saat Anda menyimpan, jadi URL dan kunci boleh dikosongkan.",
   "addDest.ivsAppPath": "Ingest Amazon IVS ini (Kick, Twitch) memerlukan jalur aplikasi /app; tanpanya kunci stream terkirim sebagai nama aplikasi dan setiap koneksi diputus. Gunakan {url}; kunci stream tetap di kolomnya sendiri.",
   "addDest.ivsAppPathUse": "Gunakan URL yang diperbaiki",
   "addDest.keyInUrl": "{platform} memasukkan semuanya ke dalam URL — biarkan kosong kecuali dasbornya menampilkan kunci terpisah.",

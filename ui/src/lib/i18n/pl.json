@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Nazwa pliku",
   "addDest.fileHint": "Zapisywany w katalogu nagrań. Tylko nazwa względna — bez ścieżek.",
   "addDest.perAccountUrl": "{platform} wydaje adres URL wejścia dla każdego konta lub każdej transmisji, więc nie ma czego wstępnie wypełnić — wklej adres z panelu platformy.",
+  "addDest.xCreatesSource": "Gdy konto X jest połączone, a X Livestream włączony, polyemesis tworzy źródło strumienia przy zapisie, więc adres URL i klucz mogą zostać puste.",
   "addDest.ivsAppPath": "Ten ingest Amazon IVS (Kick, Twitch) wymaga ścieżki aplikacji /app; bez niej klucz transmisji trafia jako nazwa aplikacji i każde połączenie jest zrywane. Użyj {url}; klucz transmisji zostaje we własnym polu.",
   "addDest.ivsAppPathUse": "Użyj poprawionego adresu URL",
   "addDest.keyInUrl": "{platform} umieszcza wszystko w adresie URL — zostaw to pole puste, chyba że panel pokazuje osobny klucz.",

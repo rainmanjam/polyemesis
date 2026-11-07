@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "ファイル名",
   "addDest.fileHint": "録画ディレクトリに書き込まれます。相対的な名前のみで、パスは使えません。",
   "addDest.perAccountUrl": "{platform} は取り込み URL をアカウントごと、または配信ごとに発行するため、事前入力できるものはありません。ダッシュボードのものを貼り付けてください。",
+  "addDest.xCreatesSource": "X アカウントを連携し X Livestream をオンにしていれば、保存時に polyemesis がストリームソースを作成するため、URL とキーは空のままで構いません。",
   "addDest.ivsAppPath": "この Amazon IVS の取り込み先（Kick、Twitch）にはアプリケーションパス /app が必要です。ないとストリームキーがアプリケーション名として送られ、接続はすべて切断されます。{url} を使ってください。ストリームキーは専用の欄に入れたままにします。",
   "addDest.ivsAppPathUse": "修正した URL を使う",
   "addDest.keyInUrl": "{platform} はすべてを URL に含めます。ダッシュボードに別のキーが表示されていない限り、ここは空のままにしてください。",
