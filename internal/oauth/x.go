@@ -703,6 +703,7 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 		// Only a broadcast polyemesis started may be adopted. With no go-live attempt on record nothing of ours can
 		// exist, so the list is not even read. With one, a broadcast on the source counts only if X created it at or
 		// after the attempt (in X's time, inside xInGoLiveWindow); anything outside it is somebody else's and is left alone.
+		adopted := false
 		if attemptMS > 0 {
 			bs, err := x.Broadcasts(ctx, "", accessToken)
 			if err != nil {
@@ -721,11 +722,14 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 				}
 				if id != "" {
 					st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
+					adopted = true
 					break
 				}
 			}
 		}
-		if err := x.fillStreamActive(ctx, accessToken, st, true); err != nil {
+		// A source missing from the list is an error only when there is no broadcast to return: if the listing found
+		// ours RUNNING, it is returned (StreamActive unknown) so it can be ended.
+		if err := x.fillStreamActive(ctx, accessToken, st, !adopted); err != nil {
 			return nil, err
 		}
 		return st, nil

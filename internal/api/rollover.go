@@ -471,6 +471,7 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 	warnings := redact.Redact(strings.Join(out.Warnings, "; "))
 	if _, err := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
 		cur.Lifecycle.BroadcastID = out.NewBroadcastID
+		cur.Lifecycle.Generation++ // a lifecycle sweep holding the row from before must not write the old id back
 		cur.Lifecycle.Phase = phaseLive
 		cur.Lifecycle.Attempts = 0
 		cur.Lifecycle.Fault = ""
@@ -512,6 +513,7 @@ func (c *rolloverCoordinator) adoptStrandedReplacement(d *db.Destination, err er
 	newID := strings.TrimSpace(rerr.NewBroadcastID)
 	if _, uerr := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
 		cur.Lifecycle.BroadcastID = newID
+		cur.Lifecycle.Generation++
 		cur.Lifecycle.Phase = phaseCreated
 		cur.Lifecycle.Attempts = 0
 		cur.Lifecycle.Fault = clipDetail("the old broadcast ended and the replacement " + newID +

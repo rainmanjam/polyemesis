@@ -275,6 +275,9 @@ func TestAYouTubeBroadcastInItsMarginWindowIsReplacedAndTheDestinationPointsAtIt
 	if got := r.store.dests[1].Lifecycle.BroadcastID; got != "new-1" {
 		t.Errorf("destination points at %q, want the replacement new-1", got)
 	}
+	if got := r.store.dests[1].Lifecycle.Generation; got != 1 {
+		t.Errorf("generation = %d after a rollover, want 1: a lifecycle sweep holding the old row must not overwrite the new id", got)
+	}
 	if !hasEvent(r.announced, hooks.TriggerRolloverCompleted) {
 		t.Errorf("no rollover.completed was announced: %+v", r.announced)
 	}

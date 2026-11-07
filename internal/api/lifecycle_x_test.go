@@ -925,14 +925,14 @@ func TestXDeletingTheDestinationRightAfterGoLiveEndsTheBroadcast(t *testing.T) {
 func TestXAFailedRecordAfterGoLiveStillLeavesTheBroadcastEndable(t *testing.T) {
 	fake := &xcFake{active: true}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
-	store.failUpdates = true
+	store.failUpdatesAfterGoLive = true // the marker is written; the record of the real id is not
 	c.sweepOnce(context.Background(), sweepEverything)
 	if _, published, _, _ := fake.snapshot(); published != 1 {
 		t.Fatalf("setup: published %d", published)
 	}
 	store.mu.Lock()
 	delete(store.rows, 5)
-	store.failUpdates = false
+	store.failUpdatesAfterGoLive = false
 	store.mu.Unlock()
 	for range 3 {
 		c.sweepOnce(context.Background(), sweepEverything)
@@ -1207,13 +1207,13 @@ func TestXGoLiveAttemptIsStampedKeptOnALostAnswerAndClearedOnARefusal(t *testing
 func TestXTrackingNeverMovesBackwardsFromAVerifiedLiveBroadcast(t *testing.T) {
 	fake := &xcFake{active: true}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
-	store.failUpdates = true
+	store.failUpdatesAfterGoLive = true
 	c.sweepOnce(context.Background(), sweepEverything) // live as bc-1; the record fails
 	if _, published, _, _ := fake.snapshot(); published != 1 {
 		t.Fatalf("setup: published %d", published)
 	}
 	store.mu.Lock()
-	store.failUpdates = false
+	store.failUpdatesAfterGoLive = false
 	store.mu.Unlock()
 	fake.set(func(f *xcFake) { f.failReads = true })
 	c.sweepOnce(context.Background(), sweepEverything) // re-tracks from the durable row; the state read fails
@@ -1580,5 +1580,110 @@ func TestXTerminalRefusalIsNeverReArmed(t *testing.T) {
 	}
 	if !store.rows[5].Lifecycle.Terminal {
 		t.Errorf("recorded = %+v, want the fault marked terminal", store.rows[5].Lifecycle)
+	}
+}
+
+// ------------------------------------------------------------ round 4 (the last)
+
+// NO GO-LIVE WITHOUT A DURABLE MARKER. If the write that records the attempt fails for ANY reason (a database error,
+// a deleted row), nothing is sent: a broadcast polyemesis could not record is one it could not find or end later.
+func TestXNoGoLiveIsSentWhenTheMarkerCannotBeWritten(t *testing.T) {
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	store.failUpdates = true
+	for range 3 {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	if fake.liveCalls != 0 {
+		t.Fatalf("%d go-live calls with the marker unwritable, want none", fake.liveCalls)
+	}
+	// Once the database answers again the go-live goes out, so nothing was lost by waiting.
+	store.mu.Lock()
+	store.failUpdates = false
+	store.mu.Unlock()
+	xcSweep(t, c, store)
+	if fake.liveCalls != 1 {
+		t.Fatalf("%d go-live calls after the write recovered, want 1", fake.liveCalls)
+	}
+}
+
+// The source is gone from X's list but the broadcast listing shows OUR RUNNING broadcast (inside the window): the read
+// returns it, so the END proceeds on a switch-off and on a delete instead of the read turning into "source gone" and the
+// maybe-live target being discarded.
+func TestXSourceGoneWithOurBroadcastRunningStillEnds(t *testing.T) {
+	for _, mode := range []string{"switched off", "deleted"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now().UnixMilli()
+			fake := &xcFake{sourceDeleted: true, state: oauth.XStateRunning, id: "bc-1", seq: 1, createdMS: now}
+			row := xcRow(mode != "switched off", db.BroadcastControl{PendingSource: xcSourceID,
+				GoLiveAttemptMS: now - 1000, GoLiveSentMS: now - 1000, Phase: phaseCreated})
+			c, store, _ := xcFixture(t, fake, true, row)
+			if mode == "deleted" {
+				c.sweepOnce(context.Background(), sweepEverything) // tracks the row (enabled): the source is gone but ours is live
+				store.mu.Lock()
+				delete(store.rows, 5)
+				store.mu.Unlock()
+			}
+			for range 4 {
+				c.sweepOnce(context.Background(), sweepEverything)
+			}
+			if _, _, ended, _ := fake.snapshot(); ended != 1 {
+				t.Fatalf("ended %d: the broadcast listing showed our RUNNING broadcast and it was not ended (%s)", ended, mode)
+			}
+		})
+	}
+}
+
+// WHERE TRACKING GIVES UP ON A MAYBE-LIVE BROADCAST IT SAYS SO. No new machinery: a durable fault on the row (so it
+// survives a restart and shows on the destination), or an escalation when the row is gone.
+const xcLeftLive = "polyemesis may have left a broadcast live on X"
+
+func TestXGivingUpOnAMaybeLiveBroadcastRaisesADurableFault(t *testing.T) {
+	now := time.Now()
+	fake := &xcFake{} // nothing on the list, ever: a lost answer whose broadcast never shows
+	c, store, faults := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: now.UnixMilli(), GoLiveSentMS: now.UnixMilli(), Phase: phaseCreated}))
+	clock := now
+	c.now = func() time.Time { return clock }
+	xcSweep(t, c, store) // the one read after the switch-off, inside the window: nothing found yet
+	if store.rows[5].Lifecycle.Fault != "" {
+		t.Fatalf("a fault inside the window: %q", store.rows[5].Lifecycle.Fault)
+	}
+	clock = now.Add(goLiveUnresolvedFor + time.Minute) // the window has passed and the row would go quiet
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	row := store.rows[5]
+	if !strings.Contains(row.Lifecycle.Fault, xcLeftLive) || !strings.Contains(row.Lifecycle.Fault, "producer tooling") || !row.Lifecycle.Terminal {
+		t.Fatalf("fault %q terminal %v, want the left-live fault on the row", row.Lifecycle.Fault, row.Lifecycle.Terminal)
+	}
+	if len(*faults) != 1 || !strings.Contains((*faults)[0].Detail, xcLeftLive) {
+		t.Errorf("escalations = %+v, want exactly one, naming the possible live broadcast", *faults)
+	}
+}
+
+func TestXGivingUpOnADeletedMaybeLiveBroadcastEscalates(t *testing.T) {
+	now := time.Now()
+	fake := &xcFake{active: true, dropLive: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	clock := now
+	c.now = func() time.Time { return clock }
+	c.sweepOnce(context.Background(), sweepEverything)                      // go-live sent, answer lost
+	fake.set(func(f *xcFake) { f.dropLive, f.state, f.id = false, "", "" }) // and nothing ever appears on the list
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+	clock = now.Add(goLiveUnresolvedFor + time.Minute)
+	for range 3 {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	n := 0
+	for _, f := range *faults {
+		if strings.Contains(f.Detail, xcLeftLive) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("escalations = %+v, want exactly one saying polyemesis may have left a broadcast live on X", *faults)
 	}
 }
