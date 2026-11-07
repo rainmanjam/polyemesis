@@ -706,6 +706,11 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	// restart. Before the redirect, so the Dashboard the operator lands on
 	// already has the chip. See attachAccountChat.
 	s.attachAccountChat(saved.Platform, saved.AccountRef)
+	if saved.Platform == db.PlatformX {
+		// A reconnect starts the account's X destinations over: a pending source may be gone from X, and a fault
+		// recorded against the old token no longer applies. A destination with a real broadcast is left alone.
+		resetXPendingLifecycle(s.store, saved.ID)
+	}
 
 	s.log.Info("platform account connected", "platform", platform, "account", acct.Name)
 	s.oauthWarn(w, r, fmt.Sprintf("Connected %s as %s", platform, saved.AccountName),
@@ -1006,6 +1011,11 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if updated != nil && updated.Platform == db.PlatformX && updated.AccountID != nil {
+		// A new key means a new (or different) stream source: whatever source the destination was waiting on is
+		// stale, so its pending state is dropped and the next sweep opens it on the one that holds this key.
+		resetXPendingLifecycle(s.store, *updated.AccountID)
 	}
 	// The caption URL was stored by that same write, bound to the new key, when
 	// the row as it stands posts captions: never for a refused write, never for

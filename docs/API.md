@@ -1074,10 +1074,20 @@ A stored id the catalogue no longer has is ignored, never an error.
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
 first go-live after the destination is switched on, and the broadcasts
-polyemesis opens again after X ends one are published with `should_not_tweet`.
+polyemesis opens again after X ends one go live with `should_not_tweet`.
 `lifecycle.renewed` is `true` on such a broadcast. Any other value is `400`. A
 destination that is not X has the field removed on save, with a warning.
-PROVISIONAL: X Livestream is gated until the app is whitelisted.
+An X destination that is switched on but not yet live has `lifecycle.broadcastId`
+empty and `lifecycle.pendingSource` set to its X stream source id: X creates the
+broadcast only when it goes live, so there is no broadcast id to show until then. `lifecycle.goLiveAttemptMs` is when the go-live for that source was
+first sent, kept while X's answer is unknown; polyemesis adopts a live broadcast on the source only if X created it
+inside a window around that time (X's own clock, read from the `Date` header of X's answers, so a wrong
+clock on the polyemesis host does not matter), so it never takes over or ends a broadcast it did not start.
+`lifecycle.goLiveSentMs` is set while a go-live's outcome is unknown, and a reconnect leaves such a destination
+alone. `lifecycle.terminal` is true for a fault that is not retried (an account X will not let go live, a token
+without a scope); any other X fault that has used its budget is tried again every two minutes and clears on the
+first success. `lifecycle.generation` is bookkeeping.
+PROVISIONAL: X Livestream is switched off until the operator sets `POLYEMESIS_X_LIVESTREAM=1`, and no live go-live has confirmed it.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and

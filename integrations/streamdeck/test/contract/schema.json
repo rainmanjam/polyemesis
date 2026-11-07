@@ -508,12 +508,37 @@
                     "string"
                   ]
                 },
+                "generation": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "goLiveAttemptMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "goLiveSentMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
+                "pendingSource": {
+                  "types": [
+                    "string"
+                  ]
+                },
                 "phase": {
                   "types": [
                     "string"
                   ]
                 },
                 "renewed": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "terminal": {
                   "types": [
                     "boolean"
                   ]

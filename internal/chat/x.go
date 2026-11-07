@@ -2,7 +2,7 @@ package chat
 
 // X (Twitter) Livestream chat: the read, the send, delete, and mute/unmute.
 //
-// Everything here is behind X's Livestream whitelist. internal/api attaches this
+// Everything here is behind the Livestream switch. internal/api attaches this
 // adapter only when the oauth.X gate is open (POLYEMESIS_X_LIVESTREAM), so with
 // the gate closed no X chat is ever read or posted.
 //
@@ -268,9 +268,12 @@ func (x *XAdapter) Delete(ctx context.Context, messageID string) error {
 
 // ---------------------------------------------------------------- ban / mute
 
-// Ban mutes a viewer in the running broadcast's chat. X's mute is the nearest
-// thing to a ban: a zero duration is an indefinite mute, and a positive one is a
-// timeout.
+// Ban mutes a viewer in the broadcaster's chat. X's mute is the nearest thing to
+// a ban: a zero duration is an indefinite mute, and a positive one is a timeout.
+// Mutes belong to the broadcaster and apply to every broadcast they host, so the
+// route is POST /2/broadcasts/chat/mutes with no broadcast id and needs no live
+// broadcast (docs.x.com/livestream-api/chat/mute-user). broadcast_id is for a
+// moderator acting in another host's chats, which this adapter never does.
 //
 // UNIT: X takes end_at_ms, an ABSOLUTE Unix timestamp in milliseconds, so the
 // duration is added to now here, at the call site. The reason is not sent,
@@ -279,10 +282,6 @@ func (x *XAdapter) Ban(ctx context.Context, userID string, d time.Duration, _ st
 	userID = strings.TrimSpace(userID)
 	if !xNumericID.MatchString(userID) {
 		return fmt.Errorf("X user id %q is not digits, so this mute cannot be addressed", userID)
-	}
-	id, err := x.currentBroadcastID(ctx)
-	if err != nil {
-		return err
 	}
 	body := map[string]string{"user_id": userID}
 	if d > 0 {
@@ -293,7 +292,7 @@ func (x *XAdapter) Ban(ctx context.Context, userID string, d time.Duration, _ st
 			Muted bool `json:"muted"`
 		} `json:"data"`
 	}
-	if err := x.xCall(ctx, http.MethodPost, xBroadcastsPath+url.PathEscape(id)+"/chat/mutes",
+	if err := x.xCall(ctx, http.MethodPost, xBroadcastsPath+"chat/mutes",
 		false, body, &out); err != nil {
 		return fmt.Errorf("X refused the mute: %s", xProblemMessage(err))
 	}
@@ -309,11 +308,7 @@ func (x *XAdapter) Unban(ctx context.Context, userID string) error {
 	if !xNumericID.MatchString(userID) {
 		return fmt.Errorf("X user id %q is not digits, so this unmute cannot be addressed", userID)
 	}
-	id, err := x.currentBroadcastID(ctx)
-	if err != nil {
-		return err
-	}
-	if err := x.xCall(ctx, http.MethodDelete, xBroadcastsPath+url.PathEscape(id)+"/chat/mutes/"+userID,
+	if err := x.xCall(ctx, http.MethodDelete, xBroadcastsPath+"chat/mutes/"+userID,
 		false, nil, nil); err != nil {
 		return fmt.Errorf("X refused the unmute: %s", xProblemMessage(err))
 	}

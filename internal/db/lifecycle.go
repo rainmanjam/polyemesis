@@ -55,6 +55,31 @@ type BroadcastControl struct {
 	// state -- it is every destination on every platform without a broadcast
 	// object, and most installs are entirely made of them.
 	BroadcastID string `json:"broadcastId,omitempty"`
+	// PendingSource is X's source id for a destination that is opened but has no broadcast yet. X's go-live
+	// creates and publishes in one call, so until the encoder is sending there is nothing on X to name, and
+	// BroadcastID stays empty: nothing that shows or acts on a broadcast id (the console, the API, a disconnect
+	// confirmation) sees a broadcast that does not exist. The coordinator alone rebuilds a handle from this.
+	// Cleared when the real broadcast id is recorded.
+	PendingSource string `json:"pendingSource,omitempty"`
+	// GoLiveAttemptMS is when the go-live was sent for the pending source, in X's OWN time (milliseconds since the
+	// epoch: the local clock plus the offset measured from the Date header of X's last answer), kept while its answer
+	// is unknown. A later read adopts a live broadcast only if X created it inside a window around this time, so it
+	// decides what polyemesis may take over. Zero means no verifiable attempt: either none was sent, or X's clock
+	// could not be read, and then nothing is adopted.
+	GoLiveAttemptMS int64 `json:"goLiveAttemptMs,omitempty"`
+	// GoLiveSentMS is the local time a go-live was sent and its outcome is not yet known: it is written before the
+	// request and cleared when the answer is a definite refusal or a real broadcast id is recorded. While it is set,
+	// the go-live may have created a broadcast, so a reconnect must not reset the row and a deleted or switched-off
+	// destination keeps looking for it.
+	GoLiveSentMS int64 `json:"goLiveSentMs,omitempty"`
+	// Generation counts the times the pending state was reset from outside the sweep that holds a copy of the row
+	// (a reconnect, a source that left X). A write made from an older copy is refused, so a late result cannot put
+	// back a source that was cleared in the meantime. Bookkeeping only; it never reaches an operator.
+	Generation int64 `json:"generation,omitempty"`
+	// Terminal is true when Fault cannot clear by retrying (an account X will not let go live, a token without a
+	// scope, a canceled broadcast): nothing retries it automatically. A fault without it that has used its budget is
+	// retried once every couple of minutes, and cleared by the first success.
+	Terminal bool `json:"terminal,omitempty"`
 	// Phase is the PLATFORM'S OWN WORD for where the broadcast is, verbatim and
 	// unmapped -- for YouTube: created, ready, testing, testStarting, live,
 	// liveStarting, complete, revoked.
@@ -111,5 +136,5 @@ type BroadcastControl struct {
 // keep an upgraded row -- which decodes to the zero value -- from being treated
 // as one it has an opinion about.
 func (b BroadcastControl) Empty() bool {
-	return b.BroadcastID == "" && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
+	return b.BroadcastID == "" && b.PendingSource == "" && b.GoLiveAttemptMS == 0 && b.GoLiveSentMS == 0 && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
 }

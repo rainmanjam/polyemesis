@@ -157,35 +157,48 @@ remembered from a page of documentation.
 destination saved before then is kept, switched off, so you can read its
 settings and delete it when you are ready.
 
-**X (Twitter) — the Livestream API is real, and X whitelists each app for it.**
+**X (Twitter) — the Livestream API is real, and polyemesis keeps it opt-in.**
 X publishes a Livestream API (the Broadcasts and Chat families, under the
-`broadcast.read` and `broadcast.write` scopes, plus `/2/sources` and
-`/2/users/{id}/sources` for stream keys). Sign-in, stream-key minting,
-go-live and end, metadata, chat read and send, and chat moderation are built
-in `internal/oauth/x.go` and `internal/chat/x.go`. **All of it sits behind
-X's whitelist, and it is switched off until the app is whitelisted.** The
-switch is the `POLYEMESIS_X_LIVESTREAM` environment variable. Until then the
-operator sees "needs X Livestream access (app must be whitelisted by X)", and
-pasting the server URL and stream key from X's producer tooling works exactly
-as before.
+`broadcast.read` and `broadcast.write` scopes, plus `/2/sources` for stream
+keys). X's [getting-started page](https://docs.x.com/livestream-api/getting-started)
+asks for a developer app, OAuth 2.0 with those two scopes, an account that is
+allowed to go live (not protected) and an RTMP encoder; it no longer asks for
+an access form or a whitelist. Sign-in, stream-key minting, go-live and end,
+metadata, chat read and send, and chat moderation are built in
+`internal/oauth/x.go` and `internal/chat/x.go`. **All of it is switched off
+until the operator switches it on.** The switch is the `POLYEMESIS_X_LIVESTREAM`
+environment variable. Until then the operator sees "needs X Livestream switched
+on (POLYEMESIS_X_LIVESTREAM=1)", and pasting the server URL and stream key from
+X's producer tooling works exactly as before. The paste also remains the way in
+for an account that cannot use the API.
 
-With the switch on, the lifecycle works like this. When an X destination turns
-on, polyemesis opens a broadcast on its stream source; X keeps it private
-(`NOT_STARTED`). Once video arrives, polyemesis publishes it with the
+The calls use the routes in X's
+[migration guide](https://docs.x.com/livestream-api/migration-guide): `POST
+/2/sources` and `GET /2/sources` (the owner comes from the access token),
+`GET /2/sources/{id}/stream_key` for the key, `POST /2/broadcasts` to go live,
+`GET /2/broadcasts[/{id}]` to read, and `PUT /2/broadcasts/{id}/state` with
+`END` to end. The older `/2/users/{id}/sources` and `/2/users/{id}/broadcasts`
+routes are removed by X on 2027-01-01 and are not called.
+
+With the switch on, the lifecycle works like this. X's go-live call creates the
+broadcast and makes it public in one step, and X ends it as `TIMED_OUT` if no
+video arrives within five minutes, so polyemesis does not call it early. When an
+X destination turns on, polyemesis records the destination's stream source and
+waits. Once video arrives, polyemesis takes the source live with the
 destination's **go-live title**, set in the X console in the destination editor
 (at most 280 characters: X says the title is "subject to X post length limits"
 and gives no number, PROVISIONAL). During the first 30 minutes of a recurring
 show, the show's template title is sent instead (see
 [RECURRING-EVENTS.md](RECURRING-EVENTS.md)). **X takes a title only at that
-publish step.** It has no write that changes a running broadcast's title, so the
+go-live step.** It has no write that changes a running broadcast's title, so the
 console makes the field read-only while the broadcast is live and the server
 refuses a change then (HTTP 409). Turning the destination off ends the
-broadcast. After a publish the X chat adapter is told the new broadcast at once,
+broadcast. After a go-live the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
-**The go-live announcement, once per show by default.** X's publish step makes
-an announcement post on the account unless the publish asks it not to
-(`should_not_tweet`, PROVISIONAL until the app is whitelisted). The X console has
+**The go-live announcement, once per show by default.** X's go-live step makes
+an announcement post on the account unless the request asks it not to
+(`should_not_tweet`, a JSON boolean, PROVISIONAL until a live run confirms it). The X console has
 a **Go-live announcement** setting with three choices:
 
 - **On the first go-live of a show only** (the default). A show lasts while the
@@ -213,7 +226,8 @@ X publishes no rate limits for the Livestream endpoints. polyemesis reads X's
 `x-rate-limit-*` headers: after a 429, or an answer that says no calls remain,
 it makes no X calls for that account until the reset time X gave (at most 15
 minutes), and the wait is not counted as a failure. The account id
-(`GET /2/users/me`) is asked for once per token and kept for ten minutes. A
+(`GET /2/users/me`) is asked for only by the account read, once per token and
+kept for ten minutes; the Livestream routes need no user id. A
 confidential app authenticates its token requests with HTTP Basic, as X
 documents. The consent page is `x.com/i/oauth2/authorize`, as X's guide shows. The spec's
 `api.x.com/2/oauth2/authorize` returns HTTP 403 to a browser; a live request on
@@ -225,12 +239,19 @@ token from console.x.com, which X's activity stream requires. It is a secret.
 Without it the chat pane stays empty and sending still works. The X console and
 the setup guide show whether the Livestream switch is on.
 
+**Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
+polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
+have left a broadcast live on X" so you can end it in X's producer tooling. The attempt time is not refreshed after
+a lost answer, so a second attempt that creates the broadcast more than about 25 seconds after the first is refused
+as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
+from X's documentation and unconfirmed live.
+
 Every cell in the X row stays *Unverified* except the stream key, which is
-*By hand*. That is deliberate: no live request from a whitelisted app has
-confirmed any of the built paths yet. Two gates apply on top of the whitelist:
-X's Broadcasts list refuses accounts without X Premium or more than 1,000
-followers (HTTP 412), and X has **no hide action**, so chat moderation offers
-mute, unmute and delete only.
+*By hand*. That is deliberate: no live request from a connected X account has
+confirmed any of the built paths yet. Two things apply on top of the switch: X
+refuses to take an account live that is not allowed to go live (HTTP 403 from
+the go-live call; the deprecated routes answered 412), and X has **no hide
+action**, so chat moderation offers mute, unmute and delete only.
 
 **The stream-key path was verified live on 2026-11-04.** polyemesis built from
 `main` at `b13944ea`, on a macOS machine on a residential connection, published

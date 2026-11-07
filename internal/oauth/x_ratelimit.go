@@ -45,8 +45,52 @@ type xCallState struct {
 	mu    sync.Mutex
 	holds map[string]time.Time
 	users map[string]xCachedUser
+	// clocks is X's clock minus ours, from the Date header of the freshest answer, per token fingerprint.
+	clocks map[string]xClockReading
 	// now is the clock; nil is time.Now. A test sets it.
 	now func() time.Time
+}
+
+// xClockReading is one measurement of X's clock against the local one.
+type xClockReading struct {
+	offset time.Duration // X's time minus the local time at the moment the answer arrived
+	at     time.Time     // the local time of that answer
+}
+
+// xClockFreshness is how old a reading may be and still be used to put an attempt in X's time. The go-live follows a
+// source read in the same sweep, so a reading older than this means no recent answer to measure from.
+const xClockFreshness = 2 * time.Minute
+
+// noteDate records X's clock from an answer's Date header. A missing or unparsable header records nothing.
+func (s *xCallState) noteDate(fp, header string) {
+	t, err := http.ParseTime(header)
+	if err != nil {
+		return
+	}
+	now := s.clock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.clocks == nil {
+		s.clocks = map[string]xClockReading{}
+	}
+	if len(s.clocks) >= xHoldsMax {
+		for k := range s.clocks {
+			delete(s.clocks, k)
+			break
+		}
+	}
+	s.clocks[fp] = xClockReading{offset: t.Sub(now), at: now}
+}
+
+// clockOffset is the freshest reading for this token, if there is one no older than xClockFreshness.
+func (s *xCallState) clockOffset(fp string) (time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.clocks[fp]
+	if !ok || s.clock().Sub(r.at) > xClockFreshness {
+		return 0, false
+	}
+	return r.offset, true
 }
 
 type xCachedUser struct {

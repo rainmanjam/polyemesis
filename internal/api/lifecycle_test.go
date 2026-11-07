@@ -156,6 +156,16 @@ type fakeLifecycleStore struct {
 	// beforeUpdate runs inside the "transaction", before apply, so a test can
 	// move the world exactly where a real race would move it.
 	beforeUpdate func(id int64, cur *db.Destination)
+	// failUpdates makes every UpdateLifecycle fail, as a full disk or a locked database would.
+	failUpdates bool
+	// failUpdatesAfterGoLive makes UpdateLifecycle fail once a write has carried a pending attempt, i.e. every write
+	// after the go-live was stamped, as a database that went away mid-sweep would.
+	failUpdatesAfterGoLive bool
+	stamped                bool
+	// onUpdate runs, keyed by the 1-based number of the UpdateLifecycle call, on the stored row before that call
+	// applies, so a test can move the world (a reconnect, a source cleared) at the exact write it wants to race.
+	onUpdate map[int]func(row *db.Destination)
+	updates  int
 }
 
 // GetDestination answers what the real store answers: the row, or
@@ -189,9 +199,16 @@ func (f *fakeLifecycleStore) ListDestinations() ([]*db.Destination, error) {
 func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failUpdates || (f.failUpdatesAfterGoLive && f.stamped) {
+		return nil, errors.New("database is locked")
+	}
 	row, ok := f.rows[id]
 	if !ok {
 		return nil, db.ErrNotFound
+	}
+	f.updates++
+	if h := f.onUpdate[f.updates]; h != nil {
+		h(row)
 	}
 	cur := *row
 	if f.beforeUpdate != nil {
@@ -203,6 +220,9 @@ func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destinatio
 	}
 	if !apply(&cur) {
 		return nil, db.ErrLifecycleSkipped
+	}
+	if f.failUpdatesAfterGoLive && cur.Lifecycle.GoLiveAttemptMS > 0 {
+		f.stamped = true
 	}
 	// ONLY the lifecycle column, exactly as db.UpdateLifecycle does.
 	updated := *row

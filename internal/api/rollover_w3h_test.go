@@ -46,6 +46,9 @@ func TestARolloverWhoseReplacementWouldNotStartAfterTheOldEndedPointsAtTheReplac
 	if lc.Attempts != 0 {
 		t.Errorf("attempts = %d, want 0 so the lifecycle is not already holding", lc.Attempts)
 	}
+	if lc.Generation != 1 {
+		t.Errorf("generation = %d, want 1: a sweep holding the row from before must not write the old id back", lc.Generation)
+	}
 	if len(r.store.results) != 1 || !strings.HasPrefix(r.store.results[0], "failed: ") {
 		t.Errorf("results = %v; the rollover still failed and must say so", r.store.results)
 	}

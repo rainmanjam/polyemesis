@@ -90,29 +90,20 @@ func TestXProblemsWithNoWordsStillSaySomething(t *testing.T) {
 	}
 }
 
-// A PUBLISH that moved the broadcast but came back with both X's errors and a failed announcement keeps BOTH
-// warnings. The announcement one used to replace the list, so the operator lost X's own report of what else went
-// wrong on the go-live.
-//
-// MUTATION: the tweet_error warning assigned rather than appended. Observed: FAIL, one warning where two were due.
-func TestXPublishKeepsXsErrorsAlongsideAFailedAnnouncement(t *testing.T) {
+// A go-live that took the source live but came back with X's errors keeps them as a warning: the broadcast is on air, so
+// it is not a failure, and the operator still reads what X said went wrong with it. (X's Go Live answer has no
+// tweet_error; a missing announcement shows as a missing tweet_id on a later read.)
+func TestXGoLiveKeepsXsErrorsAsAWarningWhenTheBroadcastIsLive(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/users/me") {
-			_, _ = io.WriteString(w, xMeFixture)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"RUNNING"},"tweet_error":"rate limited"},`+
+		w.WriteHeader(http.StatusCreated) // a new broadcast; a 200 would be the source's existing one
+		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING"},`+
 			`"errors":[{"title":"Partial","detail":"the title was not applied"}]}`)
 	})
-	res, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{Title: "Sunday"})
+	res, err := x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{Title: "Sunday"})
 	if err != nil {
 		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(res.Warnings) != 2 {
-		t.Fatalf("Warnings = %v, want X's error and the failed announcement", res.Warnings)
-	}
-	joined := strings.Join(res.Warnings, " | ")
-	if !strings.Contains(joined, "the title was not applied") || !strings.Contains(joined, "rate limited") {
-		t.Fatalf("Warnings = %v, want both reports", res.Warnings)
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "the title was not applied") {
+		t.Fatalf("Warnings = %v, want X's error as the one warning", res.Warnings)
 	}
 }

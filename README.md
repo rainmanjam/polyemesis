@@ -67,8 +67,8 @@ hot. One upload, one video encode, different audio per platform.
   roughly 4% of one core per destination.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. TikTok signs in for clip publishing.
-  X sign-in, go-live and chat are built and stay switched off until X
-  whitelists the app for its Livestream API. Instagram Live streams with a
+  X sign-in, go-live and chat are built and stay switched off until the
+  operator sets `POLYEMESIS_X_LIVESTREAM=1`. Instagram Live streams with a
   persistent key pasted from instagram.com; you click Go live in Instagram,
   and each live video runs up to an hour. [→ PLATFORMS.md](docs/PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user

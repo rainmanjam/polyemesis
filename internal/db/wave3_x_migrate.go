@@ -25,9 +25,9 @@ func (d *DB) MigrateWave3XTitle() error {
 	return nil
 }
 
-// XGoLiveTitleMax bounds the X go-live title. X documents the PUBLISH title as
+// XGoLiveTitleMax bounds the X go-live title. X documents the go-live title as
 // "subject to X post length limits" without a number, so the 280-character
-// post limit is used. PROVISIONAL until a live PUBLISH on a whitelisted app
+// post limit is used. PROVISIONAL until a live go-live
 // confirms or corrects it.
 const XGoLiveTitleMax = platform.XGoLiveTitleMax
 

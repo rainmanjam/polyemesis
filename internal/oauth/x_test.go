@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -53,17 +55,19 @@ func xCountingStub(t *testing.T) (*X, *int32) {
 }
 
 // Fixtures transcribed from X's served OpenAPI spec (api.x.com/2/openapi.json,
-// version 2.173, read 2026-10-31), not invented. A rename in a decode struct
+// version 2.173, read 2026-10-31) and the Livestream docs migration guide (read 2026-11-06), not invented. A rename in a decode struct
 // fails here instead of returning an empty account at connect time.
 const xMeFixture = `{"data": {"id": "1234567890", "name": "Sunday Practice", "username": "sundaypractice"}}`
 
-const xSourcesFixture = `{"data": {"sources": [
-  {"id": "k3y0ne", "name": "polyemesis", "rtmp_url": "rtmp://ingest.example.invalid/live",
-   "rtmps_url": "rtmps://ingest.example.invalid:443/live", "rtmp_stream_key": "k3y0ne",
-   "is_stream_active": false, "owner_id": 1234567890}
-]}}`
+// The source list is GET /2/sources: data is an array, and no source carries its stream key (the key is read from
+// GET /2/sources/{id}/stream_key). Source ids are 19 digits and are not secret.
+const xSourcesFixture = `{"data": [
+  {"id": "9123456789012345678", "name": "polyemesis", "region": "us-east-1",
+   "rtmp_url": "rtmp://ingest.example.invalid/live", "rtmps_url": "rtmps://ingest.example.invalid:443/live",
+   "is_stream_active": false, "created_at_ms": "1772029802844"}
+], "meta": {"result_count": 1}}`
 
-const xEmptySourcesFixture = `{"data": {"sources": []}}`
+const xEmptySourcesFixture = `{"data": [], "meta": {"result_count": 0}}`
 
 const xBroadcastListFixture = `{
   "data": [
@@ -71,10 +75,11 @@ const xBroadcastListFixture = `{
       "id": "1ynJOZVeajOJR",
       "broadcast_id": "1ynJOZVeajOJR",
       "twitter_user_id": "1234567890",
-      "source_id": "k3y0ne",
+      "source_id": "9123456789012345678",
       "title": "Sunday practice",
       "share_url": "https://x.com/i/broadcasts/1ynJOZVeajOJR",
       "media_key": "13_1729384756",
+      "created_at_ms": "1755302390000",
       "state": "RUNNING",
       "start_ms": "1755302400000",
       "end_ms": "",
@@ -224,14 +229,13 @@ func TestXAccountDoesNotNeedABroadcastToConnect(t *testing.T) {
 
 // ------------------------------------------------------------------ the gate
 
-// TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest is the gate. Until the
-// owner's app is whitelisted, every Livestream operation refuses WITHOUT a
-// request: a request that fails with 403 would be a refusal the operator cannot
-// interpret, and it would look like a bug in polyemesis.
+// TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest is the gate. While the operator has not switched
+// POLYEMESIS_X_LIVESTREAM on, every Livestream operation refuses WITHOUT a request: a request that fails with 403 would
+// be a refusal the operator cannot interpret, and it would look like a bug in polyemesis.
 func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 	x, hits := xCountingStub(t)
 	if x.LivestreamAccess() {
-		t.Fatal("Livestream access is on by default; it must be off until X whitelists the app")
+		t.Fatal("Livestream access is on by default; it must stay opt-in")
 	}
 	ctx := context.Background()
 	if _, err := x.Ingest(ctx, "client", "tok"); !errors.Is(err, ErrNoStreamKeyAPI) {
@@ -249,10 +253,12 @@ func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 	if !errors.Is(err, ErrNotEntitled) || !errors.Is(err, ErrXLivestreamOff) {
 		t.Errorf("CheckEntitlement with the gate off = %v, want it to match ErrNotEntitled and ErrXLivestreamOff", err)
 	}
-	// The connect warning shows Error(). It must name the app's whitelist, and it must not blame the operator's
-	// account for a plan it does not have: the gate is polyemesis's app, not the account.
-	if err != nil && (!strings.Contains(err.Error(), "needs X Livestream access") || strings.Contains(err.Error(), "paid tier") || strings.Contains(err.Error(), "does not have")) {
-		t.Errorf("CheckEntitlement message = %q, want the whitelist gate copy and no account-plan wording", err.Error())
+	// The connect warning shows Error(). It must say how to switch Livestream on, and it must not blame the operator's
+	// account for a plan it does not have, or send them to an X access form that no longer exists.
+	if err != nil && (!strings.Contains(err.Error(), "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)") ||
+		strings.Contains(err.Error(), "paid tier") || strings.Contains(err.Error(), "does not have") ||
+		strings.Contains(strings.ToLower(err.Error()), "whitelist")) {
+		t.Errorf("CheckEntitlement message = %q, want the switch-on gate copy and no whitelist or account-plan wording", err.Error())
 	}
 	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseLive); err == nil {
 		t.Error("TransitionBroadcast with the gate off returned no error")
@@ -262,45 +268,53 @@ func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 	}
 }
 
-// TestXGateReasonIsTheWhitelistCopyTheOwnerAgreed names the gate in the
-// platform's own terms, usable before anything is connected.
-func TestXGateReasonIsTheWhitelistCopyTheOwnerAgreed(t *testing.T) {
+// TestXGateReasonNamesTheSwitchNotAWhitelist names the gate in the platform's own terms, usable before anything is
+// connected. X's Livestream docs list no access form any more, so the copy must not send anyone to one.
+func TestXGateReasonNamesTheSwitchNotAWhitelist(t *testing.T) {
 	x := &X{}
 	reason := x.EntitlementReason()
-	for _, want := range []string{"needs X Livestream access", "whitelisted"} {
+	if xGateCopy != "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)" {
+		t.Errorf("xGateCopy = %q, want the neutral switch-on wording", xGateCopy)
+	}
+	for _, want := range []string{"needs X Livestream switched on", "POLYEMESIS_X_LIVESTREAM=1"} {
 		if !strings.Contains(reason, want) {
 			t.Errorf("EntitlementReason() = %q, want it to contain %q", reason, want)
+		}
+	}
+	for _, banned := range []string{"whitelist", "access form", "Request Livestream"} {
+		if strings.Contains(strings.ToLower(reason), strings.ToLower(banned)) {
+			t.Errorf("EntitlementReason() = %q still carries %q", reason, banned)
 		}
 	}
 	if !strings.Contains(x.ManualKeyReason(), "producer") {
 		t.Error("ManualKeyReason must still tell the operator where to paste the key from")
 	}
+	if strings.Contains(strings.ToLower(x.ManualKeyReason()), "whitelist") {
+		t.Errorf("ManualKeyReason() = %q still names a whitelist", x.ManualKeyReason())
+	}
 }
 
-// TestXEntitlementProbeMapsAGateRefusalToNotEntitled checks the three outcomes
-// the EntitlementGated contract names. A 403 or 412 is a gate; a 500 is not, and
-// must never be reported as one.
+// TestXEntitlementProbeMapsAGateRefusalToNotEntitled checks the three outcomes the EntitlementGated contract names. A
+// 403 or 412 is a refusal of the Livestream family; a 500 is not, and must never be reported as one. The probe reads
+// GET /2/sources, which takes the user from the token.
 func TestXEntitlementProbeMapsAGateRefusalToNotEntitled(t *testing.T) {
 	cases := []struct {
 		name   string
 		status int
 		want   bool // true means ErrNotEntitled
 	}{
-		{"forbidden is the whitelist gate", http.StatusForbidden, true},
-		{"precondition failed is the eligibility gate", http.StatusPreconditionFailed, true},
+		{"forbidden is a refusal", http.StatusForbidden, true},
+		{"precondition failed is the eligibility refusal", http.StatusPreconditionFailed, true},
 		{"server error is not evidence of a gate", http.StatusInternalServerError, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/2/users/me" {
-					_, _ = io.WriteString(w, xMeFixture)
-					return
+				if r.Method != http.MethodGet || r.URL.Path != "/2/sources" {
+					t.Errorf("the probe sent %s %s, want GET /2/sources", r.Method, r.URL.Path)
 				}
 				http.Error(w, `{"title":"Forbidden"}`, tc.status)
 			})
-			// The probe only reaches the family with the gate open; with it closed it refuses without a request, which
-			// TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest covers. These cases are about the open gate's mapping.
 			x = x.WithLivestreamAccess()
 			err := x.CheckEntitlement(context.Background(), "client", "tok")
 			if got := errors.Is(err, ErrNotEntitled); got != tc.want {
@@ -311,95 +325,72 @@ func TestXEntitlementProbeMapsAGateRefusalToNotEntitled(t *testing.T) {
 	}
 }
 
-// TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers is the nil outcome.
+// TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers is the nil outcome, and it needs no /2/users/me.
 func TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers(t *testing.T) {
-	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/2/users/me" {
-			_, _ = io.WriteString(w, xMeFixture)
-			return
-		}
-		_, _ = io.WriteString(w, xEmptySourcesFixture)
-	})
-	x = x.WithLivestreamAccess()
-	if err := x.CheckEntitlement(context.Background(), "client", "tok"); err != nil {
+	f := newXFake(t)
+	f.sources = xEmptySourcesFixture
+	if err := f.x.CheckEntitlement(context.Background(), "client", "tok"); err != nil {
 		t.Fatalf("CheckEntitlement against an answering Livestream family = %v, want nil", err)
+	}
+	if got := f.requests(); !reflect.DeepEqual(got, []string{"GET /2/sources"}) {
+		t.Errorf("the probe made %v, want exactly GET /2/sources", got)
 	}
 }
 
 // ----------------------------------------------------------------- stream key
 
-// TestXIngestMintsASourceWhenNoneExists is the source-minted key. With the gate
-// on and no polyemesis source yet, a source is created and its own rtmps URL and
-// key are returned. The host is read from the response, never invented.
+// TestXIngestMintsASourceWhenNoneExists is the source-minted key. With the gate on and no polyemesis source yet, the
+// recommended region is read, a source is created with exactly {name, region}, and its own rtmps URL and stream_key are
+// returned. The host is read from the response, never invented.
 func TestXIngestMintsASourceWhenNoneExists(t *testing.T) {
-	var created bool
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sources"):
-			_, _ = io.WriteString(w, xEmptySourcesFixture)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sources"):
-			created = true
-			_, _ = io.WriteString(w, `{"data":{"source":{"id":"minted1","name":"polyemesis",`+
-				`"rtmp_url":"rtmp://ingest.example.invalid/live","rtmps_url":"rtmps://ingest.example.invalid:443/live",`+
-				`"rtmp_stream_key":"minted1"}}}`)
-		default:
-			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusTeapot)
-		}
-	})
-	ing, err := x.Ingest(context.Background(), "client", "tok")
+	f := newXFake(t)
+	f.sources = xEmptySourcesFixture
+	ing, err := f.x.Ingest(context.Background(), "client", "tok")
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if !created {
-		t.Error("no source was created when none existed")
+	want := []string{"GET /2/sources", "GET /2/region", `POST /2/sources {"name":"polyemesis","region":"us-east-1"}`}
+	if got := f.requests(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ingest made %v, want %v", got, want)
 	}
-	if ing.Key != "minted1" {
-		t.Errorf("Key = %q, want the rtmp_stream_key X minted", ing.Key)
+	if ing.Key != "minted-key" {
+		t.Errorf("Key = %q, want the stream_key X minted", ing.Key)
 	}
 	if ing.URL != "rtmps://ingest.example.invalid:443/live" {
 		t.Errorf("URL = %q, want the rtmps_url X returned verbatim", ing.URL)
 	}
 }
 
-// TestXIngestReusesThePolyemesisSourceInsteadOfMintingAnother keeps the source
-// list from growing one entry per connect.
+// TestXIngestReusesThePolyemesisSourceInsteadOfMintingAnother keeps the source list from growing one entry per connect.
+// The list no longer carries keys, so the key is read from the source's stream_key route.
 func TestXIngestReusesThePolyemesisSourceInsteadOfMintingAnother(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case r.Method == http.MethodGet:
-			_, _ = io.WriteString(w, xSourcesFixture)
-		default:
-			t.Errorf("reused a source but still sent %s %s", r.Method, r.URL.Path)
-			http.Error(w, "no", http.StatusTeapot)
-		}
-	})
-	ing, err := x.Ingest(context.Background(), "client", "tok")
+	f := newXFake(t)
+	ing, err := f.x.Ingest(context.Background(), "client", "tok")
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if ing.Key != "k3y0ne" {
-		t.Errorf("Key = %q, want the existing source's key", ing.Key)
+	if ing.Key != xKey {
+		t.Errorf("Key = %q, want the existing source's stream key", ing.Key)
+	}
+	want := []string{"GET /2/sources", "GET /2/sources/" + xSourceID + "/stream_key"}
+	if got := f.requests(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ingest made %v, want %v (and no POST)", got, want)
 	}
 }
 
-// TestXKeyNeverAppearsInAnErrorMessage is the leak test. A failed create that
-// echoes a key in its body must not carry that key into the error an operator
-// sees, a log line or an event.
+// TestXKeyNeverAppearsInAnErrorMessage is the leak test. A failed create that echoes a key in its body must not carry
+// that key into the error an operator sees, a log line or an event.
 func TestXKeyNeverAppearsInAnErrorMessage(t *testing.T) {
 	key := xSecret("leak", "canary", "9z")
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case r.Method == http.MethodGet:
+		case r.Method == http.MethodGet && r.URL.Path == "/2/sources":
 			_, _ = io.WriteString(w, xEmptySourcesFixture)
+		case r.URL.Path == "/2/region":
+			_, _ = io.WriteString(w, `{"region":"us-east-1"}`)
 		default:
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"errors":[{"title":"Invalid request","detail":"name is required"}],"data":{"source":{"rtmp_stream_key":"`+key+`"}}}`)
+			_, _ = io.WriteString(w, `{"errors":[{"title":"Invalid request","detail":"name is required"}],"data":{"stream_key":"`+key+`"}}`)
 		}
 	})
 	_, err := x.Ingest(context.Background(), "client", "tok")
@@ -411,91 +402,113 @@ func TestXKeyNeverAppearsInAnErrorMessage(t *testing.T) {
 	}
 }
 
-// TestXStreamKeysListsEverySourceKeyForTheCrossCheck is the read-only reader.
+// TestXStreamKeysListsEverySourceKeyForTheCrossCheck is the read-only reader: the list for the sources, then each
+// source's own stream_key route, because the list no longer carries keys.
 func TestXStreamKeysListsEverySourceKeyForTheCrossCheck(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/2/users/me" {
-			_, _ = io.WriteString(w, xMeFixture)
-			return
-		}
-		_, _ = io.WriteString(w, xSourcesFixture)
-	})
-	keys, err := x.StreamKeys(context.Background(), "client", "tok")
+	f := newXFake(t)
+	keys, err := f.x.StreamKeys(context.Background(), "client", "tok")
 	if err != nil {
 		t.Fatalf("StreamKeys: %v", err)
 	}
-	if !reflect.DeepEqual(keys, []string{"k3y0ne"}) {
+	if !reflect.DeepEqual(keys, []string{xKey}) {
 		t.Errorf("StreamKeys = %v, want the one source key", keys)
+	}
+}
+
+// TestXNoRequestEverHitsAUserScopedSourceOrBroadcastRoute is the removal pin. X removes /2/users/{id}/sources and
+// /2/users/{id}/broadcasts (and their sub-routes) on 2027-01-01, and they 404 from then on. The fake fails the test on
+// any such path, so a call site that slips back to the old routes fails here. /2/users/me stays: it is the account read.
+func TestXNoRequestEverHitsAUserScopedSourceOrBroadcastRoute(t *testing.T) {
+	f := newXFake(t)
+	ctx := context.Background()
+	two := 2
+	steps := map[string]func() error{
+		"CheckEntitlement": func() error { return f.x.CheckEntitlement(ctx, "c", "tok") },
+		"Ingest":           func() error { _, err := f.x.Ingest(ctx, "c", "tok"); return err },
+		"StreamKeys":       func() error { _, err := f.x.StreamKeys(ctx, "c", "tok"); return err },
+		"Broadcasts":       func() error { _, err := f.x.Broadcasts(ctx, "c", "tok"); return err },
+		"BroadcastByID":    func() error { _, err := f.x.BroadcastByID(ctx, "c", "tok", xBroadcastID); return err },
+		"BroadcastState":   func() error { _, err := f.x.BroadcastState(ctx, "tok", xBroadcastID); return err },
+		"OpenBroadcast":    func() error { _, err := f.x.OpenBroadcast(ctx, "tok", xKey); return err },
+		"Publish": func() error {
+			_, err := f.x.PublishBroadcast(ctx, "tok", xPendingHandle(xSourceID), XPublish{Title: "T", ChatOption: &two})
+			return err
+		},
+		"Live": func() error {
+			_, err := f.x.TransitionBroadcast(ctx, "tok", xPendingHandle(xSourceID), PhaseLive)
+			return err
+		},
+		"End": func() error { _, err := f.x.TransitionBroadcast(ctx, "tok", xBroadcastID, PhaseComplete); return err },
+	}
+	for name, step := range steps {
+		if err := step(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, req := range f.requests() {
+		if xOldRoute.MatchString(strings.Fields(req)[1]) {
+			t.Errorf("request %q hit a user-scoped route X removes on 2027-01-01", req)
+		}
+	}
+	if len(f.requests()) == 0 {
+		t.Fatal("no requests recorded; the pin proves nothing")
 	}
 }
 
 // ---------------------------------------------------------------- lifecycle
 
-// TestXGoLiveIsPublishAndEndIsEndAndTestingIsRefused maps X's state machine onto
-// the three documented phases. X has no testing state, so asking for one is a
-// refusal that names the reason.
-func TestXGoLiveIsPublishAndEndIsEndAndTestingIsRefused(t *testing.T) {
-	var seen []string
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/2/users/me" {
-			_, _ = io.WriteString(w, xMeFixture)
-			return
-		}
-		body, _ := io.ReadAll(r.Body)
-		seen = append(seen, r.Method+" "+r.URL.Path+" "+string(body))
-		if strings.Contains(string(body), "END") {
-			// END's documented answer.
-			_, _ = io.WriteString(w, `{"success":true}`)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","broadcast_id":"1ynJOZVeajOJR"}}`)
-	})
+// TestXGoLiveIsOneCallAndEndIsEndAndTestingIsRefused maps X's state machine onto the three documented phases. X has no
+// testing state, so asking for one is a refusal that names the reason. Going live is ONE call, POST /2/broadcasts, and
+// its result carries the real broadcast id, which is not the pending handle the coordinator held.
+func TestXGoLiveIsOneCallAndEndIsEndAndTestingIsRefused(t *testing.T) {
+	f := newXFake(t)
 	ctx := context.Background()
+	handle := xPendingHandle(xSourceID)
 
-	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseTesting); err == nil {
+	if _, err := f.x.TransitionBroadcast(ctx, "tok", handle, PhaseTesting); err == nil {
 		t.Error("X has no testing state; a testing transition must be refused")
 	}
-	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseLive); err != nil {
+	live, err := f.x.TransitionBroadcast(ctx, "tok", handle, PhaseLive)
+	if err != nil {
 		t.Fatalf("go live: %v", err)
 	}
-	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseComplete); err != nil {
+	if live.BroadcastID != xBroadcastID || live.Status != XStateRunning {
+		t.Errorf("go live = %+v, want the real broadcast id %s RUNNING", live, xBroadcastID)
+	}
+	end, err := f.x.TransitionBroadcast(ctx, "tok", xBroadcastID, PhaseComplete)
+	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
-	if len(seen) != 2 {
-		t.Fatalf("saw %d writes, want 2 (publish, end): %v", len(seen), seen)
+	if end.Status != XStateEnded {
+		t.Errorf("end status = %q, want ENDED", end.Status)
 	}
-	if !strings.HasPrefix(seen[0], "PUT /2/users/1234567890/broadcasts/1ynJOZVeajOJR/state") ||
-		!strings.Contains(seen[0], `"state":"PUBLISH"`) {
-		t.Errorf("go-live = %q, want PUT .../users/{id}/broadcasts/{bid}/state with PUBLISH", seen[0])
+	want := []string{
+		`POST /2/broadcasts {"source_id":"` + xSourceID + `"}`,
+		`PUT /2/broadcasts/` + xBroadcastID + `/state {"state":"END"}`,
 	}
-	if !strings.HasPrefix(seen[1], "PUT /2/broadcasts/1ynJOZVeajOJR/state") ||
-		!strings.Contains(seen[1], `"state":"END"`) {
-		t.Errorf("end = %q, want PUT /2/broadcasts/{bid}/state with END", seen[1])
+	if got := f.requests(); !reflect.DeepEqual(got, want) {
+		t.Errorf("writes = %v, want %v", got, want)
 	}
 }
 
-// TestXBroadcastStateReadsTheSourceAndTheWord is the read side. The state word is
-// passed through unmapped, because X documents its states and an operator
-// comparing them against X's own page must see the same word.
+// TestXBroadcastStateReadsTheSourceAndTheWord is the read side. The state word is passed through unmapped, because X
+// documents its states and an operator comparing them against X's own page must see the same word.
 func TestXBroadcastStateReadsTheSourceAndTheWord(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","source_id":"k3y0ne","title":"Sunday practice"}}`)
-	})
-	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
+	f := newXFake(t)
+	st, err := f.x.BroadcastState(context.Background(), "tok", xBroadcastID)
 	if err != nil {
 		t.Fatalf("BroadcastState: %v", err)
 	}
-	if st.Status != "RUNNING" || st.BoundStreamID != "k3y0ne" || st.Title != "Sunday practice" {
+	if st.Status != "RUNNING" || st.BoundStreamID != xSourceID || st.Title != "Sunday practice" {
 		t.Errorf("BroadcastState = %+v", st)
 	}
-	if st.StreamActive != nil || st.MonitorStream != nil {
-		t.Error("X publishes no stream-liveness read, so those preconditions must stay UNKNOWN (nil), not false")
+	if st.MonitorStream != nil {
+		t.Error("X publishes no monitor-stream read, so that precondition must stay UNKNOWN (nil), not false")
 	}
 }
 
-// TestXMetadataCannotChangeALiveBroadcastAndSaysSo: the title and chat option are
-// written only by the PUBLISH transition. A metadata push must not claim it
-// changed a broadcast that is already running.
+// TestXMetadataCannotChangeALiveBroadcastAndSaysSo: the title and chat option are written only when the broadcast goes
+// live. A metadata push must not claim it changed a broadcast that is already running.
 func TestXMetadataCannotChangeALiveBroadcastAndSaysSo(t *testing.T) {
 	x := &X{}
 	caps := x.MetadataCaps()
@@ -517,8 +530,8 @@ func TestXMetadataCannotChangeALiveBroadcastAndSaysSo(t *testing.T) {
 
 // ------------------------------------------------------------ helpers / shape
 
-// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read,
-// including the viewer counts that must stay undecoded.
+// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read, including the viewer counts that must stay
+// undecoded.
 func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, xBroadcastListFixture)
@@ -527,7 +540,7 @@ func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Broadcasts: %v", err)
 	}
-	if len(bs) != 1 || bs[0].State != "RUNNING" || bs[0].SourceID != "k3y0ne" {
+	if len(bs) != 1 || bs[0].State != "RUNNING" || bs[0].SourceID != xSourceID {
 		t.Fatalf("decoded = %+v", bs)
 	}
 	raw, _ := json.Marshal(bs[0])
@@ -556,78 +569,61 @@ func TestXRejectsAnEmptyBroadcastID(t *testing.T) {
 	}
 }
 
-// ------------------------------------------- broadcast creation and PUBLISH
+// ------------------------------------------------ opening and going live
 
-// xCreateStub answers the calls a create-then-publish makes and records each
-// write, so a test can read the exact bodies X would have received.
-func xCreateStub(t *testing.T, writes *[]string) (*X, *httptest.Server) {
-	t.Helper()
-	return xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case r.URL.Path == "/2/users/1234567890/sources" && r.Method == http.MethodGet:
-			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"k3y0ne","name":"polyemesis","is_stream_active":true}]}}`)
-		case r.URL.Path == "/2/users/1234567890/broadcasts" && r.Method == http.MethodPost:
-			body, _ := io.ReadAll(r.Body)
-			*writes = append(*writes, r.Method+" "+r.URL.Path+" "+string(body))
-			_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"k3y0ne"},"share_url":"https://x.com/i/broadcasts/1ynJOZVeajOJR","video_access":{}}}`)
-		case strings.HasPrefix(r.URL.Path, "/2/users/1234567890/broadcasts/1ynJOZVeajOJR/state"):
-			body, _ := io.ReadAll(r.Body)
-			*writes = append(*writes, r.Method+" "+r.URL.Path+" "+string(body))
-			_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"RUNNING"},"tweet_error":"post was rate limited"}}`)
-		default:
-			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusTeapot)
-		}
-	})
-}
-
-// TestXCreateBroadcastOpensANotStartedBroadcastOnThePolyemesisSource pins the
-// create call the go-live path needs when no broadcast exists yet. The body's
-// source_id is the source's rtmp_stream_key, per the spec, and the broadcast
-// comes back NOT_STARTED, which is invisible until PUBLISH.
-func TestXCreateBroadcastOpensANotStartedBroadcastOnThePolyemesisSource(t *testing.T) {
-	var writes []string
-	x, _ := xCreateStub(t, &writes)
-	b, err := x.CreateBroadcast(context.Background(), "client", "tok", "k3y0ne")
+// TestXOpenBroadcastCreatesNothingOnXAndReturnsAPendingHandle: Go Live is public the moment it returns and ends the
+// broadcast as TIMED_OUT after five minutes without video, so opening must NOT call it. Opening resolves the stored
+// stream key to the source id and returns a handle; nothing exists on X yet.
+func TestXOpenBroadcastCreatesNothingOnXAndReturnsAPendingHandle(t *testing.T) {
+	f := newXFake(t)
+	id, err := f.x.OpenBroadcast(context.Background(), "tok", xKey)
 	if err != nil {
-		t.Fatalf("CreateBroadcast: %v", err)
+		t.Fatalf("OpenBroadcast: %v", err)
 	}
-	if b.ID != "1ynJOZVeajOJR" || b.State != XStateNotStarted {
-		t.Errorf("CreateBroadcast = id %q state %q, want 1ynJOZVeajOJR NOT_STARTED", b.ID, b.State)
+	if id != xPendingHandle(xSourceID) {
+		t.Errorf("OpenBroadcast = %q, want the pending handle for source %s", id, xSourceID)
 	}
-	if len(writes) != 1 || !strings.Contains(writes[0], `"source_id":"k3y0ne"`) {
-		t.Errorf("create body = %v, want one POST carrying source_id k3y0ne", writes)
+	for _, req := range f.requests() {
+		if strings.HasPrefix(req, "POST") || strings.HasPrefix(req, "PUT") {
+			t.Errorf("OpenBroadcast wrote to X (%q); a broadcast must not exist before go-live", req)
+		}
 	}
 }
 
-// TestXCreateBroadcastRefusesAMalformedSourceKeyWithoutAnyRequest: the spec pins
-// source_id to ^[a-zA-Z0-9]{1,32}$. A key outside that shape is refused before
-// any byte leaves the process, and the refusal never echoes the key.
-func TestXCreateBroadcastRefusesAMalformedSourceKeyWithoutAnyRequest(t *testing.T) {
+// TestXOpenBroadcastRefusesAMalformedOrUnknownKey: a key outside the stream key shape is refused before any byte leaves
+// the process, and a key no source holds is refused in words that never echo it.
+func TestXOpenBroadcastRefusesAMalformedOrUnknownKey(t *testing.T) {
 	var hits int32
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
 		http.Error(w, "should not be reached", http.StatusTeapot)
 	})
 	for _, bad := range []string{"", "has space", "way-too-long-" + strings.Repeat("a", 40), "k3y/../x"} {
-		if _, err := x.CreateBroadcast(context.Background(), "client", "tok", bad); err == nil {
-			t.Errorf("CreateBroadcast(%q) succeeded, want refusal", bad)
+		if _, err := x.OpenBroadcast(context.Background(), "tok", bad); err == nil {
+			t.Errorf("OpenBroadcast(%q) succeeded, want refusal", bad)
 		}
 	}
 	if hits != 0 {
 		t.Errorf("malformed keys caused %d requests, want none", hits)
 	}
+	f := newXFake(t)
+	unknown := xSecret("unk", "nown", "K3y")
+	_, err := f.x.OpenBroadcast(context.Background(), "tok", unknown)
+	if err == nil {
+		t.Fatal("a key no source holds was accepted")
+	}
+	if strings.Contains(err.Error(), unknown) {
+		t.Errorf("the unknown key appeared in the error: %v", err)
+	}
 }
 
-// TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed: the switched-off
-// Livestream family refuses creation and PUBLISH without a request, like every
-// other Livestream operation.
+// TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed: the switched-off Livestream family refuses opening and going
+// live without a request, like every other Livestream operation.
 func TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed(t *testing.T) {
 	x, hits := xCountingStub(t)
 	ctx := context.Background()
-	if _, err := x.CreateBroadcast(ctx, "client", "tok", "k3y0ne"); !errors.Is(err, ErrXLivestreamOff) {
-		t.Errorf("CreateBroadcast with the gate closed = %v, want ErrXLivestreamOff", err)
+	if _, err := x.OpenBroadcast(ctx, "tok", "k3y0ne"); !errors.Is(err, ErrXLivestreamOff) {
+		t.Errorf("OpenBroadcast with the gate closed = %v, want ErrXLivestreamOff", err)
 	}
 	if _, err := x.PublishBroadcast(ctx, "tok", "1ynJOZVeajOJR", XPublish{Title: "Sunday"}); !errors.Is(err, ErrXLivestreamOff) {
 		t.Errorf("PublishBroadcast with the gate closed = %v, want ErrXLivestreamOff", err)
@@ -637,77 +633,63 @@ func TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed(t *testing.T) {
 	}
 }
 
-// TestXPublishSendsTheTitleAndChatOptionOnPublish: the title and chat option
-// travel in the PUBLISH body on the user-scoped route. That route is the only
-// one that accepts PUBLISH (the newer route is END only).
-func TestXPublishSendsTheTitleAndChatOptionOnPublish(t *testing.T) {
-	var writes []string
-	x, _ := xCreateStub(t, &writes)
+// TestXPublishSendsTheTitleAndChatOptionInOneGoLiveCall: the title and chat option travel in the POST /2/broadcasts
+// body with the SOURCE ID (not the stream key), as a JSON integer, and with no state field: the route rejects unknown
+// fields.
+func TestXPublishSendsTheTitleAndChatOptionInOneGoLiveCall(t *testing.T) {
+	f := newXFake(t)
 	two := 2
-	res, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+	res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID),
 		XPublish{Title: "  Sunday practice  ", ChatOption: &two})
 	if err != nil {
 		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(writes) != 1 {
-		t.Fatalf("saw %d writes, want 1", len(writes))
+	want := `POST /2/broadcasts {"chat_option":2,"source_id":"` + xSourceID + `","title":"Sunday practice"}`
+	if got := f.requests(); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("go-live = %v, want [%s]", got, want)
 	}
-	if !strings.HasPrefix(writes[0], "PUT /2/users/1234567890/broadcasts/1ynJOZVeajOJR/state") {
-		t.Errorf("publish = %q, want the user-scoped state route", writes[0])
-	}
-	for _, want := range []string{`"state":"PUBLISH"`, `"title":"Sunday practice"`, `"chat_option":2`} {
-		if !strings.Contains(writes[0], want) {
-			t.Errorf("publish body %q is missing %s", writes[0], want)
-		}
-	}
-	if res.State != "RUNNING" {
-		t.Errorf("PublishBroadcast state = %q, want RUNNING", res.State)
+	if res.State != "RUNNING" || res.ID != xBroadcastID {
+		t.Errorf("PublishBroadcast = %+v, want id %s RUNNING", res, xBroadcastID)
 	}
 }
 
-// TestXPublishOmitsTitleAndChatOptionWhenUnset: an unset chat option is left out
-// of the body so X keeps its own default, and an empty title is not sent as a
-// blank title that would overwrite nothing useful.
+// TestXPublishOmitsTitleAndChatOptionWhenUnset: an unset chat option is left out of the body so X keeps its own
+// default, and an empty title is not sent as a blank title.
 func TestXPublishOmitsTitleAndChatOptionWhenUnset(t *testing.T) {
-	var writes []string
-	x, _ := xCreateStub(t, &writes)
-	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{}); err != nil {
+	f := newXFake(t)
+	if _, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{}); err != nil {
 		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(writes) != 1 || !strings.Contains(writes[0], `{"state":"PUBLISH"}`) {
-		t.Errorf("publish body = %v, want exactly {\"state\":\"PUBLISH\"}", writes)
+	if got, want := f.requests(), []string{`POST /2/broadcasts {"source_id":"` + xSourceID + `"}`}; !reflect.DeepEqual(got, want) {
+		t.Errorf("go-live body = %v, want %v", got, want)
 	}
 }
 
-// TestXPublishSuppressesTheAnnouncementPostOnlyWhenAsked: should_not_tweet
-// travels in the PUBLISH body as a JSON boolean true when the announcement is to
-// be suppressed, and is left out otherwise (TestXPublishOmitsTitleAndChatOptionWhenUnset
-// pins the bare body), so X's default of posting is what an unset field means.
+// TestXPublishSuppressesTheAnnouncementPostOnlyWhenAsked: should_not_tweet travels as a JSON boolean true when the
+// announcement is to be suppressed, and is left out otherwise, so X's default of posting is what an unset field means.
 //
-// MUTATION: the should_not_tweet line in PublishBroadcast removed. Observed:
-// FAIL, the body had no should_not_tweet.
+// MUTATION: the should_not_tweet line in PublishBroadcast removed. Expected: FAIL, the body had no should_not_tweet.
 func TestXPublishSuppressesTheAnnouncementPostOnlyWhenAsked(t *testing.T) {
-	var writes []string
-	x, _ := xCreateStub(t, &writes)
-	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+	f := newXFake(t)
+	if _, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID),
 		XPublish{Title: "Sunday practice", ShouldNotTweet: true}); err != nil {
 		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(writes) != 1 || !strings.Contains(writes[0], `"should_not_tweet":true`) {
-		t.Fatalf("publish body = %v, want should_not_tweet:true", writes)
+	if got := f.requests(); len(got) != 1 || !strings.Contains(got[0], `"should_not_tweet":true`) {
+		t.Fatalf("go-live body = %v, want should_not_tweet:true", got)
 	}
-	writes = writes[:0]
-	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+	f.reset()
+	if _, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID),
 		XPublish{Title: "Sunday practice"}); err != nil {
 		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(writes) != 1 || strings.Contains(writes[0], "should_not_tweet") {
-		t.Fatalf("publish body = %v, want no should_not_tweet when the post is wanted", writes)
+	if got := f.requests(); len(got) != 1 || strings.Contains(got[0], "should_not_tweet") {
+		t.Fatalf("go-live body = %v, want no should_not_tweet when the post is wanted", got)
 	}
 }
 
-// TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest: X answers 400
-// to anything outside 0 to 6, so the refusal is made locally and costs nothing.
+// TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest: X answers 400 to anything outside 0 to 6, so the
+// refusal is made locally and costs nothing.
 func TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest(t *testing.T) {
 	var hits int32
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
@@ -716,7 +698,7 @@ func TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest(t *testing.T)
 	})
 	for _, bad := range []int{-1, 7, 99} {
 		v := bad
-		if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{ChatOption: &v}); err == nil {
+		if _, err := x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{ChatOption: &v}); err == nil {
 			t.Errorf("chat option %d accepted, want refusal", bad)
 		}
 	}
@@ -725,24 +707,57 @@ func TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest(t *testing.T)
 	}
 }
 
-// TestXPublishReportsAFailedAnnouncementAsAWarning: the broadcast is live even
-// when the announcing Post fails. X reports that as tweet_error, which must come
-// back as a warning, never as a failed go-live.
-func TestXPublishReportsAFailedAnnouncementAsAWarning(t *testing.T) {
-	var writes []string
-	x, _ := xCreateStub(t, &writes)
-	res, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{Title: "Sunday"})
+// TestXPublishOfARecordedBroadcastReadsItsSourceFirst: a destination recorded before this change holds a REAL
+// NOT_STARTED broadcast id made on the old create route. The new routes cannot publish it, but they can take its source
+// live, so the source id is read from the broadcast and Go Live is called with it.
+func TestXPublishOfARecordedBroadcastReadsItsSourceFirst(t *testing.T) {
+	f := newXFake(t)
+	f.broadcastState = "NOT_STARTED"
+	res, err := f.x.PublishBroadcast(context.Background(), "tok", "legacyId1234", XPublish{})
 	if err != nil {
-		t.Fatalf("a failed announcement failed the go-live: %v", err)
+		t.Fatalf("PublishBroadcast: %v", err)
 	}
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "rate limited") {
-		t.Errorf("Warnings = %v, want the tweet_error surfaced once", res.Warnings)
+	got := f.requests()
+	if len(got) != 2 || !strings.HasPrefix(got[0], "GET /2/broadcasts/legacyId1234") ||
+		got[1] != `POST /2/broadcasts {"source_id":"`+xSourceID+`"}` {
+		t.Errorf("requests = %v, want a read of the broadcast then Go Live on its source", got)
+	}
+	if res.ID != xBroadcastID {
+		t.Errorf("ID = %q, want the new real broadcast id", res.ID)
 	}
 }
 
-// TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot: X documents six states.
-// An unrecognised word must not be treated as live, because a wrong "live"
-// would stop the coordinator from ever publishing.
+// TestXGoLiveExplainsTheConflictsAndTheIneligibleAccount: X answers Go Live 409 for two different reasons and 403 for an
+// account that cannot go live. Each must reach the operator in words that name the cause, with X's own detail kept.
+func TestXGoLiveExplainsTheConflictsAndTheIneligibleAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"conflict", http.StatusConflict, `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","detail":"Another broadcast 1abc is live on this source.","status":409}`, "Another broadcast 1abc is live"},
+		{"ineligible", http.StatusForbidden, `{"type":"about:blank","title":"Forbidden","detail":"This account is not eligible to go live.","status":403}`, "not eligible to go live"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			_, err := x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("PublishBroadcast = %v, want X's detail %q", err, tc.want)
+			}
+			var se *xStatusError
+			if !errors.As(err, &se) || se.Status != tc.status {
+				t.Errorf("error %v no longer unwraps to the X status error %d", err, tc.status)
+			}
+		})
+	}
+}
+
+// TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot: X documents six states. An unrecognised word must not be treated
+// as live, because a wrong "live" would stop the coordinator from ever publishing.
 func TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot(t *testing.T) {
 	for _, s := range []string{XStateNotStarted, XStatePrePublished, XStateRunning, XStateEnded, XStateTimedOut, XStateCanceled} {
 		if !XStateKnown(s) {
@@ -756,22 +771,287 @@ func TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot(t *testing.T) {
 	}
 }
 
-// TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes: X has no
-// stream-liveness read on the broadcast, but its source carries
-// is_stream_active. Publishing before bytes arrive would announce a blank
-// broadcast, so the source's answer fills the precondition.
-func TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case "/2/users/1234567890/sources":
-			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"k3y0ne","name":"polyemesis","is_stream_active":true}]}}`)
-		default:
-			_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"k3y0ne"}}`)
+// TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource: when nothing is live on the source, a pending
+// handle's state is a synthetic NOT_STARTED, and whether it may go live is the source's own is_stream_active.
+// Publishing before bytes arrive would announce a blank broadcast. The handle itself is never sent to X as an id.
+func TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource(t *testing.T) {
+	for _, active := range []bool{true, false} {
+		f := newXFake(t)
+		f.active = active
+		f.list = xEmptyBroadcastList
+		st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+		if err != nil {
+			t.Fatalf("BroadcastState: %v", err)
 		}
+		if st.Status != XStateNotStarted || st.BoundStreamID != xSourceID {
+			t.Errorf("BroadcastState = %+v, want NOT_STARTED bound to source %s", st, xSourceID)
+		}
+		if st.StreamActive == nil || *st.StreamActive != active {
+			t.Errorf("StreamActive = %v, want %v from the source's is_stream_active", st.StreamActive, active)
+		}
+		for _, req := range f.requests() {
+			if strings.Contains(req, "/2/broadcasts/") {
+				t.Errorf("a pending handle read asked X about a broadcast (%q) that does not exist", req)
+			}
+		}
+	}
+}
+
+// TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted: the go-live behind a handle may have
+// succeeded with its answer lost, and then the handle stands for a RUNNING broadcast. The source can also carry a
+// broadcast polyemesis did NOT start, and adopting that one would clear a fault and later END someone else's show. The
+// only documented discriminator is created_at_ms, compared with the attempt in X's OWN time (the handle carries the
+// attempt as X's clock read it, never the local clock) inside a two-sided window:
+// [attempt - 5s, attempt + 20s request timeout + 5s]. No attempt on record means nothing is adopted and the list is
+// not even read.
+func TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted(t *testing.T) {
+	const created = 1755302390000 // the list fixture's RUNNING broadcast
+	for _, tc := range []struct {
+		name      string
+		attemptMS int64
+		list      string
+		adopt     bool
+		wantList  bool
+	}{
+		{"created 1s after the attempt is ours", created - 1000, xBroadcastListFixture, true, true},
+		{"created at the end of the window is ours", created - 25000, xBroadcastListFixture, true, true},
+		{"created 3s before the attempt is ours (clock reading error)", created + 3000, xBroadcastListFixture, true, true},
+		{"created 6s before the attempt is not ours", created + 6000, xBroadcastListFixture, false, true},
+		{"created 20s before the attempt is not ours", created + 20000, xBroadcastListFixture, false, true},
+		{"created long before the attempt is not ours", created + 600000, xBroadcastListFixture, false, true},
+		{"created 2 minutes AFTER the attempt is not ours", created - 120000, xBroadcastListFixture, false, true},
+		{"created just past the window is not ours", created - 26000, xBroadcastListFixture, false, true},
+		{"no created_at_ms cannot be verified", created - 1000,
+			strings.Replace(xBroadcastListFixture, `"created_at_ms": "1755302390000",`, "", 1), false, true},
+		{"no attempt on record adopts nothing", 0, xBroadcastListFixture, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXFake(t)
+			f.list = tc.list
+			st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, tc.attemptMS))
+			if err != nil {
+				t.Fatalf("BroadcastState: %v", err)
+			}
+			if tc.adopt && (st.Status != XStateRunning || st.BroadcastID != xBroadcastID) {
+				t.Errorf("BroadcastState = %+v, want the broadcast %s adopted RUNNING", st, xBroadcastID)
+			}
+			if !tc.adopt && st.Status != XStateNotStarted {
+				t.Errorf("BroadcastState = %+v, adopted a broadcast polyemesis did not start", st)
+			}
+			listed := false
+			for _, req := range f.requests() {
+				listed = listed || req == "GET /2/broadcasts"
+			}
+			if listed != tc.wantList {
+				t.Errorf("broadcast list read = %v, want %v", listed, tc.wantList)
+			}
+		})
+	}
+	// A RUNNING broadcast on ANOTHER source is never this destination's.
+	f2 := newXFake(t)
+	f2.list = strings.ReplaceAll(xBroadcastListFixture, xSourceID, "9999999999999999999")
+	st, err := f2.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, created-1000))
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.Status != XStateNotStarted {
+		t.Errorf("a broadcast on another source was taken for this one: %+v", st)
+	}
+}
+
+// TestXMeasuresXsClockFromTheDateHeader: the go-live attempt is recorded in X's time, so the provider keeps the offset
+// between X's clock and its own from the Date header of the freshest answer, per token. The offset is what lets the
+// polyemesis clock be minutes off without breaking adoption.
+func TestXMeasuresXsClockFromTheDateHeader(t *testing.T) {
+	for _, skew := range []time.Duration{0, 10 * time.Minute, -10 * time.Minute} {
+		f := newXFake(t)
+		f.dateSkew = skew
+		if _, ok := f.x.XClockOffsetMS("tok"); ok {
+			t.Fatal("an offset was reported before any answer was seen")
+		}
+		if _, err := f.x.Broadcasts(context.Background(), "c", "tok"); err != nil {
+			t.Fatalf("Broadcasts: %v", err)
+		}
+		off, ok := f.x.XClockOffsetMS("tok")
+		if !ok {
+			t.Fatal("no offset after an answer carrying a Date header")
+		}
+		if d := time.Duration(off)*time.Millisecond - skew; d < -3*time.Second || d > 3*time.Second {
+			t.Errorf("offset = %dms for a %v skew, want it within a few seconds", off, skew)
+		}
+		if _, ok := f.x.XClockOffsetMS("another token"); ok {
+			t.Error("one token's clock reading was given to another")
+		}
+	}
+	// An answer with no Date header gives no offset: the attempt cannot be put in X's time.
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil // suppress the automatic header
+		_, _ = io.WriteString(w, xBroadcastListFixture)
 	})
-	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
+	if _, err := x.Broadcasts(context.Background(), "c", "tok"); err != nil {
+		t.Fatalf("Broadcasts: %v", err)
+	}
+	if _, ok := x.XClockOffsetMS("tok"); ok {
+		t.Error("an offset was invented for an answer with no Date header")
+	}
+}
+
+// TestXPendingHandleCarriesTheGoLiveAttempt: the handle is "pending:<source>" or "pending:<source>@<attempt ms>".
+func TestXPendingHandleCarriesTheGoLiveAttempt(t *testing.T) {
+	h := XPendingHandle(xSourceID, 1755302400000)
+	src, at, ok := XPendingParts(h)
+	if !ok || src != xSourceID || at != 1755302400000 {
+		t.Errorf("XPendingParts(%q) = %q %d %v", h, src, at, ok)
+	}
+	if src, at, ok := XPendingParts(XPendingHandle(xSourceID, 0)); !ok || src != xSourceID || at != 0 {
+		t.Errorf("a handle with no attempt parsed as %q %d %v", src, at, ok)
+	}
+	for _, bad := range []string{"pending:" + xSourceID + "@", "pending:" + xSourceID + "@x", "pending:" + xSourceID + "@-5", "pending:@5"} {
+		if _, _, ok := XPendingParts(bad); ok {
+			t.Errorf("XPendingParts(%q) accepted a malformed handle", bad)
+		}
+	}
+}
+
+// TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneButBroadcastIsLiveReturnsTheBroadcast: when the listing FOUND a
+// RUNNING in-window broadcast, a source missing from the source list must not turn the read into ErrXSourceGone: the
+// broadcast is returned, so the END can proceed.
+func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneButBroadcastIsLiveReturnsTheBroadcast(t *testing.T) {
+	f := newXFake(t)
+	f.sources = xEmptySourcesFixture
+	st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, 1755302390000-1000))
+	if err != nil {
+		t.Fatalf("BroadcastState = %v, want the live broadcast returned although its source left the list", err)
+	}
+	if st.Status != XStateRunning || st.BroadcastID != xBroadcastID {
+		t.Errorf("BroadcastState = %+v, want %s RUNNING", st, xBroadcastID)
+	}
+}
+
+// TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError: a source that left GET /2/sources (deleted on X)
+// can never go live, and reading it as "no bytes yet" would wait for ever in silence.
+func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError(t *testing.T) {
+	f := newXFake(t)
+	f.list = xEmptyBroadcastList
+	f.sources = xEmptySourcesFixture
+	_, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+	if err == nil || !strings.Contains(err.Error(), "no longer has") || !errors.Is(err, ErrXSourceGone) {
+		t.Fatalf("BroadcastState with the source gone = %v, want ErrXSourceGone saying X no longer has the source", err)
+	}
+	if strings.Contains(err.Error(), "pending:") {
+		t.Errorf("the error shows the internal handle: %v", err)
+	}
+}
+
+// TestXGoLiveRefusalsAreClassifiedForTheCoordinator pins the three documented go-live refusals to the doc's own
+// words (docs.x.com/livestream-api/broadcasts/go-live, "Errors"):
+//
+//	403  about:blank         "The account isn't eligible to go live, or the broadcast was moderated."  Don't retry.
+//	403  .../missing-scopes  "The OAuth 2.0 token lacks broadcast.write." Re-authorize with broadcast.read and broadcast.write.
+//	409  .../conflict        "The source can't take video before its encoder connects ..."  Start your encoder, then retry.
+//	409  .../conflict        "Another broadcast is live on the source. The detail names that broadcast when known."
+//
+// A 409 that matches neither phrase is NOT assumed to be the harmless wait: it passes through as an ordinary counted
+// error, so an unrecognised conflict escalates instead of waiting in silence.
+func TestXGoLiveRefusalsAreClassifiedForTheCoordinator(t *testing.T) {
+	const conflict = `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","status":409,"detail":%q}`
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   TransitionRefusal // "" means an ordinary, unclassified error
+	}{
+		{"ineligible", 403, `{"type":"about:blank","title":"Forbidden","detail":"This account is not eligible to go live.","status":403}`, RefusalNotEligible},
+		{"missing scopes", 403, `{"type":"https://api.x.com/2/problems/missing-scopes","title":"Forbidden","detail":"Token lacks broadcast.write.","status":403}`, RefusalMissingScopes},
+		{"busy", 409, sprintfBody(conflict, "Another broadcast 1abc is live on this source."), RefusalSourceBusy},
+		{"busy, broadcast not named", 409, sprintfBody(conflict, "Another broadcast is live on the source."), RefusalSourceBusy},
+		{"not ready", 409, sprintfBody(conflict, "The source can't take video before its encoder connects."), RefusalStreamInactive},
+		{"not ready, other wording", 409, sprintfBody(conflict, "Source cannot take video until the encoder is connected."), RefusalStreamInactive},
+		{"unrecognised conflict is counted, not waited out", 409, sprintfBody(conflict, "Broadcast creation is temporarily blocked."), ""},
+		{"a conflict that merely mentions a broadcast is not busy", 409, sprintfBody(conflict, "Broadcast creation is blocked."), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXFake(t)
+			f.liveStatus, f.liveBody = tc.status, tc.body
+			_, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
+			var ref *TransitionRefused
+			isRef := errors.As(err, &ref)
+			if tc.want == "" {
+				if isRef {
+					t.Fatalf("PublishBroadcast = %v, want an unclassified error, got refusal %q", err, ref.Refusal)
+				}
+			} else {
+				if !isRef || ref.Refusal != tc.want {
+					t.Fatalf("PublishBroadcast = %v, want a refusal classified %q", err, tc.want)
+				}
+				if !strings.Contains(err.Error(), "X refused") || strings.Contains(err.Error(), "YouTube") {
+					t.Errorf("refusal text = %q, want it to name X, not YouTube", err.Error())
+				}
+			}
+			var se *xStatusError
+			if !errors.As(err, &se) || se.Status != tc.status {
+				t.Errorf("error %v no longer unwraps to the X status error %d", err, tc.status)
+			}
+		})
+	}
+}
+
+func sprintfBody(format, detail string) string { return fmt.Sprintf(format, detail) }
+
+// TestXGoLiveAnswered200ForABroadcastNotStartedByPolyemesisIsRefused: a 200 means the source already had a live
+// broadcast. When the handle records the go-live attempt and that broadcast was created before it, it is somebody
+// else's, and it is refused in words rather than adopted (and later ended).
+func TestXGoLiveAnswered200ForABroadcastNotStartedByPolyemesisIsRefused(t *testing.T) {
+	const created = 1755302400000 // xFakeCreatedMS
+	f := newXFake(t)
+	f.liveExisting = true
+	_, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, created+600000), XPublish{})
+	var ref *TransitionRefused
+	if !errors.As(err, &ref) || ref.Refusal != RefusalSourceBusy || !strings.Contains(err.Error(), "not started by polyemesis") {
+		t.Fatalf("PublishBroadcast = %v, want a source-busy refusal saying the broadcast was not started by polyemesis", err)
+	}
+	// Without an attempt in X's time (no Date header was ever seen) the broadcast cannot be confirmed as ours.
+	_, err = f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, 0), XPublish{})
+	if !errors.As(err, &ref) || ref.Refusal != RefusalSourceBusy || !strings.Contains(err.Error(), "could not confirm") {
+		t.Fatalf("PublishBroadcast with no attempt = %v, want a refusal saying it could not confirm the broadcast was started by polyemesis", err)
+	}
+	// Created after the attempt, the same answer is ours: the repeat after a lost answer.
+	res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, created-1000), XPublish{})
+	if err != nil || !res.Existing || res.ID != xBroadcastID {
+		t.Fatalf("PublishBroadcast = %+v, %v, want the existing broadcast adopted", res, err)
+	}
+}
+
+// TestXGoLiveReportsWhetherItAdoptedALiveBroadcast: 201 is a new broadcast, 200 is the one the source already had
+// (the usual case is a repeat after a lost answer).
+func TestXGoLiveReportsWhetherItAdoptedALiveBroadcast(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		f := newXFake(t)
+		f.liveExisting = existing
+		res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, 1755302400000-1000), XPublish{})
+		if err != nil {
+			t.Fatalf("PublishBroadcast: %v", err)
+		}
+		if res.Existing != existing {
+			t.Errorf("Existing = %v for liveExisting=%v", res.Existing, existing)
+		}
+	}
+}
+
+// TestXUnknownBroadcastIsNotFound keeps the fake honest: X answers 404 for an id it does not hold.
+func TestXUnknownBroadcastIsNotFound(t *testing.T) {
+	f := newXFake(t)
+	if _, err := f.x.BroadcastByID(context.Background(), "c", "tok", "nope"); err == nil {
+		t.Fatal("an unknown broadcast id was read as a broadcast")
+	}
+}
+
+// TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes: a real broadcast's source carries is_stream_active, matched
+// by SOURCE ID (the stream key is no longer an id).
+func TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes(t *testing.T) {
+	f := newXFake(t)
+	f.active = true
+	st, err := f.x.BroadcastState(context.Background(), "tok", xBroadcastID)
 	if err != nil {
 		t.Fatalf("BroadcastState: %v", err)
 	}
@@ -780,115 +1060,48 @@ func TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes(t *testing.T) {
 	}
 }
 
-// TestXCreateBroadcastScrubsTheStreamKeyFromEveryError(SEC-X1, review #45): source_id IS the source's
-// rtmp_stream_key, and X's problem objects can echo the request back in detail, title or type. The lifecycle
-// coordinator puts this error into a fault, a log line, an event and the timeline, so the key must be gone from the
-// text before the error leaves this package, on a refused create (4xx) and on a 2xx that answers with errors and no
-// broadcast. The typed status error must still unwrap, because callers branch on the status.
-func TestXCreateBroadcastScrubsTheStreamKeyFromEveryError(t *testing.T) {
-	key := xSecret("srcK", "ey", "Canary7")
-	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-		typed  bool
-	}{
-		{"refused", http.StatusBadRequest, `{"title":"Invalid source ` + key + `","detail":"source_id ` + key + ` is not yours","type":"about:` + key + `","errors":[{"detail":"unknown source ` + key + `"}]}`, true},
-		{"2xx with errors", http.StatusOK, `{"errors":[{"title":"Not found","detail":"no source with id ` + key + `"}]}`, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/2/users/me" {
-					_, _ = io.WriteString(w, xMeFixture)
-					return
-				}
-				w.WriteHeader(tc.status)
-				_, _ = io.WriteString(w, tc.body)
-			})
-			for name, call := range map[string]func() error{
-				"CreateBroadcast": func() error { _, err := x.CreateBroadcast(context.Background(), "client", "tok", key); return err },
-				"OpenBroadcast":   func() error { _, err := x.OpenBroadcast(context.Background(), "tok", key); return err },
-			} {
-				err := call()
-				if err == nil {
-					t.Fatalf("%s returned no error", name)
-				}
-				if strings.Contains(err.Error(), key) {
-					t.Errorf("%s: the stream key appeared in the error: %v", name, err)
-				}
-				for e := errors.Unwrap(err); e != nil; e = errors.Unwrap(e) {
-					if strings.Contains(e.Error(), key) {
-						t.Errorf("%s: the stream key appeared in a wrapped error: %v", name, e)
-					}
-				}
-				var se *xStatusError
-				if tc.typed && (!errors.As(err, &se) || se.Status != tc.status) {
-					t.Errorf("%s: error %v no longer unwraps to the X status error", name, err)
-				}
-				if !strings.Contains(err.Error(), "is not yours") && tc.typed {
-					t.Errorf("%s: scrubbing removed X's own words, not just the key: %v", name, err)
-				}
-			}
-		})
+// TestXPendingHandleRoundTripsAndNeverMistakesARealID: the handle must be recognised only by its own prefix with a
+// source id after it, so a real broadcast id is never read as one.
+func TestXPendingHandleRoundTripsAndNeverMistakesARealID(t *testing.T) {
+	h := xPendingHandle(xSourceID)
+	if id, ok := xPendingSource(h); !ok || id != xSourceID {
+		t.Errorf("xPendingSource(%q) = %q, %v", h, id, ok)
+	}
+	for _, real := range []string{"1ynJOZVeajOJR", "", "pending:", "pending:abc", "xpending:" + xSourceID} {
+		if _, ok := xPendingSource(real); ok {
+			t.Errorf("xPendingSource(%q) read a real id as a pending handle", real)
+		}
 	}
 }
 
-// TestXPublishReturnsXsErrorsOnASuccessfulStatusWithNoState (review #28): X answers some failures 200 with an
-// errors array and no broadcast. Reading only the state would report a publish that did nothing as done, with an
-// empty state. PROVISIONAL, X is gated: the shape is from the spec's partial-error convention.
-func TestXPublishReturnsXsErrorsOnASuccessfulStatusWithNoState(t *testing.T) {
+// TestXEndingAPendingHandleSendsNothing: no broadcast exists on X for it, so there is nothing to end.
+func TestXEndingAPendingHandleSendsNothing(t *testing.T) {
+	f := newXFake(t)
+	res, err := f.x.TransitionBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), PhaseComplete)
+	if err != nil {
+		t.Fatalf("end of a pending handle: %v", err)
+	}
+	if !res.Redundant {
+		t.Errorf("end of a pending handle = %+v, want Redundant: nothing was on air", res)
+	}
+	if got := f.requests(); len(got) != 0 {
+		t.Errorf("ending a pending handle made requests %v", got)
+	}
+}
+
+// TestXGoLiveReturnsXsErrorsOnASuccessfulStatusWithNoBroadcast: X answers some failures 200 with an errors array and no
+// broadcast. Reading only the state would report a go-live that did nothing as done.
+func TestXGoLiveReturnsXsErrorsOnASuccessfulStatusWithNoBroadcast(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/2/users/me" {
-			_, _ = io.WriteString(w, xMeFixture)
-			return
-		}
-		_, _ = io.WriteString(w, `{"errors":[{"title":"Forbidden","detail":"broadcast is not NOT_STARTED"}]}`)
+		_, _ = io.WriteString(w, `{"errors":[{"title":"Forbidden","detail":"source cannot go live"}]}`)
 	})
-	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{}); err == nil ||
-		!strings.Contains(err.Error(), "not NOT_STARTED") {
-		t.Errorf("PublishBroadcast on a 200 with errors and no state = %v, want X's error", err)
+	if _, err := x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{}); err == nil ||
+		!strings.Contains(err.Error(), "source cannot go live") {
+		t.Errorf("PublishBroadcast on a 200 with errors and no broadcast = %v, want X's error", err)
 	}
 	if _, err := x.TransitionBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", PhaseComplete); err == nil ||
-		!strings.Contains(err.Error(), "not NOT_STARTED") {
+		!strings.Contains(err.Error(), "source cannot go live") {
 		t.Errorf("end on a 200 with errors and no state = %v, want X's error", err)
-	}
-}
-
-// TestXEndReadsTheStateFromTheBroadcastObjectToo (review #28): the END answer may carry the state at data.state or
-// under data.broadcast.state. Reading only the first reported an end that worked with an empty status.
-func TestXEndReadsTheStateFromTheBroadcastObjectToo(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"ENDED"}}}`)
-	})
-	res, err := x.TransitionBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", PhaseComplete)
-	if err != nil {
-		t.Fatalf("end: %v", err)
-	}
-	if res.Status != XStateEnded {
-		t.Errorf("end status = %q, want ENDED from data.broadcast.state", res.Status)
-	}
-}
-
-// TestXBroadcastStateFindsASourceBoundByItsIDWhenTheKeyDiffers (review #60): X documents the source id as the key
-// too, but a source can carry both, and they can differ. A broadcast whose source_id is the source's id must still
-// find it, or StreamActive stays unknown and the coordinator never publishes.
-func TestXBroadcastStateFindsASourceBoundByItsIDWhenTheKeyDiffers(t *testing.T) {
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/2/users/me":
-			_, _ = io.WriteString(w, xMeFixture)
-		case "/2/users/1234567890/sources":
-			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"S1src","rtmp_stream_key":"otherK3y","name":"polyemesis","is_stream_active":true}]}}`)
-		default:
-			_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"S1src"}}`)
-		}
-	})
-	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
-	if err != nil {
-		t.Fatalf("BroadcastState: %v", err)
-	}
-	if st.StreamActive == nil || !*st.StreamActive {
-		t.Errorf("StreamActive = %v, want true: the source is bound by its id", st.StreamActive)
 	}
 }
 
