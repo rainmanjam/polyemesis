@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 310,
+    "methodPatternPairs": 312,
     "swept": 80,
     "excused": 62,
-    "denied": 168,
+    "denied": 170,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -170,6 +170,12 @@
       "method": "POST",
       "pattern": "/api/v1/chat/bans",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/export",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -1238,6 +1244,12 @@
       "method": "DELETE",
       "pattern": "/api/v1/recordings/{id}",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings/{id}/chat",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -2520,6 +2532,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/chat/export",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatExport"
+    },
+    {
       "route": "GET /api/v1/chat/flags",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2874,6 +2896,16 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/recordings/{id}/chat",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "recordingChat"
     },
     {
       "route": "GET /api/v1/recordings/{id}/download",

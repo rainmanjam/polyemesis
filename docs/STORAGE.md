@@ -43,6 +43,11 @@ SHA-256 stored with it as metadata, and with `verifyDownload` the bytes
 themselves. Only then is the item `verified`. A file that changes after it was
 verified is uploaded again.
 
+A recording's saved chat (`<name>.chat.json` and `.chat.vtt`, see
+[CHAT-EXPORT.md](CHAT-EXPORT.md)) is sent with it, under the same `{kind}`
+(`recordings`) and with the same checks. There is no separate switch: they are a
+few kilobytes beside the recording.
+
 Files above 64 MiB go up in 16 MiB parts. Each part is retried on its own, and
 progress is saved after every part, so a retry or a restart sends only what
 never arrived.

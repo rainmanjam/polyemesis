@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/AppLayout";
+import { ChatExportDialog } from "@/components/ChatExportDialog";
 import { EmptyState } from "@/components/EmptyState";
 import {
   ChatComposer,
@@ -294,6 +295,7 @@ export function ChatPage() {
                 {t("chatFlags.chip")}
                 {flagCount !== "" && <span className="tnum ml-1 font-mono">{flagCount}</span>}
               </Button>
+              <ChatExportDialog platforms={platforms} />
               <PlatformFilter
                 platforms={platforms}
                 hidden={hidden}

@@ -100,6 +100,7 @@ func (m *Manager) sweepDerived() bool {
 		m.log.Info("removed derived media for recordings that are gone", "count", len(removed))
 	}
 	n := m.sweepTranscripts(known)
+	n += m.sweepChatSidecars(known)
 	return len(removed) > 0 || n > 0
 }
 

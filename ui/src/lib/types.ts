@@ -2072,6 +2072,9 @@ export interface Recording {
   /** The programme it was recorded from; absent on an older recording or one
    *  whose programme was deleted. Its live captions are kept per programme. */
   sourceId?: number | null;
+  /** Chat was saved beside the file when it finished (<name>.chat.json and
+   *  .chat.vtt). Absent on the library's richer rows. */
+  chatSaved?: boolean;
 }
 
 export interface DiskUsage {

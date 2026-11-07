@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { RecordingChatMenu } from "@/components/RecordingChatMenu";
 import { StorageTargetsCard } from "@/components/StorageTargetsCard";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -328,7 +329,7 @@ export function RecordingsPage() {
             <TableHead className="text-center">{t("rec.tracks")}</TableHead>
             <TableHead className="text-center">{t("rec.stems")}</TableHead>
             <TableHead className="text-right">{t("rec.size")}</TableHead>
-            <TableHead className="w-20" />
+            <TableHead className="w-28" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -388,6 +389,7 @@ export function RecordingsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-0.5">
+                      <RecordingChatMenu recording={r} />
                       <Button variant="ghost" size="icon-sm" asChild aria-label={t("rec.download")}>
                         <a href={api.downloadUrl(r.id)} download>
                           <Download />
