@@ -562,11 +562,11 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 
 	case db.PlatformX:
 		// X chat is part of the Livestream family, so it is attached only while
-		// the operator's Livestream gate is open (POLYEMESIS_X_LIVESTREAM). With
-		// the gate closed the account stays connected for sign-in and nothing
-		// reads or posts chat for it.
+		// the operator's Livestream gate is open (on by default, off with
+		// POLYEMESIS_X_LIVESTREAM=0). With the gate closed the account stays
+		// connected for sign-in and nothing reads or posts chat for it.
 		if s.livestreamGate(db.PlatformX) != "open" {
-			return nil, fmt.Errorf("X chat needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)")
+			return nil, fmt.Errorf("X chat needs X Livestream, which is switched off (POLYEMESIS_X_LIVESTREAM=0)")
 		}
 		origin, why := xWebhookOrigin(s.cfg)
 		return chat.NewX(chat.XConfig{

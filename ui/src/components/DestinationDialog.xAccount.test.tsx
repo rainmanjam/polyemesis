@@ -106,7 +106,7 @@ describe("linking an X destination to the connected X account", () => {
     await screen.findByTestId("connected-account-picker");
     await waitFor(() => expect(screen.getByText(en["addDest.xCreatesSource"])).toBeTruthy());
     expect(screen.queryByText(/nothing to prefill/)).toBeNull();
-    expect(screen.queryByText(/Until X Livestream is switched on/)).toBeNull();
+    expect(screen.queryByText(/When X Livestream is switched off/)).toBeNull();
   });
 
   it("keeps the paste-it-yourself copy at step 2 when Livestream is off", async () => {
@@ -114,7 +114,7 @@ describe("linking an X destination to the connected X account", () => {
     open(stored({}));
     await screen.findByTestId("connected-account-picker");
     expect(screen.getByText(/nothing to prefill/)).toBeTruthy();
-    expect(screen.getByText(/Until X Livestream is switched on/)).toBeTruthy();
+    expect(screen.getByText(/When X Livestream is switched off/)).toBeTruthy();
     expect(screen.queryByText(en["addDest.xCreatesSource"])).toBeNull();
   });
 

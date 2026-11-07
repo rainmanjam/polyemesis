@@ -1160,7 +1160,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // was built but unchecked, impossible to link at all. A row declares a
   // connect id only for a platform that signs in, so the label adds nothing.
   const showOAuth = caps?.connect !== undefined;
-  // X Livestream is switched on: with an account linked, the server creates the
+  // X Livestream is on (the default): with an account linked, the server creates the
   // stream source itself and the URL and key may be left empty.
   const xMintsKey =
     platform === "x" && rowsOf(guidesRead).find((g) => g.platform === "x")?.livestreamGate === "open";

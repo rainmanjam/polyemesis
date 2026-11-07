@@ -425,8 +425,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 	},
 	{
 		PresetID: "x", Tier: TierManual,
-		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat: switch it on with POLYEMESIS_X_LIVESTREAM=1, and the paste stays the fallback when the account cannot use the API.",
-		ReadFirst: "The Livestream API needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1). X's Livestream guide asks for a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder; it no longer asks for an access form. Until it is switched on, or when the account cannot use the API, the Livestream features stay off and pasting the server URL and stream key from X's producer tooling works on its own. Sign-in works without it.",
+		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat. It is on by default (set POLYEMESIS_X_LIVESTREAM=0 to switch it off), and the paste stays the fallback when the account cannot use the API.",
+		ReadFirst: "The Livestream API is on by default; POLYEMESIS_X_LIVESTREAM=0 switches it off. X's Livestream guide asks for a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder; it no longer asks for an access form. When it is switched off, or when the account cannot use the API, the Livestream features stay off and pasting the server URL and stream key from X's producer tooling works on its own. Sign-in works without it.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
 			// Sign-in has run live: an account connected on 2026-11-06,
@@ -437,28 +437,29 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// does, polyemesis mints the source itself; the cell stays Manual
 			// because the operator must still switch Livestream on by hand.
 			CapStreamKey: SupportManual,
-			// Built behind the gate, not yet exercised against a live X account.
-			CapMetadata: SupportUnknown,
-			CapChatRead: SupportUnknown,
+			// 2026-11-07, staging, @RainmanJam, two live runs with X Livestream on:
+			// the go-live published the broadcast with the configured title
+			// (metadata), 2 of 2 viewer messages arrived over the webhook (chat
+			// read), and both broadcasts were ended by polyemesis (lifecycle).
+			CapMetadata: SupportYes,
+			CapChatRead: SupportYes,
 			// Send and moderation are built (XAdapter implements Sender, Deleter
-			// and Banner) but only attached behind POLYEMESIS_X_LIVESTREAM, and
-			// have never run against a live X account, so they stay Unverified.
-			// chat's TestTheCapabilityMatrixAgreesWithTheChatProfiles allows that
-			// for a live-gated platform.
+			// and Banner) but have never run against a live X account, and
+			// viewer stats were not read live either, so they stay Unverified.
 			CapChatSend:           SupportUnknown,
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
-			CapBroadcastLifecycle: SupportUnknown,
+			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge. Verified live: an account connected on 2026-11-06, reconnected on 2026-11-07, and the token refreshes.",
-			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/sources, then GET /2/sources/{id}/stream_key). That needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1), so until then, or when the account cannot use the API, this is a paste from X's producer tooling.",
-			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
-			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, which X delivers only to a webhook. polyemesis registers https://<tls.hostname>/api/v1/webhooks/x, so reading chat needs the app's bearer token (POLYEMESIS_X_APP_BEARER), a public trusted HTTPS hostname without a port (tls.mode acme, inbound 443), and the X client secret saved here. Without them the chat pane stays empty, says what is missing, and sending still works. Not yet checked against a live X account.",
-			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Needs X Livestream switched on.",
+			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/sources, then GET /2/sources/{id}/stream_key). That needs X Livestream, which is on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), so when it is off, or when the account cannot use the API, this is a paste from X's producer tooling.",
+			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast. Verified live on 2026-11-07: the go-live published the broadcast with the configured title (\"Polyemesis Test Flight\") on a real account.",
+			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, which X delivers only to a webhook. polyemesis registers https://<tls.hostname>/api/v1/webhooks/x, so reading chat needs the app's bearer token (POLYEMESIS_X_APP_BEARER), a public trusted HTTPS hostname without a port (tls.mode acme, inbound 443), and the X client secret saved here. Without them the chat pane stays empty, says what is missing, and sending still works. Verified live on 2026-11-07: 2 of 2 viewer messages arrived over the webhook.",
+			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Needs X Livestream, which is on unless POLYEMESIS_X_LIVESTREAM=0. Not yet checked against a live X account.",
 			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
 			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
-			CapBroadcastLifecycle: "With Livestream switched on, polyemesis waits on the stream source when the destination turns on, takes it live once bytes arrive (POST /2/broadcasts, with the go-live title), and ends the broadcast when the destination turns off. Not yet checked against a live X account.",
+			CapBroadcastLifecycle: "With Livestream on (the default), polyemesis waits on the stream source when the destination turns on, takes it live once bytes arrive (POST /2/broadcasts, with the go-live title), and ends the broadcast when the destination turns off. Verified live on 2026-11-07 in two runs: the broadcast was published with the configured title, and polyemesis ended both.",
 		},
 	},
 	{

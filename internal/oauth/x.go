@@ -3,14 +3,14 @@ package oauth
 // X (Twitter) Livestream: the sign-in, the stream key, the broadcast lifecycle
 // and the metadata that X's Livestream API (docs.x.com/livestream-api) exposes.
 //
-// SWITCHED OFF BY DEFAULT. X no longer asks for a whitelist or an access form:
+// ON BY DEFAULT. X no longer asks for a whitelist or an access form:
 // docs.x.com/livestream-api/getting-started lists a developer app, OAuth 2.0
 // with broadcast.read and broadcast.write, an account allowed to go live, and an
-// RTMP encoder. polyemesis still keeps the family opt-in, and until the operator
-// sets POLYEMESIS_X_LIVESTREAM ("1" or "true", read once when the provider is
-// built) every operation in this file that touches it refuses WITHOUT making a
-// request, and the copy the operator sees is "needs X Livestream switched on
-// (POLYEMESIS_X_LIVESTREAM=1)". Paste-the-key keeps working regardless.
+// RTMP encoder. polyemesis keeps the family on unless the operator sets
+// POLYEMESIS_X_LIVESTREAM=0 (read once when the provider is built); while it is
+// off every operation in this file that touches it refuses WITHOUT making a
+// request, and the copy the operator sees is "needs X Livestream, which is
+// switched off (POLYEMESIS_X_LIVESTREAM=0)". Paste-the-key keeps working regardless.
 //
 // The calls follow X's Livestream docs as of 2026-11-06, including the migration
 // guide (docs.x.com/livestream-api/migration-guide). The deprecated
@@ -62,8 +62,8 @@ const (
 )
 
 // xGateCopy is the copy shown when the Livestream family is switched off. It names
-// the switch, not an X access form, and the tests pin it.
-const xGateCopy = "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"
+// the switch (POLYEMESIS_X_LIVESTREAM=0), not an X access form, and the tests pin it.
+const xGateCopy = "needs X Livestream, which is switched off (POLYEMESIS_X_LIVESTREAM=0)"
 
 // xSourceName labels the stream source polyemesis mints for itself, so a
 // connect reuses it rather than adding one per attempt.
@@ -362,7 +362,7 @@ func (x *X) Account(ctx context.Context, clientID, accessToken string) (*Account
 // connected. It is what the setup guide and the capability row show.
 func (x *X) EntitlementReason() string {
 	return "Livestream " + xGateCopy + ". It also needs an account that X allows to go live " +
-		"(not protected). Signing in works without it. Until it is switched on, or when the account cannot " +
+		"(not protected). Signing in works without it. While it is switched off, or when the account cannot " +
 		"use the API, paste the stream key from X's producer tooling."
 }
 
@@ -374,7 +374,7 @@ type xGateError struct{}
 
 func (xGateError) Error() string {
 	return "Livestream " + xGateCopy + ". Sign-in works without it; paste the stream key from " +
-		"X's producer tooling until it is switched on."
+		"X's producer tooling while it is switched off."
 }
 
 func (xGateError) Is(target error) bool {
@@ -1195,6 +1195,6 @@ func (x *X) PushMetadata(ctx context.Context, clientID, accessToken, accountRef 
 // the gate is closed.
 func (x *X) ManualKeyReason() string {
 	return "Paste the server URL and stream key from X's producer tooling. " +
-		"Once X Livestream is switched on (POLYEMESIS_X_LIVESTREAM=1) and the account can go live, " +
+		"X Livestream is on unless POLYEMESIS_X_LIVESTREAM=0 switches it off, and when the account can go live, " +
 		"polyemesis can create the stream source itself. Sign-in works without that."
 }

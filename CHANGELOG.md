@@ -47,6 +47,25 @@ its first tagged release.
   Content-Security-Policy is not loosened. The meters and the clip timeline repaint when the theme
   changes. The public player (`/watch`) and the OBS overlay pages are never themed.
 
+### Changed
+
+- **X Livestream is now on by default.** `POLYEMESIS_X_LIVESTREAM` unset or empty switches the X
+  Livestream family on (stream key, go-live, chat read and send, moderation); `POLYEMESIS_X_LIVESTREAM=0`
+  (also `false`, `off`, `no`) switches it off. A value that is neither a recognised on nor a recognised
+  off is read as before (`1` or `true` is on, anything else is off). The paste-the-stream-key fallback
+  for an account without Livestream API access is unchanged, and `POLYEMESIS_X_PUBLISH` and
+  `POLYEMESIS_CAPTIONS_FACEBOOK` stay off by default. **Upgrading:** an operator who relied on X
+  Livestream being off must now set `POLYEMESIS_X_LIVESTREAM=0`. See `docs/CONFIGURATION.md` and
+  `docs/PLATFORMS.md`.
+
+- **X Livestream was verified live on 2026-11-07.** On staging against a real X account, two runs through
+  polyemesis with X Livestream on: the destination linked to the account and the stream source was created
+  through the API on save; the go-live published the broadcast with the configured title; the announcement
+  setting `first` made X post and `never` made no post; chat read delivered 2 of 2 viewer messages over
+  the webhook; and polyemesis ended both broadcasts. In the capability matrix the X row's Metadata, Chat
+  read and Start / end cells now read Works. Chat send, moderation (delete, ban) and viewer stats were not
+  exercised and stay Unverified.
+
 ### Fixed
 
 - **X chat reaches "live", Kick's loopback self-probe no longer reads as degraded, and the X step-2
@@ -85,8 +104,8 @@ its first tagged release.
   source now has a separate, non-secret id, so the stored stream key is resolved to it. X's go-live is public as
   soon as it returns, so a destination records a pending handle while its source is silent and the real
   broadcast id is recorded when it goes live. X's Livestream docs no longer ask for a whitelist or an access
-  form, so the operator copy now says "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"; the gate
-  stays opt-in and pasting the key still works. PROVISIONAL: no live X account has run the new routes. While a destination waits for video its
+  form, so the operator copy says what the switch is; it is now on by default (see the entry above) and
+  pasting the key still works. These routes ran against a live X account on 2026-11-07 (see the entry below). While a destination waits for video its
   `lifecycle.broadcastId` is empty and `lifecycle.pendingSource` names the source. A go-live whose answer
   was lost is adopted on the next read, a deleted row right after go-live still ends the broadcast, a source
   deleted on X raises a fault, an account X will not let go live is a terminal fault, and a 409 for a source
@@ -97,7 +116,7 @@ its first tagged release.
   for a broadcast a lost go-live may have made, and a non-terminal X fault that has used its budget is retried
   every two minutes instead of waiting for a manual toggle.
 
-  **Known rare edge cases, all under the opt-in `POLYEMESIS_X_LIVESTREAM` switch.** A go-live is not sent
+  **Known rare edge cases, all under the `POLYEMESIS_X_LIVESTREAM` switch (on by default).** A go-live is not sent
   unless its marker was written first. Where tracking has to give up on a broadcast a go-live may have made
   (a list that never shows it within two minutes, or an ending that keeps failing) the destination gets a
   durable fault, "polyemesis may have left a broadcast live on X", and a deleted destination raises it as an

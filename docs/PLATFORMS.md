@@ -34,7 +34,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -59,8 +59,9 @@ key; we simply have not researched their APIs, and "unverified" is the honest
 thing to say about an API nobody here has read.
 
 The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
-server URL and key published to X with picture. The rest of the X row
-stays *Unverified*. The details, and a server that could not reach X, are under X
+server URL and key published to X with picture. On 2026-11-07 the go-live
+title, chat read and start / end were verified live as well (see below); chat
+send, moderation and viewers stay *Unverified*. The details, and a server that could not reach X, are under X
 in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
 
 ## The platforms that need a sentence each
@@ -157,7 +158,7 @@ remembered from a page of documentation.
 destination saved before then is kept, switched off, so you can read its
 settings and delete it when you are ready.
 
-**X (Twitter) — the Livestream API is real, and polyemesis keeps it opt-in.**
+**X (Twitter) — the Livestream API is real, and polyemesis has it on by default.**
 X publishes a Livestream API (the Broadcasts and Chat families, under the
 `broadcast.read` and `broadcast.write` scopes, plus `/2/sources` for stream
 keys). X's [getting-started page](https://docs.x.com/livestream-api/getting-started)
@@ -165,10 +166,11 @@ asks for a developer app, OAuth 2.0 with those two scopes, an account that is
 allowed to go live (not protected) and an RTMP encoder; it no longer asks for
 an access form or a whitelist. Sign-in, stream-key minting, go-live and end,
 metadata, chat read and send, and chat moderation are built in
-`internal/oauth/x.go` and `internal/chat/x.go`. **All of it is switched off
-until the operator switches it on.** The switch is the `POLYEMESIS_X_LIVESTREAM`
-environment variable. Until then the operator sees "needs X Livestream switched
-on (POLYEMESIS_X_LIVESTREAM=1)", and pasting the server URL and stream key from
+`internal/oauth/x.go` and `internal/chat/x.go`. **All of it is on by
+default.** The switch is the `POLYEMESIS_X_LIVESTREAM` environment variable:
+unset or empty is on, and `0` (or `false`, `off`, `no`) switches it off. While it
+is off the operator sees "needs X Livestream, which is switched off
+(POLYEMESIS_X_LIVESTREAM=0)", and pasting the server URL and stream key from
 X's producer tooling works exactly as before. The paste also remains the way in
 for an account that cannot use the API.
 
@@ -253,7 +255,7 @@ invalid), subscribes `broadcast.chat` and `broadcast.chat.remove` for the
 account to that webhook with the user's token (they persist at X and are reused on every start), and removes them
 when the account is disconnected. Without the bearer or the address the chat pane stays empty,
 says what is missing, and sending still works. The X console and the setup guide
-show whether the Livestream switch is on.
+show whether the Livestream switch is on (it is, unless `POLYEMESIS_X_LIVESTREAM=0`).
 
 **Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
 polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
@@ -269,9 +271,18 @@ a lost answer, so a second attempt that creates the broadcast more than about 25
 as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
 from X's documentation and unconfirmed live.
 
-Every cell in the X row stays *Unverified* except the stream key, which is
-*By hand*. That is deliberate: no live request from a connected X account has
-confirmed any of the built paths yet. Two things apply on top of the switch: X
+**The Livestream paths were verified live on 2026-11-07.** On staging, against a
+real X account (`@RainmanJam`), with X Livestream on, two runs went through
+polyemesis. The destination was linked to the account and the stream source was
+created through the API on save. The go-live published the broadcast with the
+configured title ("Polyemesis Test Flight"). Run 1, with the go-live
+announcement set to "first", made X post the announcement; run 2, set to
+"never", made no post. Chat read delivered 2 of 2 viewer messages over the
+webhook, and polyemesis ended both broadcasts. That is why *Metadata* (the title
+sent at go-live), *Chat read* and *Start / end* read *Works*. Not exercised
+live, and so still *Unverified*: chat send, moderation (delete, ban) and viewer
+stats. The stream key stays *By hand*, because the paste is the fallback for an
+account that cannot use the API. Two things apply on top of the switch: X
 refuses to take an account live that is not allowed to go live (HTTP 403 from
 the go-live call; the deprecated routes answered 412), and X has **no hide
 action**, so chat moderation offers mute, unmute and delete only.
@@ -285,9 +296,9 @@ steadily for over a minute with no reconnects, and the picture showed in X
 Producer's preview. The test feed was 1280×720 at 30 fps, H.264 at 3 Mb/s with
 AAC stereo at 128 kb/s; it came in over RTMP ingest and went out on the
 passthrough rendition. That verifies publishing with picture through a pasted
-key and nothing more: chat, metadata and every Livestream API path stay
-*Unverified*, and the stream-key cell stays *By hand*, which is what a pasted key
-is.
+key and nothing more: that run did not exercise the Livestream API paths
+(the 2026-11-07 runs above did), and the stream-key cell stays *By hand*, which is
+what a pasted key is.
 
 **X's ingest sits behind Cloudflare, so a server that cannot reach Cloudflare
 over IPv4 cannot stream to X.** The same day, the same X destination failed from

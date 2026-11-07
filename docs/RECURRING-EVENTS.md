@@ -187,7 +187,7 @@ rules.
   because Kick's live broadcast has none. A category Kick cannot match is a
   warning, and the title still lands.
 - **X.** The template title is sent when polyemesis takes the X source live
-  (the go-live step, `POST /2/broadcasts`, which needs X Livestream switched on). If a template-bearing
+  (the go-live step, `POST /2/broadcasts`, which needs X Livestream, on unless `POLYEMESIS_X_LIVESTREAM=0`). If a template-bearing
   start schedule that names the destination began in the last 30 minutes, its
   rendered title is sent; otherwise the destination's own go-live title is. No
   category, description, privacy or thumbnail is sent: X's go-live step takes a
