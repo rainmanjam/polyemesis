@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X veröffentlicht eine Ankündigung, wenn eine Übertragung live geht. Eine Sendung dauert, solange dieses Ziel eingeschaltet ist; beendet X die Übertragung mittendrin, öffnet polyemesis eine neue, und standardmäßig geht diese ohne Beitrag live.",
   "wave3.x.provisional": "Nach der Dokumentation von X gebaut und noch nicht mit einem echten X-Konto geprüft.",
   "wave3.x.metadata": "X nimmt einen Titel nur beim Veröffentlichen der Übertragung an, daher sendet polyemesis den Titel beim Livegang dann. Eine Änderung während der Liveübertragung ist nicht verfügbar.",
-  "wave3.x.chatRead": "Der Livechat kommt aus dem Aktivitätsstream von X und braucht das Bearer-Token der App in POLYEMESIS_X_APP_BEARER. Ohne es bleibt der Chatbereich leer, Senden funktioniert trotzdem.",
+  "wave3.x.chatRead": "Der Livechat wird an einen Webhook zugestellt, den polyemesis bei X registriert. Er braucht das Bearer-Token der App in POLYEMESIS_X_APP_BEARER und einen öffentlichen HTTPS-Hostnamen ohne Port (tls.mode acme, eingehend 443). Ohne diese Angaben bleibt der Chatbereich leer, Senden funktioniert trotzdem.",
   "wave3.x.chatSend": "Sendet in den Chat der laufenden Übertragung, bis zu 140 Zeichen. Benötigt eingeschaltetes X Livestream.",
   "wave3.x.moderation": "Zuschauer stummschalten und wieder freigeben sowie Nachrichten löschen. X kennt kein Ausblenden, eine entfernte Nachricht ist also weg.",
   "wave3.x.viewerStats": "X meldet Zuschauerzahlen, ohne zu sagen, was sie zählen, daher wird keine Zuschauerzahl angezeigt.",
