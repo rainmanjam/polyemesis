@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ban, ExternalLink, Timer, Trash2, UserSearch } from "lucide-react";
+import { Ban, ExternalLink, Reply, Timer, Trash2, UserSearch } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { platformName } from "@/lib/platforms";
-import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
+import {
+  authorReason,
+  chatActionSupport,
+  personActionSupport,
+  replySupport,
+} from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
 import { useT } from "@/lib/i18n";
 import { openPlatformLink, platformLinkFor } from "@/lib/platformLinks";
@@ -65,6 +70,7 @@ export function ChatMessageMenu({
   onClose,
   onOpenCard,
   onDelete,
+  onReply,
 }: Readonly<{
   message: ChatMessage;
   /** Viewport coordinates of the click that opened this. */
@@ -72,6 +78,8 @@ export function ChatMessageMenu({
   onClose: () => void;
   onOpenCard: (m: ChatMessage) => void;
   onDelete?: Asks<ChatMessage>;
+  /** Start a threaded reply to this message in the composer. */
+  onReply?: (m: ChatMessage) => void;
 }>) {
   // Radix positions against a trigger element, and the trigger here is a point
   // rather than a control. A zero-size fixed div at the cursor is the standard
@@ -118,6 +126,8 @@ export function ChatMessageMenu({
   //                platform that can ban can also delete — and it is here so
   //                that a future adapter with the reverse shape is explained
   //                rather than silently greyed.
+  const reply = replySupport(message.platform, t);
+
   const blanket = person.reason !== "" && person.reason === del.reason ? person.reason : "";
   const personReason = blanket === "" && noAuthor === "" ? person.reason : "";
   const deleteReason = blanket === "" ? del.reason : "";
@@ -209,6 +219,20 @@ export function ChatMessageMenu({
           <UserSearch className="mr-2 h-3.5 w-3.5" />
           {t("chatMenu.viewHistory")}
         </DropdownMenuItem>
+
+        {onReply && (
+          <DropdownMenuItem
+            disabled={!reply.ok || !message.id}
+            title={reply.reason || t("chatMenu.replyTitle")}
+            onSelect={() => {
+              close();
+              onReply(message);
+            }}
+          >
+            <Reply className="mr-2 h-3.5 w-3.5" />
+            {t("chatMenu.reply")}
+          </DropdownMenuItem>
+        )}
 
         {link && (
           <DropdownMenuItem

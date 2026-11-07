@@ -62,6 +62,7 @@ export function ChatPage() {
 
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
   const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const search = useChatSearch();
 
   // UX Council A48: what automod flagged, behind a chip with its count. The
@@ -323,6 +324,7 @@ export function ChatPage() {
               onClose={() => setMenu(null)}
               onOpenCard={setCard}
               onDelete={confirmDelete.ask}
+              onReply={setReplyTo}
             />
           )}
 
@@ -350,7 +352,13 @@ export function ChatPage() {
 
           {renderTimeline()}
 
-          <ChatComposer statuses={statuses} limits={limits} configured={configured} />
+          <ChatComposer
+            statuses={statuses}
+            limits={limits}
+            configured={configured}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
+          />
         </section>
 
         {/* ---- connections ---- */}

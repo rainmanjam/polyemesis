@@ -1387,6 +1387,19 @@ export const api = {
    *  verdicts are the answer, and a status code cannot say "Twitch took it and
    *  YouTube did not". */
   sendChat: (text: string) => post<ChatSendResponse>("/chat/send", { text }),
+  /** Answer one message on the platform that issued it. Not a fan-out: the
+   *  response carries a single result. asBot posts as the platform's bot
+   *  identity where it has one (Kick). */
+  replyChat: (
+    to: { platform: ChatPlatform; account?: string; id: string },
+    text: string,
+    asBot = false,
+  ) =>
+    post<ChatSendResponse>("/chat/send", {
+      text,
+      replyTo: { platform: to.platform, account: to.account ?? "", id: to.id },
+      asBot,
+    }),
   /** Moderator delete, on the platform that issued the id. A platform that
    *  cannot do it answers with a sentence saying so and naming where it can be
    *  done instead — the button is never hidden on a guess. */
