@@ -3059,6 +3059,10 @@ export type XGoLiveTweet = "first" | "every" | "never";
 export interface BroadcastControl {
   /** Which broadcast the rest of this describes. */
   broadcastId?: string;
+  /** X only: the stream source id of a destination that is switched on but has no
+   *  broadcast yet. X creates the broadcast when it goes live, so until video
+   *  arrives `broadcastId` is empty and this names the source instead. */
+  pendingSource?: string;
   /** The platform's own word for where the broadcast is — for YouTube:
    *  created, ready, testing, testStarting, live, liveStarting, complete,
    *  revoked. Passed through unmapped so it can be compared against what the

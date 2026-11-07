@@ -55,6 +55,12 @@ type BroadcastControl struct {
 	// state -- it is every destination on every platform without a broadcast
 	// object, and most installs are entirely made of them.
 	BroadcastID string `json:"broadcastId,omitempty"`
+	// PendingSource is X's source id for a destination that is opened but has no broadcast yet. X's go-live
+	// creates and publishes in one call, so until the encoder is sending there is nothing on X to name, and
+	// BroadcastID stays empty: nothing that shows or acts on a broadcast id (the console, the API, a disconnect
+	// confirmation) sees a broadcast that does not exist. The coordinator alone rebuilds a handle from this.
+	// Cleared when the real broadcast id is recorded.
+	PendingSource string `json:"pendingSource,omitempty"`
 	// Phase is the PLATFORM'S OWN WORD for where the broadcast is, verbatim and
 	// unmapped -- for YouTube: created, ready, testing, testStarting, live,
 	// liveStarting, complete, revoked.
@@ -111,5 +117,5 @@ type BroadcastControl struct {
 // keep an upgraded row -- which decodes to the zero value -- from being treated
 // as one it has an opinion about.
 func (b BroadcastControl) Empty() bool {
-	return b.BroadcastID == "" && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
+	return b.BroadcastID == "" && b.PendingSource == "" && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
 }

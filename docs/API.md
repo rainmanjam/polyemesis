@@ -1074,10 +1074,13 @@ A stored id the catalogue no longer has is ignored, never an error.
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
 first go-live after the destination is switched on, and the broadcasts
-polyemesis opens again after X ends one are published with `should_not_tweet`.
+polyemesis opens again after X ends one go live with `should_not_tweet`.
 `lifecycle.renewed` is `true` on such a broadcast. Any other value is `400`. A
 destination that is not X has the field removed on save, with a warning.
-PROVISIONAL: X Livestream is gated until the app is whitelisted.
+An X destination that is switched on but not yet live has `lifecycle.broadcastId`
+empty and `lifecycle.pendingSource` set to its X stream source id: X creates the
+broadcast only when it goes live, so there is no broadcast id to show until then.
+PROVISIONAL: X Livestream is switched off until the operator sets `POLYEMESIS_X_LIVESTREAM=1`, and no live go-live has confirmed it.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and

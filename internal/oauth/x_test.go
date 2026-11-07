@@ -768,13 +768,14 @@ func TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot(t *testing.T) {
 	}
 }
 
-// TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource: nothing exists on X for a pending handle, so its
-// state is a synthetic NOT_STARTED, and whether it may go live is the source's own is_stream_active. Publishing before
-// bytes arrive would announce a blank broadcast.
+// TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource: when nothing is live on the source, a pending
+// handle's state is a synthetic NOT_STARTED, and whether it may go live is the source's own is_stream_active.
+// Publishing before bytes arrive would announce a blank broadcast. The handle itself is never sent to X as an id.
 func TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource(t *testing.T) {
 	for _, active := range []bool{true, false} {
 		f := newXFake(t)
 		f.active = active
+		f.list = xEmptyBroadcastList
 		st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
 		if err != nil {
 			t.Fatalf("BroadcastState: %v", err)
@@ -786,10 +787,106 @@ func TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource(t *testing
 			t.Errorf("StreamActive = %v, want %v from the source's is_stream_active", st.StreamActive, active)
 		}
 		for _, req := range f.requests() {
-			if strings.Contains(req, "/2/broadcasts") {
+			if strings.Contains(req, "/2/broadcasts/") {
 				t.Errorf("a pending handle read asked X about a broadcast (%q) that does not exist", req)
 			}
 		}
+	}
+}
+
+// TestXBroadcastStateOfAPendingHandleFindsTheBroadcastTheSourceIsLiveOn: the go-live can have succeeded while its
+// answer was lost, or while the write that records the real id failed. The handle then stands for a RUNNING
+// broadcast, and the read must say so (real id, RUNNING) or a switch-off would never end it.
+func TestXBroadcastStateOfAPendingHandleFindsTheBroadcastTheSourceIsLiveOn(t *testing.T) {
+	f := newXFake(t) // the default list holds a RUNNING broadcast on xSourceID
+	st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.Status != XStateRunning || st.BroadcastID != xBroadcastID || st.BoundStreamID != xSourceID {
+		t.Errorf("BroadcastState = %+v, want the live broadcast %s RUNNING on source %s", st, xBroadcastID, xSourceID)
+	}
+	// A RUNNING broadcast on ANOTHER source is not this destination's.
+	f2 := newXFake(t)
+	f2.list = strings.ReplaceAll(xBroadcastListFixture, xSourceID, "9999999999999999999")
+	st, err = f2.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.Status != XStateNotStarted {
+		t.Errorf("a broadcast on another source was taken for this one: %+v", st)
+	}
+}
+
+// TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError: a source that left GET /2/sources (deleted on X)
+// can never go live, and reading it as "no bytes yet" would wait for ever in silence.
+func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError(t *testing.T) {
+	f := newXFake(t)
+	f.list = xEmptyBroadcastList
+	f.sources = xEmptySourcesFixture
+	_, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+	if err == nil || !strings.Contains(err.Error(), "no longer has") {
+		t.Fatalf("BroadcastState with the source gone = %v, want an error saying X no longer has the source", err)
+	}
+	if strings.Contains(err.Error(), "pending:") {
+		t.Errorf("the error shows the internal handle: %v", err)
+	}
+}
+
+// TestXGoLiveRefusalsAreClassifiedForTheCoordinator: 403 is an account that cannot go live (terminal), 409 is either
+// "the source cannot take video yet" (the expected wait) or "another broadcast is live on it" (a fault), and X's own
+// words survive in every one.
+func TestXGoLiveRefusalsAreClassifiedForTheCoordinator(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   TransitionRefusal
+	}{
+		{"ineligible", 403, `{"type":"about:blank","title":"Forbidden","detail":"This account is not eligible to go live.","status":403}`, RefusalNotEligible},
+		{"busy", 409, `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","detail":"Another broadcast 1abc is live on this source.","status":409}`, RefusalSourceBusy},
+		{"not ready", 409, `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","detail":"The source cannot take video until its encoder connects.","status":409}`, RefusalStreamInactive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXFake(t)
+			f.liveStatus, f.liveBody = tc.status, tc.body
+			_, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
+			var ref *TransitionRefused
+			if !errors.As(err, &ref) || ref.Refusal != tc.want {
+				t.Fatalf("PublishBroadcast = %v, want a refusal classified %q", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "X refused") || strings.Contains(err.Error(), "YouTube") {
+				t.Errorf("refusal text = %q, want it to name X, not YouTube", err.Error())
+			}
+			var se *xStatusError
+			if !errors.As(err, &se) || se.Status != tc.status {
+				t.Errorf("error %v no longer unwraps to the X status error %d", err, tc.status)
+			}
+		})
+	}
+}
+
+// TestXGoLiveReportsWhetherItAdoptedALiveBroadcast: 201 is a new broadcast, 200 is the one the source already had
+// (the usual case is a repeat after a lost answer).
+func TestXGoLiveReportsWhetherItAdoptedALiveBroadcast(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		f := newXFake(t)
+		f.liveExisting = existing
+		res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
+		if err != nil {
+			t.Fatalf("PublishBroadcast: %v", err)
+		}
+		if res.Existing != existing {
+			t.Errorf("Existing = %v for liveExisting=%v", res.Existing, existing)
+		}
+	}
+}
+
+// TestXUnknownBroadcastIsNotFound keeps the fake honest: X answers 404 for an id it does not hold.
+func TestXUnknownBroadcastIsNotFound(t *testing.T) {
+	f := newXFake(t)
+	if _, err := f.x.BroadcastByID(context.Background(), "c", "tok", "nope"); err == nil {
+		t.Fatal("an unknown broadcast id was read as a broadcast")
 	}
 }
 

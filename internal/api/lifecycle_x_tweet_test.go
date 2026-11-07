@@ -48,8 +48,8 @@ func xcShowThenRenewal(t *testing.T, setting string) (*xcFake, *db.Destination) 
 	xcSweep(t, c, store) // bytes arriving: takes the source live as bc-1
 	fake.set(func(f *xcFake) { f.state, f.active = oauth.XStateEnded, false })
 	renewed := xcSweep(t, c, store) // ended, encoder stopped: renews to a pending handle
-	if renewed.Lifecycle.BroadcastID == "bc-1" || renewed.Lifecycle.BroadcastID == "" {
-		t.Fatalf("after X ended the show the recorded broadcast is %q, want a new one", renewed.Lifecycle.BroadcastID)
+	if lifecycleBroadcastID(renewed) == "bc-1" || lifecycleBroadcastID(renewed) == "" {
+		t.Fatalf("after X ended the show the recorded broadcast is %q, want a new one", lifecycleBroadcastID(renewed))
 	}
 	fake.set(func(f *xcFake) { f.active = true })
 	last := xcSweep(t, c, store) // bytes again: takes the source live as bc-2
@@ -117,7 +117,7 @@ func TestSwitchingAnXDestinationOffEndsTheShowSoTheNextGoLivePosts(t *testing.T)
 		},
 		"a renewal that never aired": {
 			fake: &xcFake{},
-			lc:   db.BroadcastControl{Renewed: true, BroadcastID: xcPending, Phase: phaseCreated},
+			lc:   db.BroadcastControl{Renewed: true, PendingSource: xcSourceID, Phase: phaseCreated},
 		},
 	}
 	for name, tc := range cases {
@@ -142,7 +142,7 @@ func TestSwitchingAnXDestinationOffEndsTheShowSoTheNextGoLivePosts(t *testing.T)
 func TestTheNextShowAfterASwitchOffPostsItsFirstGoLive(t *testing.T) {
 	fake := &xcFake{}
 	c, store, _ := xcFixture(t, fake, true,
-		xcRow(false, db.BroadcastControl{Renewed: true, BroadcastID: xcPending, Phase: phaseCreated}))
+		xcRow(false, db.BroadcastControl{Renewed: true, PendingSource: xcSourceID, Phase: phaseCreated}))
 	xcSweep(t, c, store) // off
 	store.mu.Lock()
 	store.rows[5].Enabled = true
@@ -168,8 +168,8 @@ func TestABroadcastXEndedBeforeItWasEverPublishedDoesNotUseUpTheShowsPost(t *tes
 	fake := &xcFake{state: oauth.XStateEnded, id: "bc-1", seq: 1}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
 	row := xcSweep(t, c, store) // ended unpublished, encoder idle: renewed to bc-2
-	if row.Lifecycle.BroadcastID == "bc-1" || row.Lifecycle.BroadcastID == "" {
-		t.Fatalf("recorded broadcast = %q, want a renewal", row.Lifecycle.BroadcastID)
+	if lifecycleBroadcastID(row) == "bc-1" || lifecycleBroadcastID(row) == "" {
+		t.Fatalf("recorded broadcast = %q, want a renewal", lifecycleBroadcastID(row))
 	}
 	if row.Lifecycle.Renewed {
 		t.Fatalf("a renewal of a never-published broadcast is marked as a renewal of the show: %+v", row.Lifecycle)
