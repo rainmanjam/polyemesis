@@ -48,6 +48,11 @@ type xChatStub struct {
 	createValid bool
 	// createStatus, when non-zero, makes POST /2/webhooks fail with that status and X's problem body.
 	createStatus int
+	// createBody is X's problem body for a refused create; empty means the generic invalid-request one.
+	createBody string
+	// onSubscribe runs inside POST /2/activity/subscriptions, before the answer, so a test can see what the adapter
+	// can already do at the moment X would start delivering.
+	onSubscribe func()
 	// createRaces makes a refused create still leave the webhook behind, as another process winning the race does.
 	createRaces bool
 	// putFixes makes PUT /2/webhooks/{id} flip the webhook to valid, as a passing CRC does.
@@ -107,6 +112,11 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		if st.refuse(w, xStubAppBearer, r) {
 			return
 		}
+		// `valid` is only guaranteed when asked for (webhook_config.fields), so the adapter must ask.
+		if f := r.URL.Query().Get("webhook_config.fields"); !strings.Contains(f, "valid") || !strings.Contains(f, "url") || !strings.Contains(f, "id") {
+			http.Error(w, "webhook_config.fields must name id,url,valid", http.StatusTeapot)
+			return
+		}
 		st.mu.Lock()
 		list := make([]map[string]any, 0, len(st.webhooks))
 		for _, h := range st.webhooks {
@@ -130,7 +140,11 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 				st.webhooks = append(st.webhooks, xStubWebhook{ID: fmt.Sprint(st.nextID), URL: req.URL, Valid: true})
 			}
 			w.WriteHeader(st.createStatus)
-			_, _ = io.WriteString(w, `{"title":"Invalid Request","detail":"CRC failed","type":"https://api.x.com/2/problems/invalid-request"}`)
+			b := st.createBody
+			if b == "" {
+				b = `{"title":"Invalid Request","detail":"refused","type":"https://api.x.com/2/problems/invalid-request"}`
+			}
+			_, _ = io.WriteString(w, b)
 			return
 		}
 		st.nextID++
@@ -172,6 +186,9 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 			Tag       string            `json:"tag"`
 		}
 		_ = json.Unmarshal(body, &req)
+		if st.onSubscribe != nil {
+			st.onSubscribe()
+		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if st.subscription != "" {
@@ -228,6 +245,16 @@ func (st *xChatStub) countCalls(prefix string) int {
 		}
 	}
 	return n
+}
+
+func (st *xChatStub) setValid(id string, v bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for i := range st.webhooks {
+		if st.webhooks[i].ID == id {
+			st.webhooks[i].Valid = v
+		}
+	}
 }
 
 func (st *xChatStub) webhookList() []xStubWebhook {

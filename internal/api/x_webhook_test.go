@@ -179,9 +179,12 @@ func TestXWebhookPOSTSignature(t *testing.T) {
 func TestXWebhookRefusesAnOversizedBodyBeforeCheckingIt(t *testing.T) {
 	_, h := xHookServer(t, true)
 	big := []byte(`{"data":{"pad":"` + strings.Repeat("a", xWebhookMaxBody) + `"}}`)
-	// Signed correctly: the refusal is about size, not signature.
+	// Signed WRONG on purpose: a 413 (and not a 401) proves the size is checked before the signature is.
+	if w := xPost(t, h, big, map[string]string{xHookSigHdr: "sha256=wrong"}); w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body with a wrong signature = %d, want 413", w.Code)
+	}
 	if w := xPost(t, h, big, map[string]string{xHookSigHdr: xSign(xHookSecret, big)}); w.Code != http.StatusRequestEntityTooLarge {
-		t.Errorf("oversized body = %d, want 413", w.Code)
+		t.Errorf("oversized body with a right signature = %d, want 413", w.Code)
 	}
 }
 
@@ -196,25 +199,97 @@ func TestXWebhookTakesNoSessionAndNoCSRF(t *testing.T) {
 	}
 }
 
-func TestXWebhookRateLimitsRepeatedBadSignatures(t *testing.T) {
-	_, h := xHookServer(t, true)
-	body := xChat("u", xHookUser, "1", "x")
-	var last int
-	for i := 0; i < 12; i++ {
-		last = xPost(t, h, body, map[string]string{xHookSigHdr: "sha256=bad"}).Code
-		if last == http.StatusTooManyRequests {
-			break
+// TestXWebhookAnAttackerCannotLockXOut: the review's DoS. One address alternates bad POSTs with CRC GETs. Nothing
+// the attacker does may make a validly signed delivery or a CRC answer fail, from its own address or any other,
+// because the limit is per address, applies to FAILED signatures only, and is decided after the HMAC.
+func TestXWebhookAnAttackerCannotLockXOut(t *testing.T) {
+	s, h := xHookServer(t, true)
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	liveXAdapter(t, s, xHookUser)
+
+	at := func(ip string, r *http.Request) *httptest.ResponseRecorder {
+		r.RemoteAddr = ip + ":4000"
+		return do(t, h, r)
+	}
+	bad := xChat("atk", xHookUser, "1", "x")
+	var limited bool
+	for i := 0; i < 60; i++ {
+		r := httptest.NewRequest(http.MethodPost, xHookPath, strings.NewReader(string(bad)))
+		r.Header.Set(xHookSigHdr, "sha256=bad")
+		if at("203.0.113.66", r).Code == http.StatusTooManyRequests {
+			limited = true
+		}
+		g := httptest.NewRequest(http.MethodGet, xHookPath+"?crc_token=abc", nil)
+		if w := at("203.0.113.66", g); w.Code != http.StatusOK {
+			t.Fatalf("CRC GET from the attacker's address = %d at iteration %d; a CRC is never throttled", w.Code, i)
 		}
 	}
-	if last != http.StatusTooManyRequests {
-		t.Errorf("12 bad signatures from one address never produced a 429; last status %d", last)
+	if !limited {
+		t.Error("60 bad signatures from one address were never limited")
 	}
-	// A different address is not affected.
-	r := httptest.NewRequest(http.MethodPost, xHookPath, strings.NewReader(string(body)))
-	r.Header.Set(xHookSigHdr, xSign(xHookSecret, body))
-	r.RemoteAddr = "198.51.100.50:9"
-	if w := do(t, h, r); w.Code != http.StatusOK {
-		t.Errorf("a good delivery from another address = %d, want 200", w.Code)
+
+	// X, from another address: delivered.
+	good := xChat("real-1", xHookUser, "2090000000000000040", "from X")
+	r := httptest.NewRequest(http.MethodPost, xHookPath, strings.NewReader(string(good)))
+	r.Header.Set(xHookSigHdr, xSign(xHookSecret, good))
+	if w := at("198.51.100.20", r); w.Code != http.StatusOK {
+		t.Fatalf("a valid delivery from another address = %d, want 200", w.Code)
+	}
+	xWait(t, "the delivery", func() bool { return len(xHistory(s)) == 1 })
+
+	// And from the attacker's own address, a valid signature is still accepted.
+	good2 := xChat("real-2", xHookUser, "2090000000000000041", "valid, same address")
+	r = httptest.NewRequest(http.MethodPost, xHookPath, strings.NewReader(string(good2)))
+	r.Header.Set(xHookSigHdr, xSign(xHookSecret, good2))
+	if w := at("203.0.113.66", r); w.Code != http.StatusOK {
+		t.Errorf("a valid delivery from the limited address = %d, want 200", w.Code)
+	}
+	xWait(t, "the second delivery", func() bool { return len(xHistory(s)) == 2 })
+}
+
+// TestXWebhookACRCSuccessDoesNotClearPOSTFailures: the two are separate; answering a CRC must not forgive an
+// address its bad signatures.
+func TestXWebhookACRCSuccessDoesNotClearPOSTFailures(t *testing.T) {
+	_, h := xHookServer(t, true)
+	body := xChat("u", xHookUser, "1", "x")
+	post := func() int {
+		r := httptest.NewRequest(http.MethodPost, xHookPath, strings.NewReader(string(body)))
+		r.Header.Set(xHookSigHdr, "sha256=bad")
+		r.RemoteAddr = "203.0.113.70:1"
+		return do(t, h, r).Code
+	}
+	for i := 0; i < xFailBurst+1; i++ {
+		post()
+	}
+	if got := post(); got != http.StatusTooManyRequests {
+		t.Fatalf("setup: address not limited, got %d", got)
+	}
+	g := httptest.NewRequest(http.MethodGet, xHookPath+"?crc_token=abc", nil)
+	g.RemoteAddr = "203.0.113.70:1"
+	if w := do(t, h, g); w.Code != http.StatusOK {
+		t.Fatalf("CRC = %d", w.Code)
+	}
+	if got := post(); got != http.StatusTooManyRequests {
+		t.Errorf("after a CRC success the address's POST failures were forgiven: %d", got)
+	}
+}
+
+func TestXWebhookAnswers503WhenTheAdapterIsNotLiveSoXRedelivers(t *testing.T) {
+	s, h := xHookServer(t, true)
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	// Attached, but its Run ends at once (no public address), so it is never live.
+	a, err := chat.NewX(chat.XConfig{AccountRef: xHookUser, Token: chat.StaticToken("t"), AppBearer: "b", WebhookProblem: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.chat.Attach(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	w := signedPost(t, h, xChat("u-nl", xHookUser, "2090000000000000050", "early"))
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Errorf("event for an adapter that is not live = %d (Retry-After %q), want 503 with Retry-After", w.Code, w.Header().Get("Retry-After"))
 	}
 }
 
@@ -423,5 +498,16 @@ func TestXWebhookURLIsTheOriginPlusTheRoute(t *testing.T) {
 	}
 	if got := xWebhookURL(""); got != "" {
 		t.Errorf("xWebhookURL of nothing = %q", got)
+	}
+}
+
+func TestXIngestStatus(t *testing.T) {
+	for res, want := range map[chat.XIngest]int{
+		chat.XIngestQueued: 200, chat.XIngestDuplicate: 200, chat.XIngestIgnored: 200, chat.XIngestWrongAccount: 200,
+		chat.XIngestNotRunning: 503, chat.XIngestFull: 503, chat.XIngestMalformed: 400,
+	} {
+		if got := xIngestStatus(res); got != want {
+			t.Errorf("xIngestStatus(%v) = %d, want %d", res, got, want)
+		}
 	}
 }

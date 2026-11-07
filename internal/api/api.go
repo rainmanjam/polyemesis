@@ -480,8 +480,8 @@ type Server struct {
 	// allowance the admin needs the moment setup succeeds, and a mistyped
 	// password would slow down the one request that creates the account.
 	setups *auth.Throttle
-	// xhooks throttles rejected requests to the X webhook per client address.
-	xhooks *auth.Throttle
+	// xhooks limits failed signatures on the X webhook per client address (see xFailLimiter).
+	xhooks *xFailLimiter
 
 	// beacons is the public player's QoE endpoint state, and nextStart caches
 	// the offline card's countdown. See playout_player.go.
@@ -953,7 +953,7 @@ func New(o Options) *Server {
 		proxies:         proxies,
 		logins:          auth.NewThrottle(),
 		setups:          auth.NewThrottle(),
-		xhooks:          auth.NewThrottle(),
+		xhooks:          newXFailLimiter(),
 		setupCode:       o.SetupCode,
 		kickKeys:        &chat.KickKeyFetcher{},
 		sessions: auth.New(

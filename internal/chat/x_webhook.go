@@ -83,6 +83,17 @@ func xCRCError(hookURL, detail string) error {
 	return fmt.Errorf("X chat needs a public HTTPS address X can reach (webhook CRC failed for %s): %s", hookURL, detail)
 }
 
+// xErrIs reports whether X's error names one of the failure reasons its webhook docs list
+// (docs.x.com/x-api/webhooks/quickstart, "Common failure reasons"). The envelope those names travel in is not
+// documented, so the name is looked for in the reason and the body alike.
+func xErrIs(err error, name string) bool {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return strings.Contains(ae.Reason, name) || strings.Contains(ae.Body, name)
+}
+
 // xWhy is X's own words for a failed call, or the status when X gave none. The raw body is never included.
 func xWhy(err error) string {
 	if r := xProblemMessage(err); r != "" {
@@ -106,7 +117,9 @@ func (x *XAdapter) listWebhooks(ctx context.Context) ([]xWebhookRec, error) {
 	var out struct {
 		Data []xWebhookRec `json:"data"`
 	}
-	if err := x.xCall(ctx, http.MethodGet, "/2/webhooks", true, nil, &out); err != nil {
+	// webhook_config.fields is asked for outright: `valid` is what decides between reuse and re-validation.
+	path := "/2/webhooks?" + url.Values{"webhook_config.fields": {"id,url,valid,created_at"}}.Encode()
+	if err := x.xCall(ctx, http.MethodGet, path, true, nil, &out); err != nil {
 		return nil, fmt.Errorf("X would not list webhooks: %s", xWhy(err))
 	}
 	return out.Data, nil
@@ -153,12 +166,18 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 			}
 		}
 		switch s := statusOf(err); {
+		case xErrIs(err, "DuplicateUrlFailed"):
+			return "", errors.New("X says a webhook for this address already exists but did not list it, so chat cannot subscribe to it; check the app's webhooks in console.x.com")
+		case xErrIs(err, "WebhookLimitExceeded"):
+			return "", errors.New("the X app already has its maximum number of webhooks, so no new one can be registered; delete an old one in console.x.com")
+		case xErrIs(err, "UrlValidationFailed"):
+			return "", fmt.Errorf("X rejected the webhook address %s: %s", x.cfg.WebhookURL, xWhy(err))
+		case xErrIs(err, "CrcValidationFailed"):
+			return "", xCRCError(x.cfg.WebhookURL, xWhy(err))
 		case s == http.StatusUnauthorized || s == http.StatusForbidden:
 			return "", fmt.Errorf("X refused the webhook registration, so check POLYEMESIS_X_APP_BEARER and that the app has Webhooks enabled: %s", xWhy(err))
-		case s == http.StatusTooManyRequests || s >= 500:
-			return "", fmt.Errorf("X would not register the webhook right now: %s", xWhy(err))
 		}
-		return "", xCRCError(x.cfg.WebhookURL, xWhy(err))
+		return "", fmt.Errorf("X would not register the webhook: %s", xWhy(err))
 	}
 	if strings.TrimSpace(out.Data.ID) == "" {
 		return "", errors.New("X created the webhook but returned no id, so chat cannot subscribe to it")
@@ -222,16 +241,50 @@ func (s xSubRec) expired(now time.Time) bool {
 	return err == nil && !t.After(now)
 }
 
+// xSubOwners records which Run last claimed each subscription id, so a Run that is slow to clean up cannot delete
+// what a newer Run (a reconnect) has since reused. A subscription is deleted only by the Run that still owns it.
+var (
+	xSubOwnersMu sync.Mutex
+	xSubOwners   = map[string]uint64{}
+	xRunSeq      uint64
+)
+
+func xClaimSub(id string, gen uint64) {
+	xSubOwnersMu.Lock()
+	xSubOwners[id] = gen
+	xSubOwnersMu.Unlock()
+}
+
+// xReleaseSub reports whether gen still owns id, and forgets it if so.
+func xReleaseSub(id string, gen uint64) bool {
+	xSubOwnersMu.Lock()
+	defer xSubOwnersMu.Unlock()
+	if xSubOwners[id] != gen {
+		return false
+	}
+	delete(xSubOwners, id)
+	return true
+}
+
+func xNextRunGen() uint64 {
+	xSubOwnersMu.Lock()
+	defer xSubOwnersMu.Unlock()
+	xRunSeq++
+	return xRunSeq
+}
+
 // ensureSubscriptions makes sure the account has a live subscription for each chat event on webhookID. It returns the
-// ids this adapter owns, which Run removes on the way out, and returns them even alongside an error so a half-built
-// set is not left behind.
-func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID string) ([]string, error) {
+// ids this Run owns, which it removes on the way out, and returns them even alongside an error so a half-built set
+// is not left behind. A subscription it reuses is claimed too, so a crash's leftovers are cleaned up by the next
+// Run, but only by whichever Run claimed them last.
+func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID string, gen uint64) ([]string, error) {
 	existing, err := x.listSubscriptions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	now := x.cfg.Now()
 	var owned []string
+	hosts := map[string]string{} // webhook id -> host, read lazily and only when a replacement needs it
 	for _, event := range []string{xEventChat, xEventChatRemove} {
 		reuse := false
 		for _, s := range existing {
@@ -241,12 +294,16 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 			if s.WebhookID == webhookID {
 				reuse = true
 				if s.Tag == xSubTag {
+					xClaimSub(s.ID, gen)
 					owned = append(owned, s.ID)
 				}
 				break
 			}
 			if s.Tag == xSubTag {
-				// Ours, but on a webhook that is no longer the current one. It would keep a new one from being made.
+				// X allows one subscription per event and user. This one is ours by tag but on another webhook, which
+				// is either our own old address or ANOTHER polyemesis install sharing this X app. Either way it
+				// would keep ours from being made; replacing it is the only option, and the operator is told.
+				x.noteReplaced(ctx, s.WebhookID, hosts)
 				x.removeSubscription(s.ID)
 			}
 		}
@@ -276,9 +333,36 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 				"so polyemesis could not remove it later; live chat is stopped rather than leaving subscriptions "+
 				"running on X's side", event))
 		}
+		xClaimSub(id, gen)
 		owned = append(owned, id)
 	}
 	return owned, nil
+}
+
+// noteReplaced records, in the log and in the chat status, that a polyemesis-tagged subscription on another webhook
+// was replaced. Only the other webhook's host is named.
+func (x *XAdapter) noteReplaced(ctx context.Context, webhookID string, hosts map[string]string) {
+	if len(hosts) == 0 {
+		hosts[""] = "" // listed once
+		if whs, err := x.listWebhooks(ctx); err == nil {
+			for _, h := range whs {
+				if u, perr := url.Parse(h.URL); perr == nil {
+					hosts[h.ID] = u.Hostname()
+				}
+			}
+		}
+	}
+	host := hosts[webhookID]
+	if host == "" {
+		host = "webhook id " + webhookID
+	}
+	note := fmt.Sprintf("replaced another polyemesis install's X chat subscription (webhook %s); if that install shares this X app it no longer receives chat", host)
+	if x.cfg.Log != nil {
+		x.cfg.Log.Warn("x chat: replaced a polyemesis subscription on another webhook", "webhook", host, "account", x.cfg.AccountRef)
+	}
+	x.liveMu.Lock()
+	x.replacedNote = note
+	x.liveMu.Unlock()
 }
 
 // removeSubscription deletes one activity subscription with the user token. It uses a fresh context because the
@@ -292,10 +376,84 @@ func (x *XAdapter) removeSubscription(subID string) {
 	_ = x.xCall(ctx, http.MethodDelete, "/2/activity/subscriptions/"+url.PathEscape(subID), false, nil, nil)
 }
 
+// xRecheckEvery is how often a live Run asks X whether its webhook is still valid. X runs its own CRC hourly and
+// stops delivering to a webhook that fails it, so waiting for a reconnect could mean hours of silence.
+const xRecheckEvery = 30 * time.Minute
+
+// recheckWebhook lists the webhooks and, when ours has gone invalid, asks X to validate it once. It returns a
+// retryable error when the webhook is gone altogether (the run then re-registers). stuck says a previous check's PUT
+// did not help, in which case no further PUT is sent until it recovers.
+func (x *XAdapter) recheckWebhook(ctx context.Context, hookID string, stuck *bool) error {
+	xRegisterMu.Lock()
+	defer xRegisterMu.Unlock()
+	whs, err := x.listWebhooks(ctx)
+	if err != nil {
+		return nil // a transient X error says nothing about the webhook
+	}
+	var ours *xWebhookRec
+	for i := range whs {
+		if whs[i].ID == hookID {
+			ours = &whs[i]
+		}
+	}
+	if ours == nil {
+		return xCRCError(x.cfg.WebhookURL, "X no longer lists the webhook, so it is registered again")
+	}
+	if !ours.Valid && !*stuck {
+		*stuck = true
+		if err := x.xCall(ctx, http.MethodPut, "/2/webhooks/"+url.PathEscape(hookID), true, nil, nil); err == nil {
+			if again, lerr := x.listWebhooks(ctx); lerr == nil {
+				for _, h := range again {
+					if h.ID == hookID {
+						ours = &h
+					}
+				}
+			}
+		}
+	}
+	if ours.Valid {
+		*stuck = false
+		x.setInvalidNote("")
+		return nil
+	}
+	x.setInvalidNote(fmt.Sprintf("X lists the polyemesis webhook as invalid, so chat is not arriving; X must be able to reach %s and get the right answer to its check", x.cfg.WebhookURL))
+	return nil
+}
+
+func (x *XAdapter) setInvalidNote(n string) {
+	x.liveMu.Lock()
+	x.invalidNote = n
+	x.liveMu.Unlock()
+}
+
+// Health implements Healther: the remarks that are not failures, shown beside a live pane.
+func (x *XAdapter) Health() Health {
+	x.liveMu.RLock()
+	defer x.liveMu.RUnlock()
+	var parts []string
+	if x.invalidNote != "" {
+		parts = append(parts, x.invalidNote)
+	}
+	if x.replacedNote != "" {
+		parts = append(parts, x.replacedNote)
+	}
+	return Health{Detail: strings.Join(parts, ". ")}
+}
+
+// registered reports that Run has finished registering (webhook and subscriptions).
+func (x *XAdapter) registered() bool {
+	x.liveMu.RLock()
+	defer x.liveMu.RUnlock()
+	return x.ready
+}
+
 // ------------------------------------------------------------------ Run
 
 // Run registers the webhook and the subscriptions, then delivers the events IngestWebhook queues until ctx ends. It
-// removes the subscriptions it owns on the way out and leaves the webhook, which every X account shares.
+// removes the subscriptions it still owns on the way out and leaves the webhook, which every X account shares.
+//
+// The inbox opens BEFORE the subscriptions exist: X starts delivering the moment one does, and an event that found no
+// inbox would have nowhere to go.
 func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
 	if strings.TrimSpace(x.cfg.AppBearer) == "" {
 		return Fatal(errors.New("X live chat needs an app-only bearer token to register its webhook with X, " +
@@ -330,26 +488,44 @@ func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
 	if err != nil {
 		return err
 	}
-	owned, err := x.ensureSubscriptions(ctx, userID, hookID)
-	defer func() {
-		for _, id := range owned {
-			x.removeSubscription(id)
-		}
-	}()
-	if err != nil {
-		return err
-	}
 
 	inbox := make(chan xWebhookEvent, xInboxSize)
 	x.goLive(userID, inbox)
 	defer x.goDark(inbox)
 
+	gen := xNextRunGen()
+	owned, err := x.ensureSubscriptions(ctx, userID, hookID, gen)
+	defer func() {
+		for _, id := range owned {
+			if xReleaseSub(id, gen) {
+				x.removeSubscription(id)
+			}
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	x.liveMu.Lock()
+	x.ready = true
+	x.liveMu.Unlock()
+
+	every := x.cfg.WebhookRecheck
+	if every <= 0 {
+		every = xRecheckEvery
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	stuck := false
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case ev := <-inbox:
 			x.deliver(sink, ev)
+		case <-tick.C:
+			if err := x.recheckWebhook(ctx, hookID, &stuck); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -364,6 +540,7 @@ func (x *XAdapter) goDark(inbox chan xWebhookEvent) {
 	x.liveMu.Lock()
 	if x.liveInbox == inbox {
 		x.liveUser, x.liveInbox = "", nil
+		x.ready, x.replacedNote, x.invalidNote = false, "", ""
 	}
 	x.liveMu.Unlock()
 }
@@ -396,6 +573,8 @@ const (
 	XIngestIgnored
 	// XIngestFull: the inbox is full and the event was dropped.
 	XIngestFull
+	// XIngestDuplicate: this event_uuid was already delivered.
+	XIngestDuplicate
 )
 
 func (r XIngest) String() string {
@@ -412,6 +591,8 @@ func (r XIngest) String() string {
 		return "ignored"
 	case XIngestFull:
 		return "full"
+	case XIngestDuplicate:
+		return "duplicate"
 	}
 	return "unknown"
 }
@@ -466,6 +647,9 @@ func (x *XAdapter) IngestWebhook(body []byte) XIngest {
 	ev, ok := parseXEnvelope(body)
 	if !ok {
 		return XIngestMalformed
+	}
+	if x.seen.has(ev.UUID) {
+		return XIngestDuplicate // already delivered, so there is nothing for X to redeliver
 	}
 	x.liveMu.RLock()
 	inbox, user := x.liveInbox, x.liveUser

@@ -1,8 +1,10 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +21,7 @@ func xRun(t *testing.T, a *XAdapter, sink Sink) (stop func() error) {
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx, sink) }()
 	deadline := time.Now().Add(5 * time.Second)
-	for a.WebhookUserID() == "" {
+	for !a.registered() {
 		select {
 		case err := <-done:
 			cancel()
@@ -243,7 +245,10 @@ func TestXRunReportsAWebhookThatStaysInvalid(t *testing.T) {
 func TestXRunReportsACreateWhoseCRCFailed(t *testing.T) {
 	for name, tweak := range map[string]func(*xChatStub){
 		"valid:false in the answer": func(st *xChatStub) { st.createValid = false },
-		"an error from X":           func(st *xChatStub) { st.createStatus = 400 },
+		"an error from X": func(st *xChatStub) {
+			st.createStatus = 400
+			st.createBody = `{"title":"Invalid Request","detail":"CrcValidationFailed: timed out"}`
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			st := newXChatStub(t)
@@ -547,4 +552,175 @@ func TestXWebhookUser(t *testing.T) {
 			t.Errorf("XWebhookUser(%q) = %q", b, got)
 		}
 	}
+}
+
+// ------------------------------------------------------------- review round: ordering, ownership, errors
+
+// TestXRunIsReadyToReceiveBeforeTheSubscriptionsExist: X starts delivering the moment a subscription exists, so the
+// inbox must already be open then, or the first events are answered into the void.
+func TestXRunIsReadyToReceiveBeforeTheSubscriptionsExist(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	var mu sync.Mutex
+	var verdicts []XIngest
+	st.onSubscribe = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		verdicts = append(verdicts, a.IngestWebhook(chatEnvelope(fmt.Sprint("early-", len(verdicts)), "1234567890", "B", "2090000000000000020", "early")))
+	}
+	xRun(t, a, SinkFunc(func(Message) {}))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(verdicts) == 0 {
+		t.Fatal("no subscription was created")
+	}
+	for i, v := range verdicts {
+		if v != XIngestQueued {
+			t.Errorf("event %d arriving as subscription %d was created = %v, want queued", i, i+1, v)
+		}
+	}
+}
+
+func TestXIngestDuplicateIsKnownEvenWhenNotRunning(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	sink, wait := collect(t)
+	stop := xRun(t, a, sink)
+	a.IngestWebhook(chatEnvelope("u-d", "1234567890", "B", "2090000000000000030", "once"))
+	wait(1)
+	if got := a.IngestWebhook(chatEnvelope("u-d", "1234567890", "B", "2090000000000000030", "once")); got != XIngestDuplicate {
+		t.Errorf("replay while live = %v, want duplicate", got)
+	}
+	_ = stop()
+	if got := a.IngestWebhook(chatEnvelope("u-d", "1234567890", "B", "2090000000000000030", "once")); got != XIngestDuplicate {
+		t.Errorf("replay after stop = %v, want duplicate (already delivered, nothing to redeliver)", got)
+	}
+	if got := a.IngestWebhook(chatEnvelope("u-new", "1234567890", "B", "2090000000000000031", "new")); got != XIngestNotRunning {
+		t.Errorf("a new event after stop = %v, want not-running (X should redeliver it)", got)
+	}
+}
+
+// TestXRunCleanupNeverDeletesWhatANewerRunClaimed: a reconnect starts the new Run while the old one is still
+// cleaning up. The new Run reuses the subscriptions it finds, and the old Run's cleanup must not delete them.
+func TestXRunCleanupNeverDeletesWhatANewerRunClaimed(t *testing.T) {
+	st := newXChatStub(t)
+	old := st.adapter(t, time.Unix(1761904800, 0))
+	stopOld := xRun(t, old, SinkFunc(func(Message) {}))
+	if len(st.subList()) != 2 {
+		t.Fatalf("setup: subscriptions = %v", st.subList())
+	}
+	fresh := st.adapter(t, time.Unix(1761904800, 0))
+	stopFresh := xRun(t, fresh, SinkFunc(func(Message) {})) // reuses both
+	if n := st.countCalls("POST /2/activity/subscriptions"); n != 2 {
+		t.Fatalf("the new run created %d subscriptions in total, want it to reuse the 2 that exist", n)
+	}
+	_ = stopOld()
+	if got := st.subList(); len(got) != 2 {
+		t.Fatalf("the old run's cleanup deleted subscriptions the new run is using: %v", got)
+	}
+	_ = stopFresh()
+	if got := st.subList(); len(got) != 0 {
+		t.Errorf("the run that owns the subscriptions left them behind: %v", got)
+	}
+}
+
+func TestXRunSaysSoWhenItReplacesAnotherInstallsSubscription(t *testing.T) {
+	st := newXChatStub(t)
+	st.webhooks = []xStubWebhook{
+		{ID: "56", URL: xStubHookURL, Valid: true},
+		{ID: "9999", URL: "https://other-install.example.org/api/v1/webhooks/x", Valid: true},
+	}
+	st.subs = []map[string]any{
+		{"subscription_id": "7001", "event_type": "broadcast.chat", "filter": map[string]any{"user_id": "1234567890"}, "webhook_id": "9999", "tag": "polyemesis"},
+	}
+	var logs bytes.Buffer
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, WebhookURL: xStubHookURL, Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	xRun(t, a, SinkFunc(func(Message) {}))
+	d := a.Health().Detail
+	for _, want := range []string{"replaced another polyemesis install's X chat subscription", "other-install.example.org"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("status detail %q does not contain %q", d, want)
+		}
+	}
+	if strings.Contains(d, "app-bearer") || strings.Contains(d, "/api/v1") {
+		t.Errorf("status detail carries more than the host: %q", d)
+	}
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "other-install.example.org") {
+		t.Errorf("no WARN naming the other host in the log: %q", logs.String())
+	}
+}
+
+func TestXRunMapsXsDocumentedWebhookErrors(t *testing.T) {
+	for _, c := range []struct {
+		name, body, want, notWant string
+		fatal                     bool
+	}{
+		{"limit", `{"title":"Forbidden","detail":"WebhookLimitExceeded"}`, "maximum number of webhooks", "public HTTPS address", false},
+		{"url", `{"title":"Invalid","detail":"UrlValidationFailed: not https"}`, "rejected the webhook address", "CRC", false},
+		{"unknown", `{"title":"Invalid Request","detail":"something else"}`, "would not register the webhook", "public HTTPS address", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			st := newXChatStub(t)
+			st.createStatus, st.createBody = 400, c.body
+			err := xRunErr(t, st.adapter(t, time.Unix(1761904800, 0)))
+			if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), c.notWant) {
+				t.Errorf("error = %v, want it to contain %q and not %q", err, c.want, c.notWant)
+			}
+		})
+	}
+}
+
+func TestXRunReusesTheWebhookWhenXSaysItIsADuplicate(t *testing.T) {
+	st := newXChatStub(t)
+	st.createStatus, st.createRaces = 400, true
+	st.createBody = `{"title":"Invalid","detail":"DuplicateUrlFailed"}`
+	xRun(t, st.adapter(t, time.Unix(1761904800, 0)), SinkFunc(func(Message) {}))
+}
+
+func TestXRunRevalidatesAtMostOncePerRegistration(t *testing.T) {
+	st := newXChatStub(t)
+	st.putFixes = false
+	st.webhooks = []xStubWebhook{{ID: "56", URL: xStubHookURL, Valid: false}}
+	_ = xRunErr(t, st.adapter(t, time.Unix(1761904800, 0)))
+	if n := st.countCalls("PUT /2/webhooks/56"); n != 1 {
+		t.Errorf("PUT = %d, want exactly 1", n)
+	}
+}
+
+func xRunEvery(t *testing.T, st *xChatStub, every time.Duration) (*XAdapter, func() error) {
+	t.Helper()
+	a, err := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, WebhookURL: xStubHookURL, WebhookRecheck: every})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a, xRun(t, a, SinkFunc(func(Message) {}))
+}
+
+// TestXRunRechecksTheWebhookWhileLive: X validates hourly and stops delivering to an invalid webhook, so a webhook
+// that has gone invalid is re-validated once, without waiting for a reconnect.
+func TestXRunRechecksTheWebhookWhileLive(t *testing.T) {
+	st := newXChatStub(t)
+	_, _ = xRunEvery(t, st, 10*time.Millisecond)
+	id := st.webhookList()[0].ID
+	st.setValid(id, false)
+	xWaitFor(t, "a PUT after the webhook went invalid", func() bool { return st.countCalls("PUT /2/webhooks/"+id) >= 1 })
+	xWaitFor(t, "the webhook valid again", func() bool { return st.webhookList()[0].Valid })
+}
+
+func TestXRunSurfacesAWebhookThatStaysInvalidAndDoesNotPUTAgain(t *testing.T) {
+	st := newXChatStub(t)
+	a, _ := xRunEvery(t, st, 10*time.Millisecond)
+	id := st.webhookList()[0].ID
+	st.putFixes = false
+	st.setValid(id, false)
+	xWaitFor(t, "a status for the invalid webhook", func() bool { return strings.Contains(a.Health().Detail, "invalid") })
+	time.Sleep(80 * time.Millisecond)
+	if n := st.countCalls("PUT /2/webhooks/" + id); n != 1 {
+		t.Errorf("PUT = %d while the webhook stays invalid, want 1", n)
+	}
+	st.putFixes = true
+	st.setValid(id, true)
+	xWaitFor(t, "the status to clear", func() bool { return a.Health().Detail == "" })
 }

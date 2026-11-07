@@ -15,13 +15,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"math"
-	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -105,103 +100,9 @@ func (s *Server) xClientSecret() string {
 	return c.ClientSecret
 }
 
-// xThrottled answers 429 when this address has been failing, and reports whether it did.
-func (s *Server) xThrottled(w http.ResponseWriter, ip string) bool {
-	wait := s.xhooks.Try(ip)
-	if wait <= 0 {
-		return false
-	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-	writeError(w, http.StatusTooManyRequests, "too many rejected requests, try again later")
-	return true
-}
-
-// handleXWebhookCRC answers X's challenge. A missing, empty, or unsignable crc_token is 400; no saved client secret
-// is 503, because there is nothing to answer with.
-func (s *Server) handleXWebhookCRC(w http.ResponseWriter, r *http.Request) {
-	ip := auth.ClientIP(r, s.proxies)
-	if s.xThrottled(w, ip) {
-		return
-	}
-	tok := r.URL.Query().Get("crc_token")
-	if !xCRCTokenOK(tok) {
-		s.xhooks.Fail(ip)
-		writeError(w, http.StatusBadRequest, "crc_token is missing or not acceptable")
-		return
-	}
-	secret := s.xClientSecret()
-	if secret == "" {
-		s.xhooks.Succeed(ip)
-		writeError(w, http.StatusServiceUnavailable, "no X client secret is saved, so the check cannot be answered; add it in Settings → Platforms")
-		return
-	}
-	s.xhooks.Succeed(ip)
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]string{"response_token": xHMAC(secret, []byte(tok))})
-}
-
-// handleXWebhookEvent receives one delivery. The order matters: size, then signature over the raw bytes, and only
-// then is anything parsed. A verified body is queued without blocking and answered 200 at once, since X wants an
-// answer within 10 seconds and retries a non-2xx.
-func (s *Server) handleXWebhookEvent(w http.ResponseWriter, r *http.Request) {
-	ip := auth.ClientIP(r, s.proxies)
-	if s.xThrottled(w, ip) {
-		return
-	}
-	secret := s.xClientSecret()
-	if secret == "" {
-		s.xhooks.Succeed(ip)
-		// 401, not 503: with no key there is nothing a delivery could be verified against, which is the same
-		// refusal as a bad signature.
-		writeError(w, http.StatusUnauthorized, "signature rejected: no X client secret is saved to verify it against")
-		return
-	}
-	// One byte past the cap tells "exactly at the cap" from "over it"; a plain LimitReader would truncate silently
-	// and surface as a signature failure.
-	body, err := io.ReadAll(io.LimitReader(r.Body, xWebhookMaxBody+1))
-	if err != nil {
-		s.xhooks.Fail(ip)
-		writeError(w, http.StatusBadRequest, "could not read the request body")
-		return
-	}
-	if len(body) > xWebhookMaxBody {
-		s.xhooks.Fail(ip)
-		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-		return
-	}
-	got := r.Header.Get(xSignatureHeader)
-	if got == "" || !secretEqual(got, xHMAC(secret, body)) {
-		s.xhooks.Fail(ip)
-		writeError(w, http.StatusUnauthorized, "signature rejected")
-		return
-	}
-	s.xhooks.Succeed(ip)
-
-	if s.chat == nil {
-		w.WriteHeader(http.StatusOK) // 200 so X does not retry events a chat-less server will never want
-		return
-	}
-	user := chat.XWebhookUser(body)
-	if user == "" {
-		writeError(w, http.StatusBadRequest, "not an X activity event")
-		return
-	}
-	xa := s.xAdapterFor(user)
-	if xa == nil {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	switch res := xa.IngestWebhook(body); res {
-	case chat.XIngestMalformed:
-		writeError(w, http.StatusBadRequest, "not an X activity event")
-		return
-	case chat.XIngestFull:
-		s.log.Warn("x webhook: chat inbox full, event dropped", "user", user)
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// xAdapterFor finds the running X adapter that receives events for an X user id.
+// xAdapterFor finds the X adapter for an X user id, or nil when this install has none. It matches the account the
+// adapter is keyed on (the X user id), live or not, so an event for a known account whose adapter is still starting
+// is told apart from one for an account this install does not have.
 func (s *Server) xAdapterFor(userID string) *chat.XAdapter {
 	for _, st := range s.chat.Statuses() {
 		if st.Platform != db.PlatformX {
@@ -211,7 +112,7 @@ func (s *Server) xAdapterFor(userID string) *chat.XAdapter {
 		if !ok {
 			continue
 		}
-		if xa, ok := a.(*chat.XAdapter); ok && xa.WebhookUserID() == userID {
+		if xa, ok := a.(*chat.XAdapter); ok && xa.Account() == userID {
 			return xa
 		}
 	}

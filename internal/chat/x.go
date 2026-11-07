@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -75,6 +76,10 @@ type XConfig struct {
 	// WebhookProblem says why WebhookURL is empty (no hostname, a self-signed
 	// certificate, ...), so the operator is told what to change.
 	WebhookProblem string
+	// WebhookRecheck is how often a live Run asks X whether the webhook is still valid. Zero means 30 minutes.
+	WebhookRecheck time.Duration
+	// Log receives the warnings that are not errors (for instance a replaced subscription). Nil discards them.
+	Log *slog.Logger
 	// APIBase is the host. Empty means production.
 	APIBase string
 	// HTTP is the client. Nil means a default with a timeout.
@@ -101,6 +106,12 @@ type XAdapter struct {
 	// seen holds the event_uuids already delivered, so a retry or replay from X is not shown twice. It lives on the
 	// adapter, not on a Run, so a replay right after a reconnect is still recognised.
 	seen *xSeen
+
+	// ready is true once Run has registered the webhook and the subscriptions (the inbox opens earlier, before the
+	// subscriptions exist, so nothing X delivers is lost). notes are the operator-visible remarks Health reports.
+	ready        bool
+	replacedNote string
+	invalidNote  string
 }
 
 // SetBroadcast tells the adapter which broadcast this account is running now. The lifecycle coordinator calls it
