@@ -259,6 +259,13 @@ a lost answer, so a second attempt that creates the broadcast more than about 25
 as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
 from X's documentation and unconfirmed live.
 
+**Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
+polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
+have left a broadcast live on X" so you can end it in X's producer tooling. The attempt time is not refreshed after
+a lost answer, so a second attempt that creates the broadcast more than about 25 seconds after the first is refused
+as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
+from X's documentation and unconfirmed live.
+
 Every cell in the X row stays *Unverified* except the stream key, which is
 *By hand*. That is deliberate: no live request from a connected X account has
 confirmed any of the built paths yet. Two things apply on top of the switch: X
