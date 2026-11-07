@@ -280,7 +280,7 @@ func TestFacebookPollRefusals(t *testing.T) {
 		t.Errorf("no id: %v", err)
 	}
 	// Not live yet: a 400.
-	status, body = 400, `{"error":{"code":100,"message":"bad"}}`
+	status, body = 400, `{"error":{"code":100,"message":"The video is not live"}}`
 	if _, err := a.CreatePoll(ctx, "q", []string{"a", "b"}); err == nil || !strings.Contains(err.Error(), "live right now") {
 		t.Errorf("not live: %v", err)
 	}
