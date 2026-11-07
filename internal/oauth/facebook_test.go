@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -1771,5 +1772,52 @@ func TestTheCreateResponsesBackupEndpointsReachTheCaller(t *testing.T) {
 	}
 	if b.Backups[0].URL == "" || b.Backups[0].Key == "" {
 		t.Errorf("backup ingest is not split into URL and key: %+v", b.Backups[0])
+	}
+}
+
+// PageAccess is how the chat adapter acts as a Page: the Page's id and its own
+// token, minted from the user token, and a clear refusal for a profile.
+func TestFacebookPageAccess(t *testing.T) {
+	fb, log := fbServer(t, graphStub(t, nil))
+	ctx := context.Background()
+
+	id, tok, err := fb.PageAccess(ctx, "user-token", "page:555")
+	if err != nil || id != "555" || tok != "page-token" {
+		t.Fatalf("PageAccess = %q, %q, %v; want the Page's id and token", id, tok, err)
+	}
+	if c := fbCall(*log, http.MethodGet, "/me/accounts"); c == nil || c.Auth != "Bearer user-token" {
+		t.Errorf("accounts call = %+v, want it made with the user token", c)
+	}
+
+	for _, ref := range []string{"user:1000", "1000", ""} {
+		if _, _, err := fb.PageAccess(ctx, "user-token", ref); !errors.Is(err, ErrNotAPage) {
+			t.Errorf("ref %q: err = %v, want ErrNotAPage", ref, err)
+		}
+	}
+	// A Page this login no longer manages.
+	if _, _, err := fb.PageAccess(ctx, "user-token", "page:999"); err == nil ||
+		!strings.Contains(err.Error(), "no longer manages Page 999") {
+		t.Errorf("unmanaged page: %v", err)
+	}
+}
+
+func TestFacebookPageAccessWithoutAPageToken(t *testing.T) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{{"id": "555", "name": "P"}}})
+	})
+	if _, _, err := fb.PageAccess(context.Background(), "u", "page:555"); err == nil ||
+		!strings.Contains(err.Error(), "no Page access token") {
+		t.Errorf("err = %v, want the missing-token sentence", err)
+	}
+}
+
+// The Graph version is pinned, and the pin reaches both the API root and the
+// login dialog.
+func TestGraphVersionIsPinnedEverywhere(t *testing.T) {
+	if !strings.HasSuffix(fbGraphBase, "/"+platform.GraphVersion) || !strings.Contains(fbDialogBase, "/"+platform.GraphVersion+"/") {
+		t.Errorf("base %q and dialog %q do not both carry %s", fbGraphBase, fbDialogBase, platform.GraphVersion)
+	}
+	if platform.GraphVersion != "v26.0" {
+		t.Errorf("GraphVersion = %s, want v26.0", platform.GraphVersion)
 	}
 }

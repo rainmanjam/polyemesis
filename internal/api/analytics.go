@@ -227,7 +227,12 @@ func (s *Server) attachedChatTargets(platforms map[db.Platform]bool) []analytics
 	var out []analytics.Target
 	for _, st := range s.chat.Statuses() {
 		if platforms[st.Platform] && st.Account != "" {
-			out = append(out, analytics.Target{Platform: string(st.Platform), Account: st.Account, ChatOnly: true})
+			// Rumble's viewer count rides on the chat poll, so its target is
+			// read (from the adapter's health) rather than chat-only.
+			out = append(out, analytics.Target{
+				Platform: string(st.Platform), Account: st.Account,
+				ChatOnly: st.Platform != db.PlatformRumble,
+			})
 		}
 	}
 	return out
@@ -282,6 +287,9 @@ func (a analyticsSource) Interval(configured time.Duration, targets []analytics.
 // allowance), a rate limit is a RetryAfterError (#4, #5).
 func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytics.Stats, error) {
 	s := a.s
+	if t.Platform == string(db.PlatformRumble) {
+		return a.readRumble(), nil
+	}
 	acct, err := s.tokenFor(ctx, t.AccountID)
 	if err != nil {
 		return analytics.Stats{}, err
@@ -293,6 +301,22 @@ func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytic
 		st, err = a.readStats(ctx, acct)
 	}
 	return st, a.platformError(t, err)
+}
+
+// readRumble answers from the chat adapter's last poll. Rumble has no account
+// or OAuth provider to ask; watching_now arrives on the get-data response the
+// chat adapter already polls, so no extra request is made against an endpoint
+// with an unpublished rate limit. Live means that poll found a live broadcast.
+func (a analyticsSource) readRumble() analytics.Stats {
+	if a.s.chat == nil {
+		return analytics.Stats{}
+	}
+	for _, st := range a.s.chat.Statuses() {
+		if st.Platform == db.PlatformRumble && st.State == chat.StateLive {
+			return analytics.Stats{Live: true, Viewers: st.Viewers}
+		}
+	}
+	return analytics.Stats{}
 }
 
 func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {

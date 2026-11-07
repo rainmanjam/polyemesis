@@ -128,6 +128,8 @@ function StartForm({
   const [mirror, setMirror] = useState(twitchAvailable);
   // Off by default: a YouTube live poll costs 40 units of the day's API quota.
   const [mirrorYouTube, setMirrorYouTube] = useState(false);
+  // Off by default: Facebook only takes a poll on a video that is live now.
+  const [mirrorFacebook, setMirrorFacebook] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -140,6 +142,7 @@ function StartForm({
       durationSeconds: duration,
       mirrorTwitch: twitchAvailable && mirror,
       mirrorYouTube,
+      mirrorFacebook,
     };
     const p = pollProblem(spec);
     if (p) {
@@ -252,6 +255,19 @@ function StartForm({
         />
         <Label htmlFor="poll-mirror-youtube" className="text-sm">
           {t("polls.mirrorYouTube")}
+        </Label>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          id="poll-mirror-facebook"
+          type="checkbox"
+          checked={mirrorFacebook}
+          disabled={busy}
+          onChange={(e) => setMirrorFacebook(e.target.checked)}
+          className="h-3.5 w-3.5 accent-primary"
+        />
+        <Label htmlFor="poll-mirror-facebook" className="text-sm">
+          {t("polls.mirrorFacebook")}
         </Label>
       </div>
       <span className="text-sm text-muted-foreground">{t("polls.voteHint")}</span>

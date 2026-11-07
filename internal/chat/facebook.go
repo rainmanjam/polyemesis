@@ -55,6 +55,13 @@ type FacebookConfig struct {
 	LiveVideoID string
 	// Interval overrides the poll spacing.
 	Interval time.Duration
+	// PageAccess resolves the Page this account is connected as, with that
+	// Page's access token. Blocking a person and running a poll on a Page's
+	// live video both need it: the user token the chat is read with is refused
+	// by the Page-only edges. Nil, or an error, means the account is a profile
+	// (or the Page is no longer managed), and the actions that need a Page say
+	// so instead of trying the user token.
+	PageAccess func(ctx context.Context) (pageID, token string, err error)
 
 	APIBase string
 	HTTP    *http.Client
@@ -74,6 +81,10 @@ type FacebookAdapter struct {
 	// poll. The Hub's dedupe catches anything that slips through the equal-time
 	// boundary.
 	lastSeen time.Time
+	// pageID, pageTok and pageExpiry cache the resolved Page access.
+	pageID, pageTok string
+	pageExpiry      time.Time
+	notPageUntil    time.Time
 }
 
 // NewFacebook builds the adapter.
@@ -116,7 +127,7 @@ func (f *FacebookAdapter) Delete(ctx context.Context, commentID string) error {
 		return fmt.Errorf("no comment id to delete")
 	}
 	err := doJSON(ctx, f.cfg.HTTP, http.MethodDelete,
-		f.cfg.APIBase+"/"+url.PathEscape(commentID), f.cfg.Token, nil, nil)
+		f.cfg.APIBase+"/"+url.PathEscape(commentID), f.commentToken(ctx), nil, nil)
 	if err != nil {
 		return f.moderationError(err, "delete")
 	}
@@ -137,7 +148,7 @@ func (f *FacebookAdapter) Hide(ctx context.Context, commentID string, hidden boo
 	}
 	err := doJSON(ctx, f.cfg.HTTP, http.MethodPost,
 		f.cfg.APIBase+"/"+url.PathEscape(commentID),
-		f.cfg.Token, map[string]any{"is_hidden": hidden}, nil)
+		f.commentToken(ctx), map[string]any{"is_hidden": hidden}, nil)
 	if err != nil {
 		verb := "hide"
 		if !hidden {
@@ -156,6 +167,7 @@ func (f *FacebookAdapter) Hide(ctx context.Context, commentID string, hidden boo
 // to act on it — and the error for that reads like a generic permissions
 // failure.
 func (f *FacebookAdapter) moderationError(err error, verb string) error {
+	f.dropPageToken(err)
 	switch statusOf(err) {
 	case http.StatusForbidden:
 		return fmt.Errorf("Facebook refused to %s that comment. Acting on a Page's comments needs the "+
@@ -271,7 +283,8 @@ func (f *FacebookAdapter) poll(ctx context.Context, videoID string, sink Sink) (
 	var out struct {
 		Data []fbComment `json:"data"`
 	}
-	if err := doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, f.cfg.Token, nil, &out); err != nil {
+	if err := doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, f.commentToken(ctx), nil, &out); err != nil {
+		f.dropPageToken(err)
 		return 0, err
 	}
 

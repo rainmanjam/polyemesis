@@ -166,6 +166,8 @@ func NativeStartText(s Spec, p db.Platform) string {
 		where = "the Twitch poll above chat"
 	case db.PlatformYouTube:
 		where = "the poll in the live chat"
+	case db.PlatformFacebook:
+		where = "the poll on the live video"
 	}
 	q := s.Question
 	for n := utf8.RuneCountInString(q); n >= 1; n-- {

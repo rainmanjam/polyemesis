@@ -137,6 +137,16 @@ type Banner interface {
 	Unban(ctx context.Context, userID string) error
 }
 
+// NoTimeouter marks a Banner that can remove a person but cannot time one out:
+// its ban has no duration, so Ban refuses a positive one. Facebook's Page block
+// list is the case. It is a marker on the adapter, read off its type by
+// ProfileOf, so the console and automod can say "timeout is unavailable here"
+// instead of offering a control that would be refused.
+type NoTimeouter interface {
+	Banner
+	NoTimeout()
+}
+
 // Hider is the optional capability for taking a message off the public feed
 // WITHOUT destroying it.
 //
@@ -265,6 +275,11 @@ type Health struct {
 	// on RumbleAdapter.setLive for why a platform with no sign-in cannot report
 	// through that interface at all.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are the channel's counts where the same poll
+	// carries them (Rumble). Nil is "not reported", never zero, for the same
+	// reason as Viewers.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // Status is one platform's chat connection as reported to the UI.
@@ -291,6 +306,10 @@ type Status struct {
 	// that on the wire -- the key is absent when the platform said nothing, so a
 	// client cannot read a silence as a number.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are Health's, reported to the UI with the same
+	// absent-means-not-reported rule.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // SendResult is one platform's outcome from a fan-out send. Partial failure is
@@ -469,6 +488,10 @@ var (
 	_ Banner = (*KickAdapter)(nil)
 	_ Banner = (*YouTubeAdapter)(nil)
 	_ Banner = (*TwitchAdapter)(nil)
+	// Facebook blocks a person from the Page, permanently: the block list has
+	// no duration, so it is marked as unable to time anyone out.
+	_ Banner      = (*FacebookAdapter)(nil)
+	_ NoTimeouter = (*FacebookAdapter)(nil)
 
 	// Facebook alone, because only its live chat is a comment thread.
 	_ Hider = (*FacebookAdapter)(nil)

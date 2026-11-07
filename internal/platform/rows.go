@@ -19,9 +19,9 @@ const (
 	TikTokAPIHost  = "https://open.tiktokapis.com"
 
 	// GraphVersion is the pinned Graph API version. A bump here is the whole
-	// change: oauth and chat both build from it. v24.0 is the first version that
+	// change: oauth and chat both build from it. v24.0 was the first version that
 	// removed overlay_url, which polyemesis deliberately never sends.
-	GraphVersion   = "v24.0"
+	GraphVersion   = "v26.0"
 	GraphAPIHost   = "https://graph.facebook.com"
 	GraphAPIRoot   = GraphAPIHost + "/" + GraphVersion
 	GraphDialogURL = "https://www.facebook.com/" + GraphVersion + "/dialog/oauth"
@@ -140,7 +140,7 @@ func buildRows() []Row {
 			},
 			VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
 			Music:      &Music{Exclude: true, Reason: "Facebook Rights Manager", TargetLUFS: LUFSStreaming},
-			Moderation: &Moderation{Hide: true, Delete: true, Order: 4},
+			Moderation: &Moderation{Hide: true, Delete: true, TimeoutBan: true, NoTimeout: true, Order: 4},
 			Chat:       Chat{OverlayOrder: 4},
 			Limits: []Limit{{
 				Kind: LimitBroadcastDuration, Hours: 8, Status: LimitDocumented,

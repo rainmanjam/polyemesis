@@ -56,6 +56,7 @@ export interface PollSpec {
   durationSeconds: number;
   mirrorTwitch?: boolean;
   mirrorYouTube?: boolean;
+  mirrorFacebook?: boolean;
 }
 
 /** The server's limits (internal/polls, from the wire contract), checked here

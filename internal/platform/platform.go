@@ -66,6 +66,10 @@ type Moderation struct {
 	// Delete removes a message; TimeoutBan covers timeout and ban, which route
 	// through the same adapter method.
 	Delete, TimeoutBan bool
+	// NoTimeout is a platform whose TimeoutBan is permanent only: it can
+	// remove a person and cannot time one out (Facebook's Page block list has
+	// no duration). It only means something with TimeoutBan set.
+	NoTimeout bool
 	// Order is the platform's position in automod's platform list, whose order
 	// is part of the API response.
 	Order int
