@@ -16,6 +16,7 @@ platform, and how to tell it worked.
 - [Kick](#kick)
 - [YouTube (being verified)](#youtube-being-verified)
 - [Facebook (being verified)](#facebook-being-verified)
+- [Chat actions by platform](#chat-actions-by-platform)
 - [When something is empty or refused](#when-something-is-empty-or-refused)
 
 ---
@@ -271,6 +272,63 @@ may need a configuration instead of scopes; that is not yet verified. Meta
 also requires App Review before anyone but you can connect an account; your own
 account works at once as a developer or tester of your own app. See
 [PLATFORMS.md](PLATFORMS.md#facebook-live-meta).
+
+---
+
+## Chat actions by platform
+
+What you can do in a platform's chat from polyemesis, checked against the
+code and against each platform's published API on 2026-11-07.
+
+| Action | Twitch | Kick | X | YouTube | Facebook | Rumble |
+|---|---|---|---|---|---|---|
+| Read chat | ✅ | ✅ (needs webhooks) | ✅ (webhook + app bearer) | ✅ | ✅ (comments) | ✅ |
+| Send | ✅ 500 chars | ✅ 500 chars | ✅ 140 chars ⚠️ | ✅ 200 chars | 🔧 | 🚫 |
+| Delete message | ✅ | ✅ | ✅ ⚠️ | ✅ | ✅ | 🚫 |
+| Hide on platform | 🚫 | 🚫 | 🚫 | 🚫 | ✅ | 🚫 |
+| Time out | ✅ | ✅ | ✅ timed mute ⚠️ | ✅ temporary ban | 🚫 | 🚫 |
+| Ban / unban | ✅ | ✅ | ✅ mute / unmute ⚠️ | ✅ | 🔧 | 🚫 |
+| Native poll | ✅ | 🚫 | 🚫 | ✅ | 🔧 | 🚫 |
+| Chat settings | ✅ read + change (slow, follower, subscriber, emote, unique, moderator delay) | 🚫 | ❓ | 🚫 | 🚫 | 🚫 |
+
+- ✅ built in polyemesis.
+- ⚠️ built, not yet exercised against a live account. As of 2026-11-07 that is
+  X send, delete and mute; Twitch and Kick moderation and all of YouTube and
+  Facebook are still to be live-tested.
+- 🔧 the platform's API offers it and polyemesis does not do it yet.
+- 🚫 the platform's API doesn't offer it.
+- ❓ the platform's docs don't say.
+
+How the table plays out in practice:
+
+- **Hide locally works everywhere.** It removes a message from the console and
+  the overlays only; the platform's own chat still shows it. Where the table
+  says 🚫 for *Hide on platform*, local hiding is the way to keep a message off
+  your stream.
+- **A send to several platforms uses the strictest limit.** With X connected
+  that is 140 characters, so the same text goes out everywhere.
+- **Automod acts only where the table shows ✅.** Anywhere else it flags the
+  message or hides it locally.
+- **Where there is no native poll, polls run from chat votes.** Twitch and
+  YouTube get a native poll; every other chat is asked to type a number.
+- **An X mute belongs to the broadcaster**, so it applies to all of that
+  account's broadcasts, and a timed mute ends on its own.
+- **Kick timeouts run from 1 minute to 7 days.**
+
+Sources checked on 2026-11-07:
+
+- Twitch: [Helix reference](https://dev.twitch.tv/docs/api/reference/)
+- Kick: [Chat](https://docs.kick.com/apis/chat) and
+  [Moderation](https://docs.kick.com/apis/moderation) in the Kick public API docs
+- X: [Livestream API](https://docs.x.com/livestream-api/introduction), chat
+  endpoints
+- YouTube: [Live Streaming API reference](https://developers.google.com/youtube/v3/live/docs)
+- Facebook: Graph API reference for
+  [Comment](https://developers.facebook.com/docs/graph-api/reference/comment/),
+  [Page blocked](https://developers.facebook.com/docs/graph-api/reference/page/blocked/),
+  [Live Video polls](https://developers.facebook.com/docs/graph-api/reference/live-video/polls/)
+  and [Page settings](https://developers.facebook.com/docs/graph-api/reference/page/settings/)
+- Rumble: [Live Stream API](https://rumblefaq.groovehq.com/help/how-to-use-rumble-s-live-stream-api)
 
 ---
 

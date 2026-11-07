@@ -29,6 +29,10 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
+For what each platform's chat allows action by action (send, delete, hide, time out,
+ban, polls, chat settings), see
+[Chat actions by platform](CONNECTING-PLATFORMS.md#chat-actions-by-platform).
+
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
 |---|---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
