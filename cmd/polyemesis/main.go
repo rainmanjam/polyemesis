@@ -21,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/chatexport"
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -344,6 +345,8 @@ func run(h *hooks) error {
 	// sources exist and not one of them came up; with none, the server comes
 	// up and serves the Sources page, which is the only screen that can get
 	// the operator out of this state.
+	// The build version, written into the header of every saved chat file.
+	chatexport.SetGenerator(version)
 	eng := engine.NewManager(log, cfg, store, tools, bus)
 	eng.SetFacebookCaptions(env.FacebookCaptions)
 	h.progress("starting the streaming engine")
@@ -381,6 +384,8 @@ func run(h *hooks) error {
 		chat.WithStore(store),
 		chat.WithPublisher(bus),
 		chat.WithLogger(log),
+		// A recording's chat is not purged before its sidecar is written.
+		chat.WithPurgeFloor(eng.Recordings().ChatHold),
 	)
 	defer hub.Close()
 	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could

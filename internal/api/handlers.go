@@ -3706,13 +3706,25 @@ func (s *Server) handlePlatformRegistry(w http.ResponseWriter, r *http.Request) 
 
 // ---------------------------------------------------------------- recordings
 
+// recordingView is a recording as the list serves it: the row, and whether
+// its chat was saved beside it (see recording.writeChatSidecars).
+type recordingView struct {
+	db.Recording
+	ChatSaved bool `json:"chatSaved"`
+}
+
 func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	recs, err := s.store.ListRecordings()
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, recs)
+	mgr := s.recordings()
+	out := make([]recordingView, len(recs))
+	for i, rec := range recs {
+		out[i] = recordingView{Recording: rec, ChatSaved: mgr.HasChatSidecar(rec.Filename)}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {

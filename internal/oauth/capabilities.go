@@ -355,6 +355,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 				"among its required scopes. An account connected before that scope was requested must be " +
 				"reconnected once.",
 			CapMetadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+			CapChatSend: "POST /public/v1/chat over chat:write, as the connected user. A message can also be sent as a reply to one chat line (reply_to_message_id) or as the app's bot (type bot). Replies and bot posts are built to Kick's docs but not yet checked against a live Kick account.",
 			CapChatRead: "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
 			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out work over " +
 				"moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, " +

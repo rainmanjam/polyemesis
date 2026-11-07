@@ -1899,6 +1899,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Use(s.requireScope)
 			api.Get(r, "/recordings/{id}/download", s.handleDownloadRecording, readDenied)
 			api.Get(r, "/recordings/stems/{name}/download", s.handleDownloadStem, readDenied)
+			// A recording's chat, and any window of it. Viewer names, so
+			// read-denied like /chat/messages. See chat_export.go.
+			api.Get(r, "/recordings/{id}/chat", s.handleRecordingChat, readDenied)
+			api.Get(r, "/chat/export", s.handleChatExport, readDenied)
 			// Addressed by the JOB rather than by a filename: the export's
 			// path was written by the server and is never handed to a client
 			// to spell back at us.

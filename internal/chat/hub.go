@@ -59,7 +59,11 @@ const (
 	// quiet channel still has something to show.
 	DefaultRetention     = 2 * time.Hour
 	DefaultRetentionKeep = 2000
-	DefaultPurgeEvery    = 5 * time.Minute
+
+	// maxPurgeHold is the furthest a WithPurgeFloor hold may reach behind the
+	// retention cutoff.
+	maxPurgeHold      = 24 * time.Hour
+	DefaultPurgeEvery = 5 * time.Minute
 )
 
 // Hub supervises the adapters and owns everything they must not duplicate:
@@ -128,7 +132,9 @@ type Hub struct {
 	sendTimeout time.Duration
 	retention   time.Duration
 	retainKeep  int
-	purgeEvery  time.Duration
+	// purgeFloor, when set, holds the purge cutoff back. See WithPurgeFloor.
+	purgeFloor func(now time.Time) (time.Time, bool)
+	purgeEvery time.Duration
 
 	stop chan struct{}
 	// flushNow lets a burst of chat reach the database without waiting out the
@@ -217,6 +223,14 @@ func WithRetention(age time.Duration, keep int) Option {
 			h.retainKeep = keep
 		}
 	}
+}
+
+// WithPurgeFloor keeps the purge from passing a time the caller names. The
+// recording manager uses it to hold back the chat of a recording whose sidecar
+// is not written yet; see recording.Manager.ChatHold. The hold never reaches
+// more than a day behind the retention cutoff.
+func WithPurgeFloor(fn func(now time.Time) (time.Time, bool)) Option {
+	return func(h *Hub) { h.purgeFloor = fn }
 }
 
 // WithSendTimeout bounds one platform's send inside a fan-out.
@@ -766,6 +780,26 @@ func (h *Hub) Send(ctx context.Context, text string) ([]SendResult, error) {
 	return results, nil
 }
 
+// Reply answers one message on the platform that issued it. Unlike Send it is
+// not a fan-out: the id only means something there. An unknown or receive-only
+// target is an error, since nothing was attempted.
+func (h *Hub) Reply(ctx context.Context, p db.Platform, account, text, replyToID string, asBot bool) (SendResult, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return SendResult{}, fmt.Errorf("chat: nothing to send")
+	}
+	if strings.TrimSpace(replyToID) == "" {
+		return SendResult{}, fmt.Errorf("chat: no message to reply to")
+	}
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+	if r == nil {
+		return SendResult{}, fmt.Errorf("chat: %s is not connected", p)
+	}
+	return r.reply(ctx, text, strings.TrimSpace(replyToID), asBot), nil
+}
+
 // Delete removes a message on the platform it came from, where that platform
 // supports it. It is per-platform rather than a fan-out because a message id
 // only means anything on the platform that issued it.
@@ -1125,7 +1159,17 @@ func (h *Hub) purge() {
 	if !ok || retention <= 0 {
 		return
 	}
-	if _, err := p.PurgeChatMessages(h.now().Add(-retention), keep); err != nil {
+	now := h.now()
+	cutoff := now.Add(-retention)
+	if h.purgeFloor != nil {
+		if floor, ok := h.purgeFloor(now); ok && floor.Before(cutoff) {
+			cutoff = floor
+			if lim := now.Add(-retention - maxPurgeHold); cutoff.Before(lim) {
+				cutoff = lim
+			}
+		}
+	}
+	if _, err := p.PurgeChatMessages(cutoff, keep); err != nil {
 		h.log.Warn("chat history not purged", "err", err)
 	}
 }
@@ -1246,14 +1290,39 @@ func (s runnerSink) Retract(messageID string)    { s.r.hub.retract(s.r, messageI
 func (s runnerSink) RetractUser(authorID string) { s.r.hub.retractUser(s.r, authorID) }
 
 func (r *runner) send(ctx context.Context, text string) SendResult {
-	res := SendResult{Platform: r.platform, Account: r.account}
-
 	s, ok := r.adapter.(Sender)
 	if !ok || !r.canSend {
-		res.Skipped = true
-		res.Detail = fmt.Sprintf("polyemesis reads %s chat but cannot post to it", r.platform)
+		return r.cannotPost()
+	}
+	return r.post(ctx, func(ctx context.Context) (Message, error) { return s.Send(ctx, text) })
+}
+
+// reply is send addressed to one message. A platform with no Replier is
+// refused with a sentence rather than posted to the room as a plain message:
+// the operator asked for a threaded answer, and a stray top-level line is not it.
+func (r *runner) reply(ctx context.Context, text, replyToID string, asBot bool) SendResult {
+	rp, ok := r.adapter.(Replier)
+	if !ok || !r.canSend {
+		res := r.cannotPost()
+		if r.canSend {
+			res.Detail = fmt.Sprintf("polyemesis cannot reply to a specific %s message; send it as a normal message instead", r.platform)
+		}
 		return res
 	}
+	return r.post(ctx, func(ctx context.Context) (Message, error) {
+		return rp.Reply(ctx, text, replyToID, asBot)
+	})
+}
+
+func (r *runner) cannotPost() SendResult {
+	return SendResult{
+		Platform: r.platform, Account: r.account, Skipped: true,
+		Detail: fmt.Sprintf("polyemesis reads %s chat but cannot post to it", r.platform),
+	}
+}
+
+func (r *runner) post(ctx context.Context, do func(context.Context) (Message, error)) SendResult {
+	res := SendResult{Platform: r.platform, Account: r.account}
 
 	ctx, cancel := context.WithTimeout(ctx, r.hub.sendTimeout)
 	defer cancel()
@@ -1266,7 +1335,7 @@ func (r *runner) send(ctx context.Context, text string) SendResult {
 				err = fmt.Errorf("the %s chat adapter hit an internal error while sending", r.platform)
 			}
 		}()
-		return s.Send(ctx, text)
+		return do(ctx)
 	}()
 	if err != nil {
 		res.Detail = err.Error()

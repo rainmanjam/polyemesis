@@ -212,3 +212,11 @@ export function personActionSupport(
 export function moderationColumnSaysYes(platform: string): boolean {
   return supportOf(capabilityFor(platform), "moderation") === "yes";
 }
+
+/** Can this platform answer one specific message. Only Kick can today
+ *  (internal/chat KickAdapter.Reply, `reply_to_message_id`); everything else
+ *  would post an unthreaded line, which the server refuses rather than does. */
+export function replySupport(platform: string, t: Translator = english): ChatActionSupport {
+  if (platform === "kick") return YES;
+  return { ok: false, reason: t("chatMenu.replyUnsupported", { platform: noun(platform) }) };
+}
