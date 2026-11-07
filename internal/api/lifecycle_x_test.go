@@ -1687,3 +1687,71 @@ func TestXGivingUpOnADeletedMaybeLiveBroadcastEscalates(t *testing.T) {
 		t.Fatalf("escalations = %+v, want exactly one saying polyemesis may have left a broadcast live on X", *faults)
 	}
 }
+
+// The give-up fault holds like every other terminal fault: set at the give-up count, so a maybe-live row that is
+// switched off and on again with the encoder sending does NOT send another go-live until the fault is cleared.
+func TestXLeftLiveFaultHoldsAReEnabledRowUntilTheFaultIsCleared(t *testing.T) {
+	now := time.Now()
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: now.UnixMilli(), GoLiveSentMS: now.UnixMilli(), Phase: phaseCreated}))
+	clock := now
+	c.now = func() time.Time { return clock }
+	xcSweep(t, c, store)
+	clock = now.Add(goLiveUnresolvedFor + time.Minute)
+	for range 2 {
+		xcSweep(t, c, store)
+	}
+	lc := store.rows[5].Lifecycle
+	if lc.Fault != leftLiveFault || !lc.Terminal || lc.Attempts != lifecycleGiveUpAfter {
+		t.Fatalf("recorded = %+v, want the left-live fault, terminal, at the give-up count", lc)
+	}
+	store.mu.Lock()
+	store.rows[5].Enabled = true
+	store.mu.Unlock()
+	for range 3 {
+		clock = clock.Add(10 * time.Minute) // far past any re-arm interval: a terminal fault is not re-armed either
+		xcSweep(t, c, store)
+	}
+	if fake.liveCalls != 0 {
+		t.Fatalf("%d go-live calls for a re-enabled row holding the left-live fault, want none", fake.liveCalls)
+	}
+}
+
+// If the write that records the give-up fault fails, nothing is alerted and the target stays tracked, so the next sweep
+// tries again; the fault is raised exactly once when the write succeeds.
+func TestXLeftLiveFaultWriteFailureKeepsTrackingAndDoesNotAlert(t *testing.T) {
+	now := time.Now()
+	fake := &xcFake{}
+	c, store, faults := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: now.UnixMilli(), GoLiveSentMS: now.UnixMilli(), Phase: phaseCreated}))
+	clock := now
+	c.now = func() time.Time { return clock }
+	xcSweep(t, c, store) // inside the window: reads once, goes quiet
+	clock = now.Add(goLiveUnresolvedFor + time.Minute)
+	store.mu.Lock()
+	store.failUpdates = true
+	store.mu.Unlock()
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if len(*faults) != 0 {
+		t.Fatalf("escalations = %+v with the fault unwritable, want none", *faults)
+	}
+	c.mu.Lock()
+	_, tracked := c.tracked[5]
+	c.mu.Unlock()
+	if !tracked || store.rows[5].Lifecycle.Fault != "" {
+		t.Fatalf("tracked=%v fault=%q, want the target kept and no fault recorded yet", tracked, store.rows[5].Lifecycle.Fault)
+	}
+	store.mu.Lock()
+	store.failUpdates = false
+	store.mu.Unlock()
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if store.rows[5].Lifecycle.Fault != leftLiveFault || len(*faults) != 1 {
+		t.Fatalf("fault %q escalations %d, want the fault recorded and raised exactly once after the write recovered",
+			store.rows[5].Lifecycle.Fault, len(*faults))
+	}
+}

@@ -857,15 +857,25 @@ const leftLiveFault = "polyemesis may have left a broadcast live on X — check 
 
 // raiseLeftLive is the durable, visible alternative to giving up silently on a maybe-live broadcast whose row still
 // exists: the fault is written to the row (so it survives a restart and shows on the destination) and raised once. The
-// go-live markers stay, so a reconnect does not wipe it.
-func (c *lifecycleCoordinator) raiseLeftLive(d *db.Destination, broadcastID string) {
+// go-live markers stay, so a reconnect does not wipe it. It is held like every other terminal fault: Attempts is set
+// to the give-up count, so a re-enabled row does not send another go-live until the fault is cleared.
+//
+// It reports whether the fault is durably on the row. When the write fails nothing is alerted and the caller must keep
+// the target tracked, so the next sweep tries again; the alert follows the write, never the other way round.
+func (c *lifecycleCoordinator) raiseLeftLive(d *db.Destination, broadcastID string) bool {
 	if d.Lifecycle.Fault == leftLiveFault {
-		return
+		return true
 	}
-	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+	if c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
 		b.Fault, b.Terminal = leftLiveFault, true
-	})
+		if b.Attempts < lifecycleGiveUpAfter {
+			b.Attempts = lifecycleGiveUpAfter
+		}
+	}) == nil {
+		return false
+	}
 	c.raise(d, "", leftLiveFault)
+	return true
 }
 
 // raiseLeftLiveTarget is raiseLeftLive for a deleted row, which has nowhere to keep a fault: it is raised.
@@ -1027,8 +1037,10 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// Reading it anyway cost a broadcast read, a source list and the user
 		// lookup against X, which publishes no rate limits, every fifteen
 		// seconds for the life of the daemon. Re-enabling reads it again.
-		if d.Lifecycle.GoLiveSentMS != 0 {
-			c.raiseLeftLive(d, broadcastID) // the window has passed and nothing was found: say so, do not go quiet
+		if d.Lifecycle.GoLiveSentMS != 0 && !c.raiseLeftLive(d, broadcastID) {
+			// The window has passed and nothing was found, and the fault could not be written: stay tracked and
+			// try again next sweep rather than going quiet.
+			return true
 		}
 		c.untrack(d.ID)
 		return true
@@ -1122,8 +1134,8 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// a broadcast left live is worse than one left un-started, so this tries
 		// considerably harder before it stops. endOrphan already works this way;
 		// this is the same rule for the row that still exists.
-		if d.Lifecycle.GoLiveSentMS != 0 {
-			c.raiseLeftLive(d, broadcastID)
+		if d.Lifecycle.GoLiveSentMS != 0 && !c.raiseLeftLive(d, broadcastID) {
+			return true
 		}
 		c.untrack(d.ID)
 		return true
