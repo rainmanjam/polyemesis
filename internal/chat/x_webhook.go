@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -417,8 +418,13 @@ func (x *XAdapter) registered() bool {
 // The inbox opens BEFORE the subscriptions exist: X starts delivering the moment one does, and an event that found no
 // inbox would have nowhere to go.
 func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
+	// A starting attempt reads as "coming up", however long the outage before it: the terminal flag clears and the
+	// not-live clock restarts, so Unavailable does not drop events a successful retry would take.
 	x.liveMu.Lock()
 	x.fatal = false
+	if !x.ready {
+		x.notLiveSince = x.cfg.Now()
+	}
 	x.liveMu.Unlock()
 	err := x.run(ctx, sink)
 	if IsFatal(err) {
@@ -471,14 +477,7 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 	// 200 is never left in a channel nobody reads.
 	defer func() {
 		x.goDark(inbox)
-		for {
-			select {
-			case ev := <-inbox:
-				x.deliver(sink, ev)
-			default:
-				return
-			}
-		}
+		x.drainInbox(inbox, sink)
 	}()
 
 	if err := x.ensureSubscriptions(ctx, userID, hookID); err != nil {
@@ -505,6 +504,39 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 			if err := x.recheckWebhook(ctx, hookID, &stuck); err != nil {
 				return err
 			}
+		}
+	}
+}
+
+// xDrainLimit bounds the exit drain. Sink.Deliver is meant not to block, but a sink that does must not hang Run, and
+// with it the Hub's shutdown. A variable so a test can shorten it.
+var xDrainLimit = 2 * time.Second
+
+// drainInbox delivers what is still queued, for at most xDrainLimit. What is left after that was already answered 200
+// to X, so it cannot be redelivered; the loss is logged with its size.
+func (x *XAdapter) drainInbox(inbox chan xWebhookEvent, sink Sink) {
+	var abandoned atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for !abandoned.Load() {
+			select {
+			case ev := <-inbox:
+				x.deliver(sink, ev)
+			default:
+				return
+			}
+		}
+	}()
+	t := time.NewTimer(xDrainLimit)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+		abandoned.Store(true)
+		if x.cfg.Log != nil {
+			x.cfg.Log.Warn("x chat: the chat sink did not take the events accepted before shutdown in time; they were already answered 200 to X and are lost",
+				"account", x.cfg.AccountRef, "undelivered", len(inbox)+1, "waited", xDrainLimit)
 		}
 	}
 }

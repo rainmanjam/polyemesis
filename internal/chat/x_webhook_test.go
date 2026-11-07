@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -836,4 +838,64 @@ func TestXRunSurfacesAWebhookThatStaysInvalidAndDoesNotPUTAgain(t *testing.T) {
 	st.putFixes = true
 	st.setValid(id, true)
 	xWaitFor(t, "the status to clear", func() bool { return a.Health().Detail == "" })
+}
+
+// TestXRunExitDrainIsBounded: the exit drain hands accepted events to the sink, and a sink that blocks must not hang
+// Run (and with it the Hub's shutdown). Past the bound the rest is abandoned and logged.
+func TestXRunExitDrainIsBounded(t *testing.T) {
+	old := xDrainLimit
+	xDrainLimit = 100 * time.Millisecond
+	t.Cleanup(func() { xDrainLimit = old })
+
+	st := newXChatStub(t)
+	var logs bytes.Buffer
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, WebhookURL: xStubHookURL, Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	n := 0
+	st.onSubscribe = func() {
+		n++
+		if n == 1 {
+			for i := 0; i < 3; i++ {
+				a.IngestWebhook(chatEnvelope(fmt.Sprint("d", i), "1234567890", "B", fmt.Sprint(4000+i), "m"))
+			}
+		}
+	}
+	st.failSubscribeAt = 2
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background(), SinkFunc(func(Message) { <-release })) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Run succeeded although the second subscription failed")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run hung on a blocked sink during its exit drain")
+	}
+	if !strings.Contains(logs.String(), "already answered 200") {
+		t.Errorf("the abandoned events were not logged as already 200'd: %q", logs.String())
+	}
+}
+
+// TestXUnavailableResetsWhenANewRunStarts: a retry Run is "coming up", however long the outage before it was.
+func TestXUnavailableResetsWhenANewRunStarts(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	t.Cleanup(func() { close(hang); srv.Close() })
+	var mu sync.Mutex
+	now := time.Unix(1761904800, 0)
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("t"), AppBearer: "b", APIBase: srv.URL, WebhookURL: xStubHookURL,
+		Now: func() time.Time { mu.Lock(); defer mu.Unlock(); return now }})
+	mu.Lock()
+	now = now.Add(time.Hour)
+	mu.Unlock()
+	if !a.Unavailable(10 * time.Minute) {
+		t.Fatal("setup: an hour-old outage should be unavailable")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = a.Run(ctx, SinkFunc(func(Message) {})); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	xWaitFor(t, "a starting Run to read as coming up", func() bool { return !a.Unavailable(10 * time.Minute) })
 }
