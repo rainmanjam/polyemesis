@@ -15,6 +15,7 @@ const (
 	routeOAuthStart    = "/oauth/{platform}/start"
 	routeOAuthCallback = "/oauth/{platform}/callback"
 	routeKickWebhook   = "/chat/kick/{secret}"
+	routeXWebhook      = "/webhooks/x"
 	routeLibraryMedia  = "/library/recordings/{id}/media/{file}"
 
 	// settingsPlatformsPath is the SPA route an OAuth round trip returns to;

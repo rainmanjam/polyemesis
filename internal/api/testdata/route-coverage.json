@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort redact.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 60,
-  "counterpartlessExcusedCeiling": 30,
+  "excusedCeiling": 62,
+  "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
   "nonGetDifferentialFloor": 18,
@@ -12,9 +12,9 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 308,
+    "methodPatternPairs": 310,
     "swept": 80,
-    "excused": 60,
+    "excused": 62,
     "denied": 168,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
@@ -1620,6 +1620,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/webhooks/x",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/webhooks/x",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/ws",
       "coverage": "excused",
       "zeroSource": "unguarded"
@@ -2882,6 +2894,17 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/webhooks/x",
+      "scope": "route",
+      "why": "unauthenticated by necessity: X's CRC check carries no session. The crc_token is required (400 without it), so the anonymous and read callers see the same answer",
+      "want": {
+        "as": "read",
+        "status": 400,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
+    },
+    {
       "route": "GET /api/v1/ws",
       "scope": "route",
       "why": "a WebSocket upgrade, so it emits frames rather than a response body and the body sweep cannot read it at all. A plain GET without the upgrade headers is a 400, which is what the Want below observes.",
@@ -3047,6 +3070,17 @@
       "want": {
         "as": "read",
         "status": 400,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "POST /api/v1/webhooks/x",
+      "scope": "route",
+      "why": "unauthenticated by necessity: X's event delivery carries no session or CSRF header; the HMAC signature over the raw body is the credential, and this fixture has no X client secret saved, so every caller is answered 401 before a body is read",
+      "want": {
+        "as": "read",
+        "status": 401,
         "anonMatchesRead": true
       },
       "counterpart": ""

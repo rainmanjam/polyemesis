@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "直播开播时，X 会发布一条公告。只要此目标保持开启，节目就在进行；若 X 在节目中途结束直播，polyemesis 会开启新的直播，默认情况下该直播开播时不发布公告。",
   "wave3.x.provisional": "依据 X 的文档构建，尚未用真实的 X 账号验证。",
   "wave3.x.metadata": "X 只在发布直播时接受标题，所以 polyemesis 会在那时发送开播标题。直播中无法更改。",
-  "wave3.x.chatRead": "直播聊天来自 X 的活动流，需要在 POLYEMESIS_X_APP_BEARER 中提供应用的 bearer 令牌。没有它聊天面板会保持为空，但发送仍可使用。",
+  "wave3.x.chatRead": "直播聊天会投递到 polyemesis 在 X 注册的 webhook。需要在 POLYEMESIS_X_APP_BEARER 中提供应用的 bearer 令牌,以及不带端口的公开 HTTPS 主机名(tls.mode acme,入站 443)。没有它们聊天面板会保持为空,但发送仍可使用。",
   "wave3.x.chatSend": "向直播聊天发送消息，最多 140 个字符。需要开启 X Livestream。",
   "wave3.x.moderation": "禁言和解除禁言观众，以及删除消息。X 没有隐藏操作，所以删除的消息会直接消失。",
   "wave3.x.viewerStats": "X 提供的观众人数没有说明统计的是什么，所以不显示观众人数。",

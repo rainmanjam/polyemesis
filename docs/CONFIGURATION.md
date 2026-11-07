@@ -554,6 +554,30 @@ standing at a terminal reading an error.
 Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and `Env.RumbleChatChannel`) and handed to the chat wiring in `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
+### X live chat
+
+| Variable | What it does |
+|---|---|
+| `POLYEMESIS_X_LIVESTREAM` | Switches the X Livestream family on (stream key, go-live, chat send and moderation, chat read) |
+| `POLYEMESIS_X_APP_BEARER` | The X app's **app-only bearer token** from console.x.com. Live chat read needs it, because X's webhook and subscription-list calls are app-only. It is a secret |
+
+X delivers live chat (`broadcast.chat`) **only to a webhook**, so reading chat
+also needs an address X can reach, which comes from the config file and not a
+variable:
+
+- `tls.hostname` set to a **public DNS name** (not an IP, not `.local` or `.lan`),
+  with `tls.mode: acme` (or `manual` with a certificate X's servers trust).
+  `selfsigned` does not work: X cannot validate the certificate.
+- **No port.** X rejects a webhook URL that carries one, so polyemesis must be
+  reachable on **443** from the internet. The webhook is
+  `https://<tls.hostname>/api/v1/webhooks/x`.
+- The OAuth 2.0 **client secret** saved for X in Settings → Platforms, which keys
+  X's challenge-response check and the signature on every delivery.
+
+When any of that is missing the chat pane says so (for example "X chat needs a
+public HTTPS address X can reach: tls.mode is selfsigned …") and sending chat
+still works. A reverse proxy that terminates TLS is not recognised yet.
+
 ### FFmpeg
 
 | Variable | What it does |

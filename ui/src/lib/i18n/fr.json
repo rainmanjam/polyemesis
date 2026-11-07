@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X publie une annonce quand une diffusion passe en direct. Une émission dure tant que cette destination est activée ; si X termine la diffusion en cours d'émission, polyemesis en ouvre une nouvelle, qui passe par défaut en direct sans publication.",
   "wave3.x.provisional": "Conçu d'après la documentation de X et pas encore vérifié avec un vrai compte X.",
   "wave3.x.metadata": "X n'accepte un titre qu'à la publication de la diffusion, donc polyemesis envoie alors le titre de mise en direct. Le modifier n'est pas possible pendant le direct.",
-  "wave3.x.chatRead": "Le chat en direct provient du flux d'activité de X et nécessite le jeton bearer de l'app dans POLYEMESIS_X_APP_BEARER. Sans lui, le panneau de chat reste vide et l'envoi fonctionne toujours.",
+  "wave3.x.chatRead": "Le chat en direct est livré à un webhook que polyemesis enregistre auprès de X. Il nécessite le jeton bearer de l'app dans POLYEMESIS_X_APP_BEARER et un nom d'hôte HTTPS public sans port (tls.mode acme, entrant 443). Sans eux, le panneau de chat reste vide et l'envoi fonctionne toujours.",
   "wave3.x.chatSend": "Envoie dans le chat de la diffusion en direct, jusqu'à 140 caractères. Nécessite que X Livestream soit activé.",
   "wave3.x.moderation": "Rendre muet un spectateur ou lever la sourdine, et supprimer un message. X n'a pas d'action de masquage, donc un message supprimé disparaît.",
   "wave3.x.viewerStats": "X indique des nombres de spectateurs sans dire ce qu'ils comptent, donc aucun nombre n'est affiché.",

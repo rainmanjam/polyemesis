@@ -46,7 +46,7 @@ type Env struct {
 	// FacebookCaptions opens the provisional facebook_sei caption path.
 	FacebookCaptions bool
 
-	// XAppBearer is the app-only bearer token X's activity stream needs.
+	// XAppBearer is the app-only bearer token X's webhook and subscription-list calls need.
 	XAppBearer string
 	// RumbleChatKey is the Rumble live-stream API key; RumbleChatChannel names
 	// the channel. Both are only ever read from the environment: argv is

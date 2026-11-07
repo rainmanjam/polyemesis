@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X publikuje ogłoszenie, gdy transmisja wchodzi na żywo. Program trwa, dopóki ten cel jest włączony; jeśli X zakończy transmisję w trakcie, polyemesis otwiera nową i domyślnie wchodzi ona na żywo bez wpisu.",
   "wave3.x.provisional": "Zbudowano na podstawie dokumentacji X i jeszcze nie sprawdzono na prawdziwym koncie X.",
   "wave3.x.metadata": "X przyjmuje tytuł tylko przy publikacji transmisji, więc polyemesis wysyła wtedy tytuł przy starcie. Zmiana nie jest dostępna podczas transmisji.",
-  "wave3.x.chatRead": "Czat na żywo pochodzi ze strumienia aktywności X i wymaga tokena bearer aplikacji w POLYEMESIS_X_APP_BEARER. Bez niego panel czatu pozostaje pusty, a wysyłanie nadal działa.",
+  "wave3.x.chatRead": "Czat na żywo jest dostarczany do webhooka, który polyemesis rejestruje w X. Wymaga tokena bearer aplikacji w POLYEMESIS_X_APP_BEARER oraz publicznej nazwy hosta HTTPS bez portu (tls.mode acme, ruch przychodzący 443). Bez nich panel czatu pozostaje pusty, a wysyłanie nadal działa.",
   "wave3.x.chatSend": "Wysyła na czat transmisji na żywo, do 140 znaków. Wymaga włączonego X Livestream.",
   "wave3.x.moderation": "Wyciszanie i odciszanie widza oraz usuwanie wiadomości. X nie ma ukrywania, więc usunięta wiadomość znika.",
   "wave3.x.viewerStats": "X podaje liczby widzów, nie mówiąc, co liczą, więc liczba widzów nie jest pokazywana.",

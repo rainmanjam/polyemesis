@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X는 방송이 라이브로 전환되면 알림 게시물을 올립니다. 쇼는 이 대상이 켜져 있는 동안 이어집니다. 쇼 도중 X가 방송을 끝내면 polyemesis가 새 방송을 열고, 기본적으로 그 방송은 게시물 없이 라이브로 전환됩니다.",
   "wave3.x.provisional": "X 문서를 바탕으로 만들었으며 실제 X 계정으로는 아직 확인하지 않았습니다.",
   "wave3.x.metadata": "X는 방송을 게시할 때만 제목을 받으므로 polyemesis가 그때 라이브 시작 제목을 보냅니다. 라이브 중에는 변경할 수 없습니다.",
-  "wave3.x.chatRead": "라이브 채팅은 X의 활동 스트림에서 오며 POLYEMESIS_X_APP_BEARER에 앱의 베어러 토큰이 필요합니다. 없으면 채팅 창은 비어 있지만 보내기는 계속 됩니다.",
+  "wave3.x.chatRead": "라이브 채팅은 polyemesis가 X에 등록하는 웹훅으로 전달됩니다. POLYEMESIS_X_APP_BEARER에 앱의 베어러 토큰과, 포트 없는 공개 HTTPS 호스트 이름(tls.mode acme, 인바운드 443)이 필요합니다. 없으면 채팅 창은 비어 있지만 보내기는 계속 됩니다.",
   "wave3.x.chatSend": "라이브 방송의 채팅으로 최대 140자까지 보냅니다. X Livestream을 켜야 합니다.",
   "wave3.x.moderation": "시청자 음소거와 해제, 메시지 삭제를 할 수 있습니다. X에는 숨기기 기능이 없어 삭제한 메시지는 사라집니다.",
   "wave3.x.viewerStats": "X는 무엇을 세는지 밝히지 않고 시청자 수를 보고하므로 시청자 수를 표시하지 않습니다.",

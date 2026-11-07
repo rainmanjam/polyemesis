@@ -3663,7 +3663,7 @@
   "wave3.x.tweetHint": "X pubblica un annuncio quando una trasmissione va in onda. Uno show dura finché questa destinazione è attiva; se X termina la trasmissione a metà, polyemesis ne apre una nuova e, per impostazione predefinita, questa va in onda senza post.",
   "wave3.x.provisional": "Costruito sulla documentazione di X e non ancora verificato con un account X reale.",
   "wave3.x.metadata": "X accetta un titolo solo quando la trasmissione viene pubblicata, quindi polyemesis invia allora il titolo di avvio. Cambiarlo non è disponibile durante la diretta.",
-  "wave3.x.chatRead": "La chat dal vivo arriva dal flusso di attività di X e richiede il token bearer dell'app in POLYEMESIS_X_APP_BEARER. Senza di esso il pannello della chat resta vuoto e l'invio funziona comunque.",
+  "wave3.x.chatRead": "La chat dal vivo viene consegnata a un webhook che polyemesis registra su X. Richiede il token bearer dell'app in POLYEMESIS_X_APP_BEARER e un hostname HTTPS pubblico senza porta (tls.mode acme, ingresso 443). Senza di essi il pannello della chat resta vuoto e l'invio funziona comunque.",
   "wave3.x.chatSend": "Invia alla chat della diretta, fino a 140 caratteri. Richiede X Livestream attivato.",
   "wave3.x.moderation": "Silenziare e riattivare uno spettatore ed eliminare un messaggio. X non ha un'azione per nascondere, quindi un messaggio rimosso sparisce.",
   "wave3.x.viewerStats": "X riporta numeri di spettatori senza dire cosa contano, quindi non viene mostrato alcun conteggio.",

@@ -231,10 +231,33 @@ documents. The consent page is `x.com/i/oauth2/authorize`, as X's guide shows. T
 2026-11-06 confirmed the x.com address shows the consent screen, including with
 the broadcast scopes. Tokens still come from `api.x.com/2/oauth2/token`.
 
-Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
-token from console.x.com, which X's activity stream requires. It is a secret.
-Without it the chat pane stays empty and sending still works. The X console and
-the setup guide show whether the Livestream switch is on.
+Live chat needs three more things, because X delivers `broadcast.chat` **only to
+a webhook** ([Accessing Live Chat](https://docs.x.com/livestream-api/chat/accessing-live-chat),
+[Webhooks](https://docs.x.com/x-api/webhooks/introduction)):
+
+1. `POLYEMESIS_X_APP_BEARER`, the app's app-only bearer token from console.x.com,
+   which the webhook calls need. It is a secret.
+2. A **public, trusted HTTPS address without a port**: `tls.hostname` a public
+   DNS name, `tls.mode: acme`, and inbound **443** reachable from the internet.
+   X rejects a webhook URL with a port and cannot validate a self-signed
+   certificate.
+3. The app's OAuth 2.0 client secret saved in Settings → Platforms. It keys the
+   challenge-response check and the signature on each delivery.
+
+When chat starts, polyemesis registers `https://<tls.hostname>/api/v1/webhooks/x`
+with X (reusing it if X already lists it, and re-validating it if X lists it
+invalid), subscribes `broadcast.chat` and `broadcast.chat.remove` for the
+account to that webhook with the user's token (they persist at X and are reused on every start), and removes them
+when the account is disconnected. Without the bearer or the address the chat pane stays empty,
+says what is missing, and sending still works. The X console and the setup guide
+show whether the Livestream switch is on.
+
+**Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
+polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
+have left a broadcast live on X" so you can end it in X's producer tooling. The attempt time is not refreshed after
+a lost answer, so a second attempt that creates the broadcast more than about 25 seconds after the first is refused
+as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
+from X's documentation and unconfirmed live.
 
 **Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
 polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
