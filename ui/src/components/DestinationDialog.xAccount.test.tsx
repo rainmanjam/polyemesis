@@ -99,6 +99,31 @@ describe("linking an X destination to the connected X account", () => {
     expect(screen.queryByText(new RegExp(en["addDest.linkFetchesKey"]))).toBeNull();
   });
 
+  // MUTATION: render perAccountUrl / manualKeyNote unconditionally again. Observed: FAIL, step 2 still says to
+  // paste the URL and key although polyemesis creates the source.
+  it("tells step 2 the fields can stay empty once an account is linked and Livestream is on", async () => {
+    open(stored({}));
+    await screen.findByTestId("connected-account-picker");
+    await waitFor(() => expect(screen.getByText(en["addDest.xCreatesSource"])).toBeTruthy());
+    expect(screen.queryByText(/nothing to prefill/)).toBeNull();
+    expect(screen.queryByText(/Until X Livestream is switched on/)).toBeNull();
+  });
+
+  it("keeps the paste-it-yourself copy at step 2 when Livestream is off", async () => {
+    state.gate = "closed";
+    open(stored({}));
+    await screen.findByTestId("connected-account-picker");
+    expect(screen.getByText(/nothing to prefill/)).toBeTruthy();
+    expect(screen.getByText(/Until X Livestream is switched on/)).toBeTruthy();
+    expect(screen.queryByText(en["addDest.xCreatesSource"])).toBeNull();
+  });
+
+  it("keeps the paste-it-yourself copy at step 2 when no account is linked", async () => {
+    open(stored({ accountId: null }));
+    await screen.findByText(/nothing to prefill/);
+    expect(screen.queryByText(en["addDest.xCreatesSource"])).toBeNull();
+  });
+
   // The dialog does not refuse an empty URL and key: the server decides, because
   // only it knows whether Livestream is on. MUTATION: add a client-side
   // "URL required" return to saveFromStep. Observed: FAIL, nothing was sent.

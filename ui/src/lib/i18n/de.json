@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Dateiname",
   "addDest.fileHint": "Wird in das Aufnahmeverzeichnis geschrieben. Nur ein relativer Name – keine Pfade.",
   "addDest.perAccountUrl": "{platform} vergibt die Ingest-URL pro Konto oder pro Übertragung, hier lässt sich also nichts vorausfüllen – füge die aus dem Dashboard ein.",
+  "addDest.xCreatesSource": "Mit verknüpftem X-Konto und aktiviertem X Livestream legt polyemesis die Stream-Quelle beim Speichern selbst an, URL und Schlüssel können also leer bleiben.",
   "addDest.ivsAppPath": "Dieser Amazon-IVS-Ingest (Kick, Twitch) braucht den Anwendungspfad /app, sonst wird der Streamschlüssel als Anwendungsname gesendet und jede Verbindung getrennt. Verwende {url}; der Streamschlüssel bleibt in seinem eigenen Feld.",
   "addDest.ivsAppPathUse": "Korrigierte URL verwenden",
   "addDest.keyInUrl": "{platform} packt alles in die URL – lass dies leer, es sei denn, das Dashboard zeigt einen separaten Schlüssel.",

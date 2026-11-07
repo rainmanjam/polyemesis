@@ -49,6 +49,18 @@ its first tagged release.
 
 ### Fixed
 
+- **X chat reaches "live", Kick's loopback self-probe no longer reads as degraded, and the X step-2
+  hint stops telling you to paste.** Staging found three small things. The chat status for X stayed
+  "connecting" for as long as chat was arriving: the hub only marks an adapter live through its
+  health report, and X's reported none, so it now says live once its webhook and subscriptions are
+  in place (degraded while X lists the webhook as invalid). Kick chat showed "degraded: could not
+  reach its own callback URL (dial tcp 127.0.1.1:443: connection refused)" on a server whose own
+  hostname resolves to 127.0.1.1 in `/etc/hosts`; a self-probe that never left the machine proves
+  nothing about outside reachability, so a dial to a loopback address is now treated as
+  inconclusive. And in Add/Edit destination, with an X account linked and X Livestream on, step 2
+  still said to paste the ingest URL and stream key; it now says polyemesis creates the stream
+  source on save and the fields can stay empty.
+
 - **An X destination can be linked to the connected X account.** Staging found Add destination →
   "X (Twitter) Live" showed only Transport, RTMP URL and Stream key, with no "Connected account"
   picker, so the Livestream features had no account to act on. The X row in the destination

@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Nombre de archivo",
   "addDest.fileHint": "Se escribe en el directorio de grabaciones. Solo un nombre relativo, sin rutas.",
   "addDest.perAccountUrl": "{platform} asigna su URL de entrada por cuenta o por emisión, así que no hay nada que rellenar: pega la de su panel.",
+  "addDest.xCreatesSource": "Con tu cuenta de X vinculada y X Livestream activado, polyemesis crea la fuente de transmisión al guardar, así que la URL y la clave pueden quedar vacías.",
   "addDest.ivsAppPath": "Este ingest de Amazon IVS (Kick, Twitch) necesita la ruta de aplicación /app; sin ella la clave de transmisión se envía como nombre de aplicación y se corta cada conexión. Usa {url}; la clave de transmisión va en su propio campo.",
   "addDest.ivsAppPathUse": "Usar la URL corregida",
   "addDest.keyInUrl": "{platform} lo pone todo en la URL: deja esto vacío salvo que su panel muestre una clave aparte.",

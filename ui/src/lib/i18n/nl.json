@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "Bestandsnaam",
   "addDest.fileHint": "Wordt in de opnamemap geschreven. Alleen een relatieve naam — geen paden.",
   "addDest.perAccountUrl": "{platform} geeft de ingest-URL per account of per uitzending uit, dus er valt niets vooraf in te vullen — plak die uit het dashboard.",
+  "addDest.xCreatesSource": "Met een gekoppeld X-account en X Livestream aan maakt polyemesis de streambron aan bij het opslaan, dus URL en sleutel mogen leeg blijven.",
   "addDest.ivsAppPath": "Deze Amazon IVS-ingest (Kick, Twitch) heeft het applicatiepad /app nodig; zonder dat wordt de streamsleutel als applicatienaam verzonden en elke verbinding verbroken. Gebruik {url}; de streamsleutel blijft in een eigen veld.",
   "addDest.ivsAppPathUse": "Gecorrigeerde URL gebruiken",
   "addDest.keyInUrl": "{platform} zet alles in de URL — laat dit leeg, tenzij het dashboard een aparte sleutel toont.",

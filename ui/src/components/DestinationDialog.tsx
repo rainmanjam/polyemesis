@@ -1164,6 +1164,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // stream source itself and the URL and key may be left empty.
   const xMintsKey =
     platform === "x" && rowsOf(guidesRead).find((g) => g.platform === "x")?.livestreamGate === "open";
+  // Linked as well as open: the server only creates the source for a destination that names an account.
+  const xCreatesSource =
+    xMintsKey && platformAccounts.some((a) => String(a.id) === accountId);
   const manualKey = caps ? supportOf(caps, "streamKey") === "manual" : false;
   const unsupported = caps?.tier === "unsupported";
 
@@ -1727,7 +1730,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 where the empty box is, not in a tooltip somewhere else. */}
             {selectedPreset?.kind && !selectedPreset.url && kind !== "file" && (
               <span className="text-sm text-muted-foreground">
-                {t("addDest.perAccountUrl", { platform: selectedPreset.name })}
+                {xCreatesSource
+                  ? t("addDest.xCreatesSource")
+                  : t("addDest.perAccountUrl", { platform: selectedPreset.name })}
               </span>
             )}
           </div>
@@ -1750,7 +1755,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               {/* Said at the field, where the operator is looking for a Fetch
                   button that is never going to appear. The reason travels with
                   it so this does not read as an apology. */}
-              {manualKey && caps && (
+              {manualKey && caps && !xCreatesSource && (
                 <span className="text-sm text-muted-foreground">
                   {manualKeyNote(caps, showOAuth, xMintsKey, t)}
                 </span>

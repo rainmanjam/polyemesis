@@ -400,7 +400,16 @@ func (x *XAdapter) Health() Health {
 	if x.replacedNote != "" {
 		parts = append(parts, x.replacedNote)
 	}
-	return Health{Detail: strings.Join(parts, ". ")}
+	h := Health{Detail: strings.Join(parts, ". ")}
+	// The Hub never marks a runner live itself; an adapter that reports Health must say so. Run holds ready from the
+	// moment the webhook and subscriptions are in place, which is when X can deliver.
+	if x.ready {
+		h.State = StateLive
+		if x.invalidNote != "" {
+			h.State = StateDegraded
+		}
+	}
+	return h
 }
 
 // registered reports that Run has finished registering (webhook and subscriptions).

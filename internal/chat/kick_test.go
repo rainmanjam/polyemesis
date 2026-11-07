@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1089,5 +1090,46 @@ func TestKickReachabilityWarningNeverCarriesTheCallbackSecret(t *testing.T) {
 	}
 	if !strings.Contains(detail, "connection refused") {
 		t.Fatalf("the warning lost the cause: %q", detail)
+	}
+}
+
+// A hostname that resolves to this machine (Ubuntu's 127.0.1.1) makes the self-probe fail without leaving the box,
+// which says nothing about whether Kick can reach the URL.
+func TestKickSelfProbeThatDialedLoopbackIsInconclusiveNotDegraded(t *testing.T) {
+	dial := func(ip net.IP) error {
+		return &url.Error{Op: "Get", URL: "https://host.example/x", Err: &net.OpError{
+			Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: ip, Port: 443}, Err: errors.New("connect: connection refused")}}
+	}
+	for name, err := range map[string]error{
+		"127.0.1.1": dial(net.ParseIP("127.0.1.1")),
+		"::1":       dial(net.ParseIP("::1")),
+		"ipaddr":    &net.OpError{Op: "dial", Addr: &net.IPAddr{IP: net.ParseIP("127.0.0.1")}, Err: errors.New("refused")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := kickAdapter(t, func(c *KickConfig) {
+				c.Probe = func(context.Context, string) (string, error) { return "", err }
+			})
+			if ok, detail := a.checkReachable(context.Background()); !ok || detail != "" {
+				t.Fatalf("a loopback self-probe read as degraded: ok=%v detail=%q", ok, detail)
+			}
+		})
+	}
+}
+
+func TestKickSelfProbeThatDialedAPublicAddressStillWarns(t *testing.T) {
+	for name, err := range map[string]error{
+		"public ip": &net.OpError{Op: "dial", Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 443}, Err: errors.New("connection refused")},
+		"read op":   &net.OpError{Op: "read", Addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1")}, Err: errors.New("reset")},
+		"no addr":   &net.OpError{Op: "dial", Err: errors.New("no route")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := kickAdapter(t, func(c *KickConfig) {
+				c.Probe = func(context.Context, string) (string, error) { return "", err }
+			})
+			ok, detail := a.checkReachable(context.Background())
+			if ok || !strings.Contains(detail, "could not reach its own callback URL") {
+				t.Fatalf("a real unreachable probe was swallowed: ok=%v detail=%q", ok, detail)
+			}
+		})
 	}
 }

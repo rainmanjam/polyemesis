@@ -2927,6 +2927,7 @@
   "addDest.urlLabelFile": "文件名",
   "addDest.fileHint": "写入录制目录。只能使用相对名称 — 不能包含路径。",
   "addDest.perAccountUrl": "{platform} 按账号或按直播分配接入 URL，因此无法预填 — 请粘贴其控制面板中的地址。",
+  "addDest.xCreatesSource": "关联 X 账号并开启 X Livestream 后，polyemesis 会在保存时创建推流源，因此 URL 和密钥可以留空。",
   "addDest.ivsAppPath": "此 Amazon IVS 推流入口（Kick、Twitch）需要应用路径 /app，否则推流密钥会被当作应用名称发送，每次连接都会被断开。请使用 {url}；推流密钥仍填在它自己的字段中。",
   "addDest.ivsAppPathUse": "使用修正后的 URL",
   "addDest.keyInUrl": "{platform} 把所有信息都放在 URL 中 — 除非其控制面板显示了单独的密钥，否则请留空。",
