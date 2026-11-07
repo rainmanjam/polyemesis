@@ -23,6 +23,35 @@ its first tagged release.
 
 ### Fixed
 
+- **X Livestream moves off the routes X removes on 2027-01-01, and the whitelist copy is gone.** X deprecated
+  `/2/users/{id}/sources` and `/2/users/{id}/broadcasts` and removes them on 2027-01-01, after which they
+  return 404. polyemesis now uses `/2/sources`, `GET /2/sources/{id}/stream_key`, `POST /2/broadcasts` (create
+  and go live in one call) and `PUT /2/broadcasts/{id}/state`, which take the owner from the access token. A
+  source now has a separate, non-secret id, so the stored stream key is resolved to it. X's go-live is public as
+  soon as it returns, so a destination records a pending handle while its source is silent and the real
+  broadcast id is recorded when it goes live. X's Livestream docs no longer ask for a whitelist or an access
+  form, so the operator copy now says "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"; the gate
+  stays opt-in and pasting the key still works. PROVISIONAL: no live X account has run the new routes. While a destination waits for video its
+  `lifecycle.broadcastId` is empty and `lifecycle.pendingSource` names the source. A go-live whose answer
+  was lost is adopted on the next read, a deleted row right after go-live still ends the broadcast, a source
+  deleted on X raises a fault, an account X will not let go live is a terminal fault, and a 409 for a source
+  that is not receiving video yet costs nothing. Adoption compares X's `created_at_ms` with the go-live
+  attempt in X's own time (from the `Date` header), inside a two-sided window, so a wrong clock on the host
+  neither blocks nor misfires it. A reconnect leaves a destination with an unresolved go-live alone, a late
+  result from an older row cannot restore a cleared source, a deleted or switched-off destination keeps looking
+  for a broadcast a lost go-live may have made, and a non-terminal X fault that has used its budget is retried
+  every two minutes instead of waiting for a manual toggle.
+
+  **Known rare edge cases, all under the opt-in `POLYEMESIS_X_LIVESTREAM` switch.** A go-live is not sent
+  unless its marker was written first. Where tracking has to give up on a broadcast a go-live may have made
+  (a list that never shows it within two minutes, or an ending that keeps failing) the destination gets a
+  durable fault, "polyemesis may have left a broadcast live on X", and a deleted destination raises it as an
+  alert, so nothing is let go of silently. The go-live attempt time is not refreshed after a lost answer, so a
+  second attempt that creates the broadcast more than about 25 seconds after the first is refused as not
+  started by polyemesis and shows as a fault. A reconnect leaves a destination with an unresolved go-live
+  alone. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled from X's
+  documentation and has not been confirmed against a live account.
+
 - **The console Dashboard crashed as soon as an X account was connected.** X writes no metadata fields,
   and its capabilities carried a nil list that the API served as `"fields": null`; the Dashboard then
   called `.includes` on it ("Cannot read properties of null"). `MetadataCaps` now always serialises

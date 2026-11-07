@@ -239,10 +239,12 @@ type BroadcastLifecycler interface {
 }
 
 // BroadcastCreator is the optional capability for a platform whose broadcast has
-// to be OPENED by polyemesis before it can be commanded. X is the first: its
-// broadcast is created on the stream source in NOT_STARTED, where nothing can see
-// it, and only PUBLISH makes it public. A platform whose broadcasts already exist
-// (YouTube, through the announce path) does not implement this.
+// to be OPENED by polyemesis before it can be commanded. X is the first. Its Go
+// Live call creates AND publishes in one step and is public the moment it returns,
+// so opening resolves the destination's source and returns a pending handle that
+// names no broadcast on X; the real id arrives in the TransitionResult of the
+// go-live, and callers must record that one. A platform whose broadcasts already
+// exist (YouTube, through the announce path) does not implement this.
 //
 // The coordinator opens one only for an enabled destination that has no recorded
 // broadcast, or whose recorded broadcast is finished. LivestreamAccess is checked
@@ -251,8 +253,9 @@ type BroadcastCreator interface {
 	Provider
 	// LivestreamAccess reports whether the platform's Livestream gate is open.
 	LivestreamAccess() bool
-	// OpenBroadcast opens an unpublished broadcast on the source whose stream key
-	// is sourceKey, and returns its id. The platform may return a broadcast that
-	// is already running on that source instead of making a second one.
+	// OpenBroadcast opens the destination on the source whose stream key is
+	// sourceKey and returns an id for it. For X that id is a pending handle, not a
+	// broadcast; nothing is public until the go-live transition, whose result
+	// carries the real id.
 	OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error)
 }

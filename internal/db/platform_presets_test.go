@@ -164,7 +164,7 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 		// clearing SeparateKey should read internal/oauth/vimeo.go first.
 		PlatformVimeo: true,
 		// X names a platform for sign-in and the Livestream gate, and pastes its
-		// key until X whitelists the app. Like Vimeo, the platform and the paste
+		// key until X Livestream is switched on. Like Vimeo, the platform and the paste
 		// are separate answers. See internal/oauth/x.go.
 		PlatformX:      true,
 		PlatformCustom: true,

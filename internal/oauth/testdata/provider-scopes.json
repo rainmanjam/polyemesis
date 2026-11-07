@@ -69,7 +69,7 @@
       "tweet.write",
       "media.write"
     ],
-    "manualKeyReason": "Paste the server URL and stream key from X's producer tooling. Once X has whitelisted polyemesis's app, polyemesis can create the stream source itself. Sign-in works without that."
+    "manualKeyReason": "Paste the server URL and stream key from X's producer tooling. Once X Livestream is switched on (POLYEMESIS_X_LIVESTREAM=1) and the account can go live, polyemesis can create the stream source itself. Sign-in works without that."
   },
   {
     "platform": "youtube",

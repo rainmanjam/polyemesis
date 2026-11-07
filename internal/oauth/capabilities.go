@@ -425,8 +425,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 	},
 	{
 		PresetID: "x", Tier: TierManual,
-		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
-		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off (the operator turns them on with POLYEMESIS_X_LIVESTREAM=1 once X has approved it) and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
+		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat: switch it on with POLYEMESIS_X_LIVESTREAM=1, and the paste stays the fallback when the account cannot use the API.",
+		ReadFirst: "The Livestream API needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1). X's Livestream guide asks for a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder; it no longer asks for an access form. Until it is switched on, or when the account cannot use the API, the Livestream features stay off and pasting the server URL and stream key from X's producer tooling works on its own. Sign-in works without it.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
 			// Sign-in is built (PKCE, the five scopes) but no live authorize
@@ -434,14 +434,14 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapSSO: SupportUnknown,
 			// The stream key is pasted until the Livestream gate opens. Once it
 			// does, polyemesis mints the source itself; the cell stays Manual
-			// because the operator must still do the access request by hand.
+			// because the operator must still switch Livestream on by hand.
 			CapStreamKey: SupportManual,
-			// Built behind the gate, not yet exercised against a whitelisted app.
+			// Built behind the gate, not yet exercised against a live X account.
 			CapMetadata: SupportUnknown,
 			CapChatRead: SupportUnknown,
 			// Send and moderation are built (XAdapter implements Sender, Deleter
 			// and Banner) but only attached behind POLYEMESIS_X_LIVESTREAM, and
-			// have never run against a whitelisted app, so they stay Unverified.
+			// have never run against a live X account, so they stay Unverified.
 			// chat's TestTheCapabilityMatrixAgreesWithTheChatProfiles allows that
 			// for a live-gated platform.
 			CapChatSend:           SupportUnknown,
@@ -451,13 +451,13 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge.",
-			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/users/{id}/sources). That call needs X Livestream access (app must be whitelisted by X), so until then this is a paste from X's producer tooling.",
+			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/sources, then GET /2/sources/{id}/stream_key). That needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1), so until then, or when the account cannot use the API, this is a paste from X's producer tooling.",
 			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
-			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, read from X's activity stream with the app's bearer token, which the operator supplies as POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works. Not yet checked against a whitelisted app.",
-			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Gated behind Livestream access.",
+			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, read from X's activity stream with the app's bearer token, which the operator supplies as POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works. Not yet checked against a live X account.",
+			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Needs X Livestream switched on.",
 			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
 			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
-			CapBroadcastLifecycle: "With Livestream access, polyemesis opens a broadcast on the stream source when the destination turns on, publishes it once bytes arrive (with the go-live title), and ends it when the destination turns off. Not yet checked against a whitelisted app.",
+			CapBroadcastLifecycle: "With Livestream switched on, polyemesis waits on the stream source when the destination turns on, takes it live once bytes arrive (POST /2/broadcasts, with the go-live title), and ends the broadcast when the destination turns off. Not yet checked against a live X account.",
 		},
 	},
 	{

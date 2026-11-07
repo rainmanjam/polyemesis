@@ -138,7 +138,7 @@ func TestTheCapabilityMatrixAgreesWithTheChatProfiles(t *testing.T) {
 		pr, _ := ProfileOf(p)
 		moderates := pr.Delete || pr.Ban || pr.Hide
 		// X's adapter is built but only attached behind POLYEMESIS_X_LIVESTREAM
-		// and never run against a whitelisted app, so its cells may say
+		// and never run against a live X account, so its cells may say
 		// Unverified; the rule for it is only that they must not say No. Every
 		// other platform's cell is Yes exactly when the adapter can do it.
 		liveGated := p == db.PlatformX

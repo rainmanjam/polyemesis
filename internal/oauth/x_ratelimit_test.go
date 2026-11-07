@@ -84,32 +84,32 @@ func TestAnXAnswerWithNoCallsRemainingHoldsTheNextCall(t *testing.T) {
 	}
 }
 
-// Every Livestream address carries the user id. It is asked for once per token, not once per call: Ingest used to
-// ask twice in one call, and every lifecycle read asked again.
-func TestTheXUserIDIsAskedForOncePerTokenNotOncePerCall(t *testing.T) {
-	var me atomic.Int32
-	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/2/users/me":
-			me.Add(1)
-			_, _ = io.WriteString(w, xMeFixture)
-		case strings.HasSuffix(r.URL.Path, "/sources"):
-			_, _ = io.WriteString(w, xSourcesFixture)
-		default:
-			_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","source_id":"k3y0ne"}}`)
-		}
-	})
+// The Livestream routes take the user from the access token, so none of them asks /2/users/me for an id. Only the
+// account read does, and it asks once per token (the cached user), not once per call.
+func TestXLivestreamCallsNeverAskForTheUserID(t *testing.T) {
+	f := newXFake(t)
 	ctx := context.Background()
-	if _, err := x.Ingest(ctx, "client", "tok"); err != nil {
+	if _, err := f.x.Ingest(ctx, "client", "tok"); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	for range 3 {
-		if _, err := x.BroadcastState(ctx, "tok", "1ynJOZVeajOJR"); err != nil {
+		if _, err := f.x.BroadcastState(ctx, "tok", "1ynJOZVeajOJR"); err != nil {
 			t.Fatalf("BroadcastState: %v", err)
 		}
 	}
-	if n := me.Load(); n != 1 {
-		t.Fatalf("/2/users/me was asked %d times, want once", n)
+	if err := f.x.CheckEntitlement(ctx, "client", "tok"); err != nil {
+		t.Fatalf("CheckEntitlement: %v", err)
+	}
+	if n := f.meHits.Load(); n != 0 {
+		t.Fatalf("/2/users/me was asked %d times by Livestream calls, want none", n)
+	}
+	for range 3 {
+		if _, err := f.x.Account(ctx, "client", "tok"); err != nil {
+			t.Fatalf("Account: %v", err)
+		}
+	}
+	if n := f.meHits.Load(); n != 1 {
+		t.Fatalf("/2/users/me was asked %d times for three account reads on one token, want once", n)
 	}
 }
 
@@ -145,6 +145,9 @@ func TestAnEmptyXAnswerIsNotTakenAsAPublishAnEndOrABroadcast(t *testing.T) {
 	}
 	if _, err := x.BroadcastByID(ctx, "client", "tok", "b1"); err == nil {
 		t.Error("an empty read was taken as a broadcast")
+	}
+	if _, err := x.TransitionBroadcast(ctx, "tok", xPendingHandle(xSourceID), PhaseLive); err == nil {
+		t.Error("an empty go-live answer was taken as live")
 	}
 }
 

@@ -165,7 +165,7 @@ func TestTheGoLiveTitleCannotChangeWhileTheXBroadcastIsLive(t *testing.T) {
 	}
 }
 
-// TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen: the console shows "needs X Livestream access" while the gate
+// TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen: the console shows "needs X Livestream switched on" while the gate
 // is closed, and it reads that from the guide rather than guessing, because only the server knows whether the
 // operator switched the gate on (POLYEMESIS_X_LIVESTREAM). Platforms without a gate carry no field.
 //
