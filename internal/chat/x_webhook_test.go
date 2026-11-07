@@ -174,8 +174,10 @@ func TestXRunCreatesTheWebhookAndBothSubscriptions(t *testing.T) {
 	if err := stop(); err != nil {
 		t.Errorf("Run after a clean stop = %v, want nil", err)
 	}
-	if left := st.subList(); len(left) != 0 {
-		t.Errorf("subscriptions left on X's side after a clean stop: %+v", left)
+	// A Run's exit never deletes subscriptions: they persist per app and user and the next Run reuses them.
+	// Deleting happens on an explicit disconnect only (RemoveSubscriptions).
+	if left := st.subList(); len(left) != 2 {
+		t.Errorf("subscriptions after a clean stop = %+v, want both left in place for the next run", left)
 	}
 	if got := st.webhookList(); len(got) != 1 {
 		t.Errorf("the shared webhook was deleted on stop: %+v", got)
@@ -304,7 +306,7 @@ func TestXRunReusesAWebhookACreateRaceLeftBehind(t *testing.T) {
 	}
 }
 
-func TestXRunReusesMatchingSubscriptionsAndRemovesOwnOnStop(t *testing.T) {
+func TestXRunReusesMatchingSubscriptionsAndLeavesThemOnStop(t *testing.T) {
 	st := newXChatStub(t)
 	st.webhooks = []xStubWebhook{{ID: "56", URL: xStubHookURL, Valid: true}}
 	st.subs = []map[string]any{
@@ -319,9 +321,8 @@ func TestXRunReusesMatchingSubscriptionsAndRemovesOwnOnStop(t *testing.T) {
 		t.Errorf("subscriptions were created although matching ones exist: %v", st.recorded())
 	}
 	_ = stop()
-	left := st.subList()
-	if len(left) != 1 || left[0]["subscription_id"] != "7003" {
-		t.Errorf("after stop, subscriptions = %+v; want only the other user's 7003", left)
+	if left := st.subList(); len(left) != 3 {
+		t.Errorf("after stop, subscriptions = %+v; want all three untouched", left)
 	}
 }
 
@@ -600,30 +601,142 @@ func TestXIngestDuplicateIsKnownEvenWhenNotRunning(t *testing.T) {
 	}
 }
 
-// TestXRunCleanupNeverDeletesWhatANewerRunClaimed: a reconnect starts the new Run while the old one is still
-// cleaning up. The new Run reuses the subscriptions it finds, and the old Run's cleanup must not delete them.
-func TestXRunCleanupNeverDeletesWhatANewerRunClaimed(t *testing.T) {
+// TestXRunExitNeverDeletesWhatTheNextRunReuses: a reconnect starts the new Run while the old one is still
+// finishing. Because no Run deletes on exit there is nothing for them to race over.
+func TestXRunExitNeverDeletesWhatTheNextRunReuses(t *testing.T) {
 	st := newXChatStub(t)
 	old := st.adapter(t, time.Unix(1761904800, 0))
 	stopOld := xRun(t, old, SinkFunc(func(Message) {}))
-	if len(st.subList()) != 2 {
-		t.Fatalf("setup: subscriptions = %v", st.subList())
-	}
 	fresh := st.adapter(t, time.Unix(1761904800, 0))
 	stopFresh := xRun(t, fresh, SinkFunc(func(Message) {})) // reuses both
 	if n := st.countCalls("POST /2/activity/subscriptions"); n != 2 {
 		t.Fatalf("the new run created %d subscriptions in total, want it to reuse the 2 that exist", n)
 	}
 	_ = stopOld()
-	if got := st.subList(); len(got) != 2 {
-		t.Fatalf("the old run's cleanup deleted subscriptions the new run is using: %v", got)
-	}
 	_ = stopFresh()
-	if got := st.subList(); len(got) != 0 {
-		t.Errorf("the run that owns the subscriptions left them behind: %v", got)
+	if n := st.countCalls("DELETE /2/activity/subscriptions"); n != 0 {
+		t.Errorf("a Run deleted %d subscription(s) on exit: %v", n, st.recorded())
+	}
+	if got := st.subList(); len(got) != 2 {
+		t.Errorf("subscriptions = %v, want both in place", got)
 	}
 }
 
+// TestXRemoveSubscriptionsDeletesOnlyThisInstallsForThisAccount: the explicit disconnect. Only polyemesis-tagged
+// subscriptions on OUR webhook, for THIS account, go; another user's, another install's, and an untagged one stay.
+// The token is the one handed in (the account's own token is already gone when this runs).
+func TestXRemoveSubscriptionsDeletesOnlyThisInstallsForThisAccount(t *testing.T) {
+	st := newXChatStub(t)
+	st.webhooks = []xStubWebhook{{ID: "56", URL: xStubHookURL, Valid: true}, {ID: "9999", URL: "https://other.example.org/api/v1/webhooks/x", Valid: true}}
+	mk := func(id, ev, user, hook, tag string) map[string]any {
+		return map[string]any{"subscription_id": id, "event_type": ev, "filter": map[string]any{"user_id": user}, "webhook_id": hook, "tag": tag}
+	}
+	st.subs = []map[string]any{
+		mk("1", "broadcast.chat", "1234567890", "56", "polyemesis"),
+		mk("2", "broadcast.chat.remove", "1234567890", "56", "polyemesis"),
+		mk("3", "broadcast.chat", "42", "56", "polyemesis"),
+		mk("4", "broadcast.chat", "1234567890", "9999", "polyemesis"),
+		mk("5", "follow.follow", "1234567890", "56", "polyemesis"),
+		mk("6", "broadcast.chat", "1234567890", "56", "someone-else"),
+	}
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: func(context.Context) (string, error) { return "", fmt.Errorf("account gone") },
+		AppBearer: "app-bearer", APIBase: st.srv.URL, WebhookURL: xStubHookURL})
+	if err := a.RemoveSubscriptions(context.Background(), "user-token"); err != nil {
+		t.Fatalf("RemoveSubscriptions: %v", err)
+	}
+	var left []string
+	for _, s := range st.subList() {
+		left = append(left, fmt.Sprint(s["subscription_id"]))
+	}
+	if strings.Join(left, ",") != "3,4,5,6" {
+		t.Errorf("subscriptions left = %v, want 3,4,5,6", left)
+	}
+}
+
+// TestXRunDeliversWhatItAcceptedEvenWhenTheSecondSubscriptionFails: the inbox is open before the subscriptions are
+// made, so an event can be accepted (and answered 200) and then Run can fail before its loop ever drains it.
+func TestXRunDeliversWhatItAcceptedEvenWhenTheSecondSubscriptionFails(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	var n int
+	var verdict XIngest
+	st.onSubscribe = func() {
+		n++
+		if n == 1 {
+			verdict = a.IngestWebhook(chatEnvelope("early", "1234567890", "B", "2090000000000000060", "accepted early"))
+		}
+	}
+	st.failSubscribeAt = 2
+	sink := &recordingSink{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Run(ctx, sink); err == nil {
+		t.Fatal("Run succeeded although the second subscription failed")
+	}
+	if verdict != XIngestQueued {
+		t.Fatalf("the early event = %v, want queued", verdict)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.messages) != 1 || sink.messages[0].Text != "accepted early" {
+		t.Errorf("delivered %+v; an event answered 200 was lost on Run's exit", sink.messages)
+	}
+}
+
+func TestXRunRetriesARevalidationPUTThatFailed(t *testing.T) {
+	st := newXChatStub(t)
+	a, _ := xRunEvery(t, st, 10*time.Millisecond)
+	_ = a
+	id := st.webhookList()[0].ID
+	st.mu.Lock()
+	st.putFailures = 2
+	st.mu.Unlock()
+	st.setValid(id, false)
+	xWaitFor(t, "the webhook valid again after failed PUTs", func() bool { return st.webhookList()[0].Valid })
+	if n := st.countCalls("PUT /2/webhooks/" + id); n < 3 {
+		t.Errorf("PUT = %d, want the 2 failures retried and a third that worked", n)
+	}
+}
+
+// TestXIngestRetryOfAQueuedEventIsADuplicate: X retries an event it got no 200 for. One that is already in the inbox
+// (not yet delivered) must answer as a duplicate, even when the inbox is full.
+func TestXIngestRetryOfAQueuedEventIsADuplicate(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	release := make(chan struct{})
+	xRun(t, a, SinkFunc(func(Message) { <-release }))
+	t.Cleanup(func() { close(release) }) // after xRun's own cleanup is registered, so it runs first
+	for i := 0; i < xInboxSize+5; i++ {
+		a.IngestWebhook(chatEnvelope(fmt.Sprint("q", i), "1234567890", "B", fmt.Sprint(3000+i), "m"))
+	}
+	if got := a.IngestWebhook(chatEnvelope("q10", "1234567890", "B", "3010", "m")); got != XIngestDuplicate {
+		t.Errorf("retry of a queued event with a full inbox = %v, want duplicate", got)
+	}
+	if got := a.IngestWebhook(chatEnvelope("brand-new", "1234567890", "B", "9999", "m")); got != XIngestFull {
+		t.Errorf("a new event with a full inbox = %v, want full", got)
+	}
+}
+
+// TestXUnavailableIsTerminalOrLongNotLive: the route answers 503 only while chat is plausibly about to come up.
+func TestXUnavailableIsTerminalOrLongNotLive(t *testing.T) {
+	st := newXChatStub(t)
+	now := time.Unix(1761904800, 0)
+	clock := &now
+	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: StaticToken("t"), AppBearer: "b", APIBase: st.srv.URL,
+		WebhookURL: xStubHookURL, Now: func() time.Time { return *clock }})
+	if a.Unavailable(10 * time.Minute) {
+		t.Error("a fresh adapter is not yet unavailable")
+	}
+	*clock = clock.Add(11 * time.Minute)
+	if !a.Unavailable(10 * time.Minute) {
+		t.Error("an adapter not live for longer than the grace is unavailable")
+	}
+	fatal, _ := NewX(XConfig{AccountRef: "1", Token: StaticToken("t"), AppBearer: "b", WebhookProblem: "none"})
+	_ = xRunErr(t, fatal)
+	if !fatal.Unavailable(time.Hour) {
+		t.Error("an adapter whose Run ended with a Fatal error is unavailable at once")
+	}
+}
 func TestXRunSaysSoWhenItReplacesAnotherInstallsSubscription(t *testing.T) {
 	st := newXChatStub(t)
 	st.webhooks = []xStubWebhook{

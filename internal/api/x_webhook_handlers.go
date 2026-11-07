@@ -27,6 +27,11 @@ type xFailCount struct {
 	since time.Time
 }
 
+// xNotLiveGrace bounds how long an X adapter that is not registered keeps being answered 503. Past it (or at once,
+// after a Fatal Run) the route answers 200 and drops, so X stops retrying for chat that is not coming. A variable so
+// a test can shorten it.
+var xNotLiveGrace = 10 * time.Minute
+
 const (
 	// xFailBurst failures are answered 401 per address per window; the next ones are answered 429.
 	xFailBurst  = 20
@@ -150,6 +155,13 @@ func (s *Server) handleXWebhookEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := xa.IngestWebhook(body)
+	if res == chat.XIngestNotRunning && xa.Unavailable(xNotLiveGrace) {
+		// Terminal (a Fatal Run) or not live for longer than the grace: no live adapter is coming, so a 503 would only
+		// make X retry for nothing. The status the operator sees already says why.
+		s.log.Warn("x webhook: chat is not running for this account and is not expected to; event dropped", "user", user)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	switch code := xIngestStatus(res); code {
 	case http.StatusServiceUnavailable:
 		s.log.Warn("x webhook: event not taken, asking X to redeliver", "user", user, "result", res.String())

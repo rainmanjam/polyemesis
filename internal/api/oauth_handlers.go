@@ -391,10 +391,14 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// X: the adapter and the account's token are read now, while the row exists, because its chat subscriptions are
+	// removed from X after the delete (see removeXSubscriptions).
+	xChat, xToken := s.xChatForDisconnect(r.Context(), id, chatPlatform, chatRef)
 	if err := s.store.DeletePlatformAccount(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	s.removeXSubscriptions(r.Context(), xChat, xToken, chatPlatform, chatRef)
 	s.detachAccountChat(chatPlatform, chatRef)
 	resp := map[string]any{"status": "disconnected", "destinations": attached}
 	if len(attached) > 0 {

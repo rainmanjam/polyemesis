@@ -247,8 +247,8 @@ a webhook** ([Accessing Live Chat](https://docs.x.com/livestream-api/chat/access
 When chat starts, polyemesis registers `https://<tls.hostname>/api/v1/webhooks/x`
 with X (reusing it if X already lists it, and re-validating it if X lists it
 invalid), subscribes `broadcast.chat` and `broadcast.chat.remove` for the
-account to that webhook with the user's token, and removes its subscriptions
-when chat stops. Without the bearer or the address the chat pane stays empty,
+account to that webhook with the user's token (they persist at X and are reused on every start), and removes them
+when the account is disconnected. Without the bearer or the address the chat pane stays empty,
 says what is missing, and sending still works. The X console and the setup guide
 show whether the Livestream switch is on.
 

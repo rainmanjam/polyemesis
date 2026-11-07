@@ -537,6 +537,8 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			// there is none the adapter's Run says why, as a Fatal error.
 			WebhookURL:     xWebhookURL(origin),
 			WebhookProblem: why,
+			// So the adapter's warnings (a replaced subscription) reach the server log.
+			Log: s.log,
 		})
 
 	case db.PlatformFacebook:

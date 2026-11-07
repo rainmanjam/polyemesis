@@ -11,11 +11,13 @@ package api
 // address. Repeated failures from one address are throttled like the login and setup routes.
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -117,4 +119,42 @@ func (s *Server) xAdapterFor(userID string) *chat.XAdapter {
 		}
 	}
 	return nil
+}
+
+// xChatForDisconnect finds the X adapter of an account that is about to be disconnected, and reads the account's
+// token while the row still exists: the subscriptions are removed with it after the row is gone.
+func (s *Server) xChatForDisconnect(ctx context.Context, id int64, p db.Platform, ref string) (*chat.XAdapter, string) {
+	if s.chat == nil || p != db.PlatformX {
+		return nil, ""
+	}
+	a, ok := s.chat.Adapter(db.PlatformX, ref)
+	if !ok {
+		return nil, ""
+	}
+	xa, ok := a.(*chat.XAdapter)
+	if !ok {
+		return nil, ""
+	}
+	tok, err := s.chatToken(id)(ctx)
+	if err != nil {
+		return xa, ""
+	}
+	return xa, tok
+}
+
+// removeXSubscriptions removes a disconnected account's chat subscriptions from X. A Run's exit never does this
+// (subscriptions persist and the next Run reuses them), so the explicit disconnect is the one place they go. Skipped
+// when the account was connected again in the meantime: its new adapter is using them.
+func (s *Server) removeXSubscriptions(ctx context.Context, xa *chat.XAdapter, tok string, p db.Platform, ref string) {
+	if xa == nil || tok == "" {
+		return
+	}
+	if _, found, err := s.accountByKey(p, ref); err != nil || found {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := xa.RemoveSubscriptions(ctx, tok); err != nil {
+		s.log.Warn("x chat: could not remove the disconnected account's subscriptions from X; they stay until removed in console.x.com", "account", ref, "err", err)
+	}
 }

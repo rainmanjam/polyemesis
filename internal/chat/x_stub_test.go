@@ -53,6 +53,11 @@ type xChatStub struct {
 	// onSubscribe runs inside POST /2/activity/subscriptions, before the answer, so a test can see what the adapter
 	// can already do at the moment X would start delivering.
 	onSubscribe func()
+	// failSubscribeAt makes the nth POST /2/activity/subscriptions (1-based) fail with a 500.
+	failSubscribeAt int
+	subscribeCalls  int
+	// putFailures is how many PUT /2/webhooks/{id} calls fail with a 500 before one works.
+	putFailures int
 	// createRaces makes a refused create still leave the webhook behind, as another process winning the race does.
 	createRaces bool
 	// putFixes makes PUT /2/webhooks/{id} flip the webhook to valid, as a passing CRC does.
@@ -157,6 +162,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		id := strings.TrimPrefix(path, "/2/webhooks/")
 		st.mu.Lock()
+		if st.putFailures > 0 {
+			st.putFailures--
+			st.mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"title":"Internal Error"}`)
+			return
+		}
 		for i := range st.webhooks {
 			if st.webhooks[i].ID == id && st.putFixes {
 				st.webhooks[i].Valid = true
@@ -191,6 +203,12 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
+		st.subscribeCalls++
+		if st.failSubscribeAt != 0 && st.subscribeCalls == st.failSubscribeAt {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"title":"Internal Error"}`)
+			return
+		}
 		if st.subscription != "" {
 			_, _ = io.WriteString(w, st.subscription)
 			return

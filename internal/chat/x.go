@@ -106,6 +106,13 @@ type XAdapter struct {
 	// seen holds the event_uuids already delivered, so a retry or replay from X is not shown twice. It lives on the
 	// adapter, not on a Run, so a replay right after a reconnect is still recognised.
 	seen *xSeen
+	// queued holds the event_uuids accepted into the inbox, so a retry of one that is queued but not yet delivered is
+	// a duplicate rather than a refusal (see IngestWebhook).
+	queued *xSeen
+	// fatal is set when Run ended with a Fatal error: no live adapter will come until a reconnect or a restart.
+	// notLiveSince is when the adapter last stopped being registered (or was built), for Unavailable.
+	fatal        bool
+	notLiveSince time.Time
 
 	// ready is true once Run has registered the webhook and the subscriptions (the inbox opens earlier, before the
 	// subscriptions exist, so nothing X delivers is lost). notes are the operator-visible remarks Health reports.
@@ -154,7 +161,7 @@ func NewX(cfg XConfig) (*XAdapter, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &XAdapter{cfg: cfg, seen: newXSeen(xSeenMax)}, nil
+	return &XAdapter{cfg: cfg, seen: newXSeen(xSeenMax), queued: newXSeen(xSeenMax), notLiveSince: cfg.Now()}, nil
 }
 
 // Platform implements Adapter.

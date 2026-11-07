@@ -19,6 +19,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 const (
@@ -275,12 +276,24 @@ func TestXWebhookACRCSuccessDoesNotClearPOSTFailures(t *testing.T) {
 	}
 }
 
-func TestXWebhookAnswers503WhenTheAdapterIsNotLiveSoXRedelivers(t *testing.T) {
+// hangingX is a fake X whose every call blocks until the test ends, so an adapter attached to it stays "connecting".
+func hangingX(t *testing.T) *httptest.Server {
+	t.Helper()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() { close(release); srv.Close() })
+	return srv
+}
+
+// TestXWebhookAnswers503OnlyWhileChatIsPlausiblyComingUp: a transient not-ready adapter is 503 so X redelivers, but
+// the window is bounded, after which the answer is 200 and the event is dropped with a log line.
+func TestXWebhookAnswers503OnlyWhileChatIsPlausiblyComingUp(t *testing.T) {
 	s, h := xHookServer(t, true)
 	s.chat = chat.New()
 	t.Cleanup(s.chat.Close)
-	// Attached, but its Run ends at once (no public address), so it is never live.
-	a, err := chat.NewX(chat.XConfig{AccountRef: xHookUser, Token: chat.StaticToken("t"), AppBearer: "b", WebhookProblem: "none"})
+	x := hangingX(t)
+	a, err := chat.NewX(chat.XConfig{AccountRef: xHookUser, Token: chat.StaticToken("t"), AppBearer: "b",
+		APIBase: x.URL, WebhookURL: "https://polyemesis.example.com" + xHookPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +302,126 @@ func TestXWebhookAnswers503WhenTheAdapterIsNotLiveSoXRedelivers(t *testing.T) {
 	}
 	w := signedPost(t, h, xChat("u-nl", xHookUser, "2090000000000000050", "early"))
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
-		t.Errorf("event for an adapter that is not live = %d (Retry-After %q), want 503 with Retry-After", w.Code, w.Header().Get("Retry-After"))
+		t.Errorf("event for an adapter still connecting = %d (Retry-After %q), want 503 with Retry-After", w.Code, w.Header().Get("Retry-After"))
+	}
+	old := xNotLiveGrace
+	xNotLiveGrace = 20 * time.Millisecond
+	t.Cleanup(func() { xNotLiveGrace = old })
+	time.Sleep(60 * time.Millisecond)
+	if w := signedPost(t, h, xChat("u-nl2", xHookUser, "2090000000000000051", "late")); w.Code != http.StatusOK {
+		t.Errorf("event after the grace window = %d, want 200 (X must stop retrying for chat that is not coming)", w.Code)
+	}
+}
+
+// TestXWebhookAnswers200ForAPermanentlyFailedAdapter: a Fatal Run (no public address, no bearer) will not come up
+// by itself, so X is told 200 and stops retrying.
+func TestXWebhookAnswers200ForAPermanentlyFailedAdapter(t *testing.T) {
+	s, h := xHookServer(t, true)
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	a, err := chat.NewX(chat.XConfig{AccountRef: xHookUser, Token: chat.StaticToken("t"), AppBearer: "b", WebhookProblem: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.chat.Attach(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	xWait(t, "the adapter to fail", func() bool { return a.Unavailable(time.Hour) })
+	if w := signedPost(t, h, xChat("u-f", xHookUser, "2090000000000000052", "nobody home")); w.Code != http.StatusOK {
+		t.Errorf("event for a permanently failed adapter = %d, want 200", w.Code)
+	}
+}
+
+func TestXChatAdapterIsBuiltWithTheServerLogger(t *testing.T) {
+	s, _, _ := testServerWith(t, Options{Providers: oauth.NewSet().With(db.PlatformX, oauth.NewX().WithLivestreamAccess())})
+	s.env.XAppBearer = "app-bearer"
+	adapter, err := s.chatAdapter(context.Background(), db.PlatformAccount{ID: 1, Platform: db.PlatformX, AccountRef: xHookUser, AccountName: "x"})
+	if err != nil {
+		t.Fatalf("chatAdapter: %v", err)
+	}
+	xa, ok := adapter.(*chat.XAdapter)
+	if !ok {
+		t.Fatalf("chatAdapter returned %T", adapter)
+	}
+	if xa.Logger() == nil || xa.Logger() != s.log {
+		t.Error("the X adapter was built without the server's logger, so its warnings are discarded")
+	}
+}
+
+// xSubsFake is a fake X that lists one valid webhook and the given subscriptions, and records the subscription
+// DELETEs (path -> Authorization).
+type xSubsFake struct {
+	mu      sync.Mutex
+	deletes map[string]string
+	srv     *httptest.Server
+}
+
+func newXSubsFake(t *testing.T, user string) *xSubsFake {
+	t.Helper()
+	f := &xSubsFake{deletes: map[string]string{}}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch {
+		case r.URL.Path == "/2/users/me":
+			_, _ = io.WriteString(w, `{"data":{"id":"`+user+`"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/2/webhooks":
+			_, _ = io.WriteString(w, `{"data":[{"id":"9","url":"https://polyemesis.example.com`+xHookPath+`","valid":true}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/2/activity/subscriptions":
+			sub := func(id, ev string) string {
+				return `{"subscription_id":"` + id + `","event_type":"` + ev + `","filter":{"user_id":"` + user + `"},"webhook_id":"9","tag":"polyemesis"}`
+			}
+			_, _ = io.WriteString(w, `{"data":[`+sub("71", "broadcast.chat")+`,`+sub("72", "broadcast.chat.remove")+`]}`)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/2/activity/subscriptions/"):
+			f.deletes[r.URL.Path] = r.Header.Get("Authorization")
+			_, _ = io.WriteString(w, `{"data":{"deleted":true}}`)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusTeapot)
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *xSubsFake) deleted() map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]string{}
+	for k, v := range f.deletes {
+		out[k] = v
+	}
+	return out
+}
+
+// TestDisconnectingAnXAccountRemovesItsChatSubscriptions: a Run's exit leaves the subscriptions in place, so the
+// explicit disconnect is what removes them from X, with the account's own token read before the row is deleted.
+func TestDisconnectingAnXAccountRemovesItsChatSubscriptions(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	s.chat = chat.New()
+	t.Cleanup(s.chat.Close)
+	sign := login(t, h)
+	id := connectAccount(t, store, s.box, db.PlatformX, "xuser")
+	ref := "xuser-ref"
+	fx := newXSubsFake(t, ref)
+	a, err := chat.NewX(chat.XConfig{AccountRef: ref, Channel: "xuser", Token: s.chatToken(id), AppBearer: "app-bearer",
+		APIBase: fx.srv.URL, WebhookURL: "https://polyemesis.example.com" + xHookPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.chat.Attach(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	xWait(t, "the adapter to be live", func() bool { return a.WebhookUserID() != "" })
+	if n := len(fx.deleted()); n != 0 {
+		t.Fatalf("setup: %d deletes before the disconnect", n)
+	}
+	if w := deleteAccount(t, h, sign, id, nil); w.Code != http.StatusOK {
+		t.Fatalf("disconnect: %d %s", w.Code, w.Body.String())
+	}
+	got := fx.deleted()
+	if len(got) != 2 || got["/2/activity/subscriptions/71"] != "Bearer at" || got["/2/activity/subscriptions/72"] != "Bearer at" {
+		t.Errorf("subscription deletes after disconnect = %v, want both, with the account's token", got)
 	}
 }
 
