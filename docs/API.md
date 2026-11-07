@@ -138,7 +138,7 @@ signed-in operator in `Cookie`.
 **Thirty-two routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last twenty-four are `403` because of what
+are `403` because of what they *do*. The last twenty-three are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
