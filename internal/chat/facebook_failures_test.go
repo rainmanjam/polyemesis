@@ -71,11 +71,12 @@ func TestFacebookClassifyUnderstandsGraphEnvelopesOnHTTP400(t *testing.T) {
 }
 
 func TestFacebookRunStopsOnAReconnectRequiredTokenSource(t *testing.T) {
+	sleeps := 0
 	a := fbAdapter(t, "http://unused.invalid", func(c *FacebookConfig) {
 		c.Token = func(context.Context) (string, error) {
 			return "", fmt.Errorf("could not refresh the facebook token: %w", oauth.ErrReconnectRequired)
 		}
-		c.Sleep = func(context.Context, time.Duration) bool { return true }
+		c.Sleep = func(context.Context, time.Duration) bool { sleeps++; return sleeps < 3 }
 	})
 	err := a.Run(context.Background(), SinkFunc(func(Message) {}))
 	if !IsFatal(err) {
