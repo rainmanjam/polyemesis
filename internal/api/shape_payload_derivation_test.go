@@ -304,6 +304,9 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 		"text/csv": {Shape: "file-download",
 			Why: "the chat poll export (#14), GET /polls/export: an attachment with a " +
 				"Content-Disposition, counts only."},
+		"application/x-ndjson": {Shape: "file-download",
+			Why: "the NDJSON chat export, GET /chat/export?format=ndjson: an attachment with a " +
+				"Content-Disposition, one viewer message per line."},
 		"application/x-subrip": {Shape: "file-download",
 			Why: "the SRT caption export, GET /library/recordings/{id}/transcript/export: " +
 				"an attachment with a Content-Disposition, built from the recording id and format."},

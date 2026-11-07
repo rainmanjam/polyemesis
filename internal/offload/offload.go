@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
+	"github.com/rainmanjam/polyemesis/internal/chatexport"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -532,8 +533,32 @@ func (s *Service) recordingCandidates(recs []db.Recording, live map[string]bool,
 		finishedMasters[strings.TrimSuffix(r.Filename, filepath.Ext(r.Filename))] = r
 		out = append(out, candidate{rel: r.Filename, kind: db.OffloadKindRecording, at: r.StartedAt,
 			source: r.SourceID, path: path, size: fi.Size(), mtime: fi.ModTime(), rec: r})
+		out = s.chatCandidates(out, r, settled)
 	}
 	return out, finishedMasters
+}
+
+// chatCandidates appends a finished recording's saved chat (see
+// recording.writeChatSidecars). They ride with the recording and under its
+// kind: a storage target has a switch for stems, transcripts and clips but none
+// for chat, and adding one would be a schema change for files that are a few
+// kilobytes beside a master of gigabytes. They sit in the recordings directory
+// itself, so unlike the subdirectory kinds they are found through the master.
+func (s *Service) chatCandidates(out []candidate, r *db.Recording, settled time.Time) []candidate {
+	jsonName, vttName := chatexport.SidecarNames(r.Filename)
+	for _, name := range []string{jsonName, vttName} {
+		path, err := s.rec.Resolve(name)
+		if err != nil {
+			continue
+		}
+		fi, err := os.Stat(path)
+		if err != nil || !fi.Mode().IsRegular() || fi.ModTime().After(settled) {
+			continue
+		}
+		out = append(out, candidate{rel: name, kind: db.OffloadKindRecording, at: r.StartedAt,
+			source: r.SourceID, path: path, size: fi.Size(), mtime: fi.ModTime(), rec: r})
+	}
+	return out
 }
 
 // dirCandidates appends the settled files of dir/sub that keep accepts. keep

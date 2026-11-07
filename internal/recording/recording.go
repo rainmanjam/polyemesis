@@ -65,6 +65,12 @@ type Manager struct {
 	// directory listed no recordings; it makes the warning fire once per
 	// episode rather than every 30 seconds.
 	deindexHeld atomic.Bool
+
+	// chatDone remembers each finished segment whose chat needs no more
+	// attention -- saved already, or nothing to save -- so the scan does not
+	// query the chat table for it every 30 s. See writeChatSidecars.
+	chatMu   sync.Mutex
+	chatDone map[string]bool
 	// markerUnwritable is set when VolumeMarker could not be created, so
 	// HoldForMissing falls back to the all-missing rule. See there.
 	markerUnwritable atomic.Bool
@@ -212,6 +218,8 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 	// do: they live under a subdirectory the index never scans, so nothing else
 	// would ever consider them for retention.
 	derivedSwept := m.sweepDerived()
+	// A finished segment's chat is saved beside it, before the purge takes it.
+	chatSaved := m.writeChatSidecars()
 	// Sessions are derived from the index, so they are refreshed after
 	// everything that could have changed it — a first measurement or a swept
 	// member both move a session's span.
@@ -220,7 +228,7 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 	// to lift a halt, and waiting another tick to notice would cost a whole
 	// segment of footage.
 	guarded := m.CheckFreeSpace(s)
-	if (changed || swept || stemsSwept || derivedSwept || grouped || guarded) && m.onChange != nil {
+	if (changed || swept || stemsSwept || derivedSwept || chatSaved || grouped || guarded) && m.onChange != nil {
 		m.onChange()
 	}
 }
@@ -977,6 +985,7 @@ func (m *Manager) delete(r db.Recording, reason string) bool {
 		m.log.Warn("de-index recording", "file", r.Filename, "err", err)
 	}
 	m.removeDerived(r.Filename)
+	m.removeChatSidecars(r.Filename)
 	m.log.Info("recording deleted by retention policy", "file", r.Filename, "reason", reason)
 	return true
 }
@@ -1082,6 +1091,7 @@ func (m *Manager) Delete(id int64) error {
 		return err
 	}
 	m.removeDerived(r.Filename)
+	m.removeChatSidecars(r.Filename)
 	// Its stems and transcript files, which no index carries and which the
 	// sweeps cannot attribute to this recording on their own. See companions.go.
 	survivors := make([]string, 0, len(recs))
