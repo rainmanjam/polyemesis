@@ -58,6 +58,17 @@ const (
 	// unbuilt. An operator choosing where to run an unattended channel is
 	// choosing on exactly this.
 	CapBroadcastLifecycle Capability = "broadcastLifecycle"
+	// CapChannelTools is the room-and-role tooling beyond delete and ban:
+	// announcements, shoutouts, pins, Shield Mode, warnings, blocked terms,
+	// AutoMod levels, and moderator, VIP and appeal management.
+	//
+	// IT IS ITS OWN COLUMN, AND UNVERIFIED EVERYWHERE, because Twitch's
+	// moderation cell above means "delete and ban were exercised against a
+	// live account" and these were built from the published reference and
+	// tested against fakes only. Folding them into that cell would have
+	// quietly widened a verified claim. When one is exercised, move the
+	// Twitch cell and say which in its Reason.
+	CapChannelTools Capability = "channelTools"
 )
 
 // Support is how well one platform does one thing.
@@ -125,6 +136,7 @@ func CapabilityColumns() []CapabilityInfo {
 		{CapModeration, "Moderation", "Delete a message or time a viewer out."},
 		{CapViewerStats, "Viewer stats", "Live viewer count read back from the platform."},
 		{CapBroadcastLifecycle, "Start / end", "Tell the platform to go live and to end, rather than only sending it video."},
+		{CapChannelTools, "Channel tools", "Announcements, shoutouts, pins, Shield Mode, warnings, blocked terms, AutoMod and role management."},
 	}
 }
 
@@ -221,6 +233,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapBroadcastLifecycle: "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination \u2014 never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
@@ -253,9 +266,16 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapChannelTools: "Built, not yet exercised against a live account, so it reads Unverified. " +
+				"Announcements, shoutouts, pins, Shield Mode, warnings, blocked terms, the chatter list, " +
+				"AutoMod levels, moderator and VIP management, the banned list, unban requests and " +
+				"suspicious-user flags, over twelve scopes added at ScopeVersion 6 — an account connected " +
+				"earlier reconnects once to grant them. Receiving a message AutoMod is holding needs " +
+				"EventSub, which is not built; approving or denying one by id is.",
 			CapViewerStats: "Live state, viewer count, title, category and start time from Helix Get Streams. It needs " +
 				"no scope of its own — Twitch asks only for an app or user access token — so every account " +
 				"already connected can answer without reconnecting. A channel that is not live returns no " +
@@ -295,6 +315,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			// WHY THIS CELL NEEDS A SENTENCE AND DID NOT HAVE ONE. Facebook and
@@ -344,6 +365,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
@@ -414,6 +436,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportUnknown,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code against api.vimeo.com, over the public and private scopes. Vimeo can also verify your client ID and secret before you connect anything, so a typo is caught on the credentials page. PKCE is not documented for Vimeo and is therefore not sent — an authorization server that validates its query string strictly refuses an unknown parameter outright.",
@@ -450,6 +473,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge. Verified live: an account connected on 2026-11-06, reconnected on 2026-11-07, and the token refreshes.",
@@ -506,6 +530,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// a SupportYes here with no Stats method would fail it, correctly.
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your " +
@@ -628,6 +653,7 @@ func instagramRow() PlatformCapability {
 			CapModeration:         SupportNo,
 			CapViewerStats:        SupportNo,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapStreamKey:          "Instagram shows the stream URL (rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/) and a Stream key list. A persistent key, marked Ready and managed under Manage Persistent Key, is pasted once and reused; a one-off key has to be pasted again for each live video. Meta publishes no endpoint that hands the key over.",
@@ -661,6 +687,7 @@ func manualUnverified(presetID, name, summary, readFirst string) PlatformCapabil
 			// for a lifecycle call, and this matrix's own rule is that a No
 			// must trace to something checked.
 			CapBroadcastLifecycle: SupportUnknown,
+			CapChannelTools:       SupportUnknown,
 		},
 	}
 }

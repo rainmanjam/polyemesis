@@ -123,6 +123,8 @@ type TwitchAdapter struct {
 	// writeMu serialises writes: the keepalive ticker and the read loop's
 	// PONG both write to the same socket.
 	writeMu sync.Mutex
+	// tools holds the shoutout cooldown count; see twitch_tools.go.
+	tools toolState
 }
 
 // NewTwitch builds the adapter. A missing nick, channel or token is a

@@ -92,6 +92,8 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"automod's review list carries each flagged message's text, under its author's name"},
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
+		{http.MethodGet, "/api/v1/chat/twitch/banned", nil,
+			"the banned list, the appeals' text and the chatter names are the channel's people"},
 
 		// Wave 4 #4: cross-platform analytics is admin-only.
 		{http.MethodGet, "/api/v1/analytics/live", nil,

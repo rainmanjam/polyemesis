@@ -38,7 +38,8 @@ export type Capability =
   | "chatSend"
   | "moderation"
   | "viewerStats"
-  | "broadcastLifecycle";
+  | "broadcastLifecycle"
+  | "channelTools";
 
 /** Four values rather than a boolean, because the interesting platforms are
  *  not binary. Kick's stream key is not "unsupported" — it works perfectly,
@@ -123,6 +124,11 @@ export const CAPABILITY_COLUMNS: {
     key: "broadcastLifecycle",
     label: "caps.colBroadcastLifecycle",
     help: "caps.colBroadcastLifecycleHelp",
+  },
+  {
+    key: "channelTools",
+    label: "caps.colChannelTools",
+    help: "caps.colChannelToolsHelp",
   },
 ];
 
@@ -213,6 +219,7 @@ function manualUnverified(
       moderation: "unknown",
       viewerStats: "unknown",
       broadcastLifecycle: "unknown",
+      channelTools: "unknown",
     },
   };
 }
@@ -233,6 +240,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "yes",
       viewerStats: "yes",
       broadcastLifecycle: "yes",
+      channelTools: "unknown",
     },
     reasons: {
       broadcastLifecycle: "caps.youtube.broadcastLifecycle",
@@ -256,11 +264,13 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "yes",
       viewerStats: "yes",
       broadcastLifecycle: "no",
+      channelTools: "unknown",
     },
     reasons: {
       metadata: "caps.twitch.metadata",
       viewerStats: "caps.twitch.viewerStats",
       moderation: "caps.twitch.moderation",
+      channelTools: "caps.twitch.channelTools",
     },
   },
   {
@@ -279,6 +289,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "yes",
       viewerStats: "unknown",
       broadcastLifecycle: "yes",
+      channelTools: "unknown",
     },
     reasons: {
       // Facebook and YouTube both read "Works" here and mean different things:
@@ -307,6 +318,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "yes",
       viewerStats: "yes",
       broadcastLifecycle: "no",
+      channelTools: "unknown",
     },
     reasons: {
       sso: "caps.kick.sso",
@@ -345,6 +357,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "unknown",
       viewerStats: "unknown",
       broadcastLifecycle: "unknown",
+      channelTools: "unknown",
     },
     reasons: {
       sso: "caps.vimeo.sso",
@@ -373,6 +386,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "unknown",
       viewerStats: "unknown",
       broadcastLifecycle: "yes",
+      channelTools: "unknown",
     },
     reasons: {
       sso: "wave3.x.sso",
@@ -400,6 +414,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "no",
       viewerStats: "unknown",
       broadcastLifecycle: "no",
+      channelTools: "unknown",
     },
     reasons: {
       chatRead: "caps.rumble.chatRead",
@@ -443,6 +458,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "unknown",
       viewerStats: "unknown",
       broadcastLifecycle: "unknown",
+      channelTools: "unknown",
     },
   },
   manualUnverified(
@@ -470,6 +486,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       moderation: "no",
       viewerStats: "no",
       broadcastLifecycle: "no",
+      channelTools: "unknown",
     },
     reasons: {
       streamKey: "caps.instagram.streamKey",

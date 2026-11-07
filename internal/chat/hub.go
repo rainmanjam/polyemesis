@@ -1415,6 +1415,27 @@ func (h *Hub) ReadChatSettings(ctx context.Context, p db.Platform, account strin
 	return rd.ReadChatSettings(ctx)
 }
 
+// WithTwitchTools runs fn against the connected Twitch account's channel
+// tools, under the Hub's send timeout. One helper rather than a method per
+// tool: every tool needs the same find-the-runner, assert-the-capability and
+// bound-the-call steps, and a dozen copies of them would drift.
+func (h *Hub) WithTwitchTools(ctx context.Context, account string, fn func(context.Context, TwitchTools) error) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(db.PlatformTwitch, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: twitch is not connected")
+	}
+	tt, ok := r.adapter.(TwitchTools)
+	if !ok {
+		return fmt.Errorf("chat: this Twitch connection has no channel tools")
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return fn(ctx, tt)
+}
+
 // quotaPacer is an adapter that meters itself against a daily API allowance the
 // operator can change.
 //

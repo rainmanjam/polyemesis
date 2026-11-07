@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-seven `GET`s among the twenty-nine refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,7 +135,7 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-eight routes are refused outright**, for three different reasons. Masking
+**Twenty-nine routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last nineteen are `403` because of what
@@ -166,6 +166,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 | `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
+| `GET /chat/twitch/{resource}` | Twitch's channel tools, read: the banned list, the unban appeals' text, the chatter names, the moderator and VIP lists, the blocked terms, the pinned message |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
@@ -1952,6 +1953,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `POST` | `/chat/messages/hide` |
 | `POST` `DELETE` | `/chat/bans` |
 | `PATCH` | `/chat/settings` |
+| `GET` `POST` `PUT` `PATCH` `DELETE` | `/chat/twitch/{resource}` — Twitch's channel tools; the method picks the verb (see below) |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
 `POST /chat/send` posts to every connected chat that can take a message and
@@ -2182,6 +2184,36 @@ subscribers-only, no repeated messages. It is a `PATCH` with pointer fields all
 the way down: an omitted field means "leave it alone", which is the only way to
 express "turn slow mode on and touch nothing else" without switching
 followers-only off as a side effect.
+
+### Twitch channel tools
+
+`/chat/twitch/{resource}` is one path for everything a Twitch broadcaster or
+moderator does to a room or a role. The method is the verb, `account` in the
+query names which connected Twitch account to act as, and the body (for `POST`,
+`PUT`, `PATCH`) is JSON. A refusal is a `400` (`502` for a `GET`) carrying
+Twitch's own reason, with what to do about it: an account connected before the
+channel-tool scopes (Twitch ScopeVersion 6) is told to reconnect once. Built from
+Twitch's published reference and **not yet exercised against a live account**;
+the capability matrix reads *Unverified* for that reason.
+
+| Method | `{resource}` | What it does |
+|---|---|---|
+| `POST` | `announcements` | `message` (500 characters), `color` (`primary`, `blue`, `green`, `orange`, `purple`) |
+| `POST` | `shoutouts` | `login` or `userId`. Answers the cooldowns polyemesis has counted (one per 2 minutes, one per target per 60); `GET shoutout-cooldowns` reads them. Shoutouts sent from Twitch's own site are not seen |
+| `GET` `PUT` `PATCH` `DELETE` | `pin` | read the pinned message; pin, change or remove one. `messageId`, `durationSeconds` (30–1800, or omit to pin until the stream ends) |
+| `GET` `PUT` | `shield` | Shield Mode state; `{"active": true}` |
+| `POST` | `warnings` | `login` or `userId`, `reason` (required, 500 characters) |
+| `GET` `POST` `DELETE` | `blocked-terms` | list, add (`text`, 2–500 characters, `*` only at an end of a word), remove (`id` in the query) |
+| `POST` | `blocked-terms-sync` | adds the enabled automod rules whose pattern is a plain term (no regex metacharacter) to Twitch. Adds only, never removes; answers `added`, `present` and `skipped` with a reason each |
+| `GET` | `chatters` | Twitch's count of everyone connected to chat; `list=1` adds the names (capped at five pages) |
+| `GET` `PUT` | `automod-settings` | Twitch's AutoMod levels (0–4). The `PUT` replaces: send `settings.overallLevel` alone, or all eight categories |
+| `POST` | `held-messages` | `messageId`, `allow` (true approves, false denies) a message AutoMod is holding. Receiving the held messages needs EventSub and is not built; the console has the controls for an id supplied by hand |
+| `GET` `POST` `DELETE` | `roles` | `role=moderator` or `vip`; list, add, remove (`login` or `userId`). Broadcaster only. VIPs need Twitch's Build a Community requirement, and the refusal says so |
+| `GET` | `banned` | bans and unexpired timeouts. Broadcaster only |
+| `GET` `PATCH` | `unban-requests` | list by `status` (default `pending`); resolve with `id`, `status` (`approved` or `denied`), `resolutionText` |
+| `POST` `DELETE` | `suspicious` | flag (`status` `ACTIVE_MONITORING` or `RESTRICTED`) or clear a chatter. Twitch publishes no list of flagged users, so there is none here |
+
+Every `GET` is refused to a `read` token.
 
 One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in

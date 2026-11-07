@@ -1775,6 +1775,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
+			// Twitch's channel tools -- announcements, shoutouts, pins, Shield
+			// Mode, warnings, blocked terms, chatters, AutoMod, roles, bans and
+			// appeals -- are one resource path and the method picks the verb.
+			// See chat_twitch_tools.go.
+			api.Get(r, "/chat/twitch/{resource}", s.handleTwitchToolGet, readDenied)
+			r.Post("/chat/twitch/{resource}", s.handleTwitchToolPost)
+			r.Put("/chat/twitch/{resource}", s.handleTwitchToolPut)
+			r.Patch("/chat/twitch/{resource}", s.handleTwitchToolPatch)
+			r.Delete("/chat/twitch/{resource}", s.handleTwitchToolDelete)
 
 			// Chat polls (#14). Results are counts with no voter in them, so
 			// the GETs follow the method rule; starting and ending one posts
