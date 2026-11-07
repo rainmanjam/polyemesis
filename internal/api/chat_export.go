@@ -109,7 +109,8 @@ func (s *Server) handleRecordingChat(w http.ResponseWriter, r *http.Request) {
 // streamChat writes a plan in a format. By now the status is committed, so a
 // failure can only be logged: the client sees a truncated file and its own
 // disconnect is the usual cause.
-func (s *Server) streamChat(w http.ResponseWriter, format string, plan chatexport.Plan, withOffset bool) {
+func (s *Server) streamChat(rw http.ResponseWriter, format string, plan chatexport.Plan, withOffset bool) {
+	w := deadlineWriter{w: rw, rc: http.NewResponseController(rw)}
 	var err error
 	switch format {
 	case "vtt":
@@ -124,6 +125,23 @@ func (s *Server) streamChat(w http.ResponseWriter, format string, plan chatexpor
 	if err != nil {
 		s.log.Debug("chat export interrupted", "format", format, "err", err)
 	}
+}
+
+// chatWriteTimeout is how long one flush of an export may take. A server-wide
+// write timeout would cut a long stream off; this renews the deadline before
+// every write, so only a client that stops reading is cut off.
+const chatWriteTimeout = 30 * time.Second
+
+// deadlineWriter sets a fresh write deadline before each write, as the events
+// stream does. A ResponseWriter that cannot (a test recorder) is written as is.
+type deadlineWriter struct {
+	w  http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func (d deadlineWriter) Write(p []byte) (int, error) {
+	_ = d.rc.SetWriteDeadline(time.Now().Add(chatWriteTimeout))
+	return d.w.Write(p)
 }
 
 // parseChatInstant reads a time as RFC 3339 or Unix milliseconds.

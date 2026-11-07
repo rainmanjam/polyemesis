@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -107,12 +108,14 @@ type Header struct {
 	GeneratedAt time.Time      `json:"generatedAt"`
 	Recording   *RecordingInfo `json:"recording,omitempty"`
 	// From and To are the window the messages were taken from, [From, To).
-	From         time.Time  `json:"from"`
-	To           time.Time  `json:"to"`
-	Platforms    []string   `json:"platforms"`
-	MessageCount int        `json:"messageCount"`
-	Clock        string     `json:"clock"`
-	Excludes     []string   `json:"excludes"`
+	From         time.Time `json:"from"`
+	To           time.Time `json:"to"`
+	Platforms    []string  `json:"platforms"`
+	MessageCount int       `json:"messageCount"`
+	Clock        string    `json:"clock"`
+	Excludes     []string  `json:"excludes"`
+	// Moderation says when the exclusions above were last applied.
+	Moderation   string     `json:"moderation"`
 	Complete     bool       `json:"complete"`
 	RetainedFrom *time.Time `json:"retainedFrom,omitempty"`
 }
@@ -225,8 +228,9 @@ func plan(src Source, q db.ChatRange, startMS int64, withOffset bool, now time.T
 		Schema: SchemaVersion, Generator: generator, GeneratedAt: now.UTC(),
 		From: time.UnixMilli(q.FromMS).UTC(), To: time.UnixMilli(q.ToMS).UTC(),
 		Platforms: []string{}, MessageCount: sum.Count,
-		Clock:    "stored message time (at_ms): the platform's own timestamp where its adapter supplies one, otherwise when this server received the message; the clock the highlight scanner uses",
-		Excludes: []string{"echo", "moderation-removed"},
+		Clock:      "stored message time (at_ms): the platform's own timestamp where its adapter supplies one, otherwise when this server received the message; the clock the highlight scanner uses",
+		Excludes:   []string{"echo", "moderation-removed"},
+		Moderation: "as of generatedAt: messages a moderator deleted or the operator hid before then are excluded; later removals are not applied to a saved file",
 		// Retained chat is always a suffix of time (see db.ChatOldest), so a
 		// window that starts at or after the oldest row lost nothing to the purge.
 		Complete: any && !oldest.After(time.UnixMilli(q.FromMS)),
@@ -388,14 +392,19 @@ func badgeList(bs []Badge) string {
 }
 
 // SafeCell neutralises a spreadsheet formula. The first character that is not
-// leading whitespace decides, because a spreadsheet skips the space.
+// leading Unicode whitespace (NBSP, ideographic space, newline) decides, because
+// a spreadsheet skips it.
 func SafeCell(s string) string {
-	t := strings.TrimLeft(s, " ")
+	// Tab and carriage return are themselves the dangerous lead character.
+	if s != "" && (s[0] == '\t' || s[0] == '\r') {
+		return "'" + s
+	}
+	t := strings.TrimLeftFunc(s, unicode.IsSpace)
 	if t == "" {
 		return s
 	}
 	switch t[0] {
-	case '=', '+', '-', '@', '\t', '\r':
+	case '=', '+', '-', '@':
 		return "'" + s
 	}
 	return s

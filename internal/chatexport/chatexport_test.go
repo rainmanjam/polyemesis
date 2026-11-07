@@ -213,6 +213,9 @@ func TestSafeCell(t *testing.T) {
 		"a=b":      "a=b",
 		"1-2":      "1-2",
 		"héllo @x": "héllo @x",
+		"\u00a0=x": "'\u00a0=x", // no-break space
+		"\u3000+x": "'\u3000+x", // ideographic space
+		"\n=x":     "'\n=x",
 	} {
 		if got := SafeCell(in); got != want {
 			t.Errorf("SafeCell(%q) = %q, want %q", in, got, want)
@@ -341,5 +344,14 @@ func TestMoreThanOnePageStreamsEveryMessageOnceInOrder(t *testing.T) {
 	_ = p.Feed(func(Entry) error { got++; return nil })
 	if got != n {
 		t.Errorf("after a late arrival the stream delivered %d, header said %d", got, n)
+	}
+}
+
+func TestHeaderSaysModerationIsAsOfTheFile(t *testing.T) {
+	store := dbtest.Open(t)
+	seed(t, store, msg("1", db.PlatformTwitch, t0.Add(time.Second), "ana", "x"))
+	h := planFor(t, store).Header
+	if !strings.Contains(h.Moderation, "as of generatedAt") {
+		t.Errorf("moderation = %q", h.Moderation)
 	}
 }

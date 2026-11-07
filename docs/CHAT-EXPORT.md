@@ -57,7 +57,8 @@ or two.
   messages from a banned person can remain in the history and in a file.) A message hidden
   locally is still visible to the platform's audience, which means an analysis
   here under-counts it. A deletion that happens *after* the file was written is
-  not applied to it.
+  not applied to it: the file reflects moderation **as of its `generatedAt`**
+  (the header says so), and a file is never rewritten on a delete.
 - Emotes and author colours are not exported.
 
 ### The JSON file
@@ -67,7 +68,7 @@ or two.
 "recording":{"file":"rec-s1-20260304-200000.mkv","startedAt":"2026-03-04T20:00:00Z","durationMs":3600000,"endSource":"probe","startPrecision":"1s"},
 "from":"2026-03-04T20:00:00Z","to":"2026-03-04T21:00:00Z","platforms":["twitch","youtube"],"messageCount":2,
 "clock":"stored message time (at_ms): the platform's own timestamp where its adapter supplies one, otherwise when this server received the message; the clock the highlight scanner uses",
-"excludes":["echo","moderation-removed"],"complete":true,"messages":[
+"excludes":["echo","moderation-removed"],"moderation":"as of generatedAt: …","complete":true,"messages":[
 {"offsetMs":2500,"at":"2026-03-04T20:00:02.5Z","atMs":1772654402500,"platform":"twitch","account":"acct","messageId":"m1","authorId":"u1","author":"Gull Watcher","text":"seven gulls <3","roles":["subscriber"],"badges":[{"id":"subscriber","version":"12"}]},
 {"offsetMs":61000,"at":"2026-03-04T20:01:01Z","atMs":1772654461000,"platform":"youtube","account":"chan","messageId":"m2","authorId":"u2","author":"Sam","text":"first line","roles":[],"badges":[]}
 ]}
@@ -100,11 +101,14 @@ Text is escaped and line breaks become spaces.
 
 ## Edge cases
 
-- **A recording that spans a purge.** The file is written when the recording
-  finishes, from whatever the chat history still holds, and says so
-  (`complete: false`, `retainedFrom`; false means unproven, not necessarily lost). Keep the history longer than one segment
-  (3600 seconds by default) plus a few minutes and every file is complete; the
-  default two hours is.
+- **A recording that spans a purge.** The chat purge does not pass the start of
+  a recording whose file is still being written or finished within the last few
+  minutes, so the file can be written complete even when the segment is longer
+  than the chat retention. The hold is bounded: it never reaches more than 24
+  hours behind the retention cutoff. A file that still ends up partial says so
+  (`complete: false`, `retainedFrom`; false means unproven, not necessarily
+  lost). A rewrite (the recording file changed after the chat was saved) never
+  replaces a complete file, or one holding more messages, with a smaller one.
 - **Two programmes recording at once.** `chat_messages` records no programme, so
   each file holds *all* the chat that arrived during its window, the other
   programme's included. The highlight scanner has the same limit.

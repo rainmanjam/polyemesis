@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -551,8 +552,12 @@ func (s *Service) chatCandidates(out []candidate, r *db.Recording, settled time.
 		if err != nil {
 			continue
 		}
-		fi, err := os.Stat(path)
+		fi, err := os.Lstat(path)
 		if err != nil || !fi.Mode().IsRegular() || fi.ModTime().After(settled) {
+			continue
+		}
+		// Two masters with one stem share their sidecars; offer each once.
+		if slices.ContainsFunc(out, func(c candidate) bool { return c.rel == name }) {
 			continue
 		}
 		out = append(out, candidate{rel: name, kind: db.OffloadKindRecording, at: r.StartedAt,

@@ -1004,3 +1004,46 @@ func (p *purgeSpy) PurgeChatMessages(time.Time, int) (int, error) {
 	p.onPurge()
 	return 0, nil
 }
+
+type cutoffSpy struct{ got *time.Time }
+
+func (c cutoffSpy) AppendChatMessages([]db.ChatMessage) (int, error) { return 0, nil }
+func (c cutoffSpy) PurgeChatMessages(cut time.Time, _ int) (int, error) {
+	*c.got = cut
+	return 0, nil
+}
+
+// A recording whose chat is not yet in a sidecar holds the purge back, but never
+// by more than a day behind the retention cutoff.
+func TestPurgeFloorHoldsTheCutoffBackWithinABound(t *testing.T) {
+	h := testHub(t)
+	now := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return now }
+	var cut time.Time
+	h.store = cutoffSpy{&cut}
+	h.SetRetention(2*time.Hour, 10, time.Minute)
+
+	var floor time.Time
+	var ok bool
+	h.purgeFloor = func(time.Time) (time.Time, bool) { return floor, ok }
+
+	h.purge() // no hold
+	if want := now.Add(-2 * time.Hour); !cut.Equal(want) {
+		t.Fatalf("no hold: cutoff %v, want %v", cut, want)
+	}
+	floor, ok = now.Add(-5*time.Hour), true // a 5h segment still being written
+	h.purge()
+	if !cut.Equal(floor) {
+		t.Fatalf("hold: cutoff %v, want the segment start %v", cut, floor)
+	}
+	floor = now.Add(-100 * time.Hour) // a hold that would keep a week of chat
+	h.purge()
+	if want := now.Add(-2*time.Hour - 24*time.Hour); !cut.Equal(want) {
+		t.Fatalf("bound: cutoff %v, want %v", cut, want)
+	}
+	floor = now.Add(-time.Hour) // newer than the cutoff: no effect
+	h.purge()
+	if want := now.Add(-2 * time.Hour); !cut.Equal(want) {
+		t.Fatalf("newer floor moved the cutoff to %v", cut)
+	}
+}

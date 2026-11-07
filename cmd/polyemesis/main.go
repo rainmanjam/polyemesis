@@ -383,6 +383,8 @@ func run(h *hooks) error {
 		chat.WithStore(store),
 		chat.WithPublisher(bus),
 		chat.WithLogger(log),
+		// A recording's chat is not purged before its sidecar is written.
+		chat.WithPurgeFloor(eng.Recordings().ChatHold),
 	)
 	defer hub.Close()
 	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could

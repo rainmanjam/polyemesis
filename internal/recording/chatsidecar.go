@@ -1,8 +1,12 @@
 package recording
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -134,7 +138,9 @@ func (m *Manager) ChatSidecar(filename string, vtt bool) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	fi, err := os.Stat(path)
+	// Lstat, so a symlink planted in the directory is neither served nor
+	// uploaded: only a regular file this package wrote counts.
+	fi, err := os.Lstat(path)
 	return path, err == nil && fi.Mode().IsRegular()
 }
 
@@ -144,8 +150,32 @@ func (m *Manager) chatSidecarInfo(filename string) (os.FileInfo, bool) {
 	if !ok {
 		return nil, false
 	}
-	fi, err := os.Stat(path)
+	fi, err := os.Lstat(path)
 	return fi, err == nil
+}
+
+// savedChatHeader reads the header of the saved JSON sidecar: the part before
+// its "messages" array, which WriteJSON puts on the first line.
+func (m *Manager) savedChatHeader(filename string) (chatexport.Header, bool) {
+	var h chatexport.Header
+	path, ok := m.ChatSidecar(filename, false)
+	if !ok {
+		return h, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return h, false
+	}
+	defer f.Close()
+	line, err := bufio.NewReaderSize(f, 64<<10).ReadBytes('\n')
+	if err != nil && len(line) == 0 {
+		return h, false
+	}
+	line = bytes.TrimSuffix(bytes.TrimRight(line, "\r\n"), []byte(",\"messages\":["))
+	if json.Unmarshal(append(line, '}'), &h) != nil {
+		return h, false
+	}
+	return h, true
 }
 
 // HasChatSidecar reports whether chat was saved with the recording. The JSON
@@ -187,6 +217,16 @@ func (m *Manager) writeChatSidecars() bool {
 		plan, err := m.chatPlan(rec, recs, fi.ModTime())
 		if err != nil {
 			m.log.Warn("cannot read chat for a finished recording", "file", rec.Filename, "err", err)
+			continue
+		}
+		// NEVER DOWNGRADE A SAVED FILE. The purge may have taken part of the
+		// window since it was written (the archive job bumps a master's mtime
+		// hours later, and the keep floor still leaves some rows), so a rewrite
+		// from the table could replace a complete file with a tail. A rewrite
+		// must hold at least as much as what is there.
+		if prev, ok := m.savedChatHeader(rec.Filename); ok && !plan.Header.Complete &&
+			(prev.Complete || prev.MessageCount > plan.Header.MessageCount) {
+			m.markChatSettled(rec.Filename, fi.ModTime())
 			continue
 		}
 		if plan.Header.MessageCount == 0 {
@@ -267,7 +307,13 @@ func (m *Manager) writeAtomic(name string, write func(*os.File) error) error {
 
 // removeChatSidecars deletes a recording's saved chat. Best effort, like
 // removeDerived: the master is already gone.
+//
+// Two masters can share a stem (x.mkv and x.ts) and so share sidecars; they stay
+// while any other indexed recording or master on disk has the same stem.
 func (m *Manager) removeChatSidecars(filename string) {
+	if m.stemShared(filename) {
+		return
+	}
 	jsonName, vttName := chatexport.SidecarNames(filename)
 	for _, name := range []string{jsonName, vttName} {
 		path, err := m.Resolve(name)
@@ -283,9 +329,41 @@ func (m *Manager) removeChatSidecars(filename string) {
 	m.chatMu.Unlock()
 }
 
+// stemOf is a recording's name without its extension.
+func stemOf(name string) string {
+	base := filepath.Base(name)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// stemShared reports whether another recording, indexed or merely on disk,
+// has the same stem as filename.
+func (m *Manager) stemShared(filename string) bool {
+	stem := stemOf(filename)
+	if recs, err := m.store.ListRecordings(); err == nil {
+		for _, r := range recs {
+			if r.Filename != filename && stemOf(r.Filename) == stem {
+				return true
+			}
+		}
+	}
+	if entries, err := os.ReadDir(m.dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && isRecording(e.Name()) && e.Name() != filepath.Base(filename) && stemOf(e.Name()) == stem {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // staleChatTemp is how old a leftover temporary file must be before the sweep
 // removes it: far longer than any write, so a live write is never touched.
 const staleChatTemp = time.Hour
+
+// chatTempName is what writeAtomic's os.CreateTemp leaves: "." + the sidecar's
+// name + "." + digits + ".tmp".
+var chatTempName = regexp.MustCompile(`^\..+(` + regexp.QuoteMeta(chatexport.JSONSuffix) + `|` +
+	regexp.QuoteMeta(chatexport.VTTSuffix) + `)\.[0-9]+\.tmp$`)
 
 // sweepChatSidecars removes chat files whose recording is gone, and temporary
 // files a crashed write left. known is every indexed recording; like the other
@@ -301,8 +379,14 @@ func (m *Manager) sweepChatSidecars(known map[string]bool) int {
 	}
 	bases := make(map[string]bool, len(known))
 	for name := range known {
-		base := filepath.Base(name)
-		bases[strings.TrimSuffix(base, filepath.Ext(base))] = true
+		bases[stemOf(name)] = true
+	}
+	// A master on disk is a survivor too, indexed yet or not (as companions.go
+	// does): its chat is somebody's, and the scan simply has not got to it.
+	for _, e := range entries {
+		if !e.IsDir() && isRecording(e.Name()) {
+			bases[stemOf(e.Name())] = true
+		}
 	}
 	removed := 0
 	for _, e := range entries {
@@ -311,7 +395,7 @@ func (m *Manager) sweepChatSidecars(known map[string]bool) int {
 		}
 		name := e.Name()
 		switch {
-		case strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".tmp") && strings.Contains(name, ".chat."):
+		case chatTempName.MatchString(name):
 			if info, err := e.Info(); err != nil || time.Since(info.ModTime()) < staleChatTemp {
 				continue
 			}
@@ -331,4 +415,42 @@ func (m *Manager) sweepChatSidecars(known map[string]bool) int {
 		m.log.Info("removed chat files for recordings that are gone", "count", removed)
 	}
 	return removed
+}
+
+// chatHoldSlack is how long after its last write a recording's chat is still
+// held back from the purge: the settle window plus a few scans, so the sidecar
+// is written before the rows can go.
+const chatHoldSlack = chatSettle + 90*time.Second
+
+// chatHoldWindow bounds which recordings are considered: a segment is at most
+// 24 hours long.
+const chatHoldWindow = 25 * time.Hour
+
+// ChatHold is the earliest start among the recordings whose chat is not yet
+// safely in a sidecar: those being written, or finished within the last few
+// minutes. The chat purge does not pass it (bounded by the hub), so a segment
+// longer than the chat retention still ends up with complete chat.
+func (m *Manager) ChatHold(now time.Time) (time.Time, bool) {
+	recs, err := m.store.ListRecordings()
+	if err != nil {
+		return time.Time{}, false
+	}
+	var first time.Time
+	for _, r := range recs {
+		if r.StartedAt.Before(now.Add(-chatHoldWindow)) {
+			continue
+		}
+		path, err := m.Resolve(r.Filename)
+		if err != nil {
+			continue
+		}
+		fi, err := os.Stat(path)
+		if err != nil || now.Sub(fi.ModTime()) >= chatHoldSlack {
+			continue
+		}
+		if first.IsZero() || r.StartedAt.Before(first) {
+			first = r.StartedAt
+		}
+	}
+	return first, !first.IsZero()
 }
