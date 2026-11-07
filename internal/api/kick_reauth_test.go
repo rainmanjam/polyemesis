@@ -245,9 +245,12 @@ func TestKickChatReauthReturnsTheFreshToken(t *testing.T) {
 	if err != nil || tok != "fresh" {
 		t.Fatalf("kickChatReauth = %q, %v", tok, err)
 	}
-	// Within the cooldown a second forced refresh is declined, not repeated.
-	if _, err := s.kickChatReauth(acct.ID)(context.Background()); err == nil {
-		t.Fatal("a second forced refresh ran inside the cooldown")
+	// Within the cooldown a concurrent caller is handed the token the first one
+	// stored, not a refusal and not a second refresh: two sends that both got a
+	// 401 must both succeed on the retry.
+	tok, err = s.kickChatReauth(acct.ID)(context.Background())
+	if err != nil || tok != "fresh" {
+		t.Fatalf("second kickChatReauth inside the cooldown = %q, %v; want the stored fresh token", tok, err)
 	}
 	if n := f.refreshCount(); n != 1 {
 		t.Fatalf("%d refreshes, want 1", n)

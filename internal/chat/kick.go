@@ -179,6 +179,12 @@ type KickAdapter struct {
 	// refused" instead of the misleading "none have arrived".
 	rejected int
 	keyDown  int
+
+	// terminal is set when the account can no longer use the API at all: Kick
+	// rejects its token and a refresh did not help, or the grant is gone. Run
+	// returns it, which the Hub records as a failed chat instead of asking Kick
+	// again every few minutes.
+	terminal error
 }
 
 // NewKick builds the adapter.
@@ -302,6 +308,9 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 	k.mu.Unlock()
 	k.ensureSubscription(ctx)
 	k.refreshHealth()
+	if err := k.terminalError(); err != nil {
+		return err
+	}
 
 	tick := time.NewTicker(k.cfg.Tick)
 	defer tick.Stop()
@@ -315,8 +324,18 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 				k.ensureSubscription(ctx)
 			}
 			k.refreshHealth()
+			if err := k.terminalError(); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+// terminalError is the fatal error recorded by a subscription check, if any.
+func (k *KickAdapter) terminalError() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.terminal
 }
 
 // subscriptionDue reports whether it is time to look at the subscription again:
@@ -468,9 +487,28 @@ func kickSaysDuplicate(text string) bool {
 // declining the app or the permission (webhooks off, or no events:subscribe),
 // a 400 is Kick objecting to the request and its own text is the explanation.
 func (k *KickAdapter) subscriptionProblem(what string, err error) string {
-	switch statusOf(err) {
-	case http.StatusUnauthorized:
+	switch {
+	case IsFatal(err):
+		// The token source said the grant is gone. Not retried: Run ends with
+		// this and the chat shows Failed until the account is reconnected.
+		k.mu.Lock()
+		k.terminal = err
+		k.mu.Unlock()
+		return "Kick no longer accepts this account's token; reconnect the Kick account in Settings → Platforms."
+	case statusOf(err) == http.StatusUnauthorized && k.cfg.Reauth != nil:
+		// Refreshed and still refused: asking again in two minutes will not
+		// change the answer.
+		k.mu.Lock()
+		k.terminal = Fatal(errors.New(kickRejectedToken))
+		k.mu.Unlock()
+		return kickRejectedToken + "."
+	case statusOf(err) == http.StatusUnauthorized:
 		return "Kick rejected the access token while checking the chat subscription; reconnect the Kick account in Settings → Platforms."
+	}
+	if ae, ok := err.(*apiError); ok && ae.Edge {
+		return what + ": " + kickEdgeBlocked + ". polyemesis will retry shortly."
+	}
+	switch statusOf(err) {
 	case http.StatusForbidden:
 		return "Kick webhook not enabled for your app: " + what + " (Kick said " + kickSaid(err) + "). " + kickWebhookHint
 	case http.StatusBadRequest:
@@ -1114,6 +1152,10 @@ func (k *KickAdapter) api(ctx context.Context, method, endpoint string, payload,
 		return err
 	}
 	tok, rerr := k.cfg.Reauth(ctx)
+	if IsFatal(rerr) {
+		// The grant is gone, which is a stronger statement than the 401.
+		return rerr
+	}
 	if rerr != nil || tok == "" {
 		return err
 	}

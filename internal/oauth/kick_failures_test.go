@@ -219,3 +219,24 @@ func TestKickError(t *testing.T) {
 		t.Fatal("a transport error must pass through untouched")
 	}
 }
+
+// A rate-limited refresh is a failure to retry later, never a revoked grant.
+func TestKickRefreshRateLimitIsNotAReconnect(t *testing.T) {
+	k, _ := kickStub(t, kickStatus(429, "application/json", `{"data":null,"message":"Too Many Requests"}`, map[string]string{"Retry-After": "30"}))
+	_, err := k.Refresh(context.Background(), "cid", "secret", "rt")
+	if err == nil {
+		t.Fatal("a 429 refresh reported success")
+	}
+	if errors.Is(err, ErrReconnectRequired) {
+		t.Fatalf("a 429 on the token endpoint was classed as a dead grant: %v", err)
+	}
+}
+
+// The real dead-grant answer: 401 with error=invalid_grant (recorded live).
+func TestKickRefreshInvalidGrantIsAReconnect(t *testing.T) {
+	k, _ := kickStub(t, kickStatus(401, "application/json", `{"error":"invalid_grant","error_description":"The refresh token is invalid."}`, nil))
+	_, err := k.Refresh(context.Background(), "cid", "secret", "rt")
+	if !errors.Is(err, ErrReconnectRequired) {
+		t.Fatalf("err = %v, want ErrReconnectRequired", err)
+	}
+}

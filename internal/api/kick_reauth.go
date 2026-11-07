@@ -66,7 +66,10 @@ func (s *Server) kickReauth(ctx context.Context, acct *db.PlatformAccount) (*db.
 		return nil, errKickReconnect()
 	}
 	if !s.acctHealth.reauthDue(acct.ID, time.Now(), kickReauthCooldown) {
-		return nil, errors.New("a token refresh was just tried for this Kick account")
+		// Somebody else (a concurrent send, the sampler) refreshed moments ago.
+		// Hand back whatever is stored now: if that is a new token the caller's
+		// one retry uses it, and if it is not the retry fails honestly.
+		return s.store.GetPlatformAccount(s.box, acct.ID)
 	}
 	seen := acct.Revision()
 	fresh, err := s.refreshNow(ctx, acct)
@@ -92,6 +95,11 @@ func (s *Server) kickRetry(ctx context.Context, acct *db.PlatformAccount, call f
 		if errors.Is(rerr, oauth.ErrReconnectRequired) {
 			return fmt.Errorf("%w; %s", err, kickRevokedReason)
 		}
+		return err
+	}
+	if fresh.AccessToken == acct.AccessToken {
+		// Nothing newer is stored (a refresh just ran elsewhere and Kick refused
+		// that token too); the same token would get the same answer.
 		return err
 	}
 	return call(fresh.AccessToken)

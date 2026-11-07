@@ -561,3 +561,88 @@ func TestKickVerifierTurnsAwayAnUnsignedRequestWithoutFetchingTheKey(t *testing.
 		t.Fatal("the key was fetched for a request with no signature headers")
 	}
 }
+
+// A dead grant must end the chat, not be asked about every two minutes.
+func TestKickRunEndsFatallyWhenTheGrantIsGone(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, kickUnauthorized)
+	}))
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.APIBase = srv.URL
+		c.Tick = 10 * time.Millisecond
+		c.Reauth = func(context.Context) (string, error) {
+			return "", Fatal(errors.New("the Kick grant was revoked; reconnect the Kick account in Settings → Platforms"))
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background(), SinkFunc(func(Message) {})) }()
+	select {
+	case err := <-done:
+		if !IsFatal(err) || !strings.Contains(err.Error(), "reconnect") {
+			t.Fatalf("Run returned %v, want a fatal reconnect error", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run kept going against a revoked grant")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("%d API calls, want 1: the dead grant was asked about again", n)
+	}
+}
+
+func TestKickRunEndsFatallyWhenARefreshedTokenIsStillRefused(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, kickUnauthorized)
+	}))
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.APIBase = srv.URL
+		c.Tick = 10 * time.Millisecond
+		c.Reauth = func(context.Context) (string, error) { return "fresh", nil }
+	})
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background(), SinkFunc(func(Message) {})) }()
+	select {
+	case err := <-done:
+		if !IsFatal(err) {
+			t.Fatalf("Run returned %v, want fatal", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run kept retrying a token Kick refuses even after a refresh")
+	}
+}
+
+// Without a refresh path (no Reauth) a 401 stays the retried, degraded state it
+// always was; only a refresh that did not help makes it terminal.
+func TestKickRunKeepsRetryingA401WhenThereIsNoRefreshPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, kickUnauthorized)
+	}))
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL; c.Tick = 10 * time.Millisecond })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
+	time.Sleep(150 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("Run ended with %v", err)
+	default:
+	}
+	cancel()
+	<-done
+}
+
+func TestKickSubscriptionCheckSaysEdgeBlockNotWebhooksDisabled(t *testing.T) {
+	srv := kickStatusServer(t, 403, "text/html", cloudflareBlock, map[string]string{"Cf-Ray": "x"})
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL })
+	problem := a.syncSubscription(context.Background())
+	if !strings.Contains(problem, "edge") || strings.Contains(problem, "webhook not enabled") || strings.Contains(problem, "<") {
+		t.Fatalf("problem = %q, want the edge-block explanation", problem)
+	}
+}
