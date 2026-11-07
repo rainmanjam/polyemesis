@@ -49,6 +49,7 @@ const TRIGGER_LABELS: Record<string, TranslationKey> = {
   "destination.held": "hooks.triggerDestinationHeld",
   "failover.switched": "hooks.triggerFailoverSwitched",
   "offload.stuck": "hooks.triggerOffloadStuck",
+  activity: "hooks.triggerActivity",
 };
 
 const errText = (err: unknown, fallback: string) =>
@@ -688,6 +689,21 @@ function HookDialog({
                     onCheckedChange={(v) => toggleTrigger(tr, Boolean(v))}
                   />
                   {TRIGGER_LABELS[tr] ? t(TRIGGER_LABELS[tr]) : tr}
+                </label>
+              ))}
+              {/* Opt-in triggers after the ordinary ones: a hook receives one
+                  ONLY by naming it, so "none selected" above does not include
+                  them, and the hint says so beside the box. */}
+              {(meta?.optInTriggers ?? []).map((tr) => (
+                <label key={tr} className="col-span-2 flex flex-col gap-0.5 text-sm">
+                  <span className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={triggers.includes(tr)}
+                      onCheckedChange={(v) => toggleTrigger(tr, Boolean(v))}
+                    />
+                    {TRIGGER_LABELS[tr] ? t(TRIGGER_LABELS[tr]) : tr}
+                  </span>
+                  <span className="pl-6 text-muted-foreground">{t("hooks.triggerActivityHint")}</span>
                 </label>
               ))}
             </div>

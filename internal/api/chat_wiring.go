@@ -196,6 +196,9 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 		s.log.Warn("chat: could not attach", "platform", a.Platform, "err", err)
 		return false
 	}
+	// A platform with its own activity transport starts it beside the chat and
+	// stops it with it (detachChat). Additive: it never fails the connect.
+	s.attachActivitySource(ctx, a)
 	return true
 }
 
@@ -374,6 +377,7 @@ const chatDetachWait = 5 * time.Second
 // replacing the adapter it had: unlisted and cancelled at once, with the wait
 // bounded (see chat.Hub.DetachWithin). Caller holds chatWire.
 func (s *Server) detachChat(p db.Platform, account string) {
+	s.detachActivitySource(p, account)
 	if !s.chat.DetachWithin(p, account, chatDetachWait) {
 		s.log.Warn("chat adapter is slow to stop; it is detached and will finish in the background",
 			"platform", p, "account", account, "waited", chatDetachWait)

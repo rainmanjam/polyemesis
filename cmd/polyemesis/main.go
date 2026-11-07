@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activityhub"
 	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
@@ -427,6 +428,28 @@ func run(h *hooks) error {
 	overlayGate := overlay.New(streamHub)
 	hub.SetDisplay(overlayGate)
 	go overlayGate.Run(ctx)
+	// Viewer activity -- follows, subs, tips, raids. The hub is the one
+	// ingestion point (chat adapters reach it through the chat hub, platforms
+	// with their own transport through Attach, "Send test alert" through the
+	// API); it fans out to the bus, the opt-in `activity` webhook trigger and
+	// the alerts overlay's gate. In memory only: nothing here is stored. The
+	// gate asks the chat hub's automod about every viewer-written word before it
+	// goes on air, for the reason the chat gate does.
+	activityGate := overlay.NewActivityGate(streamHub, hub)
+	go activityGate.Run(ctx)
+	activityHub := activityhub.New(
+		activityhub.WithBus(bus), activityhub.WithHooks(hookd), activityhub.WithDisplay(activityGate),
+		activityhub.WithLogger(log.With("component", "activity")),
+		activityhub.WithSettings(func() db.ActivitySettings {
+			s, err := store.GetSettings()
+			if err != nil {
+				return db.DefaultActivitySettings()
+			}
+			return s.Activity
+		}),
+	)
+	defer activityHub.Close()
+	hub.SetActivity(activityHub)
 	// Chat polls (#14). The counter taps the same verdicts the overlay gate
 	// gets, plus why each removed message went (chat.Tap), and publishes the
 	// poll events into the same hub. A poll open when the last process
@@ -467,6 +490,8 @@ func run(h *hooks) error {
 		OverlayGate:            overlayGate,
 		OBS:                    obsBridge,
 		Polls:                  pollEngine,
+		Activity:               activityHub,
+		ActivityGate:           activityGate,
 		SetupCode:              setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on

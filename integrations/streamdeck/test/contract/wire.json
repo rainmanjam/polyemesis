@@ -68,7 +68,8 @@
     "chat",
     "chatState",
     "chatRetract",
-    "chatModeration"
+    "chatModeration",
+    "activity"
   ],
   "sourceKinds": [
     "",

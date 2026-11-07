@@ -53,6 +53,10 @@ type automodJob struct {
 	msgID    string
 	authorID string
 	finding  automod.Finding
+	// screen, when set, makes this a question about text that is not chat
+	// (activity.go): asked of the model and answered through screen.done, never
+	// acted on.
+	screen *screenRequest
 }
 
 // automodState is everything the worker needs, replaced atomically on each
@@ -229,6 +233,10 @@ func (h *Hub) runAutomodWorker(ctx context.Context, s *automodState) {
 			// would otherwise perform an arbitrary number of further actions.
 			if ctx.Err() != nil {
 				return
+			}
+			if job.screen != nil {
+				h.screenModel(ctx, job)
+				continue
 			}
 			if job.finding.Action == "" {
 				h.askModel(ctx, s, job)

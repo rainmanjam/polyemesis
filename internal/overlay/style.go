@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
@@ -35,6 +37,105 @@ type Style struct {
 	MaxLines     int  `json:"maxLines"`
 	ShowPlatform bool `json:"showPlatform"`
 	ShowBadges   bool `json:"showBadges"`
+	// Alerts is how the ALERTS overlay (/overlay/alerts) draws, on the same
+	// overlay row and key. Optional: absent means DefaultAlertStyle, so every
+	// stored row stays valid. NOTE FOR DOWNGRADES: ParseStyle refuses unknown
+	// fields, so a build that predates this refuses a row saved with it; the
+	// CHANGELOG says so.
+	Alerts *AlertStyle `json:"alerts,omitempty"`
+}
+
+// AlertStyle is how viewer activity is drawn. As closed as Style: layouts and
+// sounds come from fixed lists (there is no URL field -- nothing here fetches
+// anything), the accent is #rrggbb, the duration is bounded.
+type AlertStyle struct {
+	// Layout is "banner", "card" or "minimal".
+	Layout string `json:"layout"`
+	// Kinds are the activity kinds this overlay draws, from
+	// activity.OverlayKinds. A kind the operator switched off in the activity
+	// settings never reaches any overlay; this narrows one overlay further.
+	Kinds []string `json:"kinds"`
+	// Seconds is how long one alert stays on screen, 3 to 15.
+	Seconds int `json:"seconds"`
+	// ShowMessage draws the viewer's own words, if they were released.
+	ShowMessage bool `json:"showMessage"`
+	// ShowAmount draws the amount of a tip.
+	ShowAmount bool `json:"showAmount"`
+	// Sound is "none" or one of the tones the page synthesises itself.
+	Sound string `json:"sound"`
+	// Accent is the highlight colour, #rrggbb.
+	Accent string `json:"accent"`
+}
+
+// Alert style closed sets and bounds.
+const (
+	MinAlertSeconds = 3
+	MaxAlertSeconds = 15
+	// DefaultAlertAccent is Polyemesis's violet.
+	DefaultAlertAccent = "#7c3aed"
+)
+
+// AlertLayouts and AlertSounds are the closed lists, in display order.
+var (
+	AlertLayouts = []string{"banner", "card", "minimal"}
+	AlertSounds  = []string{"none", "chime", "pop", "bell"}
+)
+
+// DefaultAlertStyle is what an overlay with no alerts block draws: every
+// overlay kind, a banner, six seconds, words and amounts shown, silent.
+func DefaultAlertStyle() AlertStyle {
+	kinds := activity.OverlayKinds()
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+	return AlertStyle{
+		Layout: "banner", Kinds: names, Seconds: 6,
+		ShowMessage: true, ShowAmount: true, Sound: "none", Accent: DefaultAlertAccent,
+	}
+}
+
+// Validate checks every field against its closed set or bounds.
+func (a AlertStyle) Validate() error {
+	if !slices.Contains(AlertLayouts, a.Layout) {
+		return fmt.Errorf("style: unknown alert layout %q", a.Layout)
+	}
+	if !slices.Contains(AlertSounds, a.Sound) {
+		return fmt.Errorf("style: unknown alert sound %q", a.Sound)
+	}
+	if a.Seconds < MinAlertSeconds || a.Seconds > MaxAlertSeconds {
+		return fmt.Errorf("style: alert seconds must be %d to %d", MinAlertSeconds, MaxAlertSeconds)
+	}
+	if !hexColor.MatchString(a.Accent) {
+		return fmt.Errorf("style: the alert accent must be #rrggbb in lower case")
+	}
+	seen := map[string]bool{}
+	for _, k := range a.Kinds {
+		if !slices.Contains(overlayKindNames(), k) {
+			return fmt.Errorf("style: alert kind %q is not one an overlay can draw", k)
+		}
+		if seen[k] {
+			return fmt.Errorf("style: alert kind %q is listed twice", k)
+		}
+		seen[k] = true
+	}
+	return nil
+}
+
+func overlayKindNames() []string {
+	var out []string
+	for _, k := range activity.OverlayKinds() {
+		out = append(out, string(k))
+	}
+	return out
+}
+
+// AlertsOrDefault is the alert style this overlay draws with.
+func (s Style) AlertsOrDefault() AlertStyle {
+	if s.Alerts != nil {
+		return *s.Alerts
+	}
+	return DefaultAlertStyle()
 }
 
 // Presets. Each is a complete Style; picking one in the editor resets the
@@ -121,6 +222,9 @@ func (s Style) Validate() error {
 	}
 	if s.MaxLines < MinLines || s.MaxLines > MaxLines {
 		return fmt.Errorf("style: maxLines must be %d to %d", MinLines, MaxLines)
+	}
+	if s.Alerts != nil {
+		return s.Alerts.Validate()
 	}
 	return nil
 }

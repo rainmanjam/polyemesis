@@ -40,6 +40,54 @@ script needed.
 | `failover.switched` | a programme's source selector put a different source on air (primary, backup, playlist or slate). `reason` says why; a switch caused by a degraded link starts `degraded: ` and names what was measured | none |
 | `offload.stuck` | offload stopped retrying a file on a storage target after too many consecutive failures, or at once on an error waiting cannot cure (a refused credential, a missing bucket); nothing moves until Retry now. `reason` names the target, the file and the last error | none |
 
+### The `activity` trigger (opt-in)
+
+| Trigger | Fires when |
+|---|---|
+| `activity` | a viewer or the platform did something: a follow, sub, resub, gift, tip, raid, channel-points redemption, hype train, native poll or prediction, shoutout, stream online/offline report, an external moderation action, or a reaction tally. The envelope carries the event in `activity`; its `kind` says which |
+
+`activity` is **opt-in**: a hook receives it only if its `triggers` list names
+it. A hook with an empty `triggers` list still means "every lifecycle trigger"
+in the table above, and `activity` is not one of them, so no existing hook
+suddenly receives every follow. The trigger picker offers it separately, and
+`GET /api/v1/hooks/meta` lists it under `optInTriggers`, apart from `triggers`.
+
+```json
+{
+  "specVersion": "1",
+  "id": "9f2c1a7b4e8d05c31f6a2b9047e1c8d3",
+  "sequence": 7,
+  "trigger": "activity",
+  "at": "2026-11-07T20:14:03Z",
+  "source": { "id": 0, "name": "" },
+  "activity": {
+    "id": "act_3f9a0c1d", "kind": "tip", "platform": "youtube", "at": "2026-11-07T20:14:03.100Z",
+    "actor": { "id": "UCxyz", "name": "Mara" },
+    "amount": { "currency": "USD", "minor": 500, "exponent": 2, "display": "$5.00" },
+    "message": "great stream!",
+    "source": { "type": "superChatEvent", "id": "LCC.Cg8K" }
+  }
+}
+```
+
+- **`source` is the zero value** (`{"id": 0, "name": ""}`): an activity belongs
+  to an account on a platform, not to a programme. The platform is
+  `activity.platform` and the platform's own event is `activity.source`.
+- **`activity` is a new field that is absent from every other trigger.** It is
+  `omitempty`, so `specVersion` stays `"1"`: it changes nothing a receiver
+  already reads.
+- **Every kind is delivered**, whatever the overlay does. The overlay's minimum
+  tip and its kind choices apply to the overlay only. Your settings under
+  **Activity → Settings** (a kind switched off for a platform) apply to hooks
+  too.
+- **`activity.message` and the names are viewer-written.** They go through the
+  same text redaction as every other field, and they are **not** judged by
+  automod: only the overlay waits for that. Treat them as untrusted input.
+- **A test activity has `"test": true`** at the top level (and in
+  `activity.test`). **Send test alert** produces one, and so does the hook test
+  button with `?trigger=activity` (a sample US$5.00 tip).
+- Fields of `activity` are in [ACTIVITY.md](ACTIVITY.md#the-event).
+
 "Delivering" is read from FFmpeg's own progress report: the destination's
 output time has to advance between two sweeps, two seconds apart. A destination
 pointed at an endpoint that refuses the connection therefore never sends
@@ -100,7 +148,7 @@ up either.
 `ingest.disconnected` can only fire **after** a publish, so a server sitting idle
 since boot never announces a disconnection that never happened.
 
-**An empty `triggers` list means every trigger, not none.** It is the useful
+**An empty `triggers` list means every lifecycle trigger, not none.** (`activity` is the exception: it is [opt-in](#the-activity-trigger-opt-in).) It is the useful
 default for the first hook somebody creates, and it is a trap on the second: an
 operator who clears the list in the editor meaning "stop sending me things"
 subscribes to the firehose instead. It also means the subscription grows
@@ -373,7 +421,7 @@ receiver, name the trigger on the route:
 POST /api/v1/hooks/4/test?trigger=destination.down
 ```
 
-`?trigger=` accepts any name from the trigger table above, and the test ignores
+`?trigger=` accepts any name from the trigger table above (and `activity`), and the test ignores
 the hook's subscription — a hook subscribed only to `ingest.published` still
 delivers a `destination.down` test. `destination.up` and `destination.down` are
 the two that attach a synthetic destination block,

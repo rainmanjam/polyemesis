@@ -93,6 +93,12 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
 
+		// Viewer activity: names viewers and carries what they wrote, as chat does.
+		{http.MethodGet, "/api/v1/activity", nil,
+			"the feed names each viewer and carries their tip and sub messages"},
+		{http.MethodGet, "/api/v1/activity/sources", nil,
+			"the per-account source list carries each connected account's ref"},
+
 		// Wave 4 #4: cross-platform analytics is admin-only.
 		{http.MethodGet, "/api/v1/analytics/live", nil,
 			"the live audience rows name the operator's connected channels"},

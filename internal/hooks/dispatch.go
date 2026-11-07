@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -321,6 +322,16 @@ func (d *Dispatcher) Publish(ev Event) {
 	}
 }
 
+// Activity accepts a viewer or platform activity as an `activity` trigger. It
+// is what internal/activityhub calls (activityhub.Hooks), and like Publish it
+// never blocks. Only hooks that name the trigger receive it (Hook.Wants).
+func (d *Dispatcher) Activity(a activity.Event) {
+	if d == nil {
+		return
+	}
+	d.Publish(Event{Trigger: TriggerActivity, At: a.At, Activity: &a, Test: a.Test})
+}
+
 // HasHooks reports whether anybody is listening, so the engine can skip work
 // nothing would read.
 func (d *Dispatcher) HasHooks() bool {
@@ -526,6 +537,8 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		Cause:       ev.Cause,
 		Held:        ev.Held,
 		KeyChanged:  ev.KeyChanged,
+		Test:        ev.Test,
+		Activity:    ev.Activity,
 	}
 	body, err := Encode(env)
 	if err != nil {
@@ -696,6 +709,12 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 	}
 	if tr == TriggerDestinationUp || tr == TriggerDestinationDown || tr == TriggerDestinationHeld {
 		env.Destination = &DestinationRef{ID: 0, Name: "Example destination", Platform: "custom"}
+	}
+	if tr == TriggerActivity {
+		// The same canned tip "Send test alert" sends, so the receiver sees the
+		// shape it will be sent for real.
+		ev := activity.Sample(activity.KindTip, "", activity.Overrides{}, d.now()).Normalise(d.now)
+		env.Activity = &ev
 	}
 	body, err := Encode(env)
 	if err != nil {

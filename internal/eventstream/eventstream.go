@@ -22,6 +22,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
@@ -57,6 +58,10 @@ const (
 	TopicOBS Topic = "obs"
 	// TopicPoll is the cross-platform chat poll (#14, internal/polls).
 	TopicPoll Topic = "poll"
+	// TopicActivity is viewer and platform activity -- follows, subs, tips,
+	// raids (internal/activity). Named "activity" and not "alert": the alert
+	// topic is the operator's (internal/alerts) and stays that.
+	TopicActivity Topic = "activity"
 )
 
 // Event types. The destination and ingest names are the webhook trigger names
@@ -91,10 +96,15 @@ const (
 	TypePollEnded             Type = "poll.ended"
 	TypePollDisplay           Type = "poll.display"
 	TypeAlert                 Type = "alert"
-	TypeStreamGap             Type = "stream.gap"
-	TypeOBSConnection         Type = "obs.connection"
-	TypeOBSStream             Type = "obs.stream"
-	TypeOBSScene              Type = "obs.scene"
+	// TypeActivity is one viewer or platform activity; data.kind says which.
+	// ONE type for every kind, so a platform source never edits the catalogue:
+	// see activity.Kind. TypeActivityDisplay is its overlay projection.
+	TypeActivity        Type = "activity"
+	TypeActivityDisplay Type = "activity.display"
+	TypeStreamGap       Type = "stream.gap"
+	TypeOBSConnection   Type = "obs.connection"
+	TypeOBSStream       Type = "obs.stream"
+	TypeOBSScene        Type = "obs.scene"
 )
 
 // Access says whether a read-scoped API token receives a type. The zero value
@@ -133,6 +143,16 @@ type Spec struct {
 func alertOnTheTimeline(env Envelope) bool {
 	a, ok := env.Data.(alerts.Event)
 	return ok && alerts.IsTimelineType(a.Type)
+}
+
+// activityReadable is the activity row's ReadIf: a read token is sent the
+// platform's own report that the stream went online or offline, which names no
+// viewer and carries no viewer's words, and nothing else. A follow names a
+// person; a tip, a resub and a redemption carry what they wrote. Anything that
+// is not an activity.Event is withheld: fail closed.
+func activityReadable(env Envelope) bool {
+	a, ok := env.Data.(activity.Event)
+	return ok && a.Kind == activity.KindStream
 }
 
 // catalogue is THE ONE PLACE an event type is declared to exist.
@@ -212,6 +232,15 @@ var catalogue = []Spec{
 	// that sent it would widen what a read token can see.
 	{TypeAlert, TopicAlert, Partly, "An operator alert fired or resolved.", alertOnTheTimeline},
 
+	// Viewer and platform activity (internal/activity). Two rows for fourteen
+	// kinds, so that adding a platform's source never edits the catalogue, the
+	// docs table or the overlay's closed set. The activity row names viewers and
+	// carries text they wrote -- the reason chat is withheld -- so a read token
+	// gets only the stream kind, which names nobody. The display row is the
+	// overlay's projection: judged by automod, stripped of every id.
+	{TypeActivity, TopicActivity, Partly, "A viewer or platform activity -- a follow, sub, tip, raid or the platform's own stream report; data.kind says which.", activityReadable},
+	{TypeActivityDisplay, TopicOverlay, Withheld, "An activity as the alerts overlay draws it: judged by automod and stripped to what an overlay shows.", nil},
+
 	// The OBS bridge (internal/obsbridge). What OBS reported, never what it was
 	// asked: none of these carries the obs-websocket address or its password,
 	// and the connection's detail is a fixed sentence chosen by polyemesis, not
@@ -232,6 +261,10 @@ var overlayVisible = map[Type]bool{
 	TypeChatDisplay:   true,
 	TypeChatUndisplay: true,
 	TypePollDisplay:   true,
+	// The alerts overlay's projection (ActivityDisplay): names and amounts a
+	// viewer already sees on stream, no id of any kind, and text only once
+	// automod has let it stand.
+	TypeActivityDisplay: true,
 }
 
 // OverlayVisible reports whether an overlay key may be sent t.
@@ -295,6 +328,35 @@ type PollDisplay struct {
 type PollDisplayOption struct {
 	Label string `json:"label"`
 	Votes int    `json:"votes"`
+}
+
+// ActivityDisplay is an activity as the alerts overlay draws it. AN ALLOWLIST,
+// like DisplayLine: no actor id, account, source id, recipient id, breakdown
+// or moderation field exists to be filled in. Kind is one of the overlay kinds
+// (activity.OverlayKinds) and nothing else is ever published on this row.
+type ActivityDisplay struct {
+	// ID is opaque and per-process: a hash of the event's key, so the
+	// platform's ids and the operator's account refs stay off the wire.
+	ID       string `json:"id"`
+	Platform string `json:"platform"`
+	Kind     string `json:"kind"`
+	// Name is who did it ("" when anonymous, or when the name was blanked
+	// because it failed the blocked-terms check; the overlay says "Someone").
+	Name   string           `json:"name"`
+	Amount *activity.Amount `json:"amount,omitempty"`
+	Tier   string           `json:"tier,omitempty"`
+	Months int              `json:"months,omitempty"`
+	Count  int              `json:"count,omitempty"`
+	// Recipient is set only when Count is 1: a gift bomb names no one.
+	Recipient string `json:"recipient,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Viewers   int    `json:"viewers,omitempty"`
+	Level     int    `json:"level,omitempty"`
+	// Message is the viewer's own words, present only if automod released it
+	// and the operator left overlay messages on.
+	Message string    `json:"message,omitempty"`
+	Test    bool      `json:"test,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 // Catalogue returns every emitted type, in the order docs/EVENTS.md lists them.
