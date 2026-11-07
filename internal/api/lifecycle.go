@@ -338,6 +338,9 @@ type lifecycleCoordinator struct {
 	// string, and it performs the refresh. A function rather than a *Server so
 	// this type holds nothing that could reach a process; see the header.
 	tokenFor func(context.Context, int64) (*db.PlatformAccount, error)
+	// retokenFor is tokenFor for a token the platform refused before its stored expiry: it refreshes that token and
+	// returns the account. Nil means a refused token is not retried here.
+	retokenFor func(ctx context.Context, accountID int64, rejected string) (*db.PlatformAccount, error)
 	// escalate is the ONLY way a fault leaves this file. Everything it can do is
 	// tell somebody: a row field, an alert, a webhook. It cannot stop a stream,
 	// because the thing that could stop a stream is not in scope here.
@@ -1149,9 +1152,9 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	d *db.Destination, broadcastID string, cleared bool) {
 	acct, err := c.tokenFor(ctx, *d.AccountID)
 	if err != nil {
-		c.noteFailure(d, broadcastID, fmt.Sprintf(
+		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
 			"the connected %s account could not be used to read this broadcast's state: %v",
-			d.Platform, err))
+			d.Platform, err), err)
 		return
 	}
 
@@ -1159,6 +1162,16 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	defer cancel()
 
 	st, err := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
+	if err != nil && oauth.XCredentialRejected(err) && c.retokenFor != nil {
+		// X refused a token the clock says is good (revoked, or rotated by another install). One forced refresh and
+		// one more read; a refresh that fails replaces the error, so a gone grant reads as "reconnect".
+		if fresh, rerr := c.retokenFor(ctx, *d.AccountID, acct.AccessToken); rerr != nil {
+			err = rerr
+		} else {
+			acct = fresh
+			st, err = prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
+		}
+	}
 	if err != nil && errors.Is(err, oauth.ErrXSourceGone) {
 		// THE SOURCE IS GONE FROM X, SO NOTHING CAN EVER GO LIVE ON IT. Forget it, and its go-live markers, so the next
 		// sweep opens the destination again instead of asking about a dead id for ever; keep the fault visible and
@@ -1380,13 +1393,20 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	}
 	acct, err := c.tokenFor(ctx, *d.AccountID)
 	if err != nil {
-		c.noteFailure(d, "", scrubSourceKey(fmt.Sprintf(
-			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err), d.StreamKey))
+		c.noteFailureUnlessPaused(d, "", scrubSourceKey(fmt.Sprintf(
+			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err), d.StreamKey), err)
 		return
 	}
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 	id, err := creator.OpenBroadcast(cctx, acct.AccessToken, d.StreamKey)
+	if err != nil && oauth.XCredentialRejected(err) && c.retokenFor != nil {
+		if fresh, rerr := c.retokenFor(ctx, *d.AccountID, acct.AccessToken); rerr != nil {
+			err = rerr
+		} else {
+			id, err = creator.OpenBroadcast(cctx, fresh.AccessToken, d.StreamKey)
+		}
+	}
 	if err != nil {
 		c.noteFailureUnlessPaused(d, "", scrubSourceKey(fmt.Sprintf(
 			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey), err)
@@ -2068,6 +2088,26 @@ func (c *lifecycleCoordinator) noteFailure(d *db.Destination, broadcastID, detai
 	}
 }
 
+// noteReconnectNeeded records a failure only the operator can fix: the platform refused the account's grant or token
+// and a refresh cannot help. Twenty sweeps of asking again could not change the answer, so the fault is written once
+// with the give-up count already reached, raised once, and left to the periodic re-arm, which notices a reconnect.
+func (c *lifecycleCoordinator) noteReconnectNeeded(d *db.Destination, broadcastID, detail string) {
+	first := false
+	updated := c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+		first = b.Fault != detail
+		if b.Attempts < lifecycleGiveUpAfter {
+			b.Attempts = lifecycleGiveUpAfter
+		}
+		b.Fault = detail
+	})
+	c.noteRearm(d.ID)
+	if updated == nil || !first {
+		return
+	}
+	c.log.Warn("broadcast lifecycle: "+detail, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+	c.raise(d, broadcastID, detail)
+}
+
 // quietXAt and noteQuietX keep quietX; see its comment.
 func (c *lifecycleCoordinator) quietXAt(id int64) string {
 	c.mu.Lock()
@@ -2088,6 +2128,10 @@ func (c *lifecycleCoordinator) noteQuietX(id int64, broadcastID string) {
 // destination held long after the limit lifted. The fault is still recorded, so
 // the operator sees why nothing is moving; the count is left alone.
 func (c *lifecycleCoordinator) noteFailureUnlessPaused(d *db.Destination, broadcastID, detail string, err error) {
+	if errors.Is(err, oauth.ErrReconnectRequired) {
+		c.noteReconnectNeeded(d, broadcastID, detail)
+		return
+	}
 	if until, ok := oauth.XRateLimited(err); ok {
 		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.Fault = detail })
 		c.log.Debug("broadcast lifecycle: the platform asked for a pause", "destination", d.Name,

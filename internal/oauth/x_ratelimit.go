@@ -215,10 +215,15 @@ func (s *xCallState) rememberUser(fp string, u xUser) {
 // rateHoldFrom reads when X says the limit resets. ok is false when the answer says nothing about a limit that has
 // run out: a 2xx with calls remaining, or with no headers at all.
 func (s *xCallState) rateHoldFrom(resp *http.Response) (until time.Time, ok bool) {
-	now := s.clock()
-	limited := resp.StatusCode == http.StatusTooManyRequests
+	return XRateHoldFrom(resp.StatusCode, resp.Header, s.clock())
+}
+
+// XRateHoldFrom is the rule above for a caller that has the status and headers but not the response (the chat
+// adapter's own HTTP): when the answer asks for a pause, and until when, capped at xRateHoldMax.
+func XRateHoldFrom(status int, h http.Header, now time.Time) (until time.Time, ok bool) {
+	limited := status == http.StatusTooManyRequests
 	if !limited {
-		if strings.TrimSpace(resp.Header.Get("x-rate-limit-remaining")) == "0" {
+		if strings.TrimSpace(h.Get("x-rate-limit-remaining")) == "0" {
 			limited = true
 		}
 	}
@@ -226,9 +231,9 @@ func (s *xCallState) rateHoldFrom(resp *http.Response) (until time.Time, ok bool
 		return time.Time{}, false
 	}
 	until = now.Add(xRateHoldDefault)
-	if v, err := strconv.ParseInt(strings.TrimSpace(resp.Header.Get("x-rate-limit-reset")), 10, 64); err == nil && v > 0 {
+	if v, err := strconv.ParseInt(strings.TrimSpace(h.Get("x-rate-limit-reset")), 10, 64); err == nil && v > 0 {
 		until = time.Unix(v, 0)
-	} else if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
+	} else if secs, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After"))); err == nil && secs > 0 {
 		until = now.Add(time.Duration(secs) * time.Second)
 	}
 	if until.Before(now.Add(time.Second)) {

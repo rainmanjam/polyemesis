@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -92,6 +93,9 @@ type xcFake struct {
 	liveCalls int
 	// seq numbers broadcasts so a second show gets a different id.
 	seq int
+	// goodToken, when set, is the only access token X accepts: any other answers the 403 "Unsupported Authentication"
+	// X gave a garbage user bearer on a live probe.
+	goodToken string
 	// limited makes every call answer 429 with a reset a minute ahead; requests counts every call that reached X.
 	limited  bool
 	requests int
@@ -110,6 +114,11 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			w.Header()["Date"] = nil
 		}
 		f.requests++
+		if f.goodToken != "" && r.Header.Get("Authorization") != "Bearer "+f.goodToken {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"title":"Unsupported Authentication","detail":"Authenticating with OAuth 2.0 Application-Only is forbidden for this endpoint.","type":"https://api.twitter.com/2/problems/unsupported-authentication","status":403}`)
+			return
+		}
 		if f.limited {
 			w.Header().Set("x-rate-limit-reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -1753,5 +1762,75 @@ func TestXLeftLiveFaultWriteFailureKeepsTrackingAndDoesNotAlert(t *testing.T) {
 	if store.rows[5].Lifecycle.Fault != leftLiveFault || len(*faults) != 1 {
 		t.Fatalf("fault %q escalations %d, want the fault recorded and raised exactly once after the write recovered",
 			store.rows[5].Lifecycle.Fault, len(*faults))
+	}
+}
+
+// X refuses a token the clock still calls good (revoked on X, or rotated by another install) with a 403 "Unsupported
+// Authentication". The sweep refreshes that token once and reads again, instead of faulting the destination.
+func TestAnXRefusedButUnexpiredTokenIsRefreshedOnceAndTheReadRetried(t *testing.T) {
+	fake := &xcFake{goodToken: "fresh", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}, nil
+	}
+	var rejected []string
+	c.retokenFor = func(_ context.Context, _ int64, bad string) (*db.PlatformAccount, error) {
+		rejected = append(rejected, bad)
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "fresh"}, nil
+	}
+	row := xcSweep(t, c, store)
+	if len(rejected) != 1 || rejected[0] != "stale" {
+		t.Fatalf("forced refreshes = %v, want exactly one, of the refused token", rejected)
+	}
+	if row.Lifecycle.Fault != "" || row.Lifecycle.Attempts != 0 || len(*faults) != 0 {
+		t.Fatalf("fault = %q, attempts = %d, escalations = %d after a recovered read, want none", row.Lifecycle.Fault, row.Lifecycle.Attempts, len(*faults))
+	}
+}
+
+// A grant X no longer honours is a reconnect, said once and not retried for twenty sweeps.
+func TestAnXRevokedGrantStopsTheLifecycleWithAReconnectFault(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return nil, fmt.Errorf("could not refresh the x token: %w", oauth.ErrReconnectRequired)
+	}
+	var row *db.Destination
+	for range 3 {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.Attempts < lifecycleGiveUpAfter {
+		t.Fatalf("attempts = %d, want the give-up count at once", row.Lifecycle.Attempts)
+	}
+	if len(*faults) != 1 || !strings.Contains(row.Lifecycle.Fault, "could not refresh") {
+		t.Fatalf("escalations = %d, fault = %q, want one raised fault naming the refresh", len(*faults), row.Lifecycle.Fault)
+	}
+	fake.mu.Lock()
+	n := fake.requests
+	fake.mu.Unlock()
+	if n != 0 {
+		t.Errorf("X was asked %d times with no token, want 0", n)
+	}
+}
+
+// A token X refuses and a refresh that finds the grant gone is the same reconnect, reached through the read.
+func TestAnXRefusedTokenWithADeadGrantIsAReconnectFault(t *testing.T) {
+	fake := &xcFake{goodToken: "never", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.retokenFor = func(context.Context, int64, string) (*db.PlatformAccount, error) {
+		return nil, fmt.Errorf("could not refresh the x token: %w", oauth.ErrReconnectRequired)
+	}
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.Attempts < lifecycleGiveUpAfter || len(*faults) != 1 {
+		t.Fatalf("attempts = %d, escalations = %d, want the give-up count and one fault", row.Lifecycle.Attempts, len(*faults))
+	}
+}
+
+// Even without a refresher, a refused token reads as a reconnect rather than as twenty retries.
+func TestAnXRefusedTokenWithNoRefresherStillSaysReconnect(t *testing.T) {
+	fake := &xcFake{goodToken: "never", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	row := xcSweep(t, c, store)
+	if !strings.Contains(row.Lifecycle.Fault, "reconnect the X account") || strings.Contains(row.Lifecycle.Fault, "://") {
+		t.Fatalf("fault = %q, want the reconnect instruction and no URL", row.Lifecycle.Fault)
 	}
 }

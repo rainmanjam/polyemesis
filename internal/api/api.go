@@ -994,6 +994,7 @@ func New(o Options) *Server {
 	if o.DB != nil {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
+		s.lifecycle.retokenFor = s.tokenForRejected
 		s.lifecycle.announce = s.announceBroadcastPhase
 		// X: the title its PUBLISH carries, and the chat adapter told the new
 		// broadcast at once rather than after its poll.

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -75,6 +76,8 @@ type xChatStub struct {
 	// modStatus and modBody, when set, make POST /2/broadcasts/chat/moderators answer that failure.
 	modStatus int
 	modBody   string
+	// appRevoked makes every app-bearer route answer X's probed 401, as a regenerated bearer token does.
+	appRevoked atomic.Bool
 	// sendBody overrides the POST /2/broadcasts/{id}/chat answer.
 	sendBody string
 }
@@ -93,6 +96,11 @@ func newXChatStub(t *testing.T) *xChatStub {
 }
 
 func (st *xChatStub) refuse(w http.ResponseWriter, want string, r *http.Request) bool {
+	if want == xStubAppBearer && st.appRevoked.Load() {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"title":"Unauthorized","type":"about:blank","status":401,"detail":"Unauthorized"}`)
+		return true
+	}
 	if got := r.Header.Get("Authorization"); got != want {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"title":"Unauthorized","detail":"wrong credential for `+r.Method+` `+r.URL.Path+`"}`)

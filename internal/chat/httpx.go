@@ -8,11 +8,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // defaultHTTPTimeout bounds one API call. Chat polling runs on a schedule
@@ -44,6 +47,12 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// Problem is the platform's own words from an RFC 7807 or {errors:[...]} body, with no URLs and nothing else
+	// from the body (see oauth.XProblemText). Types is the problem type URIs, for matching, never for display.
+	// Header is the response header, for the rate-limit signals. None of the three is part of Error().
+	Problem string
+	Types   string
+	Header  http.Header
 }
 
 func (e *apiError) Error() string {
@@ -54,14 +63,16 @@ func (e *apiError) Error() string {
 }
 
 func statusOf(err error) int {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Status
 	}
 	return 0
 }
 
 func reasonOf(err error) string {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Reason
 	}
 	return ""
@@ -136,6 +147,10 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			URL:    stripQuery(endpoint),
 			Body:   shorten(raw),
 			Reason: errorReason(raw),
+			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
+			Problem: oauth.XProblemText(raw),
+			Types:   oauth.XProblemTypes(raw),
+			Header:  resp.Header,
 		}
 	}
 	if out == nil || len(raw) == 0 {
