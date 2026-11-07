@@ -434,6 +434,11 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 		if err != nil {
 			return nil, err
 		}
+		if r.Existing {
+			c.log.Info("broadcast lifecycle: X already had a live broadcast on this source, so that one was adopted "+
+				"and the request's title and options were ignored",
+				"destination", d.Name, "broadcast", r.ID)
+		}
 		for _, w := range r.Warnings {
 			c.log.Warn("broadcast lifecycle: X published the broadcast with a warning",
 				"destination", d.Name, "broadcast", broadcastID, "detail", redact.Redact(w))
@@ -681,7 +686,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	if d = c.clearRenewalOnSwitchOff(d); d == nil {
 		return
 	}
-	broadcastID := d.ActiveBroadcastID()
+	broadcastID := lifecycleBroadcastID(d)
 	if broadcastID == "" {
 		c.considerUnopened(ctx, d, prov, mode)
 		return
@@ -731,7 +736,7 @@ func (c *lifecycleCoordinator) clearRenewalOnSwitchOff(d *db.Destination) *db.De
 	// failed has no broadcast and is only held, and one that never aired goes
 	// quiet after one read. Both keep the rest of their block across the
 	// switch-off. One write, only when the marker is set.
-	return c.recordControl(d, d.Lifecycle.BroadcastID, func(b *db.BroadcastControl) { b.Renewed = false })
+	return c.recordControl(d, lifecycleBroadcastID(d), func(b *db.BroadcastControl) { b.Renewed = false })
 }
 
 // considerUnopened handles a row with no recorded broadcast: it is untracked,
@@ -751,18 +756,67 @@ func (c *lifecycleCoordinator) considerUnopened(ctx context.Context, d *db.Desti
 
 // trackRow records d as a destination this coordinator is acting on.
 func (c *lifecycleCoordinator) trackRow(d *db.Destination, broadcastID string) {
+	c.trackAs(d, broadcastID, d.Lifecycle.Phase)
+}
+
+// trackAs is trackRow with the phase given, for a broadcast that has just moved: the row still holds the phase
+// and id it was read with, and a target filed under those would not be ended if the row vanished now.
+func (c *lifecycleCoordinator) trackAs(d *db.Destination, broadcastID, phase string) {
 	var sourceID int64
 	if d.SourceID != nil {
 		sourceID = *d.SourceID
+	}
+	var accountID int64
+	if d.AccountID != nil {
+		accountID = *d.AccountID
 	}
 	c.track(d.ID, lifecycleTarget{
 		SourceID:    sourceID,
 		Name:        d.Name,
 		Platform:    d.Platform,
-		AccountID:   *d.AccountID,
+		AccountID:   accountID,
 		BroadcastID: broadcastID,
-		Phase:       d.Lifecycle.Phase,
+		Phase:       phase,
 	})
+}
+
+// lifecycleBroadcastID is the id the coordinator works with for d: the recorded broadcast, or, for an X destination
+// that is opened but not yet live, the pending handle rebuilt from its recorded source. Nothing outside this file
+// ever sees the handle.
+func lifecycleBroadcastID(d *db.Destination) string {
+	if id := d.ActiveBroadcastID(); id != "" {
+		return id
+	}
+	if src := strings.TrimSpace(d.Lifecycle.PendingSource); src != "" && d.Platform == db.PlatformX {
+		return oauth.XPendingHandle(src)
+	}
+	return ""
+}
+
+// setLifecycleBroadcastID records id in b. A pending handle is stored as its source (PendingSource) with
+// BroadcastID empty, so the API, the console and the disconnect check see no broadcast until one exists.
+func setLifecycleBroadcastID(b *db.BroadcastControl, id string) {
+	if src, ok := oauth.XPendingSource(id); ok {
+		b.BroadcastID, b.PendingSource = "", src
+		return
+	}
+	b.BroadcastID, b.PendingSource = id, ""
+}
+
+// publicBroadcastID is id for anything an operator or another system sees: empty for a pending handle.
+func publicBroadcastID(id string) string {
+	if _, ok := oauth.XPendingSource(id); ok {
+		return ""
+	}
+	return id
+}
+
+// describeBroadcast names a broadcast for operator-facing text. A pending handle is not a broadcast on X yet.
+func describeBroadcast(id string) string {
+	if _, ok := oauth.XPendingSource(id); ok {
+		return "the X broadcast (waiting for video)"
+	}
+	return "broadcast " + id
 }
 
 // resetOnUpEdge handles an UP edge (cleared): the live re-check budget is
@@ -825,7 +879,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// Finished, as below, and the finished broadcast is forgotten as well, so
 		// switching the destination on again opens a new one. This is the release
 		// the CANCELED fault names.
-		if d.Lifecycle.BroadcastID != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 {
+		if lifecycleBroadcastID(d) != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 {
 			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
 		}
 		c.untrack(d.ID)
@@ -933,8 +987,16 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	st, err := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
 	if err != nil {
 		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
-			"%s would not say what state broadcast %s is in: %v", d.Platform, broadcastID, err), err)
+			"%s would not say what state %s is in: %v", d.Platform, describeBroadcast(broadcastID), err), err)
 		return
+	}
+	if d.Platform == db.PlatformX && st.BroadcastID != "" && st.BroadcastID != broadcastID {
+		// The handle stood for a broadcast that is already on air: a go-live whose answer was lost, or whose id
+		// could not be recorded. Adopt the real one, and track it as what it is so a deleted row still ends it.
+		c.log.Info("broadcast lifecycle: adopted the live X broadcast behind a pending destination",
+			"destination", d.Name, "broadcast", st.BroadcastID, "state", st.Status)
+		broadcastID = st.BroadcastID
+		c.trackAs(d, broadcastID, xLifecyclePhase(st.Status))
 	}
 
 	plan := planLifecycle(d.Enabled, st)
@@ -1164,7 +1226,11 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	if plan.Send == oauth.PhaseLive {
 		c.tellChat(d.Platform, d.AccountID, broadcastID)
 	}
-	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+	// TRACKED BEFORE THE RECORD IS WRITTEN. The broadcast is on air from here, and the tracked target is what
+	// endOrphan ends if the row is deleted before the next sweep. Tracking it only after a successful write
+	// would leave a live broadcast nobody can end when that write fails.
+	c.trackAs(d, broadcastID, recordedPhase(res.Status, plan.Phase))
+	if c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
 		// The response's own lifeCycleStatus when it carried one; otherwise the
 		// phase we read a moment ago. NEVER the phase that was requested -- see
 		// db.BroadcastControl.Phase, and oauth.TransitionResult, which leaves
@@ -1172,12 +1238,16 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 		// mistake "already there" for "reported as there".
 		b.Phase = recordedPhase(res.Status, plan.Phase)
 		b.Attempts, b.Fault = 0, ""
-	})
+	}) == nil {
+		c.log.Warn("broadcast lifecycle: the broadcast moved but its state could not be recorded; it stays tracked "+
+			"so it is still ended if the destination is switched off or deleted",
+			"destination", d.Name, "platform", d.Platform, "broadcast", broadcastID, "to", plan.Send)
+	}
 	c.log.Info("moved a broadcast on", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "to", plan.Send, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
-		BroadcastID: broadcastID, Phase: recordedPhase(res.Status, plan.Phase), Redundant: res.Redundant,
+		BroadcastID: publicBroadcastID(broadcastID), Phase: recordedPhase(res.Status, plan.Phase), Redundant: res.Redundant,
 	})
 }
 
@@ -1228,7 +1298,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 		// Record the phase the platform just confirmed, which is what makes a
 		// daemon that dies on the next line recoverable: the next boot finds a
 		// disabled row holding a live phase and ends it.
-		cur.Lifecycle.BroadcastID = broadcastID
+		setLifecycleBroadcastID(&cur.Lifecycle, broadcastID)
 		cur.Lifecycle.Phase = plan.Phase
 		return true
 	})
@@ -1262,7 +1332,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 		"broadcast", broadcastID, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
-		BroadcastID: broadcastID, Phase: recordedPhase(res.Status, phaseComplete), Ended: true,
+		BroadcastID: publicBroadcastID(broadcastID), Phase: recordedPhase(res.Status, phaseComplete), Ended: true,
 		Redundant: res.Redundant,
 	})
 }
@@ -1380,7 +1450,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	c.untrack(t.destinationID)
 	c.tell(broadcastPhase{
 		DestinationID: t.destinationID, SourceID: t.SourceID, Destination: t.Name,
-		Platform: string(t.Platform), BroadcastID: t.BroadcastID, Phase: phaseComplete, Ended: true,
+		Platform: string(t.Platform), BroadcastID: publicBroadcastID(t.BroadcastID), Phase: phaseComplete, Ended: true,
 	})
 }
 
@@ -1622,7 +1692,19 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 		// would not decode. Counted and retried; oauth deliberately does not
 		// invent a classification for these, and neither does this.
 		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
-			"could not move broadcast %s to %q: %v", broadcastID, to, err), err)
+			"could not move %s to %q: %v", describeBroadcast(broadcastID), to, err), err)
+		return
+	}
+	if ref.Refusal == oauth.RefusalNotEligible {
+		// TERMINAL. X will answer the same 403 on every try, so it is recorded at the give-up count, which stops
+		// the calls, and raised once. An UP edge, or switching the destination off and on, releases it.
+		why := fmt.Sprintf("X will not let this account go live (%v). Check that the account is not protected "+
+			"and is allowed to broadcast on X. polyemesis will not try again until the destination is "+
+			"switched off and on.", ref.Unwrap())
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+			b.Attempts, b.Fault = lifecycleGiveUpAfter, why
+		})
+		c.raise(d, broadcastID, why)
 		return
 	}
 	if !ref.Fault() {
@@ -1664,8 +1746,11 @@ func refusalMessage(ref *oauth.TransitionRefused, broadcastID string) string {
 		// NEVER RESENT AS-IS: the next sweep re-reads the state and re-plans
 		// from whatever it finds, so a broadcast that moved underneath us gets
 		// the transition that suits where it actually is.
-		return fmt.Sprintf("the platform would not move broadcast %s from where it is to %q; "+
-			"its state will be re-read and re-planned", broadcastID, ref.Requested)
+		return fmt.Sprintf("the platform would not move %s from where it is to %q; "+
+			"its state will be re-read and re-planned", describeBroadcast(broadcastID), ref.Requested)
+	case oauth.RefusalSourceBusy:
+		return fmt.Sprintf("another broadcast is already live on this destination's X stream source (%v). "+
+			"End it in X's own tools; going live is retried.", ref.Unwrap())
 	default:
 		return ref.Error()
 	}
@@ -1759,7 +1844,7 @@ func (c *lifecycleCoordinator) raise(d *db.Destination, broadcastID, detail stri
 		DestinationID: d.ID,
 		Destination:   d.Name,
 		Platform:      string(d.Platform),
-		BroadcastID:   broadcastID,
+		BroadcastID:   publicBroadcastID(broadcastID),
 		Detail:        detail,
 	})
 }
@@ -1773,7 +1858,7 @@ func (c *lifecycleCoordinator) raise(d *db.Destination, broadcastID, detail stri
 func (c *lifecycleCoordinator) recordControl(d *db.Destination, broadcastID string,
 	mutate func(*db.BroadcastControl)) *db.Destination {
 	updated, err := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
-		cur.Lifecycle.BroadcastID = broadcastID
+		setLifecycleBroadcastID(&cur.Lifecycle, broadcastID)
 		mutate(&cur.Lifecycle)
 		return true
 	})

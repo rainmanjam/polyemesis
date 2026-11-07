@@ -50,15 +50,14 @@ const xAPIBase = platform.XAPIHost
 // xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
 // token and data host so a change to one does not move the other.
 //
-// PROVISIONAL. X's two official sources disagree (docs-x section 1, VERDICTS
-// X#8): the OpenAPI spec's authorizationUrl is https://api.x.com/2/oauth2/authorize,
-// which is what this follows, and every example in the user-access-token guide
-// uses https://x.com/i/oauth2/authorize. If a live authorize request on the
-// spec's host does not show the consent page, set these two to the guide's
-// "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
+// X's OpenAPI spec lists https://api.x.com/2/oauth2/authorize, but that address
+// answers a browser with HTTP 403 "Access to api.x.com was denied". The consent
+// page is the user-access-token guide's https://x.com/i/oauth2/authorize.
+// Confirmed by a live request on 2026-11-06. The token endpoint stays on
+// api.x.com (/2/oauth2/token).
 const (
-	xAuthorizeBase = platform.XAPIHost
-	xAuthorizePath = "/2/oauth2/authorize"
+	xAuthorizeBase = "https://x.com"
+	xAuthorizePath = "/i/oauth2/authorize"
 )
 
 // xGateCopy is the copy shown when the Livestream family is switched off. It names
@@ -227,21 +226,27 @@ func (e *xStatusError) Error() string {
 // discards the response. A rate-limit hold on the token refuses the call before
 // any request (x_ratelimit.go).
 func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payload, out any) error {
+	_, err := x.doStatus(ctx, method, endpoint, accessToken, payload, out)
+	return err
+}
+
+// doStatus is do, and it also returns the HTTP status of an answer that was read (0 when none was).
+func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, payload, out any) (int, error) {
 	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
 	if until, held := x.calls.heldUntil(fp); held {
-		return &xRateLimitedError{Until: until, Held: true}
+		return 0, &xRateLimitedError{Until: until, Held: true}
 	}
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
@@ -250,7 +255,7 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -258,21 +263,21 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 	if until, limited := x.calls.rateHoldFrom(resp); limited {
 		x.calls.hold(fp, until)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return &xRateLimitedError{Until: until, Problems: xProblemText(raw)}
+			return resp.StatusCode, &xRateLimitedError{Until: until, Problems: xProblemText(raw)}
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw)}
+		return resp.StatusCode, &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw)}
 	}
 	if readErr != nil {
 		// A body cut off mid-read is not an answer: a truncated body that happens to parse, or a write whose
 		// answer is discarded, would otherwise read as a success.
-		return fmt.Errorf("X's answer was cut off: %w", readErr)
+		return resp.StatusCode, fmt.Errorf("X's answer was cut off: %w", readErr)
 	}
 	if out == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
-	return json.Unmarshal(raw, out)
+	return resp.StatusCode, json.Unmarshal(raw, out)
 }
 
 // xProblemText extracts X's own words from an error body and nothing else. A
@@ -675,17 +680,39 @@ func (x *X) BroadcastByID(ctx context.Context, clientID, accessToken, id string)
 // when the source is not found, so an unknown answer is never reported as "no
 // bytes". MonitorStream has no X equivalent and stays nil.
 //
-// A pending handle (OpenBroadcast's) names no broadcast on X, so none is read: its
-// state is a synthetic NOT_STARTED and the source it stands for is the only thing
-// asked about.
+// A pending handle (OpenBroadcast's) names no broadcast on X, so none is read by
+// id. But the go-live behind it may have succeeded with its answer lost, or with
+// the write that records the real id failing, so the account's broadcasts are
+// listed for a live one on the handle's source. If there is one, that broadcast
+// (real id, its state) is what is returned and the caller adopts it, so a switch-off
+// still ends it. If there is none the state is a synthetic NOT_STARTED, and the
+// source is the only other thing asked about. A source that is gone from X is an
+// error, because nothing can ever go live on it.
 func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string) (*BroadcastLifecycleState, error) {
 	st := &BroadcastLifecycleState{BroadcastID: broadcastID}
 	if sourceID, pending := xPendingSource(broadcastID); pending {
 		if !x.livestream {
 			return nil, ErrXLivestreamOff
 		}
+		bs, err := x.Broadcasts(ctx, "", accessToken)
+		if err != nil {
+			return nil, err
+		}
 		st.Status, st.BoundStreamID = XStateNotStarted, sourceID
-		if err := x.fillStreamActive(ctx, accessToken, st); err != nil {
+		for _, b := range bs {
+			if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
+				continue
+			}
+			id := b.ID
+			if id == "" {
+				id = b.BroadcastID
+			}
+			if id != "" {
+				st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
+				break
+			}
+		}
+		if err := x.fillStreamActive(ctx, accessToken, st, true); err != nil {
 			return nil, err
 		}
 		return st, nil
@@ -695,14 +722,15 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 		return nil, err
 	}
 	st.Title, st.Status, st.BoundStreamID = b.Title, b.State, b.SourceID
-	if err := x.fillStreamActive(ctx, accessToken, st); err != nil {
+	if err := x.fillStreamActive(ctx, accessToken, st, false); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
-// fillStreamActive sets StreamActive and StreamStatus from the source st is bound to.
-func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *BroadcastLifecycleState) error {
+// fillStreamActive sets StreamActive and StreamStatus from the source st is bound to. A source that is not in the list
+// leaves them unknown (nil), unless mustExist is set: a pending handle's source that X no longer has is an error.
+func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *BroadcastLifecycleState, mustExist bool) error {
 	if st.BoundStreamID == "" {
 		return nil
 	}
@@ -722,6 +750,10 @@ func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *Broadc
 			}
 			return nil
 		}
+	}
+	if mustExist {
+		return errors.New("X no longer has the stream source this destination was set up on; it may have been " +
+			"deleted in X. Reconnect the X account in polyemesis so it can create a new one")
 	}
 	return nil
 }
@@ -767,6 +799,12 @@ const xPendingPrefix = "pending:"
 // xPendingHandle is the handle for a source that has no broadcast yet.
 func xPendingHandle(sourceID string) string { return xPendingPrefix + sourceID }
 
+// XPendingHandle is xPendingHandle for the lifecycle coordinator, which stores the source id and rebuilds the handle.
+func XPendingHandle(sourceID string) string { return xPendingHandle(sourceID) }
+
+// XPendingSource is xPendingSource for the lifecycle coordinator.
+func XPendingSource(id string) (string, bool) { return xPendingSource(id) }
+
 // xPendingSource reports whether id is a pending handle and, if so, the source it stands for. A real broadcast id is
 // never mistaken for one: it needs the prefix and a source id after it.
 func xPendingSource(id string) (string, bool) {
@@ -796,9 +834,41 @@ type XPublishResult struct {
 	// ID is the real broadcast id. It replaces the pending handle the caller held.
 	ID    string
 	State string
+	// Existing is true when X answered 200: the source already had a live broadcast and this is it, unchanged, with
+	// the request's title and options ignored. The usual cause is a repeat after a lost answer.
+	Existing bool
 	// Warnings is kept for callers that report them. X's Go Live answer has no tweet_error: a missing tweet_id is read
 	// later from GET /2/broadcasts/{id}, so nothing sets this today.
 	Warnings []string
+}
+
+// classifyXGoLive turns a refused go-live into what the coordinator can act on. X's three documented refusals are told
+// apart, because they need three different responses: 403 (the account cannot go live) is terminal, a 409 that names
+// another broadcast is a fault the operator fixes, and any other 409 is the expected wait for the source to receive
+// video. Anything else passes through as the wrapped error. X's own words stay in the text.
+func classifyXGoLive(err error, pending bool, broadcastID string) error {
+	wrapped := fmt.Errorf("X would not take the stream source live: %w", err)
+	var se *xStatusError
+	if !errors.As(err, &se) {
+		return wrapped
+	}
+	id := broadcastID
+	if pending {
+		id = ""
+	}
+	refuse := func(r TransitionRefusal, reason string) error {
+		return &TransitionRefused{BroadcastID: id, Requested: PhaseLive, Refusal: r, Reason: reason,
+			Platform: "X", err: err}
+	}
+	switch {
+	case se.Status == http.StatusForbidden && !strings.Contains(se.Problems, "missing-scopes"):
+		return refuse(RefusalNotEligible, "notEligible")
+	case se.Status == http.StatusConflict && strings.Contains(strings.ToLower(se.Problems), "broadcast"):
+		return refuse(RefusalSourceBusy, "sourceBusy")
+	case se.Status == http.StatusConflict:
+		return refuse(RefusalStreamInactive, "sourceNotReady")
+	}
+	return wrapped
 }
 
 // OpenBroadcast implements BroadcastCreator. It resolves the stored stream key to its source id and returns a pending
@@ -885,8 +955,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 		Data   XBroadcast `json:"data"`
 		Errors []xProblem `json:"errors"`
 	}
-	if err := x.do(ctx, http.MethodPost, x.apiEndpoint()+"/2/broadcasts", accessToken, body, &out); err != nil {
-		return nil, fmt.Errorf("X would not take the stream source live: %w", err)
+	status, err := x.doStatus(ctx, http.MethodPost, x.apiEndpoint()+"/2/broadcasts", accessToken, body, &out)
+	if err != nil {
+		return nil, classifyXGoLive(err, pending, broadcastID)
 	}
 	id := out.Data.ID
 	if id == "" {
@@ -902,7 +973,7 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if st := out.Data.State; st != XStateRunning && st != XStatePrePublished {
 		return nil, fmt.Errorf("X answered the go-live of broadcast %s with state %q, not %s", id, st, XStateRunning)
 	}
-	res := &XPublishResult{ID: id, State: out.Data.State}
+	res := &XPublishResult{ID: id, State: out.Data.State, Existing: status == http.StatusOK}
 	if len(out.Errors) > 0 {
 		res.Warnings = append(res.Warnings, "X took the source live but reported: "+xProblems(out.Errors))
 	}

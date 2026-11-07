@@ -99,11 +99,12 @@ var leafSensitivity = map[string]sensitivity{
 	// sentence telling them their channel is at its concurrent-broadcast limit.
 	// Nothing on the path that builds it touches a key: see
 	// TestALifecycleFaultCarriesNoCredential.
-	"destination.lifecycle.attempts":    sPublic,
-	"destination.lifecycle.broadcastId": sPublic,
-	"destination.lifecycle.fault":       sPublic,
-	"destination.lifecycle.phase":       sPublic,
-	"destination.lifecycle.renewed":     sPublic, // whether this broadcast was reopened within the show (X renew)
+	"destination.lifecycle.attempts":      sPublic,
+	"destination.lifecycle.broadcastId":   sPublic,
+	"destination.lifecycle.fault":         sPublic,
+	"destination.lifecycle.phase":         sPublic,
+	"destination.lifecycle.pendingSource": sPublic, // X stream source id (not the stream key) of a destination waiting for video
+	"destination.lifecycle.renewed":       sPublic, // whether this broadcast was reopened within the show (X renew)
 	// The reason a stream key could not be decrypted on this machine. sPublic
 	// despite sitting next to two sSecret leaves and despite the word "key"
 	// being in it: it is a fixed instruction to the operator -- re-enter the

@@ -156,6 +156,8 @@ type fakeLifecycleStore struct {
 	// beforeUpdate runs inside the "transaction", before apply, so a test can
 	// move the world exactly where a real race would move it.
 	beforeUpdate func(id int64, cur *db.Destination)
+	// failUpdates makes every UpdateLifecycle fail, as a full disk or a locked database would.
+	failUpdates bool
 }
 
 // GetDestination answers what the real store answers: the row, or
@@ -189,6 +191,9 @@ func (f *fakeLifecycleStore) ListDestinations() ([]*db.Destination, error) {
 func (f *fakeLifecycleStore) UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failUpdates {
+		return nil, errors.New("database is locked")
+	}
 	row, ok := f.rows[id]
 	if !ok {
 		return nil, db.ErrNotFound

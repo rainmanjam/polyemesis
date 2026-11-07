@@ -508,6 +508,11 @@
                     "string"
                   ]
                 },
+                "pendingSource": {
+                  "types": [
+                    "string"
+                  ]
+                },
                 "phase": {
                   "types": [
                     "string"

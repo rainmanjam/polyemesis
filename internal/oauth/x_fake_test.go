@@ -43,11 +43,21 @@ type xFake struct {
 	active bool
 	// broadcastState is the state GET /2/broadcasts/{id} reports.
 	broadcastState string
+	// list is the GET /2/broadcasts body.
+	list string
+	// liveStatus and liveBody, when set, make POST /2/broadcasts answer that status and body.
+	liveStatus int
+	liveBody   string
+	// liveExisting makes POST /2/broadcasts answer 200 (the source already has a live broadcast) instead of 201.
+	liveExisting bool
 }
+
+// xEmptyBroadcastList is GET /2/broadcasts for an account with nothing on air.
+const xEmptyBroadcastList = `{"data":[],"meta":{"result_count":0}}`
 
 func newXFake(t *testing.T) *xFake {
 	t.Helper()
-	f := &xFake{t: t, sources: xSourcesFixture, broadcastState: "RUNNING"}
+	f := &xFake{t: t, sources: xSourcesFixture, broadcastState: "RUNNING", list: xBroadcastListFixture}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	f.x = NewX(WithBaseURL(f.srv.URL)).WithLivestreamAccess()
@@ -172,13 +182,26 @@ func (f *xFake) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		w.WriteHeader(http.StatusCreated)
+		if f.liveStatus != 0 {
+			w.WriteHeader(f.liveStatus)
+			_, _ = io.WriteString(w, f.liveBody)
+			return
+		}
+		if f.liveExisting {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
 		_, _ = io.WriteString(w, `{"data":{"id":"`+xBroadcastID+`","broadcast_id":"`+xBroadcastID+`","state":"RUNNING",`+
 			`"share_url":"https://x.com/i/broadcasts/`+xBroadcastID+`"}}`)
 	case r.Method == http.MethodGet && path == "/2/broadcasts":
-		_, _ = io.WriteString(w, xBroadcastListFixture)
+		_, _ = io.WriteString(w, f.list)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/2/broadcasts/"):
 		id := strings.TrimPrefix(path, "/2/broadcasts/")
+		if id != xBroadcastID && id != "legacyId1234" {
+			f.problem(w, 404, "no such broadcast")
+			return
+		}
 		_, _ = io.WriteString(w, `{"data":{"id":"`+id+`","broadcast_id":"`+id+`","state":"`+f.broadcastState+
 			`","source_id":"`+xSourceID+`","title":"Sunday practice"}}`)
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/2/broadcasts/") && strings.HasSuffix(path, "/state"):

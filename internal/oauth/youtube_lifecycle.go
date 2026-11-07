@@ -267,6 +267,13 @@ const (
 	// occurred while changing the broadcast's status" -- the one refusal in the
 	// set that says nothing about the broadcast and may simply be tried again.
 	RefusalTransient TransitionRefusal = "transient"
+	// RefusalNotEligible is X's 403 on go-live: the account is not allowed to go live (protected, or not
+	// eligible). Retrying cannot change it, so the coordinator treats it as terminal until the destination is
+	// switched off and on.
+	RefusalNotEligible TransitionRefusal = "notEligible"
+	// RefusalSourceBusy is X's 409 "another broadcast is live on this source". It does not clear by itself: the
+	// other broadcast has to be ended first.
+	RefusalSourceBusy TransitionRefusal = "sourceBusy"
 )
 
 // TransitionRefused is a refusal YouTube named. It wraps the underlying HTTP
@@ -281,12 +288,22 @@ type TransitionRefused struct {
 	// collapses two ceiling reasons into one and a bug report wants the exact
 	// one that fired.
 	Reason string
-	err    error
+	// Platform names who refused, for the text. Empty means YouTube, which is where this type began.
+	Platform string
+	err      error
 }
 
 func (e *TransitionRefused) Error() string {
-	return fmt.Sprintf("YouTube refused the transition to %q on broadcast %s (%s): %v",
-		e.Requested, e.BroadcastID, e.Reason, e.err)
+	who := e.Platform
+	if who == "" {
+		who = "YouTube"
+	}
+	// An empty id is a broadcast that does not exist yet (X's pending handle, which is never shown).
+	on := "its broadcast"
+	if e.BroadcastID != "" {
+		on = "broadcast " + e.BroadcastID
+	}
+	return fmt.Sprintf("%s refused the transition to %q on %s (%s): %v", who, e.Requested, on, e.Reason, e.err)
 }
 
 func (e *TransitionRefused) Unwrap() error { return e.err }

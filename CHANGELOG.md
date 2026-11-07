@@ -41,7 +41,11 @@ its first tagged release.
   soon as it returns, so a destination records a pending handle while its source is silent and the real
   broadcast id is recorded when it goes live. X's Livestream docs no longer ask for a whitelist or an access
   form, so the operator copy now says "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)"; the gate
-  stays opt-in and pasting the key still works. PROVISIONAL: no live X account has run the new routes.
+  stays opt-in and pasting the key still works. PROVISIONAL: no live X account has run the new routes. While a destination waits for video its
+  `lifecycle.broadcastId` is empty and `lifecycle.pendingSource` names the source. A go-live whose answer
+  was lost is adopted on the next read, a deleted row right after go-live still ends the broadcast, a source
+  deleted on X raises a fault, an account X will not let go live is a terminal fault, and a 409 for a source
+  that is not receiving video yet costs nothing.
 
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
