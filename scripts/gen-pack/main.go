@@ -66,7 +66,7 @@ func run(root string, check, fetch, skeleton bool) error {
 		return os.WriteFile(filepath.Join(packDir, "skeleton_table.go"), out, 0o644)
 	}
 
-	out, stats, err := generate(genDir)
+	out, stats, err := generate(genDir, packDir)
 	if err != nil {
 		return err
 	}

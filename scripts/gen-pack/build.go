@@ -87,9 +87,10 @@ type override struct {
 	} `yaml:"add"`
 }
 
-// generate reads the committed source snapshots and overrides and returns the
-// bytes of en-v1.json.
-func generate(genDir string) ([]byte, stats, error) {
+// generate reads the committed source snapshots (genDir/sources) and the
+// maintainers' overrides (packDir/overrides.yaml) and returns the bytes of
+// en-v1.json.
+func generate(genDir, packDir string) ([]byte, stats, error) {
 	st := stats{byCatTier: map[string]int{}, rejected: map[string]int{}}
 	p, err := loadPins(filepath.Join(genDir, "pins.yaml"))
 	if err != nil {
@@ -111,7 +112,7 @@ func generate(genDir string) ([]byte, stats, error) {
 	}
 
 	var ov override
-	ob, err := os.ReadFile(filepath.Join(genDir, "overrides.yaml"))
+	ob, err := os.ReadFile(filepath.Join(packDir, "overrides.yaml"))
 	if err != nil {
 		return nil, st, err
 	}

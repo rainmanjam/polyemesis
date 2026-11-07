@@ -29,6 +29,3 @@ lists and is not endorsed by their authors.
    Copyright (c) 1991-2026 Unicode, Inc. Licence: Unicode License v3,
    LICENSE-Unicode-3.0.txt. Filtered to single characters that look like an
    ASCII letter or digit, and lowercased.
-
-Polyemesis-written parts of the pack (scam phrases, shorteners, brand domains,
-the maintainers' tiering) are under the polyemesis licence.

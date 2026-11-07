@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	packFile = "../../internal/automod/pack/en-v1.json"
+	packDir  = "../../internal/automod/pack"
+	packFile = packDir + "/en-v1.json"
 )
 
 // TestEmbeddedPackMatchesGeneratorOutput is the drift test. The pack is
@@ -20,7 +21,7 @@ const (
 // committed file is exactly what the pinned sources and overrides produce. It
 // reads the committed source snapshots, so it needs no network.
 func TestEmbeddedPackMatchesGeneratorOutput(t *testing.T) {
-	want, _, err := generate(".")
+	want, _, err := generate(".", packDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +35,11 @@ func TestEmbeddedPackMatchesGeneratorOutput(t *testing.T) {
 }
 
 func TestGenerationIsDeterministic(t *testing.T) {
-	a, _, err := generate(".")
+	a, _, err := generate(".", packDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, _ := generate(".")
+	b, _, _ := generate(".", packDir)
 	if !bytes.Equal(a, b) {
 		t.Fatal("two runs produced different bytes")
 	}
@@ -207,5 +208,46 @@ func TestSkeletonTableMatchesPinnedConfusables(t *testing.T) {
 	}
 	if !bytes.Equal(have, want) {
 		t.Fatal("skeleton_table.go differs from the generator output: run `go generate ./internal/automod/pack`")
+	}
+}
+
+func TestOverridesApplyAndStaleKeysFail(t *testing.T) {
+	base, _, err := generate(".", packDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := pack.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	term := p.Entries[0].Term
+
+	write := func(body string) string {
+		d := t.TempDir()
+		if err := os.WriteFile(filepath.Join(d, "overrides.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+
+	// A drop removes the term; a key that matches nothing is an error, so an
+	// override can't go stale silently when a pin moves.
+	out, _, err := generate(".", write("drop: ["+term+"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := pack.Parse(out)
+	if len(q.Entries) != len(p.Entries)-1 {
+		t.Errorf("drop left %d entries, want %d", len(q.Entries), len(p.Entries)-1)
+	}
+	for _, body := range []string{
+		"drop: [zzzz qqqq]\n",
+		"tier: {zzzz qqqq: severe}\n",
+		"except: {zzzz qqqq: [zzzzqqqqs]}\n",
+		"unknown_key: 1\n",
+	} {
+		if _, _, err := generate(".", write(body)); err == nil {
+			t.Errorf("overrides %q were accepted", body)
+		}
 	}
 }

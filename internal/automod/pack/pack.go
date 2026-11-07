@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -217,16 +216,4 @@ func (p *Pack) Count() map[string]int {
 		m[e.Category+"/"+e.Tier]++
 	}
 	return m
-}
-
-// Terms returns the terms of one category in stored order.
-func (p *Pack) Terms(category string) []string {
-	var out []string
-	for _, e := range p.Entries {
-		if e.Category == category {
-			out = append(out, e.Term)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
