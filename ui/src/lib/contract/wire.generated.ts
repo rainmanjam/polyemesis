@@ -144,6 +144,14 @@ export const WIRE = {
     "minDurationSeconds": 15,
     "maxDurationSeconds": 3600
   },
+  "twitchTools": {
+    "maxAnnouncement": 500,
+    "maxWarning": 500,
+    "minTerm": 2,
+    "maxTerm": 500,
+    "minPinSeconds": 30,
+    "maxPinSeconds": 1800
+  },
   "overlay": {
     "fonts": [
       "sans",

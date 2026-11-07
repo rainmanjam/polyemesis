@@ -202,6 +202,16 @@ const (
 	twitchPageCap          = 10
 )
 
+// The limits the console checks before it sends, from the wire contract.
+const (
+	TwitchMaxAnnouncement = twitchMaxAnnouncement
+	TwitchMaxWarning      = twitchMaxWarning
+	TwitchMinTerm         = twitchMinTerm
+	TwitchMaxTerm         = twitchMaxTerm
+	TwitchMinPinSeconds   = twitchMinPin
+	TwitchMaxPinSeconds   = twitchMaxPin
+)
+
 var announceColors = map[string]bool{"primary": true, "blue": true, "green": true, "orange": true, "purple": true}
 
 // toolState is the adapter's in-memory shoutout ledger. Its zero value works.
@@ -1146,7 +1156,8 @@ func (t *TwitchAdapter) ResolveUnbanRequest(ctx context.Context, id, status, tex
 		Data []unbanWire `json:"data"`
 	}
 	if err := t.helix(ctx, http.MethodPatch, "/moderation/unban_requests", q, nil, &out); err != nil {
-		return UnbanRequest{}, t.toolError(err, status[:len(status)-1]+" that unban request", unbanHints)
+		verb := map[string]string{"approved": "approve", "denied": "deny"}[status]
+		return UnbanRequest{}, t.toolError(err, verb+" that unban request", unbanHints)
 	}
 	if len(out.Data) == 0 {
 		return UnbanRequest{ID: id, Status: status}, nil

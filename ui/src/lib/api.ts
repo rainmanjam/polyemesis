@@ -415,12 +415,14 @@ export function mutationWarnings(body: unknown): string[] {
   return b.reconcileFailed === true ? list.slice(0, -1) : list;
 }
 
-/** The path of one Twitch channel tool; see api.twitchTool. */
-function twitchToolPath(resource: string, account: string | undefined, params: Record<string, string> = {}) {
+/** The query string of one Twitch channel tool call; see api.twitchTool. The
+ *  path itself stays a template literal at each call so the console contract
+ *  test can see which server route it reaches. */
+function twitchToolQuery(account: string | undefined, params: Record<string, string> = {}) {
   const q = new URLSearchParams(params);
   if (account) q.set("account", account);
   const qs = q.toString();
-  return `/chat/twitch/${resource}${qs ? `?${qs}` : ""}`;
+  return qs ? `?${qs}` : "";
 }
 
 const get = <T,>(p: string) => request<T>(p);
@@ -1474,15 +1476,15 @@ export const api = {
    *  JSON body. See docs/API.md, "Twitch channel tools". */
   twitchTool: {
     read: <T,>(resource: string, account: string | undefined, params: Record<string, string> = {}) =>
-      get<T>(twitchToolPath(resource, account, params)),
+      get<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
     post: <T,>(resource: string, account: string | undefined, body: unknown) =>
-      post<T>(twitchToolPath(resource, account), body ?? {}),
+      post<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body ?? {}),
     put: <T,>(resource: string, account: string | undefined, body: unknown) =>
-      put<T>(twitchToolPath(resource, account), body),
+      put<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
     patch: <T,>(resource: string, account: string | undefined, body: unknown) =>
-      patch<T>(twitchToolPath(resource, account), body),
+      patch<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
     remove: <T,>(resource: string, account: string | undefined, params: Record<string, string>) =>
-      del<T>(twitchToolPath(resource, account, params)),
+      del<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
   },
 
   // --- platforms ---

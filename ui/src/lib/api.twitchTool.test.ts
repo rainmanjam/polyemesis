@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
+import { WIRE } from "./contract/wire";
 
 /* api.twitchTool is one path, /chat/twitch/{resource}, and the method is the
  * verb. Reads and deletes carry their parameters in the query, with the account
@@ -36,5 +37,13 @@ describe("api.twitchTool", () => {
       "DELETE /chat/twitch/blocked-terms?id=i+1&account=acct",
     ]);
     expect(JSON.parse(String(calls[2].init?.body))).toEqual({ message: "hi" });
+  });
+});
+
+describe("the channel tools' limits", () => {
+  it("come from the server's wire contract", () => {
+    expect(WIRE.twitchTools).toEqual({
+      maxAnnouncement: 500, maxWarning: 500, minTerm: 2, maxTerm: 500, minPinSeconds: 30, maxPinSeconds: 1800,
+    });
   });
 });

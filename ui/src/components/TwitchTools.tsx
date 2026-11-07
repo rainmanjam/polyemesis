@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { accentFor } from "@/lib/chat";
+import { WIRE } from "@/lib/contract/wire";
 import { clockTime } from "@/lib/format";
 import { useT, type Translator } from "@/lib/i18n";
 import type {
@@ -55,6 +56,8 @@ const AUTOMOD_CATEGORIES = [
   "swearing",
 ] as const;
 const LEVELS = [0, 1, 2, 3, 4];
+/** Twitch's limits, from the server's wire contract (internal/chat). */
+const LIMITS = WIRE.twitchTools;
 
 const inputCls = "h-6 min-w-0 rounded border border-border bg-card-raised px-1 text-sm";
 
@@ -168,7 +171,7 @@ function SayTab({ account, run, busy, t }: Readonly<TabProps>) {
           <input
             className={`${inputCls} w-56`}
             value={message}
-            maxLength={500}
+            maxLength={LIMITS.maxAnnouncement}
             placeholder={t("twitchTools.announcePlaceholder")}
             aria-label={t("twitchTools.announce")}
             onChange={(e) => setMessage(e.target.value)}
@@ -241,7 +244,7 @@ function SayTab({ account, run, busy, t }: Readonly<TabProps>) {
           <input
             className={`${inputCls} w-48`}
             value={reason}
-            maxLength={500}
+            maxLength={LIMITS.maxWarning}
             placeholder={t("twitchTools.reasonPlaceholder")}
             aria-label={t("twitchTools.reasonPlaceholder")}
             onChange={(e) => setReason(e.target.value)}
@@ -273,8 +276,8 @@ function SayTab({ account, run, busy, t }: Readonly<TabProps>) {
           <input
             className={`${inputCls} w-24`}
             type="number"
-            min={30}
-            max={1800}
+            min={LIMITS.minPinSeconds}
+            max={LIMITS.maxPinSeconds}
             value={pinSecs}
             placeholder={t("twitchTools.pinSecondsPlaceholder")}
             aria-label={t("twitchTools.pinSecondsPlaceholder")}
@@ -469,14 +472,14 @@ function SafetyTab({ account, run, busy, t }: Readonly<TabProps>) {
           <input
             className={`${inputCls} w-44`}
             value={term}
-            maxLength={500}
+            maxLength={LIMITS.maxTerm}
             placeholder={t("twitchTools.termPlaceholder")}
             aria-label={t("twitchTools.blockedTerms")}
             onChange={(e) => setTerm(e.target.value)}
           />
           <Button
             size="sm"
-            disabled={busy || term.trim().length < 2}
+            disabled={busy || term.trim().length < LIMITS.minTerm}
             onClick={() =>
               void run(async () => {
                 await api.twitchTool.post("blocked-terms", account, { text: term });

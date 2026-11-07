@@ -83,6 +83,10 @@ func twitchToolsFixture(t *testing.T, fail map[string]int) (*Server, http.Handle
 			io.WriteString(w, `{"data":[{"is_active":true,"moderator_login":"mod"}]}`)
 		case "GET /chat/pins":
 			io.WriteString(w, `{"data":[]}`)
+		case "GET /moderation/automod/settings":
+			io.WriteString(w, `{"data":[{"overall_level":2}]}`)
+		case "GET /moderation/unban_requests":
+			io.WriteString(w, `{"data":[{"id":"u1","user_login":"x","text":"sorry","status":"pending"}],"pagination":{}}`)
 		case "GET /channels/vips":
 			io.WriteString(w, `{"data":[{"user_id":"4","user_login":"v","user_name":"V"}]}`)
 		case "GET /moderation/moderators":
@@ -145,6 +149,8 @@ func TestReadsOfTheTwitchToolsReachTheAdapter(t *testing.T) {
 		"pin":                `"pin":null`,
 		"roles?role=vip":     `"holders"`,
 		"shoutout-cooldowns": `"targets"`,
+		"automod-settings":   `"overallLevel":2`,
+		"unban-requests":     `"requests"`,
 	} {
 		code, body := rawBodyOf(t, h, sign, "/api/v1/chat/twitch/"+joinAccount(path))
 		if code != http.StatusOK || !strings.Contains(body, want) {
@@ -284,5 +290,22 @@ func TestErrNeedNamesTheField(t *testing.T) {
 	}
 	if v := nonNil[int](nil); v == nil {
 		t.Fatal("nonNil returned nil")
+	}
+}
+
+func TestTwitchToolsRefuseAnAdapterWithoutThem(t *testing.T) {
+	s, h, _ := testServer(t, config.Config{})
+	hub := chat.New()
+	t.Cleanup(hub.Close)
+	s.chat = hub
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := hub.Attach(ctx, &moderatableAdapter{platform: db.PlatformTwitch, account: "bare"}); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	sign := login(t, h)
+	body := send(t, h, sign, http.MethodGet, "/api/v1/chat/twitch/banned?account=bare", nil, http.StatusBadGateway)
+	if !strings.Contains(string(body), "no channel tools") {
+		t.Fatalf("body = %s", body)
 	}
 }

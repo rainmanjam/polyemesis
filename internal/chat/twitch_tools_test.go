@@ -635,7 +635,7 @@ func TestUnbanRequestRefusals(t *testing.T) {
 	if _, err := a.ListUnbanRequests(context.Background(), "pending"); err == nil || !strings.Contains(err.Error(), "not be receiving") {
 		t.Fatalf("400: %v", err)
 	}
-	if _, err := a.ResolveUnbanRequest(context.Background(), "u", "denied", ""); err == nil || !strings.Contains(err.Error(), "no such unban") {
+	if _, err := a.ResolveUnbanRequest(context.Background(), "u", "denied", ""); err == nil || !strings.Contains(err.Error(), "deny that unban request") || !strings.Contains(err.Error(), "no such unban") {
 		t.Fatalf("404: %v", err)
 	}
 	_, a = newHelixFake(t, map[string]fakeReply{"PATCH /moderation/unban_requests": {200, `{"data":[]}`}})

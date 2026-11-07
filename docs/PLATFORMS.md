@@ -684,7 +684,7 @@ version 5, so a Twitch account connected before it is marked "reconnect
 needed" once.
 
 Scope version 6 adds twelve scopes for the **channel tools** (the *Channel tools*
-column above, `POST /chat/twitch/{resource}` in the [API](API.md)):
+column above, `/chat/twitch/{resource}` in the [API](API.md)):
 `moderator:manage:announcements`, `moderator:manage:shoutouts`,
 `moderator:manage:shield_mode`, `moderator:manage:warnings`,
 `moderator:manage:blocked_terms`, `moderator:read:chatters`,
