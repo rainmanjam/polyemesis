@@ -47,3 +47,11 @@ describe("mute and remove on X", () => {
     expect(screen.queryByRole("menuitem", { name: /Mute and remove this message/ })).toBeNull();
   });
 });
+
+describe("mute and remove needs an id X can address", () => {
+  afterEach(cleanup);
+  it("is inert for a message with a synthesised id", () => {
+    draw({ ...msg("x"), id: "syn-x-123" } as ChatMessage);
+    expect(screen.getByRole("menuitem", { name: /Mute and remove this message/ }).getAttribute("aria-disabled")).toBe("true");
+  });
+});

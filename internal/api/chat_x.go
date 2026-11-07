@@ -39,12 +39,18 @@ func (s *Server) handleChatMutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"mutes": mutes})
 }
 
-// moderatorsBody is the moderator routes' answer. AppliesToAll says, for a client to show, that X's moderators act
-// on every broadcast the account hosts and are not set per broadcast.
-type moderatorsBody struct {
-	Moderators   []chat.ChatModerator `json:"moderators,omitempty"`
-	IDs          []string             `json:"ids,omitempty"`
+// moderatorListBody is GET /chat/moderators' answer. Moderators has no omitempty: an empty list is "[]", which a
+// client reads as "no moderators", where a missing key reads as "not told". AppliesToAll says, for a client to show,
+// that X's moderators act on every broadcast the account hosts and are not set per broadcast.
+type moderatorListBody struct {
+	Moderators   []chat.ChatModerator `json:"moderators"`
 	AppliesToAll bool                 `json:"appliesToAllBroadcasts"`
+}
+
+// moderatorChangeBody is the answer to adding or removing one: the ids of every moderator afterwards, "[]" when none.
+type moderatorChangeBody struct {
+	IDs          []string `json:"ids"`
+	AppliesToAll bool     `json:"appliesToAllBroadcasts"`
 }
 
 // handleChatModerators lists the account's chat moderators.
@@ -61,7 +67,7 @@ func (s *Server) handleChatModerators(w http.ResponseWriter, r *http.Request) {
 	if mods == nil {
 		mods = []chat.ChatModerator{}
 	}
-	writeJSON(w, http.StatusOK, moderatorsBody{Moderators: mods, AppliesToAll: true})
+	writeJSON(w, http.StatusOK, moderatorListBody{Moderators: mods, AppliesToAll: true})
 }
 
 // handleChatAddModerator appoints a chat moderator by the platform's user id (the author id on a chat message).
@@ -80,7 +86,10 @@ func (s *Server) handleChatAddModerator(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, moderatorsBody{IDs: ids, AppliesToAll: true})
+	if ids == nil {
+		ids = []string{}
+	}
+	writeJSON(w, http.StatusOK, moderatorChangeBody{IDs: ids, AppliesToAll: true})
 }
 
 // handleChatRemoveModerator removes a chat moderator.
@@ -99,5 +108,8 @@ func (s *Server) handleChatRemoveModerator(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, moderatorsBody{IDs: ids, AppliesToAll: true})
+	if ids == nil {
+		ids = []string{}
+	}
+	writeJSON(w, http.StatusOK, moderatorChangeBody{IDs: ids, AppliesToAll: true})
 }

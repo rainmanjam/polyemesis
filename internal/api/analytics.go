@@ -106,6 +106,9 @@ type youTubeViewerReader interface {
 // a drift test to the viewerStats cell reading "works", and this read has not run against a live X account. Asserted
 // on the provider the Set resolves, like youTubeViewerReader.
 type xViewerReader interface {
+	// LivestreamAccess is the Livestream gate. With it closed every read answers ErrXLivestreamOff, so X must stay a
+	// chat-only target rather than a row that errors on every tick.
+	LivestreamAccess() bool
 	LiveViewers(ctx context.Context, accessToken string) (*oauth.XLiveViewers, error)
 }
 
@@ -122,8 +125,8 @@ func (s *Server) hasViewerCount(p db.Platform) bool {
 	if err != nil {
 		return false
 	}
-	_, ok := prov.(xViewerReader)
-	return ok
+	xr, ok := prov.(xViewerReader)
+	return ok && xr.LivestreamAccess()
 }
 
 // analyticsSource is the sampler's view of this server.

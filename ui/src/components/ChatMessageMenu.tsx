@@ -54,6 +54,11 @@ import type { ChatMessage } from "@/lib/types";
    about ONE ACTION and hands back the sentence to put on screen.
    =========================================================================== */
 
+/** The message ids X's mute call takes. X's own ids are digits; a line that
+ *  arrived without one, or an echo that fell back to polyemesis's own, cannot
+ *  be removed that way, so the item stays inert instead of failing on press. */
+const X_MUTE_MESSAGE_ID = /^[1-9][0-9]{0,18}$/;
+
 export interface MenuAnchor {
   x: number;
   y: number;
@@ -286,7 +291,7 @@ export function ChatMessageMenu({
             delete alone leaves the viewer free to post again. */}
         {message.platform === ("x" as ChatMessage["platform"]) && (
           <DropdownMenuItem
-            disabled={!person.ok || message.id === ""}
+            disabled={!person.ok || !X_MUTE_MESSAGE_ID.test(message.id)}
             title={person.reason || t("chatMenu.muteAndRemoveTitle")}
             onSelect={() => {
               close();

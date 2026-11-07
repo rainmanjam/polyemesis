@@ -45,7 +45,34 @@ func TestChatMutesAndModeratorsRoutes(t *testing.T) {
 	if !strings.Contains(string(raw), `"ids":["4093"]`) {
 		t.Errorf("add body = %s", raw)
 	}
-	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=x&account=acct&userId=4093", nil, http.StatusOK)
+	raw = send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=x&account=acct&userId=4093", nil, http.StatusOK)
+	// Removing the last one answers "ids":[] and not a missing key, so a client can tell "none" from "not told".
+	if !strings.Contains(string(raw), `"ids":[]`) {
+		t.Errorf("remove body = %s, want an empty ids list", raw)
+	}
+}
+
+// An empty moderator list is "moderators":[], never an absent key.
+func TestChatModeratorsEmptyListIsAnEmptyArray(t *testing.T) {
+	s, h, _ := testServer(t, config.Config{})
+	hub := chat.New()
+	t.Cleanup(hub.Close)
+	s.chat = hub
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := hub.Attach(ctx, &emptyModsAdapter{xModerationAdapter{moderatableAdapter{platform: db.PlatformX, account: "acct"}}}); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	raw := send(t, h, login(t, h), http.MethodGet, "/api/v1/chat/moderators?platform=x&account=acct", nil, http.StatusOK)
+	if !strings.Contains(string(raw), `"moderators":[]`) || !strings.Contains(string(raw), `"appliesToAllBroadcasts":true`) {
+		t.Errorf("body = %s, want an empty array and the all-broadcasts flag", raw)
+	}
+}
+
+type emptyModsAdapter struct{ xModerationAdapter }
+
+func (a *emptyModsAdapter) ListModerators(context.Context) ([]chat.ChatModerator, error) {
+	return nil, nil
 }
 
 func TestChatXRoutesRefuseMissingAndUnsupported(t *testing.T) {
@@ -104,6 +131,10 @@ func TestAnalyticsReadsXViewersThroughItsOwnSeam(t *testing.T) {
 
 func TestAnalyticsXReadRefusedWhenTheGateIsClosed(t *testing.T) {
 	s, _, _ := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithXLivestream(false))})
+	// A closed gate keeps X a chat-only target, so the sampler never reads it and shows no error row.
+	if s.hasViewerCount(db.PlatformX) {
+		t.Error("hasViewerCount(x) is true with the Livestream gate closed")
+	}
 	if _, err := (analyticsSource{s}).readX(context.Background(), "tok"); err == nil {
 		t.Error("readX answered with the Livestream gate closed")
 	}
