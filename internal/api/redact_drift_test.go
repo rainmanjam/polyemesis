@@ -63,9 +63,16 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.compliance.labels":          sPublic,
 	"destination.compliance.madeForKids":     sPublic,
 	"destination.compliance.privacy":         sPublic,
-	"destination.createdAt":                  sPublic,
-	"destination.enabled":                    sPublic,
-	"destination.expertAckReencode":          sPublic,
+	// YouTube broadcast controls: latency, DVR, recording, captions. Settings.
+	"destination.compliance.youtube.closedCaptionsType": sPublic,
+	"destination.compliance.youtube.enableAutoStart":    sPublic,
+	"destination.compliance.youtube.enableAutoStop":     sPublic,
+	"destination.compliance.youtube.enableDvr":          sPublic,
+	"destination.compliance.youtube.latencyPreference":  sPublic,
+	"destination.compliance.youtube.recordFromStart":    sPublic,
+	"destination.createdAt":                             sPublic,
+	"destination.enabled":                               sPublic,
+	"destination.expertAckReencode":                     sPublic,
 	// The FFmpeg arguments an operator hand-wrote for this destination. Not a
 	// credential by their name and a credential by the product's own ruling:
 	// GET /destinations/{id}/expert is 403 to a read token BECAUSE the argv it

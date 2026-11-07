@@ -84,6 +84,11 @@ func TestAYouTubeRunningPollTallyIsReadFromTheChatPage(t *testing.T) {
 	if v, live, _ := a.PollTally("p1"); live || v[0] != 5 {
 		t.Errorf("after close: %v live=%v", v, live)
 	}
+	// A poll just created carries zeros that are no count at all.
+	a.deliverPage([]ytChatItem{pollPage("p0", "active", "0", "0")}, time.Time{}, SinkFunc(func(Message) {}))
+	if _, _, ok := a.PollTally("p0"); ok {
+		t.Error("an all-zero tally was reported as a count")
+	}
 	// Without a tally (a token that is not the channel owner's) nothing is
 	// recorded, rather than a row of zeros.
 	a.deliverPage([]ytChatItem{pollPage("p2", "active", "", "")}, time.Time{}, SinkFunc(func(Message) {}))
@@ -310,5 +315,25 @@ func TestYouTubeBanSendsPermanentOrTemporaryAsAsked(t *testing.T) {
 	// 200 units each at the quota table's price.
 	if got := a.budget.status().Used; got != 3*200 {
 		t.Errorf("spent %d, want 600", got)
+	}
+}
+
+// Another moderator's (or Studio's) ban arrives as a userBannedEvent; the
+// banned person's earlier messages leave the pane, and the event is not shown.
+func TestAYouTubeBanByAnotherModeratorRetractsTheBannedUsersMessages(t *testing.T) {
+	a := ytAdapter(t, "http://example.invalid", nil)
+	sink := &recordingSink{}
+	var ban, empty ytChatItem
+	ban.ID, empty.ID = "ev-1", "ev-2"
+	ban.Snippet.Type, empty.Snippet.Type = "userBannedEvent", "userBannedEvent"
+	ban.Snippet.UserBannedDetails = &struct {
+		BannedUserDetails struct {
+			ChannelID string `json:"channelId"`
+		} `json:"bannedUserDetails"`
+	}{}
+	ban.Snippet.UserBannedDetails.BannedUserDetails.ChannelID = "UC-banned"
+	n := a.deliverPage([]ytChatItem{ban, empty}, time.Time{}, sink)
+	if _, users := sink.snapshot(); n != 0 || len(users) != 1 || users[0] != "UC-banned" {
+		t.Fatalf("delivered %d, retracted users %v", n, users)
 	}
 }

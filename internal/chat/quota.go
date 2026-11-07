@@ -83,7 +83,7 @@ const (
 	// DefaultQuotaUnits is a Google Cloud project's default daily allowance.
 	DefaultQuotaUnits = platform.YouTubeDefaultDailyUnits
 	// DefaultQuotaReserve is held back so that sending never becomes
-	// impossible because reading spent everything. Two hundred units is four
+	// impossible because reading spent everything. Two hundred units is ten
 	// messages — enough to say "we are moving to Twitch" when it matters.
 	DefaultQuotaReserve = 200
 

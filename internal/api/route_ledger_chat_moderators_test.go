@@ -106,3 +106,16 @@ func TestChatModeratorRoutesListAddRemoveAndRefuse(t *testing.T) {
 	send(t, h, sign, http.MethodPost, "/api/v1/chat/moderators?platform=twitch&channelId=u", nil, http.StatusBadRequest)
 	send(t, h, sign, http.MethodDelete, "/api/v1/chat/moderators?platform=twitch&id=u", nil, http.StatusBadRequest)
 }
+
+// A destination that asks only for YouTube broadcast controls reports the
+// contentDetails field, and one that asks for none reports nothing.
+func TestComplianceFieldsNamesTheYouTubeControls(t *testing.T) {
+	dvr := true
+	got := complianceFields(db.Compliance{YouTube: &db.YouTubeBroadcastControls{EnableDvr: &dvr}})
+	if len(got) != 1 || got[0] != "contentDetails" {
+		t.Errorf("fields = %v", got)
+	}
+	if got := complianceFields(db.Compliance{YouTube: &db.YouTubeBroadcastControls{}}); len(got) != 0 {
+		t.Errorf("empty controls named %v", got)
+	}
+}

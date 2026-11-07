@@ -53,6 +53,7 @@ export interface MetaTarget {
     madeForKids?: boolean;
     labels?: Record<string, boolean>;
     facebookPrivacy?: string;
+    youtube?: Record<string, unknown>;
   };
 }
 

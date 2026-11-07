@@ -250,6 +250,13 @@ type ytChatItem struct {
 		// PollDetails is present on a poll message. The reference names the
 		// type "pollDetails" in one place and "pollEvent" in another, so a poll
 		// is recognised by this object rather than by the type string.
+		// UserBannedDetails is present on a userBannedEvent: a moderator (this
+		// app, another moderator or Studio) banned someone.
+		UserBannedDetails *struct {
+			BannedUserDetails struct {
+				ChannelID string `json:"channelId"`
+			} `json:"bannedUserDetails"`
+		} `json:"userBannedDetails"`
 		PollDetails *struct {
 			Metadata struct {
 				Status  string `json:"status"`
@@ -357,13 +364,26 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Sink) int {
 	delivered := 0
 	for _, it := range items {
-		// A tombstone is how the API reports a deletion: the message's id and
-		// publish time with nothing else. The messageDeletedEvent and
-		// messageRetractedEvent types it once documented were removed from the
-		// reference (2026-06-23) because it never returned them, and nothing
-		// here ever read them. https://developers.google.com/youtube/v3/live/docs/liveChatMessages
+		// A tombstone marks where a deleted message used to be: its id and
+		// publish time with nothing else. The reference says it is NOT sent at
+		// the moment of deletion, only shown in place of the message, so this
+		// catches a deletion when that stretch of chat is read again (the first
+		// page after a reconnect), not necessarily when it happens. The
+		// messageDeletedEvent and messageRetractedEvent types were removed from
+		// the reference (2026-06-23) because the API never returned them, and
+		// nothing here ever read them.
+		// https://developers.google.com/youtube/v3/live/docs/liveChatMessages
 		if it.Snippet.Type == "tombstone" {
 			retract(sink, it.ID)
+			continue
+		}
+		// A userBannedEvent IS sent when it happens, including a ban made by
+		// another moderator or in Studio. YouTube clears a banned user's
+		// backlog on its side, as Hub.Ban already assumes, so drop theirs here.
+		if it.Snippet.Type == "userBannedEvent" {
+			if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
+				retractUser(sink, d.BannedUserDetails.ChannelID)
+			}
 			continue
 		}
 		if it.Snippet.PollDetails != nil {
@@ -737,20 +757,28 @@ const ytMaxTallies = 32
 
 // notePoll remembers the tally a list page carried for a poll message. The
 // reference says the tally is present only when the request is authorised by
-// the channel owner; a poll seen without one is not recorded, so PollTally
-// reports "nothing yet" rather than a row of zeros.
+// the channel owner; a poll seen without one is not recorded. An all-zero tally
+// is not recorded either: the poll message is delivered when it is created,
+// before anyone has voted, and no documented call re-reads it, so a row of
+// zeros is as likely a snapshot from the start as a count. PollTally therefore
+// reports "nothing yet" until a page carries a count that is not zero.
 func (y *YouTubeAdapter) notePoll(it ytChatItem) {
 	md := it.Snippet.PollDetails.Metadata
 	if it.ID == "" || len(md.Options) == 0 {
 		return
 	}
 	votes := make([]int, len(md.Options))
+	total := 0
 	for i, o := range md.Options {
 		n, err := strconv.Atoi(o.Tally)
 		if err != nil || n < 0 {
 			return
 		}
 		votes[i] = n
+		total += n
+	}
+	if total == 0 {
+		return
 	}
 	y.mu.Lock()
 	defer y.mu.Unlock()

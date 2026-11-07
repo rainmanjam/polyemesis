@@ -45,9 +45,8 @@ const (
 	YouTubeCostSendMessage     = 20
 	YouTubeCostDeleteMessage   = 20
 	YouTubeCostBan             = 200
-	// liveChatBans.delete is also 200; liveChatModerators.insert and .delete
-	// are 200 and .list is 50.
-	YouTubeCostUnban         = 200
+	// liveChatModerators.list is 50; .insert and .delete are 200 (liveChatBans
+	// .delete is 200 too, but polyemesis does not keep ban ids to call it).
 	YouTubeCostModeratorList = 50
 	YouTubeCostModeratorEdit = 200
 	YouTubeCostPollCreate    = 20

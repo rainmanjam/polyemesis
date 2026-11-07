@@ -551,6 +551,9 @@ func TestTargetsQuoteTheUploadCostTheRegistryCharges(t *testing.T) {
 			if p.QuotaUnits != want {
 				t.Fatalf("quotaUnits = %d, want %d", p.QuotaUnits, want)
 			}
+			if platform.YouTubeUploadDailyCalls != 100 {
+				t.Fatalf("videos.insert bucket = %d calls a day; the table and the 15 locale strings say 100", platform.YouTubeUploadDailyCalls)
+			}
 			if got := platform.YouTubeCostUploadVideo; got != want {
 				t.Fatalf("the registry charges %d for an upload and the API quotes %d", got, want)
 			}

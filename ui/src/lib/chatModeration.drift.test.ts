@@ -112,3 +112,10 @@ describe("the gap the per-action table exists to close", () => {
     expect(r.reason).toMatch(/^Rumble /);
   });
 });
+
+describe("YouTube offers both kinds of ban", () => {
+  it("allows a timeout and a permanent ban, which the sanction pill tells apart", () => {
+    expect(chatActionSupport("youtube", "timeout").ok).toBe(true);
+    expect(chatActionSupport("youtube", "ban").ok).toBe(true);
+  });
+});
