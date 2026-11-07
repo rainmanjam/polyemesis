@@ -293,8 +293,10 @@ func (m *Manager) writeAtomic(name string, write func(*os.File) error) error {
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
+	// Owner-only, like the chat table it is copied from: a sidecar names every
+	// viewer who spoke, and it is served through the API, not read off disk.
 	if err == nil {
-		err = os.Chmod(tmpName, 0o644)
+		err = os.Chmod(tmpName, 0o600)
 	}
 	if err == nil {
 		err = os.Rename(tmpName, dest)
