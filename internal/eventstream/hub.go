@@ -273,8 +273,12 @@ func (h *Hub) Publish(env Envelope) {
 		if !wants(s.topics, s.read, s.overlay, env) {
 			continue
 		}
+		out := env
+		if s.read {
+			out = readView(env)
+		}
 		select {
-		case s.c <- env:
+		case s.c <- out:
 		default:
 			h.dropLocked(s, true)
 		}
@@ -373,6 +377,9 @@ func (h *Hub) Subscribe(f Filter, lastID string) (sub *Subscription, replay []En
 			// overlay is never replayed one that has had its moment.
 			if overlay != nil && env.Type == TypeActivityDisplay && now.Sub(env.At) > OverlayActivityReplayMax {
 				continue
+			}
+			if f.ReadScoped {
+				env = readView(env)
 			}
 			replay = append(replay, env)
 		}
@@ -546,4 +553,21 @@ func redactActor(a *activity.Actor) *activity.Actor {
 	c.Name = redact.Redact(c.Name)
 	c.Login = redact.Redact(c.Login)
 	return &c
+}
+
+// readView is what a READ-scoped subscriber is sent of an envelope: the same
+// envelope, except that an activity is cut down to the platform's own report.
+// The ReadIf lets only the stream kind through, but the full event also carries
+// the connected account's ref, the source's id and whoever the platform named;
+// /activity/sources is refused to read tokens for the account ref alone, so a
+// stream would be a second door to it. Kind, platform, phase and time are what
+// is left. The title is not: broadcast titles are refused to read tokens on
+// GET /analytics/streams, so they are here too.
+func readView(env Envelope) Envelope {
+	if a, ok := env.Data.(activity.Event); ok {
+		env.Data = activity.Event{
+			Kind: a.Kind, Platform: a.Platform, At: a.At, Phase: a.Phase, Test: a.Test,
+		}
+	}
+	return env
 }

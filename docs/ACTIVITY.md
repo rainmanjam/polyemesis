@@ -216,7 +216,7 @@ chat:
 | | Admin | Read token |
 |---|---|---|
 | `GET /api/v1/activity`, `/activity/sources` | yes | **no (403)** |
-| `activity` on `/api/v1/events` | every kind | only `stream`, which names nobody |
+| `activity` on `/api/v1/events` | every kind | only `stream`, reduced to `{kind, platform, at, phase}` (no account, source or title) |
 | `activity` on `/ws` | yes | no |
 | `POST /api/v1/activity/test`, `/activity/{id}/replay` | yes | no |
 | `activity.display` | with an overlay key, for that overlay's platforms only | no |
@@ -270,7 +270,8 @@ attached, so a follow while you are offline is not reported later.
   follow-ups; neither is wired.
 - **A platform's live-status webhook for Facebook** is not built. Reactions are
   read by polling when that source is added.
-- **The overlay is tested in headless Chromium**, as the chat overlay is, not in
+- **The alerts overlay has component tests, not a browser run.** It has not yet
+  been checked in headless Chromium at 1920 x 1080 as the chat overlay has, nor in
   OBS itself.
 
 ## For platform authors

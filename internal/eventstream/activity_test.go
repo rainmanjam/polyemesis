@@ -2,6 +2,7 @@ package eventstream
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -211,5 +212,65 @@ func TestAReadScopedSubscriberGetsOnlyTheStreamKind(t *testing.T) {
 func TestTheBusBridgeCarriesActivity(t *testing.T) {
 	if st, ok := busTypes["activity"]; !ok || st != TypeActivity {
 		t.Fatalf("busTypes: %v", busTypes)
+	}
+}
+
+// A read token is sent the platform's stream report and NOTHING that identifies
+// the account, the source or a person: the projected shape is pinned, and the
+// test fails if the full event leaks, live or on replay.
+func TestAReadTokenIsSentOnlyAProjectionOfTheStreamReport(t *testing.T) {
+	h := NewHub()
+	full := activity.Event{
+		ID: "act_secret", Kind: activity.KindStream, Platform: "twitch", Account: "acct-ref-secret",
+		At: time.Unix(5, 0), Phase: "online", Title: "Private title",
+		Actor: &activity.Actor{ID: "actor-secret", Name: "Someone"}, Other: &activity.Actor{ID: "other-secret", Name: "Other"},
+		Message: "words", Source: activity.Source{Type: "stream.online", ID: "source-secret"},
+	}
+	live, _, _ := h.Subscribe(Filter{ReadScoped: true}, "")
+	defer live.Close()
+	h.Publish(Envelope{Type: TypeActivity, Data: full})
+
+	check := func(label string, env Envelope) {
+		t.Helper()
+		got, ok := env.Data.(activity.Event)
+		if !ok {
+			t.Fatalf("%s: payload %T", label, env.Data)
+		}
+		want := activity.Event{Kind: activity.KindStream, Platform: "twitch", At: time.Unix(5, 0), Phase: "online"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: read token was sent %+v, want only %+v", label, got, want)
+		}
+		b, _ := json.Marshal(env)
+		for _, secret := range []string{"acct-ref-secret", "actor-secret", "other-secret", "source-secret", "Private title", "words", "act_secret"} {
+			if strings.Contains(string(b), secret) {
+				t.Errorf("%s: the read stream leaks %q: %s", label, secret, b)
+			}
+		}
+	}
+	got := drain(live)
+	if len(got) != 1 {
+		t.Fatalf("live: %d events", len(got))
+	}
+	check("live", got[0])
+
+	_, replay, _ := h.Subscribe(Filter{ReadScoped: true}, h.boot+"-0")
+	if len(replay) != 1 {
+		t.Fatalf("replay: %d events", len(replay))
+	}
+	check("replay", replay[0])
+
+	// An admin subscriber still gets the whole event.
+	adm, _, _ := h.Subscribe(Filter{}, "")
+	defer adm.Close()
+	h.Publish(Envelope{Type: TypeActivity, Data: full})
+	if a := drain(adm)[0].Data.(activity.Event); a.Account != "acct-ref-secret" || a.Source.ID != "source-secret" {
+		t.Errorf("the projection was applied to an admin: %+v", a)
+	}
+	// And the ring keeps the full copy, unprojected.
+	h.mu.Lock()
+	ringed := h.ring[0].Data.(activity.Event)
+	h.mu.Unlock()
+	if ringed.Account == "" {
+		t.Error("the projection wrote through to the ring")
 	}
 }

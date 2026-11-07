@@ -40,6 +40,13 @@ var redactAllowlist = map[string]string{
 	"internal/alerts/webhook_disclosure_test.go": "asserts that Redact is a NO-OP on an https " +
 		"webhook path, so nobody records \"also run Redact on LastError\" as the #160 fix.",
 
+	// --- viewer activity ---
+	"internal/activityhub/source.go": "the supervisor's failure sentence and log line quote an error a " +
+		"platform source returned (a dial or decode failure). Best-effort outer pass over whole strings; sources " +
+		"carry tokens in headers, never in the error text, and the sentence is shown on GET /activity/sources.",
+	"internal/api/activity_wiring.go": "the same residual pass over a chat connection's Detail before it is " +
+		"listed as an activity source; the chat hub's own health prose is already adapter-authored and token-free.",
+
 	// --- chat polls, #14 ---
 	"internal/polls/engine.go": "best-effort pass over a platform's own error text (a failed " +
 		"chat send, a failed native-poll read) before it is shown on the poll or logged. No " +

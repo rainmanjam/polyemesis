@@ -489,8 +489,8 @@ report that the stream went online or offline; `broadcast.live` is polyemesis
 moving a broadcast on air.
 
 `activity` names viewers and carries words they wrote, which is why chat is
-withheld from read tokens. A `read` token is sent only `data.kind: "stream"`,
-which names nobody. `message`, names and titles go through the same text
+A `read` token is sent only `data.kind: "stream"`, cut down to
+`{kind, platform, at, phase}`: no account, source, title or person, live or on replay. `message`, names and titles go through the same text
 redaction as every other event before they are numbered. An `activity` is
 **not stored**: the replay window above is all the history there is, and a
 restart empties it.

@@ -24,6 +24,7 @@ func TestEveryKindOfTestAlertReachesTheEventsStreamAndTheOverlay(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go eventstream.BridgeBus(ctx, bus, stream)
+	waitBridge(t, bus)
 
 	gate := overlay.NewActivityGate(stream, nil)
 	// Reactions on: the Facebook tally is the one kind off by default, and a
@@ -99,6 +100,7 @@ func TestViewerTextIsRedactedBeforeItIsNumbered(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go eventstream.BridgeBus(ctx, bus, stream)
+	waitBridge(t, bus)
 	hub := New(WithBus(bus))
 	defer hub.Close()
 	sub := streamtest.Subscribe(t, stream)
@@ -119,6 +121,7 @@ func TestADisabledKindNeverReachesTheStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go eventstream.BridgeBus(ctx, bus, stream)
+	waitBridge(t, bus)
 	hub := New(WithBus(bus), WithSettings(func() db.ActivitySettings {
 		s := db.DefaultActivitySettings()
 		s.Kinds = map[string][]string{"twitch": {"follow"}}
@@ -128,4 +131,20 @@ func TestADisabledKindNeverReachesTheStream(t *testing.T) {
 	sub := streamtest.Subscribe(t, stream)
 	hub.Submit(activity.Sample(activity.KindTip, "twitch", activity.Overrides{}, time.Now()))
 	streamtest.None(t, sub, eventstream.TypeActivity, 150*time.Millisecond)
+}
+
+// waitBridge blocks until BridgeBus has subscribed to the bus: a publish before
+// that is dropped by design, which would make these tests race their own setup.
+func waitBridge(t *testing.T, bus *events.Broker) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if n, _ := bus.Stats(); n > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the bridge never subscribed to the bus")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
