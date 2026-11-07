@@ -201,6 +201,8 @@ const DOCS_BY_SECTION = {
       "One display-only chat overlay for OBS across Twitch, YouTube, Kick, Facebook and Rumble. Per-scene platform filters, style presets, and a key that reads nothing else."],
     ["POLLS.md", "Chat polls across every platform",
       "One poll asked in every connected chat and counted as one result. Vote rules, automod and moderation, the on-stream widget, native Twitch polls and export."],
+    ["CHAT-EXPORT.md", "Chat saved with each recording, and chat export",
+      "Chat is written beside every recording as JSON and WebVTT so it outlives the chat history and lines up with the video, and any window of stored chat can be exported as JSON, CSV or NDJSON."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
