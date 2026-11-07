@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api } from "@/lib/api";
@@ -504,14 +505,21 @@ export function ChatComposer({
   limits,
   configured,
   compact,
+  replyTo,
+  onCancelReply,
 }: Readonly<{
   statuses: ChatStatus[];
   limits: ChatLimit[];
   configured: boolean;
   compact?: boolean;
+  /** The message being answered. While set, Send goes to that one platform as
+   *  a threaded reply instead of fanning out. */
+  replyTo?: ChatMessage | null;
+  onCancelReply?: () => void;
 }>) {
   const t = useT();
   const [text, setText] = useState("");
+  const [asBot, setAsBot] = useState(false);
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<ChatSendResult[] | null>(null);
   // The text of a send that only SOME platforms took. The box is cleared --
@@ -547,7 +555,13 @@ export function ChatComposer({
     // A stale offer must not overwrite the next draft with an older message.
     setUnsent("");
     try {
-      const res = await api.sendChat(body);
+      const res = replyTo
+        ? await api.replyChat(
+            { platform: replyTo.platform, account: replyTo.account, id: replyTo.id },
+            body,
+            asBot,
+          )
+        : await api.sendChat(body);
       setResults(res.results);
       // THE DRAFT IS CLEARED ONLY WHEN SOMETHING TOOK IT (poka-yoke audit
       // 2026-11-04). It used to be cleared before the answer was read, so a
@@ -555,8 +569,11 @@ export function ChatComposer({
       // Only if the box still holds what was sent: the field stays editable
       // while the send is in flight, and a draft typed meanwhile is the
       // operator's next message, not this one.
-      if (res.sent > 0) setText((cur) => (cur.trim() === body ? "" : cur));
-      setUnsent(res.sent > 0 && res.failed > 0 ? body : "");
+      if (res.sent > 0) {
+        setText((cur) => (cur.trim() === body ? "" : cur));
+        if (replyTo) onCancelReply?.();
+      }
+      setUnsent(!replyTo && res.sent > 0 && res.failed > 0 ? body : "");
       if (res.failed > 0) {
         toast.error(
           res.sent > 0
@@ -600,6 +617,31 @@ export function ChatComposer({
           {t("chatpage.restoreDraft")}
         </Button>
       )}
+      {replyTo && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-1 text-[11px]">
+          <span className="min-w-0 flex-1 truncate">
+            {t("chatpage.replyingTo", {
+              name: replyTo.author.name,
+              platform: accentFor(replyTo.platform).label,
+            })}
+            <span className="ml-1 text-muted-foreground">{replyTo.text}</span>
+          </span>
+          {replyTo.platform === "kick" && (
+            <label className="flex shrink-0 items-center gap-1">
+              <Checkbox checked={asBot} onCheckedChange={(v) => setAsBot(v === true)} />
+              {t("chatpage.replyAsBot")}
+            </label>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-auto shrink-0 p-0 text-[11px]"
+            onClick={() => onCancelReply?.()}
+          >
+            {t("chatpage.cancelReply")}
+          </Button>
+        </div>
+      )}
       <div className="flex items-end gap-1.5">
         <Textarea
           value={text}
@@ -618,7 +660,9 @@ export function ChatComposer({
           }}
           rows={compact ? 1 : 2}
           placeholder={
-            // The field says the state in two words. The reason is text under
+            replyTo
+              ? t("chatpage.replyPlaceholder", { name: replyTo.author.name })
+              : // The field says the state in two words. The reason is text under
             // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
             senders.length === 0
               ? t("chatpage.notConnected")
@@ -917,6 +961,7 @@ export function ChatPanel({
   const [card, setCard] = useState<ChatMessage | null>(null);
   // Same reasoning for the quick menu, plus where it was opened.
   const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const search = useChatSearch();
 
   // THE SECOND SURFACE, and the reason this is here rather than only on
@@ -964,6 +1009,7 @@ export function ChatPanel({
           onClose={() => setMenu(null)}
           onOpenCard={setCard}
           onDelete={confirmDelete.ask}
+          onReply={showComposer ? setReplyTo : undefined}
         />
       )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
@@ -1023,7 +1069,14 @@ export function ChatPanel({
       )}
 
       {showComposer && (
-        <ChatComposer statuses={statuses} limits={limits} configured={configured} compact />
+        <ChatComposer
+          statuses={statuses}
+          limits={limits}
+          configured={configured}
+          compact
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
+        />
       )}
     </div>
   );

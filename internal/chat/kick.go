@@ -837,6 +837,22 @@ func kickEmotes(ev kickChatEvent) []Emote {
 
 // Send posts to Kick chat as the connected user.
 func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
+	return k.post(ctx, text, "", false)
+}
+
+// Reply posts to Kick chat as a reply to one message, optionally as the app's
+// bot identity (type "bot") rather than the connected user. Kick's chat page
+// lists reply_to_message_id without describing it, so a refusal is explained
+// in the operator's terms instead of being passed through bare.
+func (k *KickAdapter) Reply(ctx context.Context, text, replyToID string, asBot bool) (Message, error) {
+	replyToID = strings.TrimSpace(replyToID)
+	if replyToID == "" {
+		return Message{}, fmt.Errorf("no message to reply to")
+	}
+	return k.post(ctx, text, replyToID, asBot)
+}
+
+func (k *KickAdapter) post(ctx context.Context, text, replyToID string, asBot bool) (Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Message{}, fmt.Errorf("nothing to send")
@@ -858,6 +874,15 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 		"type":                "user",
 		"broadcaster_user_id": k.cfg.BroadcasterUserID,
 	}
+	if asBot {
+		// Kick ignores broadcaster_user_id for a bot: it always posts to the
+		// channel the token belongs to, so the field is left out.
+		payload["type"] = "bot"
+		delete(payload, "broadcaster_user_id")
+	}
+	if replyToID != "" {
+		payload["reply_to_message_id"] = replyToID
+	}
 	var out struct {
 		Data struct {
 			IsSent    bool   `json:"is_sent"`
@@ -866,8 +891,18 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 	}
 	err := doJSON(ctx, k.cfg.HTTP, http.MethodPost, k.cfg.APIBase+"/public/v1/chat", k.cfg.Token, payload, &out)
 	if err != nil {
-		if statusOf(err) == http.StatusUnauthorized {
+		switch statusOf(err) {
+		case http.StatusUnauthorized:
 			return Message{}, Fatal(fmt.Errorf("kick rejected the access token; reconnect the Kick account in Settings → Platforms"))
+		case http.StatusForbidden:
+			return Message{}, fmt.Errorf("Kick refused to post this. The account needs the chat:write scope"+
+				" (reconnect it in Settings → Platforms), and %s. Kick said: %s", kickWhoCanPost(asBot), err)
+		case http.StatusBadRequest, http.StatusNotFound:
+			if replyToID != "" {
+				return Message{}, fmt.Errorf("Kick would not take this reply; the message it answers may have been deleted or may belong to another channel. Kick said: %s", err)
+			}
+		case http.StatusTooManyRequests:
+			return Message{}, fmt.Errorf("Kick is rate-limiting chat posts; wait a moment and send again. Kick said: %s", err)
 		}
 		return Message{}, err
 	}
@@ -882,11 +917,20 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 		Author: Author{
 			ID:          strconv.Itoa(k.cfg.BroadcasterUserID),
 			Name:        firstNonEmpty(k.cfg.Channel, "you"),
-			Broadcaster: true,
+			Broadcaster: !asBot,
 		},
-		Text: text,
-		At:   k.cfg.Now(),
+		Text:      text,
+		ReplyToID: replyToID,
+		At:        k.cfg.Now(),
 	}, nil
+}
+
+// kickWhoCanPost completes the 403 sentence for the identity that was refused.
+func kickWhoCanPost(asBot bool) string {
+	if asBot {
+		return "a bot message goes only to the channel the token belongs to"
+	}
+	return "the channel may be in a chat mode (followers-only, subscribers-only) this account does not meet"
 }
 
 // Delete removes a message. It needs the moderation:chat_message:manage scope,

@@ -86,6 +86,16 @@ type Sender interface {
 	Send(ctx context.Context, text string) (Message, error)
 }
 
+// Replier is the optional capability for answering one specific message, rather
+// than posting to the room. It is addressed to one platform account, never
+// fanned out: a message id only means something on the platform that issued it.
+type Replier interface {
+	Adapter
+	// Reply posts text as a reply to replyToID. asBot asks for the platform's
+	// bot identity where it has one; an adapter without one ignores it.
+	Reply(ctx context.Context, text, replyToID string, asBot bool) (Message, error)
+}
+
 // Deleter is the optional capability for removing a message, which is what the
 // unified pane needs when a moderator deletes something on one platform and
 // polyemesis is displaying it on all of them.
@@ -453,6 +463,8 @@ var (
 	_ Deleter = (*YouTubeAdapter)(nil)
 	_ Deleter = (*TwitchAdapter)(nil)
 	_ Deleter = (*FacebookAdapter)(nil)
+
+	_ Replier = (*KickAdapter)(nil)
 
 	_ Banner = (*KickAdapter)(nil)
 	_ Banner = (*YouTubeAdapter)(nil)
