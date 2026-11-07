@@ -19,8 +19,9 @@
       "Open Kick → Settings → Developer and create an OAuth application.",
       "Set the Redirect URI to exactly the URI shown below.",
       "Copy the Client ID and Client Secret into the fields on this page and save.",
+      "Still in your Kick app, switch on “Enable webhooks” and paste the Webhook URL shown below into its URL field, then save. Without it Kick has nowhere to deliver chat, so chat messages never arrive. polyemesis then subscribes the app to chat messages itself once you have connected the account.",
       "Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
-      "Nothing to paste: polyemesis reads the ingest URL and stream key from the channels resource over the streamkey:read scope, the same way it does for the other platforms."
+      "Nothing to paste for the stream key: polyemesis reads the ingest URL and stream key from the channels resource over the streamkey:read scope, the same way it does for the other platforms."
     ]
   },
   {

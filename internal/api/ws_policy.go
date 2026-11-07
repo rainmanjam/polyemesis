@@ -91,8 +91,11 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 	// anything that was said, including a key read out loud.
 	events.TypeCaption: wsRedactText,
 
-	// A platform name and a state word.
-	events.TypeChatState: wsPassthrough,
+	// A platform name, a state word, and a free-text Detail. The Detail is
+	// adapter-authored health prose that can quote a URL (Kick's reachability
+	// warning names the webhook address, whose path is a secret), so it gets
+	// the residual pass like the other text that arrives from elsewhere.
+	events.TypeChatState: wsRedactText,
 }
 
 // busReadAccess is the catalogue lookup; a variable so a test can stub a type.

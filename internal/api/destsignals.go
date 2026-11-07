@@ -21,6 +21,14 @@ import (
 // it. The one derivation, so the destination dialog's chip and the Stream Deck
 // key cannot disagree about the same account.
 func (s *Server) accountHealthNow(a db.PlatformAccount, now time.Time) AccountHealth {
+	// A token the platform said is no longer valid outranks everything: no
+	// refresh outcome or expiry reading is as final. Reported as the state the
+	// console already renders for an account that needs attention, with the
+	// reason in the platform's terms.
+	if r, revoked := s.acctHealth.revokedAt(revokedKey(a.Platform, a.AccountRef)); revoked {
+		at := r.at
+		return AccountHealth{State: AccountHealthRefreshFailing, Failures: 1, LastError: r.reason, FailedAt: &at}
+	}
 	o, failing := s.acctHealth.get(a.ID)
 	// The list read carries no secrets, so whether a near-expiry account can
 	// refresh is one extra read, for that account only. A failed read assumes

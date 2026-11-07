@@ -744,6 +744,13 @@ type SetupGuide struct {
 	// and empty for every other platform. Filled in per request by the API
 	// layer from the provider it actually uses.
 	LivestreamGate string `json:"livestreamGate,omitempty"`
+	// WebhookURL is the URL the operator pastes into the platform's app
+	// settings so it can deliver events (Kick chat). It carries a secret, so it
+	// is a credential: filled in per request by the API layer, only for a
+	// caller allowed to see credentials, and empty otherwise. WebhookURLReason
+	// says why it is empty when it is.
+	WebhookURL       string `json:"webhookUrl,omitempty"`
+	WebhookURLReason string `json:"webhookUrlReason,omitempty"`
 }
 
 // Guides returns the setup instructions rendered on the credentials page.
@@ -863,8 +870,11 @@ func guides() []SetupGuide {
 				"Open Kick → Settings → Developer and create an OAuth application.",
 				"Set the Redirect URI to exactly the URI shown below.",
 				"Copy the Client ID and Client Secret into the fields on this page and save.",
+				"Still in your Kick app, switch on “Enable webhooks” and paste the Webhook URL shown below into its URL " +
+					"field, then save. Without it Kick has nowhere to deliver chat, so chat messages never arrive. " +
+					"polyemesis then subscribes the app to chat messages itself once you have connected the account.",
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
-				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
+				"Nothing to paste for the stream key: polyemesis reads the ingest URL and stream key from the channels " +
 					"resource over the streamkey:read scope, the same way it does for the other platforms.",
 			},
 		},

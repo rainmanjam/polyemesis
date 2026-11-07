@@ -11,6 +11,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -259,5 +260,68 @@ func TestTwitchIngestIsRTMPS(t *testing.T) {
 	}
 	if ing.Key != "live_4242_current" {
 		t.Fatalf("Ingest key = %q", ing.Key)
+	}
+}
+
+// Twitch requires every app that holds a user's token to call /oauth2/validate
+// at startup and hourly, and to end the sessions that use the token when it
+// answers 401 (dev.twitch.tv/docs/authentication/validate-tokens).
+func TestTwitchValidateTellsAValidTokenFromARevokedOne(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		invalid bool
+		wantErr bool
+	}{
+		{"valid", http.StatusOK, `{"client_id":"c","login":"dj","user_id":"4242","scopes":[],"expires_in":5000}`, false, false},
+		{"revoked", http.StatusUnauthorized, `{"status":401,"message":"invalid access token"}`, true, true},
+		{"server error is not a verdict", http.StatusInternalServerError, `oops`, false, true},
+		{"rate limit is not a verdict", http.StatusTooManyRequests, `slow`, false, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth, gotPath = r.Header.Get("Authorization"), r.URL.Path
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			err := NewTwitch(WithBaseURL(srv.URL)).Validate(context.Background(), "tok-123")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got := IsTokenInvalid(err); got != tc.invalid {
+				t.Fatalf("IsTokenInvalid(%v) = %v, want %v", err, got, tc.invalid)
+			}
+			if gotPath != "/oauth2/validate" {
+				t.Errorf("path = %q, want /oauth2/validate", gotPath)
+			}
+			if gotAuth != "OAuth tok-123" {
+				t.Errorf("Authorization = %q, want the OAuth scheme the docs use", gotAuth)
+			}
+		})
+	}
+}
+
+// Twitch refuses a revoked refresh token with a 400 "Invalid refresh token" and
+// no invalid_grant, and that has to read as "reconnect", not as a failure to retry.
+func TestTwitchRefreshOfARevokedGrantRequiresReconnect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Bad Request","status":400,"message":"Invalid refresh token"}`))
+	}))
+	defer srv.Close()
+	_, err := NewTwitch(WithBaseURL(srv.URL)).Refresh(context.Background(), "cid", "sec", "rt")
+	if !errors.Is(err, ErrReconnectRequired) {
+		t.Fatalf("err = %v, want it to match ErrReconnectRequired", err)
+	}
+}
+
+// The Twitch-specific phrase must not widen every platform's reconnect rule.
+func TestInvalidRefreshTokenPhraseIsTwitchOnly(t *testing.T) {
+	if grantGone(`{"message":"Invalid refresh token"}`) {
+		t.Fatal("grantGone, which every provider shares, matches Twitch's phrase")
 	}
 }
