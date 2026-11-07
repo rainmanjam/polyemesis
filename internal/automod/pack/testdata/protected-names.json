@@ -1,0 +1,35 @@
+{
+  "_note": "Fake protected accounts for the impersonation fixtures. role is how the name became protected.",
+  "names": [
+    {
+      "platform": "twitch",
+      "name": "kestrel_demo",
+      "role": "broadcaster"
+    },
+    {
+      "platform": "twitch",
+      "name": "QuillfeatherTV",
+      "role": "broadcaster"
+    },
+    {
+      "platform": "youtube",
+      "name": "Mossy Lantern",
+      "role": "broadcaster"
+    },
+    {
+      "platform": "twitch",
+      "name": "tidewalker_mod",
+      "role": "moderator"
+    },
+    {
+      "platform": "kick",
+      "name": "CopperFoxTest",
+      "role": "broadcaster"
+    },
+    {
+      "platform": "twitch",
+      "name": "harbor_wren",
+      "role": "moderator"
+    }
+  ]
+}
