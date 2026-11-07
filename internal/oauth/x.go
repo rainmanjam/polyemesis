@@ -584,11 +584,15 @@ type XBroadcast struct {
 	// CreatedAtMS is when X created the broadcast (milliseconds since the epoch, as a string). It is the only
 	// documented field that says whether a broadcast is one polyemesis just started, so adoption reads it.
 	CreatedAtMS string `json:"created_at_ms"`
+	// TotalWatching is the live viewer count, a decimal string, as X's Broadcast schema describes it ("total_watching:
+	// live viewers"; total_watched is the cumulative figure). It is empty when X sent none, which is not zero: it
+	// is read through XLiveViewers, which keeps absent as nil.
+	TotalWatching string `json:"total_watching"`
 }
 
 // xBroadcastFields is the broadcast.fields parameter, sent explicitly on every
 // read so an empty field means X sent nothing rather than that it was not asked.
-const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms,created_at_ms"
+const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms,created_at_ms,total_watching"
 
 // xProblem is X's typed error object. Two shapes reach it: the RFC 7807 problem
 // (title, detail, type) X uses for a 400, and {error_type, message}, which the
@@ -911,6 +915,10 @@ type XPublish struct {
 	// ChatOption is nil when unset, which leaves the field out so X applies its
 	// default. Otherwise it must be 0 to 6, and it is sent as a JSON integer.
 	ChatOption *int
+	// Locale is the broadcast language, sent as the go-live "locale" string. Empty leaves the field out so X uses its
+	// own. X's page gives "en" as its example and states no stricter format, so the value is passed through trimmed
+	// and X's refusal, if any, is shown in X's words.
+	Locale string
 	// ShouldNotTweet suppresses the announcement post X makes by default. False
 	// leaves the field out, so X posts as it always has. It is sent as a JSON
 	// boolean, which is the only type the route accepts.
@@ -1033,6 +1041,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	body := map[string]any{}
 	if title := strings.TrimSpace(p.Title); title != "" {
 		body["title"] = title
+	}
+	if loc := strings.TrimSpace(p.Locale); loc != "" {
+		body["locale"] = loc
 	}
 	if p.ChatOption != nil {
 		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {

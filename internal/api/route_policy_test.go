@@ -76,6 +76,8 @@ func TestRoutePolicyIsWhatWasRegistered(t *testing.T) {
 		"/api/v1/chat",
 		"/api/v1/chat/flags",
 		"/api/v1/chat/messages",
+		"/api/v1/chat/moderators",
+		"/api/v1/chat/mutes",
 		"/api/v1/chat/search",
 		"/api/v1/chat/settings",
 		"/api/v1/chat/users",

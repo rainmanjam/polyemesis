@@ -94,6 +94,11 @@ const ADAPTERS: Record<
   youtube: { delete: true, ban: true, hideUpstream: false },
   twitch: { delete: true, ban: true, hideUpstream: false },
   kick: { delete: true, ban: true, hideUpstream: false },
+  // XAdapter implements Deleter and Banner (a mute; a zero duration is
+  // indefinite). Built from X's documentation and unverified against a live
+  // account, which the capability matrix says; nothing here hides, because X
+  // has no hide action.
+  x: { delete: true, ban: true, hideUpstream: false },
   // No Banner. Not an oversight and not a scope we could request: Facebook
   // publishes no chat ban API at all.
   facebook: { delete: true, ban: false, hideUpstream: true },

@@ -1772,6 +1772,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// person, so they get their own route too.
 			api.Get(r, "/chat/settings", s.handleGetChatSettings, readDenied)
 			r.Patch("/chat/settings", s.handleChatSettings)
+			// X's muted viewers and chat moderators: who the account has
+			// muted and appointed, so read-denied like the scrollback.
+			api.Get(r, "/chat/mutes", s.handleChatMutes, readDenied)
+			api.Get(r, "/chat/moderators", s.handleChatModerators, readDenied)
+			r.Post("/chat/moderators", s.handleChatAddModerator)
+			r.Delete("/chat/moderators", s.handleChatRemoveModerator)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)

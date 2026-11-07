@@ -90,6 +90,10 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"everything one viewer has said"},
 		{http.MethodGet, "/api/v1/chat/flags", nil,
 			"automod's review list carries each flagged message's text, under its author's name"},
+		{http.MethodGet, "/api/v1/chat/mutes?platform=x", nil,
+			"who the operator has muted on X, by user id and name, with when each timed mute ends"},
+		{http.MethodGet, "/api/v1/chat/moderators?platform=x", nil,
+			"the operator's X chat moderators, by user id and name"},
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
 

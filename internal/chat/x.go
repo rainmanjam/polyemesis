@@ -229,11 +229,15 @@ var errXNoRunningBroadcast = errors.New("X has no running broadcast on this acco
 
 // --------------------------------------------------------------------- send
 
-// Send posts text to the running broadcast as the account. It returns a
-// synthesised echo, because X answers with a timestamp and no message id.
+// Send posts text to the running broadcast as the account. It returns an echo
+// whose id is the answer's data.timestamp, the server time in nanoseconds as a
+// string: X documents that value as the message id, the one Delete takes as
+// message_id and a reply names as reply_to (docs.x.com/livestream-api/chat/
+// send-chat-message). A synthesised id stands in only when X sent no digits.
 //
-// PROVISIONAL: X's webhook may also deliver our own message back. If it does,
-// the echo and the platform copy will not dedupe against each other.
+// PROVISIONAL: the webhook's broadcast.chat event carries message_id, and
+// that it equals this timestamp is read from the docs, not seen live. If it
+// does, our own message arriving back dedupes against this echo.
 func (x *XAdapter) Send(ctx context.Context, text string) (Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -260,8 +264,12 @@ func (x *XAdapter) Send(ctx context.Context, text string) (Message, error) {
 		return Message{}, errors.New("X did not confirm the chat message was sent")
 	}
 	now := x.cfg.Now()
+	msgID := strings.TrimSpace(out.Data.Timestamp)
+	if !xNumericID.MatchString(msgID) {
+		msgID = fmt.Sprintf("syn-x-%d", now.UnixNano())
+	}
 	m := Message{
-		ID:       fmt.Sprintf("syn-x-%d", now.UnixNano()),
+		ID:       msgID,
 		Platform: db.PlatformX,
 		Account:  x.cfg.AccountRef,
 		Channel:  x.cfg.Channel,

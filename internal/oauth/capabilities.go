@@ -443,9 +443,12 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// read), and both broadcasts were ended by polyemesis (lifecycle).
 			CapMetadata: SupportYes,
 			CapChatRead: SupportYes,
-			// Send and moderation are built (XAdapter implements Sender, Deleter
-			// and Banner) but have never run against a live X account, and
-			// viewer stats were not read live either, so they stay Unverified.
+			// Send and moderation are built (XAdapter implements Sender, Deleter,
+			// Banner, MuteLister, MessageBanner and ModeratorManager) but have
+			// never run against a live X account, and the viewer count (the
+			// broadcast's total_watching, read through the sampler's own seam
+			// rather than LiveStatter) was not read live either, so they stay
+			// Unverified.
 			CapChatSend:           SupportUnknown,
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
@@ -457,8 +460,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast. Verified live on 2026-11-07: the go-live published the broadcast with the configured title (\"Polyemesis Test Flight\") on a real account.",
 			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, which X delivers only to a webhook. polyemesis registers https://<tls.hostname>/api/v1/webhooks/x, so reading chat needs the app's bearer token (POLYEMESIS_X_APP_BEARER), a public trusted HTTPS hostname without a port (tls.mode acme, inbound 443), and the X client secret saved here. Without them the chat pane stays empty, says what is missing, and sending still works. Verified live on 2026-11-07: 2 of 2 viewer messages arrived over the webhook.",
 			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Needs X Livestream, which is on unless POLYEMESIS_X_LIVESTREAM=0. Not yet checked against a live X account.",
-			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
-			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
+			CapModeration:         "Mute and unmute a viewer, mute and remove one of their messages in a single call, list who is muted with when each timed mute ends, and add, list or remove chat moderators (up to 20; they act on every broadcast the account hosts). X offers no hide action, so a removed message is gone, not kept back. Built from X's documentation; none of it has run against a live account.",
+			CapViewerStats:        "X's broadcast carries total_watching (live viewers) and total_watched (cumulative viewers), and the sampler reads total_watching from the running broadcast. Built from X's documentation; it has not been read from a live account, so it stays unverified.",
 			CapBroadcastLifecycle: "With Livestream on (the default), polyemesis waits on the stream source when the destination turns on, takes it live once bytes arrive (POST /2/broadcasts, with the go-live title), and ends the broadcast when the destination turns off. Verified live on 2026-11-07 in two runs: the broadcast was published with the configured title, and polyemesis ended both.",
 		},
 	},

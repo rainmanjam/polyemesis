@@ -102,6 +102,30 @@ type youTubeViewerReader interface {
 	LiveViewers(ctx context.Context, accessToken, videoID string) (oauth.LiveVideo, error)
 }
 
+// xViewerReader is the one read oauth.X offers the sampler. X is not a LiveStatter, because that capability is tied by
+// a drift test to the viewerStats cell reading "works", and this read has not run against a live X account. Asserted
+// on the provider the Set resolves, like youTubeViewerReader.
+type xViewerReader interface {
+	LiveViewers(ctx context.Context, accessToken string) (*oauth.XLiveViewers, error)
+}
+
+// hasViewerCount reports whether a connected account of this platform can be asked for viewers: a LiveStatter, or
+// X through xViewerReader.
+func (s *Server) hasViewerCount(p db.Platform) bool {
+	if _, ok := oauth.As[oauth.LiveStatter](s.providers, p); ok {
+		return true
+	}
+	if p != db.PlatformX {
+		return false
+	}
+	prov, err := s.providers.Get(p)
+	if err != nil {
+		return false
+	}
+	_, ok := prov.(xViewerReader)
+	return ok
+}
+
 // analyticsSource is the sampler's view of this server.
 type analyticsSource struct{ s *Server }
 
@@ -209,7 +233,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		}
 		// A platform with no viewer count still has chat, and the stream's
 		// chat is every running destination's account's (round 2, R2).
-		if _, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform); !ok {
+		if !s.hasViewerCount(acct.Platform) {
 			t.ChatOnly = true
 		}
 		out = append(out, t)
@@ -287,12 +311,33 @@ func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytic
 		return analytics.Stats{}, err
 	}
 	var st analytics.Stats
-	if t.Platform == string(db.PlatformYouTube) {
+	switch t.Platform {
+	case string(db.PlatformYouTube):
 		st, err = a.readYouTube(ctx, t, acct.AccessToken)
-	} else {
+	case string(db.PlatformX):
+		st, err = a.readX(ctx, acct.AccessToken)
+	default:
 		st, err = a.readStats(ctx, acct)
 	}
 	return st, a.platformError(t, err)
+}
+
+// readX is X's viewer read: the RUNNING broadcast's total_watching. A count X did not send stays nil, which the
+// sampler reports as hidden rather than as zero.
+func (a analyticsSource) readX(ctx context.Context, token string) (analytics.Stats, error) {
+	p, err := a.s.providers.Get(db.PlatformX)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	xr, ok := p.(xViewerReader)
+	if !ok {
+		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", db.PlatformX)
+	}
+	lv, err := xr.LiveViewers(ctx, token)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	return analytics.Stats{Live: lv.Live, Viewers: lv.Viewers, Title: lv.Title}, nil
 }
 
 func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {
