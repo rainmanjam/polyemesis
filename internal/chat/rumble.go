@@ -46,8 +46,11 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -110,6 +113,16 @@ const (
 	// max_num_results: 50; the response's own figure wins when it sends one.
 	// Taken from the docs, not observed on a live account.
 	rumbleChatCap = 50
+
+	// In-loop retry of a transient failure (5xx, edge block, timeout, 429,
+	// unreadable body). The adapter keeps its health and drop-detection history
+	// across these, which a return to the Hub (restart, state reset, backfill
+	// re-armed) would throw away. After rumbleMaxFailures in a row it returns the
+	// error so the Hub's own supervision takes over.
+	rumbleRetryBase     = 5 * time.Second
+	rumbleRetryCeil     = 2 * time.Minute
+	rumbleRetryAfterCap = 5 * time.Minute
+	rumbleMaxFailures   = 12
 	// rumbleDropNoteFor is how long the "may have dropped messages" note stays
 	// on the health line after the last poll that triggered it, so a busy chat
 	// does not flicker it on and off between polls.
@@ -259,6 +272,40 @@ func (r *RumbleAdapter) setLive(viewers, followers, subscribers *int) {
 }
 
 // noteDrop arms the dropped-messages note for rumbleDropNoteFor.
+// setTransient records a retryable failure without discarding what the last
+// good poll reported: the viewer, follower and subscriber counts stay, only the
+// state and the note change. A blip should not make the audience vanish.
+func (r *RumbleAdapter) setTransient(detail string) {
+	r.mu.Lock()
+	h := r.health
+	h.State = StateDegraded
+	h.Detail = r.scrub(detail)
+	r.health = h
+	r.mu.Unlock()
+}
+
+// retryDelay is the capped, jittered exponential backoff, raised to the
+// platform's Retry-After when it sent one. Jitter only subtracts, so the
+// ceiling stays a ceiling; a Retry-After is honoured in full (up to a cap) and
+// not jittered below, because retrying before a stated limit lifts just
+// extends it.
+func (r *RumbleAdapter) retryDelay(attempt int, retryAfter time.Duration) time.Duration {
+	d := backoff.Exponential(attempt, rumbleRetryBase, rumbleRetryCeil)
+	d -= time.Duration(rand.Int64N(int64(d/5) + 1))
+	if retryAfter > rumbleRetryAfterCap {
+		retryAfter = rumbleRetryAfterCap
+	}
+	return max(d, retryAfter)
+}
+
+func retryAfterOf(err error) time.Duration {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.RetryAfter
+	}
+	return 0
+}
+
 func (r *RumbleAdapter) noteDrop() {
 	r.mu.Lock()
 	r.noteUntil = r.cfg.Now().Add(rumbleDropNoteFor)
@@ -419,13 +466,28 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		first = true
 		wait  = r.pollInterval()
 		prev  map[string]struct{}
+
+		failures int
 	)
 
 	for ctx.Err() == nil {
 		resp, err := r.fetch(ctx)
 		if err != nil {
-			return r.classify(err)
+			cerr := r.classify(err)
+			if IsFatal(cerr) {
+				return cerr
+			}
+			failures++
+			if failures >= rumbleMaxFailures {
+				return cerr
+			}
+			r.setTransient(cerr.Error())
+			if !r.cfg.Sleep(ctx, r.retryDelay(failures-1, retryAfterOf(err))) {
+				return nil
+			}
+			continue
 		}
+		failures = 0
 
 		live, ok := liveStream(resp)
 		if !ok {
@@ -659,45 +721,117 @@ func rumbleBadgeLabel(id string) string {
 
 // ------------------------------------------------------------- failure
 
-// classify turns a failed poll into either a fatal error or a retryable one.
-//
-// THE FATAL SET IS THE POINT OF THIS FUNCTION. A key the operator revoked, or
-// mistyped, answers 403 forever. Retrying it on the Hub's schedule means a
-// request every thirty seconds, from a home IP, at an endpoint whose rate limit
-// is unpublished -- which is the twitch.go fatalNotice lesson in a different
-// spelling, and how an IP gets banned for a mistake that a sentence in the UI
-// would have fixed in ten seconds.
-//
-// Everything else falls through as retryable, including 429 and 5xx. That is
-// the fail-open direction and it is chosen: a status this function has never
-// seen is far more likely to be a bad afternoon at Rumble than a permanently
-// rejected credential, and treating an outage as fatal takes the chat pane down
-// until somebody restarts polyemesis.
-func (r *RumbleAdapter) classify(err error) error {
-	switch statusOf(err) {
-	case http.StatusBadRequest:
-		// Measured: a request with no key at all answers 400 with
-		// "No access token found in the request". Retrying an empty credential
-		// is retrying nothing.
-		r.setHealth(StateFailed,
-			"Rumble rejected the request as having no API key; check the key from rumble.com/account/livestream-api")
-		return Fatal(errors.New("rumble rejected the live-stream API request as carrying no key; " +
-			"set " + RumbleChatKeyEnv + " to the key from rumble.com/account/livestream-api"))
+// rumbleEnvelope is Rumble's own error body: {"errors":[{"code","message"}]}.
+// Cloudflare's edge in front of rumble.com answers with HTML (or its own JSON
+// with different codes), so only this shape, with the matching code, counts as
+// Rumble itself refusing the key.
+type rumbleEnvelope struct {
+	Errors []struct {
+		Code    any    `json:"code"`
+		Message string `json:"message"`
+	} `json:"errors"`
+}
 
-	case http.StatusUnauthorized, http.StatusForbidden:
-		// Measured: an invalid key answers 403 with a structured body. Rumble
-		// lets an operator reset the URL to revoke access, so a key that worked
-		// yesterday and 403s today is the expected shape of a revocation.
-		r.setHealth(StateFailed,
-			"Rumble refused the live-stream API key; it may have been reset. Issue a new one at rumble.com/account/livestream-api")
-		return Fatal(errors.New("rumble refused the live-stream API key (it may have been reset or revoked); " +
-			"issue a new one at rumble.com/account/livestream-api and update " + RumbleChatKeyEnv))
+func parseRumbleEnvelope(raw []byte) (code, message string, ok bool) {
+	var env rumbleEnvelope
+	if json.Unmarshal(raw, &env) != nil || len(env.Errors) == 0 {
+		return "", "", false
+	}
+	return fmt.Sprint(env.Errors[0].Code), env.Errors[0].Message, true
+}
+
+var (
+	htmlTag   = regexp.MustCompile(`<[^>]*>?`)
+	spaceRuns = regexp.MustCompile(`\s+`)
+)
+
+// plainReason makes a platform-supplied message safe for operator text: no
+// markup, no control characters, one line, short.
+func plainReason(s string) string {
+	s = htmlTag.ReplaceAllString(s, " ")
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(spaceRuns.ReplaceAllString(s, " "))
+	if len(s) > 120 {
+		s = s[:120] + "..."
+	}
+	return s
+}
+
+// classify turns a fetch failure into the error Run acts on.
+//
+// Credential refusals are Fatal ONLY when the body is Rumble's own JSON refusal
+// (400 invalid_request, 401/403 with the status as its code). The host sits
+// behind Cloudflare, so a WAF, bot or IP-reputation block is also a 403 -- an
+// HTML challenge page, or a response carrying cf-mitigated -- and is retried
+// with backoff: treating it as a revoked key would stop chat until a restart
+// and send the operator to rotate a key that works.
+//
+// Nothing here quotes a response body, a URL or a transport error verbatim:
+// HTML never reaches operator text, and the key-bearing request URL never
+// survives (the transport wraps it in a *url.Error).
+func (r *RumbleAdapter) classify(err error) error {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return fmt.Errorf("rumble live-stream API: %s", r.scrub(transportReason(err)))
 	}
 
-	// Retryable. The platform's own words are useful here and the key must not
-	// be in them: scrub is the second layer behind doJSON's stripQuery, so that
-	// a response body echoing the key back cannot carry it into a log.
-	return fmt.Errorf("rumble live-stream API: %s", r.scrub(err.Error()))
+	code, msg, own := parseRumbleEnvelope(ae.Raw)
+	if ae.Header.Get("Cf-Mitigated") != "" {
+		own = false
+	}
+
+	if own {
+		switch {
+		case ae.Status == http.StatusBadRequest && code == "invalid_request":
+			r.setHealth(StateFailed,
+				"Rumble rejected the request as having no API key; check the key from rumble.com/account/livestream-api")
+			return Fatal(errors.New("rumble rejected the live-stream API request as carrying no key; " +
+				"set " + RumbleChatKeyEnv + " to the key from rumble.com/account/livestream-api"))
+
+		case (ae.Status == http.StatusUnauthorized || ae.Status == http.StatusForbidden) &&
+			code == fmt.Sprint(ae.Status):
+			r.setHealth(StateFailed,
+				"Rumble refused the live-stream API key; it may have been reset. Issue a new one at rumble.com/account/livestream-api")
+			return Fatal(errors.New("rumble refused the live-stream API key (it may have been reset or revoked); " +
+				"issue a new one at rumble.com/account/livestream-api and update " + RumbleChatKeyEnv))
+		}
+	}
+
+	out := fmt.Sprintf("rumble live-stream API returned %d", ae.Status)
+	switch {
+	case ae.Status == http.StatusTooManyRequests:
+		out += " (rate limited)"
+	case !own && (ae.Status == http.StatusForbidden || ae.Status == http.StatusUnauthorized ||
+		ae.Status == http.StatusBadRequest):
+		// Not Rumble's JSON refusal, so this is the edge, not the key.
+		out += " from Rumble's network edge, not a key refusal; the host may be temporarily challenged, retrying"
+	}
+	if own {
+		if m := plainReason(msg); m != "" {
+			out += ": " + m
+		}
+	}
+	return errors.New(r.scrub(out))
+}
+
+// transportReason names a transport failure without the request URL, which
+// carries the key.
+func transportReason(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	var se *json.SyntaxError
+	var te *json.UnmarshalTypeError
+	if errors.As(err, &se) || errors.As(err, &te) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "the response was not valid JSON"
+	}
+	return plainReason(err.Error())
 }
 
 // scrub removes the API key from text on its way out of this adapter.

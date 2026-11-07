@@ -474,6 +474,17 @@ func TestRumbleStopsRatherThanRetryingACredentialItCannotFix(t *testing.T) {
 			})
 			a := rumbleAdapter(t, s.URL, nil)
 
+			if !tc.wantFatal {
+				// Retryable: Run keeps polling in-loop instead of returning.
+				if _, err := rumbleRun(t, a, 3); err != nil {
+					t.Fatalf("HTTP %d returned %v from Run; a transient failure must be retried in-loop (%s)",
+						tc.status, err, tc.because)
+				}
+				if n := s.calls.Load(); n != 3 {
+					t.Fatalf("polled %d times for HTTP %d, want 3 (retry in-loop)", n, tc.status)
+				}
+				return
+			}
 			_, err := rumbleRun(t, a, 1)
 			if err == nil {
 				t.Fatalf("Run returned nil for HTTP %d; the failure was swallowed entirely", tc.status)
@@ -521,7 +532,7 @@ func TestRumbleKeepsTheAPIKeyOutOfEveryStringItProduces(t *testing.T) {
 	})
 	a := rumbleAdapter(t, s.URL, func(c *RumbleConfig) { c.Key = key })
 
-	_, err := rumbleRun(t, a, 1)
+	_, err := rumbleRunExhaust(t, a)
 	if err == nil {
 		t.Fatal("Run returned nil; this test needs the error path it is checking")
 	}
