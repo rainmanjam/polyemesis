@@ -3666,7 +3666,7 @@
   "wave3.x.tweetHint": "X, bir yayın canlıya geçtiğinde duyuru paylaşır. Bir program bu hedef açık kaldığı sürece devam eder; X yayını program ortasında bitirirse polyemesis yeni bir yayın açar ve varsayılan olarak o yayın paylaşım yapılmadan canlıya geçer.",
   "wave3.x.provisional": "X'in belgelerine göre oluşturuldu ve henüz gerçek bir X hesabıyla denenmedi.",
   "wave3.x.metadata": "X yalnızca yayın yayımlanırken başlık kabul eder, bu yüzden polyemesis canlıya geçiş başlığını o anda gönderir. Canlı yayındayken değiştirmek mümkün değildir.",
-  "wave3.x.chatRead": "Canlı sohbet X'in etkinlik akışından gelir ve POLYEMESIS_X_APP_BEARER içinde uygulamanın bearer belirtecini gerektirir. Olmadan sohbet paneli boş kalır, gönderme yine çalışır.",
+  "wave3.x.chatRead": "Canlı sohbet, polyemesis'in X'e kaydettiği bir webhook'a iletilir. POLYEMESIS_X_APP_BEARER içinde uygulamanın bearer belirteci ve port içermeyen herkese açık bir HTTPS ana makine adı gerekir (tls.mode acme, gelen 443). Bunlar olmadan sohbet paneli boş kalır, gönderme yine çalışır.",
   "wave3.x.chatSend": "Canlı yayının sohbetine en fazla 140 karakter gönderir. X Livestream'in açık olması gerekir.",
   "wave3.x.moderation": "Bir izleyiciyi susturma ve susturmayı kaldırma, mesaj silme. X'te gizleme işlemi yoktur, bu yüzden kaldırılan mesaj silinir.",
   "wave3.x.viewerStats": "X neyi saydığını söylemeden izleyici sayıları bildirir, bu yüzden izleyici sayısı gösterilmez.",

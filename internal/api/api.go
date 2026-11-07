@@ -480,6 +480,8 @@ type Server struct {
 	// allowance the admin needs the moment setup succeeds, and a mistyped
 	// password would slow down the one request that creates the account.
 	setups *auth.Throttle
+	// xhooks limits failed signatures on the X webhook per client address (see xFailLimiter).
+	xhooks *xFailLimiter
 
 	// beacons is the public player's QoE endpoint state, and nextStart caches
 	// the offline card's countdown. See playout_player.go.
@@ -951,6 +953,7 @@ func New(o Options) *Server {
 		proxies:         proxies,
 		logins:          auth.NewThrottle(),
 		setups:          auth.NewThrottle(),
+		xhooks:          newXFailLimiter(),
 		setupCode:       o.SetupCode,
 		kickKeys:        &chat.KickKeyFetcher{},
 		sessions: auth.New(
@@ -1820,6 +1823,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// unguessable path segment is the whole credential, and the handler
 		// compares it before doing anything else. See chat_wiring.go.
 		r.HandleFunc(routeKickWebhook, s.handleKickChatWebhook)
+
+		// X's chat webhook: the CRC GET and the event POST. Outside requireAuth
+		// for the same reason, since X sends no session and no CSRF header. The
+		// credential is the HMAC signature over the raw body, keyed by the X
+		// client secret; failures are throttled per address. Two methods are
+		// registered, not HandleFunc, so no other verb is routed. See
+		// x_webhook.go.
+		r.Get(routeXWebhook, s.handleXWebhookCRC)
+		r.Post(routeXWebhook, s.handleXWebhookEvent)
 
 		// The chat overlay's two reads. Outside every auth group because the
 		// overlay key is not an API credential and requireAuth must never

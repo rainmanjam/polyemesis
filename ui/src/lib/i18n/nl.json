@@ -3666,7 +3666,7 @@
   "wave3.x.tweetHint": "X plaatst een aankondiging wanneer een uitzending live gaat. Een show duurt zolang deze bestemming aan staat; als X de uitzending halverwege beëindigt, opent polyemesis een nieuwe, en standaard gaat die zonder bericht live.",
   "wave3.x.provisional": "Gebouwd op basis van de documentatie van X en nog niet getest met een echt X-account.",
   "wave3.x.metadata": "X neemt alleen een titel aan wanneer de uitzending wordt gepubliceerd, dus polyemesis stuurt dan de titel bij livegang. Wijzigen is niet beschikbaar tijdens live.",
-  "wave3.x.chatRead": "Livechat komt uit de activiteitenstroom van X en heeft het bearer-token van de app nodig in POLYEMESIS_X_APP_BEARER. Zonder blijft het chatvenster leeg en werkt verzenden nog steeds.",
+  "wave3.x.chatRead": "Livechat wordt afgeleverd bij een webhook die polyemesis bij X registreert. Het heeft het bearer-token van de app nodig in POLYEMESIS_X_APP_BEARER en een openbare HTTPS-hostnaam zonder poort (tls.mode acme, inkomend 443). Zonder die twee blijft het chatvenster leeg en werkt verzenden nog steeds.",
   "wave3.x.chatSend": "Verstuurt naar de chat van de live uitzending, tot 140 tekens. Vereist dat X Livestream is aangezet.",
   "wave3.x.moderation": "Een kijker dempen en weer toelaten, en een bericht verwijderen. X kent geen verbergen, dus een verwijderd bericht is weg.",
   "wave3.x.viewerStats": "X meldt kijkersaantallen zonder te zeggen wat ze tellen, dus er wordt geen aantal getoond.",

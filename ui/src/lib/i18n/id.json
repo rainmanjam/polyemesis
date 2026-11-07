@@ -3666,7 +3666,7 @@
   "wave3.x.tweetHint": "X memposting pengumuman saat siaran mulai langsung. Sebuah acara berlangsung selama tujuan ini aktif; jika X mengakhiri siaran di tengah acara, polyemesis membuka siaran baru, dan secara bawaan siaran itu langsung tanpa postingan.",
   "wave3.x.provisional": "Dibuat berdasarkan dokumentasi X dan belum diperiksa dengan akun X sungguhan.",
   "wave3.x.metadata": "X hanya menerima judul saat siaran diterbitkan, jadi polyemesis mengirim judul mulai tayang pada saat itu. Mengubahnya tidak tersedia saat tayang.",
-  "wave3.x.chatRead": "Obrolan langsung berasal dari aliran aktivitas X dan butuh token bearer aplikasi di POLYEMESIS_X_APP_BEARER. Tanpa itu panel obrolan tetap kosong dan pengiriman tetap berfungsi.",
+  "wave3.x.chatRead": "Obrolan langsung dikirim ke webhook yang didaftarkan polyemesis di X. Butuh token bearer aplikasi di POLYEMESIS_X_APP_BEARER dan nama host HTTPS publik tanpa port (tls.mode acme, masuk 443). Tanpa keduanya panel obrolan tetap kosong dan pengiriman tetap berfungsi.",
   "wave3.x.chatSend": "Mengirim ke obrolan siaran langsung, hingga 140 karakter. Memerlukan X Livestream yang diaktifkan.",
   "wave3.x.moderation": "Membisukan dan membuka bisu penonton, serta menghapus pesan. X tidak punya tindakan sembunyikan, jadi pesan yang dihapus hilang.",
   "wave3.x.viewerStats": "X melaporkan angka penonton tanpa menjelaskan apa yang dihitung, jadi tidak ada jumlah penonton yang ditampilkan.",

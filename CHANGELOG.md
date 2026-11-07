@@ -26,6 +26,15 @@ its first tagged release.
   and if Twitch still refuses the account's IRC session is stopped and the account shows as needing a
   reconnect. A Twitch revoked refresh token ("Invalid refresh token") is now recognised as a
   reconnect-required grant.
+- **X live chat is read from a webhook.** X delivers `broadcast.chat` only to a registered webhook, and
+  the old route (a subscription with no webhook, read from `GET /2/activity/stream`) answered 503 on
+  every attempt against live X, so it is removed. polyemesis now serves `GET`/`POST
+  /api/v1/webhooks/x` (the CRC check and signed event deliveries), registers
+  `https://<tls.hostname>/api/v1/webhooks/x` with X when chat starts, and subscribes
+  `broadcast.chat` and `broadcast.chat.remove`; a removed message disappears from the pane. Needs
+  `POLYEMESIS_X_APP_BEARER`, a public trusted HTTPS hostname without a port (`tls.mode: acme`),
+  inbound 443, and the X client secret saved in Settings. Without them the chat pane says what is
+  missing. See `docs/PLATFORMS.md` and `docs/CONFIGURATION.md`.
 
 - **A light theme for the operator console, and a Light / Dark / System control in the header.** The
   console follows the operating system's `prefers-color-scheme` until the operator picks, then

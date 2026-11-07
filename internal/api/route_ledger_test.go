@@ -651,6 +651,19 @@ var excusedRoutes = map[string]coverageExcus{
 		Want: &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
 	},
 
+	// X's chat webhook, registered per method (not HandleFunc), so two rows.
+	"GET /api/v1/webhooks/x": {
+		Why: "unauthenticated by necessity: X's CRC check carries no session. The crc_token is " +
+			"required (400 without it), so the anonymous and read callers see the same answer",
+		Want: &routeWant{As: "read", Status: http.StatusBadRequest, AnonMatchesRead: true},
+	},
+	"POST /api/v1/webhooks/x": {
+		Why: "unauthenticated by necessity: X's event delivery carries no session or CSRF header; " +
+			"the HMAC signature over the raw body is the credential, and this fixture has no X " +
+			"client secret saved, so every caller is answered 401 before a body is read",
+		Want: &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+	},
+
 	// ---- 503 without the subsystem wired: NONE LEFT. /jobs/overview and
 	// /jobs/policy were found to answer 200 on this fixture and were swept;
 	// /jobs and /jobs/{id} really were 503 until plantRows wired a job queue

@@ -568,15 +568,22 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		if s.livestreamGate(db.PlatformX) != "open" {
 			return nil, fmt.Errorf("X chat needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)")
 		}
+		origin, why := xWebhookOrigin(s.cfg)
 		return chat.NewX(chat.XConfig{
 			AccountRef: a.AccountRef,
 			Channel:    a.AccountName,
 			Token:      s.chatToken(a.ID),
-			// PROVISIONAL: the activity stream needs an app-only bearer token,
-			// which the operator supplies from the X developer console. Nothing
-			// here mints it. Empty makes the adapter's Run refuse with a Fatal
+			// The webhook calls need an app-only bearer token, which the
+			// operator supplies from the X developer console. Nothing here
+			// mints it. Empty makes the adapter's Run refuse with a Fatal
 			// error that says so.
 			AppBearer: s.env.XAppBearer,
+			// Where X posts events: tls.hostname over https, no port. When
+			// there is none the adapter's Run says why, as a Fatal error.
+			WebhookURL:     xWebhookURL(origin),
+			WebhookProblem: why,
+			// So the adapter's warnings (a replaced subscription) reach the server log.
+			Log: s.log,
 		})
 
 	case db.PlatformFacebook:
