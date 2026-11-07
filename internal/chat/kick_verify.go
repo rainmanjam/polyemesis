@@ -57,6 +57,33 @@ const (
 // it signs with.
 const KickPublicKeyURL = platform.KickAPIHost + "/public/v1/public-key"
 
+// ErrKickKeyUnavailable means the signing key could not be obtained, so the
+// delivery could be neither accepted nor rejected on its merits. The handler
+// answers 503 for it rather than 401: Kick counts a 401 as a failed delivery
+// toward its one-day auto-disable, and a 503 is the answer that says "try
+// again", which is what is true.
+var ErrKickKeyUnavailable = errors.New("kick signing key unavailable")
+
+// ErrKickDuplicate means this Message-Id was already accepted. Kick retries a
+// delivery it believes failed, so a repeat is expected and the handler answers
+// 200 without ingesting it a second time.
+var ErrKickDuplicate = errors.New("kick webhook delivery already processed")
+
+// kickMaxSkew bounds how far a delivery's timestamp may sit from now. The
+// timestamp is signed, so a captured delivery cannot be given a fresh one; this
+// is what stops a replay from being accepted indefinitely.
+const kickMaxSkew = 5 * time.Minute
+
+// kickKeyRefetchEvery rate-limits refetching the signing key after a
+// signature failure, so a stream of forgeries cannot turn into a stream of
+// requests to api.kick.com.
+const kickKeyRefetchEvery = time.Minute
+
+// kickReplayRing is how many accepted Message-Ids the verifier remembers. The
+// timestamp window already bounds how old a replayable delivery can be, so this
+// only has to span that window at chat rates.
+const kickReplayRing = 4096
+
 // ErrKickSignature is returned for every verification failure.
 //
 // One error for all of them on purpose: "bad signature", "no such header" and
@@ -127,29 +154,116 @@ func ParseKickPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 // The key is fetched rather than compiled in. An embedded key is one key
 // rotation away from rejecting every delivery with no way for an operator to
 // fix it short of a new binary; fetching it over TLS from api.kick.com puts the
-// trust where it already is — the same host, and the same certificate chain,
+// trust where it already is -- the same host, and the same certificate chain,
 // that the rest of this adapter talks to.
 //
 // It is cached because the key does not change between deliveries and a chat
 // channel can deliver many per second. A failed fetch is NOT cached: the next
 // delivery retries, so a momentary blip does not disable verification for the
-// lifetime of the process.
+// lifetime of the process. The cache is not forever either: Refresh replaces it
+// after a signature failure, which is how a rotated key is picked up without a
+// restart.
+//
+// The lock guards the cache only and is never held across the network. A fetch
+// is shared by everyone who arrives while it runs, so a stalled api.kick.com
+// costs each delivery its own bounded wait instead of queueing them all behind
+// one.
 type KickKeyFetcher struct {
 	HTTP *http.Client
 	URL  string
+	// Now is the clock for the refetch rate limit; time.Now when nil.
+	Now func() time.Time
 
-	mu  sync.Mutex
-	key *rsa.PublicKey
+	mu        sync.Mutex
+	key       *rsa.PublicKey
+	fetchedAt time.Time
+	flight    *kickFlight
+}
+
+// kickFlight is one in-progress fetch that concurrent callers wait on.
+type kickFlight struct {
+	done chan struct{}
+	key  *rsa.PublicKey
+	err  error
+}
+
+func (f *KickKeyFetcher) now() time.Time {
+	if f.Now != nil {
+		return f.Now()
+	}
+	return time.Now()
 }
 
 // Key returns the cached public key, fetching it on first use.
 func (f *KickKeyFetcher) Key(ctx context.Context) (*rsa.PublicKey, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.key != nil {
-		return f.key, nil
+		k := f.key
+		f.mu.Unlock()
+		return k, nil
 	}
+	fl := f.joinLocked(ctx)
+	f.mu.Unlock()
+	return f.wait(ctx, fl)
+}
 
+// Refresh refetches the key after stale failed to verify a delivery. It returns
+// the key to try next: the cached one when somebody already replaced stale, or
+// when a refetch ran less than a minute ago (in which case the failure is
+// simply a bad signature), and the freshly fetched one otherwise.
+func (f *KickKeyFetcher) Refresh(ctx context.Context, stale *rsa.PublicKey) (*rsa.PublicKey, error) {
+	f.mu.Lock()
+	if f.key != nil && f.key != stale {
+		k := f.key
+		f.mu.Unlock()
+		return k, nil
+	}
+	if f.key != nil && f.now().Sub(f.fetchedAt) < kickKeyRefetchEvery {
+		k := f.key
+		f.mu.Unlock()
+		return k, nil
+	}
+	fl := f.joinLocked(ctx)
+	f.mu.Unlock()
+	return f.wait(ctx, fl)
+}
+
+// joinLocked returns the fetch in progress, starting one if there is none. The
+// caller holds f.mu.
+func (f *KickKeyFetcher) joinLocked(ctx context.Context) *kickFlight {
+	if f.flight != nil {
+		return f.flight
+	}
+	fl := &kickFlight{done: make(chan struct{})}
+	f.flight = fl
+	// Detached from the first caller's context: that caller may give up while
+	// others are still waiting on this fetch. Bounded on its own instead.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	go func() {
+		defer cancel()
+		fl.key, fl.err = f.fetch(fctx)
+		f.mu.Lock()
+		if fl.err == nil {
+			f.key = fl.key
+			f.fetchedAt = f.now()
+		}
+		f.flight = nil
+		f.mu.Unlock()
+		close(fl.done)
+	}()
+	return fl
+}
+
+func (f *KickKeyFetcher) wait(ctx context.Context, fl *kickFlight) (*rsa.PublicKey, error) {
+	select {
+	case <-fl.done:
+		return fl.key, fl.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (f *KickKeyFetcher) fetch(ctx context.Context) (*rsa.PublicKey, error) {
 	url := f.URL
 	if url == "" {
 		url = KickPublicKeyURL
@@ -191,12 +305,33 @@ func (f *KickKeyFetcher) Key(ctx context.Context) (*rsa.PublicKey, error) {
 		return nil, errors.New("fetch kick public key: response carried no key")
 	}
 
-	key, err := ParseKickPublicKey([]byte(envelope.Data.PublicKey))
-	if err != nil {
-		return nil, err
+	return ParseKickPublicKey([]byte(envelope.Data.PublicKey))
+}
+
+// kickReplayGuard remembers the Message-Ids it has accepted.
+type kickReplayGuard struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+	ring []string
+	next int
+}
+
+// firstSight records id and reports whether it was new.
+func (g *kickReplayGuard) firstSight(id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, dup := g.seen[id]; dup {
+		return false
 	}
-	f.key = key
-	return key, nil
+	if g.seen == nil {
+		g.seen = make(map[string]struct{}, kickReplayRing)
+		g.ring = make([]string, kickReplayRing)
+	}
+	delete(g.seen, g.ring[g.next])
+	g.ring[g.next] = id
+	g.next = (g.next + 1) % kickReplayRing
+	g.seen[id] = struct{}{}
+	return true
 }
 
 // KickVerifier returns the Verify function KickConfig expects, backed by a
@@ -204,17 +339,63 @@ func (f *KickKeyFetcher) Key(ctx context.Context) (*rsa.PublicKey, error) {
 //
 // Verification is not made conditional on the fetch succeeding. If the key
 // cannot be retrieved the delivery is refused, because "we could not check this
-// one" and "this one is fine" must not produce the same outcome — that
-// equivalence is exactly what left this check switched off before.
+// one" and "this one is fine" must not produce the same outcome -- that
+// equivalence is exactly what left this check switched off before. The refusal
+// is ErrKickKeyUnavailable (503, retry) rather than ErrKickSignature (401),
+// because the delivery was not found to be wrong.
+//
+// After the signature, and only then, the delivery must be recent and new: a
+// timestamp more than kickMaxSkew from now is refused, and a Message-Id already
+// accepted is ErrKickDuplicate. Doing these after the signature means a forger
+// cannot fill the replay ring with ids of their choosing.
 func KickVerifier(f *KickKeyFetcher) func(r *http.Request, body []byte) error {
+	return kickVerifier(f, time.Now)
+}
+
+func kickVerifier(f *KickKeyFetcher, now func() time.Time) func(r *http.Request, body []byte) error {
+	guard := &kickReplayGuard{}
 	return func(r *http.Request, body []byte) error {
+		// A request without the three headers is not a Kick delivery, whatever
+		// the key is. Turned away before the key is wanted, so a stranger
+		// probing the URL gets 401 (not a 503 that reads as an outage) and costs
+		// no fetch.
+		if r.Header.Get(KickHeaderMessageID) == "" || r.Header.Get(KickHeaderTimestamp) == "" || r.Header.Get(KickHeaderSignature) == "" {
+			return fmt.Errorf("%w: missing one of %s, %s, %s",
+				ErrKickSignature, KickHeaderMessageID, KickHeaderTimestamp, KickHeaderSignature)
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
 		key, err := f.Key(ctx)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrKickSignature, err)
+			return fmt.Errorf("%w: %v", ErrKickKeyUnavailable, err)
 		}
-		return VerifyKickSignature(key, r, body)
+		if err := VerifyKickSignature(key, r, body); err != nil {
+			// A rotated key fails every genuine delivery the same way a forgery
+			// fails. Refetch once (rate-limited) and judge again before saying no.
+			fresh, rerr := f.Refresh(ctx, key)
+			if rerr != nil {
+				return fmt.Errorf("%w: %v", ErrKickKeyUnavailable, rerr)
+			}
+			if fresh == key {
+				return err
+			}
+			if err := VerifyKickSignature(fresh, r, body); err != nil {
+				return err
+			}
+		}
+
+		ts, perr := time.Parse(time.RFC3339, r.Header.Get(KickHeaderTimestamp))
+		if perr != nil {
+			return fmt.Errorf("%w: timestamp is not RFC 3339: %v", ErrKickSignature, perr)
+		}
+		if skew := now().Sub(ts); skew > kickMaxSkew || skew < -kickMaxSkew {
+			return fmt.Errorf("%w: timestamp %s is outside the %s window", ErrKickSignature, ts.Format(time.RFC3339), kickMaxSkew)
+		}
+		if !guard.firstSight(r.Header.Get(KickHeaderMessageID)) {
+			return ErrKickDuplicate
+		}
+		return nil
 	}
 }

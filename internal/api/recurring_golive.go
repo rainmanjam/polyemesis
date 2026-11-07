@@ -170,9 +170,13 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	}
 	cctx, cancel := context.WithTimeout(ctx, templateCallTimeout)
 	defer cancel()
-	res, err := mp.PushMetadata(cctx, creds.ClientID, acct.AccessToken, acct.AccountRef, oauth.Metadata{
-		Title:    title,
-		Category: tpl.Category,
+	var res *oauth.MetadataResult
+	err = s.kickRetry(cctx, acct, func(token string) (e error) {
+		res, e = mp.PushMetadata(cctx, creds.ClientID, token, acct.AccountRef, oauth.Metadata{
+			Title:    title,
+			Category: tpl.Category,
+		})
+		return e
 	})
 	if err != nil {
 		s.log.Warn("recurring: the go-live title was refused; it is not retried for this show",

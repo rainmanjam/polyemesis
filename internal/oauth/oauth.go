@@ -659,7 +659,13 @@ func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, he
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	return json.Unmarshal(body, out)
+	if err := json.Unmarshal(body, out); err != nil {
+		if isEdgeAnswer(resp.Header, body) {
+			return newStatusError(resp, body, "the platform answered with a web page instead of JSON; a proxy or its edge may be blocking this server")
+		}
+		return err
+	}
+	return nil
 }
 
 func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {

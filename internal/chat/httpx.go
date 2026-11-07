@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // defaultHTTPTimeout bounds one API call. Chat polling runs on a schedule
@@ -44,6 +46,15 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// Message is the top-level "message" of the {"data":..,"message":".."}
+	// envelope Kick and a few others use, empty when the body is not one.
+	Message string
+	// RetryAfter is the platform's Retry-After, zero when it sent none.
+	RetryAfter time.Duration
+	// Edge is set when the answer came from a proxy or CDN in front of the
+	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
+	// rather than from its API. Its status says nothing about the account.
+	Edge bool
 }
 
 func (e *apiError) Error() string {
@@ -132,16 +143,69 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &apiError{
-			Status: resp.StatusCode,
-			URL:    stripQuery(endpoint),
-			Body:   shorten(raw),
-			Reason: errorReason(raw),
+			Status:     resp.StatusCode,
+			URL:        stripQuery(endpoint),
+			Body:       shorten(raw),
+			Reason:     errorReason(raw),
+			Message:    errorMessage(raw),
+			RetryAfter: retryAfter(resp.Header.Get("Retry-After")),
+			Edge:       isEdgeAnswer(resp.Header, raw),
 		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	if err := json.Unmarshal(raw, out); err != nil {
+		if isEdgeAnswer(resp.Header, raw) {
+			return fmt.Errorf("%s answered %d with a web page instead of JSON; a proxy or the platform's edge may be blocking this server",
+				stripQuery(endpoint), resp.StatusCode)
+		}
+		return err
+	}
+	return nil
+}
+
+// errorMessage reads the "message" string of a {"data":..,"message":".."}
+// error envelope. Anything else yields empty.
+func errorMessage(raw []byte) string {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &env) != nil {
+		return ""
+	}
+	return strings.TrimSpace(env.Message)
+}
+
+// retryAfter parses a Retry-After header in either form (delta-seconds or an
+// HTTP date). Zero when absent or unreadable.
+func retryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(v); err == nil {
+		return max(0, time.Until(at))
+	}
+	return 0
+}
+
+// isEdgeAnswer reports whether a response is a proxy's page rather than the
+// API's JSON: the body is not JSON and either looks like HTML or carries a
+// CDN's headers. A real API error, including Kick's, is JSON even when it
+// travelled through Cloudflare, so the JSON check comes first.
+func isEdgeAnswer(h http.Header, raw []byte) bool {
+	if len(bytes.TrimSpace(raw)) == 0 || json.Valid(raw) {
+		return false
+	}
+	lead := strings.ToLower(strings.TrimSpace(string(raw[:min(len(raw), 64)])))
+	if strings.HasPrefix(lead, "<") {
+		return true
+	}
+	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes
@@ -186,7 +250,13 @@ func stripQuery(endpoint string) string {
 func shorten(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 300 {
-		return s[:300] + "..."
+		// On a rune boundary: a cut through a multi-byte character is invalid
+		// UTF-8 in a message the UI renders.
+		cut := 300
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "..."
 	}
 	return s
 }

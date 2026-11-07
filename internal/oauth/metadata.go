@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/platform"
@@ -206,6 +207,11 @@ type statusError struct {
 	//
 	// Truncation is therefore a property of the presentation, not of the error.
 	full string
+	// RetryAfter and Edge are what StatusError carries for the getJSON path:
+	// the platform's Retry-After, and whether a proxy rather than the API
+	// answered. Set by requestJSON from the response.
+	RetryAfter time.Duration
+	Edge       bool
 }
 
 func (e *statusError) Error() string {
@@ -275,7 +281,11 @@ func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToke
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw)}
+		return &statusError{
+			Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			Edge:       isEdgeAnswer(resp.Header, raw),
+		}
 	}
 	// A successful PATCH is a 204 on Helix; there is nothing to decode.
 	if out == nil || len(raw) == 0 {

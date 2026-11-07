@@ -305,7 +305,11 @@ func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount
 	if err != nil {
 		return analytics.Stats{}, err
 	}
-	ls, err := sf.Stats(ctx, creds.ClientID, acct.AccessToken)
+	var ls *oauth.LiveStats
+	err = s.kickRetry(ctx, acct, func(token string) (e error) {
+		ls, e = sf.Stats(ctx, creds.ClientID, token)
+		return e
+	})
 	if err != nil {
 		return analytics.Stats{}, err
 	}

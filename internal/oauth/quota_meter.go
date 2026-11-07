@@ -3,6 +3,7 @@ package oauth
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -118,20 +119,22 @@ type StatusError struct {
 	// QuotaExceeded is any of the reasons IsSpentQuotaReason names: the
 	// project's allowance is spent until the reset.
 	QuotaExceeded bool
-	msg           string
+	// Edge is set when what answered was a proxy or CDN in front of the
+	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
+	// rather than its API, so the status says nothing about the account.
+	Edge bool
+	// body is the response body, bounded, kept for a provider that wants the
+	// platform's own message back out of it.
+	body string
+	msg  string
 }
 
 func (e *StatusError) Error() string { return e.msg }
 
 func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
-	e := &StatusError{Status: resp.StatusCode, msg: msg}
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
-		if secs, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && secs > 0 {
-			e.RetryAfter = time.Duration(secs) * time.Second
-		} else if at, err := http.ParseTime(ra); err == nil {
-			e.RetryAfter = max(0, time.Until(at))
-		}
-	}
+	e := &StatusError{Status: resp.StatusCode, msg: msg, body: string(body[:min(len(body), 4<<10)])}
+	e.Edge = isEdgeAnswer(resp.Header, body)
+	e.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
 }
@@ -155,4 +158,35 @@ func bodyNamesSpentQuota(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// parseRetryAfter reads a Retry-After header in either form, delta-seconds or an
+// HTTP date. Zero when absent or unreadable.
+func parseRetryAfter(ra string) time.Duration {
+	ra = strings.TrimSpace(ra)
+	if ra == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(ra); err == nil {
+		return max(0, time.Until(at))
+	}
+	return 0
+}
+
+// isEdgeAnswer reports whether a response is a proxy's page rather than the
+// API's JSON: the body is not JSON and either looks like HTML or carries a
+// CDN's headers. A real API error is JSON even when it travelled through
+// Cloudflare, so the JSON check comes first.
+func isEdgeAnswer(h http.Header, body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 || json.Valid(body) {
+		return false
+	}
+	lead := strings.ToLower(strings.TrimSpace(string(body[:min(len(body), 64)])))
+	if strings.HasPrefix(lead, "<") {
+		return true
+	}
+	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
 }
