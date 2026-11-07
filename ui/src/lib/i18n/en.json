@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Choose a start time.",
   "chatExport.needOrder": "The end must be after the start.",
   "chatExport.note": "Only chat still in the history is included. Chat from recorded streams is also saved with each recording.",
-  "set.chatSavedWithRecordings": "Chat is also saved with each recording, so a short history here is fine for analysing recorded streams."
+  "set.chatSavedWithRecordings": "Chat is also saved with each recording, so a short history here is fine for analysing recorded streams.",
+  "chatpage.countViewers": "Watching: {n}",
+  "chatpage.countFollowers": "Followers: {n}",
+  "chatpage.countSubscribers": "Subscribers: {n}",
+  "caps.rumble.viewerStats": "Built but not yet checked against a live account. The viewer count (watching_now), follower count and subscriber count arrive on the same get-data poll as chat and show beside the Rumble chat status and in analytics. Rumble has no sign-in, so this is not the per-account stats route, and the cell stays Unverified until a live broadcast confirms it. Chat is capped at the latest 50 messages per poll; when a busy chat outruns that, the status says some messages may have been missed. Rumble's payload carries two follower figures, num_followers and num_followers_total, and its article does not say how they differ; the count shown is num_followers and may understate the channel until it is compared with the channel page on a live account."
 }

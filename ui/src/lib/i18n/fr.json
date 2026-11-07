@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Choisissez une heure de début.",
   "chatExport.needOrder": "La fin doit être postérieure au début.",
   "chatExport.note": "Seul le chat encore présent dans l'historique est inclus. Le chat des diffusions enregistrées est aussi enregistré avec chaque enregistrement.",
-  "set.chatSavedWithRecordings": "Le chat est aussi enregistré avec chaque enregistrement : un historique court ici suffit donc pour analyser les diffusions enregistrées."
+  "set.chatSavedWithRecordings": "Le chat est aussi enregistré avec chaque enregistrement : un historique court ici suffit donc pour analyser les diffusions enregistrées.",
+  "chatpage.countViewers": "Spectateurs : {n}",
+  "chatpage.countFollowers": "Followers : {n}",
+  "chatpage.countSubscribers": "Abonnés : {n}",
+  "caps.rumble.viewerStats": "Développé mais pas encore vérifié sur un compte en direct. Le nombre de spectateurs (watching_now), d'abonnés (followers) et d'abonnés payants arrive avec la même requête get-data que le chat et s'affiche à côté de l'état du chat Rumble et dans les analyses. Rumble n'a pas de connexion, ce n'est donc pas la route de statistiques par compte ; la case reste « Non vérifié » tant qu'un direct ne l'a pas confirmé. Le chat est limité aux 50 derniers messages par requête ; si un chat très actif dépasse cette limite, l'état signale que des messages ont pu être manqués."
 }

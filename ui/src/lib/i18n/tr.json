@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Bir başlangıç zamanı seçin.",
   "chatExport.needOrder": "Bitiş, başlangıçtan sonra olmalıdır.",
   "chatExport.note": "Yalnızca geçmişte hâlâ bulunan sohbet dahil edilir. Kaydedilen yayınların sohbeti her kayıtla birlikte de saklanır.",
-  "set.chatSavedWithRecordings": "Sohbet her kayıtla birlikte de saklanır; bu yüzden kaydedilen yayınları analiz etmek için buradaki kısa bir geçmiş yeterlidir."
+  "set.chatSavedWithRecordings": "Sohbet her kayıtla birlikte de saklanır; bu yüzden kaydedilen yayınları analiz etmek için buradaki kısa bir geçmiş yeterlidir.",
+  "chatpage.countViewers": "İzleyen: {n}",
+  "chatpage.countFollowers": "Takipçi: {n}",
+  "chatpage.countSubscribers": "Abone: {n}",
+  "caps.rumble.viewerStats": "Geliştirildi ancak henüz canlı bir hesapta denenmedi. İzleyici sayısı (watching_now), takipçi ve abone sayısı sohbetle aynı get-data sorgusuyla gelir ve Rumble sohbet durumunun yanında ve analizlerde görünür. Rumble'da oturum açma yoktur, bu nedenle bu hesap bazlı istatistik yolu değildir; hücre, canlı bir yayın doğrulayana kadar “Doğrulanmadı” kalır. Sohbet, sorgu başına son 50 mesajla sınırlıdır; yoğun bir sohbet bunu aşarsa durum, bazı mesajların kaçmış olabileceğini belirtir."
 }

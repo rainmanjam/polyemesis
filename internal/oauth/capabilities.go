@@ -500,11 +500,11 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapSSO:        SupportNo,
 			CapChatSend:   SupportNo,
 			CapModeration: SupportNo,
-			// Documented but unread, and it stays unverified for exactly that
-			// reason: watching_now sits in the same get-data response the chat
-			// poller already fetches, so this is a field read away rather than
-			// an integration away. The stats drift test is a biconditional --
-			// a SupportYes here with no Stats method would fail it, correctly.
+			// Read from the chat poll (watching_now, followers, subscribers)
+			// and fed to analytics, but never checked against a live account,
+			// so it stays unverified. The stats drift test is a biconditional
+			// on the oauth Stats route, which Rumble cannot have -- a
+			// SupportYes here with no Stats method would fail it, correctly.
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportNo,
 		},
@@ -515,11 +515,12 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 				"no message id, so polyemesis derives one from the content, and two identical messages from one " +
 				"person inside the same second are indistinguishable and show as one. And Rumble publishes no rate " +
 				"limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
-			CapStreamKey:  "Rumble Studio issues both fields; copy them across by hand. There is a Static Stream Key that does not change between broadcasts, which makes this a one-time paste rather than a per-stream chore -- but it is obtainable only through Rumble's own settings UI, never over the API.",
-			CapSSO:        "Rumble publishes no OAuth and no developer sign-in. Its one API article says authentication is not required for that API, and rumble.com/oauth/authorize is a genuine 404 -- only an unpublished partner agreement could change this.",
-			CapMetadata:   "No write API exists. Rumble's own mechanism is a live-stream template chosen in your account settings, which it applies automatically each time the static key goes live -- so set the title and category there, before the broadcast, rather than expecting polyemesis to push them.",
-			CapChatSend:   "The entire published API is one read-only snapshot request; no send path, method or request body is documented anywhere. Chat bots that appear to work drive Rumble's private frontend with a stored account password, which polyemesis will not do.",
-			CapModeration: "Rumble documents moderation as a UI action -- three dots next to a message in live chat -- and its moderation article does not mention an API at all.",
+			CapViewerStats: "Built but not yet checked against a live account. The viewer count (watching_now), follower count and subscriber count arrive on the same get-data poll as chat and show beside the Rumble chat status and in analytics. Rumble has no sign-in, so this is not the per-account stats route, and the cell stays Unverified until a live broadcast confirms it. Chat is capped at the latest 50 messages per poll; when a busy chat outruns that, the status says some messages may have been missed. Rumble's payload carries two follower figures, num_followers and num_followers_total, and its article does not say how they differ; the count shown is num_followers and may understate the channel until it is compared with the channel page on a live account.",
+			CapStreamKey:   "Rumble Studio issues both fields; copy them across by hand. There is a Static Stream Key that does not change between broadcasts, which makes this a one-time paste rather than a per-stream chore -- but it is obtainable only through Rumble's own settings UI, never over the API.",
+			CapSSO:         "Rumble publishes no OAuth and no developer sign-in. Its one API article says authentication is not required for that API, and rumble.com/oauth/authorize is a genuine 404 -- only an unpublished partner agreement could change this.",
+			CapMetadata:    "No write API exists. Rumble's own mechanism is a live-stream template chosen in your account settings, which it applies automatically each time the static key goes live -- so set the title and category there, before the broadcast, rather than expecting polyemesis to push them.",
+			CapChatSend:    "The entire published API is one read-only snapshot request; no send path, method or request body is documented anywhere. Chat bots that appear to work drive Rumble's private frontend with a stored account password, which polyemesis will not do.",
+			CapModeration:  "Rumble documents moderation as a UI action -- three dots next to a message in live chat -- and its moderation article does not mention an API at all.",
 		},
 	},
 	manualUnverified(

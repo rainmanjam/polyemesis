@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Scegli un orario di inizio.",
   "chatExport.needOrder": "La fine deve essere successiva all'inizio.",
   "chatExport.note": "Include solo la chat ancora presente nella cronologia. La chat delle dirette registrate viene salvata anche con ogni registrazione.",
-  "set.chatSavedWithRecordings": "La chat viene salvata anche con ogni registrazione, quindi una cronologia breve qui basta per analizzare le dirette registrate."
+  "set.chatSavedWithRecordings": "La chat viene salvata anche con ogni registrazione, quindi una cronologia breve qui basta per analizzare le dirette registrate.",
+  "chatpage.countViewers": "Spettatori: {n}",
+  "chatpage.countFollowers": "Follower: {n}",
+  "chatpage.countSubscribers": "Abbonati: {n}",
+  "caps.rumble.viewerStats": "Realizzato ma non ancora verificato con un account in diretta. Il numero di spettatori (watching_now), follower e abbonati arriva con la stessa richiesta get-data della chat e compare accanto allo stato della chat di Rumble e nelle analisi. Rumble non ha un accesso, quindi non è la rotta delle statistiche per account; la cella resta «Non verificato» finché una diretta non la conferma. La chat è limitata agli ultimi 50 messaggi per richiesta; se una chat molto attiva la supera, lo stato avvisa che alcuni messaggi potrebbero essere andati persi."
 }

@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "请选择开始时间。",
   "chatExport.needOrder": "结束时间必须晚于开始时间。",
   "chatExport.note": "只包含仍保留在记录中的聊天。已录制直播的聊天也会随每次录制一起保存。",
-  "set.chatSavedWithRecordings": "聊天也会随每次录制一起保存，因此这里保留较短的记录就足以分析已录制的直播。"
+  "set.chatSavedWithRecordings": "聊天也会随每次录制一起保存，因此这里保留较短的记录就足以分析已录制的直播。",
+  "chatpage.countViewers": "{n} 人观看",
+  "chatpage.countFollowers": "{n} 位关注者",
+  "chatpage.countSubscribers": "{n} 位订阅者",
+  "caps.rumble.viewerStats": "已实现，但尚未在实时账号上验证。观看人数(watching_now)、关注者数和订阅者数与聊天来自同一次 get-data 轮询,显示在 Rumble 聊天状态旁和分析中。Rumble 没有登录,因此这不是按账号的统计路由;在直播验证之前,该单元格保持“未验证”。聊天每次轮询最多返回最近 50 条消息;当繁忙的聊天超出该上限时,状态会提示可能漏掉了部分消息。"
 }

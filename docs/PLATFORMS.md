@@ -436,7 +436,13 @@ Two things to know before relying on Rumble chat. The key goes in the
 sign-in to store it against, and it never goes into the database or onto a
 command line. And Rumble publishes no rate limit, so polyemesis polls
 conservatively (ten seconds, backing off while chat is quiet) rather than as
-fast as the pane could use.
+fast as the pane could use. The same poll carries the viewer count, follower
+count and subscriber count, which show beside the chat status and feed
+analytics; that is built but not yet checked on a live account, so Viewers
+stays *unverified*. Rumble returns only the latest 50 chat messages per poll,
+so when a busy chat outruns that the status says messages may have been
+missed, and polyemesis polls at the five-second floor while the response is
+full.
 
 **DLive** stays *unverified* rather than *unsupported*: its developer portal at
 `dev.dlive.tv` no longer resolves in DNS, which tells us nothing about what the

@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "시작 시간을 선택하세요.",
   "chatExport.needOrder": "종료는 시작보다 늦어야 합니다.",
   "chatExport.note": "기록에 아직 남아 있는 채팅만 포함됩니다. 녹화한 방송의 채팅은 각 녹화와 함께도 저장됩니다.",
-  "set.chatSavedWithRecordings": "채팅은 각 녹화와 함께도 저장되므로, 녹화한 방송을 분석하는 용도라면 여기의 기록 기간이 짧아도 괜찮습니다."
+  "set.chatSavedWithRecordings": "채팅은 각 녹화와 함께도 저장되므로, 녹화한 방송을 분석하는 용도라면 여기의 기록 기간이 짧아도 괜찮습니다.",
+  "chatpage.countViewers": "시청 중 {n}",
+  "chatpage.countFollowers": "팔로워 {n}",
+  "chatpage.countSubscribers": "구독자 {n}",
+  "caps.rumble.viewerStats": "구현은 되었지만 라이브 계정으로는 아직 확인하지 않았습니다. 시청자 수(watching_now), 팔로워 수, 구독자 수는 채팅과 같은 get-data 조회로 들어오며 Rumble 채팅 상태 옆과 분석에 표시됩니다. Rumble에는 로그인이 없으므로 계정별 통계 경로가 아니며, 라이브 방송으로 확인될 때까지 이 칸은 '미확인'으로 남습니다. 채팅은 조회당 최근 50개로 제한되며, 활발한 채팅이 이를 넘으면 메시지가 누락되었을 수 있다고 상태에 표시됩니다."
 }

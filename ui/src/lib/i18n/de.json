@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Wähle eine Startzeit.",
   "chatExport.needOrder": "Das Ende muss nach dem Start liegen.",
   "chatExport.note": "Enthalten ist nur Chat, der noch im Verlauf steht. Der Chat aufgezeichneter Streams wird außerdem mit jeder Aufnahme gespeichert.",
-  "set.chatSavedWithRecordings": "Der Chat wird außerdem mit jeder Aufnahme gespeichert. Ein kurzer Verlauf hier genügt also, um aufgezeichnete Streams auszuwerten."
+  "set.chatSavedWithRecordings": "Der Chat wird außerdem mit jeder Aufnahme gespeichert. Ein kurzer Verlauf hier genügt also, um aufgezeichnete Streams auszuwerten.",
+  "chatpage.countViewers": "Zuschauer: {n}",
+  "chatpage.countFollowers": "Follower: {n}",
+  "chatpage.countSubscribers": "Abonnenten: {n}",
+  "caps.rumble.viewerStats": "Gebaut, aber noch nicht an einem Live-Konto geprüft. Zuschauerzahl (watching_now), Follower- und Abonnentenzahl kommen mit derselben get-data-Abfrage wie der Chat und erscheinen neben dem Rumble-Chatstatus und in den Analysen. Rumble hat keine Anmeldung, daher ist das nicht die kontobezogene Statistikroute; die Zelle bleibt „Ungeprüft“, bis eine Live-Sendung sie bestätigt. Der Chat ist auf die letzten 50 Nachrichten pro Abfrage begrenzt; überholt ein reger Chat das, weist der Status darauf hin, dass Nachrichten fehlen können."
 }

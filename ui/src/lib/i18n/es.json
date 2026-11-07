@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Elige una hora de inicio.",
   "chatExport.needOrder": "El final debe ser posterior al inicio.",
   "chatExport.note": "Solo se incluye el chat que aún está en el historial. El chat de las transmisiones grabadas también se guarda con cada grabación.",
-  "set.chatSavedWithRecordings": "El chat también se guarda con cada grabación, así que un historial corto aquí basta para analizar las transmisiones grabadas."
+  "set.chatSavedWithRecordings": "El chat también se guarda con cada grabación, así que un historial corto aquí basta para analizar las transmisiones grabadas.",
+  "chatpage.countViewers": "Viendo ahora: {n}",
+  "chatpage.countFollowers": "Seguidores: {n}",
+  "chatpage.countSubscribers": "Suscriptores: {n}",
+  "caps.rumble.viewerStats": "Implementado pero aún sin comprobar con una cuenta en directo. El número de espectadores (watching_now), de seguidores y de suscriptores llegan en la misma consulta get-data que el chat y aparecen junto al estado del chat de Rumble y en las analíticas. Rumble no tiene inicio de sesión, así que no es la ruta de estadísticas por cuenta; la celda sigue como «Sin verificar» hasta que una emisión en directo lo confirme. El chat se limita a los últimos 50 mensajes por consulta; si un chat muy activo lo supera, el estado avisa de que pueden haberse perdido mensajes."
 }

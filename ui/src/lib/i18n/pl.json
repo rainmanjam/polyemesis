@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Wybierz czas rozpoczęcia.",
   "chatExport.needOrder": "Koniec musi być po początku.",
   "chatExport.note": "Uwzględniany jest tylko czat, który nadal jest w historii. Czat z nagranych transmisji jest też zapisywany razem z każdym nagraniem.",
-  "set.chatSavedWithRecordings": "Czat jest też zapisywany razem z każdym nagraniem, więc krótka historia tutaj wystarczy do analizy nagranych transmisji."
+  "set.chatSavedWithRecordings": "Czat jest też zapisywany razem z każdym nagraniem, więc krótka historia tutaj wystarczy do analizy nagranych transmisji.",
+  "chatpage.countViewers": "Oglądających: {n}",
+  "chatpage.countFollowers": "Obserwujących: {n}",
+  "chatpage.countSubscribers": "Subskrybentów: {n}",
+  "caps.rumble.viewerStats": "Zbudowane, ale jeszcze niesprawdzone na koncie na żywo. Liczba widzów (watching_now), obserwujących i subskrybentów przychodzi w tym samym zapytaniu get-data co czat i pojawia się obok statusu czatu Rumble oraz w analityce. Rumble nie ma logowania, więc to nie jest trasa statystyk dla konta; komórka pozostaje „Niezweryfikowane”, dopóki transmisja na żywo jej nie potwierdzi. Czat jest ograniczony do 50 ostatnich wiadomości na zapytanie; gdy ruchliwy czat to przekroczy, status informuje, że część wiadomości mogła zostać pominięta."
 }

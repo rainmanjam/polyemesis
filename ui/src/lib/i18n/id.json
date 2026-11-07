@@ -4012,5 +4012,9 @@
   "chatExport.needFrom": "Pilih waktu mulai.",
   "chatExport.needOrder": "Waktu selesai harus setelah waktu mulai.",
   "chatExport.note": "Hanya obrolan yang masih ada di riwayat yang disertakan. Obrolan dari siaran yang direkam juga disimpan bersama setiap rekaman.",
-  "set.chatSavedWithRecordings": "Obrolan juga disimpan bersama setiap rekaman, jadi riwayat singkat di sini sudah cukup untuk menganalisis siaran yang direkam."
+  "set.chatSavedWithRecordings": "Obrolan juga disimpan bersama setiap rekaman, jadi riwayat singkat di sini sudah cukup untuk menganalisis siaran yang direkam.",
+  "chatpage.countViewers": "Menonton: {n}",
+  "chatpage.countFollowers": "Pengikut: {n}",
+  "chatpage.countSubscribers": "Pelanggan: {n}",
+  "caps.rumble.viewerStats": "Sudah dibuat tetapi belum diperiksa dengan akun yang sedang live. Jumlah penonton (watching_now), pengikut, dan pelanggan datang pada polling get-data yang sama dengan chat dan tampil di samping status chat Rumble serta di analitik. Rumble tidak punya login, jadi ini bukan rute statistik per akun; sel ini tetap Belum diverifikasi sampai siaran langsung mengonfirmasinya. Chat dibatasi 50 pesan terbaru per polling; jika chat yang ramai melampauinya, status akan menyebut bahwa sebagian pesan mungkin terlewat."
 }
