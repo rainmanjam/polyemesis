@@ -47,8 +47,8 @@ const (
 )
 
 // XPublishEnv is the operator's switch for publishing to X. It is separate from
-// POLYEMESIS_X_LIVESTREAM on purpose: that one says X has whitelisted the app
-// for Livestream, and nothing about it says posting is wanted.
+// POLYEMESIS_X_LIVESTREAM on purpose: that one is on by default for Livestream,
+// and nothing about it says posting is wanted.
 const XPublishEnv = startupenv.XPublishVar
 
 // XGateCopy is the sentence shown while X publishing is off.

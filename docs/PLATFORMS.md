@@ -154,7 +154,7 @@ remembered from a page of documentation.
 destination saved before then is kept, switched off, so you can read its
 settings and delete it when you are ready.
 
-**X (Twitter) — the Livestream API is real, and polyemesis keeps it opt-in.**
+**X (Twitter) — the Livestream API is real, and polyemesis has it on by default.**
 X publishes a Livestream API (the Broadcasts and Chat families, under the
 `broadcast.read` and `broadcast.write` scopes, plus `/2/sources` for stream
 keys). X's [getting-started page](https://docs.x.com/livestream-api/getting-started)
@@ -162,10 +162,11 @@ asks for a developer app, OAuth 2.0 with those two scopes, an account that is
 allowed to go live (not protected) and an RTMP encoder; it no longer asks for
 an access form or a whitelist. Sign-in, stream-key minting, go-live and end,
 metadata, chat read and send, and chat moderation are built in
-`internal/oauth/x.go` and `internal/chat/x.go`. **All of it is switched off
-until the operator switches it on.** The switch is the `POLYEMESIS_X_LIVESTREAM`
-environment variable. Until then the operator sees "needs X Livestream switched
-on (POLYEMESIS_X_LIVESTREAM=1)", and pasting the server URL and stream key from
+`internal/oauth/x.go` and `internal/chat/x.go`. **All of it is on by
+default.** The switch is the `POLYEMESIS_X_LIVESTREAM` environment variable:
+unset or empty is on, and `0` (or `false`, `off`, `no`) switches it off. While it
+is off the operator sees "needs X Livestream, which is switched off
+(POLYEMESIS_X_LIVESTREAM=0)", and pasting the server URL and stream key from
 X's producer tooling works exactly as before. The paste also remains the way in
 for an account that cannot use the API.
 
@@ -250,7 +251,7 @@ invalid), subscribes `broadcast.chat` and `broadcast.chat.remove` for the
 account to that webhook with the user's token (they persist at X and are reused on every start), and removes them
 when the account is disconnected. Without the bearer or the address the chat pane stays empty,
 says what is missing, and sending still works. The X console and the setup guide
-show whether the Livestream switch is on.
+show whether the Livestream switch is on (it is, unless `POLYEMESIS_X_LIVESTREAM=0`).
 
 **Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
 polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may

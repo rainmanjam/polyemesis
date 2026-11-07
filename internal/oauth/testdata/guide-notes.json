@@ -61,14 +61,14 @@
   },
   {
     "platform": "x",
-    "note": "Read this first: X's Livestream API needs a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder. Signing in works for any X account, and polyemesis tells you at connect time whether Livestream is switched on (POLYEMESIS_X_LIVESTREAM=1) and reachable. When it is not, or when the account cannot use the API, paste the server URL and stream key from X's producer tooling; streaming works exactly the same.",
+    "note": "Read this first: X's Livestream API needs a developer app, OAuth 2.0 with the broadcast.read and broadcast.write scopes, an account that is allowed to go live (not protected) and an RTMP encoder. Signing in works for any X account, and polyemesis tells you at connect time whether Livestream is on (it is by default; POLYEMESIS_X_LIVESTREAM=0 switches it off) and reachable. When it is not, or when the account cannot use the API, paste the server URL and stream key from X's producer tooling; streaming works exactly the same.",
     "steps": [
       "Open console.x.com, create a project and an app, and copy the Client ID and Client secret.",
       "Under the app's user authentication settings, add exactly the redirect URI shown below.",
       "Copy the Client ID and Client secret into the fields on this page and save.",
       "Go to a destination and click Connect account. X will ask you to grant access.",
-      "If the account cannot use the Livestream API, or you have not switched it on, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
-      "To use the Livestream API, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, takes each broadcast live with the destination's go-live title once your encoder is sending, ends it, and sends and moderates chat.",
+      "If the account cannot use the Livestream API, or you have switched it off, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
+      "The Livestream API is on by default; set POLYEMESIS_X_LIVESTREAM=0 in polyemesis's environment and restart it to switch it off. While it is on, polyemesis creates the stream source, takes each broadcast live with the destination's go-live title once your encoder is sending, ends it, and sends and moderates chat.",
       "To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com (a secret: keep it out of shared files and screenshots), and serve polyemesis on a public HTTPS hostname with no port (tls.mode acme, inbound 443) so X can deliver chat to its webhook."
     ]
   },

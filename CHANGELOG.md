@@ -31,6 +31,17 @@ its first tagged release.
   Content-Security-Policy is not loosened. The meters and the clip timeline repaint when the theme
   changes. The public player (`/watch`) and the OBS overlay pages are never themed.
 
+### Changed
+
+- **X Livestream is now on by default.** `POLYEMESIS_X_LIVESTREAM` unset or empty switches the X
+  Livestream family on (stream key, go-live, chat read and send, moderation); `POLYEMESIS_X_LIVESTREAM=0`
+  (also `false`, `off`, `no`) switches it off. A value that is neither a recognised on nor a recognised
+  off is read as before (`1` or `true` is on, anything else is off). The paste-the-stream-key fallback
+  for an account without Livestream API access is unchanged, and `POLYEMESIS_X_PUBLISH` and
+  `POLYEMESIS_CAPTIONS_FACEBOOK` stay off by default. **Upgrading:** an operator who relied on X
+  Livestream being off must now set `POLYEMESIS_X_LIVESTREAM=0`. See `docs/CONFIGURATION.md` and
+  `docs/PLATFORMS.md`.
+
 ### Fixed
 
 - **X Livestream moves off the routes X removes on 2027-01-01, and the whitelist copy is gone.** X deprecated

@@ -558,7 +558,7 @@ Both are read once at startup by `internal/startupenv` (`Env.RumbleChatKey` and 
 
 | Variable | What it does |
 |---|---|
-| `POLYEMESIS_X_LIVESTREAM` | Switches the X Livestream family on (stream key, go-live, chat send and moderation, chat read) |
+| `POLYEMESIS_X_LIVESTREAM` | The X Livestream family (stream key, go-live, chat send and moderation, chat read) is **on by default**; set `0` (or `false`, `off`, `no`) to switch it off |
 | `POLYEMESIS_X_APP_BEARER` | The X app's **app-only bearer token** from console.x.com. Live chat read needs it, because X's webhook and subscription-list calls are app-only. It is a secret |
 
 X delivers live chat (`broadcast.chat`) **only to a webhook**, so reading chat

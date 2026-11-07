@@ -12,7 +12,6 @@ func lookup(m map[string]string) func(string) string {
 func TestEveryBooleanSwitchAcceptsTheSameSpellings(t *testing.T) {
 	switches := map[string]func(Env) bool{
 		XPublishVar:         func(e Env) bool { return e.XPublish },
-		XLivestreamVar:      func(e Env) bool { return e.XLivestream },
 		FacebookCaptionsVar: func(e Env) bool { return e.FacebookCaptions },
 	}
 	for name, got := range switches {
@@ -29,9 +28,30 @@ func TestEveryBooleanSwitchAcceptsTheSameSpellings(t *testing.T) {
 	}
 }
 
+// X Livestream is the one switch that is on by default: unset or empty is on,
+// the explicit false spellings turn it off, and a value that is neither a
+// recognised on nor a recognised off follows Flag (off), so a typo cannot read
+// as on.
+func TestXLivestreamIsOnUnlessTurnedOff(t *testing.T) {
+	live := func(m map[string]string) bool { return FromLookup(lookup(m)).XLivestream }
+	if !live(nil) || !live(map[string]string{XLivestreamVar: ""}) || !live(map[string]string{XLivestreamVar: "  "}) {
+		t.Error("an unset or empty POLYEMESIS_X_LIVESTREAM must leave X Livestream on")
+	}
+	for _, on := range []string{"1", "true", "TRUE", " True ", "1\n"} {
+		if !live(map[string]string{XLivestreamVar: on}) {
+			t.Errorf("POLYEMESIS_X_LIVESTREAM=%q turned X Livestream off", on)
+		}
+	}
+	for _, off := range []string{"0", "false", "FALSE", " Off ", "no", "No\n", "yes", "on", "2", "truee", "flase"} {
+		if live(map[string]string{XLivestreamVar: off}) {
+			t.Errorf("POLYEMESIS_X_LIVESTREAM=%q left X Livestream on", off)
+		}
+	}
+}
+
 func TestTheSwitchesAreIndependent(t *testing.T) {
 	e := FromLookup(lookup(map[string]string{FacebookCaptionsVar: "true"}))
-	if !e.FacebookCaptions || e.XPublish || e.XLivestream {
+	if !e.FacebookCaptions || e.XPublish || !e.XLivestream {
 		t.Errorf("one switch moved others: %+v", e)
 	}
 }

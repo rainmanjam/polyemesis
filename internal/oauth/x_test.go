@@ -255,7 +255,7 @@ func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 	}
 	// The connect warning shows Error(). It must say how to switch Livestream on, and it must not blame the operator's
 	// account for a plan it does not have, or send them to an X access form that no longer exists.
-	if err != nil && (!strings.Contains(err.Error(), "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)") ||
+	if err != nil && (!strings.Contains(err.Error(), "needs X Livestream, which is switched off (POLYEMESIS_X_LIVESTREAM=0)") ||
 		strings.Contains(err.Error(), "paid tier") || strings.Contains(err.Error(), "does not have") ||
 		strings.Contains(strings.ToLower(err.Error()), "whitelist")) {
 		t.Errorf("CheckEntitlement message = %q, want the switch-on gate copy and no whitelist or account-plan wording", err.Error())
@@ -273,10 +273,10 @@ func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 func TestXGateReasonNamesTheSwitchNotAWhitelist(t *testing.T) {
 	x := &X{}
 	reason := x.EntitlementReason()
-	if xGateCopy != "needs X Livestream switched on (POLYEMESIS_X_LIVESTREAM=1)" {
-		t.Errorf("xGateCopy = %q, want the neutral switch-on wording", xGateCopy)
+	if xGateCopy != "needs X Livestream, which is switched off (POLYEMESIS_X_LIVESTREAM=0)" {
+		t.Errorf("xGateCopy = %q, want the neutral switch-off wording", xGateCopy)
 	}
-	for _, want := range []string{"needs X Livestream switched on", "POLYEMESIS_X_LIVESTREAM=1"} {
+	for _, want := range []string{"needs X Livestream", "POLYEMESIS_X_LIVESTREAM=0"} {
 		if !strings.Contains(reason, want) {
 			t.Errorf("EntitlementReason() = %q, want it to contain %q", reason, want)
 		}

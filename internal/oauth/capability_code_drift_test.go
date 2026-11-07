@@ -67,11 +67,11 @@ func capabilityJoins() []capabilityJoin {
 			implemented: registered,
 			exceptions: map[db.Platform]string{
 				// X's Livestream family sits behind polyemesis's opt-in switch: while the gate is closed
-				// (POLYEMESIS_X_LIVESTREAM unset) the code refuses without a request, so the
+				// (POLYEMESIS_X_LIVESTREAM=0) the code refuses without a request, so the
 				// cell reads Unknown until a live X account verifies it. Delete the
 				// exception once the cell is set to Yes.
 
-				db.PlatformX: "X Livestream gate: built, switched off until the operator sets POLYEMESIS_X_LIVESTREAM=1",
+				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
 			},
 		},
 		{
@@ -80,7 +80,7 @@ func capabilityJoins() []capabilityJoin {
 			// interface, so signing in is exactly what makes a key fetchable.
 			implemented: registered,
 			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built, switched off until the operator sets POLYEMESIS_X_LIVESTREAM=1",
+				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
 				// SIGNING IN IS NOT WHAT MAKES A KEY FETCHABLE HERE, which is
 				// the assumption the resolver above encodes and the first
 				// platform to break it.
@@ -117,14 +117,14 @@ func capabilityJoins() []capabilityJoin {
 			cap: CapMetadata, label: "Title / category",
 			implemented: func(p db.Platform) bool { _, ok := As[MetadataPusher](Set{}, p); return ok },
 			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built, switched off until the operator sets POLYEMESIS_X_LIVESTREAM=1",
+				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
 			},
 		},
 		{
 			cap: CapBroadcastLifecycle, label: "Start / end",
 			implemented: func(p db.Platform) bool { _, ok := As[BroadcastLifecycler](Set{}, p); return ok },
 			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built, switched off until the operator sets POLYEMESIS_X_LIVESTREAM=1",
+				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
 				// COMMANDED BY HAND RATHER THAN DRIVEN, and both are real, which
 				// is why the cell is Yes and As[BroadcastLifecycler] is false.
 				//

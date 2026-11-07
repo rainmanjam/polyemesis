@@ -36,12 +36,13 @@ const (
 )
 
 // Env is the startup environment. The zero value has every switch off and every
-// string empty.
+// string empty. FromLookup of an empty environment is not the zero value:
+// XLivestream is on unless the operator turns it off.
 type Env struct {
 	// XPublish opens clip publishing to X.
 	XPublish bool
-	// XLivestream opens X's Livestream family (go-live, chat), once X has
-	// whitelisted the app.
+	// XLivestream opens X's Livestream family (go-live, chat). It is on by
+	// default and POLYEMESIS_X_LIVESTREAM=0 turns it off (see FlagDefaultOn).
 	XLivestream bool
 	// FacebookCaptions opens the provisional facebook_sei caption path.
 	FacebookCaptions bool
@@ -78,7 +79,7 @@ func FromEnv() Env { return FromLookup(os.Getenv) }
 func FromLookup(get func(string) string) Env {
 	return Env{
 		XPublish:          Flag(get(XPublishVar)),
-		XLivestream:       Flag(get(XLivestreamVar)),
+		XLivestream:       FlagDefaultOn(get(XLivestreamVar)),
 		FacebookCaptions:  Flag(get(FacebookCaptionsVar)),
 		XAppBearer:        strings.TrimSpace(get(XAppBearerVar)),
 		RumbleChatKey:     strings.TrimSpace(get(RumbleChatKeyVar)),
@@ -98,6 +99,20 @@ func Flag(v string) bool {
 		return true
 	}
 	return false
+}
+
+// FlagDefaultOn is Flag for a switch that is on unless turned off. Empty (unset)
+// is on, and "0", "false", "off" and "no" are off, ignoring case and surrounding
+// space. Any other value is read by Flag, so "1" and "true" are on and a stray
+// word or typo is off, never a silent on.
+func FlagDefaultOn(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return true
+	case "0", "false", "off", "no":
+		return false
+	}
+	return Flag(v)
 }
 
 // String names the switches and says which secrets are set, never their values.

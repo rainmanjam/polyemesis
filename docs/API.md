@@ -1089,7 +1089,7 @@ clock on the polyemesis host does not matter), so it never takes over or ends a 
 alone. `lifecycle.terminal` is true for a fault that is not retried (an account X will not let go live, a token
 without a scope); any other X fault that has used its budget is tried again every two minutes and clears on the
 first success. `lifecycle.generation` is bookkeeping.
-PROVISIONAL: X Livestream is switched off until the operator sets `POLYEMESIS_X_LIVESTREAM=1`, and no live go-live has confirmed it.
+PROVISIONAL: X Livestream is on by default (`POLYEMESIS_X_LIVESTREAM=0` switches it off), and no live go-live has confirmed it.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and
