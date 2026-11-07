@@ -1179,7 +1179,7 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 // broadcast; END rejects a title (the Livestream reference at docs.x.com/livestream-api,
 // read 2026-10-31). Nothing here can change a live broadcast.
 func (x *X) MetadataCaps() MetadataCaps {
-	return MetadataCaps{Scope: "broadcast.write"}
+	return MetadataCaps{Fields: []MetadataField{}, Scope: "broadcast.write"}
 }
 
 // PushMetadata refuses every change, because X has no way to change a live

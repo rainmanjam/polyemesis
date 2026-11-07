@@ -1406,3 +1406,47 @@ func TestYouTubeTitlesAreCountedInUTF16(t *testing.T) {
 		t.Errorf("100 emoji is 100 characters and Twitch allows 140: %s", problem)
 	}
 }
+
+// The console reads caps.fields with array methods, so the served JSON must
+// carry an array for every provider -- X reports no writable fields, which as a
+// nil slice used to serialise as null and crash the Dashboard.
+func TestMetadataTargetsServeFieldsAsAnArrayForEveryProvider(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	connectAccount(t, store, s.box, db.PlatformX, "xacct")
+	for p, pr := range s.providers.All() {
+		if _, ok := pr.(oauth.MetadataPusher); ok && p != db.PlatformX {
+			connectAccount(t, store, s.box, p, string(p)+"-acct")
+		}
+	}
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/metadata", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", w.Code, w.Body.String())
+	}
+	var raw struct {
+		Targets []struct {
+			Platform string `json:"platform"`
+			Caps     struct {
+				Fields json.RawMessage `json:"fields"`
+			} `json:"caps"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sawX := false
+	for _, tgt := range raw.Targets {
+		if tgt.Platform == string(db.PlatformX) {
+			sawX = true
+		}
+		if !strings.HasPrefix(string(tgt.Caps.Fields), "[") {
+			t.Errorf("%s: caps.fields = %s, want an array", tgt.Platform, tgt.Caps.Fields)
+		}
+	}
+	if !sawX {
+		t.Fatal("X account was not offered as a target; the test proved nothing")
+	}
+}
