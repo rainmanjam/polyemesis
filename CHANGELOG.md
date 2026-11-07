@@ -10,6 +10,19 @@ its first tagged release.
 
 ### Added
 
+- **Chat is saved with each recording and can be exported.** When a recording finishes, polyemesis
+  writes `<recording>.chat.json` (every viewer message with its offset from the recording start,
+  absolute UTC time, platform, account, author, roles and badges, under a small header) and
+  `<recording>.chat.vtt` (WebVTT cues, `[PLATFORM] name: text`) beside it, so post-stream analytics
+  survives the chat purge and lines up with the video. They are deleted with their recording by the
+  delete button and by the age and size sweeps, and offload copies them along. New routes:
+  `GET /recordings/{id}/chat?format=json|vtt` (the saved file, or built from the chat history if it is
+  still kept) and `GET /chat/export?from&to&format=json|csv|ndjson&platform` (a streamed window); both
+  are refused to `read` tokens like `GET /chat/messages`, and CSV cells beginning `= + - @` are
+  neutralised. `GET /recordings` reports `chatSaved`. The Recordings page has a Chat menu per
+  recording, the Chat page an Export chat button, and Settings → Pipeline → Chat history says chat is
+  saved with each recording. Times are the stored message time (`at_ms`) the highlight scanner uses; see
+  `docs/CHAT-EXPORT.md`. No schema change.
 - **Kick chat now sets itself up, and the console shows the webhook URL Kick needs.** Staging found
   Kick chat could not work: nothing showed the operator the webhook URL to paste into their Kick app,
   and nothing created the event subscription. Settings → Platform credentials → Kick now shows

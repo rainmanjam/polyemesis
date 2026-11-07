@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-eight `GET`s among the thirty refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-eight routes are refused outright**, for three different reasons. Masking
+**Thirty routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last nineteen are `403` because of what
+are `403` because of what they *do*. The last twenty-one are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -153,6 +153,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
+| `GET /recordings/{id}/chat` | the chat that arrived during the recording: every viewer's message, under their name |
 | `GET /clips/{name}/download` | an exported clip |
 | `GET /clipper/jobs/{id}/download` | the clipper's output |
 | `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
@@ -162,6 +163,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
 | `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
 | `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
+| `GET /chat/export` | the same scrollback, streamed for any window as JSON, CSV or NDJSON |
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
@@ -1537,6 +1539,7 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` | `/recordings`, `/recordings/usage`, `/recordings/stems` |
 | `DELETE` | `/recordings/{id}` |
 | `GET` | `/recordings/{id}/download`, `/recordings/stems/{name}/download` |
+| `GET` | `/recordings/{id}/chat` — the chat saved with a recording, as `json` or `vtt` |
 | `GET` | `/library`, `/library/search` |
 | `POST` | `/library/sessions`, `/library/sessions/regroup` |
 | `GET` `PUT` `DELETE` | `/library/sessions/{id}` |
@@ -1945,6 +1948,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
@@ -2028,6 +2032,8 @@ platform here publishes an API for a user's message history, Twitch included.
 Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
+The scrollback is a bounded replay buffer. For a durable copy of a recorded
+stream's chat, see [CHAT-EXPORT.md](CHAT-EXPORT.md).
 
 The card also carries `sanction`: the ban or timeout in force on that person,
 **as polyemesis recorded it**. Every successful `POST /chat/bans` — the
@@ -2118,6 +2124,36 @@ and names which connected account on that platform to act as, for an install
 with more than one. `limit` defaults to `300` — roughly a screenful of
 scrollback and the room to scroll up through it — and is clamped to `2000`; a
 value that is zero, negative or not a number silently takes the default.
+
+**Exporting chat.** Two read-denied downloads, because the body is what viewers
+wrote under their names. Both stream, so a long window is never held in memory,
+and both set a `Content-Disposition` filename.
+
+| Route | Parameters |
+|---|---|
+| `GET /recordings/{id}/chat` | `format` = `json` (default) or `vtt` |
+| `GET /chat/export` | `from` (required), `to` (default now), `format` = `json` (default), `csv` or `ndjson`, `platform` |
+
+`from` and `to` are RFC 3339 times or Unix milliseconds, `to` must be after
+`from`, and every bad parameter is a `400` before any byte is sent. The window
+is on the **stored message time** (`at_ms`): the platform's own timestamp where
+its adapter supplies one, otherwise the moment this server received the message.
+It is the clock the highlight scanner lines chat up with a recording by. Messages polyemesis sent itself are never included,
+and neither are messages a moderator deleted or the operator hid (both remove
+the stored row).
+
+`GET /recordings/{id}/chat` serves the file saved beside the recording when
+there is one (see [CHAT-EXPORT.md](CHAT-EXPORT.md)),
+and otherwise builds the same file from the chat table if it still holds the
+recording's window. When neither does it is a `404` saying so; a recording whose
+chat was merely quiet is a valid file with no messages. `json` carries a header
+(`schema`, `generator`, `recording`, `from`, `to`, `platforms`, `messageCount`,
+`complete`, and `retainedFrom` when the purge reached into the window) then
+`messages`; `vtt` is one cue per message, `[PLATFORM] name: text`. CSV cells
+that begin with `=`, `+`, `-` or `@` are written with a leading `'` so a
+spreadsheet does not run them. `csv` and `ndjson` have no header, so ask for
+`json` when you need to know whether the window was complete.
+Each row of `GET /recordings` carries `chatSaved`, true when that file exists.
 
 `DELETE /chat/messages` removes one message on the platform. The platform is
 asked first and the local copy is only dropped once it agreed, because the
