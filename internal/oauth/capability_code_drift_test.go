@@ -72,7 +72,7 @@ func capabilityJoins() []capabilityJoin {
 			// interface, so signing in is exactly what makes a key fetchable.
 			implemented: registered,
 			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
+				db.PlatformX: "X Livestream mints the key when the account can use the API, and the paste stays the fallback, so the cell is By hand",
 				// SIGNING IN IS NOT WHAT MAKES A KEY FETCHABLE HERE, which is
 				// the assumption the resolver above encodes and the first
 				// platform to break it.
@@ -108,15 +108,11 @@ func capabilityJoins() []capabilityJoin {
 		{
 			cap: CapMetadata, label: "Title / category",
 			implemented: func(p db.Platform) bool { _, ok := As[MetadataPusher](Set{}, p); return ok },
-			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
-			},
 		},
 		{
 			cap: CapBroadcastLifecycle, label: "Start / end",
 			implemented: func(p db.Platform) bool { _, ok := As[BroadcastLifecycler](Set{}, p); return ok },
 			exceptions: map[db.Platform]string{
-				db.PlatformX: "X Livestream gate: built and on by default (POLYEMESIS_X_LIVESTREAM=0 switches it off), not yet confirmed by a live go-live",
 				// COMMANDED BY HAND RATHER THAN DRIVEN, and both are real, which
 				// is why the cell is Yes and As[BroadcastLifecycler] is false.
 				//

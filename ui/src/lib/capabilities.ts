@@ -362,15 +362,17 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     summary: "wave3.x.summary",
     readFirst: "wave3.x.readFirst",
     caps: {
-      // Sign-in has run live; every other cell is still unverified.
+      // Sign-in has run live, and on 2026-11-07 so did the go-live title
+      // (metadata), chat read and start / end. Chat send, moderation and
+      // viewer stats have not run live.
       sso: "yes",
       streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
+      metadata: "yes",
+      chatRead: "yes",
       chatSend: "unknown",
       moderation: "unknown",
       viewerStats: "unknown",
-      broadcastLifecycle: "unknown",
+      broadcastLifecycle: "yes",
     },
     reasons: {
       sso: "wave3.x.sso",

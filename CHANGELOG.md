@@ -58,6 +58,14 @@ its first tagged release.
   Livestream being off must now set `POLYEMESIS_X_LIVESTREAM=0`. See `docs/CONFIGURATION.md` and
   `docs/PLATFORMS.md`.
 
+- **X Livestream was verified live on 2026-11-07.** On staging against a real X account, two runs through
+  polyemesis with X Livestream on: the destination linked to the account and the stream source was created
+  through the API on save; the go-live published the broadcast with the configured title; the announcement
+  setting `first` made X post and `never` made no post; chat read delivered 2 of 2 viewer messages over
+  the webhook; and polyemesis ended both broadcasts. In the capability matrix the X row's Metadata, Chat
+  read and Start / end cells now read Works. Chat send, moderation (delete, ban) and viewer stats were not
+  exercised and stay Unverified.
+
 ### Fixed
 
 - **X chat reaches "live", Kick's loopback self-probe no longer reads as degraded, and the X step-2
@@ -97,7 +105,7 @@ its first tagged release.
   soon as it returns, so a destination records a pending handle while its source is silent and the real
   broadcast id is recorded when it goes live. X's Livestream docs no longer ask for a whitelist or an access
   form, so the operator copy says what the switch is; it is now on by default (see the entry above) and
-  pasting the key still works. PROVISIONAL: no live X account has run the new routes. While a destination waits for video its
+  pasting the key still works. These routes ran against a live X account on 2026-11-07 (see the entry below). While a destination waits for video its
   `lifecycle.broadcastId` is empty and `lifecycle.pendingSource` names the source. A go-live whose answer
   was lost is adopted on the next read, a deleted row right after go-live still ends the broadcast, a source
   deleted on X raises a fault, an account X will not let go live is a terminal fault, and a 409 for a source

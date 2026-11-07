@@ -1089,7 +1089,7 @@ clock on the polyemesis host does not matter), so it never takes over or ends a 
 alone. `lifecycle.terminal` is true for a fault that is not retried (an account X will not let go live, a token
 without a scope); any other X fault that has used its budget is tried again every two minutes and clears on the
 first success. `lifecycle.generation` is bookkeeping.
-PROVISIONAL: X Livestream is on by default (`POLYEMESIS_X_LIVESTREAM=0` switches it off), and no live go-live has confirmed it.
+X Livestream is on by default (`POLYEMESIS_X_LIVESTREAM=0` switches it off). It was verified live on 2026-11-07, on staging against a real X account, in two runs: the destination linked to the account and the stream source was created through the API on save; the go-live published the broadcast with the configured title; the announcement setting `first` made X post and `never` made no post; chat read delivered 2 of 2 viewer messages over the webhook; and polyemesis ended both broadcasts. STILL UNVERIFIED live: chat send, chat moderation (delete, ban) and viewer stats, and the 200-versus-201, `created_at_ms` and `Date` header behaviour the lifecycle models from X's documentation.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and

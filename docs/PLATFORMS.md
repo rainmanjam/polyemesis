@@ -34,7 +34,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -59,8 +59,9 @@ key; we simply have not researched their APIs, and "unverified" is the honest
 thing to say about an API nobody here has read.
 
 The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
-server URL and key published to X with picture. The rest of the X row
-stays *Unverified*. The details, and a server that could not reach X, are under X
+server URL and key published to X with picture. On 2026-11-07 the go-live
+title, chat read and start / end were verified live as well (see below); chat
+send, moderation and viewers stay *Unverified*. The details, and a server that could not reach X, are under X
 in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
 
 ## The platforms that need a sentence each
@@ -270,9 +271,18 @@ a lost answer, so a second attempt that creates the broadcast more than about 25
 as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
 from X's documentation and unconfirmed live.
 
-Every cell in the X row stays *Unverified* except the stream key, which is
-*By hand*. That is deliberate: no live request from a connected X account has
-confirmed any of the built paths yet. Two things apply on top of the switch: X
+**The Livestream paths were verified live on 2026-11-07.** On staging, against a
+real X account (`@RainmanJam`), with X Livestream on, two runs went through
+polyemesis. The destination was linked to the account and the stream source was
+created through the API on save. The go-live published the broadcast with the
+configured title ("Polyemesis Test Flight"). Run 1, with the go-live
+announcement set to "first", made X post the announcement; run 2, set to
+"never", made no post. Chat read delivered 2 of 2 viewer messages over the
+webhook, and polyemesis ended both broadcasts. That is why *Metadata* (the title
+sent at go-live), *Chat read* and *Start / end* read *Works*. Not exercised
+live, and so still *Unverified*: chat send, moderation (delete, ban) and viewer
+stats. The stream key stays *By hand*, because the paste is the fallback for an
+account that cannot use the API. Two things apply on top of the switch: X
 refuses to take an account live that is not allowed to go live (HTTP 403 from
 the go-live call; the deprecated routes answered 412), and X has **no hide
 action**, so chat moderation offers mute, unmute and delete only.
@@ -286,9 +296,9 @@ steadily for over a minute with no reconnects, and the picture showed in X
 Producer's preview. The test feed was 1280×720 at 30 fps, H.264 at 3 Mb/s with
 AAC stereo at 128 kb/s; it came in over RTMP ingest and went out on the
 passthrough rendition. That verifies publishing with picture through a pasted
-key and nothing more: chat, metadata and every Livestream API path stay
-*Unverified*, and the stream-key cell stays *By hand*, which is what a pasted key
-is.
+key and nothing more: that run did not exercise the Livestream API paths
+(the 2026-11-07 runs above did), and the stream-key cell stays *By hand*, which is
+what a pasted key is.
 
 **X's ingest sits behind Cloudflare, so a server that cannot reach Cloudflare
 over IPv4 cannot stream to X.** The same day, the same X destination failed from
