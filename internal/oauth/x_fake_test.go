@@ -48,9 +48,14 @@ type xFake struct {
 	// liveStatus and liveBody, when set, make POST /2/broadcasts answer that status and body.
 	liveStatus int
 	liveBody   string
+	// createdAtMS is created_at_ms on GET /2/broadcasts/{id}; empty means xFakeCreatedMS.
+	createdAtMS string
 	// liveExisting makes POST /2/broadcasts answer 200 (the source already has a live broadcast) instead of 201.
 	liveExisting bool
 }
+
+// xFakeCreatedMS is when the fake's broadcast was created, and the list fixture's created_at_ms is 10s before it.
+const xFakeCreatedMS = "1755302400000"
 
 // xEmptyBroadcastList is GET /2/broadcasts for an account with nothing on air.
 const xEmptyBroadcastList = `{"data":[],"meta":{"result_count":0}}`
@@ -202,8 +207,12 @@ func (f *xFake) serve(w http.ResponseWriter, r *http.Request) {
 			f.problem(w, 404, "no such broadcast")
 			return
 		}
+		created := f.createdAtMS
+		if created == "" {
+			created = xFakeCreatedMS
+		}
 		_, _ = io.WriteString(w, `{"data":{"id":"`+id+`","broadcast_id":"`+id+`","state":"`+f.broadcastState+
-			`","source_id":"`+xSourceID+`","title":"Sunday practice"}}`)
+			`","source_id":"`+xSourceID+`","title":"Sunday practice","created_at_ms":"`+created+`"}}`)
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/2/broadcasts/") && strings.HasSuffix(path, "/state"):
 		m, ok := f.strictBody(w, body, "state")
 		if !ok {

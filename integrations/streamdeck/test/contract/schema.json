@@ -508,6 +508,11 @@
                     "string"
                   ]
                 },
+                "goLiveAttemptMs": {
+                  "types": [
+                    "number"
+                  ]
+                },
                 "pendingSource": {
                   "types": [
                     "string"

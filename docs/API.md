@@ -1079,7 +1079,9 @@ polyemesis opens again after X ends one go live with `should_not_tweet`.
 destination that is not X has the field removed on save, with a warning.
 An X destination that is switched on but not yet live has `lifecycle.broadcastId`
 empty and `lifecycle.pendingSource` set to its X stream source id: X creates the
-broadcast only when it goes live, so there is no broadcast id to show until then.
+broadcast only when it goes live, so there is no broadcast id to show until then. `lifecycle.goLiveAttemptMs` is when the go-live for that source was
+first sent, kept while X's answer is unknown; polyemesis adopts a live broadcast on the source only if X created it
+after that time, so it never takes over or ends a broadcast it did not start.
 PROVISIONAL: X Livestream is switched off until the operator sets `POLYEMESIS_X_LIVESTREAM=1`, and no live go-live has confirmed it.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is

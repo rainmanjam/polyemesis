@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -77,6 +78,7 @@ const xBroadcastListFixture = `{
       "title": "Sunday practice",
       "share_url": "https://x.com/i/broadcasts/1ynJOZVeajOJR",
       "media_key": "13_1729384756",
+      "created_at_ms": "1755302390000",
       "state": "RUNNING",
       "start_ms": "1755302400000",
       "end_ms": "",
@@ -794,27 +796,76 @@ func TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource(t *testing
 	}
 }
 
-// TestXBroadcastStateOfAPendingHandleFindsTheBroadcastTheSourceIsLiveOn: the go-live can have succeeded while its
-// answer was lost, or while the write that records the real id failed. The handle then stands for a RUNNING
-// broadcast, and the read must say so (real id, RUNNING) or a switch-off would never end it.
-func TestXBroadcastStateOfAPendingHandleFindsTheBroadcastTheSourceIsLiveOn(t *testing.T) {
-	f := newXFake(t) // the default list holds a RUNNING broadcast on xSourceID
-	st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
-	if err != nil {
-		t.Fatalf("BroadcastState: %v", err)
+// TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted: the go-live behind a handle may have
+// succeeded with its answer lost, and then the handle stands for a RUNNING broadcast. But the source can also carry a
+// broadcast polyemesis did NOT start, and adopting that one would clear a fault and later END someone else's show. The
+// only documented discriminator is created_at_ms, so a broadcast is adopted only when the handle records a go-live
+// attempt and the broadcast was created at or after it (less a clock-skew allowance). No attempt on record means
+// nothing of ours can exist, so nothing is adopted and the list is not even read.
+func TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted(t *testing.T) {
+	const fixtureCreated = 1755302390000 // the list fixture's RUNNING broadcast
+	for _, tc := range []struct {
+		name      string
+		attemptMS int64
+		list      string
+		adopt     bool
+		wantList  bool
+	}{
+		{"created after the attempt is ours", fixtureCreated - 1000, xBroadcastListFixture, true, true},
+		{"created within the skew allowance is ours", fixtureCreated + 20000, xBroadcastListFixture, true, true},
+		{"created long before the attempt is not ours", fixtureCreated + 600000, xBroadcastListFixture, false, true},
+		{"no created_at_ms cannot be verified", fixtureCreated - 1000,
+			strings.Replace(xBroadcastListFixture, `"created_at_ms": "1755302390000",`, "", 1), false, true},
+		{"no attempt on record adopts nothing", 0, xBroadcastListFixture, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXFake(t)
+			f.list = tc.list
+			st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, tc.attemptMS))
+			if err != nil {
+				t.Fatalf("BroadcastState: %v", err)
+			}
+			if tc.adopt && (st.Status != XStateRunning || st.BroadcastID != xBroadcastID) {
+				t.Errorf("BroadcastState = %+v, want the broadcast %s adopted RUNNING", st, xBroadcastID)
+			}
+			if !tc.adopt && st.Status != XStateNotStarted {
+				t.Errorf("BroadcastState = %+v, adopted a broadcast polyemesis did not start", st)
+			}
+			listed := false
+			for _, req := range f.requests() {
+				listed = listed || req == "GET /2/broadcasts"
+			}
+			if listed != tc.wantList {
+				t.Errorf("broadcast list read = %v, want %v", listed, tc.wantList)
+			}
+		})
 	}
-	if st.Status != XStateRunning || st.BroadcastID != xBroadcastID || st.BoundStreamID != xSourceID {
-		t.Errorf("BroadcastState = %+v, want the live broadcast %s RUNNING on source %s", st, xBroadcastID, xSourceID)
-	}
-	// A RUNNING broadcast on ANOTHER source is not this destination's.
+	// A RUNNING broadcast on ANOTHER source is never this destination's.
 	f2 := newXFake(t)
 	f2.list = strings.ReplaceAll(xBroadcastListFixture, xSourceID, "9999999999999999999")
-	st, err = f2.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
+	st, err := f2.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, fixtureCreated-1000))
 	if err != nil {
 		t.Fatalf("BroadcastState: %v", err)
 	}
 	if st.Status != XStateNotStarted {
 		t.Errorf("a broadcast on another source was taken for this one: %+v", st)
+	}
+}
+
+// TestXPendingHandleCarriesTheGoLiveAttempt: the handle is "pending:<source>" or "pending:<source>@<attempt ms>".
+func TestXPendingHandleCarriesTheGoLiveAttempt(t *testing.T) {
+	h := XPendingHandle(xSourceID, 1755302400000)
+	src, at, ok := XPendingParts(h)
+	if !ok || src != xSourceID || at != 1755302400000 {
+		t.Errorf("XPendingParts(%q) = %q %d %v", h, src, at, ok)
+	}
+	if src, at, ok := XPendingParts(XPendingHandle(xSourceID, 0)); !ok || src != xSourceID || at != 0 {
+		t.Errorf("a handle with no attempt parsed as %q %d %v", src, at, ok)
+	}
+	for _, bad := range []string{"pending:" + xSourceID + "@", "pending:" + xSourceID + "@x", "pending:" + xSourceID + "@-5", "pending:@5"} {
+		if _, _, ok := XPendingParts(bad); ok {
+			t.Errorf("XPendingParts(%q) accepted a malformed handle", bad)
+		}
 	}
 }
 
@@ -825,38 +876,58 @@ func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError(t *testing.T)
 	f.list = xEmptyBroadcastList
 	f.sources = xEmptySourcesFixture
 	_, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandle(xSourceID))
-	if err == nil || !strings.Contains(err.Error(), "no longer has") {
-		t.Fatalf("BroadcastState with the source gone = %v, want an error saying X no longer has the source", err)
+	if err == nil || !strings.Contains(err.Error(), "no longer has") || !errors.Is(err, ErrXSourceGone) {
+		t.Fatalf("BroadcastState with the source gone = %v, want ErrXSourceGone saying X no longer has the source", err)
 	}
 	if strings.Contains(err.Error(), "pending:") {
 		t.Errorf("the error shows the internal handle: %v", err)
 	}
 }
 
-// TestXGoLiveRefusalsAreClassifiedForTheCoordinator: 403 is an account that cannot go live (terminal), 409 is either
-// "the source cannot take video yet" (the expected wait) or "another broadcast is live on it" (a fault), and X's own
-// words survive in every one.
+// TestXGoLiveRefusalsAreClassifiedForTheCoordinator pins the three documented go-live refusals to the doc's own
+// words (docs.x.com/livestream-api/broadcasts/go-live, "Errors"):
+//
+//	403  about:blank         "The account isn't eligible to go live, or the broadcast was moderated."  Don't retry.
+//	403  .../missing-scopes  "The OAuth 2.0 token lacks broadcast.write." Re-authorize with broadcast.read and broadcast.write.
+//	409  .../conflict        "The source can't take video before its encoder connects ..."  Start your encoder, then retry.
+//	409  .../conflict        "Another broadcast is live on the source. The detail names that broadcast when known."
+//
+// A 409 that matches neither phrase is NOT assumed to be the harmless wait: it passes through as an ordinary counted
+// error, so an unrecognised conflict escalates instead of waiting in silence.
 func TestXGoLiveRefusalsAreClassifiedForTheCoordinator(t *testing.T) {
+	const conflict = `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","status":409,"detail":%q}`
 	for _, tc := range []struct {
 		name   string
 		status int
 		body   string
-		want   TransitionRefusal
+		want   TransitionRefusal // "" means an ordinary, unclassified error
 	}{
 		{"ineligible", 403, `{"type":"about:blank","title":"Forbidden","detail":"This account is not eligible to go live.","status":403}`, RefusalNotEligible},
-		{"busy", 409, `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","detail":"Another broadcast 1abc is live on this source.","status":409}`, RefusalSourceBusy},
-		{"not ready", 409, `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","detail":"The source cannot take video until its encoder connects.","status":409}`, RefusalStreamInactive},
+		{"missing scopes", 403, `{"type":"https://api.x.com/2/problems/missing-scopes","title":"Forbidden","detail":"Token lacks broadcast.write.","status":403}`, RefusalMissingScopes},
+		{"busy", 409, sprintfBody(conflict, "Another broadcast 1abc is live on this source."), RefusalSourceBusy},
+		{"busy, broadcast not named", 409, sprintfBody(conflict, "Another broadcast is live on the source."), RefusalSourceBusy},
+		{"not ready", 409, sprintfBody(conflict, "The source can't take video before its encoder connects."), RefusalStreamInactive},
+		{"not ready, other wording", 409, sprintfBody(conflict, "Source cannot take video until the encoder is connected."), RefusalStreamInactive},
+		{"unrecognised conflict is counted, not waited out", 409, sprintfBody(conflict, "Broadcast creation is temporarily blocked."), ""},
+		{"a conflict that merely mentions a broadcast is not busy", 409, sprintfBody(conflict, "Broadcast creation is blocked."), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newXFake(t)
 			f.liveStatus, f.liveBody = tc.status, tc.body
 			_, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
 			var ref *TransitionRefused
-			if !errors.As(err, &ref) || ref.Refusal != tc.want {
-				t.Fatalf("PublishBroadcast = %v, want a refusal classified %q", err, tc.want)
-			}
-			if !strings.Contains(err.Error(), "X refused") || strings.Contains(err.Error(), "YouTube") {
-				t.Errorf("refusal text = %q, want it to name X, not YouTube", err.Error())
+			isRef := errors.As(err, &ref)
+			if tc.want == "" {
+				if isRef {
+					t.Fatalf("PublishBroadcast = %v, want an unclassified error, got refusal %q", err, ref.Refusal)
+				}
+			} else {
+				if !isRef || ref.Refusal != tc.want {
+					t.Fatalf("PublishBroadcast = %v, want a refusal classified %q", err, tc.want)
+				}
+				if !strings.Contains(err.Error(), "X refused") || strings.Contains(err.Error(), "YouTube") {
+					t.Errorf("refusal text = %q, want it to name X, not YouTube", err.Error())
+				}
 			}
 			var se *xStatusError
 			if !errors.As(err, &se) || se.Status != tc.status {
@@ -866,13 +937,34 @@ func TestXGoLiveRefusalsAreClassifiedForTheCoordinator(t *testing.T) {
 	}
 }
 
+func sprintfBody(format, detail string) string { return fmt.Sprintf(format, detail) }
+
+// TestXGoLiveAnswered200ForABroadcastNotStartedByPolyemesisIsRefused: a 200 means the source already had a live
+// broadcast. When the handle records the go-live attempt and that broadcast was created before it, it is somebody
+// else's, and it is refused in words rather than adopted (and later ended).
+func TestXGoLiveAnswered200ForABroadcastNotStartedByPolyemesisIsRefused(t *testing.T) {
+	const created = 1755302400000 // xFakeCreatedMS
+	f := newXFake(t)
+	f.liveExisting = true
+	_, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, created+600000), XPublish{})
+	var ref *TransitionRefused
+	if !errors.As(err, &ref) || ref.Refusal != RefusalSourceBusy || !strings.Contains(err.Error(), "not started by polyemesis") {
+		t.Fatalf("PublishBroadcast = %v, want a source-busy refusal saying the broadcast was not started by polyemesis", err)
+	}
+	// Created after the attempt, the same answer is ours: the repeat after a lost answer.
+	res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, created-1000), XPublish{})
+	if err != nil || !res.Existing || res.ID != xBroadcastID {
+		t.Fatalf("PublishBroadcast = %+v, %v, want the existing broadcast adopted", res, err)
+	}
+}
+
 // TestXGoLiveReportsWhetherItAdoptedALiveBroadcast: 201 is a new broadcast, 200 is the one the source already had
 // (the usual case is a repeat after a lost answer).
 func TestXGoLiveReportsWhetherItAdoptedALiveBroadcast(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		f := newXFake(t)
 		f.liveExisting = existing
-		res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandle(xSourceID), XPublish{})
+		res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, 1755302400000-1000), XPublish{})
 		if err != nil {
 			t.Fatalf("PublishBroadcast: %v", err)
 		}

@@ -38,6 +38,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -579,11 +580,14 @@ type XBroadcast struct {
 	State   string `json:"state"`
 	StartMS string `json:"start_ms"`
 	EndMS   string `json:"end_ms"`
+	// CreatedAtMS is when X created the broadcast (milliseconds since the epoch, as a string). It is the only
+	// documented field that says whether a broadcast is one polyemesis just started, so adoption reads it.
+	CreatedAtMS string `json:"created_at_ms"`
 }
 
 // xBroadcastFields is the broadcast.fields parameter, sent explicitly on every
 // read so an empty field means X sent nothing rather than that it was not asked.
-const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms"
+const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms,created_at_ms"
 
 // xProblem is X's typed error object. Two shapes reach it: the RFC 7807 problem
 // (title, detail, type) X uses for a 400, and {error_type, message}, which the
@@ -690,26 +694,34 @@ func (x *X) BroadcastByID(ctx context.Context, clientID, accessToken, id string)
 // error, because nothing can ever go live on it.
 func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string) (*BroadcastLifecycleState, error) {
 	st := &BroadcastLifecycleState{BroadcastID: broadcastID}
-	if sourceID, pending := xPendingSource(broadcastID); pending {
+	if sourceID, attemptMS, pending := XPendingParts(broadcastID); pending {
 		if !x.livestream {
 			return nil, ErrXLivestreamOff
 		}
-		bs, err := x.Broadcasts(ctx, "", accessToken)
-		if err != nil {
-			return nil, err
-		}
 		st.Status, st.BoundStreamID = XStateNotStarted, sourceID
-		for _, b := range bs {
-			if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
-				continue
+		// Only a broadcast polyemesis started may be adopted. With no go-live attempt on record nothing of ours can
+		// exist, so the list is not even read. With one, a broadcast on the source counts only if X created it at or
+		// after the attempt (less xAdoptSkewMS for the two clocks); anything older is somebody else's and is left alone.
+		if attemptMS > 0 {
+			bs, err := x.Broadcasts(ctx, "", accessToken)
+			if err != nil {
+				return nil, err
 			}
-			id := b.ID
-			if id == "" {
-				id = b.BroadcastID
-			}
-			if id != "" {
-				st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
-				break
+			for _, b := range bs {
+				if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
+					continue
+				}
+				if !xCreatedSince(b.CreatedAtMS, attemptMS) {
+					continue
+				}
+				id := b.ID
+				if id == "" {
+					id = b.BroadcastID
+				}
+				if id != "" {
+					st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
+					break
+				}
 			}
 		}
 		if err := x.fillStreamActive(ctx, accessToken, st, true); err != nil {
@@ -752,10 +764,28 @@ func (x *X) fillStreamActive(ctx context.Context, accessToken string, st *Broadc
 		}
 	}
 	if mustExist {
-		return errors.New("X no longer has the stream source this destination was set up on; it may have been " +
-			"deleted in X. Reconnect the X account in polyemesis so it can create a new one")
+		return ErrXSourceGone
 	}
 	return nil
+}
+
+// ErrXSourceGone is a pending destination's stream source missing from GET /2/sources: it was deleted in X, so nothing
+// can ever go live on it. Callers match it with errors.Is to forget the source and start again.
+var ErrXSourceGone = errors.New("X no longer has the stream source this destination was set up on; it may have been " +
+	"deleted in X. Reconnect the X account in polyemesis so it can create a new one")
+
+// xAdoptSkewMS is how far before a go-live attempt a broadcast's created_at_ms may be and still count as the one that
+// attempt made. X stamps created_at_ms with its own clock, not ours.
+const xAdoptSkewMS = 30000
+
+// xCreatedSince reports whether createdAtMS (X's created_at_ms) is at or after attemptMS less the skew allowance. A
+// value that is missing or not a number cannot be verified and is never "since".
+func xCreatedSince(createdAtMS string, attemptMS int64) bool {
+	created, err := strconv.ParseInt(strings.TrimSpace(createdAtMS), 10, 64)
+	if err != nil || created <= 0 {
+		return false
+	}
+	return created >= attemptMS-xAdoptSkewMS
 }
 
 // ------------------------------------------------------------ go live
@@ -796,23 +826,55 @@ var xStreamKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,32}$`)
 // no broadcast on X, and nothing here ever sends it to X as one.
 const xPendingPrefix = "pending:"
 
-// xPendingHandle is the handle for a source that has no broadcast yet.
-func xPendingHandle(sourceID string) string { return xPendingPrefix + sourceID }
+// xPendingHandle is the handle for a source that has no broadcast yet and no go-live attempt on record.
+func xPendingHandle(sourceID string) string { return xPendingHandleAt(sourceID, 0) }
 
-// XPendingHandle is xPendingHandle for the lifecycle coordinator, which stores the source id and rebuilds the handle.
-func XPendingHandle(sourceID string) string { return xPendingHandle(sourceID) }
+// xPendingHandleAt is the handle for a source whose go-live was attempted at attemptMS (milliseconds since the epoch,
+// polyemesis's clock). The attempt is what lets a later read tell a broadcast polyemesis started from one it did not.
+// Zero means no attempt: "pending:<source>"; otherwise "pending:<source>@<attempt>".
+func xPendingHandleAt(sourceID string, attemptMS int64) string {
+	if attemptMS <= 0 {
+		return xPendingPrefix + sourceID
+	}
+	return xPendingPrefix + sourceID + "@" + strconv.FormatInt(attemptMS, 10)
+}
+
+// XPendingHandle is xPendingHandleAt for the lifecycle coordinator, which stores the source id and the attempt and
+// rebuilds the handle from them.
+func XPendingHandle(sourceID string, attemptMS int64) string {
+	return xPendingHandleAt(sourceID, attemptMS)
+}
 
 // XPendingSource is xPendingSource for the lifecycle coordinator.
 func XPendingSource(id string) (string, bool) { return xPendingSource(id) }
 
+// XPendingParts splits a pending handle into its source id and go-live attempt (0 when none).
+func XPendingParts(id string) (sourceID string, attemptMS int64, ok bool) { return xPendingParts(id) }
+
 // xPendingSource reports whether id is a pending handle and, if so, the source it stands for. A real broadcast id is
 // never mistaken for one: it needs the prefix and a source id after it.
 func xPendingSource(id string) (string, bool) {
+	src, _, ok := xPendingParts(id)
+	return src, ok
+}
+
+func xPendingParts(id string) (string, int64, bool) {
 	rest, ok := strings.CutPrefix(id, xPendingPrefix)
-	if !ok || !xSourceIDPattern.MatchString(rest) {
-		return "", false
+	if !ok {
+		return "", 0, false
 	}
-	return rest, true
+	src, attempt, hasAttempt := strings.Cut(rest, "@")
+	if !xSourceIDPattern.MatchString(src) {
+		return "", 0, false
+	}
+	if !hasAttempt {
+		return src, 0, true
+	}
+	ms, err := strconv.ParseInt(attempt, 10, 64)
+	if err != nil || ms <= 0 || strconv.FormatInt(ms, 10) != attempt {
+		return "", 0, false
+	}
+	return src, ms, true
 }
 
 // XPublish is what going live carries.
@@ -860,16 +922,32 @@ func classifyXGoLive(err error, pending bool, broadcastID string) error {
 		return &TransitionRefused{BroadcastID: id, Requested: PhaseLive, Refusal: r, Reason: reason,
 			Platform: "X", err: err}
 	}
+	// The documented refusals (docs.x.com/livestream-api/broadcasts/go-live, "Errors"), and the problem type each carries:
+	//   403 about:blank        "The account isn't eligible to go live, or the broadcast was moderated."  Don't retry.
+	//   403 .../missing-scopes "The OAuth 2.0 token lacks `broadcast.write`."  Re-authorize with broadcast.read and broadcast.write.
+	//   409 .../conflict       "The source can't take video before its encoder connects ..."  Start your encoder, then retry.
+	//   409 .../conflict       "Another broadcast is live on the source. The `detail` names that broadcast when known."
+	// Both 409s share a type, so they are told apart by the doc's own phrases; a 409 that matches neither is not assumed
+	// to be the harmless wait and is returned as an ordinary error, which the coordinator counts and escalates.
 	switch {
-	case se.Status == http.StatusForbidden && !strings.Contains(se.Problems, "missing-scopes"):
+	case se.Status == http.StatusForbidden && strings.Contains(se.Problems, "missing-scopes"):
+		return refuse(RefusalMissingScopes, "missingScopes")
+	case se.Status == http.StatusForbidden:
 		return refuse(RefusalNotEligible, "notEligible")
-	case se.Status == http.StatusConflict && strings.Contains(strings.ToLower(se.Problems), "broadcast"):
+	case se.Status == http.StatusConflict && xBusyDetail.MatchString(se.Problems):
 		return refuse(RefusalSourceBusy, "sourceBusy")
-	case se.Status == http.StatusConflict:
+	case se.Status == http.StatusConflict && xNotReadyDetail.MatchString(se.Problems):
 		return refuse(RefusalStreamInactive, "sourceNotReady")
 	}
 	return wrapped
 }
+
+var (
+	// xBusyDetail matches "Another broadcast is live on the source".
+	xBusyDetail = regexp.MustCompile(`(?i)another broadcast`)
+	// xNotReadyDetail matches "The source can't take video before its encoder connects".
+	xNotReadyDetail = regexp.MustCompile(`(?i)(can'?t|cannot|can not) take video|before its encoder|until (its|the) encoder`)
+)
 
 // OpenBroadcast implements BroadcastCreator. It resolves the stored stream key to its source id and returns a pending
 // handle. NOTHING is created on X: a broadcast made by Go Live is public at once, so it is made by PublishBroadcast,
@@ -939,7 +1017,7 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if p.ShouldNotTweet {
 		body["should_not_tweet"] = true
 	}
-	sourceID, pending := xPendingSource(broadcastID)
+	sourceID, attemptMS, pending := xPendingParts(broadcastID)
 	if !pending {
 		b, err := x.BroadcastByID(ctx, "", accessToken, broadcastID)
 		if err != nil {
@@ -973,7 +1051,19 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if st := out.Data.State; st != XStateRunning && st != XStatePrePublished {
 		return nil, fmt.Errorf("X answered the go-live of broadcast %s with state %q, not %s", id, st, XStateRunning)
 	}
-	res := &XPublishResult{ID: id, State: out.Data.State, Existing: status == http.StatusOK}
+	existing := status == http.StatusOK
+	if existing && pending {
+		// 200: the source already had a live broadcast. It is adopted only if polyemesis started it, which the handle's
+		// recorded go-live attempt and the broadcast's created_at_ms decide. Otherwise it is somebody else's show:
+		// refused in words, never adopted, and so never ended by a later switch-off.
+		b, err := x.BroadcastByID(ctx, "", accessToken, id)
+		if err != nil || attemptMS <= 0 || !xCreatedSince(b.CreatedAtMS, attemptMS) {
+			return nil, &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "foreignBroadcast",
+				Platform: "X", err: errors.New("a broadcast not started by polyemesis is live on this source; " +
+					"polyemesis will not take it over or end it")}
+		}
+	}
+	res := &XPublishResult{ID: id, State: out.Data.State, Existing: existing}
 	if len(out.Errors) > 0 {
 		res.Warnings = append(res.Warnings, "X took the source live but reported: "+xProblems(out.Errors))
 	}

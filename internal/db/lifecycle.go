@@ -61,6 +61,11 @@ type BroadcastControl struct {
 	// confirmation) sees a broadcast that does not exist. The coordinator alone rebuilds a handle from this.
 	// Cleared when the real broadcast id is recorded.
 	PendingSource string `json:"pendingSource,omitempty"`
+	// GoLiveAttemptMS is when (milliseconds since the epoch, polyemesis's clock) the first go-live was sent for the
+	// pending source, kept while its answer is unknown. It is the only way a later read can tell a broadcast
+	// polyemesis just started (created at or after it) from one it did not, so it decides what may be adopted. Zero
+	// means no attempt is outstanding: a definite refusal clears it, because nothing was created.
+	GoLiveAttemptMS int64 `json:"goLiveAttemptMs,omitempty"`
 	// Phase is the PLATFORM'S OWN WORD for where the broadcast is, verbatim and
 	// unmapped -- for YouTube: created, ready, testing, testStarting, live,
 	// liveStarting, complete, revoked.
@@ -117,5 +122,5 @@ type BroadcastControl struct {
 // keep an upgraded row -- which decodes to the zero value -- from being treated
 // as one it has an opinion about.
 func (b BroadcastControl) Empty() bool {
-	return b.BroadcastID == "" && b.PendingSource == "" && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
+	return b.BroadcastID == "" && b.PendingSource == "" && b.GoLiveAttemptMS == 0 && b.Phase == "" && b.Attempts == 0 && b.Fault == ""
 }

@@ -95,6 +95,7 @@ func TestXProblemsWithNoWordsStillSaySomething(t *testing.T) {
 // tweet_error; a missing announcement shows as a missing tweet_id on a later read.)
 func TestXGoLiveKeepsXsErrorsAsAWarningWhenTheBroadcastIsLive(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated) // a new broadcast; a 200 would be the source's existing one
 		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING"},`+
 			`"errors":[{"title":"Partial","detail":"the title was not applied"}]}`)
 	})
