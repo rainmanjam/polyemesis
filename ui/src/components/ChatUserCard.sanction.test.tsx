@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import { ChatUserCard } from "./ChatUserCard";
 import { api } from "@/lib/api";
-import type { ChatSanction, ChatUserCard as CardData } from "@/lib/types";
+import type { ChatPlatform, ChatSanction, ChatUserCard as CardData } from "@/lib/types";
 
 /* UX COUNCIL A48: THE CARD SAYS WHAT POLYEMESIS HAS IN FORCE.
  *
@@ -18,9 +18,9 @@ import type { ChatSanction, ChatUserCard as CardData } from "@/lib/types";
 
 const chatUser = vi.spyOn(api, "chatUser");
 
-function draw(platform: "twitch" | "facebook" = "twitch") {
+function draw(platform: "twitch" | "facebook" | "rumble" = "twitch") {
   return render(
-    <ChatUserCard platform={platform} account="acct" authorId="u1" authorName="someone" open onOpenChange={() => {}} />,
+    <ChatUserCard platform={platform as ChatPlatform} account="acct" authorId="u1" authorName="someone" open onOpenChange={() => {}} />,
   );
 }
 
@@ -82,10 +82,10 @@ describe("A48: the user card's sanction state", () => {
   // The one certain case: the platform cannot ban, so there is nothing to lift.
   it("disables Lift ban only where the platform cannot ban, with the platform's reason", async () => {
     chatUser.mockResolvedValue(card({ action: "none" }));
-    draw("facebook");
+    draw("rumble");
     await waitFor(() => expect(screen.getByText("No ban placed through polyemesis")).toBeTruthy());
     expect(liftBan().disabled).toBe(true);
-    expect(liftBan().title).toMatch(/Facebook/);
+    expect(liftBan().title).toMatch(/Rumble/);
   });
 
   // review #2: a time on another day carries its date.
@@ -101,7 +101,7 @@ describe("A48: the user card's sanction state", () => {
   // review #8: "Lift ban stays available" is not said where it is disabled.
   it("does not promise Lift ban on a platform that cannot ban", async () => {
     chatUser.mockResolvedValue(card(undefined));
-    draw("facebook");
+    draw("rumble");
     await waitFor(() => expect(screen.getByText("Ban state unknown")).toBeTruthy());
     expect(screen.getByText(/could not tell whether this person is banned/)).toBeTruthy();
     expect(screen.queryByText(/stays available/)).toBeNull();

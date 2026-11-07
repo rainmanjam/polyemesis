@@ -137,6 +137,16 @@ type Banner interface {
 	Unban(ctx context.Context, userID string) error
 }
 
+// NoTimeouter marks a Banner that can remove a person but cannot time one out:
+// its ban has no duration, so Ban refuses a positive one. Facebook's Page block
+// list is the case. It is a marker on the adapter, read off its type by
+// ProfileOf, so the console and automod can say "timeout is unavailable here"
+// instead of offering a control that would be refused.
+type NoTimeouter interface {
+	Banner
+	NoTimeout()
+}
+
 // Hider is the optional capability for taking a message off the public feed
 // WITHOUT destroying it.
 //
@@ -478,6 +488,10 @@ var (
 	_ Banner = (*KickAdapter)(nil)
 	_ Banner = (*YouTubeAdapter)(nil)
 	_ Banner = (*TwitchAdapter)(nil)
+	// Facebook blocks a person from the Page, permanently: the block list has
+	// no duration, so it is marked as unable to time anyone out.
+	_ Banner      = (*FacebookAdapter)(nil)
+	_ NoTimeouter = (*FacebookAdapter)(nil)
 
 	// Facebook alone, because only its live chat is a comment thread.
 	_ Hider = (*FacebookAdapter)(nil)

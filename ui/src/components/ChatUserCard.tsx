@@ -118,6 +118,8 @@ export function ChatUserCard({
   // control that lies to a moderator mid-raid is worse than one that is
   // missing. See lib/chatModeration.ts.
   const ban = chatActionSupport(platform, "ban", t);
+  // Separate from the ban: Facebook blocks a person and cannot time one out.
+  const timeout = chatActionSupport(platform, "timeout", t);
   const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
 
   // UX Council A48: what is in force on this person, AS POLYEMESIS RECORDED
@@ -326,8 +328,8 @@ export function ChatUserCard({
                 key={to.seconds}
                 size="sm"
                 variant="secondary"
-                disabled={!ban.ok || busy !== ""}
-                title={ban.reason || t("chatCard.timeOutFor", { duration: t(to.label) })}
+                disabled={!timeout.ok || busy !== ""}
+                title={timeout.reason || t("chatCard.timeOutFor", { duration: t(to.label) })}
                 onClick={() =>
                   run(t("chatCard.timedOutFor", { duration: t(to.label) }), () =>
                     api.banChatUser({ platform, account, userId: authorId, seconds: to.seconds }),
@@ -349,7 +351,11 @@ export function ChatUserCard({
               every action; now that Facebook can hide and delete but cannot
               ban, a card-wide "polyemesis cannot moderate Facebook" would be
               false about two of the controls on screen. */}
-          {!ban.ok && <p className="text-sm text-warn">{ban.reason}</p>}
+          {!ban.ok ? (
+            <p className="text-sm text-warn">{ban.reason}</p>
+          ) : (
+            !timeout.ok && <p className="text-sm text-warn">{timeout.reason}</p>
+          )}
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">

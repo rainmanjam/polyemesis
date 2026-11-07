@@ -103,26 +103,26 @@ describe("ChatMessageMenu on a platform whose moderation column says yes", () =>
     expect(moderationColumnSaysYes("facebook")).toBe(true);
   });
 
-  it("renders the timeouts inert rather than enabled and always failing", () => {
+  it("renders the timeouts inert rather than enabled and always refused", () => {
     draw(msg({ platform: "facebook" }));
-    // Hub.Ban type-asserts chat.Banner and FacebookAdapter has no Ban, so
-    // every one of these was a press that could only produce an error toast.
+    // Facebook's ban is a Page block, which has no duration: FacebookAdapter.Ban
+    // refuses any positive one, so every timeout press could only error.
     expect(inert(/Time out 1 min/)).toBe(true);
     expect(inert(/Time out 1 day/)).toBe(true);
   });
 
-  it("renders the ban entry inert too, since it opens a card that asks first", () => {
+  it("keeps the ban entry live, since Facebook can block a person from the Page", () => {
     draw(msg({ platform: "facebook" }));
-    expect(inert(/Open card to ban/)).toBe(true);
+    expect(inert(/Open card to ban/)).toBe(false);
   });
 
-  it("says WHY, in a sentence naming what to do instead", () => {
+  it("says WHY timeouts are unavailable, in a sentence naming what to do instead", () => {
     // A disabled control with no explanation is only marginally better than a
     // broken one: the moderator still cannot tell an unsupported platform from
     // a broken tool, and still has nowhere to go.
     draw(msg({ platform: "facebook" }));
-    expect(screen.getByText(/no chat ban API/)).toBeTruthy();
-    expect(screen.getByText(/Facebook page itself/)).toBeTruthy();
+    expect(screen.getByText(/cannot time anyone out/)).toBeTruthy();
+    expect(screen.getByText(/permanent ban/)).toBeTruthy();
   });
 
   it("leaves Delete live, because Facebook can genuinely delete a comment", () => {

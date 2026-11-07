@@ -261,7 +261,7 @@ func (e *Engine) Start(s Spec) (Result, error) {
 	// The native polls are created FIRST and the announcement waits for
 	// them, because a chat with a native poll is told to vote there and every
 	// other chat to type a number -- which needs to know which is which.
-	mirror := (s.MirrorTwitch || s.MirrorYouTube) && e.mirror != nil
+	mirror := (s.MirrorTwitch || s.MirrorYouTube || s.MirrorFacebook) && e.mirror != nil
 	if mirror {
 		a.mirror = e.mirror
 		a.mirrorFinal = false

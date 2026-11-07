@@ -70,6 +70,9 @@ type Spec struct {
 	// YouTube chat, when the poll fits YouTube's limits and the quota above
 	// the send reserve covers it (40 units).
 	MirrorYouTube bool `json:"mirrorYouTube,omitempty"`
+	// MirrorFacebook does the same as a native poll on every connected
+	// Facebook live video. Facebook only takes one while the video is live.
+	MirrorFacebook bool `json:"mirrorFacebook,omitempty"`
 }
 
 func (s Spec) Duration() time.Duration { return time.Duration(s.DurationSeconds) * time.Second }
@@ -110,7 +113,7 @@ func Clean(s string) string {
 // Normalise cleans and validates a spec.
 func (s Spec) Normalise() (Spec, error) {
 	out := Spec{Question: Clean(s.Question), DurationSeconds: s.DurationSeconds,
-		MirrorTwitch: s.MirrorTwitch, MirrorYouTube: s.MirrorYouTube}
+		MirrorTwitch: s.MirrorTwitch, MirrorYouTube: s.MirrorYouTube, MirrorFacebook: s.MirrorFacebook}
 	if out.Question == "" {
 		return Spec{}, invalid("a question is required")
 	}

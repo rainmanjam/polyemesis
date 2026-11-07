@@ -121,6 +121,8 @@ A poll can also run as the platform's own poll, in the places that have one:
   Twitch channel that allows it.
 - **Also run as a native YouTube poll** starts a YouTube live poll in every
   connected YouTube chat. It is off by default because it costs API quota.
+- **Also run as a native Facebook poll** starts a poll on every connected
+  Facebook live video. It is off by default.
 
 **While a chat's native poll runs, that chat votes there, not by typing.** Its
 viewers are told so when the poll opens:
@@ -182,6 +184,23 @@ running poll's count; the count comes back only in the response to closing it.
 While the poll runs, YouTube's share shows nothing, and the panel says the
 count is added at close. The final result includes it. This needs the channel
 owner's account: YouTube shows the count only to the channel owner.
+
+### Facebook
+
+A Facebook poll uses the permissions the broadcast was created with
+(`publish_video` for a profile; `pages_manage_posts` and `pages_read_engagement`
+for a Page), so no reconnect is needed. Meta documents no limit on the number
+of options. It is created with `POST /{live-video-id}/polls` and closed with
+`POST /{poll-id}?action=CLOSE`.
+
+**Facebook only accepts a poll on a video that is live right now.** A poll
+started before the stream is up is refused, the reason is shown under the poll,
+and that chat votes by typing. Facebook reports a running poll's count, so its
+share shows live. Facebook chat cannot be posted to, so the announcement is not
+sent there; viewers see the poll on the video.
+
+This is built from Meta's documentation and has not been run against a live
+Facebook account.
 
 ## History and export
 
