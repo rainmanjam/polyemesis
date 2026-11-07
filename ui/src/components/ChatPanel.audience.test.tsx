@@ -30,18 +30,18 @@ describe("ChatStatusList audience line", () => {
       />,
     );
     expect(
-      screen.getByText(/19 watching · 1,200 followers · 3 subscribers/),
+      screen.getByText(/Watching: 19 · Followers: 1,200 · Subscribers: 3/),
     ).toBeTruthy();
   });
 
   it("shows nothing for figures the platform did not report", () => {
     render(<ChatStatusList statuses={[status({ viewers: 0 })]} />);
-    expect(screen.getByText("0 watching")).toBeTruthy();
-    expect(screen.queryByText(/followers/)).toBeNull();
+    expect(screen.getByText("Watching: 0")).toBeTruthy();
+    expect(screen.queryByText(/Followers/)).toBeNull();
   });
 
   it("renders no audience line when nothing was reported", () => {
     render(<ChatStatusList statuses={[status({})]} />);
-    expect(screen.queryByText(/watching/)).toBeNull();
+    expect(screen.queryByText(/Watching/)).toBeNull();
   });
 });
