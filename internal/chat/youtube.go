@@ -159,10 +159,20 @@ func (y *YouTubeAdapter) setHealth(state State, detail string) {
 // for a broadcast is a normal state, not a failure.
 func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 	idleFor := ytBroadcastPoll
+	// endedID is the chat that last finished. A broadcast can stay listed as
+	// active after its chat has ended or been disabled, so rediscovering the
+	// same id means "nothing new", not "a chat to poll".
+	endedID := ""
 	for ctx.Err() == nil {
 		chatID, err := y.liveChatID(ctx)
 		if err != nil {
 			return err
+		}
+		if chatID != "" && chatID == endedID {
+			y.mu.Lock()
+			y.chatID = ""
+			y.mu.Unlock()
+			chatID = ""
 		}
 		if chatID == "" {
 			y.setHealth(StateDegraded, "waiting for a YouTube broadcast to go live; chat starts when it does")
@@ -191,10 +201,12 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 			continue
 		}
 		idleFor = ytBroadcastPoll
+		endedID = ""
 
 		if err := y.pump(ctx, chatID, sink); err != nil {
 			return err
 		}
+		endedID = chatID
 		// The chat ended. Forget the id so the next round rediscovers, in case
 		// the operator starts a second broadcast without restarting anything.
 		y.mu.Lock()
@@ -203,6 +215,13 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		// Wait before rediscovering: the broadcast list can still show the
+		// chat that just ended, and looping straight back spent the day's
+		// quota in a second.
+		if !y.cfg.Sleep(ctx, idleFor) {
+			return nil
+		}
+		idleFor = min(idleFor*2, ytBroadcastPollMax)
 	}
 	return nil
 }
@@ -448,7 +467,15 @@ func (y *YouTubeAdapter) handleListError(ctx context.Context, err error, failure
 			return true, false, nil
 		}
 		return false, true, nil
-	case reason == "liveChatDisabled", reason == "liveChatEnded", reason == "liveChatNotFound", reason == "forbidden":
+	case reason == "forbidden":
+		// Google documents this on liveChatMessages.list as "you don't have
+		// the permissions required to retrieve messages". It is the account's
+		// problem, not the chat closing: treating it as the end made Run
+		// rediscover the same chat and be refused again, without pause.
+		ferr := Fatal(fmt.Errorf("YouTube refused to let this account read the live chat; reconnect the YouTube account in Settings → Platforms, or make sure it is the broadcast's owner or a moderator"))
+		y.setHealth(StateFailed, ferr.Error())
+		return false, false, ferr
+	case reason == "liveChatDisabled", reason == "liveChatEnded", reason == "liveChatNotFound":
 		y.setHealth(StateStopped, "this YouTube broadcast has no live chat")
 		return true, false, nil
 	}

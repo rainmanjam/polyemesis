@@ -463,7 +463,21 @@ func (k *KickAdapter) subscriptionProblem(what string, err error) string {
 // kickSaid is the platform's own words for a failed call, without the URL.
 func kickSaid(err error) string {
 	if ae, ok := err.(*apiError); ok {
-		return fmt.Sprintf("%d %s", ae.Status, strings.TrimSpace(ae.Body))
+		said := ae.Message
+		if said == "" {
+			said = ae.Reason
+		}
+		if said == "" {
+			// Kick's own envelope is short JSON; a proxy's HTML error page is
+			// not something an operator should read in a health line.
+			if b := strings.TrimSpace(ae.Body); b != "" && !strings.HasPrefix(b, "<") {
+				said = b
+				if len(said) > 200 {
+					said = said[:200] + "…"
+				}
+			}
+		}
+		return strings.TrimSpace(fmt.Sprintf("%d %s", ae.Status, said))
 	}
 	return err.Error()
 }
