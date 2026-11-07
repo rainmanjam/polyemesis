@@ -46,6 +46,10 @@ script needed.
 |---|---|
 | `activity` | a viewer or the platform did something: a follow, sub, resub, gift, tip, raid, channel-points redemption, hype train, native poll or prediction, shoutout, stream online/offline report, an external moderation action, or a reaction tally. The envelope carries the event in `activity`; its `kind` says which |
 
+A follow-bot burst cannot crowd out `destination.down`: activity has its own
+bounded queue in the dispatcher and in each endpoint, and nothing is queued at
+all while no hook names the trigger.
+
 `activity` is **opt-in**: a hook receives it only if its `triggers` list names
 it. A hook with an empty `triggers` list still means "every lifecycle trigger"
 in the table above, and `activity` is not one of them, so no existing hook

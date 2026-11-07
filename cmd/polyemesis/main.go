@@ -440,12 +440,9 @@ func run(h *hooks) error {
 	activityHub := activityhub.New(
 		activityhub.WithBus(bus), activityhub.WithHooks(hookd), activityhub.WithDisplay(activityGate),
 		activityhub.WithLogger(log.With("component", "activity")),
-		activityhub.WithSettings(func() db.ActivitySettings {
+		activityhub.WithSettings(func() (db.ActivitySettings, error) {
 			s, err := store.GetSettings()
-			if err != nil {
-				return db.DefaultActivitySettings()
-			}
-			return s.Activity
+			return s.Activity, err
 		}),
 	)
 	defer activityHub.Close()

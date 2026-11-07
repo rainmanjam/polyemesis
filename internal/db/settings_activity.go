@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -110,12 +111,34 @@ func (a ActivitySettings) BelowMinimum(amt *activity.Amount) bool {
 	for _, m := range a.MinTip {
 		switch {
 		case m.Currency != "" && amt.Currency == m.Currency:
-			return amt.Minor < m.Minor
+			return belowScaled(amt, m)
 		case m.Unit != "" && amt.Unit == m.Unit:
 			return amt.Units < m.Units
 		}
 	}
 	return false
+}
+
+// belowScaled compares a tip with a minimum in the same currency at the same
+// scale. A minimum's Minor is in the currency's own standard minor unit
+// (activity.ExponentFor); the tip carries its exponent, so both are brought to
+// a common scale before comparing -- a 500 JPY tip against a US-style 2-digit
+// minimum is otherwise off by a factor of a hundred. A currency with no standard
+// exponent is compared as written.
+func belowScaled(amt *activity.Amount, m MinAmount) bool {
+	std, known := activity.ExponentFor(amt.Currency)
+	if !known || std == amt.Exponent {
+		return amt.Minor < m.Minor
+	}
+	// tip = amt.Minor / 10^amt.Exponent, floor = m.Minor / 10^std.
+	// tip < floor  <=>  amt.Minor * 10^std < m.Minor * 10^amt.Exponent.
+	l := new(big.Int).Mul(big.NewInt(amt.Minor), pow10(std))
+	r := new(big.Int).Mul(big.NewInt(m.Minor), pow10(amt.Exponent))
+	return l.Cmp(r) < 0
+}
+
+func pow10(n int) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(max(n, 0))), nil)
 }
 
 func (a ActivitySettings) problems() []string {

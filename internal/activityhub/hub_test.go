@@ -1,6 +1,7 @@
 package activityhub
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"strconv"
@@ -70,7 +71,11 @@ type rig struct {
 	hk  *fakeHooks
 	set atomic.Pointer[db.ActivitySettings]
 	rd  atomic.Int64
-	now atomic.Pointer[time.Time]
+	// failNext, when set, makes the next settings read fail; slow, when set, is
+	// closed-over by a read that waits for it.
+	failNext atomic.Bool
+	hold     atomic.Pointer[chan struct{}]
+	now      atomic.Pointer[time.Time]
 }
 
 func newRig(t *testing.T, opts ...Option) *rig {
@@ -83,7 +88,7 @@ func newRig(t *testing.T, opts ...Option) *rig {
 	base := []Option{
 		WithBus(r.bus), WithDisplay(r.dsp), WithHooks(r.hk),
 		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
-		WithSettings(func() db.ActivitySettings { r.rd.Add(1); return *r.set.Load() }),
+		WithSettings(func() (db.ActivitySettings, error) { r.rd.Add(1); return *r.set.Load(), r.loadErr() }),
 		WithClock(func() time.Time { return *r.now.Load() }),
 		WithBackoff(func(int) time.Duration { return time.Millisecond }),
 	}
@@ -421,5 +426,65 @@ func TestConcurrentSubmitIsRaceFree(t *testing.T) {
 	wg.Wait()
 	if r.hub.Stats().Delivered != 400 {
 		t.Errorf("delivered %d", r.hub.Stats().Delivered)
+	}
+}
+
+func (r *rig) loadErr() error {
+	if r.failNext.Swap(false) {
+		return errors.New("database is locked")
+	}
+	if c := r.hold.Load(); c != nil {
+		<-*c
+	}
+	return nil
+}
+
+// A failed read keeps the LAST GOOD settings: a hiccup must not turn a
+// switched-off activity back on.
+func TestAFailedSettingsReadKeepsTheLastGoodSettings(t *testing.T) {
+	r := newRig(t)
+	r.settings(func(s *db.ActivitySettings) { s.Enabled = false })
+	if r.hub.Submit(real(activity.KindFollow, "twitch", "1")).Accepted {
+		t.Fatal("disabled activity delivered")
+	}
+	r.advance(settingsTTL + time.Second)
+	r.failNext.Store(true)
+	if res := r.hub.Submit(real(activity.KindFollow, "twitch", "2")); res.Accepted {
+		t.Errorf("a failed read turned activity back on: %+v", res)
+	}
+	// And the next read (after the TTL) recovers.
+	r.settings(func(s *db.ActivitySettings) { s.Enabled = true })
+	if !r.hub.Submit(real(activity.KindFollow, "twitch", "3")).Accepted {
+		t.Error("never recovered")
+	}
+}
+
+// A read that began before InvalidateSettings must not overwrite the cache with
+// what it read: it may predate the save that invalidated it.
+func TestAStaleSettingsLoadNeverOverwritesANewerOne(t *testing.T) {
+	r := newRig(t)
+	r.hub.InvalidateSettings()
+	hold := make(chan struct{})
+	r.hold.Store(&hold)
+	old := *r.set.Load() // enabled, as the slow read will return it
+	r.advance(settingsTTL + time.Second)
+	done := make(chan bool, 1)
+	go func() { done <- r.hub.Submit(real(activity.KindFollow, "twitch", "slow")).Accepted }()
+	for r.rd.Load() < 1 {
+		time.Sleep(time.Millisecond)
+	}
+	// A save lands while that read is in flight: the stored document is now off.
+	off := old
+	off.Enabled = false
+	r.set.Store(&off)
+	r.hub.InvalidateSettings()
+	r.hold.Store(nil)
+	close(hold)
+	<-done
+	if r.hub.Settings().Enabled {
+		t.Error("the stale load overwrote the newer settings")
+	}
+	if r.hub.Submit(real(activity.KindFollow, "twitch", "after")).Accepted {
+		t.Error("an event after the save obeyed the old settings")
 	}
 }

@@ -183,3 +183,48 @@ func TestRedactActorNil(t *testing.T) {
 		t.Error("redactActor(nil) != nil")
 	}
 }
+
+// With no hook naming the trigger, an activity is not queued, redacted or
+// counted: a follow-bot costs an install with no activity hook nothing.
+func TestActivityIsNotQueuedWhenNoHookWantsIt(t *testing.T) {
+	rec := &recorder{}
+	d := NewDispatcher(testLogger(t), SourceFunc(func() ([]Hook, error) { return oneHook(), nil }),
+		WithDoer(rec), WithReloadInterval(10*time.Millisecond))
+	runDispatcher(t, d)
+	waitFor(t, func() bool { return d.HasHooks() })
+	for i := 0; i < 5000; i++ {
+		d.Activity(sampleActivity(activity.KindFollow))
+	}
+	if st := d.Stats(); st.Queued != 0 || st.Dropped != 0 {
+		t.Errorf("an unwanted activity touched the queues: %+v", st)
+	}
+}
+
+// A burst of follows must not displace a lifecycle delivery, in the dispatcher's
+// intake or in the endpoint's own queue, even when the endpoint is stuck.
+func TestAnActivityBurstNeverDropsALifecycleDelivery(t *testing.T) {
+	rec := &recorder{block: make(chan struct{})}
+	h := Hook{ID: 1, Name: "both", Enabled: true, URL: "https://example.com/h", Secret: "s",
+		Triggers: []Trigger{TriggerActivity, TriggerDestinationDown}}.Normalized()
+	d := NewDispatcher(testLogger(t), SourceFunc(func() ([]Hook, error) { return []Hook{h}, nil }),
+		WithDoer(rec), WithReloadInterval(10*time.Millisecond))
+	runDispatcher(t, d)
+	waitFor(t, func() bool { return d.HasHooks() })
+
+	d.Publish(Event{Trigger: TriggerDestinationDown, At: time.Now(), Source: SourceRef{ID: 1}})
+	for i := 0; i < 2000; i++ {
+		d.Activity(sampleActivity(activity.KindFollow))
+	}
+	d.Publish(Event{Trigger: TriggerDestinationDown, At: time.Now(), Source: SourceRef{ID: 2}})
+	time.Sleep(100 * time.Millisecond)
+	close(rec.block)
+	waitFor(t, func() bool {
+		var down int
+		for _, b := range rec.seen() {
+			if strings.Contains(b, `"trigger":"destination.down"`) {
+				down++
+			}
+		}
+		return down == 2
+	})
+}

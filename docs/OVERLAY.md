@@ -69,9 +69,9 @@ It follows the same rules as the chat overlay:
   last few minutes of alerts again: an alert is replayed to a reconnecting
   overlay only if it is under 10 seconds old.
 - **Only the overlay kinds are drawn:** follows, subs, resubs, gifts, tips,
-  raids in, redemptions, hype trains and shoutouts. A moderation action, the
+  raids in, redemptions, hype trains and shoutouts received. A moderation action, the
   platform's stream online/offline report, a native poll or prediction, a
-  reaction tally, and a raid you sent *out* never reach an overlay.
+  reaction tally, and a raid or shoutout you sent *out* never reach an overlay.
 - **No ids.** The overlay is sent a name, an amount and a few numbers, never a
   platform account id, an actor id or a source id.
 

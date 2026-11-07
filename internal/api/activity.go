@@ -226,6 +226,13 @@ func (s *Server) handleActivityReplay(w http.ResponseWriter, r *http.Request) {
 	if !s.requireActivity(w) {
 		return
 	}
+	// The same limit as Send test alert: a replay reaches the overlay, which is
+	// on air, and an id in the URL is no reason to allow a machine gun.
+	if !s.activityTests.allow(time.Now()) {
+		w.Header().Set("Retry-After", "1")
+		writeErrorCode(w, http.StatusTooManyRequests, "rate_limited", "replays are limited to two a second")
+		return
+	}
 	if !s.activity.Replay(chi.URLParam(r, "id")) {
 		writeError(w, http.StatusNotFound, "that activity is no longer held, or is not one an overlay shows")
 		return

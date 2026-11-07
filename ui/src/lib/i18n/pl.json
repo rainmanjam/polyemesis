@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Na tej samej stronie ze szczegółami pokaż i skopiuj Client secret.",
   "publish.ackOutcome": "Sprawdziłem(-am) {platform} i wpisu tam nie ma.",
   "hooks.triggerActivity": "Aktywność widzów",
-  "hooks.triggerActivityHint": "Na życzenie: otrzymuje to tylko hook, który to wybierze. Brak wybranych wyzwalaczy tego nie obejmuje.",
+  "hooks.triggerActivityHint": "Na życzenie: zaznaczenie tego w hooku, który otrzymuje wszystko, zachowuje zaznaczone wszystkie zdarzenia cyklu życia i dodaje aktywność widzów. Hook bez zaznaczonych wyzwalaczy nigdy nie otrzymuje aktywności widzów.",
   "activity.tabsLabel": "Sekcje czatu",
   "activity.tab.chat": "Czat",
   "activity.tab.activity": "Aktywność",

@@ -209,9 +209,75 @@ func TestScreenWhenTheModeratorIsReplacedMidQuestion(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the cancelled question never answered")
 	}
-	// A screen with no automod at all, reached after the fact.
-	if v, err := h.screenVerdict(context.Background(), db.PlatformTwitch, "x"); err != nil || len(v.Findings) != 0 {
-		t.Errorf("screenVerdict with no moderator: %v %v", v, err)
-	}
 	close(block)
+}
+
+// The screening queue is its own: filling it makes the alert show without its
+// text and does not touch the queue that carries bans and timeouts.
+func TestAFullScreeningQueueShowsTheAlertWithoutTextAndLeavesModerationAlone(t *testing.T) {
+	block := make(chan struct{})
+	mod := &stubModerator{modelOn: true, modelBlock: block}
+	h := screenHub(t, mod)
+	defer close(block)
+	pending, blocked := 0, 0
+	for i := 0; i < screenQueueDepth*2+5; i++ {
+		switch h.ScreenText(db.PlatformTwitch, "words", func(Display) {}) {
+		case DisplayPending:
+			pending++
+		case DisplayBlocked:
+			blocked++
+		}
+	}
+	if pending < screenQueueDepth || blocked == 0 {
+		t.Fatalf("pending %d blocked %d: a full screening queue must answer Blocked", pending, blocked)
+	}
+	h.mu.Lock()
+	moderation := len(h.automod.jobs)
+	h.mu.Unlock()
+	if moderation != 0 {
+		t.Errorf("screening put %d jobs on the moderation queue", moderation)
+	}
+	// And a moderation action still queues, however full the screening queue is.
+	h.mu.Lock()
+	s := h.automod
+	h.mu.Unlock()
+	h.enqueueAutomod(s, automodJob{gen: s.gen, platform: db.PlatformTwitch, finding: automod.Finding{Checker: automod.CheckerRules, Action: automod.ActionFlag}})
+}
+
+// Alert text is judged by the same shape detectors as chat: a Super Chat message
+// chat would hide stays off air, though it has no author to keep a window for.
+func TestAlertTextThatChatWouldHideStaysOffAir(t *testing.T) {
+	limits := automod.HistoryLimits{
+		Window: time.Minute, MaxMentionsPerMessage: 3, MaxLinks: 1, MinLengthForCaps: 10, MaxCapsRatio: 0.6,
+		Action: automod.ActionHideLocal, Retain: 10, IdleEviction: time.Hour, MaxAuthors: 100,
+	}
+	m := automod.DefaultMatrix()
+	m.Set(automod.Key{Platform: db.PlatformTwitch, Action: automod.ActionHideLocal, Checker: automod.CheckerHistory}, true)
+	engine := automod.New(m, automod.PlatformCaps{}, nil, automod.NewHistory(limits), nil)
+
+	cases := map[string]string{
+		"shouting": "THIS IS ALL UPPER CASE TEXT",
+		"mentions": "@a @b @c @d hello",
+		"links":    "see http://a.example and http://b.example",
+	}
+	for name, text := range cases {
+		// What chat does with it: the message from a real author is removed.
+		if v := engine.CheckFast(db.PlatformTwitch, "u1", text); !removes(v) {
+			t.Fatalf("%s: chat would not hide %q, so this test proves nothing", name, text)
+		}
+		h := screenHub(t, engine)
+		if got := h.ScreenText(db.PlatformTwitch, text, nil); got != DisplayBlocked {
+			t.Errorf("%s: alert text %q verdict %v, want blocked", name, text, got)
+		}
+	}
+	h := screenHub(t, engine)
+	if got := h.ScreenText(db.PlatformTwitch, "thanks for the stream", nil); got != DisplayClear {
+		t.Errorf("clean text: %v", got)
+	}
+	// Screening records nothing: the same text a hundred times is never a flood.
+	for i := 0; i < 100; i++ {
+		if h.ScreenText(db.PlatformTwitch, "thanks for the stream", nil) != DisplayClear {
+			t.Fatal("repeated alert text was treated as a flood")
+		}
+	}
 }

@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "同じアプリの詳細ページでクライアントシークレットを表示してコピーします。",
   "publish.ackOutcome": "{platform} を確認しました。投稿は見当たりません。",
   "hooks.triggerActivity": "視聴者アクティビティ",
-  "hooks.triggerActivityHint": "オプトイン: これを選択したフックだけが受け取ります。トリガーを何も選ばなくても含まれません。",
+  "hooks.triggerActivityHint": "オプトイン: すべてを受け取るフックでこれをオンにすると、ライフサイクルの全イベントはオンのまま維持され、視聴者アクティビティが追加されます。トリガーを何もオンにしていないフックは、視聴者アクティビティを受け取りません。",
   "activity.tabsLabel": "チャットのセクション",
   "activity.tab.chat": "チャット",
   "activity.tab.activity": "アクティビティ",

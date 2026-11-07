@@ -73,6 +73,51 @@ func (s runnerSink) Activity(ev activity.Event) {
 	}
 }
 
+// TextChecker is the optional capability of a Moderator that can judge text
+// which has no author. internal/automod.Engine has it. Without it ScreenText
+// falls back to CheckFast with no author, which runs the rules but not the
+// history detectors (they need an author to keep a window for).
+type TextChecker interface {
+	CheckText(p db.Platform, text string) automod.Verdict
+}
+
+func checkText(m Moderator, p db.Platform, text string) automod.Verdict {
+	if tc, ok := m.(TextChecker); ok {
+		return tc.CheckText(p, text)
+	}
+	return m.CheckFast(p, "", text)
+}
+
+// screenQueueDepth bounds the screening queue. SEPARATE from the moderation
+// queue (automodQueueDepth) and from its worker: a bounded queue of cheap cheers
+// must not be able to starve or drop a ban.
+const screenQueueDepth = 64
+
+// screenJob is one model question about alert text, with the platform it is
+// asked as.
+type screenJob struct {
+	platform db.Platform
+	req      *screenRequest
+}
+
+// runScreenWorker answers screening questions, one at a time, for one
+// moderator generation. Its own goroutine, so it never delays a moderation
+// action, and cancelled with the generation.
+func (h *Hub) runScreenWorker(ctx context.Context, s *automodState) {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-s.screenJobs:
+			if ctx.Err() != nil {
+				return
+			}
+			h.screenModel(ctx, s, job)
+		}
+	}
+}
+
 // screenRequest is a model question about text that is not chat.
 type screenRequest struct {
 	text string
@@ -101,17 +146,21 @@ func (h *Hub) ScreenText(p db.Platform, text string, done func(Display)) Display
 	if s == nil || text == "" {
 		return DisplayClear
 	}
-	if removes(s.mod.CheckFast(p, "", text)) {
+	if removes(checkText(s.mod, p, text)) {
 		return DisplayBlocked
 	}
 	if !s.mod.ModelEnabled() || done == nil {
 		return DisplayClear
 	}
-	h.enqueueAutomod(s, automodJob{
-		gen: s.gen, platform: p,
-		finding: automod.Finding{Checker: automod.CheckerModel},
-		screen:  &screenRequest{text: text, done: done},
-	})
+	select {
+	case s.screenJobs <- screenJob{platform: p, req: &screenRequest{text: text, done: done}}:
+	default:
+		// The screening queue is full. NOT the moderation queue: that one carries
+		// bans and timeouts and is never touched here. The alert shows without
+		// its words.
+		h.log.Warn("alert text screening queue full; the alert is shown without its text", "platform", p)
+		return DisplayBlocked
+	}
 	return DisplayPending
 }
 
@@ -141,9 +190,9 @@ func (h *Hub) ScreenName(p db.Platform, name string) Display {
 // (A chat line that is already on the console fails open, because an overlay
 // that went silent whenever the model did would be a second outage. An alert's
 // name and amount still show.)
-func (h *Hub) screenModel(ctx context.Context, job automodJob) {
-	req := job.screen
-	v, err := h.screenVerdict(ctx, job.platform, req.text)
+func (h *Hub) screenModel(ctx context.Context, s *automodState, job screenJob) {
+	req := job.req
+	v, err := s.mod.CheckModel(ctx, job.platform, req.text)
 	switch {
 	case err != nil:
 		h.log.Warn("automod model check failed; the alert's text is not shown",
@@ -154,14 +203,4 @@ func (h *Hub) screenModel(ctx context.Context, job automodJob) {
 	default:
 		req.done(DisplayClear)
 	}
-}
-
-func (h *Hub) screenVerdict(ctx context.Context, p db.Platform, text string) (automod.Verdict, error) {
-	h.mu.Lock()
-	s := h.automod
-	h.mu.Unlock()
-	if s == nil {
-		return automod.Verdict{}, nil
-	}
-	return s.mod.CheckModel(ctx, p, text)
 }

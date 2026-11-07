@@ -3,6 +3,7 @@ import {
   alertsWidgetPathUrl,
   alertsWidgetUrl,
   alertStyleOf,
+  OVERLAY_ALERT_KINDS,
   DEFAULT_ALERT_STYLE,
   OVERLAY_KEY_HEADER,
   SSEParser,
@@ -272,5 +273,12 @@ describe("the alerts overlay (/overlay/alerts)", () => {
       (async () => responses.shift()!) as unknown as typeof fetch, async () => {});
     expect(onActivity).toHaveBeenCalledTimes(1);
     expect(onActivity).toHaveBeenCalledWith(good);
+  });
+});
+
+describe("alertStyleOf with kinds missing", () => {
+  it.each([null, undefined])("falls back to every overlay kind for %s", (kinds) => {
+    const a = alertStyleOf({ alerts: { ...DEFAULT_ALERT_STYLE, kinds } as never });
+    expect(a.kinds).toEqual([...OVERLAY_ALERT_KINDS]);
   });
 });

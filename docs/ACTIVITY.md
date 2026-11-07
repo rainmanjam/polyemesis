@@ -42,7 +42,7 @@ what streamers call it, but the wire name does not follow the label.
 | `raid` | a channel sent its viewers, or you sent yours | `other`, `direction`, `viewers` | only `direction: "in"` |
 | `redemption` | a channel-points reward was redeemed | `actor`, `title`, `status`, `message` | yes |
 | `hypetrain` | a hype train began, moved or ended | `level`, `progress`, `phase` | yes |
-| `shoutout` | a shoutout was given or received | `other`, `direction`, `viewers` | yes |
+| `shoutout` | a shoutout was given or received | `other`, `direction`, `viewers` | only `direction: "in"` |
 | `poll` | a platform-native poll | `title`, `progress`, `phase` | never |
 | `prediction` | a platform-native prediction | `title`, `progress`, `phase` | never |
 | `stream` | the **platform's** report that the stream went online, offline or changed title | `title`, `phase` | never |
@@ -120,6 +120,10 @@ converted**.
 - Money: `currency` (ISO 4217), `minor` (500 with `exponent` 2 is 5.00) and
   `exponent`, carried so nothing needs a currency table (JPY has 0, BHD 3).
 - A unit: `unit` (`bits`, `kicks`) and `units`.
+- A bad exponent is refused, not corrected: outside 0 to 6, or contradicting a
+  well-known currency (a yen with `exponent` 2, a dollar with it omitted), makes
+  the event invalid. The wire omits an exponent of 0, so JPY and KRW amounts
+  carry none. Minimums are compared at the tip's own scale.
 - `display` is the platform's own string when it sends one (a Super Chat's
   `amountDisplayString`), otherwise built.
 
@@ -234,10 +238,15 @@ by a stranger. So, on the overlay only:
   message**. An error from the model checker is treated the same way, which is
   stricter than chat (a chat line is already on your console; an alert loses
   nothing by showing no words);
+- the text goes through the same shape checks as chat that need no author
+  (shouting, mentions, links in one message), and nothing it says is recorded, so
+  the same thanks twice is never a "flood". Its model questions have their own
+  small queue, apart from the one that carries bans and timeouts; if it is full
+  the alert simply shows without its words;
 - the **name** (and a single gift recipient) is checked against your blocked
   terms, and a name that fails is shown as "Someone";
 - the projection has **no ids** (no actor id, account, source id or recipient
-  id), and a **raid you sent out** is never drawn;
+  id), and a **raid or shoutout you sent out** is never drawn;
 - the text is drawn as plain text, never as markup.
 
 A Super Chat or a rant stays a chat line **and** becomes an activity; the two

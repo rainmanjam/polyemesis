@@ -317,7 +317,6 @@ func (e Event) Normalise(now func() time.Time) Event {
 		a := *e.Amount
 		a.Currency = strings.ToUpper(strings.TrimSpace(a.Currency))
 		a.Unit = strings.ToLower(strings.TrimSpace(a.Unit))
-		a.Exponent = clampInt(a.Exponent, 0, 6)
 		a.Display = clip(strings.TrimSpace(a.Display), MaxShortRunes)
 		if a.Display == "" {
 			a.Display = a.build()
@@ -535,8 +534,41 @@ func (e Event) Validate() error {
 	return nil
 }
 
-// Validate refuses an amount that is both money and a unit, or neither.
+// MaxExponent is the largest minor-unit exponent an amount may carry.
+const MaxExponent = 6
+
+// standardExponent lists the currencies whose minor unit is not the usual
+// hundredth, and the common ones that are, so an amount whose exponent
+// contradicts its currency (a yen with exponent 2 is a hundredfold error in
+// every threshold) is refused rather than believed. A currency not listed is
+// accepted at any exponent in 0..MaxExponent: this is a guard against the
+// frequent mistakes, not a copy of ISO 4217.
+var standardExponent = map[string]int{
+	"JPY": 0, "KRW": 0, "VND": 0, "CLP": 0, "ISK": 0, "UGX": 0, "XAF": 0, "XOF": 0, "PYG": 0, "RWF": 0,
+	"BHD": 3, "KWD": 3, "JOD": 3, "OMR": 3, "TND": 3, "IQD": 3, "LYD": 3,
+	"USD": 2, "EUR": 2, "GBP": 2, "CAD": 2, "AUD": 2, "NZD": 2, "CHF": 2, "SEK": 2, "NOK": 2, "DKK": 2,
+	"PLN": 2, "CZK": 2, "MXN": 2, "BRL": 2, "INR": 2, "SGD": 2, "HKD": 2, "ZAR": 2, "TRY": 2, "RUB": 2,
+}
+
+// ExponentFor returns the standard minor-unit exponent of a currency, and false
+// for one this build does not list.
+func ExponentFor(currency string) (int, bool) {
+	e, ok := standardExponent[strings.ToUpper(currency)]
+	return e, ok
+}
+
+// Validate refuses an amount that is both money and a unit, or neither, an
+// exponent outside 0..MaxExponent, or one that contradicts a known currency.
 func (a Amount) Validate() error {
+	if a.Exponent < 0 || a.Exponent > MaxExponent {
+		return fmt.Errorf("activity: exponent %d is not between 0 and %d", a.Exponent, MaxExponent)
+	}
+	if want, known := ExponentFor(a.Currency); known && a.Exponent != want {
+		return fmt.Errorf("activity: %s has %d minor-unit digits, not %d", a.Currency, want, a.Exponent)
+	}
+	if a.Currency == "" && a.Exponent != 0 {
+		return fmt.Errorf("activity: a platform unit carries no exponent")
+	}
 	money := a.Currency != ""
 	unit := a.Unit != "" || a.Units != 0
 	switch {
@@ -569,7 +601,9 @@ func (e Event) OverlayVisible() bool {
 	if !slices.Contains(OverlayKinds(), e.Kind) {
 		return false
 	}
-	if e.Kind == KindRaid && e.Direction == "out" {
+	// A raid or shoutout going OUT is the streamer's own act, not an alert: the
+	// overlay would otherwise announce "Shoutout from X" for one they gave.
+	if (e.Kind == KindRaid || e.Kind == KindShoutout) && e.Direction == "out" {
 		return false
 	}
 	return true

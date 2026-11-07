@@ -29,10 +29,10 @@ func TestEveryKindOfTestAlertReachesTheEventsStreamAndTheOverlay(t *testing.T) {
 	gate := overlay.NewActivityGate(stream, nil)
 	// Reactions on: the Facebook tally is the one kind off by default, and a
 	// test alert obeys the settings like a real event.
-	hub := New(WithBus(bus), WithDisplay(gate), WithSettings(func() db.ActivitySettings {
+	hub := New(WithBus(bus), WithDisplay(gate), WithSettings(func() (db.ActivitySettings, error) {
 		s := db.DefaultActivitySettings()
 		s.Reactions = true
-		return s
+		return s, nil
 	}))
 	defer hub.Close()
 
@@ -122,10 +122,10 @@ func TestADisabledKindNeverReachesTheStream(t *testing.T) {
 	defer cancel()
 	go eventstream.BridgeBus(ctx, bus, stream)
 	waitBridge(t, bus)
-	hub := New(WithBus(bus), WithSettings(func() db.ActivitySettings {
+	hub := New(WithBus(bus), WithSettings(func() (db.ActivitySettings, error) {
 		s := db.DefaultActivitySettings()
 		s.Kinds = map[string][]string{"twitch": {"follow"}}
-		return s
+		return s, nil
 	}))
 	defer hub.Close()
 	sub := streamtest.Subscribe(t, stream)

@@ -357,3 +357,34 @@ func TestStyleWithAndWithoutAlertsParses(t *testing.T) {
 		t.Error("an unknown alert field parsed")
 	}
 }
+
+func TestAnAlertsStyleWithoutKindsGetsTheDefaultListNotNull(t *testing.T) {
+	style := func(kinds string) json.RawMessage {
+		return json.RawMessage(`{"preset":"classic","font":"sans","fontSize":24,"textColor":"#ffffff","backgroundColor":"#000000",` +
+			`"backgroundOpacity":0,"authorColors":true,"fadeSeconds":30,"maxLines":12,"showPlatform":true,"showBadges":true,` +
+			`"alerts":{"layout":"card",` + kinds + `"seconds":8,"showMessage":false,"showAmount":true,"sound":"chime","accent":"#ff0000"}}`)
+	}
+	for name, kinds := range map[string]string{"absent": "", "null": `"kinds":null,`} {
+		s, err := ParseStyle(style(kinds))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(s.Alerts.Kinds) != len(activity.OverlayKinds()) {
+			t.Errorf("%s: kinds = %v", name, s.Alerts.Kinds)
+		}
+		b, _ := json.Marshal(s)
+		if strings.Contains(string(b), `"kinds":null`) {
+			t.Errorf("%s: stored as null: %s", name, b)
+		}
+	}
+	// An explicit empty list is a choice, and stays empty.
+	if s, err := ParseStyle(style(`"kinds":[],`)); err != nil || s.Alerts.Kinds == nil || len(s.Alerts.Kinds) != 0 {
+		t.Errorf("empty list: %+v %v", s.Alerts, err)
+	}
+	// A hand-built style without a list is refused rather than stored as null.
+	a := DefaultAlertStyle()
+	a.Kinds = nil
+	if a.Validate() == nil {
+		t.Error("nil kinds validated")
+	}
+}

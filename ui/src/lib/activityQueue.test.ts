@@ -48,6 +48,15 @@ function drive(initial: AlertQueueState = emptyAlertQueue()) {
   };
 }
 
+describe("enqueueAlert with kinds missing", () => {
+  it.each([null, undefined])("accepts every overlay kind when kinds is %s", (kinds) => {
+    for (const k of ALL) {
+      const next = enqueueAlert(emptyAlertQueue(), ev(k as ActivityKind), { kinds } as never, 0);
+      expect(next.queue).toHaveLength(1);
+    }
+  });
+});
+
 describe("activity alert queue", () => {
   beforeEach(() => {
     vi.useFakeTimers();

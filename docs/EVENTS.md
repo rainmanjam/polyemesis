@@ -504,7 +504,7 @@ blocked-terms check (the overlay says "Someone"). `message` is present only if
 automod let it stand: **an alert whose message automod removed, or did not rule
 on within four seconds, is still published, without the message.** Only the
 overlay kinds are projected (never `moderation`, `stream`, `poll`, `prediction`,
-`reaction`, or a raid you sent *out*). `id` is opaque and different for every
+`reaction`, or a raid or shoutout you sent *out*). `id` is opaque and different for every
 showing, including a replay from the console.
 
 Replay treats an `activity.display` differently for an overlay key: it is

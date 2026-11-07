@@ -30,6 +30,14 @@ const (
 	queueDepth = 64
 	// intakeDepth buffers the hand-off from Publish to the fan-out goroutine.
 	intakeDepth = 256
+	// activityDepth is the same hand-off for viewer activity, and a SEPARATE
+	// queue so that a burst of follows can never push a destination.down off
+	// the lifecycle one. Smaller on purpose: an overflowing activity queue
+	// drops activity, which is counted, and costs nothing else.
+	activityDepth = 128
+	// activityQueueDepth is one endpoint's room for activity, apart from its
+	// lifecycle queue (queueDepth) for the same reason.
+	activityQueueDepth = 64
 	// reloadEvery is how often the hook list is re-read, so a hook added or
 	// edited takes effect without a restart. Same idea as the notifier's rule
 	// cache; the interval is longer because nothing here is on a hot path.
@@ -191,7 +199,10 @@ func WithReloadInterval(d time.Duration) Option {
 // whenever the first attempt at the earlier one was slower, and an automation
 // told the stream is down while it is live is worse than no automation.
 type worker struct {
-	ch     chan Event
+	ch chan Event
+	// actCh is this endpoint's queue for activity, apart from ch: a hook
+	// subscribed to both must not lose a lifecycle delivery to a follow burst.
+	actCh  chan Event
 	stop   func()
 	done   chan struct{}
 	seq    atomic.Uint64
@@ -217,6 +228,11 @@ type Dispatcher struct {
 	reloadEvery time.Duration
 
 	intake chan Event
+	// activityIntake carries viewer activity, apart from intake. wantsActivity
+	// is set by reload when some loaded hook names the trigger; until then
+	// Activity returns without queueing anything.
+	activityIntake chan Event
+	wantsActivity  atomic.Bool
 
 	mu      sync.Mutex
 	workers map[int64]*worker
@@ -286,14 +302,15 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 // is what lets main wire it before it has a context.
 func NewDispatcher(log *slog.Logger, src Source, opts ...Option) *Dispatcher {
 	d := &Dispatcher{
-		log:         log,
-		src:         src,
-		doer:        &http.Client{Transport: &http.Transport{DialContext: safeDialContext}},
-		now:         time.Now,
-		sleep:       backoff.SleepCtx,
-		reloadEvery: reloadEvery,
-		intake:      make(chan Event, intakeDepth),
-		workers:     map[int64]*worker{},
+		log:            log,
+		src:            src,
+		doer:           &http.Client{Transport: &http.Transport{DialContext: safeDialContext}},
+		now:            time.Now,
+		sleep:          backoff.SleepCtx,
+		reloadEvery:    reloadEvery,
+		intake:         make(chan Event, intakeDepth),
+		activityIntake: make(chan Event, activityDepth),
+		workers:        map[int64]*worker{},
 	}
 	for _, o := range opts {
 		o(d)
@@ -324,12 +341,28 @@ func (d *Dispatcher) Publish(ev Event) {
 
 // Activity accepts a viewer or platform activity as an `activity` trigger. It
 // is what internal/activityhub calls (activityhub.Hooks), and like Publish it
-// never blocks. Only hooks that name the trigger receive it (Hook.Wants).
+// never blocks, and it has its own bounded queue so that a burst of follows
+// cannot displace a lifecycle delivery. Only hooks that name the trigger
+// receive it (Hook.Wants).
 func (d *Dispatcher) Activity(a activity.Event) {
 	if d == nil {
 		return
 	}
-	d.Publish(Event{Trigger: TriggerActivity, At: a.At, Activity: &a, Test: a.Test})
+	// Nothing is queued, redacted or counted unless a loaded hook names the
+	// trigger: an install with no activity hook pays nothing for a follow-bot.
+	if !d.wantsActivity.Load() {
+		return
+	}
+	ev := Event{Trigger: TriggerActivity, At: a.At, Activity: &a, Test: a.Test}
+	if ev.At.IsZero() {
+		ev.At = d.now()
+	}
+	select {
+	case d.activityIntake <- ev.redacted():
+		d.bump(func(s *Stats) { s.Queued++ })
+	default:
+		d.bump(func(s *Stats) { s.Dropped++ })
+	}
 }
 
 // HasHooks reports whether anybody is listening, so the engine can skip work
@@ -386,6 +419,23 @@ func (d *Dispatcher) Run(ctx context.Context) {
 			d.reload()
 		case ev := <-d.intake:
 			d.fanOut(ev)
+		case ev := <-d.activityIntake:
+			// Lifecycle first: anything waiting on the other queue is
+			// delivered before this one.
+			d.drainLifecycle()
+			d.fanOut(ev)
+		}
+	}
+}
+
+// drainLifecycle fans out whatever is already waiting on the lifecycle intake.
+func (d *Dispatcher) drainLifecycle() {
+	for {
+		select {
+		case ev := <-d.intake:
+			d.fanOut(ev)
+		default:
+			return
 		}
 	}
 }
@@ -407,8 +457,12 @@ func (d *Dispatcher) fanOut(ev Event) {
 	d.mu.Unlock()
 
 	for _, w := range targets {
+		q := w.ch
+		if ev.Trigger == TriggerActivity {
+			q = w.actCh
+		}
 		select {
-		case w.ch <- ev:
+		case q <- ev:
 		default:
 			w.missed.Add(1)
 			d.bump(func(s *Stats) { s.Dropped++ })
@@ -469,6 +523,15 @@ func (d *Dispatcher) reload() {
 		}
 		d.workers[id] = d.startWorker(h)
 	}
+	wantsActivity := false
+	for _, w := range d.workers {
+		w.mu.Lock()
+		if w.hook.Wants(TriggerActivity) {
+			wantsActivity = true
+		}
+		w.mu.Unlock()
+	}
+	d.wantsActivity.Store(wantsActivity)
 	d.mu.Unlock()
 
 	for _, w := range stopping {
@@ -480,10 +543,11 @@ func (d *Dispatcher) reload() {
 func (d *Dispatcher) startWorker(h Hook) *worker {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
-		ch:   make(chan Event, queueDepth),
-		stop: cancel,
-		done: make(chan struct{}),
-		hook: h,
+		ch:    make(chan Event, queueDepth),
+		actCh: make(chan Event, activityQueueDepth),
+		stop:  cancel,
+		done:  make(chan struct{}),
+		hook:  h,
 	}
 	go func() {
 		defer close(w.done)
@@ -492,6 +556,14 @@ func (d *Dispatcher) startWorker(h Hook) *worker {
 			case <-ctx.Done():
 				return
 			case ev := <-w.ch:
+				d.deliver(ctx, w, ev)
+			case ev := <-w.actCh:
+				// A lifecycle delivery that is already waiting goes first.
+				select {
+				case first := <-w.ch:
+					d.deliver(ctx, w, first)
+				default:
+				}
 				d.deliver(ctx, w, ev)
 			}
 		}

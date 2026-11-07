@@ -48,7 +48,7 @@ export function isOverlayKind(kind: string): boolean {
 export function amountValue(a: ActivityAmount | undefined): { code: string; value: number } | null {
   if (!a) return null;
   if (a.currency && a.minor !== undefined) {
-    return { code: a.currency.toUpperCase(), value: a.minor / 10 ** (a.exponent ?? 2) };
+    return { code: a.currency.toUpperCase(), value: a.minor / 10 ** (a.exponent ?? 0) };
   }
   if (a.unit && a.units !== undefined) return { code: a.unit.toLowerCase(), value: a.units };
   return null;

@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "같은 앱 세부 정보 페이지에서 클라이언트 시크릿을 표시한 뒤 복사하세요.",
   "publish.ackOutcome": "{platform}을(를) 확인했으며 게시물이 없습니다.",
   "hooks.triggerActivity": "시청자 활동",
-  "hooks.triggerActivityHint": "선택 사항: 이것을 선택한 훅만 받습니다. 트리거를 하나도 선택하지 않아도 포함되지 않습니다.",
+  "hooks.triggerActivityHint": "선택 사항: 모든 것을 받는 훅에서 이것을 선택하면 모든 수명 주기 이벤트가 선택된 상태로 유지되고 시청자 활동이 추가됩니다. 선택된 트리거가 없는 훅은 시청자 활동을 받지 않습니다.",
   "activity.tabsLabel": "채팅 섹션",
   "activity.tab.chat": "채팅",
   "activity.tab.activity": "활동",

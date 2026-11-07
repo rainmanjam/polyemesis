@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Zeige auf derselben Seite App-Details das Client Secret an und kopiere es.",
   "publish.ackOutcome": "Ich habe {platform} geprüft, der Beitrag ist dort nicht vorhanden.",
   "hooks.triggerActivity": "Zuschaueraktivität",
-  "hooks.triggerActivityHint": "Opt-in: Nur ein Hook, der dies auswählt, erhält es. Ohne ausgewählte Auslöser ist es nicht enthalten.",
+  "hooks.triggerActivityHint": "Opt-in: Wird es bei einem Hook angehakt, der alles erhält, bleiben alle Lebenszyklus-Ereignisse angehakt und die Zuschaueraktivität kommt hinzu. Ein Hook ohne angehakte Auslöser erhält nie Zuschaueraktivität.",
   "activity.tabsLabel": "Chat-Bereiche",
   "activity.tab.chat": "Chat",
   "activity.tab.activity": "Aktivität",

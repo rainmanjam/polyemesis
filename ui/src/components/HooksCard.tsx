@@ -561,9 +561,16 @@ function HookDialog({
   const triggers = draft.triggers ?? [];
 
   const toggleTrigger = (tr: HookTrigger, on: boolean) => {
+    // An empty list means "every lifecycle trigger". Naming an opt-in trigger
+    // there must not narrow that to just the opt-in one, so spell the lifecycle
+    // ones out first and the hook keeps what it received.
+    const base =
+      on && triggers.length === 0 && (meta?.optInTriggers ?? []).includes(tr)
+        ? [...(meta?.triggers ?? [])]
+        : triggers;
     onChange({
       ...draft,
-      triggers: on ? [...triggers, tr] : triggers.filter((have) => have !== tr),
+      triggers: on ? [...base, tr] : base.filter((have) => have !== tr),
     });
   };
 

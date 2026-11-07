@@ -429,3 +429,56 @@ func TestClipKeepsValidUTF8(t *testing.T) {
 		t.Errorf("invalid utf-8 survived: %q", clip("a\xffb", 10))
 	}
 }
+
+func TestAmountExponentIsRefusedWhenOutOfRangeOrWrongForTheCurrency(t *testing.T) {
+	bad := []Amount{
+		{Currency: "USD", Minor: 1, Exponent: 9},
+		{Currency: "USD", Minor: 1, Exponent: -1},
+		{Currency: "USD", Minor: 500, Exponent: 0}, // a dollar amount with the exponent omitted
+		{Currency: "JPY", Minor: 500, Exponent: 2}, // a hundredfold error
+		{Currency: "BHD", Minor: 1, Exponent: 2},
+		{Unit: "bits", Units: 1, Exponent: 2},
+	}
+	for _, a := range bad {
+		e := Event{Kind: KindTip, Platform: "twitch", Actor: &Actor{Name: "a"}, Amount: &a, Source: Source{Type: "x", ID: "1"}}.Normalise(now)
+		if e.Amount.Exponent != a.Exponent {
+			t.Errorf("Normalise changed exponent %d to %d instead of leaving it for Validate", a.Exponent, e.Amount.Exponent)
+		}
+		if e.Validate() == nil {
+			t.Errorf("%+v validated", a)
+		}
+	}
+	for _, a := range []Amount{
+		{Currency: "JPY", Minor: 500}, {Currency: "USD", Minor: 500, Exponent: 2}, {Currency: "BHD", Minor: 1234, Exponent: 3},
+		{Currency: "XYZ", Minor: 5, Exponent: 4}, {Unit: "kicks", Units: 3},
+	} {
+		e := Event{Kind: KindTip, Platform: "twitch", Actor: &Actor{Name: "a"}, Amount: &a, Source: Source{Type: "x", ID: "1"}}.Normalise(now)
+		if err := e.Validate(); err != nil {
+			t.Errorf("%+v refused: %v", a, err)
+		}
+	}
+	if x, ok := ExponentFor("jpy"); !ok || x != 0 {
+		t.Errorf("ExponentFor(jpy) = %d %v", x, ok)
+	}
+	if _, ok := ExponentFor("XYZ"); ok {
+		t.Error("an unlisted currency is known")
+	}
+}
+
+func TestSampleOverrideAmountTakesTheCurrenciesOwnExponent(t *testing.T) {
+	e := Sample(KindTip, "", Overrides{Amount: &Amount{Currency: "USD", Minor: 700}}, fixedNow).Normalise(now)
+	if e.Amount.Exponent != 2 || e.Validate() != nil {
+		t.Errorf("%+v %v", e.Amount, e.Validate())
+	}
+}
+
+func TestAnOutgoingShoutoutIsNeverOverlayVisible(t *testing.T) {
+	e := Sample(KindShoutout, "twitch", Overrides{}, fixedNow)
+	if !e.OverlayVisible() {
+		t.Fatal("a shoutout received should be drawn")
+	}
+	e.Direction = "out"
+	if e.OverlayVisible() {
+		t.Error("a shoutout the streamer gave was announced as one received")
+	}
+}

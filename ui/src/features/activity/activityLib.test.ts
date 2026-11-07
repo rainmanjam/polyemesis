@@ -34,6 +34,8 @@ describe("amounts", () => {
   it("reads money in major units and units as they are", () => {
     expect(amountValue({ currency: "usd", minor: 500, exponent: 2 })).toEqual({ code: "USD", value: 5 });
     expect(amountValue({ currency: "JPY", minor: 500, exponent: 0 })).toEqual({ code: "JPY", value: 500 });
+    // The Go wire omits a zero exponent, so a missing one means no minor unit.
+    expect(amountValue({ currency: "JPY", minor: 500 })).toEqual({ code: "JPY", value: 500 });
     expect(amountValue({ unit: "Bits", units: 100 })).toEqual({ code: "bits", value: 100 });
     expect(amountValue({ currency: "USD" })).toBeNull();
     expect(amountValue(undefined)).toBeNull();

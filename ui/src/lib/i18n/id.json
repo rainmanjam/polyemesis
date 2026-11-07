@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Di halaman detail yang sama, tampilkan dan salin Client secret.",
   "publish.ackOutcome": "Saya sudah memeriksa {platform} dan kiriman itu tidak ada di sana.",
   "hooks.triggerActivity": "Aktivitas penonton",
-  "hooks.triggerActivityHint": "Opsional: hanya hook yang memilih ini yang menerimanya. Tidak memilih pemicu apa pun tidak mencakupnya.",
+  "hooks.triggerActivityHint": "Opsional: mencentangnya pada hook yang menerima semuanya mempertahankan semua peristiwa siklus hidup tetap tercentang dan menambahkan aktivitas penonton. Hook tanpa pemicu yang dicentang tidak pernah menerima aktivitas penonton.",
   "activity.tabsLabel": "Bagian obrolan",
   "activity.tab.chat": "Obrolan",
   "activity.tab.activity": "Aktivitas",

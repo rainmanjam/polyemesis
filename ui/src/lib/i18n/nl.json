@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Toon op dezelfde pagina met app-details het Client secret en kopieer het.",
   "publish.ackOutcome": "Ik heb {platform} gecontroleerd en de post staat er niet.",
   "hooks.triggerActivity": "Kijkersactiviteit",
-  "hooks.triggerActivityHint": "Opt-in: alleen een hook die dit selecteert ontvangt het. Geen enkele trigger selecteren neemt het niet mee.",
+  "hooks.triggerActivityHint": "Opt-in: als je dit aanvinkt bij een hook die alles ontvangt, blijven alle levenscyclusgebeurtenissen aangevinkt en komt kijkeractiviteit erbij. Een hook zonder aangevinkte triggers ontvangt nooit kijkeractiviteit.",
   "activity.tabsLabel": "Chatonderdelen",
   "activity.tab.chat": "Chat",
   "activity.tab.activity": "Activiteit",

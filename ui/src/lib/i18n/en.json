@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "On the same App details page, reveal and copy the Client secret.",
   "publish.ackOutcome": "I checked {platform} and the post is not there.",
   "hooks.triggerActivity": "Viewer activity",
-  "hooks.triggerActivityHint": "Opt-in: only a hook that selects this receives it. Selecting no triggers does not include it.",
+  "hooks.triggerActivityHint": "Opt-in: ticking it on a hook that receives everything keeps all the lifecycle events checked and adds viewer activity. A hook with no triggers ticked never receives viewer activity.",
   "activity.tabsLabel": "Chat sections",
   "activity.tab.chat": "Chat",
   "activity.tab.activity": "Activity",

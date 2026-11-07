@@ -63,7 +63,10 @@ export const ALERT_SECONDS = { min: 3, max: 15 } as const;
 /** The alerts look an overlay draws with: its own block over the defaults, so
  *  a block missing a field (an older save) still draws. */
 export function alertStyleOf(style: Pick<OverlayStyle, "alerts"> | null | undefined): AlertStyle {
-  return { ...DEFAULT_ALERT_STYLE, ...style?.alerts };
+  const merged = { ...DEFAULT_ALERT_STYLE, ...style?.alerts };
+  // A missing or null `kinds` means the default list, never "none" or a crash.
+  if (!Array.isArray(merged.kinds)) merged.kinds = [...OVERLAY_ALERT_KINDS];
+  return merged;
 }
 
 /** The closed font set and the bounds internal/overlay validates, from the wire

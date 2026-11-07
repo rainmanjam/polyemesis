@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "在同一应用详情页中显示并复制客户端密钥。",
   "publish.ackOutcome": "我已查看 {platform}，那里没有这条发布内容。",
   "hooks.triggerActivity": "观众动态",
-  "hooks.triggerActivityHint": "需主动选择：只有选中它的钩子才会收到。不选任何触发器也不包含它。",
+  "hooks.triggerActivityHint": "需主动选择：在接收全部事件的钩子上勾选它，会保持所有生命周期事件的勾选并加入观众活动。未勾选任何触发器的钩子永远不会收到观众活动。",
   "activity.tabsLabel": "聊天分区",
   "activity.tab.chat": "聊天",
   "activity.tab.activity": "动态",

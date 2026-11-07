@@ -118,6 +118,11 @@ func applyOverrides(e Event, o Overrides) Event {
 	}
 	if o.Amount != nil && e.Kind == KindTip {
 		a := *o.Amount
+		// A caller who names a listed currency and no exponent means that
+		// currency's own; the wire omits a zero exponent, so it cannot tell.
+		if std, ok := ExponentFor(a.Currency); ok && a.Exponent == 0 {
+			a.Exponent = std
+		}
 		e.Amount = &a
 	}
 	if o.Count > 0 && (e.Kind == KindGift || e.Kind == KindReaction) {

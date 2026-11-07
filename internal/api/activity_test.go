@@ -41,12 +41,9 @@ func activityServer(t *testing.T) (*httptest.Server, *Server, http.Handler, func
 	s.activityGate = gate
 	s.activity = activityhub.New(
 		activityhub.WithBus(streamBus{hub}), activityhub.WithDisplay(gate),
-		activityhub.WithSettings(func() db.ActivitySettings {
+		activityhub.WithSettings(func() (db.ActivitySettings, error) {
 			cfg, err := s.store.GetSettings()
-			if err != nil {
-				return db.DefaultActivitySettings()
-			}
-			return cfg.Activity
+			return cfg.Activity, err
 		}),
 	)
 	t.Cleanup(s.activity.Close)
@@ -269,10 +266,12 @@ func TestReplayRedrawsARememberedEventOnTheOverlay(t *testing.T) {
 	mod := s.activity.Submit(activity.Sample(activity.KindModeration, "twitch", activity.Overrides{}, time.Now()))
 
 	send(t, h, sign, http.MethodPost, "/api/v1/activity/"+res.Event.ID+"/replay", nil, http.StatusOK)
+	resetActivityLimiter(s)
 	again := streamtest.ExpectSSE(t, ov, eventstream.TypeActivityDisplay)
 	if first.Env.Data.(map[string]any)["id"] == again.Env.Data.(map[string]any)["id"] {
 		t.Error("a replay must be a new showing to the overlay's queue")
 	}
+	resetActivityLimiter(s)
 	send(t, h, sign, http.MethodPost, "/api/v1/activity/"+mod.Event.ID+"/replay", nil, http.StatusNotFound)
 	send(t, h, sign, http.MethodPost, "/api/v1/activity/act_gone/replay", nil, http.StatusNotFound)
 }
@@ -401,5 +400,46 @@ func TestSourceBuilderFailuresAndAbsencesNeverBreakAnAccount(t *testing.T) {
 	bare.detachActivitySource(db.PlatformKick, "1")
 	if chatActivityStatuses(nil)() != nil {
 		t.Error("a nil chat hub listed sources")
+	}
+}
+
+func resetActivityLimiter(s *Server) {
+	s.activityTests.mu.Lock()
+	s.activityTests.stamp = nil
+	s.activityTests.mu.Unlock()
+}
+
+// Replay reaches the on-air overlay, so it shares Send test alert's limit.
+func TestReplayIsRateLimited(t *testing.T) {
+	_, s, h, sign, _ := activityServer(t)
+	res := s.activity.Submit(activity.Sample(activity.KindFollow, "twitch", activity.Overrides{}, time.Now()))
+	path := "/api/v1/activity/" + res.Event.ID + "/replay"
+	send(t, h, sign, http.MethodPost, path, nil, http.StatusOK)
+	send(t, h, sign, http.MethodPost, path, nil, http.StatusOK)
+	r := jsonRequest(t, http.MethodPost, path, nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "1" {
+		t.Errorf("third replay in a second = %d %v", w.Code, w.Header())
+	}
+}
+
+// An alerts block saved without kinds is stored with the default list, never
+// JSON null, which the overlay page cannot read.
+func TestAnAlertsStyleSavedWithoutKindsIsStoredWithTheDefaults(t *testing.T) {
+	_, _, h, sign, _ := activityServer(t)
+	style := map[string]any{
+		"preset": "classic", "font": "sans", "fontSize": 24, "textColor": "#ffffff", "backgroundColor": "#000000",
+		"backgroundOpacity": 0, "authorColors": true, "fadeSeconds": 30, "maxLines": 12, "showPlatform": true, "showBadges": true,
+		"alerts": map[string]any{"layout": "banner", "seconds": 6, "showMessage": true, "showAmount": true, "sound": "none", "accent": "#7c3aed"},
+	}
+	raw := send(t, h, sign, http.MethodPost, "/api/v1/overlays", map[string]any{"name": "NoKinds", "style": style}, http.StatusCreated)
+	if strings.Contains(string(raw), `"kinds":null`) {
+		t.Fatalf("stored with null kinds: %s", raw)
+	}
+	var v overlayView
+	mustDecode(t, raw, &v)
+	if v.Style.Alerts == nil || len(v.Style.Alerts.Kinds) != len(activity.OverlayKinds()) {
+		t.Errorf("kinds = %+v", v.Style.Alerts)
 	}
 }

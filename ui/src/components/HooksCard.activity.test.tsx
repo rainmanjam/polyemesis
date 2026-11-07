@@ -63,6 +63,22 @@ describe("HooksCard: the opt-in activity trigger", () => {
     expect(activity.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(within(dialog).getByRole("button", { name: translate("en", "hooks.create") }));
     await waitFor(() => expect(create).toHaveBeenCalled());
-    expect((create.mock.calls[0][0] as { triggers: string[] }).triggers).toEqual(["activity"]);
+    // A catch-all hook keeps every lifecycle trigger it received, plus activity.
+    expect((create.mock.calls[0][0] as { triggers: string[] }).triggers).toEqual([
+      "ingest.published",
+      "destination.up",
+      "activity",
+    ]);
+  });
+
+  it("unticking it leaves the lifecycle triggers in place", async () => {
+    const dialog = await openNew();
+    fireEvent.change(within(dialog).getByLabelText(translate("en", "hooks.url")), { target: { value: "https://example.com/h" } });
+    const activity = within(dialog).getByRole("checkbox", { name: new RegExp(translate("en", "hooks.triggerActivity")) });
+    fireEvent.click(activity);
+    fireEvent.click(activity);
+    fireEvent.click(within(dialog).getByRole("button", { name: translate("en", "hooks.create") }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect((create.mock.calls[0][0] as { triggers: string[] }).triggers).toEqual(["ingest.published", "destination.up"]);
   });
 });

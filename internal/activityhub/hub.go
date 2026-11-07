@@ -106,8 +106,12 @@ func WithDisplay(d Display) Option { return func(h *Hub) { h.display = d } }
 func WithHooks(k Hooks) Option { return func(h *Hub) { h.hooks = k } }
 
 // WithSettings sets where the activity settings come from. Read at most once
-// every couple of seconds.
-func WithSettings(fn func() db.ActivitySettings) Option { return func(h *Hub) { h.settings = fn } }
+// every couple of seconds. A read that fails keeps the LAST GOOD settings rather
+// than falling back to defaults: a database hiccup must not quietly turn a
+// switched-off activity, or a switched-off overlay message, back on.
+func WithSettings(fn func() (db.ActivitySettings, error)) Option {
+	return func(h *Hub) { h.settings = fn }
+}
 
 // WithLogger sets the logger.
 func WithLogger(l *slog.Logger) Option { return func(h *Hub) { h.log = l } }
@@ -130,7 +134,7 @@ type Hub struct {
 	bus      Bus
 	display  Display
 	hooks    Hooks
-	settings func() db.ActivitySettings
+	settings func() (db.ActivitySettings, error)
 	log      *slog.Logger
 	now      func() time.Time
 	backoff  func(attempt int) time.Duration
@@ -147,6 +151,10 @@ type Hub struct {
 	cached  db.ActivitySettings
 	cacheT  time.Time
 	cacheOK bool
+	// gen counts InvalidateSettings calls. A load that began before an
+	// invalidation must not overwrite the cache with what it read: that may be
+	// the document from before the save that invalidated it.
+	gen uint64
 
 	sources sources
 }
@@ -165,8 +173,9 @@ func New(opts ...Option) *Hub {
 		o(h)
 	}
 	if h.settings == nil {
-		h.settings = db.DefaultActivitySettings
+		h.settings = func() (db.ActivitySettings, error) { return db.DefaultActivitySettings(), nil }
 	}
+	h.cached = db.DefaultActivitySettings()
 	if h.backoff == nil {
 		h.backoff = defaultBackoff
 	}
@@ -297,19 +306,35 @@ func (h *Hub) Stats() Stats {
 func (h *Hub) Settings() db.ActivitySettings { return h.currentSettings() }
 
 func (h *Hub) currentSettings() db.ActivitySettings {
-	h.mu.Lock()
-	if h.cacheOK && h.now().Sub(h.cacheT) < settingsTTL {
-		c := h.cached
+	for attempt := 0; ; attempt++ {
+		h.mu.Lock()
+		if h.cacheOK && h.now().Sub(h.cacheT) < settingsTTL {
+			c := h.cached
+			h.mu.Unlock()
+			return c
+		}
+		gen := h.gen
+		h.mu.Unlock()
+		// Outside the lock: the loader reads the database.
+		c, err := h.settings()
+		h.mu.Lock()
+		if h.gen != gen && attempt < 2 {
+			// Invalidated while we were reading: what we read may predate the
+			// save. Read again rather than cache it.
+			h.mu.Unlock()
+			continue
+		}
+		if err != nil {
+			// Keep the last good settings, and try again after the TTL.
+			h.log.Warn("activity settings could not be read; keeping the last good ones", "err", err)
+			c = h.cached
+		} else {
+			h.cached = c
+		}
+		h.cacheT, h.cacheOK = h.now(), true
 		h.mu.Unlock()
 		return c
 	}
-	h.mu.Unlock()
-	// Outside the lock: the loader reads the database.
-	c := h.settings()
-	h.mu.Lock()
-	h.cached, h.cacheT, h.cacheOK = c, h.now(), true
-	h.mu.Unlock()
-	return c
 }
 
 // InvalidateSettings drops the cached settings, so the next event reads the
@@ -320,6 +345,7 @@ func (h *Hub) InvalidateSettings() {
 	}
 	h.mu.Lock()
 	h.cacheOK = false
+	h.gen++
 	h.mu.Unlock()
 }
 

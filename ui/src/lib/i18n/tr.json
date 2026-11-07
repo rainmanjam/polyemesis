@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Aynı ayrıntılar sayfasında Client secret değerini gösterip kopyalayın.",
   "publish.ackOutcome": "{platform} hesabını kontrol ettim, gönderi orada yok.",
   "hooks.triggerActivity": "İzleyici etkinliği",
-  "hooks.triggerActivityHint": "İsteğe bağlı: yalnızca bunu seçen bir hook alır. Hiç tetikleyici seçmemek bunu kapsamaz.",
+  "hooks.triggerActivityHint": "İsteğe bağlı: her şeyi alan bir hook'ta bunu işaretlemek tüm yaşam döngüsü olaylarını işaretli tutar ve izleyici etkinliğini ekler. Hiç tetikleyicisi işaretli olmayan bir hook izleyici etkinliğini asla almaz.",
   "activity.tabsLabel": "Sohbet bölümleri",
   "activity.tab.chat": "Sohbet",
   "activity.tab.activity": "Etkinlik",

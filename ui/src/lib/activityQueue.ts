@@ -10,6 +10,7 @@
  *  reads Date.now or sets a timer, so a test drives time by passing numbers and
  *  the page drives it with a timeout from nextDelay. */
 
+import { OVERLAY_ALERT_KINDS } from "./overlay";
 import type { ActivityDisplay, AlertStyle } from "./types";
 
 /** The most alerts held waiting. Tips may exceed it; see enqueueAlert. */
@@ -60,10 +61,12 @@ export function displayMs(style: Pick<AlertStyle, "seconds">): number {
 export function enqueueAlert(
   state: AlertQueueState,
   display: ActivityDisplay,
-  style: Pick<AlertStyle, "kinds">,
+  style: { kinds?: AlertStyle["kinds"] | null },
   now: number,
 ): AlertQueueState {
-  if (!style.kinds.includes(display.kind)) return state;
+  // kinds can arrive null/missing: fall back to every overlay kind.
+  const kinds: readonly string[] = style.kinds ?? OVERLAY_ALERT_KINDS;
+  if (!kinds.includes(display.kind)) return state;
   if (state.seen.includes(display.id)) return state;
 
   const seen = [...state.seen, display.id].slice(-SEEN_LIMIT);

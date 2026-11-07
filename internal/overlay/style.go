@@ -109,6 +109,9 @@ func (a AlertStyle) Validate() error {
 	if !hexColor.MatchString(a.Accent) {
 		return fmt.Errorf("style: the alert accent must be #rrggbb in lower case")
 	}
+	if a.Kinds == nil {
+		return fmt.Errorf("style: alert kinds are required (an empty list draws nothing)")
+	}
 	seen := map[string]bool{}
 	for _, k := range a.Kinds {
 		if !slices.Contains(overlayKindNames(), k) {
@@ -196,6 +199,12 @@ func ParseStyle(raw json.RawMessage) (Style, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&s); err != nil {
 		return Style{}, fmt.Errorf("style: %w", err)
+	}
+	// An alerts block with no kinds (absent or null) means the default list,
+	// not "none": left nil it would be stored as JSON null and the overlay page
+	// would have no list to read. An explicit [] stays empty.
+	if s.Alerts != nil && s.Alerts.Kinds == nil {
+		s.Alerts.Kinds = DefaultAlertStyle().Kinds
 	}
 	return s, s.Validate()
 }

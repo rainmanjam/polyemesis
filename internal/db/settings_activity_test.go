@@ -60,8 +60,13 @@ func TestActivityBelowMinimumIsPerCurrencyAndUnit(t *testing.T) {
 		amt  *activity.Amount
 		want bool
 	}{
-		{&activity.Amount{Currency: "USD", Minor: 499}, true},
-		{&activity.Amount{Currency: "USD", Minor: 500}, false},
+		{&activity.Amount{Currency: "USD", Minor: 499, Exponent: 2}, true},
+		{&activity.Amount{Currency: "USD", Minor: 500, Exponent: 2}, false},
+		// The same sum at another scale is the same sum.
+		{&activity.Amount{Currency: "USD", Minor: 4999, Exponent: 3}, true},
+		{&activity.Amount{Currency: "USD", Minor: 5000, Exponent: 3}, false},
+		{&activity.Amount{Currency: "USD", Minor: 5, Exponent: 0}, false},
+		{&activity.Amount{Currency: "USD", Minor: 4, Exponent: 0}, true},
 		{&activity.Amount{Currency: "JPY", Minor: 1}, false},
 		{&activity.Amount{Unit: "bits", Units: 99}, true},
 		{&activity.Amount{Unit: "bits", Units: 100}, false},
@@ -148,5 +153,27 @@ func TestActivitySettingsSurviveTheStore(t *testing.T) {
 	got, _ = d.GetSettings()
 	if len(got.Activity.Kinds["kick"]) != 1 || got.Activity.MinTip[0].Units != 20 {
 		t.Errorf("not persisted: %+v", got.Activity)
+	}
+}
+
+// A minimum's minor units are the currency's own, and a tip is compared at its
+// own exponent: 500 yen is 500 yen, not 5.00.
+func TestBelowMinimumScalesByTheExponent(t *testing.T) {
+	a := ActivitySettings{MinTip: []MinAmount{{Currency: "JPY", Minor: 500}, {Currency: "BHD", Minor: 2000}, {Currency: "XYZ", Minor: 100}}}
+	cases := []struct {
+		amt  activity.Amount
+		want bool
+	}{
+		{activity.Amount{Currency: "JPY", Minor: 499}, true},
+		{activity.Amount{Currency: "JPY", Minor: 500}, false},
+		{activity.Amount{Currency: "BHD", Minor: 1999, Exponent: 3}, true},
+		{activity.Amount{Currency: "BHD", Minor: 2000, Exponent: 3}, false},
+		{activity.Amount{Currency: "XYZ", Minor: 99, Exponent: 2}, true},
+		{activity.Amount{Currency: "XYZ", Minor: 100, Exponent: 4}, false},
+	}
+	for _, c := range cases {
+		if got := a.BelowMinimum(&c.amt); got != c.want {
+			t.Errorf("%+v below = %v, want %v", c.amt, got, c.want)
+		}
 	}
 }

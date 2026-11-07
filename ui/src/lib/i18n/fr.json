@@ -3985,7 +3985,7 @@
   "credLabels.tiktok.secretWhere": "Sur la même page de détails, affichez puis copiez le Client secret.",
   "publish.ackOutcome": "J'ai vérifié {platform} et la publication n'y est pas.",
   "hooks.triggerActivity": "Activité des spectateurs",
-  "hooks.triggerActivityHint": "Sur option : seul un hook qui le sélectionne le reçoit. Ne sélectionner aucun déclencheur ne l'inclut pas.",
+  "hooks.triggerActivityHint": "Sur option : le cocher sur un hook qui reçoit tout laisse tous les événements du cycle de vie cochés et ajoute l'activité des spectateurs. Un hook sans aucun déclencheur coché ne reçoit jamais l'activité des spectateurs.",
   "activity.tabsLabel": "Sections du chat",
   "activity.tab.chat": "Chat",
   "activity.tab.activity": "Activité",
