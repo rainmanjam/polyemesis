@@ -21,6 +21,7 @@ import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatFlaggedList } from "@/components/ChatFlaggedList";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
+import { TwitchTools } from "@/components/TwitchTools";
 import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
@@ -381,6 +382,7 @@ export function ChatPage() {
               form, and before the rules. */}
           <ChatStatusList statuses={statuses} />
           <ChatRules statuses={statuses} />
+          <TwitchTools statuses={statuses} />
           <PollPanel twitchAvailable={statuses.some((s) => s.platform === "twitch")} />
 
           {configured && statuses.length === 0 && (

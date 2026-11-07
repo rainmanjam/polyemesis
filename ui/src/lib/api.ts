@@ -415,6 +415,14 @@ export function mutationWarnings(body: unknown): string[] {
   return b.reconcileFailed === true ? list.slice(0, -1) : list;
 }
 
+/** The path of one Twitch channel tool; see api.twitchTool. */
+function twitchToolPath(resource: string, account: string | undefined, params: Record<string, string> = {}) {
+  const q = new URLSearchParams(params);
+  if (account) q.set("account", account);
+  const qs = q.toString();
+  return `/chat/twitch/${resource}${qs ? `?${qs}` : ""}`;
+}
+
 const get = <T,>(p: string) => request<T>(p);
 const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
@@ -1459,6 +1467,22 @@ export const api = {
     const q = new URLSearchParams({ platform });
     if (account) q.set("account", account);
     return patch<{ status: string }>(`/chat/settings?${q.toString()}`, s);
+  },
+
+  /** Twitch channel tools: one /chat/twitch/{resource} path, the method is the
+   *  verb. Reads and deletes carry their parameters in the query; the rest in a
+   *  JSON body. See docs/API.md, "Twitch channel tools". */
+  twitchTool: {
+    read: <T,>(resource: string, account: string | undefined, params: Record<string, string> = {}) =>
+      get<T>(twitchToolPath(resource, account, params)),
+    post: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      post<T>(twitchToolPath(resource, account), body ?? {}),
+    put: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      put<T>(twitchToolPath(resource, account), body),
+    patch: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      patch<T>(twitchToolPath(resource, account), body),
+    remove: <T,>(resource: string, account: string | undefined, params: Record<string, string>) =>
+      del<T>(twitchToolPath(resource, account, params)),
   },
 
   // --- platforms ---

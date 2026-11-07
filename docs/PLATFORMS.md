@@ -683,6 +683,23 @@ the mirror is skipped and the chat poll runs as usual. It was added in scope
 version 5, so a Twitch account connected before it is marked "reconnect
 needed" once.
 
+Scope version 6 adds twelve scopes for the **channel tools** (the *Channel tools*
+column above, `POST /chat/twitch/{resource}` in the [API](API.md)):
+`moderator:manage:announcements`, `moderator:manage:shoutouts`,
+`moderator:manage:shield_mode`, `moderator:manage:warnings`,
+`moderator:manage:blocked_terms`, `moderator:read:chatters`,
+`moderator:manage:automod`, `moderator:manage:automod_settings`,
+`moderator:manage:unban_requests`, `moderator:manage:suspicious_users`,
+`channel:manage:moderators` and `channel:manage:vips`. Pinning reuses
+`moderator:manage:chat_messages` and the banned list reuses
+`moderator:manage:banned_users`. These are built from Twitch's reference and not
+yet exercised against a live account, so the column reads *Unverified*. Adding
+or removing moderators and VIPs, and the banned list, work only for the
+channel's owner, and Twitch refuses VIPs until the channel has finished its
+Build a Community requirement; the refusal says so. Receiving a message AutoMod
+is holding needs EventSub and is not built: the approve and deny call is, by id.
+Accounts connected earlier are marked "reconnect needed" once.
+
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
 that is already there keeps it, and its destinations, linked; disconnecting
