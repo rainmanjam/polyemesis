@@ -221,7 +221,7 @@ export function GoLiveComposer() {
   }, [jobId, jobDone]);
 
   const accepts = useCallback(
-    (field: MetaField) => (targets ?? []).filter((t) => t.caps.fields.includes(field)),
+    (field: MetaField) => (targets ?? []).filter((t) => (t.caps.fields ?? []).includes(field)),
     [targets],
   );
 
@@ -271,7 +271,7 @@ export function GoLiveComposer() {
   );
 
   const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
-  const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
+  const noDescription = (targets ?? []).filter((t) => !(t.caps.fields ?? []).includes("description"));
   // What a push will send BEYOND what is typed here.
   //
   // Compliance is configured per destination and has no field in this composer,

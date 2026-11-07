@@ -126,6 +126,18 @@ type MetadataCaps struct {
 	Scope string `json:"scope,omitempty"`
 }
 
+// MarshalJSON holds the wire contract that "fields" is always an array. A
+// platform that writes no metadata field (X) leaves Fields nil, which would
+// otherwise serialise as null and crash the console's caps.fields.includes(...).
+// Enforcing it on the type means no provider, present or future, can forget it.
+func (c MetadataCaps) MarshalJSON() ([]byte, error) {
+	type plain MetadataCaps // no methods, so no recursion
+	if c.Fields == nil {
+		c.Fields = []MetadataField{}
+	}
+	return json.Marshal(plain(c))
+}
+
 // Accepts reports whether this platform can take the given field.
 func (c MetadataCaps) Accepts(f MetadataField) bool {
 	for _, have := range c.Fields {
