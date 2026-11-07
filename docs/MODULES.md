@@ -13,7 +13,7 @@ so they reflect what is actually vendored.
 
 ## Go — direct dependencies
 
-Thirteen, and the count is deliberate. Every one is either doing something
+Fourteen, and the count is deliberate. Every one is either doing something
 genuinely hard or is the Go project's own code.
 
 | Module | Version | Licence | What it does |
@@ -26,6 +26,7 @@ genuinely hard or is the Go project's own code.
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | Process groups, disk stats, Windows job objects |
 | `golang.org/x/net` | v0.58.0 | BSD-3-Clause | IDNA for ACME hostnames, and `ipv4.PacketConn` control messages in the SRT listener. **Direct**, not pulled in by crypto |
 | `golang.org/x/term` | v0.45.0 | BSD-3-Clause | Reads the new password without echoing it, for `polyemesis -reset-admin` |
+| `golang.org/x/text` | v0.43.0 | BSD-3-Clause | NFKC normalisation for the automod pack's message forms (`internal/automod/pack`). **Direct**, no longer only pulled in by net |
 | `github.com/shirou/gopsutil/v4` | v4.26.7 | BSD-3-Clause | Host CPU, memory and disk for the monitoring page |
 | `github.com/datarhei/gosrt` | v0.11.0 | MIT | Pure-Go SRT. Powers one-port token-addressed ingest |
 | `github.com/bluenviron/gortmplib` | v1.0.1 | MIT | Pure-Go RTMP. Powers one-port key-addressed ingest — message level only, never decoded media |
@@ -52,7 +53,6 @@ the rest are build-time or test-only for their parent.
 | `github.com/benburkert/openpgp` | 20160410 | see note | gosrt (AES key-wrap) | ✅ |
 | `github.com/ebitengine/purego` | v0.10.2 | Apache-2.0 | gopsutil | ✅ |
 | `github.com/tklauser/go-sysconf` | v0.4.0 | BSD-3-Clause | gopsutil | ✅ |
-| `golang.org/x/text` | v0.41.0 | BSD-3-Clause | net | ✅ |
 | `github.com/go-ole/go-ole` | v1.3.0 | MIT | gopsutil (Windows) | platform |
 | `github.com/yusufpapurcu/wmi` | v1.2.4 | MIT | gopsutil (Windows) | platform |
 | `github.com/lufia/plan9stats` | 20260627 | BSD-3-Clause | gopsutil (Plan 9) | platform |

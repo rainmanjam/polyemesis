@@ -1,0 +1,37 @@
+# The pinned inputs to en-v1.json and skeleton_table.go.
+#
+# Every source is pinned to an exact upstream commit and each file to a SHA-256,
+# so `go run ./scripts/gen-pack -fetch` either reproduces the committed
+# snapshots byte for byte or fails loudly. Moving a pin is a reviewable diff:
+# change `sha` and the file hashes here, run -fetch, then regenerate.
+#
+# Licences were read from each upstream's LICENSE file at the pinned commit, not
+# recalled. The licence texts are committed beside the snapshots and embedded in
+# the binary from internal/automod/pack/LICENSES/.
+sources:
+  - name: dsojevic/profanity-list
+    repo: dsojevic/profanity-list
+    url: https://github.com/dsojevic/profanity-list
+    licence: MIT
+    sha: c27924319aa9bd6f917e3782b4f4b6604a50b652
+    dir: dsojevic-profanity-list
+    files:
+      - {path: en.json, sha256: bcf8bfc09dd3f7480972cb041a4cba291a6ff16a6fbf29022d5d679e3c39502c}
+      - {path: LICENSE, sha256: 33962cb4fc7b987408d5ea301ad46a2f54f9ba11c56d7a039459f931736363aa}
+  - name: LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+    repo: LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+    url: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+    licence: CC-BY-4.0
+    sha: 5faf2ba42d7b1c0977169ec3611df25a3c08eb13
+    dir: ldnoobw
+    files:
+      - {path: en, sha256: af851ecef1d5f212caba17339b12ac39cc2fef7d78c74876f67237644fcee8bd}
+      - {path: LICENSE, sha256: 55bfbc1759943f7d19acfc68e35644b7fbe10cd8d39ab3551ce5ecff5dda9979}
+
+# UTS #39 confusables.txt, for the Unicode version Go's `unicode` package tracks
+# (unicode.Version). Unicode License v3. Not committed: it is 745 KB and only the
+# generated table is used, so -skeleton fetches it and checks the hash.
+unicode:
+  version: 17.0.0
+  url: https://www.unicode.org/Public/17.0.0/security/confusables.txt
+  sha256: 091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a

@@ -38,7 +38,7 @@ toolchain actually reads.
 
 ## Direct Go dependencies
 
-Thirteen, deliberately. Each one earns its place below.
+Fourteen, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
@@ -53,6 +53,7 @@ Thirteen, deliberately. Each one earns its place below.
 | `golang.org/x/net` | v0.58.0 | `internal/tlsx` (IDNA), `internal/srtserver` |
 | `golang.org/x/sys` | v0.47.0 | `internal/recording`, `internal/supervisor`, service wrapper |
 | `golang.org/x/term` | v0.45.0 | `cmd/polyemesis` (`-reset-admin`, echo-free password entry) |
+| `golang.org/x/text` | v0.43.0 | `internal/automod/pack` (NFKC), `scripts/gen-pack` |
 | `gopkg.in/yaml.v3` | v3.0.1 | `internal/config` |
 | `modernc.org/sqlite` | v1.57.0 | `internal/db` |
 
@@ -244,6 +245,12 @@ CPU, memory and per-process metrics for the monitoring page. This is the
 dependency with the widest OS-specific surface, and it is the source of most of
 the indirect modules below (`go-ole`, `purego`, `tklauser/*`, `plan9stats`,
 `perfstat`, `wmi`). It is pure Go on every target we ship.
+
+### `golang.org/x/text`
+
+One package, `unicode/norm`, for NFKC in the automod pack's message forms. It was
+already in the module graph through `x/net`; the pack imports it directly, so it
+moved from indirect to direct. Go's own standard library has no NFKC.
 
 ### `gopkg.in/yaml.v3`
 
