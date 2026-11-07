@@ -913,6 +913,21 @@ func TestXPendingHandleCarriesTheGoLiveAttempt(t *testing.T) {
 	}
 }
 
+// TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneButBroadcastIsLiveReturnsTheBroadcast: when the listing FOUND a
+// RUNNING in-window broadcast, a source missing from the source list must not turn the read into ErrXSourceGone: the
+// broadcast is returned, so the END can proceed.
+func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneButBroadcastIsLiveReturnsTheBroadcast(t *testing.T) {
+	f := newXFake(t)
+	f.sources = xEmptySourcesFixture
+	st, err := f.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, 1755302390000-1000))
+	if err != nil {
+		t.Fatalf("BroadcastState = %v, want the live broadcast returned although its source left the list", err)
+	}
+	if st.Status != XStateRunning || st.BroadcastID != xBroadcastID {
+		t.Errorf("BroadcastState = %+v, want %s RUNNING", st, xBroadcastID)
+	}
+}
+
 // TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError: a source that left GET /2/sources (deleted on X)
 // can never go live, and reading it as "no bytes yet" would wait for ever in silence.
 func TestXBroadcastStateOfAPendingHandleWhoseSourceIsGoneIsAnError(t *testing.T) {

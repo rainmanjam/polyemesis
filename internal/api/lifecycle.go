@@ -852,6 +852,33 @@ func (c *lifecycleCoordinator) goLiveUnresolved(sentMS int64) bool {
 	return sentMS > 0 && c.clock().UnixMilli()-sentMS < goLiveUnresolvedFor.Milliseconds()
 }
 
+// leftLiveFault is what the operator reads wherever tracking gives up on a broadcast a go-live may have made.
+const leftLiveFault = "polyemesis may have left a broadcast live on X — check X's producer tooling and end it there."
+
+// raiseLeftLive is the durable, visible alternative to giving up silently on a maybe-live broadcast whose row still
+// exists: the fault is written to the row (so it survives a restart and shows on the destination) and raised once. The
+// go-live markers stay, so a reconnect does not wipe it.
+func (c *lifecycleCoordinator) raiseLeftLive(d *db.Destination, broadcastID string) {
+	if d.Lifecycle.Fault == leftLiveFault {
+		return
+	}
+	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+		b.Fault, b.Terminal = leftLiveFault, true
+	})
+	c.raise(d, "", leftLiveFault)
+}
+
+// raiseLeftLiveTarget is raiseLeftLive for a deleted row, which has nowhere to keep a fault: it is raised.
+func (c *lifecycleCoordinator) raiseLeftLiveTarget(t lifecycleTarget) {
+	if c.escalate == nil {
+		return
+	}
+	c.escalate(lifecycleFault{
+		SourceID: t.SourceID, DestinationID: t.destinationID, Destination: t.Name,
+		Platform: string(t.Platform), Detail: leftLiveFault,
+	})
+}
+
 // forgetTarget drops the tracked target of one destination and nothing else, for a broadcast that is over.
 func (c *lifecycleCoordinator) forgetTarget(id int64) {
 	c.mu.Lock()
@@ -1000,6 +1027,9 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// Reading it anyway cost a broadcast read, a source list and the user
 		// lookup against X, which publishes no rate limits, every fifteen
 		// seconds for the life of the daemon. Re-enabling reads it again.
+		if d.Lifecycle.GoLiveSentMS != 0 {
+			c.raiseLeftLive(d, broadcastID) // the window has passed and nothing was found: say so, do not go quiet
+		}
 		c.untrack(d.ID)
 		return true
 	case !d.Enabled && d.Platform == db.PlatformX && isTerminalPhase(d.Lifecycle.Phase):
@@ -1092,6 +1122,9 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// a broadcast left live is worse than one left un-started, so this tries
 		// considerably harder before it stops. endOrphan already works this way;
 		// this is the same rule for the row that still exists.
+		if d.Lifecycle.GoLiveSentMS != 0 {
+			c.raiseLeftLive(d, broadcastID)
+		}
 		c.untrack(d.ID)
 		return true
 	}
@@ -1391,9 +1424,10 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 			sendID = oauth.XPendingHandle(src, attemptX)
 			if _, err := c.recordControlErr(d, sendID, func(b *db.BroadcastControl) {
 				b.GoLiveAttemptMS, b.GoLiveSentMS = attemptX, now.UnixMilli()
-			}); errors.Is(err, db.ErrLifecycleSkipped) {
-				// Reset under this sweep (a reconnect, or the source left X): the copy of the row is out of date and
-				// the go-live is not sent. The next sweep starts from what the row now says.
+			}); err != nil {
+				// NOTHING IS SENT THAT COULD NOT BE RECORDED. A reset under this sweep (the copy of the row is out of
+				// date), a database error and a deleted row all end here: a broadcast with no durable marker is one a
+				// later read could not find and a switch-off could not end. The next sweep starts again from the row.
 				return
 			}
 			// From here a broadcast may exist behind the handle, so the tracked target says so and carries the
@@ -1569,6 +1603,9 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	// open; ending one that should not costs the show, because on YouTube
 	// complete is terminal.
 	if !endableFromPhase(t.Phase) && !(t.maybeLive && c.goLiveUnresolved(t.sentMS)) {
+		if t.maybeLive {
+			c.raiseLeftLiveTarget(t)
+		}
 		c.untrack(t.destinationID)
 		c.log.Info("broadcast lifecycle: a deleted destination's broadcast was never "+
 			"confirmed on air by this process, so it was left alone rather than ended",
@@ -1602,6 +1639,9 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		return
 	}
 	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {
+		if t.maybeLive {
+			c.raiseLeftLiveTarget(t)
+		}
 		c.untrack(t.destinationID)
 		c.log.Warn("broadcast lifecycle: giving up on ending a deleted destination's broadcast; "+
 			"end it in the platform's own console, or let the platform's automatic stop close it "+
@@ -1643,7 +1683,11 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 			c.mu.Unlock()
 			return
 		}
-		// Never aired, already complete, or a phase with no end to send.
+		// Never aired, already complete, or a phase with no end to send. A maybe-live target that reaches here has used
+		// its window with nothing found: say so rather than letting go in silence.
+		if t.maybeLive && st.Status == oauth.XStateNotStarted {
+			c.raiseLeftLiveTarget(t)
+		}
 		c.untrack(t.destinationID)
 		return
 	}

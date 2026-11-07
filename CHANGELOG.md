@@ -42,6 +42,16 @@ its first tagged release.
   for a broadcast a lost go-live may have made, and a non-terminal X fault that has used its budget is retried
   every two minutes instead of waiting for a manual toggle.
 
+  **Known rare edge cases, all under the opt-in `POLYEMESIS_X_LIVESTREAM` switch.** A go-live is not sent
+  unless its marker was written first. Where tracking has to give up on a broadcast a go-live may have made
+  (a list that never shows it within two minutes, or an ending that keeps failing) the destination gets a
+  durable fault, "polyemesis may have left a broadcast live on X", and a deleted destination raises it as an
+  alert, so nothing is let go of silently. The go-live attempt time is not refreshed after a lost answer, so a
+  second attempt that creates the broadcast more than about 25 seconds after the first is refused as not
+  started by polyemesis and shows as a fault. A reconnect leaves a destination with an unresolved go-live
+  alone. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled from X's
+  documentation and has not been confirmed against a live account.
+
 - **SonarCloud reliability and security findings.** A fetch chain in the clip editor, the process poll
   and the routing page's first redirect no longer end as unhandled promises; six regular expressions that
   could take quadratic time on a hostile paste (endpoint and ingest URLs, timecodes, stream-health values,
