@@ -146,3 +146,57 @@ func TestAPastedXUrlAndKeyAreNotReplacedByAMintedSource(t *testing.T) {
 		t.Errorf("X was asked %d times although both fields were typed", n)
 	}
 }
+
+// The mint's failures each answer the create and store nothing: a half-made X
+// destination with no URL would fail Validate on every later edit.
+func TestALinkedXDestinationIsNotStoredWhenTheMintCannotRun(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"title":"Service Unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(failing.Close)
+
+	cases := []struct {
+		name     string
+		baseURL  string
+		creds    bool
+		platform db.Platform
+		account  func(acct int64) int64
+		status   int
+		want     string
+	}{
+		{"no developer credentials", "", false, db.PlatformX, nil, http.StatusPreconditionFailed, "developer credentials are missing"},
+		{"the linked account is not X", "", true, db.PlatformTwitch, nil, http.StatusBadRequest, "linked account is twitch"},
+		{"the linked account does not exist", "", true, db.PlatformX, func(acct int64) int64 { return acct + 99 }, http.StatusBadGateway, ""},
+		{"X refuses the source", failing.URL, true, db.PlatformX, nil, http.StatusBadGateway, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := xSourceFake(t)
+			base := srv.URL
+			if tc.baseURL != "" {
+				base = tc.baseURL
+			}
+			s, h, store, sign := engineServer(t, defaultTools(), Options{
+				Providers: oauth.NewSet().With(db.PlatformX, oauth.NewX(oauth.WithBaseURL(base)).WithLivestreamAccess()),
+			})
+			acct := connectAccount(t, store, s.box, tc.platform, "rainman")
+			if tc.account != nil {
+				acct = tc.account(acct)
+			}
+			if tc.creds {
+				if err := store.PutPlatformCreds(s.box, db.PlatformX, "cid", "placeholder-secret"); err != nil {
+					t.Fatalf("creds: %v", err)
+				}
+			}
+
+			raw := send(t, h, sign, http.MethodPost, "/api/v1/destinations", xCreateBody(&acct, "", ""), tc.status)
+
+			if tc.want != "" && !strings.Contains(string(raw), tc.want) {
+				t.Errorf("refusal %q does not say %q", raw, tc.want)
+			}
+			if all, _ := store.ListDestinations(); len(all) != 0 {
+				t.Errorf("a refused create left %d destinations behind", len(all))
+			}
+		})
+	}
+}
