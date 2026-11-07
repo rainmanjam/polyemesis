@@ -967,14 +967,40 @@ func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) 
 	if err := b.Unban(ctx, userID); err != nil {
 		return err
 	}
+	h.recordUnban(ctx, r, userID)
+	return nil
+}
+
+// recordUnban is the bookkeeping after a ban is lifted: clear the recorded
+// sanction and tell subscribers. Shared by Unban and RecordUnbanFromAppeal so
+// the two ways of lifting a ban cannot drift.
+func (h *Hub) recordUnban(ctx context.Context, r *runner, userID string) {
 	if sc, ok := h.store.(Sanctioner); ok {
 		if err := sc.ClearChatSanction(r.platform, r.account, userID); err != nil {
 			h.log.Warn("lifted chat sanction not cleared; the user card may still show it",
 				"platform", r.platform, "err", err)
 		}
 	}
-	h.publishModeration(ctx, Moderation{Action: ModUnban, Platform: p, Account: account, UserID: userID})
-	return nil
+	h.publishModeration(ctx, Moderation{Action: ModUnban, Platform: r.platform, Account: r.account, UserID: userID})
+}
+
+// RecordUnbanFromAppeal does the bookkeeping for a ban that Twitch has already
+// lifted because an unban request was approved: it clears the recorded
+// sanction and publishes the ModUnban event, exactly as Unban does after its
+// own platform call. It makes no platform call. A missing runner or empty
+// userID is a no-op; the ban is already lifted on Twitch either way.
+func (h *Hub) RecordUnbanFromAppeal(ctx context.Context, account, userID string) {
+	if userID == "" {
+		return
+	}
+	h.mu.Lock()
+	r := h.runners[runnerKey(db.PlatformTwitch, account)]
+	h.mu.Unlock()
+	if r == nil {
+		return
+	}
+	defer h.lockViewer(r, userID)()
+	h.recordUnban(ctx, r, userID)
 }
 
 // ------------------------------------------------------------------- status
@@ -1419,7 +1445,11 @@ func (h *Hub) ReadChatSettings(ctx context.Context, p db.Platform, account strin
 // tools, under the Hub's send timeout. One helper rather than a method per
 // tool: every tool needs the same find-the-runner, assert-the-capability and
 // bound-the-call steps, and a dozen copies of them would drift.
-func (h *Hub) WithTwitchTools(ctx context.Context, account string, fn func(context.Context, TwitchTools) error) error {
+//
+// timeout bounds the whole call; zero means the Hub's send timeout. Tools that
+// make many sequential Helix calls (blocked-terms sync, the chatter list) pass
+// a longer one so a local deadline is not reported as a Twitch failure.
+func (h *Hub) WithTwitchTools(ctx context.Context, account string, timeout time.Duration, fn func(context.Context, TwitchTools) error) error {
 	h.mu.Lock()
 	r := h.runners[runnerKey(db.PlatformTwitch, account)]
 	h.mu.Unlock()
@@ -1431,7 +1461,10 @@ func (h *Hub) WithTwitchTools(ctx context.Context, account string, fn func(conte
 	if !ok {
 		return fmt.Errorf("chat: this Twitch connection has no channel tools")
 	}
-	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	if timeout <= 0 {
+		timeout = h.sendTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return fn(ctx, tt)
 }

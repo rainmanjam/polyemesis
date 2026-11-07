@@ -19,12 +19,18 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
+
+// twitchLongToolTimeout bounds the tools that page through Helix or make one
+// call per item (blocked-terms sync, the chatter list), which the Hub's 15s
+// send timeout would cut short.
+const twitchLongToolTimeout = 60 * time.Second
 
 // twitchToolBody is every field any tool accepts. Unused fields are ignored.
 type twitchToolBody struct {
@@ -98,7 +104,13 @@ func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table m
 		b.terms = plainAutomodTerms(set.Automod.Rules)
 	}
 	var out any
-	err := s.chat.WithTwitchTools(r.Context(), strings.TrimSpace(q.Get("account")),
+	account := strings.TrimSpace(q.Get("account"))
+	timeout := time.Duration(0)
+	switch chi.URLParam(r, "resource") {
+	case "blocked-terms-sync", "chatters":
+		timeout = twitchLongToolTimeout
+	}
+	err := s.chat.WithTwitchTools(r.Context(), account, timeout,
 		func(ctx2 context.Context, tt chat.TwitchTools) (err error) {
 			out, err = fn(r.WithContext(ctx2), tt, b)
 			return err
@@ -106,6 +118,12 @@ func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table m
 	if err != nil {
 		writeError(w, failStatus, err.Error())
 		return
+	}
+	// An approved appeal lifts the ban on Twitch's side; polyemesis's own record
+	// of it and the chat.moderation event go through the same bookkeeping as
+	// DELETE /chat/bans.
+	if ur, ok := out.(chat.UnbanRequest); ok && ur.Status == "approved" {
+		s.chat.RecordUnbanFromAppeal(r.Context(), account, ur.UserID)
 	}
 	if out == nil {
 		out = map[string]string{"status": "done"}
