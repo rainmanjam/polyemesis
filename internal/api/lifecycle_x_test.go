@@ -82,6 +82,12 @@ type xcFake struct {
 	createdMS int64
 	// failReads makes GET /2/sources and GET /2/broadcasts answer 500.
 	failReads bool
+	// skew is how far X's clock (its Date header, and the created_at_ms it stamps) is from the real one.
+	skew time.Duration
+	// noDate suppresses the Date header, so X's clock cannot be read.
+	noDate bool
+	// dropLive makes POST /2/broadcasts create the broadcast and then drop the connection: the answer is lost.
+	dropLive bool
 	// liveCalls counts every go-live call, refused or not.
 	liveCalls int
 	// seq numbers broadcasts so a second show gets a different id.
@@ -99,6 +105,10 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Date", time.Now().Add(f.skew).UTC().Format(http.TimeFormat))
+		if f.noDate {
+			w.Header()["Date"] = nil
+		}
 		f.requests++
 		if f.limited {
 			w.Header().Set("x-rate-limit-reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
@@ -191,7 +201,10 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			f.id = "bc-" + string(rune('0'+f.seq))
 			f.state = oauth.XStateRunning
 			f.published++
-			f.createdMS = time.Now().UnixMilli()
+			f.createdMS = time.Now().Add(f.skew).UnixMilli()
+			if f.dropLive {
+				panic(http.ErrAbortHandler) // created, and the answer never arrives
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, xcBroadcastJSON(f.id, f.state))
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "/2/broadcasts/"):
@@ -655,6 +668,7 @@ func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
 func TestXHeldCreateIsReleasedWhenTheOperatorDisablesTheDestination(t *testing.T) {
 	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{Attempts: lifecycleGiveUpAfter, Fault: "refused"}))
+	c.noteRearm(5) // held in this process just now, so the re-arm interval is running
 
 	xcSweep(t, c, store)
 	if n := fake.createCalls(); n != 0 {
@@ -1172,15 +1186,18 @@ func TestXGoLiveAttemptIsStampedKeptOnALostAnswerAndClearedOnARefusal(t *testing
 	before := time.Now().UnixMilli()
 	xcSweep(t, c, store) // goes live; the record of the real id fails
 	row := store.rows[5]
-	if row.Lifecycle.GoLiveAttemptMS < before || row.Lifecycle.PendingSource != xcSourceID || row.Lifecycle.BroadcastID != "" {
-		t.Fatalf("recorded = %+v, want the pending source with the attempt stamped at or after %d", row.Lifecycle, before)
+	if row.Lifecycle.GoLiveSentMS < before || row.Lifecycle.PendingSource != xcSourceID || row.Lifecycle.BroadcastID != "" {
+		t.Fatalf("recorded = %+v, want the pending source with the in-flight marker at or after %d", row.Lifecycle, before)
+	}
+	if d := row.Lifecycle.GoLiveAttemptMS - time.Now().UnixMilli(); d < -3000 || d > 3000 {
+		t.Fatalf("attempt in X's time = %d, want it within a few seconds of now (X's clock has one-second resolution)", row.Lifecycle.GoLiveAttemptMS)
 	}
 
 	fake2 := &xcFake{active: true, liveStatus: http.StatusConflict}
 	c2, store2, _ := xcFixture(t, fake2, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
 	row2 := xcSweep(t, c2, store2)
-	if row2.Lifecycle.GoLiveAttemptMS != 0 {
-		t.Errorf("attempt = %d after a definite refusal, want it cleared: nothing was created", row2.Lifecycle.GoLiveAttemptMS)
+	if row2.Lifecycle.GoLiveAttemptMS != 0 || row2.Lifecycle.GoLiveSentMS != 0 {
+		t.Errorf("markers = %+v after a definite refusal, want them cleared: nothing was created", row2.Lifecycle)
 	}
 }
 
@@ -1321,5 +1338,247 @@ func TestXMissingScopesIsATerminalFaultThatSaysReconnect(t *testing.T) {
 		if !strings.Contains(row.Lifecycle.Fault, want) {
 			t.Errorf("fault %q does not say %q", row.Lifecycle.Fault, want)
 		}
+	}
+}
+
+// ------------------------------------------------------------ round 3: clocks, races, re-arm
+
+// X's clock, not ours. The go-live attempt is recorded in X's time (our clock plus the offset from X's Date header), so
+// a polyemesis clock ten minutes either way still adopts the broadcast its own lost go-live made, without a second POST.
+func TestXAdoptsItsOwnBroadcastWhateverTheLocalClockSays(t *testing.T) {
+	for _, skew := range []time.Duration{10 * time.Minute, -10 * time.Minute, 0} {
+		t.Run(skew.String(), func(t *testing.T) {
+			fake := &xcFake{active: true, skew: skew, dropLive: true}
+			c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+			row := xcSweep(t, c, store) // goes live; the answer is lost
+			if row.Lifecycle.GoLiveSentMS == 0 || row.Lifecycle.BroadcastID != "" {
+				t.Fatalf("recorded = %+v, want the go-live marked as unresolved", row.Lifecycle)
+			}
+			fake.set(func(f *xcFake) { f.dropLive = false })
+			row = xcSweep(t, c, store)
+			if row.Lifecycle.BroadcastID != "bc-1" || row.Lifecycle.GoLiveSentMS != 0 || row.Lifecycle.Phase != phaseLive {
+				t.Fatalf("recorded = %+v, want the broadcast its own go-live made adopted as bc-1", row.Lifecycle)
+			}
+			if fake.liveCalls != 1 {
+				t.Errorf("%d go-live calls, want 1: the lost answer is resolved by reading, not by sending again", fake.liveCalls)
+			}
+		})
+	}
+}
+
+// A broadcast on the source that X created minutes AFTER the attempt, or before it, is somebody else's: never adopted,
+// never ended, and the operator is told.
+func TestXForeignBroadcastInsideOrOutsideTheWindowIsNeverAdoptedOrEnded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		by   time.Duration // created_at_ms relative to the attempt
+	}{{"two minutes after the attempt", 2 * time.Minute}, {"two minutes before the attempt", -2 * time.Minute}} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			fake := &xcFake{active: true, state: oauth.XStateRunning, id: "other-1", seq: 1, createdMS: now.Add(tc.by).UnixMilli()}
+			c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID,
+				GoLiveAttemptMS: now.UnixMilli(), GoLiveSentMS: now.UnixMilli(), Phase: phaseCreated}))
+			var row *db.Destination
+			for range 3 {
+				row = xcSweep(t, c, store)
+			}
+			if row.Lifecycle.BroadcastID != "" || len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "not started by polyemesis") {
+				t.Fatalf("recorded %+v faults %d, want it refused as not started by polyemesis", row.Lifecycle, len(*faults))
+			}
+			store.mu.Lock()
+			store.rows[5].Enabled = false
+			store.mu.Unlock()
+			for range 3 {
+				xcSweep(t, c, store)
+			}
+			if _, _, ended, _ := fake.snapshot(); ended != 0 {
+				t.Fatalf("ended %d: polyemesis ended a broadcast it did not start", ended)
+			}
+		})
+	}
+}
+
+// With no reading of X's clock the attempt is not recorded in X's time, and a 200 for a live broadcast cannot be
+// confirmed as ours: refused with that wording, never adopted, never ended.
+func TestXWithNoReadingOfXsClockNothingIsAdopted(t *testing.T) {
+	fake := &xcFake{active: true, noDate: true, state: oauth.XStateRunning, id: "other-1", seq: 1, listLag: true,
+		createdMS: time.Now().UnixMilli()}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.BroadcastID != "" || len(*faults) == 0 || !strings.Contains(row.Lifecycle.Fault, "could not confirm the broadcast on this source was started by polyemesis") {
+		t.Fatalf("recorded %+v faults %d, want the unconfirmed broadcast refused in words", row.Lifecycle, len(*faults))
+	}
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if _, _, ended, _ := fake.snapshot(); ended != 0 {
+		t.Fatalf("ended %d: an unconfirmed broadcast was ended", ended)
+	}
+}
+
+// RACE (a): a reconnect does not reset a row whose go-live is in flight or unresolved; the sweep resolves it.
+func TestReconnectLeavesARowWithAnUnresolvedGoLiveToTheSweep(t *testing.T) {
+	acct := int64(9)
+	row := xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, GoLiveSentMS: 5, GoLiveAttemptMS: 5, Phase: phaseCreated, Fault: "x"})
+	store := &fakeLifecycleStore{rows: map[int64]*db.Destination{5: row}}
+	if n := resetXPendingLifecycle(store, acct); n != 0 {
+		t.Fatalf("reset %d rows, want the unresolved one left alone", n)
+	}
+	if got := store.rows[5].Lifecycle; got.PendingSource != xcSourceID || got.GoLiveSentMS != 5 {
+		t.Errorf("row = %+v, want it untouched", got)
+	}
+	// Decided again inside the write: a go-live stamped between the listing and the write is also left alone.
+	row2 := xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated, Fault: "x"})
+	store2 := &fakeLifecycleStore{rows: map[int64]*db.Destination{5: row2}}
+	store2.onUpdate = map[int]func(*db.Destination){1: func(r *db.Destination) { r.Lifecycle.GoLiveSentMS = 7 }}
+	if n := resetXPendingLifecycle(store2, acct); n != 0 || store2.rows[5].Lifecycle.GoLiveSentMS != 7 || store2.rows[5].Lifecycle.PendingSource == "" {
+		t.Errorf("reset %d rows / row %+v, want a go-live stamped during the reset to win", n, store2.rows[5].Lifecycle)
+	}
+}
+
+// RACE (b): the row is reset between the sweep's read and its stamp. The stamp is refused (older generation), so the
+// go-live is NOT sent for a source that was just reset.
+func TestXStampRefusedByAResetSendsNoGoLive(t *testing.T) {
+	fake := &xcFake{active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	store.onUpdate = map[int]func(*db.Destination){1: func(r *db.Destination) {
+		r.Lifecycle = db.BroadcastControl{Generation: r.Lifecycle.Generation + 1} // a reconnect reset it
+	}}
+	c.sweepOnce(context.Background(), sweepEverything)
+	if fake.liveCalls != 0 {
+		t.Fatalf("%d go-live calls, want none: the row was reset under the sweep", fake.liveCalls)
+	}
+}
+
+// RACE (b): a late FAILURE record from a sweep that read the older row cannot put back a source that was cleared.
+func TestXLateFailureRecordCannotRestoreAClearedSource(t *testing.T) {
+	fake := &xcFake{active: true, liveStatus: http.StatusConflict,
+		liveBody: `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","status":409,"detail":"Broadcast creation is temporarily blocked."}`}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	// Write 1 is the stamp. Write 2 is the failure record, and the source is cleared just before it.
+	store.onUpdate = map[int]func(*db.Destination){2: func(r *db.Destination) {
+		r.Lifecycle = db.BroadcastControl{Generation: r.Lifecycle.Generation + 1}
+	}}
+	c.sweepOnce(context.Background(), sweepEverything)
+	if got := store.rows[5].Lifecycle; got.PendingSource != "" || got.Fault != "" || got.Attempts != 0 {
+		t.Fatalf("row = %+v, want the cleared state kept: a late result must not restore the source or the fault", got)
+	}
+}
+
+// RACE (c): a go-live whose answer was lost, then the row deleted. The target is kept as maybe-live; the read finds the
+// broadcast inside the window (even after the list lagged once) and ENDS the real id.
+func TestXDeletedRowAfterALostGoLiveStillEndsWhatItMade(t *testing.T) {
+	fake := &xcFake{active: true, dropLive: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	c.sweepOnce(context.Background(), sweepEverything) // goes live, answer lost
+	if _, published, _, _ := fake.snapshot(); published != 1 {
+		t.Fatalf("setup: published %d", published)
+	}
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+	fake.set(func(f *xcFake) { f.dropLive, f.listLag = false, true })
+	c.sweepOnce(context.Background(), sweepEverything) // the list has not caught up: kept, not dropped
+	if _, _, ended, _ := fake.snapshot(); ended != 0 {
+		t.Fatalf("ended %d before the list showed the broadcast", ended)
+	}
+	fake.set(func(f *xcFake) { f.listLag = false })
+	for range 3 {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+		t.Fatalf("ended %d (X state %s): the broadcast a lost go-live made was dropped when the row was deleted", ended, state)
+	}
+}
+
+// RACE (c): a switched-off destination whose go-live answer was lost also ends it, and keeps reading until it shows up.
+func TestXSwitchOffAfterALostGoLiveKeepsLookingThenEnds(t *testing.T) {
+	fake := &xcFake{active: true, dropLive: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	xcSweep(t, c, store) // goes live, answer lost
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	fake.set(func(f *xcFake) { f.dropLive, f.listLag = false, true })
+	xcSweep(t, c, store) // list lags: this must not make the row quiet
+	xcSweep(t, c, store)
+	fake.set(func(f *xcFake) { f.listLag = false })
+	xcSweep(t, c, store)
+	if _, _, ended, _ := fake.snapshot(); ended != 1 {
+		t.Fatalf("ended %d, want the broadcast ended once the list showed it", ended)
+	}
+}
+
+// RACE (c): a source that left X with a go-live unresolved clears the row (so it can open again) but keeps the tracked
+// maybe-live target, so nothing that may be on air is forgotten.
+func TestXSourceGoneKeepsTheMaybeLiveTarget(t *testing.T) {
+	fake := &xcFake{sourceDeleted: true}
+	now := time.Now().UnixMilli()
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID,
+		GoLiveAttemptMS: now, GoLiveSentMS: now, Phase: phaseCreated}))
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.PendingSource != "" || row.Lifecycle.GoLiveSentMS != 0 || row.Lifecycle.Generation != 1 {
+		t.Fatalf("recorded = %+v, want the pending state cleared and the generation bumped", row.Lifecycle)
+	}
+	c.mu.Lock()
+	tgt, ok := c.tracked[5]
+	c.mu.Unlock()
+	if !ok || !tgt.maybeLive {
+		t.Fatalf("tracked = %+v ok=%v, want the maybe-live target kept", tgt, ok)
+	}
+}
+
+// UNKNOWN 409. A conflict X does not explain is counted, and its exact detail is shown. When the budget is used the
+// destination is not blocked for ever: every two minutes one try is made, and the first one X accepts goes live with no
+// manual toggle. A terminal refusal is never retried.
+func TestXUnknownConflictIsRetriedEveryTwoMinutesAfterTheBudgetAndGoesLive(t *testing.T) {
+	const detail = "Broadcast creation is temporarily blocked."
+	fake := &xcFake{active: true, liveStatus: http.StatusConflict,
+		liveBody: `{"type":"https://api.x.com/2/problems/conflict","title":"Conflict","status":409,"detail":"` + detail + `"}`}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	clock := time.Now()
+	c.now = func() time.Time { return clock }
+	var row *db.Destination
+	for range lifecycleGiveUpAfter {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.Attempts != lifecycleGiveUpAfter || row.Lifecycle.Terminal {
+		t.Fatalf("recorded = %+v, want the budget used and the fault not terminal", row.Lifecycle)
+	}
+	if !strings.Contains(row.Lifecycle.Fault, detail) || len(*faults) == 0 {
+		t.Fatalf("fault %q faults %d, want X's exact words in the fault and the fault raised", row.Lifecycle.Fault, len(*faults))
+	}
+	calls := fake.liveCalls
+	fake.set(func(f *xcFake) { f.liveStatus = 0 }) // X accepts from now on
+	xcSweep(t, c, store)
+	if fake.liveCalls != calls {
+		t.Fatalf("a held destination made a go-live call before the interval: %d -> %d", calls, fake.liveCalls)
+	}
+	clock = clock.Add(lifecycleRearmEvery + time.Second)
+	row = xcSweep(t, c, store)
+	if row.Lifecycle.BroadcastID != "bc-1" || row.Lifecycle.Fault != "" || row.Lifecycle.Attempts != 0 {
+		t.Fatalf("recorded = %+v, want it live as bc-1 with the fault cleared, with no manual toggle", row.Lifecycle)
+	}
+}
+
+func TestXTerminalRefusalIsNeverReArmed(t *testing.T) {
+	fake := &xcFake{active: true, liveStatus: http.StatusForbidden,
+		liveBody: `{"type":"about:blank","title":"Forbidden","detail":"This account is not eligible to go live.","status":403}`}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{PendingSource: xcSourceID, Phase: phaseCreated}))
+	clock := time.Now()
+	c.now = func() time.Time { return clock }
+	xcSweep(t, c, store)
+	for range 3 {
+		clock = clock.Add(10 * time.Minute)
+		xcSweep(t, c, store)
+	}
+	if fake.liveCalls != 1 {
+		t.Fatalf("%d go-live calls, want 1: a terminal refusal is not retried automatically", fake.liveCalls)
+	}
+	if !store.rows[5].Lifecycle.Terminal {
+		t.Errorf("recorded = %+v, want the fault marked terminal", store.rows[5].Lifecycle)
 	}
 }

@@ -103,6 +103,9 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.lifecycle.broadcastId":     sPublic,
 	"destination.lifecycle.fault":           sPublic,
 	"destination.lifecycle.phase":           sPublic,
+	"destination.lifecycle.goLiveSentMs":    sPublic, // local time a go-live was sent and not yet resolved
+	"destination.lifecycle.generation":      sPublic, // reset counter
+	"destination.lifecycle.terminal":        sPublic, // whether the fault is retried automatically
 	"destination.lifecycle.goLiveAttemptMs": sPublic, // when the first go-live for the pending X source was sent
 	"destination.lifecycle.pendingSource":   sPublic, // X stream source id (not the stream key) of a destination waiting for video
 	"destination.lifecycle.renewed":         sPublic, // whether this broadcast was reopened within the show (X renew)

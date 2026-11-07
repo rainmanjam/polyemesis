@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -797,13 +798,14 @@ func TestXBroadcastStateOfAPendingHandleIsNotStartedAndReadsTheSource(t *testing
 }
 
 // TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted: the go-live behind a handle may have
-// succeeded with its answer lost, and then the handle stands for a RUNNING broadcast. But the source can also carry a
+// succeeded with its answer lost, and then the handle stands for a RUNNING broadcast. The source can also carry a
 // broadcast polyemesis did NOT start, and adopting that one would clear a fault and later END someone else's show. The
-// only documented discriminator is created_at_ms, so a broadcast is adopted only when the handle records a go-live
-// attempt and the broadcast was created at or after it (less a clock-skew allowance). No attempt on record means
-// nothing of ours can exist, so nothing is adopted and the list is not even read.
+// only documented discriminator is created_at_ms, compared with the attempt in X's OWN time (the handle carries the
+// attempt as X's clock read it, never the local clock) inside a two-sided window:
+// [attempt - 5s, attempt + 20s request timeout + 5s]. No attempt on record means nothing is adopted and the list is
+// not even read.
 func TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted(t *testing.T) {
-	const fixtureCreated = 1755302390000 // the list fixture's RUNNING broadcast
+	const created = 1755302390000 // the list fixture's RUNNING broadcast
 	for _, tc := range []struct {
 		name      string
 		attemptMS int64
@@ -811,10 +813,15 @@ func TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted(t 
 		adopt     bool
 		wantList  bool
 	}{
-		{"created after the attempt is ours", fixtureCreated - 1000, xBroadcastListFixture, true, true},
-		{"created within the skew allowance is ours", fixtureCreated + 20000, xBroadcastListFixture, true, true},
-		{"created long before the attempt is not ours", fixtureCreated + 600000, xBroadcastListFixture, false, true},
-		{"no created_at_ms cannot be verified", fixtureCreated - 1000,
+		{"created 1s after the attempt is ours", created - 1000, xBroadcastListFixture, true, true},
+		{"created at the end of the window is ours", created - 25000, xBroadcastListFixture, true, true},
+		{"created 3s before the attempt is ours (clock reading error)", created + 3000, xBroadcastListFixture, true, true},
+		{"created 6s before the attempt is not ours", created + 6000, xBroadcastListFixture, false, true},
+		{"created 20s before the attempt is not ours", created + 20000, xBroadcastListFixture, false, true},
+		{"created long before the attempt is not ours", created + 600000, xBroadcastListFixture, false, true},
+		{"created 2 minutes AFTER the attempt is not ours", created - 120000, xBroadcastListFixture, false, true},
+		{"created just past the window is not ours", created - 26000, xBroadcastListFixture, false, true},
+		{"no created_at_ms cannot be verified", created - 1000,
 			strings.Replace(xBroadcastListFixture, `"created_at_ms": "1755302390000",`, "", 1), false, true},
 		{"no attempt on record adopts nothing", 0, xBroadcastListFixture, false, false},
 	} {
@@ -843,12 +850,49 @@ func TestXBroadcastStateOfAPendingHandleAdoptsOnlyABroadcastPolyemesisStarted(t 
 	// A RUNNING broadcast on ANOTHER source is never this destination's.
 	f2 := newXFake(t)
 	f2.list = strings.ReplaceAll(xBroadcastListFixture, xSourceID, "9999999999999999999")
-	st, err := f2.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, fixtureCreated-1000))
+	st, err := f2.x.BroadcastState(context.Background(), "tok", xPendingHandleAt(xSourceID, created-1000))
 	if err != nil {
 		t.Fatalf("BroadcastState: %v", err)
 	}
 	if st.Status != XStateNotStarted {
 		t.Errorf("a broadcast on another source was taken for this one: %+v", st)
+	}
+}
+
+// TestXMeasuresXsClockFromTheDateHeader: the go-live attempt is recorded in X's time, so the provider keeps the offset
+// between X's clock and its own from the Date header of the freshest answer, per token. The offset is what lets the
+// polyemesis clock be minutes off without breaking adoption.
+func TestXMeasuresXsClockFromTheDateHeader(t *testing.T) {
+	for _, skew := range []time.Duration{0, 10 * time.Minute, -10 * time.Minute} {
+		f := newXFake(t)
+		f.dateSkew = skew
+		if _, ok := f.x.XClockOffsetMS("tok"); ok {
+			t.Fatal("an offset was reported before any answer was seen")
+		}
+		if _, err := f.x.Broadcasts(context.Background(), "c", "tok"); err != nil {
+			t.Fatalf("Broadcasts: %v", err)
+		}
+		off, ok := f.x.XClockOffsetMS("tok")
+		if !ok {
+			t.Fatal("no offset after an answer carrying a Date header")
+		}
+		if d := time.Duration(off)*time.Millisecond - skew; d < -3*time.Second || d > 3*time.Second {
+			t.Errorf("offset = %dms for a %v skew, want it within a few seconds", off, skew)
+		}
+		if _, ok := f.x.XClockOffsetMS("another token"); ok {
+			t.Error("one token's clock reading was given to another")
+		}
+	}
+	// An answer with no Date header gives no offset: the attempt cannot be put in X's time.
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil // suppress the automatic header
+		_, _ = io.WriteString(w, xBroadcastListFixture)
+	})
+	if _, err := x.Broadcasts(context.Background(), "c", "tok"); err != nil {
+		t.Fatalf("Broadcasts: %v", err)
+	}
+	if _, ok := x.XClockOffsetMS("tok"); ok {
+		t.Error("an offset was invented for an answer with no Date header")
 	}
 }
 
@@ -950,6 +994,11 @@ func TestXGoLiveAnswered200ForABroadcastNotStartedByPolyemesisIsRefused(t *testi
 	var ref *TransitionRefused
 	if !errors.As(err, &ref) || ref.Refusal != RefusalSourceBusy || !strings.Contains(err.Error(), "not started by polyemesis") {
 		t.Fatalf("PublishBroadcast = %v, want a source-busy refusal saying the broadcast was not started by polyemesis", err)
+	}
+	// Without an attempt in X's time (no Date header was ever seen) the broadcast cannot be confirmed as ours.
+	_, err = f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, 0), XPublish{})
+	if !errors.As(err, &ref) || ref.Refusal != RefusalSourceBusy || !strings.Contains(err.Error(), "could not confirm") {
+		t.Fatalf("PublishBroadcast with no attempt = %v, want a refusal saying it could not confirm the broadcast was started by polyemesis", err)
 	}
 	// Created after the attempt, the same answer is ours: the repeat after a lost answer.
 	res, err := f.x.PublishBroadcast(context.Background(), "tok", xPendingHandleAt(xSourceID, created-1000), XPublish{})
