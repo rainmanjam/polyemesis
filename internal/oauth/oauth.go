@@ -518,6 +518,17 @@ var httpClient = &http.Client{Timeout: 20 * time.Second}
 type tokenStatusError struct {
 	code int
 	body string
+	// full is the untruncated body, for parsing (see statusError.full): body is
+	// cut at 300 characters for display, and a Graph envelope can be longer.
+	full string
+}
+
+// payload is the body to parse: whole when captured, truncated otherwise.
+func (e *tokenStatusError) payload() string {
+	if e.full != "" {
+		return e.full
+	}
+	return e.body
 }
 
 // ErrReconnectRequired matches a refresh the platform refused because the
@@ -582,7 +593,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body)}
+		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body), full: string(body)}
 	}
 
 	var out struct {

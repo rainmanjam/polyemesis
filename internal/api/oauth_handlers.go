@@ -1603,6 +1603,9 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 		// "failing to refresh" with the platform's words, before a broadcast
 		// that needs the token finds out.
 		s.acctHealth.fail(acct.ID, err, time.Now())
+		if errors.Is(err, oauth.ErrReconnectRequired) {
+			s.acctHealth.markDead(acct.ID, acct.ExpiresAt)
+		}
 		return nil, fmt.Errorf("could not refresh the %s token: %w", acct.Platform, err)
 	}
 
@@ -1682,6 +1685,12 @@ func (s *Server) RefreshLoop(ctx context.Context) {
 				if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
 					continue
 				}
+				if s.acctHealth.isDead(a.ID, a.ExpiresAt) {
+					// The platform refused the grant itself; retrying every
+					// ten minutes forever cannot help. A reconnect stores a new
+					// expiry, which lifts this.
+					continue
+				}
 				rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				if _, err := s.tokenFor(rctx, a.ID); err != nil {
 					s.log.Warn("token refresh failed", "platform", a.Platform, "account", a.AccountName, "err", err)
@@ -1749,7 +1758,7 @@ func (s *Server) fillFacebookBackupIngest(ctx context.Context, dest *db.Destinat
 	if err != nil {
 		s.log.Warn("could not add a backup ingest to an existing Facebook broadcast",
 			"destination", dest.ID, "liveVideo", liveVideoID, "err", err)
-		return "Facebook would not add a redundant ingest to this broadcast: " + err.Error() +
+		return "Facebook would not add a redundant ingest to this broadcast: " + oauth.FacebookErrorText(err) +
 			". The destination is otherwise saved and will go live on its primary feed."
 	}
 	dest.BackupURL, dest.BackupStreamKey = ing.URL, ing.Key

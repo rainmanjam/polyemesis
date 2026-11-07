@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/platform"
@@ -206,6 +207,9 @@ type statusError struct {
 	//
 	// Truncation is therefore a property of the presentation, not of the error.
 	full string
+	// wait is how long the platform asked callers to hold off (Retry-After, or
+	// Graph's estimated_time_to_regain_access); zero when it said nothing.
+	wait time.Duration
 }
 
 func (e *statusError) Error() string {
@@ -275,7 +279,8 @@ func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToke
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw)}
+		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw),
+			wait: GraphWait(resp.Header)}
 	}
 	// A successful PATCH is a 204 on Helix; there is nothing to decode.
 	if out == nil || len(raw) == 0 {

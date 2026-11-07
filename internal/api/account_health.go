@@ -80,6 +80,30 @@ type refreshOutcome struct {
 	failures  int
 	lastError string
 	at        time.Time
+	// dead is set when the refresh was refused for good (reconnect required),
+	// deadExpiry the stored expiry it was refused at. A reconnect stores a new
+	// expiry, so a different value means the account is worth trying again.
+	dead       bool
+	deadExpiry time.Time
+}
+
+// markDead records that this account's grant is gone. fail must have run first.
+func (b *accountHealthBook) markDead(id int64, expiry time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if o, ok := b.m[id]; ok {
+		o.dead, o.deadExpiry = true, expiry
+		b.m[id] = o
+	}
+}
+
+// isDead reports whether the background refresh should skip the account: its
+// last refresh was refused for good and nothing has been reconnected since.
+func (b *accountHealthBook) isDead(id int64, expiry time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o, ok := b.m[id]
+	return ok && o.dead && o.deadExpiry.Equal(expiry)
 }
 
 func (b *accountHealthBook) fail(id int64, err error, now time.Time) {

@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // defaultHTTPTimeout bounds one API call. Chat polling runs on a schedule
@@ -44,6 +46,20 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// full is the untouched body, for parsing: Body is cut at 300 characters
+	// for display, and a Graph envelope can be longer than that.
+	full string
+	// Wait is how long the platform asked callers to hold off (Retry-After, or
+	// Graph's estimated_time_to_regain_access); zero when it said nothing.
+	Wait time.Duration
+}
+
+// payload is the body to parse: whole when captured, truncated otherwise.
+func (e *apiError) payload() string {
+	if e.full != "" {
+		return e.full
+	}
+	return e.Body
 }
 
 func (e *apiError) Error() string {
@@ -136,6 +152,8 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			URL:    stripQuery(endpoint),
 			Body:   shorten(raw),
 			Reason: errorReason(raw),
+			full:   string(raw),
+			Wait:   oauth.GraphWait(resp.Header),
 		}
 	}
 	if out == nil || len(raw) == 0 {
