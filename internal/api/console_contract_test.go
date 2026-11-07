@@ -50,6 +50,7 @@ var consoleDynamicCalls = map[string]consoleDynamic{
 	"lib/api.ts|path":                              {Reason: "request forwarding its path to requestRaw"},
 	"lib/api.ts|BASE + path":                       {Reason: "requestRaw itself: the one place a request is built"},
 	"lib/api.ts|url":                               {Reason: "playoutPublic builds BASE + \"/playout/public\" + tokenQuery(token)", Method: "GET", Path: "/api/v1/playout/public"},
+	"lib/chatExport.ts|url":                        {Reason: "downloadChatFile saves a URL its caller built with api.recordingChatUrl, so the one route it reaches is a recording's chat", Method: "GET", Path: "/api/v1/recordings/{}/chat"},
 	"features/player/liveCaptions.ts|url":          {Reason: "the captions URL PublicPlayer derives from the master playlist's own directory; not a fixed route"},
 	"pages/ClipEditor.tsx|seg.spriteVtt as string": {Reason: "a recording's sprite sheet path, served from the media tree, not an API route"},
 }

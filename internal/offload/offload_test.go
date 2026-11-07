@@ -712,3 +712,39 @@ func TestDueSkipsSettledItemsAndResendsAChangedFile(t *testing.T) {
 		})
 	}
 }
+
+// A recording's saved chat (recording.writeChatSidecars) rides along with it:
+// no storage target has a switch for it, so it goes under the recording kind.
+func TestSavedChatTravelsWithItsRecording(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	old := f.segment(5*time.Hour, "old segment", true)
+	live := f.segment(time.Minute, "newest, still being written", true)
+	base := strings.TrimSuffix(old, ".mkv")
+	liveBase := strings.TrimSuffix(live, ".mkv")
+	for _, name := range []string{base + ".chat.json", base + ".chat.vtt", liveBase + ".chat.json"} {
+		path := filepath.Join(f.dir, name)
+		if err := os.WriteFile(path, []byte("chat "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := f.now.Add(-time.Hour)
+		if err := os.Chtimes(path, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.Pass(context.Background())
+
+	for _, name := range []string{base + ".chat.json", base + ".chat.vtt"} {
+		it, ok := f.item(id, name)
+		if !ok || it.State != db.OffloadVerified || it.Kind != db.OffloadKindRecording {
+			t.Errorf("%s: %+v (found %v), want a verified recording-kind item", name, it, ok)
+		}
+	}
+	// A segment the recorder may still hold is not offloaded, and neither is its chat.
+	if _, ok := f.item(id, liveBase+".chat.json"); ok {
+		t.Error("the live segment's chat was offloaded")
+	}
+	if !f.local(base + ".chat.json") {
+		t.Error("mirror mode removed the local sidecar")
+	}
+}
