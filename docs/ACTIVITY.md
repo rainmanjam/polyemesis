@@ -274,8 +274,8 @@ own token: no public address and no callback to set up. It starts with the
 account's chat and stops with it. Subscriptions live and die with the socket, so
 a restart is a new session and Twitch replays nothing; Twitch sends each
 notification at least once under one message id, and that id is what
-de-duplicates it (a notification stamped more than ten minutes ago is not news
-and is dropped).
+de-duplicates it (a notification stamped more than ten minutes before Twitch's own
+clock is not news and is dropped; this host's clock is never consulted).
 
 | Kind | EventSub type | Needs | Channel |
 |---|---|---|---|
@@ -298,10 +298,12 @@ and is dropped).
   `live` and everything else flows. The channel's type is read again every 24
   hours.
 - **Connected before this release?** The six new read scopes are part of scope
-  version 6 and the account needs one reconnect to grant them. Until then each
-  kind that needs one is reported `reconnect`, and the kinds that need none
-  (raids, stream status, shoutouts, polls) already work. The check is the
-  account's granted scopes, not its scope version.
+  version 6, and so is `moderator:manage:shoutouts`; an account connected on an
+  earlier version needs one reconnect to grant them. Until then each kind that
+  needs one is reported `reconnect`, and the kinds that need none (raids and
+  stream status) already work, as do polls (`channel:manage:polls` has been
+  requested since scope version 5). The check is the account's granted scopes,
+  not its scope version.
 - **Bits** are reported as `{"unit": "bits", "units": 1000}` and are never turned
   into money. **A gifted-sub bomb** is one `gift` event; the per-recipient
   subscribes Twitch also sends are dropped. **A resub** is reported when the

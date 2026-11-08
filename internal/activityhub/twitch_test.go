@@ -331,23 +331,30 @@ func TestATierAnAccountOnlyDiscoversByTheCreateAnswerIsUnavailableNotAnError(t *
 func TestAMissingScopeIsReconnectNotAnAttempt(t *testing.T) {
 	f := newFakeTwitch(t)
 	r := startTwitch(t, f, func(c *TwitchConfig) {
-		// A token from before the activity scopes: it has the old set only.
-		c.Scopes = func() []string { return []string{"channel:manage:polls", "moderator:manage:shoutouts", "chat:read"} }
+		// An account connected on scope version 5 (v0.15.0): it holds neither
+		// the activity scopes nor moderator:manage:shoutouts, which arrived in 6.
+		c.Scopes = func() []string {
+			return []string{
+				"channel:manage:broadcast", "channel:manage:polls", "channel:read:stream_key", "chat:edit", "chat:read",
+				"moderator:manage:banned_users", "moderator:manage:chat_messages", "moderator:manage:chat_settings",
+			}
+		}
 	})
 	r.ready()
-	for _, k := range []activity.Kind{activity.KindFollow, activity.KindSubscribe, activity.KindTip, activity.KindRedemption, activity.KindHypeTrain, activity.KindPrediction} {
+	for _, k := range []activity.Kind{activity.KindFollow, activity.KindSubscribe, activity.KindTip, activity.KindRedemption,
+		activity.KindHypeTrain, activity.KindPrediction, activity.KindShoutout} {
 		st := r.kind(k)
 		if st.State != activity.KindReconnect || !strings.Contains(st.Detail, "Reconnect") {
 			t.Errorf("%s = %+v, want reconnect", k, st)
 		}
 	}
-	// No-scope kinds and the ones the old scopes already cover work at once.
-	for _, k := range []activity.Kind{activity.KindRaid, activity.KindStream, activity.KindShoutout, activity.KindPoll} {
+	// No-scope kinds and the one the old scopes already cover work at once.
+	for _, k := range []activity.Kind{activity.KindRaid, activity.KindStream, activity.KindPoll} {
 		if st := r.kind(k); st.State != activity.KindOn {
 			t.Errorf("%s = %+v, want on", k, st)
 		}
 	}
-	if f.hitCount("channel.follow") != 0 || f.hitCount("channel.cheer") != 0 {
+	if f.hitCount("channel.follow") != 0 || f.hitCount("channel.cheer") != 0 || f.hitCount("channel.shoutout.create") != 0 {
 		t.Error("a subscription was attempted without its scope")
 	}
 }
@@ -762,3 +769,40 @@ func TestBeforeTheFirstSessionKindsAreUnknownOrReconnect(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestAHostClockFarFromTwitchsDoesNotDropAlerts(t *testing.T) {
+	// The stale rule is read against Twitch's timestamps. A host whose own
+	// clock is an hour out must still get every alert: nothing here asks it.
+	f := newFakeTwitch(t)
+	r := startTwitch(t, f, nil)
+	c := r.ready()
+	// Stamped now, by Twitch's reckoning: fresh whatever this host thinks.
+	c.send(note("fresh-1", "channel.follow", "2", evFollow))
+	waitFor(t, "the follow", func() bool { return len(r.events(activity.KindFollow)) == 1 })
+	if r.src.Stats().Ignored != 0 {
+		t.Errorf("ignored = %d", r.src.Stats().Ignored)
+	}
+}
+
+func TestNothingSentOnTheOldSocketDuringTheSwapIsLost(t *testing.T) {
+	// Twitch delivers on the old socket until the new welcome and does not
+	// repeat those messages on the new one. A burst sent right behind
+	// session_reconnect must all arrive, however the swap interleaves.
+	const burst = 12
+	for round := 0; round < 15; round++ {
+		f := newFakeTwitch(t)
+		r := startTwitch(t, f, nil)
+		old := r.ready()
+		old.send(reconnectMsg("rc", f.ws2URL()))
+		for i := 0; i < burst; i++ {
+			old.send(note("burst-"+itoa(int64(i)), "channel.cheer", "1", evCheer))
+		}
+		waitFor(t, "every message of the burst", func() bool { return len(r.events(activity.KindTip)) == burst })
+		if got := r.src.Stats().Reconnects; got != 1 {
+			// The swap may still be settling; it must complete.
+			waitFor(t, "the swap", func() bool { return r.src.Stats().Reconnects == 1 })
+		}
+		r.cancel()
+		r.hub.Close()
+	}
+}

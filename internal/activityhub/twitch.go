@@ -71,7 +71,6 @@ type TwitchConfig struct {
 	PollHold time.Duration
 	// WelcomeWait bounds the wait for the first message. Default 15 s.
 	WelcomeWait time.Duration
-	Now         func() time.Time
 }
 
 // TwitchStats are the source's counters, the way Kick's are (kick.go): what
@@ -90,9 +89,12 @@ type Twitch struct {
 	cfg TwitchConfig
 	api *eventsub.API
 	log *slog.Logger
-	now func() time.Time
 
 	received, emitted, unparseable, deduped, ignored, reconnects atomic.Int64
+
+	// latestStamp is the newest message_timestamp Twitch has sent (UnixNano):
+	// Twitch's clock, as far as this source can read it.
+	latestStamp atomic.Int64
 
 	seen *seenSet
 
@@ -111,27 +113,52 @@ var (
 
 const (
 	twitchSeenCap = 4096
-	// staleAfter is the replay-protection rule Twitch gives for webhooks and
-	// that holds here too: a message stamped more than ten minutes ago is not
-	// something that just happened.
+	// twitchStaleAfter is the replay-protection rule Twitch gives for webhooks
+	// and that holds here too: a message stamped more than ten minutes before
+	// Twitch's own clock is not something that just happened. It is measured
+	// against the timestamps Twitch sends, never this host's clock, which on a
+	// self-hosted box may be minutes out.
 	twitchStaleAfter = 10 * time.Minute
 	// twitchSubscribeParallel is how many subscriptions are created at once; the
 	// whole set must be in before Twitch's welcome window closes.
 	twitchSubscribeParallel = 8
+	// twitchDrainWindow is how long the old socket is still read after a
+	// reconnect swap.
+	twitchDrainWindow = time.Second
 )
 
 // NewTwitch builds the source. It does not connect.
 func NewTwitch(cfg TwitchConfig) *Twitch {
-	t := &Twitch{cfg: cfg, log: cfg.Log, now: cfg.Now, seen: newSeenSet(twitchSeenCap)}
+	t := &Twitch{cfg: cfg, log: cfg.Log, seen: newSeenSet(twitchSeenCap)}
 	if t.log == nil {
 		t.log = slog.Default()
-	}
-	if t.now == nil {
-		t.now = time.Now
 	}
 	t.api = &eventsub.API{Base: cfg.HelixBase, ClientID: cfg.ClientID, HTTP: cfg.HTTP, Token: cfg.Token, Refresh: cfg.Refresh}
 	t.kinds = t.initialKinds()
 	return t
+}
+
+// observe records a message timestamp from Twitch.
+func (t *Twitch) observe(m eventsub.Message) {
+	at := m.Metadata.Time()
+	if at.IsZero() {
+		return
+	}
+	n := at.UnixNano()
+	for {
+		cur := t.latestStamp.Load()
+		if n <= cur || t.latestStamp.CompareAndSwap(cur, n) {
+			return
+		}
+	}
+}
+
+func (t *Twitch) twitchClock() time.Time {
+	n := t.latestStamp.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }
 
 // Platform and Account identify the source.
@@ -394,10 +421,51 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 
 	curC := conn.Frames()
 	var pendingC <-chan eventsub.Frame
+
+	// After a reconnect swap the old socket is not closed at once: Twitch
+	// delivers on it until the new welcome, those messages are not repeated on
+	// the new socket, and some are still buffered here when the swap happens.
+	// It is read for a short drain window first (repeats are the seen-set's
+	// business).
+	var draining *eventsub.Conn
+	var drainC <-chan eventsub.Frame
+	var drainTimer *time.Timer
+	var drainDone <-chan time.Time
+	endDrain := func() {
+		if draining != nil {
+			draining.Close()
+		}
+		if drainTimer != nil {
+			drainTimer.Stop()
+		}
+		draining, drainC, drainTimer, drainDone = nil, nil, nil, nil
+	}
+	defer endDrain()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case f, open := <-drainC:
+			if !open || f.Err != nil {
+				endDrain()
+				continue
+			}
+			if f.Bad {
+				t.unparseable.Add(1)
+				continue
+			}
+			t.observe(f.Msg)
+			switch f.Msg.Type() {
+			case eventsub.TypeNotification:
+				t.notification(ctx, f.Msg, emit)
+			case eventsub.TypeRevocation:
+				t.revocation(f.Msg)
+			}
+
+		case <-drainDone:
+			endDrain()
 
 		case <-timer.C:
 			return fmt.Errorf("Twitch went quiet for %s; reconnecting", keepalive.Round(time.Second))
@@ -431,6 +499,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 				t.unparseable.Add(1)
 				continue
 			}
+			t.observe(f.Msg)
 			switch f.Msg.Type() {
 			case eventsub.TypeWelcome:
 				// Subscriptions carried over: nothing is created here.
@@ -439,10 +508,17 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 					t.unparseable.Add(1)
 					continue
 				}
-				old := conn
+				old, oldC := conn, curC
 				conn, curC = pending, pending.Frames()
 				pending, pendingC = nil, nil
-				old.Close()
+				endDrain()
+				if oldC != nil {
+					draining, drainC = old, oldC
+					drainTimer = time.NewTimer(twitchDrainWindow)
+					drainDone = drainTimer.C
+				} else {
+					old.Close()
+				}
 				keepalive = t.keepaliveFor(sess)
 				rearm()
 				if graceTimer != nil {
@@ -468,6 +544,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 				t.unparseable.Add(1)
 				continue
 			}
+			t.observe(f.Msg)
 			switch f.Msg.Type() {
 			case eventsub.TypeKeepalive, eventsub.TypeWelcome:
 			case eventsub.TypeNotification:
@@ -525,6 +602,7 @@ func (t *Twitch) awaitWelcome(ctx context.Context, c *eventsub.Conn) (eventsub.S
 			if f.Bad || f.Msg.Type() != eventsub.TypeWelcome {
 				continue
 			}
+			t.observe(f.Msg)
 			return f.Msg.Session()
 		}
 	}
@@ -766,7 +844,7 @@ func (t *Twitch) notification(ctx context.Context, m eventsub.Message, emit func
 		return
 	}
 	at := m.Metadata.Time()
-	if !at.IsZero() && t.now().Sub(at) > twitchStaleAfter {
+	if ref := t.twitchClock(); !at.IsZero() && !ref.IsZero() && ref.Sub(at) > twitchStaleAfter {
 		t.ignored.Add(1)
 		return
 	}
