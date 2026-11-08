@@ -3056,11 +3056,12 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 }
 
 // putDestinationPlan is a PUT /destinations/{id} body decoded over the stored
-// row and validated: what the save will write, and the warnings it carries.
+// row and validated: what the save will write. The repair and its warnings
+// (destinationWriteWarnings) stay in the handler beside the write, where
+// TestEveryDestinationWriteIsRepairedFirst looks for them.
 type putDestinationPlan struct {
 	existing       *db.Destination
 	storedSourceID *int64
-	warnings       []string
 }
 
 // planDestinationUpdate reads the stored row, decodes the body over it and runs
@@ -3131,19 +3132,7 @@ func (s *Server) planDestinationUpdate(w http.ResponseWriter, id int64, body []b
 	existing.ExtraOutputArgs = saved.OutputArgs
 	existing.ExpertAckReencode = saved.AckReencode
 
-	// Deliberately AFTER the decode-over-existing above, because that is the
-	// path that produces the state worth catching: a body carrying nothing but
-	// {"platform":"kick"} leaves the stored compliance untouched, so the row
-	// ends up on a platform that cannot send what it is holding without the
-	// client ever mentioning compliance. Checking the request body instead of
-	// the merged row would see nothing at all.
-	warnings, err := s.destinationWriteWarnings(existing)
-	if err != nil {
-		writeStoreError(w, err)
-		return nil, false
-	}
-
-	return &putDestinationPlan{existing: existing, storedSourceID: storedSourceID, warnings: warnings}, true
+	return &putDestinationPlan{existing: existing, storedSourceID: storedSourceID}, true
 }
 
 // bodyEnables reports whether a PUT body asks for enabled:true. Lenient on
@@ -3217,7 +3206,19 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	existing, storedSourceID, warnings := plan.existing, plan.storedSourceID, plan.warnings
+	existing, storedSourceID := plan.existing, plan.storedSourceID
+
+	// Deliberately AFTER the decode-over-existing above, because that is the
+	// path that produces the state worth catching: a body carrying nothing but
+	// {"platform":"kick"} leaves the stored compliance untouched, so the row
+	// ends up on a platform that cannot send what it is holding without the
+	// client ever mentioning compliance. Checking the request body instead of
+	// the merged row would see nothing at all.
+	warnings, err := s.destinationWriteWarnings(existing)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
