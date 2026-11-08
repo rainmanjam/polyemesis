@@ -145,6 +145,13 @@ func (x *X) Scopes() []string {
 // match.
 func (x *X) ScopeVersion() int { return 2 }
 
+// ScopeUnlocks is what version 2 gave an operator who reconnects, as a UI i18n
+// key, for the "reconnect to enable" banner. Keep it beside ScopeVersion; see
+// ScopeNoter.
+func (x *X) ScopeUnlocks() map[int]string {
+	return map[int]string{2: "reconnect.unlock.x2"}
+}
+
 // PKCE is ON. X's Livestream authentication guide recommends the PKCE flow for
 // every new integration; the challenge is sent at authorize and the verifier at
 // exchange.

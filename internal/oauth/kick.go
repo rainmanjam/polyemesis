@@ -126,6 +126,11 @@ func (k *Kick) Scopes() []string {
 // button fail.
 func (k *Kick) ScopeVersion() int { return 2 }
 
+// ScopeUnlocks: version 2 predates the "reconnect to enable" banner, so its
+// empty value is the explicit statement that no banner is shown for it. Bumps
+// after this one need a real i18n key.
+func (k *Kick) ScopeUnlocks() map[int]string { return map[int]string{2: ""} }
+
 func (k *Kick) PKCE() bool { return true }
 
 func (k *Kick) AuthURL(clientID, redirectURI, state, challenge string) string {

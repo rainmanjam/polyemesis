@@ -789,6 +789,14 @@ granted. Accounts connected before the version existed are judged on the scopes
 the platform actually returned, so an account that already holds everything is
 left alone rather than nagged.
 
+When a scope bump unlocks something you would want (Twitch version 6: moderation
+tools, Shield Mode, mods and VIPs, AutoMod and activity alerts; X version 2: follow
+and subscription alerts and clip posting), a **"reconnect to enable" banner** also
+shows at the top of the console, naming the platform and what the reconnect turns
+on, with a one-click **Reconnect** (the same sign-in as Settings → Platform
+credentials → Connect). Dismiss it per account; it returns if a later release bumps
+the version again. It is shown to administrators only, like the account list.
+
 ### Facebook Live (Meta)
 
 **Read this first: Meta requires App Review before anyone but you can connect an

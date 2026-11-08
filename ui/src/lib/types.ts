@@ -2344,6 +2344,12 @@ export interface PlatformAccount {
    *  against the running build's to spot a token issued before a permission
    *  was added. 0 means the row predates the field. */
   scopeVer: number;
+  /** The scope version this build asks for; the account is behind when
+   *  scopeVer is below it. Absent on an older server. */
+  currentScopeVersion?: number;
+  /** i18n keys for what the versions between scopeVer and currentScopeVersion
+   *  unlock, from the provider's ScopeUnlocks (internal/oauth/scopever.go). */
+  scopeUnlocks?: string[];
   createdAt: string;
   updatedAt: string;
   /** Whether this account still holds the permissions this build needs.
