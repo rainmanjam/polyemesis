@@ -95,6 +95,8 @@ type YouTubeAdapter struct {
 	mu     sync.Mutex
 	health Health
 	chatID string
+	// act is the activity decoder's state: what it has seen, when it began.
+	act ytActivity
 	// tallies is the last count each poll message was seen with in a list page;
 	// see PollTally.
 	tallies map[string]ytTally
@@ -277,7 +279,15 @@ type ytChatItem struct {
 				ChannelID string `json:"channelId"`
 			} `json:"bannedUserDetails"`
 		} `json:"userBannedDetails"`
-		PollDetails *struct {
+		// The event detail blocks, one per type, named as the liveChatMessages
+		// resource names them. See youtube_activity.go.
+		SuperChatDetails              *ytPaidDetails `json:"superChatDetails"`
+		SuperStickerDetails           *ytPaidDetails `json:"superStickerDetails"`
+		NewSponsorDetails             *ytNewSponsor  `json:"newSponsorDetails"`
+		MemberMilestoneChatDetails    *ytMilestone   `json:"memberMilestoneChatDetails"`
+		MembershipGiftingDetails      *ytGifting     `json:"membershipGiftingDetails"`
+		GiftMembershipReceivedDetails *ytGiftRecv    `json:"giftMembershipReceivedDetails"`
+		PollDetails                   *struct {
 			Metadata struct {
 				Status  string `json:"status"`
 				Options []struct {
@@ -307,6 +317,9 @@ type ytListResponse struct {
 // pump polls one live chat until it ends or ctx does. A nil return means the
 // chat finished normally.
 func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) error {
+	// The no-replay baseline is the moment watching begins, before the first
+	// list call, so an empty first page cannot move it past a later event.
+	y.beginActivity()
 	var (
 		pageToken   string
 		idle        = 1.0
@@ -353,6 +366,9 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 		}
 
 		failures, authRetried = 0, false
+		y.mu.Lock()
+		y.act.scope = false // the chat reads fine, whatever refused earlier
+		y.mu.Unlock()
 		cutoff := time.Time{}
 		if first {
 			cutoff = y.cfg.Now().Add(-ytDefaultBackfill)
@@ -397,6 +413,9 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Sink) int {
 	delivered := 0
 	for _, it := range items {
+		// Activity first, and before messageFrom drops an item with no text: a
+		// gifting event has none. The chat line is delivered below as before.
+		y.activityFrom(it, sink)
 		// A tombstone marks where a deleted message used to be: its id and
 		// publish time with nothing else. The reference says it is NOT sent at
 		// the moment of deletion, only shown in place of the message, so this
@@ -444,6 +463,13 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 // since a status we have never seen is more likely transient than terminal.
 func (y *YouTubeAdapter) handleListError(ctx context.Context, err error, failures int) (done, retry bool, fatal error) {
 	if ferr := y.fatalFor(err); ferr != nil {
+		if ytScopeReason(reasonOf(err)) {
+			// Read path only: a refused moderation write says nothing about
+			// whether the chat can be read.
+			y.mu.Lock()
+			y.act.scope = true
+			y.mu.Unlock()
+		}
 		y.setHealth(StateFailed, ferr.Error())
 		return false, false, ferr
 	}
@@ -520,12 +546,16 @@ func ytRateWait(failures int, retryAfter time.Duration) time.Duration {
 
 // fatalFor returns a Fatal error, with an instruction the operator can act
 // on, for a failure no retry can fix, and nil otherwise.
+func ytScopeReason(reason string) bool {
+	return reason == "insufficientPermissions" || reason == "insufficientScope" || reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT"
+}
+
 func (y *YouTubeAdapter) fatalFor(err error) error {
 	if IsFatal(err) {
 		return err
 	}
 	switch reason := reasonOf(err); {
-	case reason == "insufficientPermissions", reason == "insufficientScope", reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT":
+	case ytScopeReason(reason):
 		return Fatal(fmt.Errorf("the connected YouTube account has not granted the permission this needs; reconnect the YouTube account in Settings → Platforms and approve every permission"))
 	case reason == "liveStreamingNotEnabled":
 		return Fatal(fmt.Errorf("live streaming is not enabled on this YouTube channel; enable it in YouTube Studio (it can take up to 24 hours), then restart chat"))
