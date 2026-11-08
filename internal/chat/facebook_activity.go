@@ -102,6 +102,12 @@ func (f *FacebookAdapter) ActivityKinds() []activity.KindStatus {
 // comment loop: reactions are additive and must not degrade chat.
 func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sink Sink) {
 	if !f.reactionsOn() {
+		// Forget the baseline so switching back on re-seeds silently instead of
+		// reporting everything that came in while off. The App Review state and
+		// backoff survive the toggle.
+		f.mu.Lock()
+		f.react = fbReactions{unavailable: f.react.unavailable, retryAfter: f.react.retryAfter}
+		f.mu.Unlock()
 		return
 	}
 	now := f.cfg.Now()
@@ -139,17 +145,22 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 	// A change (or the seed): read the breakdown, so a drop moves the per-type
 	// baseline too and the next rise is measured from where it really is. A type that cannot be read is
 	// left out; the count is still true.
+	f.mu.Lock()
+	oldTypes := f.react.byType
+	f.mu.Unlock()
 	types := map[string]int64{}
 	for _, ty := range fbReactionTypes {
+		k := strings.ToLower(ty)
 		if n, err := f.reactionCount(ctx, videoID, ty); err == nil {
-			types[strings.ToLower(ty)] = n
+			types[k] = n
+		} else if old, ok := oldTypes[k]; ok {
+			types[k] = old // keep its baseline; a failed read must not zero it
 		}
 	}
 
 	f.mu.Lock()
 	st = &f.react
 	start := st.windowStart
-	oldTypes := st.byType
 	st.total, st.byType, st.windowStart, st.seeded = total, types, now, true
 	f.mu.Unlock()
 	if !seeded || delta < 0 {
@@ -157,7 +168,11 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 	}
 	breakdown := map[string]int{}
 	for k, n := range types {
-		if d := n - oldTypes[k]; d > 0 {
+		old, ok := oldTypes[k]
+		if !ok {
+			continue // no baseline for this type yet: its lifetime total is not news
+		}
+		if d := n - old; d > 0 {
 			breakdown[k] = int(min(d, activity.MaxCount))
 		}
 	}

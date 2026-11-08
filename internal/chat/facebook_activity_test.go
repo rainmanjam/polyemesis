@@ -38,7 +38,8 @@ type fbReactGraph struct {
 	mu        sync.Mutex
 	total     string // raw JSON for summary.total_count; "" omits the summary
 	types     map[string]int64
-	status    int // when set, /reactions answers this with a Graph error
+	failType  string // a type= request for this type answers 500
+	status    int    // when set, /reactions answers this with a Graph error
 	body      string
 	reactReqs int
 }
@@ -77,6 +78,11 @@ func (g *fbReactGraph) server(t *testing.T) *httptest.Server {
 		}
 		n := g.total
 		if ty := r.URL.Query().Get("type"); ty != "" {
+			if ty == g.failType {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"error":{"message":"boom","code":2}}`)
+				return
+			}
 			n = fmt.Sprint(g.types[ty])
 		}
 		fmt.Fprintf(w, `{"data":[],"paging":{"cursors":{"before":"a","after":"b"}},"summary":{"total_count":%s,"viewer_reaction":"NONE","can_like":false,"has_liked":false}}`, n)
@@ -306,5 +312,58 @@ func TestFacebookActivityKindsSayWhyThereIsNoTip(t *testing.T) {
 		if !k.State.Valid() || strings.Contains(k.Detail, "fb-token") {
 			t.Fatalf("bad status %+v", k)
 		}
+	}
+}
+
+func TestFacebookReactionsToggledOffAndOnDoesNotReplay(t *testing.T) {
+	g := &fbReactGraph{}
+	g.set(123, fbBase)
+	clk := time.Date(2026, 3, 1, 20, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	on := true
+	a := fbAdapter(t, g.server(t).URL, func(c *FacebookConfig) {
+		c.Now = func() time.Time { return clk }
+		c.ReactionsEnabled = func() bool { mu.Lock(); defer mu.Unlock(); return on }
+	})
+	sink := &fbReactSink{}
+	setOn := func(v bool) { mu.Lock(); on = v; mu.Unlock() }
+	runFb(t, a, sink, &clk, 13, func(tick int) {
+		switch tick {
+		case 1: // after the seed
+			setOn(false)
+		case 2:
+			g.set(200, map[string]int64{"LIKE": 170, "LOVE": 27, "WOW": 3})
+		case 4:
+			setOn(true) // first sample after re-enable must seed, not replay +77
+		case 9: // a real rise after re-enable is still reported
+			g.set(203, map[string]int64{"LIKE": 173, "LOVE": 27, "WOW": 3})
+		}
+	})
+	got := sink.events()
+	if len(got) != 1 || got[0].Count != 3 {
+		t.Fatalf("want only the +3 after re-enable, got %+v", got)
+	}
+}
+
+func TestFacebookReactionsFailedTypeReadDoesNotReportLifetimeTotal(t *testing.T) {
+	g := &fbReactGraph{failType: "LOVE"}
+	g.set(123, fbBase)
+	a, clk := fbReactAdapter(t, g, true)
+	sink := &fbReactSink{}
+	runFb(t, a, sink, clk, 7, func(tick int) {
+		switch tick {
+		case 2:
+			g.mu.Lock()
+			g.failType = ""
+			g.mu.Unlock()
+			g.set(126, map[string]int64{"LIKE": 100, "LOVE": 23, "WOW": 3})
+		}
+	})
+	got := sink.events()
+	if len(got) != 1 || got[0].Count != 3 {
+		t.Fatalf("want one +3 event, got %+v", got)
+	}
+	if v, bad := got[0].Breakdown["love"]; bad && v > 3 {
+		t.Fatalf("love breakdown %d reports the lifetime total", v)
 	}
 }
