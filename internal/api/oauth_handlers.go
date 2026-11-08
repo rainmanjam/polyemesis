@@ -896,34 +896,74 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
-	dest, err := s.store.GetDestination(id)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	if dest.AccountID == nil {
-		writeError(w, http.StatusBadRequest,
-			"this destination is not linked to a connected account; connect one or enter the key manually")
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	updated, warnings, fail := s.refreshDestinationKey(ctx, id)
+	if fail != nil {
+		fail.write(w)
+		return
+	}
+	rw := s.reconcileNow("the refreshed stream key")
+	resp := map[string]any{"destination": updated}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// keyRefreshFailure is why refreshDestinationKey stored nothing, carried as the
+// status and sentence handleRefreshKey has always answered with, so that the
+// route and the start path that shares its body cannot word one refusal two
+// ways. store is set instead of msg for a failed row read, which
+// writeStoreError maps (404 for a missing row).
+type keyRefreshFailure struct {
+	status int
+	msg    string
+	store  error
+}
+
+func (f *keyRefreshFailure) Error() string {
+	if f.store != nil {
+		return f.store.Error()
+	}
+	return f.msg
+}
+
+func (f *keyRefreshFailure) write(w http.ResponseWriter) {
+	if f.store != nil {
+		writeStoreError(w, f.store)
+		return
+	}
+	writeError(w, f.status, f.msg)
+}
+
+// refreshDestinationKey is what Refresh stream key does, minus the reconcile:
+// it re-fetches the destination's ingest URL and stream key through its
+// connected account and stores them, returning the stored row and the warnings
+// the operator should read. The caller reconciles, because the two callers
+// differ in when: the route reconciles at once, and a start reconciles as the
+// very next step of enabling the destination.
+func (s *Server) refreshDestinationKey(ctx context.Context, id int64) (*db.Destination, []string, *keyRefreshFailure) {
+	dest, err := s.store.GetDestination(id)
+	if err != nil {
+		return nil, nil, &keyRefreshFailure{store: err}
+	}
+	if dest.AccountID == nil {
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadRequest, msg: "this destination is not linked to a connected account; connect one or enter the key manually"}
+	}
+
 	acct, err := s.tokenFor(ctx, *dest.AccountID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadGateway, msg: err.Error()}
 	}
 	provider, err := s.providers.Get(acct.Platform)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadRequest, msg: err.Error()}
 	}
 	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, "developer credentials are missing for "+string(acct.Platform))
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusPreconditionFailed, msg: "developer credentials are missing for " + string(acct.Platform)}
 	}
 
 	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, s.ingestOptionsForRefresh(dest))
@@ -932,11 +972,9 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		// failure, and 502 invites a retry that can never succeed. The
 		// operator needs the paste field, not the button again.
 		if errors.Is(err, oauth.ErrNoStreamKeyAPI) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
+			return nil, nil, &keyRefreshFailure{status: http.StatusBadRequest, msg: err.Error()}
 		}
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadGateway, msg: err.Error()}
 	}
 	// Facebook's key IS the broadcast, so this is where a running chat adapter
 	// finds out which live video to read comments from.
@@ -960,11 +998,9 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// a URL, so the branch is never taken for them.
 	var warnings []string
 	if b.Ingest.URL == "" && strings.TrimSpace(dest.URL) == "" {
-		writeError(w, http.StatusBadRequest,
-			string(acct.Platform)+" supplies the stream key but does not publish an ingest URL, and this "+
-				"destination has none yet. Copy the server URL from the platform's own dashboard into "+
-				"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone.")
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadRequest, msg: string(acct.Platform) + " supplies the stream key but does not publish an ingest URL, and this " +
+			"destination has none yet. Copy the server URL from the platform's own dashboard into " +
+			"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone."}
 	}
 	// Recorded even when empty: a destination that used to have a backup
 	// endpoint and no longer does must stop publishing to the old one, which
@@ -1005,8 +1041,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// first because the callback cannot read the store.
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusInternalServerError, msg: err.Error()}
 	}
 	var repairs []string
 	caption := &db.IngestCaption{URL: b.CaptionIngestURL}
@@ -1028,12 +1063,10 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if errors.Is(err, errRefreshAccountChanged) {
-		writeError(w, http.StatusConflict, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusConflict, msg: err.Error()}
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, nil, &keyRefreshFailure{status: http.StatusBadRequest, msg: err.Error()}
 	}
 	if updated != nil && updated.Platform == db.PlatformX && updated.AccountID != nil {
 		// A new key means a new (or different) stream source: whatever source the destination was waiting on is
@@ -1066,12 +1099,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	}
 	warnings = append(warnings, repairs...)
 
-	rw := s.reconcileNow("the refreshed stream key")
-	resp := map[string]any{"destination": updated}
-	if len(warnings) > 0 {
-		resp["warnings"] = warnings
-	}
-	writeMutation(w, http.StatusOK, rw, resp)
+	return updated, warnings, nil
 }
 
 // errRefreshAccountChanged refuses a fetched key for a destination whose

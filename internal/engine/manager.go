@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -78,6 +79,9 @@ type Manager struct {
 	// One runner makes that unrepresentable rather than merely unlikely, and
 	// its Reconcile is Manager.Reconcile, which covers every engine. See #526.
 	sched *scheduler.Runner
+	// startPrep runs before a SCHEDULED start writes a destination's enable
+	// flag. See SetStartPrep.
+	startPrep atomic.Pointer[func(ids []int64) func()]
 	// hostStop ends the sampler goroutine. Set by Start, called by Stop.
 	hostStop context.CancelFunc
 
@@ -1609,6 +1613,33 @@ func (m *Manager) SetFacebookCaptions(open bool) {
 // created later, through the same one path as SetHooks.
 func (m *Manager) SetStream(h *eventstream.Hub) {
 	m.saveEngineSetting(func(s *engineSettings) { s.stream = h })
+}
+
+// SetStartPrep installs a function the scheduler's actuator calls ONCE with
+// every destination id a start schedule is about to switch on, before the first
+// enable flag is written. The API uses it to renew Facebook live-video keys,
+// which the engine has no token to do; it does them concurrently under one
+// shared deadline so a slow platform cannot stall the rest of the sweep. The
+// returned release is called after the last flag is written (it frees whatever
+// the function held to keep a second start out). It cannot fail the start.
+// Nil clears it.
+func (m *Manager) SetStartPrep(f func(ids []int64) (release func())) {
+	if f == nil {
+		m.startPrep.Store(nil)
+		return
+	}
+	m.startPrep.Store(&f)
+}
+
+// DestinationInUse reports whether any engine is carrying the destination in a
+// way a new start must not disturb. See Engine.DestinationInUse.
+func (m *Manager) DestinationInUse(id int64) bool {
+	for _, e := range m.Engines() {
+		if e.DestinationInUse(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetLifecycle attaches the broadcast-lifecycle coordinator to every engine, now

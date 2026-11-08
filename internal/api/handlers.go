@@ -3082,38 +3082,26 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 	return true
 }
 
-func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
-	id, err := idParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, errInvalidID)
-		return
-	}
-	// The body is read BEFORE the lock below, so a slow client holds nothing.
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
+// putDestinationPlan is a PUT /destinations/{id} body decoded over the stored
+// row and validated: what the save will write. The repair and its warnings
+// (destinationWriteWarnings) stay in the handler beside the write, where
+// TestEveryDestinationWriteIsRepairedFirst looks for them.
+type putDestinationPlan struct {
+	existing       *db.Destination
+	storedSourceID *int64
+}
 
-	// SERIALISED WITH THE TRACK-GAIN ROUTE. Both are a read-modify-write of the
-	// whole row: this one decodes over the stored row and writes all of it back,
-	// so a mute that POST .../tracks/{n}/gain stored between this read and this
-	// write was silently undone -- even by a PUT that never mentioned the
-	// profile. Held through the reconcile, as the gain route holds it, so neither
-	// request reads the other's live-level outcome as its own.
-	//
-	// A mutex rather than a row version with 409 on a stale write: a version only
-	// protects a writer that sends it back, and neither the console nor the
-	// Stream Deck plugin does today, so it would either leave their writes
-	// unprotected or start refusing them. The one network call this can hold the
-	// lock across, fillFacebookBackupIngest, happens only on the save that first
-	// turns on a Facebook backup ingest.
-	s.trackGainMu.Lock()
-	defer s.trackGainMu.Unlock()
-
+// planDestinationUpdate reads the stored row, decodes the body over it and runs
+// EVERY check the save can refuse on, writing the refusal to w and returning
+// false when there is one. It is the ONE place those checks live: the handler
+// calls it once before a key renewal (so a save that would be refused creates no
+// live video) and again under trackGainMu for the write itself, so the two
+// cannot drift.
+func (s *Server) planDestinationUpdate(w http.ResponseWriter, id int64, body []byte) (*putDestinationPlan, bool) {
 	existing, err := s.store.GetDestination(id)
 	if err != nil {
 		writeStoreError(w, err)
-		return
+		return nil, false
 	}
 	// The programme the destination runs on before this save, read before the
 	// decode below can move it: what it is running now is asked of that engine.
@@ -3139,31 +3127,31 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 			strings.EqualFold(existing.Lifecycle.Phase, phasePrePublished))
 	if err := decodeJSONInto(body, existing); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, false
 	}
 	existing.ID = id
 	if existing.PresetID != storedPresetID {
 		if p := existing.PresetProblem(); p != "" {
 			writeError(w, http.StatusBadRequest, p)
-			return
+			return nil, false
 		}
 	}
 	if refuseUnsendableGoLiveTitle(w, existing, storedGoLiveTitle) {
 		return
 	}
 	if s.refuseBadDestinationWrite(w, existing, &before) {
-		return
+		return nil, false
 	}
 	// X takes a title only when the broadcast is published, and has no write
 	// that changes a running one, so a change saved now would never reach X.
 	if xBroadcastLive && existing.GoLiveTitle != storedGoLiveTitle {
 		writeError(w, http.StatusConflict, xTitleLiveRefusal)
-		return
+		return nil, false
 	}
 	// The chat access mode and language travel on the same PUBLISH.
 	if xBroadcastLive && xControlsKey(existing.Compliance.X) != storedXControls {
 		writeError(w, http.StatusConflict, xControlsLiveRefusal)
-		return
+		return nil, false
 	}
 	// Whatever the body said about expert arguments, the stored ones win. Only
 	// the expert routes enforce the confirm step and the guard acknowledgement,
@@ -3173,6 +3161,82 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	existing.ExtraInputArgs = saved.InputArgs
 	existing.ExtraOutputArgs = saved.OutputArgs
 	existing.ExpertAckReencode = saved.AckReencode
+
+	return &putDestinationPlan{existing: existing, storedSourceID: storedSourceID}, true
+}
+
+// bodyEnables reports whether a PUT body asks for enabled:true. Lenient on
+// purpose: the strict decode that follows is what refuses a bad body.
+func bodyEnables(body []byte) bool {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	return json.Unmarshal(body, &req) == nil && req.Enabled != nil && *req.Enabled
+}
+
+func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidID)
+		return
+	}
+	// The body is read BEFORE the lock below, so a slow client holds nothing.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+
+	// THE DESTINATION'S RENEWAL LOCK COMES FIRST, FOR EVERY PUT, before the row
+	// is read. A start (or another PUT) that renewed the Facebook key and wrote
+	// it holds this lock until its reconcile is done; a save that read the row
+	// before that and wrote it afterwards would put the dead key back over the
+	// fresh one and its reconcile would replace the live process with it. The
+	// order is freshKey, then trackGainMu, and nothing takes freshKey while
+	// holding trackGainMu.
+	defer s.freshKey.lock(id)()
+
+	// A SAVE THAT SWITCHES A DESTINATION ON IS A START, and it used to publish
+	// with the stored key. Renewed here, with only the renewal lock held: the
+	// Graph call can take 30s and trackGainMu below is install-wide, so holding
+	// it across the call would stall every track gain, OBS level and routing
+	// preset request behind one Facebook round trip. The fresh key is stored by
+	// the renewal itself, so the read below sees it and the whole-row write
+	// carries it.
+	var keyWarning string
+	if peek, perr := s.store.GetDestination(id); perr == nil && !peek.Enabled && bodyEnables(body) {
+		// ONLY A SAVE THAT WILL SUCCEED RENEWS: a refused one would leave a live
+		// video on the operator's page that nothing publishes to. The refusal
+		// is written by the same check the write below runs.
+		if _, ok := s.planDestinationUpdate(w, id, body); !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+		_, keyWarning = s.renewFacebookKeyLocked(ctx, id, false)
+		cancel()
+	}
+
+	// SERIALISED WITH THE TRACK-GAIN ROUTE. Both are a read-modify-write of the
+	// whole row: this one decodes over the stored row and writes all of it back,
+	// so a mute that POST .../tracks/{n}/gain stored between this read and this
+	// write was silently undone -- even by a PUT that never mentioned the
+	// profile. Held through the reconcile, as the gain route holds it, so neither
+	// request reads the other's live-level outcome as its own.
+	//
+	// A mutex rather than a row version with 409 on a stale write: a version only
+	// protects a writer that sends it back, and neither the console nor the
+	// Stream Deck plugin does today, so it would either leave their writes
+	// unprotected or start refusing them. The one network call this can still
+	// hold the lock across, fillFacebookBackupIngest, happens only on the save
+	// that first turns on a Facebook backup ingest. The key renewal above does
+	// NOT run under it.
+	s.trackGainMu.Lock()
+	defer s.trackGainMu.Unlock()
+
+	plan, ok := s.planDestinationUpdate(w, id, body)
+	if !ok {
+		return
+	}
+	existing, storedSourceID := plan.existing, plan.storedSourceID
 
 	// Deliberately AFTER the decode-over-existing above, because that is the
 	// path that produces the state worth catching: a body carrying nothing but
@@ -3194,6 +3258,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if keyWarning != "" {
+		warnings = append(warnings, keyWarning)
 	}
 
 	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.
@@ -3408,6 +3475,9 @@ type destControl struct {
 	Effect       destEffect
 	StoreErr     error
 	ReconcileErr error
+	// KeyWarning is set when a start needed a fresh Facebook stream key and
+	// could not get one. The start went ahead. See facebook_fresh_key.go.
+	KeyWarning string
 }
 
 // applyDestinationEnabled is the whole of what POST /destinations/{id}/start and
@@ -3428,11 +3498,24 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 	if cut {
 		s.mgr.CutOnStop(id)
 	}
+	// A NEW START OF AN ACCOUNT-LINKED FACEBOOK DESTINATION GETS A NEW LIVE
+	// VIDEO FIRST: its stored key belonged to one that has ended. Before the
+	// enable is written, so the reconcile below spawns FFmpeg with the fresh key
+	// rather than the dead one. The destination's lock is held through that
+	// reconcile, so a second start waits and finds the process up instead of
+	// minting a second live video. See facebook_fresh_key.go.
+	var keyWarning string
+	if enabled {
+		defer s.freshKey.lock(id)()
+		ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+		_, keyWarning = s.renewFacebookKeyLocked(ctx, id, false)
+		cancel()
+	}
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
 	if rw := s.reconcileNow(reconcileDestination); rw != "" {
-		return destControl{ReconcileErr: errors.New(rw)}
+		return destControl{ReconcileErr: errors.New(rw), KeyWarning: keyWarning}
 	}
 	var wasCut bool
 	if cut {
@@ -3479,7 +3562,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 		break
 	}
 	eff.Cut = wasCut
-	return destControl{Effect: eff}
+	return destControl{Effect: eff, KeyWarning: keyWarning}
 }
 
 func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
@@ -3511,6 +3594,9 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		return
 	}
 	resp := map[string]any{"enabled": enabled}
+	if ctl.KeyWarning != "" {
+		resp["warnings"] = []string{ctl.KeyWarning}
+	}
 	if ctl.Effect.Found {
 		if ctl.Effect.HasProcess {
 			resp["state"] = ctl.Effect.State
@@ -3569,11 +3655,31 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "the source this destination carries is not running")
 		return
 	}
-	if err := eng.RestartDestination(id); err != nil {
+	// A restart of a destination that is NOT publishing (held, failed or
+	// stopped) while switched on is a new start: the live video its key
+	// belonged to has ended. One whose process is up, filling or draining a
+	// delay, or that is switched off, keeps its key. See facebook_fresh_key.go.
+	defer s.freshKey.lock(id)()
+	rctx, rcancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+	renewed, keyWarning := s.renewFacebookKeyLocked(rctx, id, true)
+	rcancel()
+	if renewed {
+		// The process cycled by RestartDestination re-runs the spec it was
+		// built with, so the new key would not reach it. A reconcile sees the
+		// changed key and replaces the process, as Refresh stream key does.
+		if rw := s.reconcileNow(reconcileDestination); rw != "" {
+			writeError(w, http.StatusInternalServerError, rw)
+			return
+		}
+	} else if err := eng.RestartDestination(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
+	resp := map[string]any{"status": "restarting"}
+	if keyWarning != "" {
+		resp["warnings"] = []string{keyWarning}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // -------------------------------------------------------------- routing API
