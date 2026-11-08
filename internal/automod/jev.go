@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,7 +86,20 @@ type JevConfig struct {
 	Compact         bool                `json:"compact,omitempty"`
 	FlagOnly        bool                `json:"flagOnly,omitempty"`
 	CategoryActions map[Category]Action `json:"categoryActions,omitempty"`
+	// SelfHarm adds the self_harm category to the request and the parse. Set
+	// only for an install with the protection pack on (spec D14): the category
+	// list is part of the request, and adding a category for everyone would move
+	// a "kys" message out of an armed harassment action into a self_harm that
+	// cannot be acted on, an enforcement downgrade nobody chose.
+	SelfHarm bool `json:"selfHarm,omitempty"`
+	// HoldOverlay sets Hold on a finding at or above the floor, in every
+	// category but "other": flag in the console and keep the line off every
+	// overlay (spec 6.4). Set only for an install with the pack on.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 }
+
+// categories is the list this connector asks, and the parse accepts.
+func (c JevConfig) categories() []Category { return ModelCategoriesFor(c.SelfHarm) }
 
 // Jev is the connector.
 type Jev struct {
@@ -156,7 +170,7 @@ func (j *Jev) Check(ctx context.Context, text string) ([]Finding, error) {
 		return nil, errJevPaused
 	}
 	if j.budget != nil && !j.budget.reserve(j.cfg.MaxCallsPerHour) {
-		return nil, fmt.Errorf("hourly ceiling of %d calls reached", j.cfg.MaxCallsPerHour)
+		return nil, &ceilingError{calls: j.cfg.MaxCallsPerHour}
 	}
 
 	v, err := j.ask(ctx, text)
@@ -165,7 +179,7 @@ func (j *Jev) Check(ctx context.Context, text string) ([]Finding, error) {
 		band jevBand
 	)
 	if err == nil {
-		cat, band, err = jevDecide(v, j.cfg.MinConfidence)
+		cat, band, err = jevDecide(v, j.cfg.MinConfidence, j.cfg.categories())
 	}
 	j.record(err)
 	if err != nil || band == jevBandNone {
@@ -173,15 +187,19 @@ func (j *Jev) Check(ctx context.Context, text string) ([]Finding, error) {
 	}
 
 	action := categoryAction(j.cfg.Action, j.cfg.CategoryActions, j.cfg.FlagOnly, cat)
-	if band == jevBandFlag {
+	if band == jevBandFlag || cat == CategorySelfHarm {
 		// Under the operator's floor: a human looks, nothing else happens.
 		// Nothing irreversible is ever chosen from a probability under the
-		// floor, whatever the category table says.
+		// floor, whatever the category table says. And self_harm is flag-only
+		// at any probability: acting against a person in crisis is never
+		// automatic, and the checker's legacy single Action (which may be a
+		// ban) must not reach it.
 		action = ActionFlag
 	}
 	return []Finding{{
 		Checker:        CheckerModel,
 		Action:         action,
+		Hold:           j.cfg.HoldOverlay && band == jevBandAct && cat != CategoryOther,
 		TimeoutSeconds: j.cfg.TimeoutSeconds,
 		Confidence:     v.PAct,
 		Category:       cat,
@@ -210,7 +228,7 @@ const (
 // key that is neither "ok" nor a model category is a reply this connector did
 // not ask for, and it fails open as an error -- the same treatment model.go
 // gives an unknown category.
-func jevDecide(v JevVerdict, floor Confidence) (Category, jevBand, error) {
+func jevDecide(v JevVerdict, floor Confidence, offered []Category) (Category, jevBand, error) {
 	band := jevBandNone
 	switch {
 	case v.PAct >= floor.Float():
@@ -222,7 +240,7 @@ func jevDecide(v JevVerdict, floor Confidence) (Category, jevBand, error) {
 		return "", band, nil
 	}
 	if v.Choice != jevOK {
-		cat, ok := ParseModelCategory(v.Choice)
+		cat, ok := ParseCategoryIn(v.Choice, offered)
 		if !ok {
 			return "", jevBandNone, errUnknownCategory
 		}
@@ -231,7 +249,7 @@ func jevDecide(v JevVerdict, floor Confidence) (Category, jevBand, error) {
 	// Highest non-ok probability, ties broken by ModelCategories order so the
 	// same reply always gets the same label.
 	best, bestP := CategoryOther, -1.0
-	for _, c := range ModelCategories() {
+	for _, c := range offered {
 		if p, ok := v.PCategory[string(c)]; ok && p > bestP {
 			best, bestP = c, p
 		}
@@ -241,7 +259,7 @@ func jevDecide(v JevVerdict, floor Confidence) (Category, jevBand, error) {
 
 // jevCategoryCriteria: the keys are "ok" plus exactly ModelCategories(), so the
 // reply is checked against the same set ParseModelCategory accepts.
-func jevCategoryCriteria(compact bool) map[string]string {
+func jevCategoryCriteria(compact, selfHarm bool) map[string]string {
 	long := map[Category]string{
 		CategoryHarassment:    "Targeted abuse or insults aimed at a person, including telling someone to harm or kill themselves",
 		CategoryHateSpeech:    "Abuse aimed at a protected characteristic such as race, religion, gender, sexuality, disability or nationality, including masked or obfuscated slurs",
@@ -249,6 +267,7 @@ func jevCategoryCriteria(compact bool) map[string]string {
 		CategorySexualContent: "Sexual content, sexual solicitation, or sexual remarks aimed at a person",
 		CategorySpam:          "Advertising, scams, crypto schemes, fake giveaways, phishing, follow-for-follow, or promoting another channel",
 		CategoryOther:         "Breaks the community rule in a way none of the other options describes",
+		CategorySelfHarm:      "Expresses intent or wish to self-harm, or encourages someone else to",
 	}
 	short := map[Category]string{
 		CategoryHarassment:    "insulting or bullying a person",
@@ -257,13 +276,14 @@ func jevCategoryCriteria(compact bool) map[string]string {
 		CategorySexualContent: "sexual",
 		CategorySpam:          "spam, scam or advertising",
 		CategoryOther:         "breaks chat rules in another way",
+		CategorySelfHarm:      "self-harm",
 	}
 	desc, ok := long, "Allowed: ordinary chat, questions, slang, banter, gaming trash talk about gameplay, emotes, quotes, in any language"
 	if compact {
 		desc, ok = short, "normal chat"
 	}
 	out := map[string]string{jevOK: ok}
-	for _, c := range ModelCategories() {
+	for _, c := range ModelCategoriesFor(selfHarm) {
 		out[string(c)] = desc[c]
 	}
 	return out
@@ -277,7 +297,7 @@ func jevCategoryCriteria(compact bool) map[string]string {
 // for a local decision model whose context window the full form overflows
 // (laya: 512 tokens; the full request averages about 560). It does not carry
 // the operator's Instruction, which is the cost of fitting.
-func jevRequestBody(model, instruction, text string, compact bool) map[string]any {
+func jevRequestBody(model, instruction, text string, compact, selfHarm bool) map[string]any {
 	if compact {
 		return map[string]any{
 			"model": model,
@@ -287,7 +307,7 @@ func jevRequestBody(model, instruction, text string, compact bool) map[string]an
 					"instructions": "Is this live-stream chat message abusive, hateful, threatening, sexual, or spam?"},
 				"category": map[string]any{"type": "choice",
 					"instructions": "What kind of chat message is this?",
-					"criteria":     jevCategoryCriteria(true)},
+					"criteria":     jevCategoryCriteria(true, selfHarm)},
 			},
 		}
 	}
@@ -309,7 +329,7 @@ func jevRequestBody(model, instruction, text string, compact bool) map[string]an
 			"category": map[string]any{
 				"type":         "choice",
 				"instructions": "Which option best describes `message`?",
-				"criteria":     jevCategoryCriteria(false),
+				"criteria":     jevCategoryCriteria(false, selfHarm),
 			},
 			"targeted": map[string]any{
 				"type":         "noul",
@@ -339,7 +359,7 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, j.cfg.Timeout)
 	defer cancel()
 
-	buf, err := json.Marshal(jevRequestBody(j.cfg.Model, j.cfg.Instruction, text, j.cfg.Compact))
+	buf, err := json.Marshal(jevRequestBody(j.cfg.Model, j.cfg.Instruction, text, j.cfg.Compact, j.cfg.SelfHarm))
 	if err != nil {
 		return JevVerdict{}, err
 	}
@@ -374,10 +394,7 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 		j.mu.Unlock()
 	}
 	if resp.StatusCode != http.StatusOK {
-		// The status only, never the body. A 422 body previews the request,
-		// and the request carries a viewer's message; a 401 body from some
-		// gateways echoes part of the key.
-		return JevVerdict{}, fmt.Errorf("Jev API returned %d", resp.StatusCode)
+		return JevVerdict{}, j.statusError(resp.StatusCode, raw)
 	}
 
 	var out struct {
@@ -416,6 +433,58 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 		v.Severity = *s.Score
 	}
 	return v, nil
+}
+
+// statusError is the operator-facing text for a non-200 reply.
+//
+// FIXED SENTENCES, never the body. A 422 body previews the request, and the
+// request carries a viewer's message; a 401 body from some gateways echoes part
+// of the key. The one thing read from a 400 body is whether it NAMES the model
+// (a yes/no, nothing copied out), because "400" alone sends an operator to the
+// docs for what is usually a mistyped model id. The model id shown is the one
+// the operator configured, trimmed and bounded, so it is their own text and
+// not the far end's.
+func (j *Jev) statusError(code int, body []byte) error {
+	switch code {
+	case http.StatusUnauthorized:
+		return errJevKeyRejected
+	case http.StatusBadRequest:
+		if unknownModelBody(body) {
+			return fmt.Errorf("Jev does not recognise model %s -- check the model name", shownModel(j.cfg.Model))
+		}
+	}
+	return fmt.Errorf("Jev API returned %d", code)
+}
+
+// unknownModelRe is a 400 body that says the model is the problem: the word
+// "model" beside "not found", "unknown", "invalid", "no such", "does not exist"
+// or "unsupported", in either order and within a short span. A 400 that merely
+// MENTIONS the model ("input exceeds the model's context") is about something
+// else, and sending the operator to retype a correct model id is worse than
+// the plain status.
+var unknownModelRe = regexp.MustCompile(
+	`(?s)(model[\W_].{0,40}(not[ _]found|unknown|invalid|does not exist|doesn't exist|not[ _]supported|unsupported|no such))` +
+		`|((unknown|invalid|unsupported|no such|unrecognized|unrecognised)[\W_].{0,20}model)`)
+
+func unknownModelBody(body []byte) bool {
+	return unknownModelRe.Match(bytes.ToLower(body))
+}
+
+// errJevKeyRejected is the 401 sentence. The Test button shows it as is.
+var errJevKeyRejected = errors.New("Jev rejected the API key -- paste a new one")
+
+// shownModel bounds and cleans a configured model id for an error sentence.
+func shownModel(m string) string {
+	m = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(m))
+	if r := []rune(m); len(r) > 60 {
+		m = string(r[:60]) + "..."
+	}
+	return strconv.Quote(m)
 }
 
 func (j *Jev) record(err error) {

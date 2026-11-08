@@ -41,6 +41,7 @@ export const ACTION_KEYS: Record<AutomodAction, TranslationKey> = {
 export const CHECKER_KEYS: Record<AutomodChecker, TranslationKey> = {
   rules: "automod.checkerRules",
   history: "automod.checkerHistory",
+  protection: "automod.checkerProtection",
   model: "automod.checkerModel",
 };
 
@@ -95,6 +96,14 @@ export function checkerReady(
       return { ready: false, reason: "automod.modelNoEndpoint" };
     }
     return READY;
+  }
+  if (checker === "protection") {
+    // The server builds the pack checker only while protection.state is "on"
+    // (checkerConfigured, internal/api). Undecided ("") and declined ("off")
+    // both mean nothing is behind the column.
+    return a?.protection?.state === "on"
+      ? READY
+      : { ready: false, reason: "automod.protectionOff" };
   }
   // History is built from DefaultHistoryLimits on every save, so it is never
   // nil and never unconfigured. A checker this build does not know is left
@@ -282,6 +291,14 @@ export const CATEGORY_KEYS: Record<string, TranslationKey> = {
   sexual_content: "automod.catSexualContent",
   spam: "automod.catSpam",
   other: "automod.catOther",
+  // The protection pack's categories, which a finding carries and the review
+  // list and the test box name.
+  doxxing: "automod.protCatDoxxing",
+  scam: "automod.protCatScam",
+  flood: "automod.protCatFlood",
+  impersonation: "automod.protCatImpersonation",
+  raid: "automod.protCatRaid",
+  self_harm: "automod.protCatSelfHarm",
 };
 
 /** The suggested per-category actions -- shown beside each row and applied

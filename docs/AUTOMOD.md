@@ -25,6 +25,7 @@ turning it off costs you enforcement and not visibility.
 |---|---|---|
 | **Rules** | your regexes, each with its own action | free, in-process |
 | **History** | rate, repeats, links, mentions, capitals over a window | free, in-process |
+| **Protection** | the recommended-protection pack: hate terms, doxxing, scams, impersonation, floods, raids | free, in-process |
 | **Model** | one message, when the other two could not settle it | an API call |
 
 Rules and history run on the messages already arriving for the chat pane.
@@ -167,6 +168,192 @@ the same as in every other section, rather than accepted and ignored.
 Because `maxRepeats` compares the **normalised** text, a spammer varying case,
 padding or doubled letters still trips it.
 
+Two limits to know. The history checker is **per author and per platform**: one
+person with an account on Twitch and another on YouTube is two authors, because
+there is no reliable link between the accounts, so a spammer who alternates
+platforms is counted on each separately. And `maxRepeats` counts exact repeats
+only. Near-copies ("buy now 1", "buy now 2") and the same text from many
+different accounts are the job of the protection pack, below.
+
+## The recommended-protection pack
+
+A compiled term list and a set of detectors, in `internal/automod/pack`, that
+run as their own checker, so that arming an action for the pack never arms your
+own regex rules. A hit is **flagged in the console and can be held off every
+overlay**; it asks for no platform action by itself, and the matrix is still the
+only thing that can permit one.
+
+### Who has it on
+
+A **fresh install** has the pack on, with every platform action off. An
+**existing install is never switched on silently**: its settings carry no
+answer yet (`automod.protection.state` is empty), nothing new runs, and
+`GET /settings` reports `automod.protection.offer: true` so the console can ask.
+Answering writes `on` or `off`, a recorded answer rather than a dismissed
+notice. A matrix cell for the `protection` checker is refused on save
+("recommended protection is not on") unless the pack is on in the same save.
+
+### In the console
+
+Settings, Pipeline, **Recommended protection** is the first automod card. An
+install that has not answered yet sees a banner there (and above the flagged list
+on the Chat page) with **Turn on** and **Not now**; both record an answer, and
+**Not now** is final. Once the pack is on the card shows:
+
+- **One row per category** (hate and slurs, doxxing, scams, spam shapes,
+  impersonation, raids, and profanity, which is off). Each has a switch, a chip
+  saying whether its hits are held off the overlays or only shown in the console,
+  how often it is wrong, and the highest ladder rung it may reach. **Details**
+  opens a switch and a "hold off overlays" checkbox for each detector, the box to
+  add a word or allow a pack word (hate and profanity), the domain allow-list
+  (scams and doxxing) and the extra names to protect (impersonation). The
+  street-address detector is off until you switch it on.
+- **The action ladder**, a row per platform with **Delete, Time out, Ban** as
+  three pills. Nothing is armed until you click a pill, and delete and ban ask
+  first because polyemesis cannot take either back. A pill the platform cannot
+  perform is inert and gives the reason. Turning the pack off disarms its pills in
+  the same save. The Twitch row repeats a note worth knowing: Twitch's own AutoMod
+  and blocked terms only see Twitch chat, so a YouTube or Kick message shown on
+  your Twitch stream is kept off it by an overlay hold, not by Twitch.
+- **Twitch's own filters**, shown when a Twitch account is connected. Four
+  buttons, each off until you click it because each changes your Twitch
+  channel's own settings. **Copy the severe hate terms to Twitch blocked terms**
+  sends the pack's severe hate terms (plus your added severe terms, minus the
+  words you allowed) to Twitch's blocked terms; it adds a batch at a time and the
+  card repeats until none are left, so it is safe to click again after a failure.
+  polyemesis records the Twitch id of a term only when that very request created
+  it (the term was not in the list just read, and its `created_at`, which Twitch
+  gives in whole seconds on its own clock, is within seconds of Twitch's answer),
+  because Twitch answers a duplicate with the term that was already there and
+  hides private ones. The record is kept per Twitch channel and holds a hash of
+  each term, never the term, so connecting a second channel cannot orphan the
+  first one's terms and the settings document carries no slur list. If you
+  remove one of those terms on Twitch yourself, the next copy puts it back (the
+  answer's `restored` says how many); to keep a term off Twitch, allow it in
+  polyemesis. Copying uses the saved settings, so the card holds the button back
+  while protection edits are unsaved. A term you or Twitch's AutoMod added is
+  therefore never recorded,
+  and **Remove the terms polyemesis added**, turning hate & slurs off, a word you
+  allow, or a pack update that drops a term (the next sync reconciles) delete only
+  the ones polyemesis really added. **Set Twitch AutoMod to level 1 or 2** raises
+  every AutoMod category except swearing to at least that level; it never lowers
+  one you set stricter, and it sends all eight categories because Twitch's
+  settings update replaces. **Refresh protected names from Twitch roles** reads
+  your moderators and VIPs (broadcaster only; the VIP list also needs Twitch's
+  own requirements) into the impersonation detector's in-memory protected names.
+  The card shows counts, never the terms.
+- **A test box** that calls `POST /automod/explain`. It shows which detectors
+  fire, whether the line would be held, and, for a pack hit, what the strike
+  ladder would ask the platform to do at strikes 1, 2 and 3 given the rungs you
+  have armed and the category's ceiling ("flag for review" where none is armed).
+  It uses the settings you have **saved**, and it never stores, logs or sends the
+  text.
+- **Advanced**: the ladder's timeout length, the strike window and each
+  category's highest rung. Self-harm has no control: it is hold only.
+
+The protection column is not in the switch matrix below the cards, because the
+pack is armed one rung at a time on its own card.
+
+The settings are also reachable through the API. What you change is stored as a **difference over the
+pack**, never as a copy of it, so a release that updates the pack reaches every
+install that is on and nothing you chose is overwritten:
+
+| Key under `automod.protection` | Meaning |
+|---|---|
+| `state` | `""` (undecided), `"on"` or `"off"` |
+| `pack`, `packVersion` | the pack id (`en`) and the version you last accepted |
+| `categories` | `{category: {enabled, detectors: {name: bool}}}`. Absent means the pack's default. Categories: `hate_speech`, `profanity` (off by default), `doxxing`, `scam`, `flood`, `impersonation`, `raid`. A detector is named by what follows the slash (`address` for `doxxing/address`) |
+| `ceilings` | `{category: "hold" \| "delete" \| "timeout" \| "ban"}`, how high a category may climb the ladder |
+| `holdDetectors` | `{detector: bool}`, whether a detector also holds the message off the overlay |
+| `addTerms`, `allowTerms`, `allowDomains` | your terms (2 to 100 characters, hate tier `severe` or `contextual`, profanity tier `mild` or `strong`), pack terms to ignore, and domains that are never a shortener or lookalike |
+| `impersonation` | `protect`: extra names to guard, `allowIds`: author ids that are never an impostor |
+| `strikeWindowSeconds`, `ladderTimeoutSeconds` | how long a strike counts, and the timeout rung's length (both 600 by default; never zero, because a zero timeout is a permanent ban) |
+
+A sent `categories`, `ceilings`, `holdDetectors`, `addTerms`, `allowTerms`,
+`allowDomains` or `impersonation` list **replaces** the stored one, so removing
+an entry saves and takes effect. A misspelt key is a 400, and so is a category,
+detector or ceiling the pack does not have.
+
+### The action ladder
+
+Each platform has up to three rungs for the pack: **delete**, **timeout** and
+**ban**. You arm one by switching on its matrix cell, `platform/rung/protection`
+(for example `twitch/ban/protection`). None is armed by default, so on a fresh
+install a hit only flags the message and holds it off the overlay.
+
+Every pack hit is a strike against its author on that platform, counted once
+per message however many detectors fired, inside `strikeWindowSeconds`. Strike 1
+asks for a delete, strike 2 for a timeout and strike 3 and later for a ban,
+**capped by the category's ceiling** and then lowered to the highest rung you
+have actually armed at or below it. If none is armed the hit stays a flag. So
+with only Ban armed, the first two hits flag and the third bans.
+
+| Category | Highest rung by default |
+|---|---|
+| Hate terms, severe | ban |
+| Scams | ban |
+| Doxxing | timeout |
+| Floods (only a detector that holds) | timeout |
+| Raid | delete |
+| Profanity | delete |
+| Impersonation, contextual hate terms, self-harm | hold only |
+
+Only a detector that **holds** is on the ladder. Emote walls, shouting and
+near-duplicate messages ship flag-only (see the table below), so they stay a
+flag however many rungs you arm; turning `holdDetectors` on for one of them
+opts it in. Where another checker (the flood history checker's timeout, a rule)
+already acts on the same message, the ladder adds a second *sanction* only if
+its rung is more severe, and then the ban is performed first. A timeout or ban
+is a sanction on the author and does not remove the line, so when delete is also
+armed on that platform and the hit is entitled to it (its category ceiling
+reaches delete), the message is **also deleted**, as a separate action after the
+sanction. One sanction per message, plus the delete.
+
+Two properties are deliberate:
+
+- **Arming starts the count again.** Strikes belong to an arming epoch for the
+  platform, and any change to the set of rungs armed there starts a new one. An
+  install that ran unarmed for a week cannot ban someone for their third message
+  the moment Ban is armed: arming affects only what happens afterwards.
+- **A settings save in the middle of a raid forgets nothing.** Strike counts,
+  the raid window and the names learned from moderators belong to the server,
+  not to the rebuilt engine.
+
+Strikes are kept in memory only, are bounded (idle authors are dropped, and at
+most 20,000 are tracked), and are not carried across a restart. The model
+checker has its own category table and is not part of the ladder.
+
+| Detector | What it catches | Held off the overlay |
+|---|---|---|
+| Hate terms, severe | slurs whose meaning does not depend on context. Whole-token match on a normalised form (confusables, leetspeak, zero-width characters, letter-spacing, stretched letters) | yes |
+| Hate terms, contextual | reclaimable or ambiguous terms; flagged only | no |
+| Doxxing | phone numbers, email addresses (also `name [at] host [dot] com`), IPv4 and IPv6 addresses. A street address detector exists and ships off. Private, loopback and documentation address ranges are never reported, and neither are version strings, scores, dates and times | yes |
+| Scams | giveaway and crypto lures, check-my-bio pitches, fake platform support, URL shorteners, lookalike domains | yes |
+| Impersonation | an author name that folds onto the broadcaster's or a moderator's (look-alike letters, `_official`, `tv`, a digit suffix), or is one edit away while the message carries a link or handle | yes |
+| Floods | zalgo text, one character repeated, mass mentions, too many links | yes |
+| Floods, flag only | emote walls, shouting, near-duplicate repeats | no |
+| Raid | five or more different accounts, on any platform, posting the same or near-same text (at least 12 characters) within 20 seconds | yes |
+
+A finding names its detector and never the matched value, because a finding's
+reason is written to the server log and the value of a doxxing hit is the thing
+being kept out of it.
+
+Near-duplicate repeats count a message as a repeat of an earlier one by the same
+author when most of their words match (a Jaccard overlap of 0.8) or when they
+are the same once digits are removed. More than three of them in 30 seconds
+counts, the same numbers as the exact-repeat detector's defaults; this detector
+does not yet follow your `maxRepeats` and `windowSeconds`.
+Raids are counted by text, not by author, and a chant such as `F` or `GG`, an
+emote-only line, a command like `!play` and anything a moderator or the
+broadcaster says never counts. The tracker is bounded (a fixed number of
+distinct texts and of accounts per text), so a raid cannot grow it without
+limit, and it survives a settings save.
+
+The test box is `POST /automod/explain` (see below). It runs the pack and your
+rules on text you type and leaves no trace. It uses the pack as you have
+configured it (a category off, a term added, a domain allowed), and it never
+counts a strike.
+
 ### A timeout of zero is a permanent ban
 
 On every platform. The server refuses to save a timeout action carrying no
@@ -180,6 +367,111 @@ action if that is what you meant
 
 Worth knowing when writing rules through the API, where it is easier to omit a
 field than it is in the console.
+
+### Known limits of the pack
+
+- **Not across platforms, for one person.** Strikes, near-duplicate repeats and
+  impersonation are counted per platform and per account. There is no reliable
+  link between one person's Twitch and YouTube accounts, so a viewer who spams
+  both is two viewers. (A raid is the exception: it counts different accounts on
+  any platform posting the same text.)
+- **English first.** The term list is English. Non-English chat is covered by the
+  shape detectors (floods, doxxing, scams) and by the model tier, not by a
+  translated term list, and the detectors are tuned not to fire on other scripts.
+- **Display-only until you arm something.** A hit hides one line from the
+  broadcast and nothing else. That is the safety claim the staging runbook below
+  checks.
+
+### Staging runbook: prove it before you arm it
+
+Two parts, run in order, on a **staging** server with your own channels and
+accounts. Part 1 never changes anything on a platform. Part 2 does, so every step
+in it needs your own go-ahead, and you use a viewer **test account** that you
+own, never a real viewer.
+
+Use a test-only canary rather than real abuse. In **Recommended protection**,
+open **Details** on *Hate and slurs* and add the word `polyemesis-canary-hate`
+as a severe term. It stands in for a slur: the card, the log and the review list
+never print the word anyone matched, and nothing real is ever typed.
+
+#### Before either part
+
+```bash
+PROTECTION=1 ./scripts/acceptance-automod.sh
+```
+
+`PROTECTION=1` runs only the **protection tier**: local, no network, no
+credentials and no platform. It applies a fresh install's settings, injects
+synthetic lines (the canary, an email, a phone number, an IP address, a giveaway
+scam, a link shortener, a character flood, an impersonator, a shouted line, a
+raid burst, and benign lines such as scores, times, version strings and place
+names) through a real chat hub and overlay gate, and checks that the right lines
+were held, no benign line was flagged, the overlay's *held* counter rose by
+exactly the lines held, no delete, ban or timeout reached a platform, and no
+`automod acted` line was logged. It takes a few seconds and must pass before
+part 1. Without `PROTECTION=1` the script runs the model-endpoint steps as
+before.
+
+#### Part 1: display-only against real chat
+
+The pack on, **nothing armed**, and the model **off or a local model**. Hosted
+Jev against real chat needs your explicit OK for each test.
+
+1. **Nothing is armed.** `GET /api/v1/automod/matrix`: no `protection` cell is
+   on, on any platform. `grep 'automod acted'` in the server log finds nothing,
+   and keeps finding nothing through the whole of part 1.
+2. **One line per category, from a test account.** Post a line for each
+   category: the canary word; an email address you made up; a phone number
+   in `+44 20 7946 0958` form; a giveaway-scam line (`free nitro for everyone`);
+   a link-shortener URL; forty `#`; and, from a second account whose name
+   imitates one of your moderators, any line. (The impersonation check knows
+   your moderators' names only once they have posted since the server started,
+   so have a moderator post one line first, or add the name under
+   Impersonation, extra names.) Each must appear in **Flagged** on
+   the Chat page with a hold. **Settings, Chat overlays** shows *held back by
+   moderation* rising by the number held, the line is absent from the overlay in
+   OBS, and the platform's own chat is unchanged (nothing deleted, nobody
+   timed out). Use the card's test box (`POST /automod/explain`) for anything
+   you would rather not post.
+3. **Real streams.** Leave it running through one or more real streams. Afterwards
+   open **Flagged**, label each entry a true or a false positive, and divide: the
+   false positives over the lines the audience sent should be **0.2% or less**.
+   Release a wrongly held line with **Show on overlay**. Each false positive is a
+   line to add to the corpus (`internal/automod/pack/testdata/corpus-en.jsonl`,
+   with a synthetic stand-in, never the viewer's words) before the pack ships.
+4. **With the model on and scope `hard`**, fewer than 5% of lines should wait for
+   a verdict: `GET /api/v1/automod/stats`, `gate`, and the overlay card's
+   *dropped while waiting* figure.
+
+Part 1 passes when steps 1 and 2 are exactly as described and step 3 is within
+the figure. Do not arm anything to "see if it works": that is part 2.
+
+#### Part 2: armed actions with a test account
+
+One viewer test account per platform. For each step, tell yourself "go" first.
+
+1. **Delete.** Arm **Delete** on one platform's ladder row. The canary from the
+   test account is deleted on the platform; the **Flagged** entry shows it acted,
+   and a `chat.moderation` event with `by: automod` is on `GET /api/v1/events`.
+2. **Time out.** Arm **Time out**. Post a second canary inside the strike window:
+   the account is timed out for `ladderTimeoutSeconds`. On Kick the length rounds
+   **up** to whole minutes.
+3. **Ban.** Arm **Ban** for a category whose ceiling allows it (hate terms do).
+   A third canary bans the test account. Unban it by hand on the platform, and
+   check polyemesis's record of the ban clears.
+4. **Negatives.** An **unarmed** platform does nothing with the same canary. Turn
+   the global automod switch off while actions are queued: the queued actions are
+   dropped, not performed.
+5. **Twitch's own filters.** Add a term by hand in Twitch first, then **Copy the
+   severe hate terms to Twitch blocked terms**, which sends the pack (including
+   your canary). Turn hate and slurs off: only the terms polyemesis added are
+   removed and your hand-added term stays. **Set Twitch AutoMod to level 1 or 2**,
+   read it back, and restore the level you had.
+6. **Repeat per platform.** For a platform still marked unverified in
+   [Connecting your platforms](CONNECTING-PLATFORMS.md#chat-actions-by-platform),
+   this is also its first live moderation test: record what happens there.
+
+Disarm everything you armed when you are done, and unban the test account.
 
 ## The model tier
 
@@ -206,6 +498,120 @@ second opinion.
 The model is asked only about messages the free checkers did not already
 **remove**. A message a rule deleted is not sent anywhere; a message a rule
 only flagged still is.
+
+### Only the hard cases: the model scope
+
+`automod.protection.modelScope` decides **which messages** reach the model once
+it is on. It cannot switch the model on; the key, the Test button and the
+checker's own switch are all still yours.
+
+- **`all`** asks about every message the free checkers did not remove. This is
+  what every install did before the pack existed, so an **existing install
+  keeps `all`**. The card offers `hard` for you to choose, with an estimate of
+  the saving (the share of the messages the model was asked about that `hard`
+  would have skipped, counted while you run `all` and shown once there are 50;
+  `gate.considered` and `gate.wouldSkip` in `GET /automod/stats`). Nothing
+  moves you.
+- **`hard`**, the setting on a **fresh install**, asks only about a message the
+  free checkers could not settle. A severe hate term, a doxxing hit or a scam
+  hit is already decided and is never sent. Of the rest, the model sees a
+  message only when it shows at least one sign a list cannot judge:
+  - a contextual-tier hate term (a word that is a slur in some uses and not in
+    others);
+  - a violence word aimed at someone (`you`, `u`, `@name` or a reply);
+  - letters swapped for look-alikes, digits or zero-width characters, in two or
+    more places, with no list hit;
+  - a self-harm phrase;
+  - a sexual remark aimed at someone;
+  - an insult in a reply or at an `@name`.
+
+  The word lists behind these (`internal/automod/pack/hardcase-en.json`, about
+  a hundred and fifty entries or fewer each) are small, written by polyemesis,
+  and versioned with the pack. They are signals worth one question, not
+  verdicts. The corpus gates each signal's recall on the lines Jev should flag
+  (`hardcaseRecall` in `testdata/targets.json`) and the rate at which ordinary
+  chat shows a signal (`hardcaseBenignCeiling`). A link, a frame rate (`30fps`),
+  a level (`lvl50`), a numbered emote (`4Head`) and a name with a number on the
+  end are not obfuscation; a digit or symbol standing inside a word (`k1ll`,
+  `y0u`, `g4m3`) is.
+
+Within `hard` the model is also limited by:
+
+- **One call per author per 20 seconds.** A further hard message from the same
+  person keeps its free verdict (a contextual hate term stays a flag with no
+  hold), but it was not judged, so it is never shown as clear: see **When the
+  model cannot answer** below.
+- **One call per distinct text per 10 minutes.** Verdicts are remembered by the
+  message's NFKC text with case and spacing folded (not the lossier pack form,
+  which would let a benign line and an abusive look-alike such as `k1ll` share
+  one verdict), so a verbatim copypasta raid costs one call, not one per account.
+  A variant with different punctuation or leet spelling is a different question.
+- **A raid brake.** If the gate passes more than 30 messages in 10 seconds it
+  stops asking for 60 seconds; `GET /automod/stats` reports `gate.brakeUntil`.
+  Hard lines that arrive while it is on are treated as unjudged, not as clear.
+  The history checker and the pack's raid detector are already watching.
+- Your hourly ceiling, as always. 300 an hour is a sound ceiling for an install
+  on `hard`.
+
+A message the gate does not send is not waiting on anything, so it reaches the
+overlay at once instead of after up to 4 seconds.
+
+If both checkers fail, the message keeps its free verdict (fail open), as ever.
+A contextual hate term the model could not answer stays a flag only.
+
+**With the pack on**, a model finding at or above the floor also **holds the
+line off the overlay**, in every category except `other`. It asks for no
+platform action: those still come from the category table and the *Model* cells.
+The request also gains a seventh category, **self-harm** ("expresses intent or
+wish to self-harm, or encourages someone else to"). A self-harm finding is a
+flag and a hold and never anything stronger, at any probability and whatever
+your default action is, and `categoryActions` refuses a `self_harm` entry. With
+the pack off the request is exactly what it was.
+
+### When the model cannot answer
+
+By default a message the model was asked about and could not judge (an outage
+or a rejected key) passes, on the overlay too. Turn on
+`automod.model.holdWhenUnavailable` (**Hold the overlay when the model cannot
+answer**, off by default) and such a message waits off every overlay instead,
+and appears in the **Flagged** list so you can release it. It is read from the
+primary and covers both checkers.
+
+The same setting covers a hard-case line the **gate** kept from the model (the
+per-author limit, a full author table or the raid brake, with `modelScope`
+`hard`): it was judged by nothing, so it is treated exactly like a model outage.
+Held when the setting is on, passing as before when it is off, and on the
+**Flagged** list either way. A decoy followed by the real message, or a flood
+past the brake, therefore cannot slip an unchecked line onto the overlay as
+clear.
+
+A **spent hourly ceiling is not an outage**, and it does not hold lines: the
+model was not down, your spend limit worked, and holding every line after call
+500 would freeze the overlay for most of an hour on a busy chat. Those messages
+pass. But moderation is degraded, and the console says so: the model checker
+shows **Hourly ceiling reached** beside its spend line, and a line that showed a
+hard-case signal and was skipped for this reason is put on the **Flagged** list
+(not held) so a person can look. A chain with one checker at its ceiling and the
+other down still counts as an outage.
+
+At most **50** lines that nothing checked (outage, gate decline or spent
+ceiling together) are listed at once. The cap bounds the **list**, not the
+hold: past it a held line stays off the overlay without an entry, and is dropped
+after the overlay's ten-minute hold time. A long outage therefore cannot push
+real findings off the 500-entry review list, and never airs a line you asked to
+hold.
+
+The Test button and the moderation log say what went wrong in plain words
+instead of a bare status: `Jev rejected the API key -- paste a new one` for a
+401, and `Jev does not recognise model "..." -- check the model name` for a 400
+that names the model as unknown or invalid (a 400 that only mentions the model,
+such as an input over its context length, stays `Jev API returned 400`). The
+reply body is never shown.
+
+The model's verdict cache (10 minutes, `hard` scope) is emptied on every
+settings save, so a changed category action, hold setting, model, key or floor
+takes effect on the next message; the per-author limit and the raid brake are
+kept.
 
 ### Setting up a checker
 
@@ -384,8 +790,9 @@ on their own:
 | Method | Path | Why |
 |---|---|---|
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
-| `GET` | `/automod/stats` | what the checkers have done |
+| `GET` | `/automod/stats` | what the checkers have done, and the gate's counters (`gate`): the real ones under the `hard` model scope, and under `all` the dry run (`considered`, `wouldSkip`), absent until it has seen a message |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
+| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine, `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |
 
 Keys are write-only: `automod.model.hasApiKey` and

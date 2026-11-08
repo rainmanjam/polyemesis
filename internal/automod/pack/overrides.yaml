@@ -22,6 +22,13 @@ drop: []
 except: {}
 #   some term: [benign token, another]
 
+# Upstream exceptions to remove. An exception is a benign whole token, so one
+# that is itself a severe pack term is wrong: it would excuse the very thing the
+# pack catches. Pack.Validate rejects such an exception, so this is where the
+# generator is told to drop it.
+dropExcept:
+  spic: [spicks]
+
 # Terms upstream lacks. category is hate_speech or profanity; tier is severe or
 # contextual for hate_speech, mild or strong for profanity.
 add: []

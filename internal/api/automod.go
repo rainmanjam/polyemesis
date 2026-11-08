@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/automod/pack"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -64,6 +66,88 @@ func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
 		"presets":         automod.Presets(),
 		"modelCategories": automod.ModelCategories(),
 	})
+}
+
+// explainMaxRunes bounds the pretend message. Chat messages are far shorter; the
+// bound keeps a request from spending a long regex pass on a megabyte.
+const explainMaxRunes = 2000
+
+// handleAutomodExplain is the test box: what would the checkers say about this
+// pretend message?
+//
+// OFFLINE, STATELESS, UNLOGGED. It builds a fresh engine from the stored rules,
+// history limits and matrix, runs the pack and RuleSet.Check on the text, and
+// returns. It never calls History.Observe, a windowed detector or a strike
+// counter (all of which mutate per-author state), never makes a network call,
+// and the text appears in no log line and in no response field: a detection
+// names its detector and never the matched value. It is a different route from
+// /automod/test on purpose, which sends canned text to a model provider.
+func (s *Server) handleAutomodExplain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text       string   `json:"text"`
+		AuthorName string   `json:"authorName"`
+		Platform   string   `json:"platform"`
+		Protect    []string `json:"protect"`
+		EmoteCount int      `json:"emoteCount"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if utf8.RuneCountInString(req.Text) > explainMaxRunes {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("text is over %d characters", explainMaxRunes))
+		return
+	}
+	plat := db.Platform(strings.ToLower(strings.TrimSpace(req.Platform)))
+	if plat == "" {
+		plat = db.PlatformTwitch
+	}
+	if !automod.KnownPlatform(plat) {
+		writeError(w, http.StatusBadRequest, "platform is not one automod moderates")
+		return
+	}
+	if len(req.Protect) > 50 {
+		writeError(w, http.StatusBadRequest, "at most 50 protected names")
+		return
+	}
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	a := settings.Automod
+	rules, err := rulesFromSettings(a)
+	if err != nil {
+		// A rule that does not compile is the operator's to fix elsewhere; the
+		// test box still explains everything else.
+		rules = nil
+	}
+	hl := historyFromSettings(a)
+	// The pack as the operator has configured it, so the test box reflects their
+	// edits (a category off, an added term, an allowed domain) -- built as if it
+	// were on, because the box shows what turning it on does. No windowed
+	// trackers: nothing here remembers.
+	explainSet := a
+	explainSet.Protection.State = db.ProtectionOn
+	cfg, hold := packConfigFromSettings(explainSet.Protection)
+	cfg.Names = pack.NewNameSet(append(append([]string(nil), explainSet.Protection.Impersonation.Protect...), req.Protect...))
+	prot, err := automod.NewProtection(automod.ProtectionConfig{Pack: cfg, Hold: hold, History: &hl})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the protection pack did not load")
+		return
+	}
+	// No windowed trackers are passed: nothing here remembers. The pack always
+	// runs here so the operator can see what it would say, but whether it counts
+	// is the live engine's own rule (checkerConfigured): while the pack is off
+	// the response says so, rather than showing holds chat will not make.
+	packOn, _ := checkerConfigured(a, automod.CheckerProtection)
+	// The ladder is attached only to preview what each strike would ask for; the
+	// Strikes it holds is a throwaway nothing ever records into.
+	engine := automod.New(matrixFromSettings(a), automod.PlatformCaps{}, rules, automod.NewHistory(hl), nil).
+		WithProtection(prot).
+		WithLadder(ladderFromSettings(a.Protection, automod.NewStrikes()))
+	writeJSON(w, http.StatusOK, engine.ExplainAs(plat, automod.Subject{
+		AuthorName: req.AuthorName, Text: req.Text, EmoteCount: req.EmoteCount,
+	}, packOn))
 }
 
 // handleAutomodStats reports model spend and health.
@@ -140,7 +224,7 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("automod key stored, but settings could not be re-read to "+
 			"rebuild the model checker; it will pick the key up on restart", "err", err)
 	} else {
-		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget)
+		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
 	}
 
 	// A key set while debug recording is on is a literal the recording's
@@ -298,6 +382,11 @@ func matrixFromSettings(a db.AutomodSettings) automod.Matrix {
 	return m
 }
 
+// EffectiveAutomodMatrix is the matrix the engine runs with for these
+// settings: matrixFromSettings, exported for the acceptance driver so its gate
+// reads what the engine enforces rather than the raw stored map.
+func EffectiveAutomodMatrix(a db.AutomodSettings) automod.Matrix { return matrixFromSettings(a) }
+
 // checkerConfigured reports whether a checker exists at all in the engine
 // ApplyAutomod would build from these settings, and in the operator's terms why
 // not when it does not.
@@ -338,6 +427,15 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 			}
 		}
 		return false, "the model checker has no endpoint"
+	case automod.CheckerProtection:
+		// The pack is its own switch (protection.state). A cell armed for it
+		// while the pack is off would be stored and never fire, then go live the
+		// day the pack is turned on -- the same rule the model and rules
+		// columns follow. An undecided install (state "") is off too.
+		if !protectionOn(a) {
+			return false, "recommended protection is not on"
+		}
+		return true, ""
 	}
 	// History is built from DefaultHistoryLimits on every save and is never
 	// nil. A checker this build does not know is dropped by matrixFromSettings
@@ -406,6 +504,27 @@ func newlyArmedOnUnconfigured(stored map[string]bool, sent db.AutomodSettings) e
 // dropping one leaves an operator believing a protection exists when it does
 // not, which is the same silent-failure shape the capability gate prevents.
 func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
+	rs, _, err := rulesFromSettingsClamped(a)
+	return rs, err
+}
+
+// rulesFromSettingsClamped is rulesFromSettings that also reports the IDs of
+// stored self_harm rules it clamped to flag, for the caller to log once.
+func rulesFromSettingsClamped(a db.AutomodSettings) (*automod.RuleSet, []int64, error) {
+	return compileSettingsRules(a, automod.LoadRuleSet)
+}
+
+// rulesFromSettingsStrict is the SAVE-time check: the self_harm ceiling is a
+// refusal here, where loading clamps it.
+func rulesFromSettingsStrict(a db.AutomodSettings) (*automod.RuleSet, error) {
+	rs, _, err := compileSettingsRules(a, func(r []automod.Rule) (*automod.RuleSet, []int64, error) {
+		rs, err := automod.NewRuleSet(r)
+		return rs, nil, err
+	})
+	return rs, err
+}
+
+func compileSettingsRules(a db.AutomodSettings, build func([]automod.Rule) (*automod.RuleSet, []int64, error)) (*automod.RuleSet, []int64, error) {
 	rules := make([]automod.Rule, 0, len(a.Rules))
 	for _, r := range a.Rules {
 		rules = append(rules, automod.Rule{
@@ -419,7 +538,7 @@ func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
 			HoldOverlay:    r.HoldOverlay,
 		})
 	}
-	return automod.NewRuleSet(rules)
+	return build(rules)
 }
 
 // historyFromSettings converts the stored bounds.
@@ -486,7 +605,7 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 		// be read means this checker cannot run, not that chat stops.
 		log.Warn("automod model key unreadable; this checker will fail open", "checker", slot, "err", err)
 	}
-	return newChecker(conn, a.Model, key, binding, budget, func(err error) {
+	return newChecker(conn, a.Model, key, binding, budget, protectionOn(a), func(err error) {
 		// Named loudly rather than swallowed, for the same reason a rule that
 		// does not compile is: a confidence floor an operator set and this
 		// server ignored is a moderation posture they believe they have. The
@@ -501,13 +620,19 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 // to that endpoint, so a settings document and a key read a moment apart --
 // with a save moving the endpoint in between -- cannot pair the old key with
 // the new address: the call is refused instead.
-func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
+//
+// protected is whether the protection pack is on: it adds the self_harm
+// category to a Jev request (spec D14) and lets a finding hold the line off the
+// overlay (spec 6.4). Off, the request and the findings are exactly what they
+// were before the pack existed.
+func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, protected bool, onFloorErr func(error)) automod.ModelChecker {
 	if automod.ProtocolOf(conn) == automod.ProtocolJev {
 		cfg, err := automod.JevConfigFor(conn, shared)
 		if err != nil && onFloorErr != nil {
 			onFloorErr(err)
 		}
 		cfg.APIKey, cfg.KeyBinding = key, binding
+		cfg.SelfHarm, cfg.HoldOverlay = protected, protected
 		return automod.NewJev(cfg, budget)
 	}
 	cfg, err := automod.ModelConfigFor(conn, shared)
@@ -515,11 +640,12 @@ func newChecker(conn, shared db.AutomodModel, key, binding string, budget *autom
 		onFloorErr(err)
 	}
 	cfg.APIKey, cfg.KeyBinding = key, binding
+	cfg.HoldOverlay = protected
 	return automod.NewModel(cfg, budget)
 }
 
 func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
-	budget, secondaryBudget *automod.Budget) {
+	budget, secondaryBudget *automod.Budget, persist *automod.Persistent) {
 	if hub == nil {
 		return
 	}
@@ -530,7 +656,11 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		return
 	}
 
-	rules, err := rulesFromSettings(a)
+	rules, clamped, err := rulesFromSettingsClamped(a)
+	if len(clamped) > 0 && persist.NoteClamped(clamped) {
+		log.Warn("automod: stored self_harm rules asked for more than flag; clamped to flag",
+			"rule_ids", clamped)
+	}
 	if err != nil {
 		// Named loudly. A rule that does not compile is a protection the
 		// operator believes they have.
@@ -548,12 +678,34 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		model = automod.NewChain(primary, secondary)
 	}
 
+	if persist == nil {
+		// A caller with no long-lived state (a test) still gets a working
+		// ladder; it just forgets across applies.
+		persist = automod.NewPersistent()
+	}
+	hl := historyFromSettings(a)
 	engine := automod.New(
 		matrixFromSettings(a),
 		automod.PlatformCaps{},
 		rules,
-		automod.NewHistory(historyFromSettings(a)),
+		automod.NewHistory(hl),
 		model,
 	)
+	// The pack only when the install has it on. An undecided or declined
+	// install builds no pack checker, which is what keeps an upgrade silent.
+	prot, err := protectionFromSettings(a, hl, persist)
+	if err != nil {
+		// Degrade, like a rule that does not compile: chat still flows and the
+		// other checkers still run.
+		log.Error("automod protection pack did not load; running without it", "err", err)
+		prot = nil
+	}
+	if prot != nil {
+		engine.WithProtection(prot).WithLadder(ladderFromSettings(a.Protection, persist.Strikes))
+	}
+	// Which messages reach the model, and what happens to one it cannot answer.
+	// Both are no-ops with the model off.
+	engine.WithModelGate(automod.ParseModelScope(a.Protection.ModelScope), persist.Gate).
+		WithHoldOnModelError(a.Model.HoldWhenUnavailable)
 	hub.SetModerator(engine)
 }

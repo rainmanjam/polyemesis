@@ -45,9 +45,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 )
 
 // defaultEndpoint is the one DefaultModelConfig's model name implies. Not
@@ -83,6 +86,8 @@ func main() {
 		hub()
 	case "classify":
 		classify()
+	case "protection":
+		protection()
 	default:
 		fail("unknown command %q", os.Args[1])
 	}
@@ -692,4 +697,253 @@ func classify() {
 	// -- a judgement call about somebody else's classifier -- from "the round
 	// trip did not work", which is ours.
 	emit("bothCallsSucceeded", err == nil && err2 == nil)
+}
+
+// ------------------------------------------------------------- protection
+
+// canaryHate is the test-only hate term (spec 8.3 step 2). It is added to the
+// pack as an operator term, so no real slur is written in this file, in a log
+// or in a CI transcript.
+const canaryHate = "polyemesis-canary-hate"
+
+// canaryContextual is the contextual-tier twin: the pack flags it, never holds.
+const canaryContextual = "polyemesis-canary-context"
+
+// protCase is one synthetic line the protection tier injects.
+type protCase struct {
+	name string
+	// author is a distinct id per case so no case is another's strike or raid.
+	author string
+	text   string
+	// hold says whether the pack should keep the line off the overlay.
+	hold bool
+	// flag says the line must be flagged at all. Every non-benign case sets it,
+	// so a detector that silently stopped firing is a mismatch even when its
+	// policy is hold=false.
+	flag bool
+	// byPack says the finding must come from the protection pack, not from the
+	// legacy history checker that also sees the line (it flags caps on its own).
+	byPack bool
+	// repeat delivers the line this many times (default 1), for the
+	// near-duplicate detector.
+	repeat int
+}
+
+// protCases are written here and never sampled from chat. The positives use
+// documentation addresses and the example.com domain; the negatives are the
+// shapes the corpus's trap slices exist for (scores, times, versions, hype).
+var protCases = []protCase{
+	{name: "canary hate term", author: "u-hate", text: "hello " + canaryHate + " there", hold: true, flag: true, byPack: true},
+	{name: "email", author: "u-email", text: "mail me at canary.person@example.com", hold: true, flag: true, byPack: true},
+	{name: "phone", author: "u-phone", text: "call +44 20 7946 0958 now", hold: true, flag: true, byPack: true},
+	{name: "ipv4", author: "u-ip", text: "his ip is 198.18.0.1", hold: true, flag: true, byPack: true},
+	{name: "scam giveaway", author: "u-scam", text: "free nitro for everyone", hold: true, flag: true, byPack: true},
+	{name: "link shortener", author: "u-short", text: "look https://bit.ly/abc123", hold: true, flag: true, byPack: true},
+	{name: "character flood", author: "u-char", text: "wow " + strings.Repeat("#", 40), hold: true, flag: true, byPack: true},
+	{name: "impersonation", author: "kestrelcanary_official", text: "hi chat", hold: true, flag: true, byPack: true},
+	// The pack's own flag-only groups (GroupHateContextual, GroupEmote,
+	// GroupNearDuplicate): each must be flagged BY THE PACK and not held. The
+	// legacy history checker flags shouting on its own, so caps proves nothing
+	// about the pack and is not used for this.
+	{name: "contextual hate term (flag only)", author: "u-ctx", text: "that was " + canaryContextual + " honestly", flag: true, byPack: true},
+	{name: "emote wall (flag only)", author: "u-emote", text: strings.TrimSpace(strings.Repeat("LUL ", 14)), flag: true, byPack: true},
+	{name: "near-duplicate repeat (flag only)", author: "u-dup", text: "this is the exact same line again and again", flag: true, byPack: true, repeat: 6},
+	{name: "caps (legacy checker)", author: "u-caps", text: "THIS IS A VERY LOUD MESSAGE", flag: true},
+	{name: "benign hype", author: "u-b1", text: "LETS GOOOO that was clean"},
+	{name: "benign score", author: "u-b2", text: "final score was 3-2 at 12:30:45"},
+	{name: "benign version", author: "u-b3", text: "running jev-1.14.0 on 1920x1080 at 6000 kbps"},
+	{name: "benign banter", author: "u-b4", text: "that boss fight was a nightmare, I died ten times"},
+	{name: "benign place name", author: "u-b5", text: "I grew up near Scunthorpe and Penistone"},
+}
+
+var nearSuffix = []string{"please", "kindly", "today", "now", "thanks", "ok", "yes", "hello"}
+
+// protAdapter delivers every protCase, then the raid burst, then waits.
+type protAdapter struct {
+	mu      sync.Mutex
+	deletes int
+	bans    int
+	done    chan struct{}
+}
+
+func (a *protAdapter) Platform() db.Platform { return db.PlatformTwitch }
+func (a *protAdapter) Account() string       { return "acceptance" }
+
+func (a *protAdapter) Run(ctx context.Context, sink chat.Sink) error {
+	now := time.Now()
+	n := 0
+	deliver := func(author, name, text string) {
+		n++
+		sink.Deliver(chat.Message{
+			ID:       fmt.Sprintf("prot-%d", n),
+			Platform: db.PlatformTwitch,
+			Account:  "acceptance",
+			Author:   chat.Author{ID: author, Name: name},
+			Text:     text,
+			At:       now,
+		})
+	}
+	for _, c := range protCases {
+		reps := c.repeat
+		if reps < 1 {
+			reps = 1
+		}
+		for i := 0; i < reps; i++ {
+			text := c.text
+			if reps > 1 {
+				// Near copies, not exact ones: the pack drops a near-duplicate
+				// finding when the history checker already reported the exact
+				// repeat, so an exact repeat would never reach the pack.
+				text = fmt.Sprintf("%s %s", c.text, nearSuffix[i%len(nearSuffix)])
+			}
+			deliver(c.author, c.author, text)
+		}
+	}
+	// Five distinct authors sending the same long line inside the window is a
+	// raid; the fifth and later are held (the spec 11 defaults).
+	for i := 0; i < 6; i++ {
+		deliver(fmt.Sprintf("raid-%d", i), fmt.Sprintf("raider%d", i), "synthetic raid copypasta line for the acceptance suite")
+	}
+	close(a.done)
+	<-ctx.Done()
+	return nil
+}
+
+func (a *protAdapter) Delete(ctx context.Context, messageID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.deletes++
+	return nil
+}
+
+func (a *protAdapter) Ban(ctx context.Context, userID string, d time.Duration, reason string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.bans++
+	return nil
+}
+
+// nopPub is the overlay gate's publisher: this tier reads the gate's counters
+// rather than the event stream.
+type nopPub struct{}
+
+func (nopPub) Publish(eventstream.Envelope) {}
+
+// protection is part 1 of the staging runbook, credential-free and local: a
+// fresh install's default settings (the pack on, nothing armed, the model off)
+// are applied through the production ApplyAutomod, synthetic lines are injected
+// through a real Hub, and the real overlay Gate counts what it holds.
+//
+// The thing under test is the SAFETY CLAIM, not the detectors (the corpus tests
+// own those): held lines never reach the platform, benign lines are never held,
+// and nothing logs an action.
+func protection() {
+	set := db.DefaultSettings().Automod
+	set.Enabled = true
+	set.Model.Enabled = false
+	set.Secondary.Enabled = false
+	set.Protection.AddTerms = []db.ProtectionTerm{
+		{Term: canaryHate, Category: "hate_speech", Tier: "severe"},
+		{Term: canaryContextual, Category: "hate_speech", Tier: "contextual"},
+	}
+	set.Protection.Impersonation.Protect = []string{"kestrelcanary"}
+	emit("protectionState", set.Protection.State)
+	// Counted over the matrix the engine runs with (the same conversion
+	// ApplyAutomod uses), not over the raw map this function just built.
+	armed := 0
+	for k, on := range api.EffectiveAutomodMatrix(set).On {
+		if on && strings.HasSuffix(k, "/protection") {
+			armed++
+		}
+	}
+	emit("armedProtectionCells", armed)
+
+	var logBuf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h := chat.New(chat.WithLogger(log), chat.WithHistory(256))
+	gate := overlay.New(nopPub{})
+	h.SetDisplay(gate)
+	api.ApplyAutomod(h, nil, nil, log, set, automod.NewBudget(), automod.NewBudget(), nil)
+
+	ad := &protAdapter{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := h.Attach(ctx, ad); err != nil {
+		cancel()
+		fail("attach: %v", err)
+	}
+	select {
+	case <-ad.done:
+	case <-time.After(10 * time.Second):
+		cancel()
+		fail("the adapter never delivered its messages")
+	}
+	// The fast checkers run on the adapter goroutine; this only lets the
+	// worker settle so a late action, if there were one, would show.
+	time.Sleep(500 * time.Millisecond)
+
+	flagged := map[string]chat.FlaggedMessage{}
+	for _, f := range h.Flagged(db.PlatformTwitch, 0) {
+		flagged[f.Message.Author.ID] = f
+	}
+	wantHeld, wrong := 0, 0
+	for _, c := range protCases {
+		f, isFlagged := flagged[c.author]
+		if c.hold {
+			wantHeld++
+		}
+		bad := c.hold != (isFlagged && f.Held)
+		if c.flag && !isFlagged {
+			bad = true
+			emit("notFlagged", c.name)
+		}
+		if c.byPack && isFlagged {
+			fromPack := false
+			for _, fd := range f.Findings {
+				if fd.Checker == automod.CheckerProtection {
+					fromPack = true
+				}
+			}
+			if !fromPack {
+				bad = true
+				emit("notFromPack", c.name)
+			}
+		}
+		if bad {
+			wrong++
+			emit("wrong", c.name)
+		}
+	}
+	benignFlagged := 0
+	for _, c := range protCases {
+		if strings.HasPrefix(c.name, "benign") {
+			if _, ok := flagged[c.author]; ok {
+				benignFlagged++
+			}
+		}
+	}
+	raidHeld := 0
+	for i := 0; i < 6; i++ {
+		if f, ok := flagged[fmt.Sprintf("raid-%d", i)]; ok && f.Held {
+			raidHeld++
+		}
+	}
+	emit("expectedHeld", wantHeld)
+	emit("mismatches", wrong)
+	emit("benignFlagged", benignFlagged)
+	emit("raidHeld", raidHeld)
+
+	st := gate.Stats()
+	emit("gateHeld", st.Held)
+	emit("gateBlocked", st.Blocked)
+	emit("gateShown", st.Shown)
+
+	deletes, bans := func() (int, int) { ad.mu.Lock(); defer ad.mu.Unlock(); return ad.deletes, ad.bans }()
+	emit("deletes", deletes)
+	emit("bans", bans)
+	out := logBuf.String()
+	emit("actedLines", strings.Count(out, "automod acted"))
+	emit("canaryInLog", strings.Contains(out, canaryHate))
+
+	cancel()
+	h.Close()
 }

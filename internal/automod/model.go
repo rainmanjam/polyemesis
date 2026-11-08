@@ -106,6 +106,9 @@ type ModelConfig struct {
 	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 	// FlagOnly forces every finding to ActionFlag. Set for local presets.
 	FlagOnly bool `json:"flagOnly,omitempty"`
+	// HoldOverlay keeps a finding in any category but "other" off every overlay
+	// (spec 6.4). Set only for an install with the protection pack on.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 	// CategoryActions is the operator's per-category table. A category it
 	// does not name gets Action. See categoryAction.
 	CategoryActions map[Category]Action `json:"categoryActions,omitempty"`
@@ -156,6 +159,18 @@ type ModelStats struct {
 	FailedOpen int `json:"failedOpen"`
 	// LastDecidedBy is the checker that answered the most recent message.
 	LastDecidedBy Slot `json:"lastDecidedBy,omitempty"`
+	// Gate is the hard-case gate's counters. Set on the engine's aggregate,
+	// and only while the scope is "hard".
+	Gate *GateStats `json:"gate,omitempty"`
+	// CeilingSpent is set when the hourly ceiling is used up, so the model is
+	// not being asked: moderation is degraded, even though nothing is down.
+	// Lines with a hard-case signal that were skipped for this reason are on
+	// the review list. Set on the engine's aggregate only.
+	CeilingSpent bool `json:"ceilingSpent,omitempty"`
+	// UncheckedUnlisted counts lines nothing checked that got no review-list
+	// entry because the list's cap for them was reached (they were still held
+	// where the hold setting is on). Filled by the chat hub.
+	UncheckedUnlisted int `json:"uncheckedUnlisted,omitempty"`
 }
 
 // Model is the connector.
@@ -259,7 +274,7 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 		return nil, nil
 	}
 	if !m.reserve() {
-		return nil, fmt.Errorf("hourly ceiling of %d calls reached", m.cfg.MaxCallsPerHour)
+		return nil, &ceilingError{calls: m.cfg.MaxCallsPerHour}
 	}
 
 	v, err := m.ask(ctx, text)
@@ -300,6 +315,7 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	return []Finding{{
 		Checker:        CheckerModel,
 		Action:         categoryAction(m.cfg.Action, m.cfg.CategoryActions, m.cfg.FlagOnly, cat),
+		Hold:           m.cfg.HoldOverlay && cat != CategoryOther,
 		Provider:       m.cfg.Preset,
 		TimeoutSeconds: m.cfg.TimeoutSeconds,
 		Confidence:     v.Confidence,

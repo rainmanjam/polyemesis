@@ -143,6 +143,10 @@ func doJSON(ctx context.Context, hc *http.Client, method, endpoint string, token
 	return doJSONHeaders(ctx, hc, method, endpoint, token, nil, payload, out)
 }
 
+// respDateKey asks doJSONHeaders to store the response's Date header (the
+// server's own clock) in the *time.Time held under it.
+type respDateKey struct{}
+
 // doJSONHeaders is doJSON with extra request headers.
 //
 // It exists for Twitch's Helix API, which rejects a request carrying a valid
@@ -202,6 +206,11 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if p, ok := ctx.Value(respDateKey{}).(*time.Time); ok {
+		if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+			*p = d
+		}
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &apiError{

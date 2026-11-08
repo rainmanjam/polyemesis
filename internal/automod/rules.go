@@ -75,6 +75,13 @@ func (r *Rule) Compile() error {
 	if r.Category != "" && !KnownCategory(r.Category) {
 		return fmt.Errorf("rule %q has unknown category %q", r.Name, r.Category)
 	}
+	// Self-harm is never acted against: a person in crisis is not removed from
+	// the chat by a pattern. A rule may flag it (and hold it off the overlay,
+	// which is an attribute, not an action), and that is the ceiling.
+	if r.Category == CategorySelfHarm && r.Action != ActionFlag {
+		return fmt.Errorf("rule %q: the self_harm category can only flag; "+
+			"acting against someone in crisis is never automatic", r.Name)
+	}
 	// (?i) rather than lowercasing the subject: an operator writing a pattern
 	// with a character class should not have to think about case folding, and
 	// folding the subject would break any pattern that deliberately matches
@@ -114,6 +121,32 @@ func NewRuleSet(rules []Rule) (*RuleSet, error) {
 		out = append(out, r)
 	}
 	return &RuleSet{rules: out}, nil
+}
+
+// LoadRuleSet is NewRuleSet for rules ALREADY STORED. It differs in one way: a
+// stored self_harm rule whose action is above flag is clamped to flag instead
+// of failing the whole set, and its ID is returned so the caller can say so
+// once.
+//
+// The ceiling is enforced at SAVE time by Compile. A row stored before that
+// existed, or written around the API, must not take every other rule down with
+// it: NewRuleSet is all-or-nothing, so one over-reaching self_harm rule would
+// start automod with no rules at all, silently, on upgrade.
+func LoadRuleSet(rules []Rule) (*RuleSet, []int64, error) {
+	out := make([]Rule, 0, len(rules))
+	var clamped []int64
+	for _, r := range rules {
+		if r.Category == CategorySelfHarm && r.Action != ActionFlag && KnownActions(r.Action) {
+			clamped = append(clamped, r.ID)
+			r.Action = ActionFlag
+			r.TimeoutSeconds = 0
+		}
+		if err := r.Compile(); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, r)
+	}
+	return &RuleSet{rules: out}, clamped, nil
 }
 
 // Check returns the findings for one message, worst action first.

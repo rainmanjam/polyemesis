@@ -1400,6 +1400,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	// gives. The console unlocks a checker's switch on it.
 	settings.Automod.Model.Tested = s.checkerTested(automod.SlotPrimary, settings.Automod.Model)
 	settings.Automod.Secondary.Tested = s.checkerTested(automod.SlotSecondary, settings.Automod.Secondary)
+	// And whether the protection pack is still waiting on an answer: derived,
+	// never stored, so there is no second copy of "undecided" to drift.
+	settings.Automod.Protection.Offer = settings.Automod.Protection.State == ""
 	// The ingest credentials are sealed the same way the MQTT password and the
 	// automod key already were, except that they cannot be moved out of the
 	// blob -- the settings page reads and writes them -- so they are blanked on
@@ -1444,6 +1447,10 @@ func settingsVersion(st db.Settings) string {
 	st.Automod.Secondary.HasAPIKey = false
 	st.Automod.Model.Tested = false
 	st.Automod.Secondary.Tested = false
+	st.Automod.Protection.Offer = false
+	// Server bookkeeping, not the operator's document: a Twitch sync that
+	// records term ids must not make every open settings page stale.
+	st.Automod.Protection.Native = db.ProtectionNative{}
 	b, err := json.Marshal(st)
 	if err != nil {
 		return ""
@@ -1831,9 +1838,13 @@ func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVers
 	}
 	stored := snapshotStoredSettings(settings)
 	*storedJSON = stored.json
+	// Copied BEFORE the decode: it merges into the stored map in place.
+	native := cloneNative(settings.Automod.Protection.Native)
 	if err := decodeJSONInto(body, settings); err != nil {
 		return false, err
 	}
+	// The platform-term record is the server's, never the client's.
+	settings.Automod.Protection.Native = native
 	// A per-install MQTT instance when MQTT is first set up with the shared
 	// default, so two installs on one broker cannot collide. Never for an
 	// install that was ever configured: its topic tree is a contract.
@@ -1848,6 +1859,7 @@ func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVers
 	// these is not a fact about this server.
 	settings.Automod.Model.Tested = false
 	settings.Automod.Secondary.Tested = false
+	settings.Automod.Protection.Offer = false
 	if err := s.checkSettingsAgainstStored(settings, stored); err != nil {
 		return false, err
 	}
@@ -1967,7 +1979,7 @@ func snapshotStoredSettings(settings *db.Settings) storedSettings {
 	out.on = maps.Clone(settings.Automod.On)
 	// And the stored model-checker blocks, which newlyEnabledUntested
 	// compares against. Copies: only their connection fields are read.
-	out.automod = db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
+	out.automod = db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary, Protection: settings.Automod.Protection}
 	// Whether MQTT has ever been set up here, for AssignInstanceOnFirstSetup
 	// below: off, with no broker URL stored.
 	out.mqttNeverConfigured = !settings.MQTT.Enabled && strings.TrimSpace(settings.MQTT.BrokerURL) == ""
@@ -2048,7 +2060,7 @@ func (s *Server) checkAutomodChange(settings *db.Settings, stored storedSettings
 	// a valid rule is. This handler is the only place both are visible, and
 	// it is the only writer a person can reach.
 	if !sameAutomodRules(stored.rules, settings.Automod.Rules) {
-		if _, err := rulesFromSettings(settings.Automod); err != nil {
+		if _, err := rulesFromSettingsStrict(settings.Automod); err != nil {
 			return db.InvalidSettingsError{Err: err}
 		}
 	}
@@ -2061,6 +2073,9 @@ func (s *Server) checkAutomodChange(settings *db.Settings, stored storedSettings
 	// or a category action this build does not have. See
 	// newlyEnabledUntested and automodProviderProblems.
 	if err := automodProviderProblems(settings.Automod); err != nil {
+		return err
+	}
+	if err := protectionChangeProblems(stored.automod.Protection, settings.Automod.Protection); err != nil {
 		return err
 	}
 	return newlyEnabledUntested(stored.automod, settings.Automod, s.store.AutomodTestPass)
@@ -2216,7 +2231,7 @@ func (s *Server) ApplySettings(settings db.Settings) {
 	// sample skip the initial delay. handlePutSettings wakes it after a save.
 	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
 	// Rebuilding the automod engine is also what recompiles a changed rule.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
 	ApplyAlertSettings(s.mgr, settings.Alerts)
 }
 

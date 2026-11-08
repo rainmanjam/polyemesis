@@ -181,6 +181,45 @@
       "settings": {},
       "checker": "history",
       "ready": true
+    },
+    {
+      "name": "the pack is not switched on yet",
+      "settings": {},
+      "checker": "protection",
+      "ready": false,
+      "reason": "protectionOff"
+    },
+    {
+      "name": "the pack is undecided",
+      "settings": {
+        "protection": {
+          "state": ""
+        }
+      },
+      "checker": "protection",
+      "ready": false,
+      "reason": "protectionOff"
+    },
+    {
+      "name": "the pack was declined",
+      "settings": {
+        "protection": {
+          "state": "off"
+        }
+      },
+      "checker": "protection",
+      "ready": false,
+      "reason": "protectionOff"
+    },
+    {
+      "name": "the pack is on",
+      "settings": {
+        "protection": {
+          "state": "on"
+        }
+      },
+      "checker": "protection",
+      "ready": true
     }
   ]
 }

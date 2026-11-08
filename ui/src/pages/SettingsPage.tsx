@@ -34,6 +34,7 @@ import { useIngestLive } from "@/hooks/useLiveData";
 import { AccountLiveStats, TwitchChattersLine } from "@/components/AccountLiveStats";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { AutomodConfig } from "@/components/AutomodConfig";
+import { AutomodProtectionCard } from "@/components/AutomodProtection";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
@@ -1490,6 +1491,8 @@ function PipelineSettings({
 
           Reading order is therefore the causal order: write the rules, key the
           model, then say what each may do. */}
+      <AutomodProtectionCard settings={draft} onChange={setDraft} saved={settings} />
+
       <AutomodConfig settings={draft} onChange={setDraft} saveError={saveError} />
 
       <AutomodMatrix settings={draft} onChange={setDraft} />

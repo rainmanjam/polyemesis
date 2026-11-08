@@ -114,6 +114,12 @@ func (p *Pack) Validate() error {
 		return fmt.Errorf("pack %s: needs at least one source", p.ID)
 	}
 	seen := make(map[string]bool, len(p.Entries))
+	severe := map[string]bool{}
+	for _, e := range p.Entries {
+		if e.Category == CategoryHate && e.Tier == TierSevere {
+			severe[e.Term] = true
+		}
+	}
 	for i, e := range p.Entries {
 		if e.Term == "" || Fold(e.Term) != e.Term {
 			return fmt.Errorf("pack %s: entry %d is not in pack form", p.ID, i)
@@ -137,6 +143,9 @@ func (p *Pack) Validate() error {
 		for _, x := range e.Except {
 			if Fold(x) != x || strings.ContainsRune(x, ' ') || !strings.Contains(x, e.Term) {
 				return fmt.Errorf("pack %s: entry %d: an exception is not a whole token containing the term", p.ID, i)
+			}
+			if severe[x] {
+				return fmt.Errorf("pack %s: entry %d: an exception is itself a severe term", p.ID, i)
 			}
 		}
 	}

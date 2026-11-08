@@ -332,7 +332,15 @@ How the table plays out in practice:
 - **A send to several platforms uses the strictest limit.** With X connected
   that is 140 characters, so the same text goes out everywhere.
 - **Automod acts only where the table shows ✅.** Anywhere else it flags the
-  message or hides it locally.
+  message or hides it locally. That includes the recommended-protection pack:
+  it is on by default and only flags and holds lines off the overlays, and each
+  platform's delete, time-out and ban is a switch you arm yourself (Settings,
+  Pipeline, Recommended protection). A rung the platform cannot perform is shown
+  inert with the reason. Only Twitch also has its own filters the pack can fill
+  (blocked terms and the AutoMod level), because Twitch's filters see only
+  Twitch chat. See [Automatic moderation](AUTOMOD.md#the-recommended-protection-pack),
+  including the staging runbook for a first live test on a platform that is not
+  yet verified.
 - **Where there is no native poll, polls run from chat votes.** Twitch and
   YouTube get a native poll; every other chat is asked to type a number.
 - **An X mute belongs to the broadcaster**, so it applies to all of that

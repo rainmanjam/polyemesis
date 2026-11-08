@@ -1515,6 +1515,7 @@ partial file behind.
 | `GET` | `/automod/matrix` |
 | `GET` | `/automod/stats` |
 | `POST` | `/automod/test` |
+| `POST` | `/automod/explain` |
 
 Automod's *configuration* lives inside `/settings` — the matrix, the rules and
 the model options all round-trip through that blob. Only a few things need
@@ -1532,6 +1533,20 @@ to drift.
 the ceiling, failures, and the last error. The top-level numbers are the
 primary model checker's; `primary` and `secondary` carry each checker's own,
 with `fallbacks`, `failedOpen` and `lastDecidedBy` beside them.
+
+`POST /automod/explain` is the test box for the recommended-protection pack:
+`{text, authorName?, platform?, protect?, emoteCount?}` returns each detector
+that fired (`detector`, `category`, `tier`, `form`, `reason`, `hold`, `action`,
+`act`), whether the message would be held off the overlay, and the detectors that
+depend on what the author sent recently and so cannot be answered for one message
+(`windowed`). **Offline and stateless**: it records nothing in any window, makes
+no network call and logs no text, and a detection names its detector, never the
+matched value. `text` is bounded at 2,000 characters; `protect` names accounts to
+treat as protected for this one test. It is **session-only**, like `/automod/test`: it answers from
+your rule names and pack policy, so no API token can call it. `protection` says
+whether the pack is on in the live engine (it is not yet), `held` is what chat
+would do, `wouldHoldIfOn` is what it would do with the pack on, and a detection
+with `live: false` is the pack's, shown for that second case.
 
 `POST /automod/test` is the Test button. It sends three synthetic messages to
 the connection in the body (`checker`, `protocol`, `preset`, `endpoint`,
@@ -2287,6 +2302,9 @@ the capability matrix reads *Unverified* for that reason.
 | `POST` | `warnings` | `login` or `userId`, `reason` (required, 500 characters) |
 | `GET` `POST` `DELETE` | `blocked-terms` | list, add (`text`, 2–500 characters, `*` only at an end of a word), remove (`id` in the query) |
 | `POST` | `blocked-terms-sync` | adds the enabled automod rules whose pattern is a plain term (no regex metacharacter) to Twitch. Adds only, never removes; answers `added`, `present` and `skipped` with a reason each |
+| `GET` `POST` `DELETE` | `pack-terms`, `pack-terms-sync` | the recommended-protection pack on Twitch's blocked terms. `GET pack-terms` answers counts (`eligible`, `recorded`, `pushedPackVersion`, `packVersion`, `on`); `POST pack-terms-sync` reconciles the pack's severe hate terms (plus the operator's added severe terms, minus allowed words) and answers counts, `restored` (terms polyemesis had added that the operator removed on Twitch, put back), `remaining` and `done`, adding at most one batch per call, so re-post until `done`; `DELETE pack-terms` removes exactly the terms polyemesis added. A term id is recorded, per channel and with a hash of the term, in `automod.protection.native.twitch.channels[].addedTermIds` only when the add itself created it (absent from the list just read, `created_at` within seconds of Twitch's own clock). Needs protection on (`400` otherwise); one at a time (`409`). No term is ever in an answer, and `GET /settings` carries hashes, not terms; if the record cannot be written the error says how many terms were added but not recorded |
+| `PUT` | `pack-automod-level` | `level` 1 or 2: raises every AutoMod category except swearing to at least that level, never lowers one, and answers `before` and `after` |
+| `POST` | `pack-protected-names` | reads the moderators and VIPs and teaches the impersonation detector their names (in memory, bounded). Answers `moderators`, `vips` and a `vipNote` when the VIP list could not be read |
 | `GET` | `chatters` | Twitch's count of everyone connected to chat; `list=1` adds the names (capped at five pages) |
 | `GET` `PUT` | `automod-settings` | Twitch's AutoMod levels (0–4). The `PUT` replaces: send `settings.overallLevel` alone, or all eight categories |
 | `POST` | `held-messages` | `messageId`, `allow` (true approves, false denies) a message AutoMod is holding. Receiving the held messages needs EventSub and is not built; the console has the controls for an id supplied by hand |

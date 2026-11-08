@@ -506,6 +506,14 @@ def gen_number_traps():
     for v in versions:
         add(MAIN, "running %s here, no issues" % v, "doxxing", "pass", "version string, must not read as IPv4 or a phone", "number_trap", "doxxing/ipv4")
         add(MAIN, "which version is that? mine says %s" % v, "doxxing", "pass", "version string", "number_trap", "doxxing/ipv4")
+    # Well-known public service addresses: tech chat names them all the time, and
+    # they identify a DNS provider, not a person. The detector rejects them like
+    # a private range, so these are traps and not positives.
+    resolvers = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112", "208.67.222.222", "2001:4860:4860::8888", "2606:4700:4700::1111"]
+    for a in resolvers:
+        g = "doxxing/ipv6" if ":" in a else "doxxing/ipv4"
+        add(MAIN, "set your dns to %s and retry" % a, "doxxing", "pass", "public DNS resolver, not a person's address", "number_trap", g)
+        add(MAIN, "ping me at %s lol" % a, "doxxing", "pass", "public DNS resolver, not a person's address", "number_trap", g)
     prices = ["$1,299.99", "$19.99", "299.99", "$1,000,000", "49.95", "$5.00", "1,299.00", "$0.99", "$12,345.67", "89.99 usd"]
     for p in prices:
         add(MAIN, "the deck costs %s lol" % p, "doxxing", "pass", "price", "number_trap", G)
@@ -797,7 +805,10 @@ def gen_impersonation():
                      author=nm, platform=p["platform"], detector="fold", obf=kind if kind == "homoglyph" else "", protects=p["name"], esc=(kind == "homoglyph"))
             n_pos += ok
     # edit distance 1 with a link, handle or scam hit -> hold
-    links = ["https://nitro-gift.example/claim", "https://bit.ly/demo11", "@free_robux_team", "free nitro giveaway at https://example.com/x"]
+    # The signals are neutral on purpose: the scorer counts a line once, in its own
+    # group, so a signal that a scam detector also flags would score as a scam
+    # false positive. The scam-hit arm is covered in checker_test.go instead.
+    links = ["https://example.com/x", "https://example.org/join", "@dusk_runner", "https://example.net/live"]
     for j, p in enumerate(PROTECTED):
         nm = p["name"]
         if len(nm.replace(" ", "")) < 6:
@@ -810,7 +821,7 @@ def gen_impersonation():
             if mutated.lower() == nm.lower():
                 continue
             text = "hey it's me, join " + links[(j + k) % len(links)]
-            add(MAIN, text, "impersonation", "hold", "edit distance 1 from a protected name plus a link, handle or scam hit", "positive", "impersonation",
+            add(MAIN, text, "impersonation", "hold", "edit distance 1 from a protected name plus a link or handle", "positive", "impersonation",
                 author=mutated, platform=p["platform"], detector="edit1", protects=nm)
             # same name, no link: must pass
             add(MAIN, benign_msgs[(j + k) % len(benign_msgs)], "impersonation", "pass", "edit distance 1 but no link, handle or scam hit: a fan, not an impersonator",

@@ -153,11 +153,15 @@ An overlay shows a message only after automatic moderation has judged it:
 - **Automod off, or only the free checkers:** a message is judged as it
   arrives, so it appears immediately. A message the rules or history checkers
   will hide, delete, time out or ban never appears at all.
-- **The model checker on:** each message waits for the model's verdict for up
-  to **4 seconds**. A message the model removes never appears. If the verdict
-  hasn't arrived after 4 seconds, the overlay leaves that message out. The
-  console still shows it. If the model endpoint fails, messages pass, just as
-  they do in the console.
+- **The model checker on:** a message the model is asked about waits for its
+  verdict for up to **4 seconds**. A message the model removes never appears. If
+  the verdict hasn't arrived after 4 seconds, the overlay leaves that message
+  out. The console still shows it. If the model endpoint fails, messages pass,
+  just as they do in the console, unless you turned on **Hold the overlay when
+  the model cannot answer**: then they wait off the overlay and are listed to
+  release. With the model scope on `hard` (a fresh install's default; see
+  [AUTOMOD.md](AUTOMOD.md#only-the-hard-cases-the-model-scope)) the model is
+  asked only about hard cases, so every other line reaches the overlay at once.
 
 - **A rule that holds its matches:** a rule with **Hold off the overlay** on
   (see [AUTOMOD.md](AUTOMOD.md#hold-a-match-off-the-overlay)) keeps its matches
@@ -166,6 +170,16 @@ An overlay shows a message only after automatic moderation has judged it:
   the Chat page to put it on screen after all. The server keeps the last 200
   held lines for ten minutes for this. A held line counts in the "held back by
   moderation" figure below, and again as shown if you release it.
+
+- **The recommended-protection pack:** on a fresh install the pack is on, and a
+  hit it marks as held (hate terms, doxxing, scams, floods, impersonation and
+  raid copies; shouting and emote walls are only flagged) is kept off every
+  overlay the same way, with nothing sent to the platform. It lands in the same
+  **Flagged** list with **Show on overlay**, and counts in the same "held back by
+  moderation" figure. A line the pack holds is still in the console, flagged. A
+  held message is not counted as a chat poll vote. See
+  [AUTOMOD.md](AUTOMOD.md#the-recommended-protection-pack), and its staging
+  runbook for how to check this on your own channels before you arm anything.
 
 If you hide or delete a message, or ban its author, after it's on screen, it
 leaves every overlay straight away. An overlay that reconnects, for example

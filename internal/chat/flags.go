@@ -74,6 +74,28 @@ func (h *Hub) noteFlag(m Message, findings []automod.Finding) {
 	}
 }
 
+// unjudgedHeldFor is how long a line held for an unavailable model can still be
+// released: the overlay gate keeps a held line for ten minutes. The hub is not
+// told when one is released or expires, so an entry older than this is treated
+// as no longer holding anything; without it a finished outage's entries would
+// sit among the 500 for hours and count against the cap for ever.
+const unjudgedHeldFor = 10 * time.Minute
+
+// unjudgedHeld counts the review-list entries that are only there because the
+// model could not answer, and that can still be holding a line.
+func (h *Hub) unjudgedHeld() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.now()
+	n := 0
+	for _, f := range h.flags {
+		if len(f.Findings) == 1 && isUncheckedReason(f.Findings[0].Reason) && now.Sub(f.At) < unjudgedHeldFor {
+			n++
+		}
+	}
+	return n
+}
+
 // messageFor returns a held message, or a bare one naming it when it has
 // already left the history ring.
 func (h *Hub) messageFor(p db.Platform, account, msgID, authorID string) Message {

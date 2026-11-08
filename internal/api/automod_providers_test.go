@@ -230,11 +230,11 @@ func TestApplyAutomodBuildsBothCheckersAndKeepsTheirBudgets(t *testing.T) {
 	pb, sb := automod.NewBudget(), automod.NewBudget()
 	hub := newTestHub(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ApplyAutomod(hub, store, box, log, a, pb, sb)
+	ApplyAutomod(hub, store, box, log, a, pb, sb, nil)
 	if _, err := hub.Moderator().CheckModel(t.Context(), db.PlatformTwitch, "you are worthless"); err != nil {
 		t.Fatalf("the secondary did not answer for an unreachable primary: %v", err)
 	}
-	ApplyAutomod(hub, store, box, log, a, pb, sb)
+	ApplyAutomod(hub, store, box, log, a, pb, sb, nil)
 	st := hub.Moderator().ModelStats()
 	if st.Primary == nil || st.Secondary == nil || st.Primary.Protocol != automod.ProtocolJev ||
 		st.Secondary.CallsThisHour != 1 || st.CallsThisHour != 1 {
@@ -291,7 +291,10 @@ func TestNeitherModelKeyLeaksIntoSettingsResponsesLogsEventsOrTheDebugBundle(t *
 			}
 			b := map[string]any{"checker": slot, "protocol": proto, "endpoint": echo.URL, "key": key}
 			out := string(send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK))
-			if !strings.Contains(out, "401") {
+			// A Jev 401 reads as a sentence for the operator, an OpenAI-shaped
+			// one still reports the status. Either way the key is not in it
+			// (the surfaces check below).
+			if !strings.Contains(out, "401") && !strings.Contains(out, "Jev rejected the API key") {
 				t.Fatalf("the test response does not report the failure: %s", out)
 			}
 			surfaces = append(surfaces, out)

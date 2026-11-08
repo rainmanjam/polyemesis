@@ -229,46 +229,81 @@ var leafSensitivity = map[string]sensitivity{
 	// protects the key entered THERE, not one pasted into this field, and this
 	// row said sPublic because the block's derived hasApiKey boolean was taken
 	// as settling the whole block.
-	"settings.automod.model.endpoint":        sMasked,
-	"settings.automod.model.hasApiKey":       sPublic,
-	"settings.automod.model.instruction":     sPublic,
-	"settings.automod.model.maxCallsPerHour": sPublic,
-	"settings.automod.model.minConfidence":   sPublic,
-	"settings.automod.model.model":           sPublic,
-	"settings.automod.model.timeoutForBan":   sPublic,
-	"settings.automod.model.timeoutSeconds":  sPublic,
+	"settings.automod.model.endpoint":            sMasked,
+	"settings.automod.model.hasApiKey":           sPublic,
+	"settings.automod.model.instruction":         sPublic,
+	"settings.automod.model.maxCallsPerHour":     sPublic,
+	"settings.automod.model.minConfidence":       sPublic,
+	"settings.automod.model.model":               sPublic,
+	"settings.automod.model.timeoutForBan":       sPublic,
+	"settings.automod.model.holdWhenUnavailable": sPublic,
+	"settings.automod.model.timeoutSeconds":      sPublic,
 	// #21. The protocol, preset and category table are configuration; tested
 	// is a derived boolean like hasApiKey. The secondary mirrors the primary:
 	// its ENDPOINT is masked for the same api_key-in-the-query reason, and its
 	// key is sealed in its own table and never in the blob.
-	"settings.automod.model.protocol":            sPublic,
-	"settings.automod.model.preset":              sPublic,
-	"settings.automod.model.categoryActions":     sPublic,
-	"settings.automod.model.tested":              sPublic,
-	"settings.automod.secondary.action":          sPublic,
-	"settings.automod.secondary.enabled":         sPublic,
-	"settings.automod.secondary.endpoint":        sMasked,
-	"settings.automod.secondary.hasApiKey":       sPublic,
-	"settings.automod.secondary.instruction":     sPublic,
-	"settings.automod.secondary.maxCallsPerHour": sPublic,
-	"settings.automod.secondary.minConfidence":   sPublic,
-	"settings.automod.secondary.model":           sPublic,
-	"settings.automod.secondary.timeoutForBan":   sPublic,
-	"settings.automod.secondary.timeoutSeconds":  sPublic,
-	"settings.automod.secondary.protocol":        sPublic,
-	"settings.automod.secondary.preset":          sPublic,
-	"settings.automod.secondary.categoryActions": sPublic,
-	"settings.automod.secondary.tested":          sPublic,
-	"settings.automod.on":                        sPublic,
-	"settings.automod.platformEnabled":           sPublic,
-	"settings.automod.rules.action":              sPublic,
-	"settings.automod.rules.category":            sPublic,
-	"settings.automod.rules.holdOverlay":         sPublic,
-	"settings.automod.rules.enabled":             sPublic,
-	"settings.automod.rules.id":                  sPublic,
-	"settings.automod.rules.name":                sPublic,
-	"settings.automod.rules.pattern":             sPublic,
-	"settings.automod.rules.timeoutSeconds":      sPublic,
+	"settings.automod.model.protocol":                  sPublic,
+	"settings.automod.model.preset":                    sPublic,
+	"settings.automod.model.categoryActions":           sPublic,
+	"settings.automod.model.tested":                    sPublic,
+	"settings.automod.secondary.action":                sPublic,
+	"settings.automod.secondary.enabled":               sPublic,
+	"settings.automod.secondary.endpoint":              sMasked,
+	"settings.automod.secondary.hasApiKey":             sPublic,
+	"settings.automod.secondary.instruction":           sPublic,
+	"settings.automod.secondary.maxCallsPerHour":       sPublic,
+	"settings.automod.secondary.minConfidence":         sPublic,
+	"settings.automod.secondary.model":                 sPublic,
+	"settings.automod.secondary.timeoutForBan":         sPublic,
+	"settings.automod.secondary.holdWhenUnavailable":   sPublic,
+	"settings.automod.secondary.timeoutSeconds":        sPublic,
+	"settings.automod.secondary.protocol":              sPublic,
+	"settings.automod.secondary.preset":                sPublic,
+	"settings.automod.secondary.categoryActions":       sPublic,
+	"settings.automod.secondary.tested":                sPublic,
+	"settings.automod.on":                              sPublic,
+	"settings.automod.platformEnabled":                 sPublic,
+	"settings.automod.protection.addTerms.category":    sPublic,
+	"settings.automod.protection.addTerms.term":        sPublic,
+	"settings.automod.protection.addTerms.tier":        sPublic,
+	"settings.automod.protection.allowDomains":         sPublic,
+	"settings.automod.protection.allowTerms":           sPublic,
+	"settings.automod.protection.categories.detectors": sPublic,
+	"settings.automod.protection.categories.enabled":   sPublic,
+	"settings.automod.protection.ceilings":             sPublic,
+	"settings.automod.protection.holdDetectors":        sPublic,
+	// allowIds and protect are sPublic on purpose, not by oversight. The classes
+	// above are about CREDENTIALS, and a platform account id or a channel name
+	// is neither: both are public identifiers that anyone can read off the
+	// platform, and they are the operator's own allow list and the names of the
+	// operator's own broadcaster and moderators, not data collected about
+	// viewers. A read token needs them to show the Impersonation panel. If a
+	// shareable export ever needs them removed, that is a privacy class this
+	// table does not have, and it should be added for every such field at once.
+	"settings.automod.protection.impersonation.allowIds": sPublic,
+	"settings.automod.protection.impersonation.protect":  sPublic,
+	"settings.automod.protection.ladderTimeoutSeconds":   sPublic,
+	"settings.automod.protection.offer":                  sPublic,
+	// The per-channel record of the blocked terms polyemesis added: the
+	// channel's numeric id (public on the channel page), Twitch's opaque term
+	// ids, a hash of each term (never the term), and the pack version pushed.
+	// A read token needs the counts to draw the card.
+	"settings.automod.protection.native.twitch.channels.broadcasterId":     sPublic,
+	"settings.automod.protection.native.twitch.channels.addedTermIds":      sPublic,
+	"settings.automod.protection.native.twitch.channels.pushedPackVersion": sPublic,
+	"settings.automod.protection.modelScope":                               sPublic,
+	"settings.automod.protection.pack":                                     sPublic,
+	"settings.automod.protection.packVersion":                              sPublic,
+	"settings.automod.protection.state":                                    sPublic,
+	"settings.automod.protection.strikeWindowSeconds":                      sPublic,
+	"settings.automod.rules.action":                                        sPublic,
+	"settings.automod.rules.category":                                      sPublic,
+	"settings.automod.rules.holdOverlay":                                   sPublic,
+	"settings.automod.rules.enabled":                                       sPublic,
+	"settings.automod.rules.id":                                            sPublic,
+	"settings.automod.rules.name":                                          sPublic,
+	"settings.automod.rules.pattern":                                       sPublic,
+	"settings.automod.rules.timeoutSeconds":                                sPublic,
 	// An IANA zone name. It says how times are WRITTEN DOWN and reveals
 	// nothing about the install beyond roughly where its operator sits, which
 	// the destinations already say louder.

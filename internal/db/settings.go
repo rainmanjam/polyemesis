@@ -9,8 +9,10 @@ import (
 	"math"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -1901,6 +1903,217 @@ type AutomodSettings struct {
 	// Action, TimeoutForBan and CategoryActions are not read: the primary's
 	// apply to both.
 	Secondary AutomodModel `json:"secondary"`
+	// Protection is the recommended-protection pack: a built-in term list and
+	// detector set that flags, and holds off the overlays, what a channel
+	// should never show. See AutomodProtection.
+	Protection AutomodProtection `json:"protection"`
+}
+
+// The protection pack's state. Undecided is the empty string.
+const (
+	// ProtectionOn: the pack runs.
+	ProtectionOn = "on"
+	// ProtectionOff: the operator was offered it and declined, or turned it off.
+	ProtectionOff = "off"
+)
+
+// DefaultProtectionPack and DefaultProtectionPackVersion name the English pack
+// shipped in this build. internal/api holds the version in step with the pack
+// itself with a test; db cannot import internal/automod.
+const (
+	DefaultProtectionPack        = "en"
+	DefaultProtectionPackVersion = 1
+	// DefaultLadderSeconds is both the strike window and the ladder's timeout.
+	DefaultLadderSeconds = 600
+)
+
+// AutomodProtection is the recommended-protection block.
+//
+// SPARSE ON PURPOSE. The pack's own data is in the binary; what is stored here
+// is the operator's DIFF over it -- a category switched off, a term added, a
+// domain allowed. A release that updates the pack therefore reaches every
+// install that is on, and nothing the operator chose is overwritten, because
+// nothing was copied. DefaultSettings must not write the pack's categories,
+// ceilings or holds into this block for the same reason: an empty diff is what
+// "uncustomised" means.
+//
+// Arming a platform action is NOT here. It is the matrix cell
+// platform/rung/protection in AutomodSettings.On, the single answer to "may
+// this happen".
+type AutomodProtection struct {
+	// State is "" (undecided: an upgraded install, offered the pack and not yet
+	// answered), "on" or "off". A fresh install is "on". An install that
+	// predates the block is "" and does nothing new until its operator says so.
+	State string `json:"state"`
+	// Pack is the pack id, and PackVersion the version the operator last
+	// ACCEPTED.
+	Pack        string `json:"pack"`
+	PackVersion int    `json:"packVersion"`
+	// Categories switches a whole category, and detectors inside it. Absent is
+	// the pack default.
+	Categories map[string]ProtectionCategory `json:"categories"`
+	// Ceilings overrides how high a category may climb the ladder: hold,
+	// delete, timeout or ban.
+	Ceilings map[string]string `json:"ceilings"`
+	// AddTerms and AllowTerms are the operator's diff over the term list.
+	AddTerms   []ProtectionTerm `json:"addTerms"`
+	AllowTerms []string         `json:"allowTerms"`
+	// AllowDomains are never a shortener, lookalike or scam link.
+	AllowDomains []string `json:"allowDomains"`
+	// HoldDetectors overrides whether a detector also holds the message off the
+	// overlay.
+	HoldDetectors map[string]bool `json:"holdDetectors"`
+	// Impersonation lists extra names to protect, and author ids that are never
+	// an impostor.
+	Impersonation ProtectionImpersonation `json:"impersonation"`
+	// StrikeWindowSeconds is how far back a strike counts, and
+	// LadderTimeoutSeconds the timeout rung's length. Never zero: a zero
+	// timeout is a permanent ban.
+	StrikeWindowSeconds  int `json:"strikeWindowSeconds"`
+	LadderTimeoutSeconds int `json:"ladderTimeoutSeconds"`
+	// ModelScope is which messages reach the Jev model once it is on: "hard"
+	// (only the cases the free checkers cannot settle, within a budget) or
+	// "all" (every message the fast pass did not remove, which is what every
+	// install did before the pack). A fresh install is "hard"; an install whose
+	// stored blob predates the field is "all" (mergeBaseSettings), so an upgrade
+	// never quietly stops checking messages it used to check.
+	ModelScope string `json:"modelScope"`
+	// Native is the bookkeeping for what the pack has pushed to a platform's
+	// own filters. It is SERVER-OWNED: the platform actions write it, and a
+	// PUT /settings can neither set nor clear it (mergeSavedSettings puts the
+	// stored value back), so a stale tab cannot make polyemesis forget which
+	// platform terms it added.
+	Native ProtectionNative `json:"native"`
+	// Offer is DERIVED: true while State is undecided, so the console can show
+	// the banner. Filled on the way out of GET /settings and ignored when sent,
+	// like AutomodModel.Tested.
+	Offer bool `json:"offer,omitempty"`
+}
+
+// The Jev scopes.
+const (
+	ModelScopeAll  = "all"
+	ModelScopeHard = "hard"
+)
+
+// ProtectionNative is what the pack has pushed to platforms' own filters.
+type ProtectionNative struct {
+	Twitch ProtectionTwitchNative `json:"twitch"`
+}
+
+// ProtectionTwitchNative is the Twitch half: one record per channel, because a
+// term id means something only on the channel that issued it and polyemesis can
+// moderate several (one runner per Twitch account).
+type ProtectionTwitchNative struct {
+	Channels []ProtectionTwitchChannel `json:"channels"`
+}
+
+// ProtectionTwitchChannel is what the pack pushed to ONE Twitch channel.
+type ProtectionTwitchChannel struct {
+	// BroadcasterID is the channel's numeric Twitch id.
+	BroadcasterID string `json:"broadcasterId"`
+	// AddedTermIDs maps a Twitch blocked-term id to a hash of its term
+	// (chat.TermKey), never the term itself: the document is readable by any
+	// read token and must not carry the slur list. It holds exactly the terms
+	// polyemesis's own sync created; a term the operator, a moderator or
+	// AutoMod added is never recorded, so removing the pack's terms removes
+	// only polyemesis's own.
+	AddedTermIDs map[string]string `json:"addedTermIds"`
+	// PushedPackVersion is the pack version whose terms were last fully pushed
+	// to this channel; zero is never.
+	PushedPackVersion int `json:"pushedPackVersion"`
+}
+
+// Channel returns the record for a broadcaster, zero when there is none.
+func (n ProtectionTwitchNative) Channel(broadcasterID string) ProtectionTwitchChannel {
+	for _, c := range n.Channels {
+		if c.BroadcasterID == broadcasterID {
+			return c
+		}
+	}
+	return ProtectionTwitchChannel{BroadcasterID: broadcasterID}
+}
+
+// Put stores a channel's record, dropping it when it is empty.
+func (n *ProtectionTwitchNative) Put(c ProtectionTwitchChannel) {
+	out := n.Channels[:0:0]
+	for _, o := range n.Channels {
+		if o.BroadcasterID != c.BroadcasterID {
+			out = append(out, o)
+		}
+	}
+	if len(c.AddedTermIDs) > 0 || c.PushedPackVersion != 0 {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BroadcasterID < out[j].BroadcasterID })
+	n.Channels = out
+}
+
+// MaxNativeTermIDs bounds one channel's AddedTermIDs. Twitch allows 1,000
+// blocked terms in a channel, so a larger record is not Twitch's.
+const MaxNativeTermIDs = 1000
+
+// MaxNativeChannels bounds the channel records.
+const MaxNativeChannels = 20
+
+// UpdateProtectionNative changes ONLY the platform-term record. It skips the
+// whole-document Validate that UpdateSettings runs, on purpose: this records
+// terms Twitch has already accepted, and an unrelated problem elsewhere in the
+// stored document must not make polyemesis forget them. The record's own
+// bounds are checked here.
+func (d *DB) UpdateProtectionNative(mutate func(*ProtectionNative)) error {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+	s, err := d.GetSettings()
+	if err != nil {
+		return err
+	}
+	mutate(&s.Automod.Protection.Native)
+	var bad error
+	s.Automod.Protection.Native.problems(func(f string, a ...any) { bad = fmt.Errorf(f, a...) })
+	if bad != nil {
+		return InvalidSettingsError{Err: bad}
+	}
+	return d.PutSettings(s)
+}
+
+func (n ProtectionNative) problems(add problemAdder) {
+	if len(n.Twitch.Channels) > MaxNativeChannels {
+		add("automod protection records more than %d Twitch channels", MaxNativeChannels)
+	}
+	seen := map[string]bool{}
+	for _, c := range n.Twitch.Channels {
+		switch {
+		case c.BroadcasterID == "" || seen[c.BroadcasterID]:
+			add("automod protection has a Twitch channel record with no id, or two for one channel")
+		case len(c.AddedTermIDs) > MaxNativeTermIDs:
+			add("automod protection records more than %d Twitch term ids", MaxNativeTermIDs)
+		case c.PushedPackVersion < 0:
+			add("automod protection pushedPackVersion cannot be negative")
+		}
+		seen[c.BroadcasterID] = true
+	}
+}
+
+// ProtectionCategory is one category's diff. A nil Enabled is the pack default.
+type ProtectionCategory struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	// Detectors switches one detector inside the category, by its name after
+	// the slash ("address" for doxxing/address).
+	Detectors map[string]bool `json:"detectors,omitempty"`
+}
+
+// ProtectionTerm is a term the operator added to the pack.
+type ProtectionTerm struct {
+	Term     string `json:"term"`
+	Category string `json:"category"`
+	Tier     string `json:"tier"`
+}
+
+// ProtectionImpersonation is the impersonation detector's tuning.
+type ProtectionImpersonation struct {
+	Protect  []string `json:"protect"`
+	AllowIDs []string `json:"allowIds"`
 }
 
 // UnmarshalJSON makes a sent matrix REPLACE the stored one instead of merging
@@ -1940,10 +2153,20 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		Rules           json.RawMessage `json:"rules"`
 		Model           json.RawMessage `json:"model"`
 		Secondary       json.RawMessage `json:"secondary"`
+		Protection      json.RawMessage `json:"protection"`
 	}
 	if err := json.Unmarshal(b, &sent); err != nil {
 		return err
 	}
+	// The protection block is sparse in the same way, and every one of its
+	// collections would otherwise MERGE: unticking a category or removing an
+	// added term would save, answer 200, and leave the stored entry in place.
+	// Decided per key, so a client that never heard of one of them is safe.
+	protSent, err := sentProtectionKeys(sent.Protection)
+	if err != nil {
+		return err
+	}
+	protSent.clear(&a.Protection)
 	// The category table is a sparse map with the same merge trap as On: a
 	// category the client set back to "use the default" by leaving it out
 	// would otherwise keep its stored action.
@@ -1993,7 +2216,79 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		a.Model.Protocol = AutomodProtocolOpenAI
 		a.Model.Preset = "custom"
 	}
+	// PackVersion is the version the operator last ACCEPTED, and turning the
+	// pack on is accepting it. An upgraded install starts undecided at version
+	// 0 (mergeBaseSettings) and a client that sends only {state:"on"} never
+	// names a version, so without this the answer would be stored as "on, v0"
+	// and a later pack-update offer keyed on the version would misfire for
+	// exactly the installs that upgraded. Here, with the other decode-time
+	// repairs, so it also heals a blob already stored that way.
+	if a.Protection.State == ProtectionOn && a.Protection.PackVersion == 0 {
+		a.Protection.PackVersion = DefaultProtectionPackVersion
+	}
 	return nil
+}
+
+// sentProtectionKeyset is which replaceable keys a sent protection object named.
+type sentProtectionKeyset struct {
+	categories, ceilings, addTerms, allowTerms, allowDomains, holdDetectors bool
+	protect, allowIDs                                                       bool
+}
+
+func sentProtectionKeys(raw json.RawMessage) (sentProtectionKeyset, error) {
+	var k sentProtectionKeyset
+	if len(raw) == 0 || string(raw) == "null" {
+		return k, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return k, err
+	}
+	_, k.categories = m["categories"]
+	_, k.ceilings = m["ceilings"]
+	_, k.addTerms = m["addTerms"]
+	_, k.allowTerms = m["allowTerms"]
+	_, k.allowDomains = m["allowDomains"]
+	_, k.holdDetectors = m["holdDetectors"]
+	if imp, ok := m["impersonation"]; ok && string(imp) != "null" {
+		var im map[string]json.RawMessage
+		if err := json.Unmarshal(imp, &im); err != nil {
+			return k, err
+		}
+		_, k.protect = im["protect"]
+		_, k.allowIDs = im["allowIds"]
+	}
+	return k, nil
+}
+
+// clear empties each collection the sent object named, so the decode that
+// follows replaces it instead of merging into it. A slice of structs would
+// otherwise keep stale fields by index, exactly as Rules did.
+func (k sentProtectionKeyset) clear(p *AutomodProtection) {
+	if k.categories {
+		p.Categories = nil
+	}
+	if k.ceilings {
+		p.Ceilings = nil
+	}
+	if k.addTerms {
+		p.AddTerms = nil
+	}
+	if k.allowTerms {
+		p.AllowTerms = nil
+	}
+	if k.allowDomains {
+		p.AllowDomains = nil
+	}
+	if k.holdDetectors {
+		p.HoldDetectors = nil
+	}
+	if k.protect {
+		p.Impersonation.Protect = nil
+	}
+	if k.allowIDs {
+		p.Impersonation.AllowIDs = nil
+	}
 }
 
 // AutomodProtocolJev and AutomodProtocolOpenAI mirror automod.ProtocolJev and
@@ -2115,6 +2410,11 @@ type AutomodModel struct {
 	// A category not named here gets Action, which is flag by default. Read
 	// from the primary only.
 	CategoryActions map[string]string `json:"categoryActions,omitempty"`
+	// HoldWhenUnavailable keeps a message off every overlay when the model was
+	// asked about it and neither checker could answer (an outage, a rejected
+	// key, a spent hourly ceiling). Off by default: failing open is the safe
+	// side for an overlay nobody asked to be strict. Read from the primary only.
+	HoldWhenUnavailable bool `json:"holdWhenUnavailable,omitempty"`
 	// Tested reports that this checker's current connection -- protocol,
 	// preset, endpoint, model and key -- has passed the Test button. DERIVED,
 	// like HasAPIKey: filled on the way out to the settings page, and a value
@@ -2526,6 +2826,18 @@ func DefaultSettings() Settings {
 				MinConfidence:   0.8,
 				Instruction:     "Flag harassment, threats, slurs and targeted abuse. Ordinary criticism, banter and strong language are not abuse.",
 			},
+			// A FRESH install gets the recommended-protection pack on. It arms no
+			// rung: the pack flags and holds, and every platform action stays
+			// off until an operator arms it. mergeBaseSettings undoes the state
+			// for a stored blob. Sparse otherwise -- see AutomodProtection.
+			Protection: AutomodProtection{
+				State:                ProtectionOn,
+				Pack:                 DefaultProtectionPack,
+				PackVersion:          DefaultProtectionPackVersion,
+				StrikeWindowSeconds:  DefaultLadderSeconds,
+				LadderTimeoutSeconds: DefaultLadderSeconds,
+				ModelScope:           ModelScopeHard,
+			},
 			// The optional fallback: OpenAI-compatible, on the preset the
 			// spike measured best among them (Cerebras qwen-3.8, 0/165 false
 			// positives with a strict schema and reasoning off).
@@ -2654,6 +2966,85 @@ func (a AutomodSettings) problems(add problemAdder) {
 			add("automod %sprotocol %q is not jev or openai", m.name, p)
 		}
 	}
+	a.Protection.problems(add)
+}
+
+// Limits on the protection block. Generous for a person typing, small enough
+// that the document cannot be made to carry a megabyte of "terms".
+const (
+	protectionMaxTerms   = 2000
+	protectionMaxDomains = 500
+	protectionMaxNames   = 50
+	protectionMaxIDs     = 500
+	protectionMaxEntry   = 100
+	// protectionMaxTimeout is two weeks, the longest timeout Twitch accepts.
+	protectionMaxTimeout = 14 * 24 * 3600
+)
+
+// protectionRungs is the closed set a ceiling may name.
+var protectionRungs = map[string]bool{"hold": true, "delete": true, "timeout": true, "ban": true}
+
+// problems checks the protection block's shape. The vocabularies (category and
+// detector names, tiers) live in internal/automod, which db cannot import, and
+// are checked by internal/api beside automodProviderProblems.
+func (p AutomodProtection) problems(add problemAdder) {
+	switch p.State {
+	case "", ProtectionOn, ProtectionOff:
+	default:
+		add("automod protection state %q is not on, off or empty", p.State)
+	}
+	switch p.ModelScope {
+	case "", ModelScopeAll, ModelScopeHard:
+	default:
+		add("automod protection modelScope %q is not all or hard", p.ModelScope)
+	}
+	// Zero is refused once the pack is on: a zero timeout is a PERMANENT ban
+	// on some platforms, and a zero window never counts a strike. A blob that
+	// predates the block decodes over non-zero defaults, so this only catches a
+	// client that sent the zero.
+	for _, f := range []struct {
+		name string
+		v    int
+	}{{"strike window", p.StrikeWindowSeconds}, {"ladder timeout", p.LadderTimeoutSeconds}} {
+		if f.v < 0 || f.v > protectionMaxTimeout || (f.v == 0 && p.State == ProtectionOn) {
+			add("automod protection %s %ds out of range (1-%d)", f.name, f.v, protectionMaxTimeout)
+		}
+	}
+	for k, v := range p.Ceilings {
+		if !protectionRungs[v] {
+			add("automod protection ceiling for %q is %q: use hold, delete, timeout or ban", k, v)
+		}
+		// Acting against a person in crisis is never automatic.
+		if k == "self_harm" && v != "hold" {
+			add("automod protection ceiling for self_harm cannot be raised above hold")
+		}
+	}
+	if len(p.AddTerms) > protectionMaxTerms {
+		add("automod protection has more than %d added terms", protectionMaxTerms)
+	}
+	p.Native.problems(add)
+	for _, t := range p.AddTerms {
+		if n := utf8.RuneCountInString(strings.TrimSpace(t.Term)); n < 2 || n > protectionMaxEntry {
+			add("an automod protection added term must be 2-%d characters", protectionMaxEntry)
+			break
+		}
+	}
+	checkList := func(what string, max int, list []string, min int) {
+		if len(list) > max {
+			add("automod protection has more than %d %s", max, what)
+			return
+		}
+		for _, v := range list {
+			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n < min || n > protectionMaxEntry {
+				add("an automod protection entry in %s must be %d-%d characters", what, min, protectionMaxEntry)
+				return
+			}
+		}
+	}
+	checkList("allowed terms", protectionMaxTerms, p.AllowTerms, 2)
+	checkList("allowed domains", protectionMaxDomains, p.AllowDomains, 1)
+	checkList("protected names", protectionMaxNames, p.Impersonation.Protect, 1)
+	checkList("allowed author ids", protectionMaxIDs, p.Impersonation.AllowIDs, 1)
 }
 
 // problems checks the display time zone resolves.
@@ -2693,6 +3084,15 @@ func mergeBaseSettings() Settings {
 	s := DefaultSettings()
 	s.Ingest.Mode = IngestSRT
 	s.Failover.Backup.Mode = IngestSRT
+	// Same shape: an install whose stored blob predates the protection block
+	// is UNDECIDED, never switched on silently. It is offered the pack, and
+	// until its operator answers nothing new runs. Only a genuinely fresh
+	// install (the ErrNoRows branch of GetSettings) keeps the default "on".
+	s.Automod.Protection.State = ""
+	s.Automod.Protection.PackVersion = 0
+	// And an install that predates the scope keeps asking the model about every
+	// message, which is what it has always done (spec D11).
+	s.Automod.Protection.ModelScope = ModelScopeAll
 	return s
 }
 

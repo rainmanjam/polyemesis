@@ -3803,7 +3803,7 @@ export type AutomodAction =
   | "timeout"
   | "ban";
 
-export type AutomodChecker = "rules" | "history" | "model";
+export type AutomodChecker = "rules" | "history" | "protection" | "model";
 
 /** One switch, plus whether the platform can do it at all.
  *
@@ -3862,6 +3862,10 @@ export interface AutomodModel {
   timeoutForBan?: number;
   minConfidence: number;
   instruction: string;
+  /** A message the model was asked about and neither checker could answer
+   *  waits off every overlay instead of passing. Off by default. Read from the
+   *  primary only. */
+  holdWhenUnavailable?: boolean;
   /** "jev" or "openai". A block stored before there was a choice reads back
    *  as "openai", which is the only protocol there was. */
   protocol?: AutomodProtocol;
@@ -3959,6 +3963,146 @@ export interface AutomodSettings {
   /** The optional fallback, asked only when the primary could not answer.
    *  Optional here so a document from an older server still types. */
   secondary?: AutomodModel;
+  /** The recommended-protection pack. Optional so a document from an older
+   *  server still types. */
+  protection?: AutomodProtection;
+}
+
+/** "" is undecided: an install that predates the pack, offered it and not yet
+ *  answered. A fresh install is "on". */
+export type AutomodProtectionState = "" | "on" | "off";
+
+/** A platform action a category may climb to, lowest first. */
+export type AutomodCeiling = "hold" | "delete" | "timeout" | "ban";
+
+/** The operator's DIFF over the built-in pack, never a copy of it: an absent
+ *  key is the pack's own default, so a release that updates the pack reaches
+ *  every install that is on. Arming a platform action is not here; it is the
+ *  matrix cell `platform/rung/protection`. */
+export interface AutomodProtection {
+  state: AutomodProtectionState;
+  pack: string;
+  /** The pack version the operator last accepted. */
+  packVersion: number;
+  categories?: Record<string, AutomodProtectionCategory> | null;
+  ceilings?: Record<string, AutomodCeiling> | null;
+  addTerms?: AutomodProtectionTerm[] | null;
+  allowTerms?: string[] | null;
+  allowDomains?: string[] | null;
+  holdDetectors?: Record<string, boolean> | null;
+  impersonation: AutomodProtectionImpersonation;
+  strikeWindowSeconds: number;
+  ladderTimeoutSeconds: number;
+  /** Which messages reach the model once it is on: "hard" asks only about the
+   *  cases the free checkers cannot settle; "all" asks about every message.
+   *  A fresh install is "hard"; an upgraded one stays "all". */
+  modelScope?: "all" | "hard";
+  /** What the pack has pushed to a platform's own filters. Server-owned: the
+   *  Twitch actions write it and a save cannot change it. */
+  native?: AutomodProtectionNative;
+  /** Derived: true while `state` is "". A value sent back is ignored. */
+  offer?: boolean;
+}
+
+/** The Twitch half of the pack's platform bookkeeping, one record per channel. */
+export interface AutomodProtectionNative {
+  twitch?: {
+    channels?: Array<{
+      broadcasterId: string;
+      /** Twitch blocked-term id to a hash of the term (never the term), for the terms polyemesis itself added. */
+      addedTermIds?: Record<string, string> | null;
+      /** The pack version whose terms were last fully pushed to this channel; 0 is never. */
+      pushedPackVersion?: number;
+    }> | null;
+  };
+}
+
+/** GET /chat/twitch/pack-terms: counts only, never the terms. */
+export interface TwitchPackStatus {
+  eligible: number;
+  recorded: number;
+  pushedPackVersion: number;
+  packVersion: number;
+  on: boolean;
+}
+
+/** One pass of POST pack-terms-sync, or DELETE pack-terms. */
+export interface TwitchPackSync {
+  added: number;
+  present: number;
+  removed: number;
+  /** Terms polyemesis had added, the operator removed on Twitch, and this pass put back. */
+  restored?: number;
+  skipped: number;
+  skipWhy?: Record<string, number>;
+  remaining: number;
+  done: boolean;
+}
+
+/** One category's diff. An absent `enabled` is the pack default. */
+export interface AutomodProtectionCategory {
+  enabled?: boolean;
+  /** One detector inside the category, by its name after the slash. */
+  detectors?: Record<string, boolean>;
+}
+
+/** A term the operator added to the pack. */
+export interface AutomodProtectionTerm {
+  term: string;
+  category: string;
+  tier: string;
+}
+
+export interface AutomodProtectionImpersonation {
+  protect?: string[] | null;
+  allowIds?: string[] | null;
+}
+
+/** One detector's result in the test box. A detection names its detector and
+ *  never the matched value. */
+export interface AutomodDetection {
+  checker: AutomodChecker;
+  category: string;
+  /** The pack group ("doxxing/phone") or the history detector. */
+  detector: string;
+  /** The term tier, for hate hits. */
+  tier?: string;
+  /** The form of the message the evidence was found on. */
+  form?: string;
+  reason: string;
+  /** The hit keeps the message off every overlay. */
+  hold: boolean;
+  action: AutomodAction;
+  /** The current matrix would let `action` happen on the platform asked. */
+  act: boolean;
+  /** What the strike ladder would ask a platform to do at strikes 1, 2 and 3,
+   *  from the saved arming and ceiling ("flag" where nothing is armed). Only on
+   *  a pack finding that holds, the only kind on the ladder. */
+  ladder?: { strike: number; action: AutomodAction; alsoDelete?: boolean }[];
+  /** The live engine would produce this finding: false for a pack detection
+   *  while the pack is off. */
+  live: boolean;
+}
+
+/** What POST /automod/explain answers. Session-only, offline and unlogged. */
+export interface AutomodExplanation {
+  /** The pack is on in the live engine. */
+  protection: boolean;
+  detections: AutomodDetection[];
+  /** The live engine would hold the message off the overlays. */
+  held: boolean;
+  /** The same with the pack counted: differs from `held` only while it is off. */
+  wouldHoldIfOn: boolean;
+  /** Detectors that depend on what the author sent recently, so are not
+   *  answered for one pretend message. */
+  windowed: string[];
+}
+
+/** The pretend message a test box sends. */
+export interface AutomodExplainRequest {
+  text: string;
+  authorName?: string;
+  platform?: string;
 }
 
 /** What the operator sees about model spend and health. */
@@ -3978,6 +4122,28 @@ export interface AutomodModelStats {
   fallbacks?: number;
   failedOpen?: number;
   lastDecidedBy?: AutomodSlot;
+  /** The hard-case gate's counters: the real ones under the "hard" scope, the
+   *  dry run (`considered`, `wouldSkip`) under "all" once it has seen a message. */
+  gate?: AutomodGateStats;
+  /** The hourly ceiling is used up, so the model is not being asked: moderation
+   *  is degraded though nothing is down. Set on the aggregate only. */
+  ceilingSpent?: boolean;
+}
+
+export interface AutomodGateStats {
+  scope?: "all" | "hard";
+  asked: number;
+  settled: number;
+  noSignal: number;
+  capped: number;
+  cached: number;
+  braked: number;
+  /** The dry run under the "all" scope: of the `considered` messages the model
+   *  was asked about, how many "hard" would have skipped. Absent under "hard". */
+  considered?: number;
+  wouldSkip?: number;
+  /** When the raid brake lifts; absent while it is off. */
+  brakeUntil?: string;
 }
 
 /** The server-rendered matrix. Rows, columns and availability all come from the

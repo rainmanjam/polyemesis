@@ -41,13 +41,17 @@ type Forms struct {
 	// Despaced is the tokens joined, collapsed again, when the message looks
 	// deliberately letter-spaced ("b a d w o r d"). Empty otherwise.
 	Despaced string
+	// Stretch is aligned with Tokens: true where the sender repeated a letter
+	// more than twice in a row ("fuuuuck"). The pack form keeps two, so a term
+	// stored with one letter needs this to be tried against the collapsed token.
+	Stretch []bool
 }
 
 // NewForms builds every form of text.
 func NewForms(text string) Forms {
 	n := NFKC(text)
-	p, toks := fold(n)
-	f := Forms{NFKC: n, Pack: p, Tokens: toks}
+	p, toks, stretch := fold(n)
+	f := Forms{NFKC: n, Pack: p, Tokens: toks, Stretch: stretch}
 	if deliberatelySpaced(toks) {
 		f.Despaced = collapse(strings.Join(toks, ""))
 	}
@@ -59,7 +63,7 @@ func NewForms(text string) Forms {
 // Fold(term) == term for every entry, so a term can never silently stop
 // matching the text it was written to catch.
 func Fold(s string) string {
-	p, _ := fold(NFKC(s))
+	p, _, _ := fold(NFKC(s))
 	return p
 }
 
@@ -188,9 +192,9 @@ func isLetterish(r rune) bool { return unicode.IsLetter(r) || unicode.IsMark(r) 
 //
 // Steps: skeleton -> lowercase -> leet (inside tokens with a letter) -> collapse
 // runs of one letter to two -> split on non-letters.
-func fold(s string) (string, []string) {
+func fold(s string) (string, []string, []bool) {
 	if s == "" {
-		return "", nil
+		return "", nil, nil
 	}
 	rs := make([]rune, 0, len(s))
 	for _, r := range s {
@@ -212,17 +216,23 @@ func fold(s string) (string, []string) {
 
 	var (
 		b    strings.Builder
-		offs [][2]int
+		offs [][3]int // start, end, stretched
 		last rune
 		run  int
 		tok  = -1 // start offset of the token being written, or -1
+		long bool // the token being written had a letter repeated past maxRun
 	)
 	b.Grow(len(rs))
 	flush := func() {
 		if tok >= 0 && b.Len() > tok {
-			offs = append(offs, [2]int{tok, b.Len()})
+			st := 0
+			if long {
+				st = 1
+			}
+			offs = append(offs, [3]int{tok, b.Len(), st})
 		}
 		tok = -1
+		long = false
 		last, run = 0, 0
 	}
 
@@ -263,6 +273,7 @@ func fold(s string) (string, []string) {
 			if r == last {
 				run++
 				if run > maxRun {
+					long = true
 					continue
 				}
 			} else {
@@ -276,13 +287,15 @@ func fold(s string) (string, []string) {
 
 	out := b.String()
 	if len(offs) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	toks := make([]string, len(offs))
+	stretch := make([]bool, len(offs))
 	for k, o := range offs {
 		toks[k] = out[o[0]:o[1]]
+		stretch[k] = o[2] == 1
 	}
-	return out, toks
+	return out, toks, stretch
 }
 
 // isWordRune reports whether rs[i] is part of a word. Symbols that can stand in

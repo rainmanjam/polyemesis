@@ -40,11 +40,22 @@
 # anybody sent. A suite that fed real chat to a third party to prove it could
 # would be doing the thing it exists to hold to account.
 #
+# THE PROTECTION TIER (PROTECTION=1). The recommended-protection pack is the
+# part of automod that is on by default, so its safety claim gets its own tier:
+# credential-free, no network, no platform. It applies a fresh install's
+# settings through the production ApplyAutomod, injects synthetic lines through
+# a real Hub and overlay Gate, and asserts what part 1 of the staging runbook
+# (docs/AUTOMOD.md, "Staging runbook") asserts by hand: positives are held off
+# the overlay, benign lines are not, and nothing reaches a platform. It runs
+# INSTEAD of steps 1-7, which are about a model endpoint this tier never calls.
+#
 #   ./scripts/acceptance-automod.sh
+#   PROTECTION=1 ./scripts/acceptance-automod.sh
 #
 # Environment:
 #   POLY_AUTOMOD_ENDPOINT  the endpoint under test (default: api.openai.com)
 #   POLY_AUTOMOD_API_KEY   enables step 7; OPENAI_API_KEY is also accepted
+#   PROTECTION=1           run only the protection tier (step P)
 set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -83,6 +94,68 @@ drive() { go run "$DRIVER" "$@" 2>&1; }
 val() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
 ENDPOINT="${POLY_AUTOMOD_ENDPOINT:-https://api.openai.com/v1/chat/completions}"
+
+# ---------------------------------------------------------------------------
+# The protection tier. Exits when done: steps 1-7 below are about a model
+# endpoint, which this tier never touches.
+if [ "${PROTECTION:-}" = 1 ]; then
+  printf "\033[1mautomod protection, local and credential-free\033[0m\n"
+  step "P. The default pack holds the lines it should, and does nothing else"
+
+  OUT="$(drive protection)"
+
+  # The gate. Without it every check below could be vacuous: a pack that was
+  # never on holds nothing and "no platform call" is then trivially true.
+  if [ "$(val "$OUT" protectionState)" = on ] && [ "$(val "$OUT" armedProtectionCells)" = 0 ]; then
+    ok "a fresh install has the pack on and no protection cell armed"
+  else
+    bad "state=$(val "$OUT" protectionState) armed=$(val "$OUT" armedProtectionCells); the tier proves nothing"
+  fi
+
+  if [ "$(val "$OUT" mismatches)" = 0 ] && [ -n "$(val "$OUT" expectedHeld)" ]; then
+    ok "every synthetic positive was flagged, the pack held the hold ones, and its three flag-only groups (contextual hate, emote wall, near-duplicate) were flagged by the pack and not held"
+  else
+    bad "flag/held disagreed with the pack's policy for: $(printf '%s\n' "$OUT" | sed -n 's/^wrong=//p' | tr '\n' ',')"
+  fi
+
+  [ "$(val "$OUT" benignFlagged)" = 0 ] \
+    && ok "no benign line (scores, times, versions, place names, hype) was flagged" \
+    || bad "$(val "$OUT" benignFlagged) benign lines were flagged"
+
+  # 5 distinct authors inside the window is a raid; the fifth and sixth hold.
+  [ "$(val "$OUT" raidHeld)" = 2 ] \
+    && ok "a six-author raid burst was held from the fifth author on" \
+    || bad "raid held=$(val "$OUT" raidHeld), expected 2"
+
+  # The overlay counter rises by exactly the lines held (docs/OVERLAY.md).
+  EXPECT=$(( $(val "$OUT" expectedHeld) + 2 ))
+  if [ "$(val "$OUT" gateHeld)" = "$EXPECT" ] && [ "$(val "$OUT" gateBlocked)" = "$EXPECT" ]; then
+    ok "the overlay gate's Held and Blocked counters rose by $EXPECT"
+  else
+    bad "gate held=$(val "$OUT" gateHeld) blocked=$(val "$OUT" gateBlocked), expected $EXPECT"
+  fi
+
+  if [ "$(val "$OUT" deletes)" = 0 ] && [ "$(val "$OUT" bans)" = 0 ]; then
+    ok "no Delete, Ban or timeout call reached the platform"
+  else
+    bad "a hold made a platform call: $(val "$OUT" deletes) deletes, $(val "$OUT" bans) bans"
+  fi
+
+  if [ "$(val "$OUT" actedLines)" = 0 ] && [ "$(val "$OUT" canaryInLog)" = false ]; then
+    ok "no 'automod acted' log line, and the log never carries the canary text"
+  else
+    bad "acted lines=$(val "$OUT" actedLines) canaryInLog=$(val "$OUT" canaryInLog)"
+  fi
+
+  printf "\n  \033[1m%d passed, %d failed, %d skipped\033[0m\n\n" "$pass" "$fail" "$skip"
+  # FIXED floor, as below: the tier's checks never move with the environment.
+  if [ $((pass + fail + skip)) -ne 7 ]; then
+    printf "  \033[31mINCOMPLETE\033[0m  %d of 7 protection checks ran\n\n" "$((pass + fail + skip))"
+    exit 1
+  fi
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
 
 printf "\033[1mautomod, against a real endpoint\033[0m\n"
 note "endpoint: $ENDPOINT"
@@ -398,6 +471,31 @@ fi
 #   6d no key in the log  model.go redactEndpoint: `return err`
 #   7a both calls made    POLY_AUTOMOD_API_KEY=<not a real key>; both 401
 #   7b the pair separates the same; both came back empty
+#
+# The protection tier (PROTECTION=1) was proven the same way, with the change
+# made in the driver's protection():
+#
+#   Pa on, none armed     set.On = {"twitch/delete/protection": true}
+#   Pb held as policy     drop the canary term from AddTerms (the hold check
+#                         names it); or add a benign word as a term (it names
+#                         the benign line)
+#   Pc no benign flagged  add "nightmare" as a severe term
+#   Pd raid held          the same arming change (raid held=0 once a delete is
+#                         armed, because the ladder removes instead of holds)
+#   Pe gate counters      the canary change (held 9, expected 10), and a benign
+#                         term (held 11)
+#   Pf no platform call   the arming change: 9 deletes reached the adapter
+#   Pg no acted lines     the arming change: 9 "automod acted" lines
+#   Pg canary in log      a scratch copy (go run -overlay) of chat/automod.go
+#                         with h.log.Debug("...", "text", m.Text) after
+#                         CheckFast: canaryInLog=true, check red
+#   Pb flag-only groups   pack/checker.go defaultHold GroupHateContextual,
+#                         GroupEmote or GroupNearDuplicate set to true: each
+#                         names its own case. Dropping the contextual term from
+#                         AddTerms: notFlagged names it (a silent detector)
+#   Pa effective matrix   armed cells are counted over
+#                         api.EffectiveAutomodMatrix, the conversion the engine
+#                         uses; the arming change above still reads 1
 #
 # 7a and 7b have been proven able to FAIL and never proven able to PASS: no key
 # was available when this was written. They are the honest state of the

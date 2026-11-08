@@ -77,7 +77,8 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
 
   const refresh = useCallback(async () => {
     try {
-      setView(await api.automodMatrix());
+      const v = await api.automodMatrix();
+      setView(v);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
@@ -88,6 +89,20 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   }, [refresh]);
 
   const automod = settings.automod;
+
+  /** The columns the table draws. The protection column is not a grid of
+   *  switches: the pack is armed one rung at a time on its own card, so it is
+   *  left out of the table, of "clear row" and of "clear column".
+   *
+   *  ONLY THE TABLE. `view.checkers` stays whole, and the armed count, the
+   *  irreversible-action banner and the readiness map read it, because a rung
+   *  armed on the protection card is a real permission: filtering it out of
+   *  those would print "nothing automatic" over an armed ban, the very
+   *  disagreement automodArmed.ts exists to prevent. */
+  const columns = useMemo(
+    () => (view?.checkers ?? []).filter((c) => c !== "protection"),
+    [view],
+  );
 
   /** Cells indexed for lookup, so rendering does not scan the list per cell. */
   const byKey = useMemo(() => {
@@ -164,7 +179,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   /** Bulk: every checker for one action on one platform. */
   function setRow(platform: string, action: AutomodAction, auto: boolean) {
     const on = { ...(automod!.on ?? {}) };
-    for (const checker of view!.checkers) {
+    for (const checker of columns) {
       const key = `${platform}/${action}/${checker}`;
       if (auto && armable(key)) on[key] = true;
       else delete on[key];
@@ -301,7 +316,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                     <thead>
                       <tr>
                         <th className="pb-2 text-left font-medium">{t("automod.colAction")}</th>
-                        {view.checkers.map((c) => {
+                        {columns.map((c) => {
                           const ready = readiness.get(c);
                           return (
                             <th key={c} className="pb-2 px-2 font-medium">
@@ -359,7 +374,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                               </div>
                             )}
                           </td>
-                          {view.checkers.map((checker) => {
+                          {columns.map((checker) => {
                             const key = `${platform}/${action}/${checker}`;
                             const cell = byKey.get(key);
                             const available = cell?.available ?? false;

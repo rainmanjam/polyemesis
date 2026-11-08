@@ -47,6 +47,12 @@ type TwitchTools interface {
 	AddBlockedTerm(ctx context.Context, text string) (BlockedTerm, error)
 	DeleteBlockedTerm(ctx context.Context, id string) error
 	SyncBlockedTerms(ctx context.Context, terms []string) (BlockedTermSync, error)
+	SyncTrackedTerms(ctx context.Context, want []string, recorded map[string]string, maxAdds int) (TrackedTermSync, error)
+	RemoveTrackedTerms(ctx context.Context, recorded map[string]string) (TrackedTermSync, error)
+	RaiseAutoModLevel(ctx context.Context, level int) (before, after AutoModSettings, err error)
+	// ChannelID is the broadcaster id of the channel these tools act on: the
+	// key a per-channel record is filed under.
+	ChannelID() string
 	Chatters(ctx context.Context, withList bool) (ChatterList, error)
 	GetAutoMod(ctx context.Context) (AutoModSettings, error)
 	SetAutoMod(ctx context.Context, s AutoModSettings) (AutoModSettings, error)
@@ -768,6 +774,26 @@ func termProblem(term string) string {
 // it is already there. A leading or trailing * is Twitch's wildcard.
 // POST /helix/moderation/blocked_terms.
 func (t *TwitchAdapter) AddBlockedTerm(ctx context.Context, text string) (BlockedTerm, error) {
+	b, _, err := t.addBlockedTerm(ctx, text)
+	return b, err
+}
+
+// ChannelID is the broadcaster id the adapter moderates.
+func (t *TwitchAdapter) ChannelID() string { return t.cfg.BroadcasterID }
+
+// addBlockedTerm is AddBlockedTerm that also says when Twitch answered, by its
+// own clock (the response's Date header), or the local clock when it sent none.
+func (t *TwitchAdapter) addBlockedTerm(ctx context.Context, text string) (BlockedTerm, time.Time, error) {
+	var at time.Time
+	ctx = context.WithValue(ctx, respDateKey{}, &at)
+	b, err := t.addBlockedTermReq(ctx, text)
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return b, at, err
+}
+
+func (t *TwitchAdapter) addBlockedTermReq(ctx context.Context, text string) (BlockedTerm, error) {
 	text = strings.TrimSpace(text)
 	if p := termProblem(text); p != "" {
 		return BlockedTerm{}, fmt.Errorf("%q is %s", text, p)

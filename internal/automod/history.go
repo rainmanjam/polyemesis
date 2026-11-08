@@ -3,11 +3,10 @@ package automod
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 
+	"github.com/rainmanjam/polyemesis/internal/automod/pack"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -164,7 +163,7 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 
 	reasons := append(h.windowReasons(inWindow, norm), h.messageReasons(text)...)
 	var out []Finding
-	for _, reason := range reasons {
+	for _, r := range reasons {
 		out = append(out, Finding{
 			Checker:        CheckerHistory,
 			Action:         h.limits.Action,
@@ -172,7 +171,8 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 			// Every detector here is a flooding shape; the counted detail is
 			// the operator's, and stays in Reason. See finding.go, #495.
 			Category: CategoryFlood,
-			Reason:   reason,
+			Reason:   r.reason,
+			Detector: r.detector,
 		})
 	}
 	return sortByConsequence(out)
@@ -192,14 +192,15 @@ func (h *History) CheckText(text string) []Finding {
 	reasons := h.messageReasons(text)
 	if h.limits.MaxLinks > 0 {
 		if n := countLinks(text); n > h.limits.MaxLinks {
-			reasons = append(reasons, fmt.Sprintf("%d links in one message", n))
+			reasons = append(reasons, reasonOf(DetectorLinks, fmt.Sprintf("%d links in one message", n)))
 		}
 	}
 	var out []Finding
-	for _, reason := range reasons {
+	for _, r := range reasons {
 		out = append(out, Finding{
 			Checker: CheckerHistory, Action: h.limits.Action,
-			TimeoutSeconds: h.limits.TimeoutSeconds, Category: CategoryFlood, Reason: reason,
+			TimeoutSeconds: h.limits.TimeoutSeconds, Category: CategoryFlood, Reason: r.reason,
+			Detector: r.detector,
 		})
 	}
 	return sortByConsequence(out)
@@ -223,23 +224,42 @@ func (h *History) recordLocked(key string, e entry) *authorLog {
 
 // windowReasons judges the author's messages inside the window: how many,
 // how many repeats of this one, and how many links.
-func (h *History) windowReasons(inWindow []entry, norm string) []string {
-	var out []string
+func (h *History) windowReasons(inWindow []entry, norm string) []histReason {
+	var out []histReason
 	if n := len(inWindow); h.limits.MaxMessages > 0 && n > h.limits.MaxMessages {
-		out = append(out, fmt.Sprintf("%d messages in %s", n, h.limits.Window))
+		out = append(out, reasonOf(DetectorMessageRate, fmt.Sprintf("%d messages in %s", n, h.limits.Window)))
 	}
 	if h.limits.MaxRepeats > 0 && norm != "" {
 		if repeats := countRepeats(inWindow, norm); repeats > h.limits.MaxRepeats {
-			out = append(out, fmt.Sprintf("the same message %d times in %s", repeats, h.limits.Window))
+			out = append(out, reasonOf(DetectorRepeats, fmt.Sprintf("the same message %d times in %s", repeats, h.limits.Window)))
 		}
 	}
 	if h.limits.MaxLinks > 0 {
 		if links := windowLinks(inWindow); links > h.limits.MaxLinks {
-			out = append(out, fmt.Sprintf("%d links in %s", links, h.limits.Window))
+			out = append(out, reasonOf(DetectorLinks, fmt.Sprintf("%d links in %s", links, h.limits.Window)))
 		}
 	}
 	return out
 }
+
+// The history detectors' names, carried on Finding.Detector so a policy can
+// differ per detector (whether a hit also holds the message off the overlay).
+// Closed set; the pack checker's detectors use the same field with theirs.
+const (
+	DetectorMessageRate = "message_rate"
+	DetectorRepeats     = "repeats"
+	DetectorLinks       = "links"
+	DetectorMentions    = "mentions"
+	DetectorCaps        = "caps"
+)
+
+// histReason is one reason a history detector fired, with the detector's name.
+type histReason struct {
+	detector string
+	reason   string
+}
+
+func reasonOf(detector, reason string) histReason { return histReason{detector, reason} }
 
 // countRepeats is how many entries are norm.
 func countRepeats(entries []entry, norm string) int {
@@ -262,16 +282,16 @@ func windowLinks(entries []entry) int {
 }
 
 // messageReasons judges this one message: its mentions and its upper case.
-func (h *History) messageReasons(text string) []string {
-	var out []string
+func (h *History) messageReasons(text string) []histReason {
+	var out []histReason
 	if h.limits.MaxMentionsPerMessage > 0 {
-		if n := strings.Count(text, "@"); n > h.limits.MaxMentionsPerMessage {
-			out = append(out, fmt.Sprintf("%d mentions in one message", n))
+		if n := pack.Mentions(text); n > h.limits.MaxMentionsPerMessage {
+			out = append(out, reasonOf(DetectorMentions, fmt.Sprintf("%d mentions in one message", n)))
 		}
 	}
 	if r, ok := capsRatio(text, h.limits.MinLengthForCaps); ok &&
 		h.limits.MaxCapsRatio > 0 && r > h.limits.MaxCapsRatio {
-		out = append(out, fmt.Sprintf("%.0f%% upper case", r*100))
+		out = append(out, reasonOf(DetectorCaps, fmt.Sprintf("%.0f%% upper case", r*100)))
 	}
 	return out
 }
@@ -320,7 +340,8 @@ func (h *History) capAuthorsLocked() {
 		all = append(all, aged{k, log.last})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
-	for i := 0; i < len(all)-limit; i++ {
+	// To a low-water mark, not to the cap: see pack.LowWater.
+	for i := 0; i < len(all)-pack.LowWater(limit); i++ {
 		delete(h.authors, all[i].key)
 	}
 }
@@ -333,31 +354,10 @@ func (h *History) Tracked() int {
 	return len(h.authors)
 }
 
-func countLinks(s string) int {
-	n := strings.Count(s, "http://") + strings.Count(s, "https://")
-	if n == 0 {
-		// A bare domain is still a link to anybody reading it, and dropping the
-		// scheme is the obvious way past a filter that only counts "http".
-		n = strings.Count(s, "www.")
-	}
-	return n
-}
+// countLinks and capsRatio are counted in internal/automod/pack, so the pack
+// checker and this one cannot disagree about what a link or a shout is.
+func countLinks(s string) int { return pack.Links(s) }
 
 // capsRatio reports the proportion of cased letters that are upper case, and
 // whether the message is long enough for the question to mean anything.
-func capsRatio(s string, minLength int) (float64, bool) {
-	var upper, letters int
-	for _, r := range s {
-		if !unicode.IsLetter(r) {
-			continue
-		}
-		letters++
-		if unicode.IsUpper(r) {
-			upper++
-		}
-	}
-	if letters < minLength {
-		return 0, false
-	}
-	return float64(upper) / float64(letters), true
-}
+func capsRatio(s string, minLength int) (float64, bool) { return pack.CapsRatio(s, minLength) }

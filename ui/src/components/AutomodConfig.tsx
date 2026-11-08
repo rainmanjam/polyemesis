@@ -87,6 +87,9 @@ export interface AutomodConfigProps {
   saveError?: string | null;
 }
 
+/** Fewest messages before the saving estimate is shown. */
+const MIN_SAVING_SAMPLE = 50;
+
 /** The default a NEW rule gets: on, and flagging.
  *
  *  Flagging for the reason DefaultMatrix starts there — it changes nothing an
@@ -250,6 +253,18 @@ export function AutomodConfig({
   }
 
   const rejectedRule = serverRejection(saveError);
+  // The raid brake: the gate stopped asking and says when it will start again.
+  const brakeUntil = stats?.gate?.brakeUntil;
+  const brakeOn = brakeUntil !== undefined && Date.parse(brakeUntil) > Date.now();
+  // The offer's evidence (D11): under "all", the share of the messages asked
+  // about that "hard" would have skipped. Not shown on a handful of messages,
+  // which would read as a precise number it is not.
+  const considered = stats?.gate?.considered ?? 0;
+  const wouldSkip = stats?.gate?.wouldSkip ?? 0;
+  const savingPct =
+    automod.protection?.modelScope !== "hard" && considered >= MIN_SAVING_SAMPLE
+      ? Math.round((wouldSkip / considered) * 100)
+      : null;
 
   return (
     <>
@@ -503,6 +518,58 @@ export function AutomodConfig({
                 <p className="text-xs text-muted-foreground">{t("automod.highlightScoringNote")}</p>
               </div>
             </div>
+            {/* Off by default: a model outage lets messages through, on the
+                overlay too. On, an unjudged message waits off the overlay. */}
+            <div className="flex items-start gap-2 pt-1">
+              <Switch
+                id="automod-hold-unavailable"
+                checked={model.holdWhenUnavailable === true}
+                onCheckedChange={(v) => patchModel({ holdWhenUnavailable: v })}
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="automod-hold-unavailable" className="text-xs">
+                  {t("automod.holdUnavailable")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{t("automod.holdUnavailableNote")}</p>
+              </div>
+            </div>
+            {/* The scope lives in the protection block (it is the pack that
+                knows what a hard case is), but it is about the model, so the
+                control sits here. Hidden on a server that has no protection
+                block. */}
+            {automod.protection && (
+              <div className="flex items-start gap-2 pt-1">
+                <Switch
+                  id="automod-model-scope"
+                  checked={automod.protection.modelScope === "hard"}
+                  onCheckedChange={(v) =>
+                    onChange({
+                      ...settings,
+                      automod: {
+                        ...automod,
+                        protection: { ...automod.protection!, modelScope: v ? "hard" : "all" },
+                      },
+                    })
+                  }
+                />
+                <div className="grid gap-0.5">
+                  <Label htmlFor="automod-model-scope" className="text-xs">
+                    {t("automod.modelScopeHard")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("automod.modelScopeHardNote")}</p>
+                  {savingPct !== null && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("automod.modelScopeSaving", { pct: savingPct, count: considered })}
+                    </p>
+                  )}
+                  {brakeOn && (
+                    <p role="status" className="text-xs text-warn">
+                      {t("automod.modelBrake")}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           {secondary && (

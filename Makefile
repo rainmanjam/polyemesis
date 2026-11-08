@@ -254,6 +254,14 @@ lint: $(UI_DIR)/node_modules ## Lint the frontend
 # GLOBBED, NOT LISTED. release.yml already did this for install.sh and
 # acceptance-install.sh by name, and naming scripts is how you cover the two
 # somebody remembered.
+# The safety claim of the part of automod that is on by default: a fresh
+# install's settings, synthetic lines through a real Hub and overlay Gate,
+# positives held, benign lines not, nothing sent to a platform. No network, no
+# port, no credentials; seconds. CI's go job runs the same line.
+.PHONY: automod-protection
+automod-protection: ## The PROTECTION=1 automod acceptance tier (no network, seconds)
+	PROTECTION=1 ./scripts/acceptance-automod.sh
+
 .PHONY: sh-syntax
 sh-syntax: ## bash -n every scripts/*.sh, including the ones nothing runs
 	@n=0; for f in scripts/*.sh scripts/*/*.sh; do \
@@ -357,9 +365,9 @@ endif
 # internal/testenv/checkparity_invocation_test.go compares CHECK-CI against
 # ci.yml. Neither target claims to be the other. `check`'s help line says
 # "fast", so nobody reads it as a promise about CI.
-check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui streamdeck web ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build, Stream Deck plugin, site
+check: fmtcheck vet test coverage-instrument-guard sh-syntax automod-protection typecheck lint ui-test ui streamdeck web ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build, Stream Deck plugin, site
 
-check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax typecheck lint ui-test ui streamdeck web ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
+check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax automod-protection typecheck lint ui-test ui streamdeck web ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
 
 # NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
 # and Node and nothing else, and that property is worth keeping: the moment the

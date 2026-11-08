@@ -378,6 +378,15 @@ jobs:
         run: go build ./...
       - if: needs.changes.outputs.code == 'true'
         run: go vet ./...
+      # The acceptance driver is a //go:build ignore file, which build and vet
+      # above skip, so a compile break after an API change would go unseen.
+      # The protection tier needs no credentials and runs locally in seconds:
+      # it is the default-on safety claim (no platform call, nothing held that
+      # should not be), checked on every change rather than by hand.
+      - if: needs.changes.outputs.code == 'true'
+        run: go vet ./scripts/acceptance_automod_driver.go
+      - if: needs.changes.outputs.code == 'true'
+        run: PROTECTION=1 ./scripts/acceptance-automod.sh
 
       # WINDOWS TOO, because `go vet ./...` above never sees a _windows.go file.
       # internal/supervisor and internal/fsperm both have Windows-only sources

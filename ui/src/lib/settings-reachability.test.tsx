@@ -873,6 +873,14 @@ const NOT_A_VALUE: Record<string, string> = {
     'a sparse set keyed "platform/action/checker"; every cell of the matrix writes into it, and there is no leaf to give a value to',
   version:
     "a branded SettingsVersion the server assigns and no page can mint: the version of the document the page read, sent back so a save from a stale read is refused (409) instead of reverting somebody else's change. Never a control",
+  "automod.protection.categories":
+    "a sparse map keyed by pack category (diff over the pack's defaults); the protection card's category toggles write into it, and an absent key means the pack default",
+  "automod.protection.ceilings":
+    "a sparse map keyed by category; the card's Advanced section writes into it, and an absent key means the default ceiling",
+  "automod.protection.holdDetectors":
+    "a sparse map keyed by detector; the card's per-detector hold checkbox writes into it, and an absent key means the pack default",
+  "automod.protection.native.twitch.channels":
+    "server bookkeeping, one record per Twitch channel (broadcaster id; blocked-term id to a hash of its term; pack version last pushed), written by the Twitch pack actions on the protection card (AutomodProtectionTwitch) and not by a save. A save cannot change it (the server puts the stored value back), so a control would only be a field that looks editable and is not",
   "automod.model.categoryActions":
     "a sparse map keyed by model category; the per-category selects on the model card (automod-category-<name>) write into it, and an absent key means the default action",
   "automod.secondary.categoryActions":
@@ -902,6 +910,8 @@ const NOT_A_CONTROL: Record<string, string> = {
     "not read: the fallback checker applies the primary's viewer-silence duration",
   "automod.secondary.instruction":
     "not read: both checkers are asked with the primary's instruction",
+  "automod.secondary.holdWhenUnavailable":
+    "not read: the primary's hold-when-unavailable switch applies to both checkers",
   "automod.rules[].id":
     "server-assigned. A rule's identity is not something an operator types",
   "ingest.degraded.enabled":
@@ -1018,6 +1028,32 @@ const NO_CONTROL_YET: Record<string, string> = {
   "automod.history.timeoutSeconds": "#788 sweep. No sequence-detector editor exists",
   "automod.history.retainPerAuthor": "#788 sweep. No sequence-detector editor exists",
   "automod.history.idleEvictionSeconds": "#788 sweep. No sequence-detector editor exists",
+  "automod.protection.state":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.pack":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.packVersion":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.addTerms[].term":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.addTerms[].category":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.addTerms[].tier":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.allowTerms":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.allowDomains":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.impersonation.protect":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.impersonation.allowIds":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.strikeWindowSeconds":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.ladderTimeoutSeconds":
+    "recommended-protection settings (PR 5): stored, validated and acted on by ApplyAutomod; the protection card that edits it is the UI stage (PR 7)",
+  "automod.protection.offer":
+    "derived on the way out (true while state is undecided) and ignored when sent, like automod.model.tested; the banner that reads it is the UI stage (PR 7)",
   "automod.rules[].category":
     "hold-and-subject plumbing: the closed-set reason a rule's match carries is stored and honoured, and the editor gets a picker with the protection pack, which is what gives it a category worth choosing",
 

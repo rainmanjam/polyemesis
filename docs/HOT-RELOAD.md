@@ -26,14 +26,14 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 130 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 150 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 2 |
-| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 10 |
+| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 13 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
-The 51 are the ones that reach an FFmpeg argv. The five classes hold 193 fields
+The 51 are the ones that reach an FFmpeg argv. The five classes hold 216 fields
 between them, and `reload.go` is the authority for every number on this page.
 
 ### Applied live — nothing is replaced
@@ -70,6 +70,11 @@ between them, and `reload.go` is the authority for every number on this page.
 - **Clips:** `automod.highlightScoring` is read when a highlight scan asks for
   model scoring. No running process holds it, so switching it changes the next
   scan and nothing else.
+- **Twitch pack record:** `automod.protection.native.twitch.channels` (per channel: `broadcasterId`,
+  `addedTermIds`, `pushedPackVersion`) holds the ids of the Twitch blocked terms
+  polyemesis itself added, each with a hash of its term. The Twitch
+  pack actions write them and read them back on the next click; a settings save
+  cannot change them and nothing running holds a copy.
 
 ### Requires a respawn — the value is in an argv or a socket bind
 

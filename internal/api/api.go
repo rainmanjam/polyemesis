@@ -617,6 +617,13 @@ type Server struct {
 	// the primary's allowance -- each checker's ceiling is the one the operator
 	// set for it.
 	automodSecondaryBudget *automod.Budget
+	// automodState is what must outlive a settings save: strike counts, the
+	// raid window and the learned moderator names. ApplyAutomod rebuilds the
+	// engine on every save; a save in the middle of a raid must not wipe them.
+	automodState *automod.Persistent
+	// packMu serialises the Twitch pack term sync and its reversal: two at once
+	// would both list, both add, and race to record.
+	packMu sync.Mutex
 	// automodTestPrimary / automodTestSecondary allow one Test run per
 	// checker at a time. A Test is three paid calls, and an impatient
 	// double-click should not be six.
@@ -952,6 +959,7 @@ func New(o Options) *Server {
 		whisper:       o.Whisper,
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
+		automodState:  automod.NewPersistent(),
 		automodSecondaryBudget: func() *automod.Budget {
 			if o.AutomodSecondaryBudget != nil {
 				return o.AutomodSecondaryBudget
@@ -1477,6 +1485,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
 				r.Post("/automod/test", s.handleAutomodTest)
+				// The test box for the pack. Offline and stateless, but SESSION-ONLY
+				// too (spec 7.3): it answers from the operator's own rule names and
+				// pack policy, which no write-scoped API token has a need to read.
+				r.Post("/automod/explain", s.handleAutomodExplain)
 				r.Post("/storage/targets/test", s.handleTestStorageTarget)
 
 				// Clip publishing (Wave 4 #5c). SESSION-ONLY, and that is the

@@ -79,7 +79,11 @@ type override struct {
 	Tier   map[string]string   `yaml:"tier"`
 	Drop   []string            `yaml:"drop"`
 	Except map[string][]string `yaml:"except"`
-	Add    []struct {
+	// DropExcept removes exceptions the upstream list supplied. An exception is
+	// a benign whole token, so one that is itself a severe pack term is a
+	// mistake in the source: it excuses the very thing the pack exists to catch.
+	DropExcept map[string][]string `yaml:"dropExcept"`
+	Add        []struct {
 		Term     string   `yaml:"term"`
 		Category string   `yaml:"category"`
 		Tier     string   `yaml:"tier"`
@@ -213,6 +217,20 @@ func generate(genDir, packDir string) ([]byte, stats, error) {
 			return nil, st, fmt.Errorf("overrides.yaml: except: no term %q", term)
 		}
 		e.Except = append(e.Except, ex...)
+	}
+	for term, drop := range ov.DropExcept {
+		e, ok := byTerm[term]
+		if !ok {
+			return nil, st, fmt.Errorf("overrides.yaml: dropExcept: no term %q", term)
+		}
+		for _, x := range drop {
+			i := indexOf(e.Except, x)
+			if i < 0 {
+				return nil, st, fmt.Errorf("overrides.yaml: dropExcept: %q has no exception %q", term, x)
+			}
+			e.Except = append(e.Except[:i], e.Except[i+1:]...)
+			st.exceptDropped++
+		}
 	}
 	for _, term := range ov.Drop {
 		if _, ok := byTerm[term]; !ok {
@@ -391,4 +409,13 @@ func sortedUnique(in []string) []string {
 		}
 	}
 	return out
+}
+
+func indexOf(list []string, x string) int {
+	for i, y := range list {
+		if y == x {
+			return i
+		}
+	}
+	return -1
 }

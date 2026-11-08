@@ -243,6 +243,14 @@ var invocationGoJobGates = []invocationGoJobGate{
 			"an unrun script is found by whoever next runs it by hand.",
 	},
 	{
+		name:  "the automod protection tier",
+		re:    regexp.MustCompile(`\bPROTECTION=1 \./scripts/acceptance-automod\.sh\b`),
+		local: regexp.MustCompile(`\bPROTECTION=1 \./scripts/acceptance-automod\.sh\b`),
+		costs: "the proof that a fresh install's recommended protection holds positives off " +
+			"the overlay, leaves benign lines alone and sends nothing to a platform. It is " +
+			"the part of automod on by default; seconds, no network, no port.",
+	},
+	{
 		name:  "go test",
 		re:    regexp.MustCompile(`\bgo test\b.*\./\.\.\.`),
 		local: regexp.MustCompile(`\bgo test\b.*\./\.\.\.`),

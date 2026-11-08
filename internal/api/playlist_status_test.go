@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,7 +39,18 @@ func TestReadinessIsNotOnTheSettingsBlob(t *testing.T) {
 		t.Fatalf("PutSettings: %v", err)
 	}
 
-	body := string(send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK))
+	// Only the playlist's own subtree: other blocks (automod.protection.state)
+	// legitimately carry a field of that name.
+	var doc struct {
+		Failover struct {
+			Playlist json.RawMessage `json:"playlist"`
+		} `json:"failover"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &doc)
+	body := string(doc.Failover.Playlist)
+	if !strings.Contains(body, `"items"`) {
+		t.Fatalf("the playlist block was not found in the settings payload: %s", body)
+	}
 	if strings.Contains(body, `"state"`) {
 		t.Error("per-item readiness is on the settings payload, which the UI PUTs " +
 			"back verbatim; it belongs on GET /failover/playlist")

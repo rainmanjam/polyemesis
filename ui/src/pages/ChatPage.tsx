@@ -20,6 +20,7 @@ import {
 import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatFlaggedList } from "@/components/ChatFlaggedList";
+import { ProtectionOfferStandalone } from "@/components/ProtectionOfferStandalone";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
 import { XChatModeration } from "@/components/XChatModeration";
@@ -210,13 +211,16 @@ export function ChatPage() {
   const renderTimeline = () => {
     if (flagsOpen) {
       return (
-        <ChatFlaggedList
-          flags={flags}
-          failed={readFailed(flagsRead.read)}
-          filtered={flags.length === 0 && allFlags.length > 0}
-          onOpenUser={setCard}
-          onRelease={release}
-        />
+        <>
+          <ProtectionOfferStandalone />
+          <ChatFlaggedList
+            flags={flags}
+            failed={readFailed(flagsRead.read)}
+            filtered={flags.length === 0 && allFlags.length > 0}
+            onOpenUser={setCard}
+            onRelease={release}
+          />
+        </>
       );
     }
     if (search.active) {
