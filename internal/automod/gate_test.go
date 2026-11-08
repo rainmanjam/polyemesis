@@ -171,7 +171,7 @@ func TestRaidBrakeStopsAskingAndLifts(t *testing.T) {
 	}
 }
 
-// A copypasta raid costs one call: the answer is cached by pack form, and the
+// A copypasta raid costs one call: the answer is cached by NFKC text (case and spacing folded), and the
 // cached answer needs neither the author allowance nor a second request.
 func TestCopypastaCostsOneCallAndErrorsAreNotCached(t *testing.T) {
 	fc := &fakeChecker{out: []Finding{{Checker: CheckerModel, Action: ActionFlag, Category: CategoryThreat, Hold: true}}}
@@ -181,11 +181,11 @@ func TestCopypastaCostsOneCallAndErrorsAreNotCached(t *testing.T) {
 	p := db.PlatformTwitch
 	ctx := context.Background()
 
-	v1, err := e.CheckModel(ctx, p, "I WILL find you, and kill you!!")
+	v1, err := e.CheckModel(ctx, p, "I  WILL find you and kill you")
 	if err != nil || !v1.Hold {
 		t.Fatalf("first answer: %+v %v", v1, err)
 	}
-	// Same pack form, different case and punctuation, a different author.
+	// Same NFKC text modulo case and spacing, a different author.
 	if !e.WantsModel(p, Subject{AuthorID: "x", Text: "i will find you and kill you"}, Verdict{}) {
 		t.Fatal("the cached text was declined")
 	}
@@ -462,3 +462,35 @@ func (b *blockingChecker) Check(context.Context, string) ([]Finding, error) {
 }
 func (b *blockingChecker) Stats() ModelStats { return ModelStats{} }
 func (b *blockingChecker) Enabled() bool     { return true }
+
+// Two texts that fold to one pack form but differ in NFKC must not share a
+// cached verdict, or whichever was judged first decides the other for ten
+// minutes. Case and spacing differences still do share one.
+func TestVerdictCacheIsKeyedOnNFKCNotThePackForm(t *testing.T) {
+	benign, variant := "i will kill you", "i will k1ll you"
+	a, b := pack.NewForms(benign), pack.NewForms(variant)
+	if a.Pack != b.Pack || a.NFKC == b.NFKC {
+		t.Fatalf("setup: need the same pack form and different NFKC, got %q/%q and %q/%q", a.Pack, b.Pack, a.NFKC, b.NFKC)
+	}
+	fc := &fakeChecker{}
+	e := hardEngine(t, fc, NewModelGate(GateConfig{}))
+	ctx := context.Background()
+	if _, err := e.CheckModel(ctx, db.PlatformTwitch, benign); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CheckModel(ctx, db.PlatformTwitch, variant); err != nil {
+		t.Fatal(err)
+	}
+	if got := fc.calls.Load(); got != 2 {
+		t.Fatalf("the model was asked %d times, want 2: the variant was answered from the benign line's cached verdict", got)
+	}
+	// Case and whitespace are the only folds that cannot change a meaning.
+	for _, same := range []string{"I  WILL kill you", "  i will kill\tyou "} {
+		if _, err := e.CheckModel(ctx, db.PlatformTwitch, same); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := fc.calls.Load(); got != 2 {
+		t.Fatalf("a case/whitespace variant cost a call: %d", got)
+	}
+}

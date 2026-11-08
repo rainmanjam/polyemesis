@@ -3,6 +3,7 @@ package automod
 import (
 	"container/list"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,23 +187,27 @@ func (g *ModelGate) Stats() GateStats {
 	return s
 }
 
-// formKey hashes the pack form, so "Free  GIVEAWAY!!" and "free giveaway" are
-// one question. 64 bits of FNV: a collision would serve one text another's
-// cached verdict, and over 2,048 entries that is a ~1e-13 event.
-func formKey(packForm string) uint64 {
+// formKey hashes the verdict-cache text (see verdictText).
+// 64 bits of FNV: a collision would serve one text another's cached verdict,
+// and over 2,048 entries that is a ~1e-13 event.
+func formKey(text string) uint64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(packForm))
+	_, _ = h.Write([]byte(text))
 	return h.Sum64()
 }
 
-// gateText is the text a question is keyed by: the pack form, or the NFKC form
-// for a line of nothing but symbols, whose pack form is empty and would
-// otherwise make every such line one question.
-func gateText(f pack.Forms) string {
-	if f.Pack != "" {
-		return f.Pack
-	}
-	return f.NFKC
+// verdictText is the text a cached verdict is keyed by: NFKC (format
+// characters stripped), lower-cased, runs of whitespace collapsed -- and
+// nothing lossier.
+//
+// NOT the pack form. That fold maps leet, confusables and repeated letters onto
+// one spelling, so a benign line and an abusive variant of it ("kill" and
+// "k1ll", which the model might judge differently) shared one key, and
+// whichever was asked first decided the other for ten minutes. Case and spacing
+// are the only differences that cannot change what a message means. Used for a
+// line of nothing but symbols too, which the pack form emptied.
+func verdictText(text string) string {
+	return strings.Join(strings.Fields(strings.ToLower(pack.NFKC(text))), " ")
 }
 
 func (g *ModelGate) countSettled()  { g.bump(func(s *GateStats) { s.Settled++ }) }

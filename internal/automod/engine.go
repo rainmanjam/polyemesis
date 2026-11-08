@@ -165,12 +165,12 @@ func (e *Engine) CheckModel(ctx context.Context, p db.Platform, text string) (Ve
 		return Verdict{}, nil
 	}
 	// Under the hard-case scope an answer is remembered for ten minutes by the
-	// pack form of the text, so a copypasta raid costs one call. Only there:
+	// NFKC text (case and whitespace folded), so a copypasta raid costs one call. Only there:
 	// scope "all" asks every time, as it always has.
 	var key uint64
 	cached := e.scope == ScopeHard && e.gate != nil
 	if cached {
-		key = formKey(gateText(pack.NewForms(text)))
+		key = formKey(verdictText(text))
 		if f, by, ok := e.gate.lookup(key); ok {
 			v := e.decide(p, f)
 			v.DecidedBy = by
