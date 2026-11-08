@@ -76,7 +76,8 @@ func TestAnOverlaySubscriberIsSentOnlyTheDisplayProjection(t *testing.T) {
 func TestOnlyTheOverlayRowsAreOverlayVisible(t *testing.T) {
 	for _, s := range Catalogue() {
 		visible := OverlayVisible(s.Type)
-		should := s.Type == TypeChatDisplay || s.Type == TypeChatUndisplay || s.Type == TypePollDisplay
+		should := s.Type == TypeChatDisplay || s.Type == TypeChatUndisplay || s.Type == TypePollDisplay ||
+			s.Type == TypeActivityDisplay
 		if visible != should {
 			t.Errorf("%s: overlay-visible = %v, want %v", s.Type, visible, should)
 		}

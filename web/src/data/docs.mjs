@@ -203,6 +203,8 @@ const DOCS_BY_SECTION = {
       "One poll asked in every connected chat and counted as one result. Vote rules, automod and moderation, the on-stream widget, native Twitch polls and export."],
     ["CHAT-EXPORT.md", "Chat saved with each recording, and chat export",
       "Chat is written beside every recording as JSON and WebVTT so it outlives the chat history and lines up with the video, and any window of stored chat can be exported as JSON, CSV or NDJSON."],
+    ["ACTIVITY.md", "Viewer activity and the alerts overlay",
+      "Follows, subs, gifts, tips, raids and redemptions from every platform as one event: the console feed, an OBS alerts overlay that only shows viewer words automod has passed, opt-in webhooks, and a test alert that needs no account."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",

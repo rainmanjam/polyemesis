@@ -2,7 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { ChatOverlayView } from "@/components/overlay/ChatOverlayView";
 import { PollWidgetView } from "@/components/overlay/PollWidgetView";
+import { AlertView } from "@/components/overlay/AlertView";
 import {
+  advanceAlerts,
+  emptyAlertQueue,
+  enqueueAlert,
+  GAP_MS,
+  nextAlertDelay,
+  type AlertQueueState,
+  type QueuedAlert,
+} from "@/lib/activityQueue";
+import { playAlertSound } from "@/lib/alertSound";
+import {
+  alertStyleOf,
   addLine,
   applyPoll,
   expireLines,
@@ -62,6 +74,7 @@ export function OverlayPage() {
   const [loc] = useState(
     () => overlayLocation(window.location.pathname, window.location.hash) ?? { key: "", dock: false, poll: false },
   );
+  if (loc.alerts) return <AlertsOverlay overlayKey={loc.key} />;
   if (loc.poll) return <PollOverlay overlayKey={loc.key} />;
   return <ChatOverlay overlayKey={loc.key} dock={loc.dock} />;
 }
@@ -131,6 +144,122 @@ function PollOverlay({ overlayKey: key }: Readonly<{ overlayKey: string }>) {
     <div style={{ position: "fixed", inset: 0, background: "transparent", padding: "0.75rem", boxSizing: "border-box" }}>
       <PollWidgetView poll={poll} style={style} now={now} />
     </div>
+  );
+}
+
+/** The alerts overlay (/overlay/alerts): follows, subs, tips and raids drawn one
+ *  at a time. Same key, same style row and same display stream as the chat
+ *  overlay, but it draws ONLY activity.display, paced by the queue in
+ *  lib/activityQueue. Runs with no session, on a transparent page, and a
+ *  failure draws NOTHING -- an error here would be burned into the broadcast.
+ *  Unlike the poll widget it retries a failed start: it sits in a scene for
+ *  hours, and one blip when OBS launches must not leave it dead. */
+function AlertsOverlay({ overlayKey: key }: Readonly<{ overlayKey: string }>) {
+  const [style, setStyle] = useState<OverlayStyle | null>(null);
+  const [queue, setQueue] = useState<AlertQueueState>(emptyAlertQueue);
+  const [shown, setShown] = useState<{ item: QueuedAlert; leaving: boolean } | null>(null);
+  useTransparentPage();
+
+  // The stream's handlers are created once; a restyle arrives on a reconnect
+  // and is read through this ref.
+  const alert = alertStyleOf(style);
+  const alertRef = useRef(alert);
+  // The ref is set the moment a config arrives, before React renders it:
+  // the first frames of the stream can land in between, and would otherwise
+  // be filtered by the defaults instead of this overlay's own kinds.
+  const take = (s: OverlayStyle) => {
+    alertRef.current = alertStyleOf(s);
+    setStyle(s);
+  };
+
+  useEffect(() => {
+    if (!key) return;
+    const ctl = new AbortController();
+    const run = async () => {
+      const config = await fetchOverlayConfig(key, ctl.signal);
+      if (!config) return;
+      take(config.style);
+      let first = true;
+      await runOverlayStream(
+        key,
+        {
+          onActivity: (d) => setQueue((q) => enqueueAlert(q, d, alertRef.current, Date.now())),
+          onDenied: () => {
+            setQueue(emptyAlertQueue());
+            setShown(null);
+            setStyle(null);
+          },
+          onConnect: async () => {
+            if (first) {
+              first = false;
+              return;
+            }
+            const fresh = await fetchOverlayConfig(key, ctl.signal).catch(() => undefined);
+            if (fresh) take(fresh.style);
+          },
+        },
+        ctl.signal,
+      );
+    };
+    let retry: number | undefined;
+    const attempt = () => {
+      run().catch(() => {
+        if (ctl.signal.aborted) return;
+        retry = window.setTimeout(attempt, RETRY_MS);
+      });
+    };
+    attempt();
+    return () => {
+      ctl.abort();
+      window.clearTimeout(retry);
+    };
+  }, [key]);
+
+  // The queue's one timer: wakes when the alert on screen is due to go, or the
+  // gap before the next has passed.
+  const { seconds } = alert;
+  useEffect(() => {
+    const wait = nextAlertDelay(queue, { seconds }, Date.now());
+    if (wait === null) return;
+    const id = window.setTimeout(
+      () =>
+        setQueue((q) => {
+          const next = advanceAlerts(q, { seconds }, Date.now());
+          // Nothing was due (the wall clock can step back in an OBS source that
+          // has run for hours). An unchanged object would make React bail out
+          // and this effect never re-arm, leaving the alert up until the next
+          // event; a copy re-runs it with a fresh delay.
+          return next === q ? { ...q } : next;
+        }),
+      wait,
+    );
+    return () => window.clearTimeout(id);
+  }, [queue, seconds]);
+
+  // A new alert goes on screen (and plays its sound); when the queue lets go of
+  // it, it stays mounted for the exit transition, then leaves.
+  const current = queue.current;
+  useEffect(() => {
+    if (current) {
+      setShown({ item: current, leaving: false });
+      void playAlertSound(alertRef.current.sound);
+      return;
+    }
+    setShown((s) => (s ? { ...s, leaving: true } : s));
+    const id = window.setTimeout(() => setShown(null), GAP_MS);
+    return () => window.clearTimeout(id);
+  }, [current]);
+
+  if (!style || !shown) return null;
+  return (
+    <AlertView
+      key={shown.item.display.id}
+      display={shown.item.display}
+      followers={shown.item.followers}
+      alert={alert}
+      style={style}
+      leaving={shown.leaving}
+    />
   );
 }
 

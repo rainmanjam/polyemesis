@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/rainmanjam/polyemesis/internal/activityhub"
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
@@ -651,6 +652,13 @@ type Server struct {
 	obsDocMu sync.Mutex
 	// polls is the chat poll counter (#14), or nil without chat. polls.go.
 	polls *polls.Engine
+	// activity is the viewer-activity hub (internal/activityhub), or nil; the
+	// activity routes answer 503 without it. activityGate is the alerts
+	// overlay's gate, read for its counters only. activityTests limits "Send
+	// test alert". activity.go.
+	activity      *activityhub.Hub
+	activityGate  *overlay.ActivityGate
+	activityTests activityTestLimiter
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -870,6 +878,10 @@ type Options struct {
 	// Polls is the chat poll counter. Optional; the poll routes answer 503
 	// without it.
 	Polls *polls.Engine
+	// Activity is the viewer-activity hub and ActivityGate the alerts overlay's
+	// gate. Both optional; the activity routes answer 503 without the hub.
+	Activity     *activityhub.Hub
+	ActivityGate *overlay.ActivityGate
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -946,6 +958,8 @@ func New(o Options) *Server {
 		overlayGate:     o.OverlayGate,
 		obs:             o.OBS,
 		polls:           o.Polls,
+		activity:        o.Activity,
+		activityGate:    o.ActivityGate,
 		version:         o.Version,
 		diag:            o.Diag,
 		diagLevel:       o.DiagLevel,
@@ -1028,6 +1042,11 @@ func New(o Options) *Server {
 	}
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
+	}
+	// A platform whose activity rides its chat connection is listed in
+	// GET /activity/sources by asking the chat hub (activity_wiring.go).
+	if s.activity != nil && s.chat != nil {
+		s.activity.AddStatusProvider(chatActivityStatuses(s.chat))
 	}
 	// Read (and, for a file from before the token was sealed, rewrite) the
 	// playout sidecar now rather than on the first request, so an install
@@ -1784,6 +1803,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/polls/export", s.handleExportPolls)
 			r.Get("/polls/{id}", s.handleGetPoll)
 			r.Post("/polls/{id}/end", s.handleEndPoll)
+
+			// Viewer activity -- follows, subs, tips, raids (internal/activity).
+			// Named activity, not alerts: that word is the operator's. The two
+			// GETs name viewers and carry what they wrote, so a read token is
+			// refused them as it is refused chat; the two POSTs reach the
+			// overlay and are admin by the method rule. See activity.go.
+			api.Get(r, "/activity", s.handleActivity, readDenied)
+			api.Get(r, "/activity/sources", s.handleActivitySources, readDenied)
+			r.Post("/activity/test", s.handleActivityTest)
+			r.Post("/activity/{id}/replay", s.handleActivityReplay)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -1962,6 +1991,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// it can be placed apart from the chat lines.
 	r.Get(OverlayPath+"/poll", ovPage)
 	r.Get(OverlayPath+"/poll"+OverlayKeyPath+"{key}", ovPage)
+	// The alerts overlay: the same key again, a third OBS source for follows,
+	// subs, tips and raids.
+	r.Get(OverlayPath+"/alerts", ovPage)
+	r.Get(OverlayPath+"/alerts"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)

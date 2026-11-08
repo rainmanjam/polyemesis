@@ -70,6 +70,8 @@ func TestRoutePolicyIsWhatWasRegistered(t *testing.T) {
 		t.Errorf("secretInPath = %v, want %v", got, want)
 	}
 	if got, want := patternList(p.patterns(readDenied)), []string{
+		"/api/v1/activity",
+		"/api/v1/activity/sources",
 		"/api/v1/analytics/live",
 		"/api/v1/analytics/streams",
 		"/api/v1/analytics/streams/{id}",

@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort redact.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 62,
-  "counterpartlessExcusedCeiling": 32,
+  "excusedCeiling": 64,
+  "counterpartlessExcusedCeiling": 34,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
   "nonGetDifferentialFloor": 18,
@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 312,
+    "methodPatternPairs": 318,
     "swept": 80,
-    "excused": 62,
-    "denied": 170,
+    "excused": 64,
+    "denied": 174,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -28,6 +28,30 @@
     "unstable": 4
   },
   "routes": [
+    {
+      "method": "GET",
+      "pattern": "/api/v1/activity",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/activity/sources",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/activity/test",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/activity/{id}/replay",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/meta",
@@ -1686,6 +1710,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/overlay/alerts",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/alerts/k/{key}",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/overlay/dock",
       "coverage": "excused",
       "zeroSource": "unguarded"
@@ -2482,6 +2518,26 @@
       "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
+      "route": "GET /api/v1/activity",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/activity/sources",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
       "route": "GET /api/v1/analytics/live",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2971,6 +3027,28 @@
     },
     {
       "route": "GET /overlay",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/alerts",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/alerts/k/{key}",
       "scope": "route",
       "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
       "want": {

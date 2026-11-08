@@ -1,7 +1,8 @@
 # Chat overlay and OBS dock
 
 **One chat overlay for every platform, as an OBS browser source, plus a dock
-for reading chat inside OBS. Both are display-only.**
+for reading chat inside OBS and an [alerts overlay](#alerts-overlay) for
+follows, subs, tips and raids. All are display-only.**
 
 Set them up under **Settings → Chat overlays**.
 
@@ -42,6 +43,71 @@ can place it apart from the chat lines. Its path is `/overlay/poll`, or
 The widget shows totals only, with no platform logos or per-platform
 breakdown, so it appears on every overlay key whatever its platform filter.
 It never shows who voted.
+
+## Alerts overlay
+
+A third OBS browser source on the same key draws **viewer activity**: a new
+follower, a sub, a gift, a tip, a raid, a channel-points redemption, a hype
+train, a shoutout. Select **Copy alerts overlay URL** and add it as its own
+Browser source, so you can place it apart from the chat lines. Its path is
+`/overlay/alerts`, or `/overlay/alerts/k/{key}` with the key in the path. What
+the events are and where they come from is in [ACTIVITY.md](ACTIVITY.md).
+
+It follows the same rules as the chat overlay:
+
+- **The page is transparent.** Only the alert shows over your scene.
+- **The platform filter applies.** A Twitch-only overlay is never sent a Kick
+  follow. The platform name is shown as text.
+- **Words and names are judged before they go on air.** A viewer's message is
+  held until automod has passed it. If automod removes it, or gives no answer
+  within four seconds, the alert **still shows, without the message**. A name
+  that matches your blocked terms is shown as "Someone". The names are checked
+  against the blocked terms only; the model checker is asked about messages, not
+  names. You can also turn viewer messages off for the overlay entirely under
+  **Activity → Settings**.
+- **Nothing replays on reload.** If OBS reloads the source, it is not played the
+  last few minutes of alerts again: an alert is replayed to a reconnecting
+  overlay only if it is under 10 seconds old.
+- **Only the overlay kinds are drawn:** follows, subs, resubs, gifts, tips,
+  raids in, redemptions, hype trains and shoutouts received. A moderation action, the
+  platform's stream online/offline report, a native poll or prediction, a
+  reaction tally, and a raid or shoutout you sent *out* never reach an overlay.
+- **No ids.** The overlay is sent a name, an amount and a few numbers, never a
+  platform account id, an actor id or a source id.
+
+Alerts queue on the page and play one at a time, each for the overlay's
+**Seconds** (3 to 15). The queue holds 50; when it is full the oldest follow
+goes first, and a tip is never dropped. More than five follows in ten seconds
+are shown as one "N new followers" alert.
+
+### Alerts style
+
+The overlay's style gains an optional `alerts` block (the chat style fields are
+unchanged):
+
+| Field | Values |
+|---|---|
+| `layout` | `banner`, `card`, `minimal` |
+| `kinds` | the kinds this overlay draws, from the nine above |
+| `seconds` | 3 to 15 |
+| `showMessage` | draw the viewer's message, if it was released |
+| `showAmount` | draw the amount of a tip |
+| `sound` | `none`, `chime`, `pop` or `bell`: tones the page makes itself. There is no sound URL. |
+| `accent` | `#rrggbb`, lower case |
+
+With no `alerts` block the overlay draws every kind as a banner for six seconds,
+silently. **Downgrading:** an older polyemesis refuses to read an overlay saved
+with an `alerts` block, because it rejects style fields it does not know; remove
+the block, or restore the overlay from before the upgrade, if you go back.
+
+### Try it without a platform
+
+**Send test alert** (on the overlay editor beside **Copy OBS URL**, and under
+**Activity → Settings**) sends a canned alert of any kind through the same path
+a real one takes, with no account connected and no Affiliate or monetisation
+tier needed. It obeys your settings, so a kind you switched off does not show,
+and it carries a `TEST` mark in the console. Use it to choose a layout and a
+sound, and to check the platform filter.
 
 ## Platform filter: a Twitch-safe scene
 
@@ -183,7 +249,7 @@ The overlay key reaches these two routes, sent in `X-Overlay-Key`:
 | Method | Path | Returns |
 |---|---|---|
 | `GET` | `/api/v1/overlay/config` | `{name, platforms, style}` |
-| `GET` | `/api/v1/overlay/events` | Server-Sent Events: `chat.display`, `chat.undisplay` and `poll.display` only |
+| `GET` | `/api/v1/overlay/events` | Server-Sent Events: `chat.display`, `chat.undisplay`, `poll.display` and `activity.display` only |
 
 The event payloads are described in [EVENTS.md](EVENTS.md#overlay).
 
@@ -191,8 +257,12 @@ The event payloads are described in [EVENTS.md](EVENTS.md#overlay).
 
 - A newly opened overlay starts empty. It shows messages that arrive after it
   connects.
-- Alerts aren't part of the overlay. Polls are drawn by the separate
-  [poll widget](#the-poll-widget), not on the chat overlay.
+- Polls are drawn by the separate [poll widget](#the-poll-widget), and viewer
+  activity by the separate [alerts overlay](#alerts-overlay), not on the chat
+  overlay.
+- Activity is kept in memory and not stored. An alert that happened while no
+  overlay was connected is not shown later, and a restart forgets the console's
+  activity feed.
 - The overlay was tested in headless Chromium, the engine OBS's browser source
   uses, with a transparent background at 1920 × 1080. It hasn't been tested in
   OBS itself.

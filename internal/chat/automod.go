@@ -61,9 +61,12 @@ type automodState struct {
 	mod  Moderator
 	gen  uint64
 	jobs chan automodJob
-	stop context.CancelFunc
-	done chan struct{}
-	wg   sync.WaitGroup
+	// screenJobs is the alert-text screening queue (activity.go), with its own
+	// worker, apart from jobs.
+	screenJobs chan screenJob
+	stop       context.CancelFunc
+	done       chan struct{}
+	wg         sync.WaitGroup
 }
 
 // SetModerator attaches the deciding half, replacing any previous one.
@@ -81,14 +84,17 @@ func (h *Hub) SetModerator(m Moderator) {
 	if m != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		next = &automodState{
-			mod:  m,
-			gen:  gen,
-			jobs: make(chan automodJob, automodQueueDepth),
-			stop: cancel,
-			done: make(chan struct{}),
+			mod:        m,
+			gen:        gen,
+			jobs:       make(chan automodJob, automodQueueDepth),
+			screenJobs: make(chan screenJob, screenQueueDepth),
+			stop:       cancel,
+			done:       make(chan struct{}),
 		}
 		next.wg.Add(1)
+		next.wg.Add(1)
 		go h.runAutomodWorker(ctx, next)
+		go h.runScreenWorker(ctx, next)
 	}
 	h.automod = next
 	h.mu.Unlock()
