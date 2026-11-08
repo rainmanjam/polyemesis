@@ -3,7 +3,10 @@ package oauth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -193,5 +196,30 @@ func TestGraphWaitAndCodeTables(t *testing.T) {
 	got := FacebookErrorText(&statusError{Status: 400, URL: "https://graph/x", Body: fbDeadTokenBody[:300], full: fbDeadTokenBody})
 	if strings.Contains(got, "fbtrace") || strings.Contains(got, "https://") || !strings.Contains(got, "code 190") {
 		t.Fatalf("summary = %q", got)
+	}
+}
+
+// Every refused refresh keeps "returned <status>" in its text: the live OAuth
+// acceptance driver (scripts/acceptance_oauth_driver.go statusFrom) reads the
+// HTTP status from exactly that phrase, and a friendlier message that dropped
+// it turned a correct refusal into "status -1" against the real Facebook.
+func TestFacebookRefreshErrorsKeepTheHTTPStatus(t *testing.T) {
+	statusRe := regexp.MustCompile(`returned (\d{3})[:\s]`)
+	bodies := map[string]int{
+		`{"error":{"message":"Invalid App ID","type":"OAuthException","code":101}}`:                       400,
+		`{"error":{"message":"(#4) Application request limit reached","type":"OAuthException","code":4}}`: 400,
+		`{"error":{"message":"Session has expired","type":"OAuthException","code":190}}`:                  400,
+		`<html>bad gateway</html>`: 502,
+	}
+	for body, status := range bodies {
+		fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		})
+		_, err := fb.Refresh(context.Background(), "cid", "secret", "old-token")
+		m := statusRe.FindStringSubmatch(fmt.Sprint(err))
+		if m == nil || m[1] != strconv.Itoa(status) {
+			t.Errorf("status %d is not readable from %q", status, err)
+		}
 	}
 }

@@ -110,19 +110,20 @@ func fbRefreshError(err error) error {
 	ge, ok := decodeGraphError(te.payload())
 	if !ok {
 		// Not Meta's envelope: a proxy or edge page. Say so without echoing it.
-		return fmt.Errorf("Facebook's token endpoint returned HTTP %d", te.code)
+		return fmt.Errorf("Facebook's token endpoint returned %d: the answer was not Meta's error format", te.code)
 	}
 	switch {
 	case IsGraphTokenDead(ge.Code):
 		return fmt.Errorf("Facebook no longer accepts the saved login (it expired, was revoked, or the password "+
-			"changed). Reconnect the Facebook account in Settings → Platforms. Facebook said: %s: %w",
-			metaMessage(ge), ErrReconnectRequired)
+			"changed). Reconnect the Facebook account in Settings → Platforms. Facebook said: %s "+
+			"(token endpoint returned %d: dead login): %w", metaMessage(ge), te.code, ErrReconnectRequired)
 	case ge.Code == 101 || strings.Contains(strings.ToLower(ge.Message), "client secret"):
 		return fmt.Errorf("Facebook rejected the App ID or App Secret; check them in Settings → Platforms. "+
-			"Facebook said: %s", metaMessage(ge))
+			"Facebook said: %s (token endpoint returned %d: invalid client)", metaMessage(ge), te.code)
 	case IsGraphRateLimit(ge.Code):
 		return fmt.Errorf("Facebook is rate-limiting polyemesis, so the token could not be refreshed. %s "+
-			"Facebook said: %s", graphWaitAdvice(GraphWait(te.header)), metaMessage(ge))
+			"Facebook said: %s (token endpoint returned %d: rate limited)", graphWaitAdvice(GraphWait(te.header)),
+			metaMessage(ge), te.code)
 	}
 	return fmt.Errorf("Facebook's token endpoint returned %d: %s", te.code, GraphErrorSummary(te.payload()))
 }
