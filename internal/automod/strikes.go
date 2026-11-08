@@ -181,13 +181,18 @@ func (e *Engine) syncArming() {
 	}
 }
 
-// climb raises each pack finding's action to what the ladder asks for at this
-// strike, lowered to the highest armed rung at or below it. A finding no rung
-// is armed for stays the flag it was.
+// climb resolves the strike to ONE platform action for the message: the most
+// severe rung any pack finding in it is entitled to, given its ceiling and the
+// rungs armed on this platform. The Hub performs every entry of Verdict.Act, so
+// raising each finding would turn one message into several actions, a lesser
+// one issued after a greater (a timeout landing on a ban). The winning finding
+// carries the action; the others stay the flags they were. A finding no rung is
+// armed for stays a flag.
 func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
 	if strike > int(maxRung) {
 		strike = int(maxRung)
 	}
+	best, bestRung := -1, RungHold
 	for i := range fs {
 		f := &fs[i]
 		if f.Checker != CheckerProtection {
@@ -199,13 +204,19 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
 		}
 		for r := want; r > RungHold; r-- {
 			if e.matrix.Allows(e.caps, Key{Platform: p, Action: r.Action(), Checker: CheckerProtection}) {
-				f.Action = r.Action()
-				if f.Action == ActionTimeout {
-					f.TimeoutSeconds = e.ladder.timeoutSeconds()
+				if r > bestRung {
+					best, bestRung = i, r
 				}
 				break
 			}
 		}
+	}
+	if best < 0 {
+		return
+	}
+	fs[best].Action = bestRung.Action()
+	if bestRung == RungTimeout {
+		fs[best].TimeoutSeconds = e.ladder.timeoutSeconds()
 	}
 }
 

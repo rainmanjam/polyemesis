@@ -340,7 +340,6 @@ func automodProviderProblems(a db.AutomodSettings) error {
 			probs = append(probs, fmt.Sprintf("category %q asks for unknown action %q", k, a.Model.CategoryActions[k]))
 		}
 	}
-	probs = append(probs, protectionVocabProblems(a.Protection)...)
 	if len(probs) == 0 {
 		return nil
 	}

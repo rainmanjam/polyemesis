@@ -1972,7 +1972,7 @@ func snapshotStoredSettings(settings *db.Settings) storedSettings {
 	out.on = maps.Clone(settings.Automod.On)
 	// And the stored model-checker blocks, which newlyEnabledUntested
 	// compares against. Copies: only their connection fields are read.
-	out.automod = db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
+	out.automod = db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary, Protection: settings.Automod.Protection}
 	// Whether MQTT has ever been set up here, for AssignInstanceOnFirstSetup
 	// below: off, with no broker URL stored.
 	out.mqttNeverConfigured = !settings.MQTT.Enabled && strings.TrimSpace(settings.MQTT.BrokerURL) == ""
@@ -2066,6 +2066,9 @@ func (s *Server) checkAutomodChange(settings *db.Settings, stored storedSettings
 	// or a category action this build does not have. See
 	// newlyEnabledUntested and automodProviderProblems.
 	if err := automodProviderProblems(settings.Automod); err != nil {
+		return err
+	}
+	if err := protectionChangeProblems(stored.automod.Protection, settings.Automod.Protection); err != nil {
 		return err
 	}
 	return newlyEnabledUntested(stored.automod, settings.Automod, s.store.AutomodTestPass)

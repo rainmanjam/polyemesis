@@ -327,3 +327,36 @@ func TestPolicyKeyNamesProfanityByItsGroup(t *testing.T) {
 		t.Fatal("policyKey")
 	}
 }
+
+func TestOneMessageNeverYieldsTwoPlatformActions(t *testing.T) {
+	e, clk := ladderEngine(t, NewStrikes(), nil, ActionDelete, ActionTimeout, ActionBan)
+	text := slur(t) + " someone@gmail.com" // hate (ceiling ban) and doxxing (ceiling timeout)
+	var v Verdict
+	for i := 0; i < 3; i++ {
+		v = e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", AuthorName: "viewer", Text: text})
+		clk.advance(time.Second)
+	}
+	acting := 0
+	var got Action
+	for _, f := range v.Act {
+		if f.Checker == CheckerProtection && f.Action != ActionFlag {
+			acting++
+			got = f.Action
+		}
+	}
+	if acting != 1 || got != ActionBan {
+		t.Fatalf("strike 3 of a two-finding message: %d platform actions (%q), want exactly one ban", acting, got)
+	}
+	var doxx, hate Finding
+	for _, f := range v.Findings {
+		switch f.Category {
+		case CategoryDoxxing:
+			doxx = f
+		case CategoryHateSpeech:
+			hate = f
+		}
+	}
+	if doxx.Action != ActionFlag || hate.Action != ActionBan {
+		t.Fatalf("doxxing %q hate %q, want flag and ban", doxx.Action, hate.Action)
+	}
+}

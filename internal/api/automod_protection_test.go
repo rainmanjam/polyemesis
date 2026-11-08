@@ -424,3 +424,40 @@ func TestLadderFromSettingsReadsCeilingsAndNeverRaisesSelfHarm(t *testing.T) {
 		t.Fatal("an unparseable ceiling reached the ladder")
 	}
 }
+
+// A block already stored with a name this build does not know (written by a
+// newer build, or by a pack that later dropped the detector) must not make
+// every unrelated save fail; only editing the block is checked.
+func TestAnUnknownStoredProtectionNameDoesNotBlockUnrelatedSaves(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	s, err := store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Automod.Protection.Categories = map[string]db.ProtectionCategory{"astrology": {}}
+	if err := store.PutSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &doc)
+	doc["automod"].(map[string]any)["enabled"] = true // the echoed offer and block are unchanged
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", doc, http.StatusOK)
+	// Editing the block is checked again.
+	doc["automod"].(map[string]any)["protection"].(map[string]any)["ceilings"] = map[string]any{"astrology": "ban"}
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", doc, http.StatusBadRequest)
+}
+
+func TestSameProtectionIgnoresTheDerivedOffer(t *testing.T) {
+	a := db.AutomodProtection{State: "on", Offer: true}
+	b := db.AutomodProtection{State: "on"}
+	if !sameProtection(a, b) {
+		t.Fatal("the derived offer made an unchanged block look edited")
+	}
+	b.AllowDomains = []string{"x.example"}
+	if sameProtection(a, b) {
+		t.Fatal("an edit was not noticed")
+	}
+	if err := protectionChangeProblems(a, a); err != nil {
+		t.Fatal(err)
+	}
+}

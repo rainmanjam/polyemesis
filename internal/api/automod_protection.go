@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -248,4 +250,29 @@ func protectionFromSettings(a db.AutomodSettings, hl automod.HistoryLimits, ps *
 		cfg.Names = pack.NewNameSet(a.Protection.Impersonation.Protect)
 	}
 	return automod.NewProtection(automod.ProtectionConfig{Pack: cfg, Hold: hold, History: &hl})
+}
+
+// sameProtection reports whether two stored blocks are the same document, with
+// the derived offer ignored: the client echoes it back, and it must not make an
+// unchanged block look edited.
+func sameProtection(a, b db.AutomodProtection) bool {
+	a.Offer, b.Offer = false, false
+	x, errA := json.Marshal(a)
+	y, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(x, y)
+}
+
+// protectionChangeProblems refuses a protection block this build cannot run,
+// but only when the save CHANGES the block. An install carrying a category or
+// detector name a newer build wrote, or one a later pack dropped, must still be
+// able to save its listener port; the same reasoning scopes the rule-compile
+// check and the cell-arming check to a change.
+func protectionChangeProblems(stored, sent db.AutomodProtection) error {
+	if sameProtection(stored, sent) {
+		return nil
+	}
+	if probs := protectionVocabProblems(sent); len(probs) > 0 {
+		return badRequestError{"automod: " + strings.Join(probs, "; ")}
+	}
+	return nil
 }
