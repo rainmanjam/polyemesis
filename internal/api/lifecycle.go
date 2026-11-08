@@ -444,6 +444,14 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 	acct *db.PlatformAccount, d *db.Destination, broadcastID string, to oauth.BroadcastPhase) (*oauth.TransitionResult, error) {
 	if pub, ok := prov.(xPublisher); ok && d.Platform == db.PlatformX && to == oauth.PhaseLive {
 		pubReq := oauth.XPublish{Title: c.titleFor(d), ShouldNotTweet: xShouldNotTweet(d)}
+		if x := d.Compliance.X; !x.Empty() {
+			// Copied, so the oauth layer never holds a pointer into the destination row.
+			if x.ChatOption != nil {
+				opt := *x.ChatOption
+				pubReq.ChatOption = &opt
+			}
+			pubReq.Locale = strings.TrimSpace(x.Locale)
+		}
 		r, _, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.XPublishResult, error) {
 			return pub.PublishBroadcast(ctx, a.AccessToken, broadcastID, pubReq)
 		})

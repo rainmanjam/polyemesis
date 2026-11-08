@@ -180,3 +180,61 @@ func TestABroadcastXEndedBeforeItWasEverPublishedDoesNotUseUpTheShowsPost(t *tes
 		t.Fatalf("should_not_tweet per PUBLISH = %v, want one PUBLISH that posts", got)
 	}
 }
+
+// X's CHAT ACCESS MODE AND BROADCAST LANGUAGE ride the go-live as chat_option (a
+// JSON integer) and locale (a string), from the destination's Compliance.X.
+
+func xcGoLiveBody(t *testing.T, x *db.XBroadcastControls) map[string]any {
+	t.Helper()
+	fake := &xcFake{active: true}
+	row := xcRow(true, db.BroadcastControl{})
+	row.Compliance.X = x
+	c, store, faults := xcFixture(t, fake, true, row)
+	xcSweep(t, c, store) // opens
+	xcSweep(t, c, store) // takes the source live
+	if len(*faults) != 0 {
+		t.Fatalf("faults: %v", *faults)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.publishBodies) != 1 {
+		t.Fatalf("publish bodies = %d, want 1", len(fake.publishBodies))
+	}
+	return fake.publishBodies[0]
+}
+
+// MUTATION: the X controls not copied into XPublish in transition. Observed: FAIL, the body had neither field.
+func TestTheXGoLiveCarriesTheChatModeAndLanguage(t *testing.T) {
+	opt := 4
+	b := xcGoLiveBody(t, &db.XBroadcastControls{ChatOption: &opt, Locale: " pt-BR "})
+	if v, ok := b["chat_option"].(float64); !ok || v != 4 {
+		t.Fatalf("chat_option = %#v, want the JSON integer 4", b["chat_option"])
+	}
+	if b["locale"] != "pt-BR" {
+		t.Fatalf("locale = %#v, want pt-BR", b["locale"])
+	}
+}
+
+func TestTheXGoLiveSendsAChatOptionOfZeroWhenItWasChosen(t *testing.T) {
+	zero := 0
+	b := xcGoLiveBody(t, &db.XBroadcastControls{ChatOption: &zero})
+	if v, ok := b["chat_option"].(float64); !ok || v != 0 {
+		t.Fatalf("chat_option = %#v, want an explicit 0", b["chat_option"])
+	}
+	if _, ok := b["locale"]; ok {
+		t.Fatalf("locale was sent though none was set: %v", b)
+	}
+}
+
+// MUTATION: a default chat option always sent. Observed: FAIL, an unset destination sent chat_option.
+func TestTheXGoLiveSendsNeitherWhenNothingIsSet(t *testing.T) {
+	for _, x := range []*db.XBroadcastControls{nil, {}, {Locale: "  "}} {
+		b := xcGoLiveBody(t, x)
+		if _, ok := b["chat_option"]; ok {
+			t.Fatalf("chat_option sent for %+v: %v", x, b)
+		}
+		if _, ok := b["locale"]; ok {
+			t.Fatalf("locale sent for %+v: %v", x, b)
+		}
+	}
+}

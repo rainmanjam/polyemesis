@@ -8,7 +8,9 @@ Two separate questions, often confused:
    platform's published API offers, and it varies enormously.
 
 This page answers both, then gives the OAuth app setup for each platform that
-supports sign-in.
+supports sign-in. For the walk-through from an installed server to streaming
+and chat, including the server prerequisites, see
+[CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md).
 
 - [Capability matrix](#capability-matrix)
 - [The platforms that need a sentence each](#the-platforms-that-need-a-sentence-each)
@@ -26,6 +28,10 @@ below. The table is what each platform's **published API** allows today.
 
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
+
+For what each platform's chat allows action by action (send, delete, hide, time out,
+ban, polls, chat settings), see
+[Chat actions by platform](CONNECTING-PLATFORMS.md#chat-actions-by-platform).
 
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end | Channel tools |
 |---|---|---|---|---|---|---|---|---|---|
@@ -204,7 +210,7 @@ broadcast and makes it public in one step, and X ends it as `TIMED_OUT` if no
 video arrives within five minutes, so polyemesis does not call it early. When an
 X destination turns on, polyemesis records the destination's stream source and
 waits. Once video arrives, polyemesis takes the source live with the
-destination's **go-live title**, set in the X console in the destination editor
+destination's **go-live title**, set in the **X Livestream** card on the destination editor's **Video and advanced** step
 (at most 280 characters: X says the title is "subject to X post length limits"
 and gives no number, PROVISIONAL). During the first 30 minutes of a recurring
 show, the show's template title is sent instead (see
@@ -215,9 +221,19 @@ refuses a change then (HTTP 409). Turning the destination off ends the
 broadcast. After a go-live the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
+**Who can chat, and the broadcast language.** Step 4 of the destination dialog, in the X card, has a
+**Who can chat** and a **Language** setting. Both ride the same go-live call (`POST /2/broadcasts`) as
+`chat_option` and `locale`, so like the title they cannot change while the broadcast is live (HTTP 409). X
+documents `chat_option` as a JSON integer from 0 to 6: 0 default, 1 chat off, 2 everyone, 3 verified accounts,
+4 accounts the broadcaster follows, 5 the broadcaster's subscribers, and 6 accounts followed by an account the
+broadcaster follows. The picker offers 1 to 6, and **X decides (default)** sends nothing, so X applies its own;
+`locale` is a language tag such as `en` or `pt-BR`. Left unset, neither field is sent. They are stored in the
+destination's `compliance.x` block (see [API.md](API.md)), built from X's documentation and not yet checked on
+a live account.
+
 **The go-live announcement, once per show by default.** X's go-live step makes
 an announcement post on the account unless the request asks it not to
-(`should_not_tweet`, a JSON boolean, PROVISIONAL until a live run confirms it). The X console has
+(`should_not_tweet`, a JSON boolean, confirmed live on 2026-11-07). The **X Livestream** card has
 a **Go-live announcement** setting with three choices:
 
 - **On the first go-live of a show only** (the default). A show lasts while the
@@ -263,7 +279,7 @@ a webhook** ([Accessing Live Chat](https://docs.x.com/livestream-api/chat/access
    DNS name, `tls.mode: acme`, and inbound **443** reachable from the internet.
    X rejects a webhook URL with a port and cannot validate a self-signed
    certificate.
-3. The app's OAuth 2.0 client secret saved in Settings → Platforms. It keys the
+3. The app's OAuth 2.0 client secret saved in Settings → Platform credentials. It keys the
    challenge-response check and the signature on each delivery.
 
 When chat starts, polyemesis registers `https://<tls.hostname>/api/v1/webhooks/x`
@@ -281,15 +297,8 @@ a lost answer, so a second attempt that creates the broadcast more than about 25
 as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
 from X's documentation and unconfirmed live.
 
-**Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
-polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
-have left a broadcast live on X" so you can end it in X's producer tooling. The attempt time is not refreshed after
-a lost answer, so a second attempt that creates the broadcast more than about 25 seconds after the first is refused
-as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
-from X's documentation and unconfirmed live.
-
 **The Livestream paths were verified live on 2026-11-07.** On staging, against a
-real X account (`@RainmanJam`), with X Livestream on, two runs went through
+real X account, with X Livestream on, two runs went through
 polyemesis. The destination was linked to the account and the stream source was
 created through the API on save. The go-live published the broadcast with the
 configured title ("Polyemesis Test Flight"). Run 1, with the go-live
@@ -479,7 +488,8 @@ below reads as *not configured* — never an error — and destinations with a
 pasted URL and key work exactly as well.
 
 `Settings → Platform credentials` has step-by-step instructions and renders the
-exact redirect URI to whitelist. In summary:
+exact redirect URI to whitelist. [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md)
+walks the whole path, server prerequisites included. In summary:
 
 **Four of the five platforms can prove the pair you pasted before you connect
 anything.** Twitch, Kick, Facebook and Vimeo each publish a client-credentials
@@ -797,7 +807,10 @@ anyone else's behalf needs Advanced Access to `publish_video` (profiles) or
 minutes, and start it before you need it.
 
 1. <https://developers.facebook.com/apps> → **Create app**, use case *Other*,
-   type *Business*.
+   type *Business*. A **Live Video API** use case is being verified as the
+   alternative; see [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md#facebook-being-verified),
+   which also notes that an app set up with Facebook Login for Business may need
+   a configuration rather than scopes.
 2. Add the **Facebook Login** product; under its settings enable Client and Web
    OAuth login and add the redirect URI:
    `https://YOUR_HOST/api/v1/oauth/facebook/callback`
@@ -964,7 +977,7 @@ sessions of a token that is no longer valid. polyemesis does this for each
 connected Twitch account. On a 401 it spends one refresh to rule out a merely
 stale token; if Twitch still refuses (or refuses the refresh itself), the
 account's chat session is stopped and the account shows as needing a reconnect
-in Settings → Platforms. Reconnecting clears it. A Twitch outage or network
+in Settings → Platform credentials. Reconnecting clears it. A Twitch outage or network
 failure is never treated as a revocation.
 
 ## Multiple accounts

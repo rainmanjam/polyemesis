@@ -3139,6 +3139,21 @@ export interface Compliance {
   /** YouTube broadcast contentDetails controls. null clears the block (an
    *  update is decoded over the stored row, so undefined would keep it). */
   youtube?: YouTubeBroadcastControls | null;
+  /** X's chat access mode and broadcast language, sent when the X broadcast
+   *  goes live. null clears the block (an update is decoded over the stored
+   *  row). Only an X destination may hold it. Mirrors db.XBroadcastControls. */
+  x?: XBroadcastControls | null;
+}
+
+/** What an X go-live carries besides its title. Every field omitted means
+ *  "leave it out", so X applies its own. */
+export interface XBroadcastControls {
+  /** Who may chat: 1 chat off, 2 everyone, 3 verified accounts, 4 accounts
+   *  the broadcaster follows, 5 the broadcaster's subscribers, 6 accounts
+   *  followed by an account the broadcaster follows. 0 is X's own default. */
+  chatOption?: number;
+  /** The broadcast language tag, such as "en" or "pt-BR". */
+  locale?: string;
 }
 
 /** YouTube's liveBroadcasts contentDetails toggles, per destination. Every

@@ -207,6 +207,8 @@ const DOCS_BY_SECTION = {
       "Follows, subs, gifts, tips, raids and redemptions from every platform as one event: the console feed, an OBS alerts overlay that only shows viewer words automod has passed, opt-in webhooks, and a test alert that needs no account."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
+    ["CONNECTING-PLATFORMS.md", "Connecting your platforms, end to end",
+      "From an installed server to streaming and chat on X, Twitch and Kick, with YouTube and Facebook being verified: the server prerequisites, each platform's app, and what chat actions each allows."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
       "YouTube, Twitch, Kick, Facebook and Rumble. Anything taking RTMP or SRT works with a pasted key; this is what each platform's API lets you automate."],
     ["ROLLOVER.md", "Planned rollover before platform caps",

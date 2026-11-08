@@ -2,7 +2,9 @@ package db
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 // Compliance metadata: the fields that are not a nicety.
@@ -164,6 +166,54 @@ type Compliance struct {
 	// is the per-destination JSON that already carries YouTube's privacy and
 	// COPPA declaration and that the metadata push already applies.
 	YouTube *YouTubeBroadcastControls `json:"youtube,omitempty"`
+	// X is the chat access mode and broadcast language an X go-live carries. A
+	// pointer for the same reason YouTube is, and it lives in this JSON for the
+	// same one: no column, no schema change, and it goes with the row. It is
+	// NOT part of Empty: compliance is what a CompliancePusher sends, and X is
+	// not one -- these two values travel on the PUBLISH instead. Only an X
+	// destination may hold it; see Destination.xGoLiveProblems.
+	X *XBroadcastControls `json:"x,omitempty"`
+}
+
+// XChatOptionMax is the largest chat_option POST /2/broadcasts accepts.
+const XChatOptionMax = 6
+
+// xLocalePattern is the shape of a locale sent as the go-live "locale": a BCP 47
+// style tag such as "en", "pt-BR" or "zh-Hans". X's page states only "Broadcast
+// language, e.g. en", so this guards against a pasted sentence rather than
+// naming the languages X knows; X's own refusal is shown in X's words.
+var xLocalePattern = regexp.MustCompile(`^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8}){0,2}$`)
+
+// XBroadcastControls are the two options an X go-live carries besides its
+// title. Every field's zero value means "leave it out", so X applies its own.
+type XBroadcastControls struct {
+	// ChatOption is who may chat, 0 to 6 as X documents them: 0 default, 1 chat
+	// off, 2 everyone, 3 verified accounts, 4 accounts the broadcaster follows,
+	// 5 the broadcaster's subscribers, 6 accounts followed by an account the
+	// broadcaster follows. nil sends nothing.
+	ChatOption *int `json:"chatOption,omitempty"`
+	// Locale is the broadcast language tag. Empty sends nothing.
+	Locale string `json:"locale,omitempty"`
+}
+
+// Empty reports whether there is nothing to send.
+func (c *XBroadcastControls) Empty() bool {
+	return c == nil || (c.ChatOption == nil && strings.TrimSpace(c.Locale) == "")
+}
+
+// Problems reports what X will refuse.
+func (c *XBroadcastControls) Problems() []string {
+	if c == nil {
+		return nil
+	}
+	var probs []string
+	if c.ChatOption != nil && (*c.ChatOption < 0 || *c.ChatOption > XChatOptionMax) {
+		probs = append(probs, fmt.Sprintf("unknown X chat option %d: use 0 to %d", *c.ChatOption, XChatOptionMax))
+	}
+	if loc := strings.TrimSpace(c.Locale); loc != "" && !xLocalePattern.MatchString(loc) {
+		probs = append(probs, fmt.Sprintf("unknown X broadcast language %q: use a language tag such as en or pt-BR", c.Locale))
+	}
+	return probs
 }
 
 // YouTube latency and closed-caption values, as liveBroadcasts.contentDetails
@@ -247,6 +297,7 @@ func (c Compliance) Problems() []string {
 			c.FacebookPrivacy))
 	}
 	probs = append(probs, c.YouTube.Problems()...)
+	probs = append(probs, c.X.Problems()...)
 	ids := make([]string, 0, len(c.Labels))
 	for id := range c.Labels {
 		ids = append(ids, id)

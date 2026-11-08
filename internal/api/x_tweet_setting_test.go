@@ -39,3 +39,30 @@ func TestTheXGoLiveTweetSettingIsRemovedFromADestinationThatIsNotX(t *testing.T)
 		t.Fatalf("an X destination lost its setting (%q) or was warned: %q", x.XGoLiveTweet, warnings)
 	}
 }
+
+// TestTheXChatControlsSurviveOnXAndAreRemovedElsewhere: Compliance.X lives in the
+// compliance blob, but X is not a CompliancePusher, so the clearing of a platform's
+// unsendable compliance must not take it, while any other platform loses it.
+//
+// MUTATION: the X controls not carried through the compliance clearing. Observed: FAIL, the X row lost them.
+func TestTheXChatControlsSurviveOnXAndAreRemovedElsewhere(t *testing.T) {
+	s, _, _ := testServer(t, config.Config{})
+	opt := 2
+	x := &db.Destination{Platform: db.PlatformX, Compliance: db.Compliance{
+		Privacy: db.PrivacyPublic, X: &db.XBroadcastControls{ChatOption: &opt, Locale: "en"},
+	}}
+	if _, err := s.dropUnsendableSettings(x); err != nil {
+		t.Fatalf("dropUnsendableSettings: %v", err)
+	}
+	if x.Compliance.X.Empty() || x.Compliance.Privacy != "" {
+		t.Fatalf("X row compliance = %+v, want the privacy cleared and the chat controls kept", x.Compliance)
+	}
+	tw := &db.Destination{Platform: db.PlatformTwitch, Compliance: db.Compliance{X: &db.XBroadcastControls{ChatOption: &opt}}}
+	warnings, err := s.dropUnsendableSettings(tw)
+	if err != nil {
+		t.Fatalf("dropUnsendableSettings: %v", err)
+	}
+	if tw.Compliance.X != nil || len(warnings) != 1 || !strings.Contains(warnings[0], "chat access mode") {
+		t.Fatalf("Twitch row kept %+v, warnings %q", tw.Compliance.X, warnings)
+	}
+}

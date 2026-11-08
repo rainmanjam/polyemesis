@@ -571,7 +571,7 @@ variable:
 - **No port.** X rejects a webhook URL that carries one, so polyemesis must be
   reachable on **443** from the internet. The webhook is
   `https://<tls.hostname>/api/v1/webhooks/x`.
-- The OAuth 2.0 **client secret** saved for X in Settings → Platforms, which keys
+- The OAuth 2.0 **client secret** saved for X in Settings → Platform credentials, which keys
   X's challenge-response check and the signature on every delivery.
 
 When any of that is missing the chat pane says so (for example "X chat needs a

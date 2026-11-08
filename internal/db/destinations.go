@@ -749,6 +749,7 @@ func (d Destination) Validate() error {
 	d.captionProblems(add)
 
 	d.xGoLiveProblems(add)
+	d.xControlsProblems(add)
 
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
@@ -848,6 +849,14 @@ func (d Destination) xGoLiveProblems(add problemAdder) {
 		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
 			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
 		}
+	}
+}
+
+// xControlsProblems refuses the X chat access mode and language on a
+// destination that is not X: only an X PUBLISH carries them.
+func (d Destination) xControlsProblems(add problemAdder) {
+	if !d.Compliance.X.Empty() && d.Platform != PlatformX {
+		add("the X chat access mode and language are sent only to X; %s takes neither", d.Platform)
 	}
 }
 

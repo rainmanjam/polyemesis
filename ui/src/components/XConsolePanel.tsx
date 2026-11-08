@@ -2,8 +2,38 @@ import { X_GO_LIVE_TITLE_MAX } from "@/lib/platforms";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useT, type TranslationKey } from "@/lib/i18n";
-import type { BroadcastControl, XGoLiveTweet } from "@/lib/types";
+import { useLanguage, useT, type TranslationKey } from "@/lib/i18n";
+import type { BroadcastControl, XBroadcastControls, XGoLiveTweet } from "@/lib/types";
+
+/** The chat access modes X documents for chat_option, in the order the picker
+ *  shows them. 0 is X's own default, which the picker offers as "X decides" by
+ *  sending nothing, so it is not listed. */
+const CHAT_KEY: Record<number, TranslationKey> = {
+  1: "wave3.x.chat.1",
+  2: "wave3.x.chat.2",
+  3: "wave3.x.chat.3",
+  4: "wave3.x.chat.4",
+  5: "wave3.x.chat.5",
+  6: "wave3.x.chat.6",
+};
+
+/** Broadcast languages offered for the go-live locale. The names come from the
+ *  browser in the console's language; the codes are the tags sent to X. */
+export const X_LOCALES: readonly string[] = [
+  "ar", "bn", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fr", "he", "hi", "hu", "id", "it",
+  "ja", "ko", "ms", "nl", "no", "pl", "pt", "pt-BR", "ro", "ru", "sv", "th", "tr", "uk", "vi", "zh-Hans", "zh-Hant",
+];
+
+const UNSET = "unset";
+
+function localeName(code: string, uiLang: string): string {
+  try {
+    const name = new Intl.DisplayNames([uiLang], { type: "language" }).of(code);
+    return name && name !== code ? `${name} (${code})` : code;
+  } catch {
+    return code;
+  }
+}
 
 /** The go-live announcement choices, in the order the picker shows them. */
 const TWEET_KEY: Record<XGoLiveTweet, TranslationKey> = {
@@ -46,6 +76,8 @@ export function XConsolePanel({
   onTitleChange,
   tweet,
   onTweetChange,
+  controls,
+  onControlsChange,
 }: Readonly<{
   gate?: "open" | "closed";
   lifecycle?: BroadcastControl;
@@ -54,8 +86,20 @@ export function XConsolePanel({
   /** When X posts its go-live announcement (Destination.xGoLiveTweet). */
   tweet: XGoLiveTweet;
   onTweetChange: (tweet: XGoLiveTweet) => void;
+  /** Who can chat and the broadcast language (Destination.compliance.x). Absent
+   *  fields are left out of the go-live, so X decides. */
+  controls: XBroadcastControls | null | undefined;
+  onControlsChange: (controls: XBroadcastControls | null) => void;
 }>) {
   const t = useT();
+  const uiLang = useLanguage();
+  // A stored language outside the list (written by the API) stays selectable.
+  const locale = controls?.locale ?? "";
+  const locales = locale && !X_LOCALES.includes(locale) ? [...X_LOCALES, locale] : X_LOCALES;
+  const patchControls = (patch: Partial<XBroadcastControls>) => {
+    const next = { ...(controls ?? {}), ...patch };
+    onControlsChange(next.chatOption === undefined && !next.locale ? null : next);
+  };
   // "prepublished" locks the title too: the publish already carried it to X.
   const live = lifecycle?.phase === "live" || lifecycle?.phase === "prepublished";
   return (
@@ -106,6 +150,50 @@ export function XConsolePanel({
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground">{t("wave3.x.tweetHint")}</span>
+      </div>
+      {/* Both ride the go-live (POST /2/broadcasts) like the title does, so they
+          are read-only while the broadcast is live and the server refuses a change then. */}
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="x-chat-option">{t("wave3.x.chatLabel")}</Label>
+        <Select
+          value={controls?.chatOption ? String(controls.chatOption) : UNSET}
+          disabled={live}
+          onValueChange={(v) => patchControls({ chatOption: v === UNSET ? undefined : Number(v) })}
+        >
+          <SelectTrigger id="x-chat-option" aria-label={t("wave3.x.chatLabel")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNSET}>{t("wave3.x.unset")}</SelectItem>
+            {Object.keys(CHAT_KEY).map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(CHAT_KEY[Number(v)])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground">{t("wave3.x.chatHint")}</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="x-locale">{t("wave3.x.localeLabel")}</Label>
+        <Select
+          value={locale || UNSET}
+          disabled={live}
+          onValueChange={(v) => patchControls({ locale: v === UNSET ? undefined : v })}
+        >
+          <SelectTrigger id="x-locale" aria-label={t("wave3.x.localeLabel")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNSET}>{t("wave3.x.unset")}</SelectItem>
+            {locales.map((code) => (
+              <SelectItem key={code} value={code}>
+                {localeName(code, uiLang)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {live && <span className="text-xs text-muted-foreground">{t("wave3.x.controlsLocked")}</span>}
       </div>
       <span className="text-xs text-muted-foreground">{t("wave3.x.provisional")}</span>
     </div>
