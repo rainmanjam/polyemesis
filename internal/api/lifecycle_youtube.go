@@ -33,11 +33,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
-// ytOpenUnits is what one open costs: the stream list, the active read, the insert and the bind, a unit each.
+// ytOpenUnits is what one open costs: the stream list, the active read, the upcoming read, the insert and the bind,
+// a unit each.
 // Using a picked event swaps the insert for a read of it (and sends a bind only when it is not already on the
 // stream), so it never costs more. A category adds the category list, the video read and the video update.
 const (
-	ytOpenUnits     = 4
+	ytOpenUnits     = 5
 	ytCategoryUnits = 52
 )
 
@@ -114,9 +115,25 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 		return
 	}
 	c.forgetTarget(d.ID)
-	c.recordControl(d, res.BroadcastID, func(b *db.BroadcastControl) {
-		b.Phase, b.Attempts, b.Fault, b.Opened = phaseCreated, 0, "", true
-	})
+	if c.recordControl(d, res.BroadcastID, func(b *db.BroadcastControl) {
+		b.Phase, b.Attempts, b.Fault, b.Opened, b.Created = phaseCreated, 0, "", true, !res.Existing
+	}) == nil {
+		// THE RECORD COULD NOT BE WRITTEN (the row was reset, or the store failed), so nothing here would ever find
+		// this broadcast again and the next sweep would make another. One polyemesis created is deleted; a picked
+		// event is left as it was.
+		if !res.Existing {
+			if del, ok := op.(oauth.UnairedDeleter); ok {
+				dctx, dcancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+				defer dcancel()
+				if err := del.DeleteUnairedBroadcast(dctx, acct.AccessToken, res.BroadcastID, phaseCreated); err != nil {
+					c.log.Warn("broadcast lifecycle: could not record the broadcast it opened, and could not delete it; "+
+						"delete it in YouTube Studio", "destination", d.Name, bcAttr(res.BroadcastID),
+						"detail", scrubSourceKey(err.Error(), d.StreamKey))
+				}
+			}
+		}
+		return
+	}
 	if res.LiveChatID != "" && c.pointYouTubeChat != nil {
 		c.pointYouTubeChat(*d.AccountID, res.LiveChatID)
 	}
@@ -152,4 +169,57 @@ func (c *lifecycleCoordinator) openYouTubeFailed(d *db.Destination, failID strin
 		c.noteFailureUnlessPaused(d, failID, scrubSourceKey(fmt.Sprintf(
 			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey), err)
 	}
+}
+
+// deleteIfNeverAired is the end of a destination switched off whose recorded broadcast polyemesis CREATED and that
+// is still created or ready: it is deleted (one unit) and the record cleared. A created Public event with auto-start
+// on, bound to the destination's stream, would otherwise air on any later video sent to that key. A broadcast that is
+// anything else, or was adopted from the operator's own events, is never deleted here. It reports whether it acted.
+func (c *lifecycleCoordinator) deleteIfNeverAired(ctx context.Context, prov oauth.BroadcastLifecycler,
+	acct *db.PlatformAccount, d *db.Destination, broadcastID, status string) bool {
+	if d.Platform != db.PlatformYouTube || !d.Lifecycle.Opened || !d.Lifecycle.Created || d.Lifecycle.BroadcastID != broadcastID {
+		return false
+	}
+	del, ok := prov.(oauth.UnairedDeleter)
+	if !ok || !(strings.EqualFold(status, phaseCreated) || strings.EqualFold(status, phaseReady)) {
+		return false
+	}
+	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+	defer cancel()
+	if err := del.DeleteUnairedBroadcast(cctx, acct.AccessToken, broadcastID, status); err != nil {
+		c.noteFailureUnlessPaused(d, broadcastID, scrubSourceKey(fmt.Sprintf(
+			"could not delete the broadcast polyemesis created and never aired: %v", err), d.StreamKey), err)
+		return true
+	}
+	c.forgetBroadcast(d)
+	c.log.Info("broadcast lifecycle: deleted the broadcast polyemesis created, which never aired",
+		"destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+	return true
+}
+
+// forgetBroadcast clears the recorded broadcast, releases chat and stops tracking the row.
+func (c *lifecycleCoordinator) forgetBroadcast(d *db.Destination) {
+	c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+	c.tellChat(d.Platform, d.AccountID, "")
+	c.forgetTarget(d.ID)
+	c.untrack(d.ID)
+}
+
+// releaseYouTube stops driving a broadcast polyemesis opened for a destination that no longer wants one (switched to
+// Studio's Stream now). One that never aired and that polyemesis created is deleted; anything else (live, or an
+// adopted event) is left exactly as it is and simply forgotten: the operator's Studio runs it from here.
+func (c *lifecycleCoordinator) releaseYouTube(ctx context.Context, prov oauth.BroadcastLifecycler, d *db.Destination, broadcastID string) {
+	if d.Lifecycle.Created {
+		if acct, err := c.tokenFor(ctx, *d.AccountID); err == nil {
+			cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+			st, serr := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
+			cancel()
+			if serr == nil && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
+				return
+			}
+		}
+	}
+	c.forgetBroadcast(d)
+	c.log.Info("broadcast lifecycle: this destination now uses YouTube Studio's Stream now, so polyemesis stopped "+
+		"driving the broadcast it had opened", "destination", d.Name, bcAttr(broadcastID))
 }

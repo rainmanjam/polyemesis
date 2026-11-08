@@ -570,20 +570,34 @@ What happens, in order, when the destination is switched on:
    says so on the card, quietly, with no alert. Switching the destination off
    and on checks again. This is also what a destination that was already on air
    when you upgraded looks like.
-3. It creates the broadcast (one unit) and binds it to the stream (one unit):
+3. It looks for a broadcast of its own that an earlier attempt made and did not
+   finish recording (one unit), and reuses it rather than making another. Only
+   if there is none does it create the broadcast (one unit) and bind it to the
+   stream (one unit):
    **auto-start on, auto-stop off**, visibility **Public** unless the
    destination's visibility says otherwise, and the **go-live title** (or the
    recurring show's title, or the destination's name). YouTube allows a title of
-   up to 100 characters. Four units in all, charged to the shared daily
-   allowance.
+   up to 100 characters. Five units in all, charged to the shared daily
+   allowance. If the record of the new broadcast cannot be written, it is deleted
+   rather than left behind.
 4. Video reaches the stream and YouTube takes the broadcast live by itself.
    Chat reads from this broadcast's own live chat.
 
 Auto-stop is off so that a reconnect gap never ends the broadcast.
 **polyemesis ends it when you switch the destination off**, and when the
 broadcast it made finishes while the destination is still on (you ended it in
-Studio) it makes the next one. A scheduled show's broadcast that finishes stays
-a fault, as before.
+Studio) it makes the next one. A scheduled show that has finished does not stand
+in the way of a later ad-hoc go-live, which opens a live-now broadcast; a
+scheduled show that goes live and then ends while the destination stays on is
+still a fault, as before.
+
+**A broadcast polyemesis created that never aired is deleted** when you switch
+the destination off or switch it to Studio's *Stream now* (one unit): left
+alone it would be a Public event, auto-start on, bound to your stream, that
+could air on any later video sent to that key. A broadcast that went live is
+never deleted, and **an event you picked is never deleted**. A broadcast waiting
+for video is checked every ten minutes or so rather than every fifteen seconds,
+and at once when video starts.
 
 A failure never stops the stream: a refused create, a spent quota (retried when
 the allowance resets, without using up the retry budget) and an already-live

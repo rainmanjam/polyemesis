@@ -312,3 +312,76 @@ func TestAScheduledShowCarriesTheCreateFieldsAndAnUnsetOneIsUnchanged(t *testing
 }
 
 func ytTestTime() time.Time { return time.Date(2030, 1, 1, 18, 0, 0, 0, time.UTC) }
+
+func TestOpenLiveNowReusesItsOwnEarlierUnrecordedBroadcastInsteadOfMakingAnother(t *testing.T) {
+	start := time.Now().Add(90 * time.Second).UTC().Format(time.RFC3339)
+	own := `{"items":[{"id":"left-over","snippet":{"title":"Friday","scheduledStartTime":"` + start + `","liveChatId":"chat-lo"},"status":{"lifeCycleStatus":"created"},` +
+		`"contentDetails":{"boundStreamId":"","enableAutoStart":true,"enableAutoStop":false}}]}`
+	var log []capture
+	y := lnStub(t, &log, map[string]http.HandlerFunc{
+		"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("broadcastStatus") == "upcoming" {
+				io.WriteString(w, own)
+				return
+			}
+			io.WriteString(w, `{"items":[]}`)
+		},
+	})
+	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.BroadcastID != "left-over" || r.LiveChatID != "chat-lo" || r.Existing {
+		t.Errorf("result = %+v, want the earlier attempt's broadcast reused", r)
+	}
+	noPost(t, log, ytBroadcastsPath)
+	if bind := find(log, http.MethodPost, ytBindPath); bind == nil || mustQuery(t, bind).Get("id") != "left-over" {
+		t.Errorf("the reused broadcast was not bound: %v", callsOf(log))
+	}
+}
+
+// A broadcast with another title, or auto-stop on, or bound to another stream, is somebody else's and is not reused.
+func TestOpenLiveNowDoesNotReuseABroadcastThatIsNotItsOwn(t *testing.T) {
+	start := time.Now().Add(90 * time.Second).UTC().Format(time.RFC3339)
+	for name, item := range map[string]string{
+		"other title":    `"title":"Other","scheduledStartTime":"` + start + `"},"status":{"lifeCycleStatus":"created"},"contentDetails":{"enableAutoStart":true,"enableAutoStop":false}`,
+		"auto-stop on":   `"title":"Friday","scheduledStartTime":"` + start + `"},"status":{"lifeCycleStatus":"created"},"contentDetails":{"enableAutoStart":true,"enableAutoStop":true}`,
+		"other stream":   `"title":"Friday","scheduledStartTime":"` + start + `"},"status":{"lifeCycleStatus":"created"},"contentDetails":{"boundStreamId":"stream-88","enableAutoStart":true,"enableAutoStop":false}`,
+		"start long ago": `"title":"Friday","scheduledStartTime":"2020-01-01T00:00:00Z"},"status":{"lifeCycleStatus":"created"},"contentDetails":{"enableAutoStart":true,"enableAutoStop":false}`,
+	} {
+		var log []capture
+		y := lnStub(t, &log, map[string]http.HandlerFunc{
+			"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("broadcastStatus") == "upcoming" {
+					io.WriteString(w, `{"items":[{"id":"x-1","snippet":{`+item+`}]}`)
+					return
+				}
+				io.WriteString(w, `{"items":[]}`)
+			},
+		})
+		r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday"})
+		if err != nil || r.BroadcastID != "bcast-9" {
+			t.Errorf("%s: result %+v err %v, want a new broadcast", name, r, err)
+		}
+	}
+}
+
+func TestDeleteUnairedBroadcastDeletesOnlyACreatedOrReadyOne(t *testing.T) {
+	var log []capture
+	y := lnStub(t, &log, map[string]http.HandlerFunc{
+		"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
+	})
+	for _, st := range []string{"live", "testing", "complete", "liveStarting", ""} {
+		if err := y.DeleteUnairedBroadcast(context.Background(), "tok", "b-1", st); err == nil {
+			t.Errorf("status %q: a broadcast that may have aired was deleted", st)
+		}
+	}
+	if find(log, http.MethodDelete, ytBroadcastsPath) != nil {
+		t.Fatal("a delete was sent for a broadcast that may have aired")
+	}
+	for _, st := range []string{"created", "ready"} {
+		if err := y.DeleteUnairedBroadcast(context.Background(), "tok", "b-1", st); err != nil {
+			t.Errorf("status %q: %v", st, err)
+		}
+	}
+}

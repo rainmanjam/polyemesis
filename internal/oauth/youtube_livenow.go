@@ -89,9 +89,29 @@ type LiveNowRequest struct {
 	CaptionDelay time.Duration
 }
 
+// UnairedDeleter is the optional capability of removing a broadcast polyemesis created that never aired.
+type UnairedDeleter interface {
+	// DeleteUnairedBroadcast deletes the broadcast (one unit) only when status, the state the caller just read, is
+	// created or ready. The caller is responsible for knowing polyemesis created it; see deleteBroadcast.
+	DeleteUnairedBroadcast(ctx context.Context, accessToken, broadcastID, status string) error
+}
+
+var _ UnairedDeleter = (*YouTube)(nil)
+
+// DeleteUnairedBroadcast implements UnairedDeleter.
+func (y *YouTube) DeleteUnairedBroadcast(ctx context.Context, accessToken, broadcastID, status string) error {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "created", "ready":
+	default:
+		return fmt.Errorf("broadcast %s is %q, not created or ready, so it may have aired and is not deleted", broadcastID, status)
+	}
+	return y.deleteBroadcast(ctx, accessToken, broadcastID)
+}
+
 // LiveNowResult is the broadcast that was made, or the picked event that was taken over.
 type LiveNowResult struct {
-	// Existing is true when a picked event was used and nothing was created.
+	// Existing is true when a picked event was used and nothing was created. A result with Existing false is a
+	// broadcast polyemesis created (or reused from its own earlier attempt).
 	Existing bool
 	// Warnings are parts that did not apply (the category) without failing the open.
 	Warnings    []string
@@ -137,8 +157,8 @@ func (y *YouTube) OpenBroadcast(ctx context.Context, accessToken, sourceKey stri
 }
 
 // OpenLiveNow lists the channel's streams, finds the destination's, refuses to double up on a live broadcast, then
-// inserts a broadcast and binds it. Quota: the list, the active read, the insert and the bind are one unit each, so
-// four units a go-live (a failed bind adds one for the delete).
+// inserts a broadcast and binds it. Quota: the list, the active read, the upcoming read, the insert and the bind are one unit each, so
+// five units a go-live (a failed bind adds one for the delete).
 func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveNowRequest) (*LiveNowResult, error) {
 	if strings.TrimSpace(req.StreamKey) == "" {
 		return nil, errors.New("this destination has no stream key, so there is no stream to bind a broadcast to")
@@ -165,9 +185,16 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 	if active != "" {
 		return nil, &ErrActiveBroadcastOnStream{BroadcastID: active}
 	}
-	created, err := y.insertLiveNow(ctx, accessToken, req)
+	// A broadcast of ours that an earlier attempt made and did not finish recording (the answer was lost, the daemon
+	// died, the record write failed) is reused instead of making another. One more unit.
+	created, err := y.ownUpcoming(ctx, accessToken, req, stream.ID)
 	if err != nil {
 		return nil, err
+	}
+	if created == nil {
+		if created, err = y.insertLiveNow(ctx, accessToken, req); err != nil {
+			return nil, err
+		}
 	}
 	if err := y.bindBroadcast(ctx, accessToken, created.ID, stream.ID); err != nil {
 		// Deleted, not named in a message: see IngestFor's long comment for why an orphan is the worse outcome.
@@ -187,6 +214,55 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 		}
 	}
 	return res, nil
+}
+
+// ownUpcoming finds an upcoming broadcast an earlier attempt of ours made for this open: created or ready, bound to
+// this stream or not yet bound, with our title, auto-start on and auto-stop off (what insertLiveNow sends), and a
+// start time within the lead window of now. It is a heuristic by necessity: YouTube has no field to mark a broadcast
+// as ours, and a false match would only reuse an event the operator made with the same title and settings.
+func (y *YouTube) ownUpcoming(ctx context.Context, accessToken string, req LiveNowRequest, streamID string) (*ytBroadcast, error) {
+	var list struct {
+		Items []ytBroadcast `json:"items"`
+	}
+	q := url.Values{}
+	q.Set("part", "id,snippet,status,contentDetails")
+	q.Set("broadcastStatus", "upcoming")
+	q.Set("broadcastType", "all")
+	q.Set("maxResults", "50")
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+		return nil, err
+	}
+	title := liveNowTitle(req.Title)
+	for i := range list.Items {
+		b := &list.Items[i]
+		if b.Snippet.Title != title || !b.ContentDetails.EnableAutoStart || b.ContentDetails.EnableAutoStop {
+			continue
+		}
+		if bound := b.ContentDetails.BoundStreamID; bound != "" && bound != streamID {
+			continue
+		}
+		if st := strings.ToLower(b.Status.LifeCycleStatus); st != "created" && st != "ready" {
+			continue
+		}
+		start, err := time.Parse(time.RFC3339, b.Snippet.ScheduledStartTime)
+		if err != nil || start.Sub(time.Now()) > ytLiveNowLead+time.Minute || time.Now().Sub(start) > 10*time.Minute {
+			continue
+		}
+		return b, nil
+	}
+	return nil, nil
+}
+
+// liveNowTitle is the title insertLiveNow sends for a requested one.
+func liveNowTitle(requested string) string {
+	title := []rune(strings.TrimSpace(requested))
+	if len(title) == 0 {
+		title = []rune("polyemesis live")
+	}
+	if len(title) > ytBroadcastTitleMax {
+		title = title[:ytBroadcastTitleMax]
+	}
+	return string(title)
 }
 
 // adoptEvent takes over the picked event: bound to this destination's stream (moved only when confirmed and the
@@ -280,13 +356,7 @@ func (y *YouTube) activeOnStream(ctx context.Context, accessToken, streamID stri
 
 // insertLiveNow is liveBroadcasts.insert for a go-live. part names exactly the three parts the body carries.
 func (y *YouTube) insertLiveNow(ctx context.Context, accessToken string, req LiveNowRequest) (*ytBroadcast, error) {
-	title := []rune(strings.TrimSpace(req.Title))
-	if len(title) == 0 {
-		title = []rune("polyemesis live")
-	}
-	if len(title) > ytBroadcastTitleMax {
-		title = title[:ytBroadcastTitleMax]
-	}
+	title := liveNowTitle(req.Title)
 	privacy := strings.TrimSpace(req.Privacy)
 	if privacy == "" {
 		privacy = ytDefaultPrivacy
@@ -301,7 +371,7 @@ func (y *YouTube) insertLiveNow(ctx context.Context, accessToken string, req Liv
 		}
 	}
 	snippet := map[string]any{
-		"title":              string(title),
+		"title":              title,
 		"scheduledStartTime": time.Now().Add(ytLiveNowLead).UTC().Format(time.RFC3339),
 	}
 	if d := strings.TrimSpace(req.Description); d != "" {

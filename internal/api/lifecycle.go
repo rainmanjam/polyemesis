@@ -797,6 +797,12 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		c.considerUnopened(ctx, d, prov, mode)
 		return
 	}
+	if d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && d.AccountID != nil && !d.YouTubeLiveNow() {
+		// Switched to Studio's Stream now (or its account was unlinked) while polyemesis holds a broadcast it opened:
+		// stop driving it. See releaseYouTube.
+		c.releaseYouTube(ctx, prov, d, broadcastID)
+		return
+	}
 	if d.AccountID == nil {
 		// No connected account means no token, and a broadcast id nothing here
 		// can act on. Not a fault: it is what a destination looks like after its
@@ -1127,6 +1133,16 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		}
 		c.untrack(d.ID)
 		return true
+	case !d.Enabled && d.Platform == db.PlatformYouTube && isTerminalPhase(d.Lifecycle.Phase):
+		// Finished, and the finished broadcast is forgotten too, as X's is above: the recorded id would otherwise
+		// stand between the next SCHEDULED show's announcement (ActiveBroadcastID prefers the recorded id) and the
+		// coordinator, and an ad-hoc go-live would open nothing.
+		if d.Lifecycle.BroadcastID != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 || d.Lifecycle.Opened {
+			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+		}
+		c.forgetTarget(d.ID)
+		c.untrack(d.ID)
+		return true
 	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
 		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
 		// disabled row whose broadcast has already completed has nothing left
@@ -1184,6 +1200,11 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// label standing for at most ten minutes. See lifecycleLiveRecheckEvery
 		// for the full arithmetic, and forgetLiveRecheck for why the case that
 		// actually happens is noticed in one sweep rather than forty.
+		return true
+	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" &&
+		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
+		!c.dueForLiveRecheck(d.ID):
+		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
 		return true
 	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter &&
 		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID)):
@@ -1276,13 +1297,17 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 		c.trackAs(d, broadcastID, xLifecyclePhase(st.Status))
 	}
 
+	if !d.Enabled && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
+		return
+	}
 	plan := planLifecycle(d.Enabled, st)
-	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.Lifecycle.Opened &&
-		d.Lifecycle.BroadcastID == broadcastID && strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
-		d.YouTubeLiveNow() {
+	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.YouTubeLiveNow() &&
+		strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
+		((d.Lifecycle.Opened && d.Lifecycle.BroadcastID == broadcastID) || !endableFromPhase(d.Lifecycle.Phase)) {
 		// The broadcast polyemesis opened is finished and the destination is still on air (Studio's End, an
-		// operator's end, or YouTube's own timeout): open the next. A broadcast that was ANNOUNCED ahead keeps the
-		// fault, and so does a revoked one.
+		// operator's end, or YouTube's own timeout): open the next. So is an ANNOUNCED broadcast that this process
+		// never saw on air (a scheduled show that has long completed, and an ad-hoc go-live now): the fault is for one
+		// that went live under us and ended while the destination stayed on. A revoked one keeps the fault.
 		plan.Fault, plan.Renew = "", true
 	}
 	if !d.Enabled && (d.Platform == db.PlatformX || d.Platform == db.PlatformYouTube) && plan.Send == "" {
@@ -1295,7 +1320,13 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	// said rather than from what the row says. Armed only on `live`, and cleared
 	// on everything else, so the map can never hold a budget that some earlier
 	// read put there for a broadcast that has since moved.
-	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive))
+	// A YouTube broadcast WAITING FOR VIDEO (created or ready, nothing to send, no fault) is read on the same slow
+	// cadence as a live one: every sweep would spend 480 units an hour, 11,500 a day, for as long as the encoder is
+	// away. The UP edge that video arriving produces spends the budget at once (forgetLiveRecheck), and with
+	// auto-start on YouTube moves the broadcast itself in the meantime.
+	waiting := d.Platform == db.PlatformYouTube && d.Enabled && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
+		(strings.EqualFold(plan.Phase, phaseCreated) || strings.EqualFold(plan.Phase, phaseReady))
+	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive) || waiting)
 	switch {
 	case plan.Renew:
 		// Second show: the recorded broadcast is finished and the destination is

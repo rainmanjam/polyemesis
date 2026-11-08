@@ -3306,6 +3306,9 @@ export interface BroadcastControl {
   /** YouTube only: true when polyemesis itself created this broadcast at go-live, rather than it being
    *  announced ahead or made in YouTube Studio. Only such a broadcast is renewed when it finishes. */
   opened?: boolean;
+  /** YouTube only: with `opened`, true when polyemesis created the broadcast and false when it adopted a picked
+   *  event. Only a created broadcast that never aired is deleted on switch-off. */
+  created?: boolean;
   /** What went wrong, in the operator's words, or absent when nothing has.
    *
    *  A fault here NEVER means the stream stopped: the server does not stop a

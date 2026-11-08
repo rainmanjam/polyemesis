@@ -17,6 +17,10 @@ its first tagged release.
   chat from it. It never creates a stream or changes a key, and leaves a stream that already has a live
   broadcast alone. Turn it off per destination with "Use YouTube Studio's Stream now instead". Stored in
   `compliance.youtube` (`streamId`, `studioStreamNow`) and `lifecycle.opened`; no schema change.
+- A broadcast polyemesis created that never aired is deleted when the destination is switched off or switched to
+  Studio's Stream now (never an adopted event); the open reuses its own earlier unrecorded broadcast and deletes one it
+  could not record; a broadcast waiting for video is read every ten minutes instead of every fifteen seconds
+  (`lifecycle.created` records the origin).
 - **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
   reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
   ingest address; the destination dialog stores an optional pinned stream.

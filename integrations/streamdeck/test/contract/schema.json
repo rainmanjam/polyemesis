@@ -599,6 +599,11 @@
                     "string"
                   ]
                 },
+                "created": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
                 "fault": {
                   "types": [
                     "string"

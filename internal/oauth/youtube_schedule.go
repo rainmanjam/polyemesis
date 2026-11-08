@@ -549,14 +549,17 @@ func ytBroadcastCreateAdvice(err error) error {
 	return err
 }
 
-// deleteBroadcast removes a broadcast this package created and could not
-// finish setting up.
+// deleteBroadcast removes a broadcast polyemesis ITSELF created.
 //
-// ONLY EVER CALLED ON A BROADCAST CREATED SECONDS EARLIER IN THE SAME
-// FUNCTION, and that constraint is what makes it safe to have at all. A
-// general "delete a YouTube broadcast" helper on this provider would be a
-// loaded gun: nothing else in polyemesis should be able to remove an
-// operator's event page, and there is no caller that should want to.
+// THIS WAS "ONLY EVER CALLED ON A BROADCAST CREATED SECONDS EARLIER IN THE SAME FUNCTION", and the rule has been
+// widened on purpose, to exactly three callers, each of which holds proof the broadcast is polyemesis's own:
+//   - IngestFor and OpenLiveNow, for a broadcast they inserted a moment ago and could not bind;
+//   - DeleteUnairedBroadcast, for a live-now broadcast the coordinator recorded as CREATED by polyemesis
+//     (BroadcastControl.Created) that is still created or ready, because a never-aired Public event with auto-start
+//     on, bound to the destination's stream, would otherwise air on any later video sent to that key.
+//
+// A broadcast the operator made, or picked from their list, is never passed here: that origin is recorded
+// separately and DeleteUnairedBroadcast refuses a status that is not created or ready.
 //
 // A 404 is success. The broadcast not being there is the state this is trying
 // to reach, and treating "already gone" as a failure would turn a clean

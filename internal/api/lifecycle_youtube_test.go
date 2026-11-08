@@ -41,6 +41,9 @@ type ynFake struct {
 	inserts     int
 	transitions []string // broadcastStatus values sent
 	refuseTrans string   // reason to refuse a transition with, once
+	deletes     []string // ids deleted
+	dropInsert  bool     // the insert creates the broadcast and then the answer never arrives
+	onInsert    func()   // runs when an insert lands, before the answer
 	quotaSpent  bool     // every call answers 403 quotaExceeded
 }
 
@@ -83,12 +86,15 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 				if q.Get("broadcastStatus") == "active" && b.status != "live" && b.status != "testing" {
 					continue
 				}
+				if q.Get("broadcastStatus") == "upcoming" && b.status != "created" && b.status != "ready" {
+					continue
+				}
 				if q.Get("id") != "" && q.Get("id") != id {
 					continue
 				}
-				items = append(items, fmt.Sprintf(`{"id":%q,"snippet":{"title":%q,"liveChatId":%q},"status":{"lifeCycleStatus":%q},`+
-					`"contentDetails":{"boundStreamId":%q,"monitorStream":{"enableMonitorStream":false}}}`,
-					id, b.title, b.chat, b.status, b.bound))
+				items = append(items, fmt.Sprintf(`{"id":%q,"snippet":{"title":%q,"liveChatId":%q,"scheduledStartTime":%q},"status":{"lifeCycleStatus":%q},`+
+					`"contentDetails":{"boundStreamId":%q,"enableAutoStart":%v,"enableAutoStop":%v,"monitorStream":{"enableMonitorStream":false}}}`,
+					id, b.title, b.chat, time.Now().Add(2*time.Minute).UTC().Format(time.RFC3339), b.status, b.bound, b.autoStart == true, b.autoStop == true))
 			}
 			fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts":
@@ -103,7 +109,17 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 				kids: body["status"]["selfDeclaredMadeForKids"], dvr: body["contentDetails"]["enableDvr"],
 				latency: body["contentDetails"]["latencyPreference"], projection: body["contentDetails"]["projection"],
 				desc: body["snippet"]["description"]}
+			if f.onInsert != nil {
+				f.onInsert()
+			}
+			if f.dropInsert {
+				panic(http.ErrAbortHandler)
+			}
 			fmt.Fprintf(w, `{"id":%q,"snippet":{"liveChatId":%q},"status":{"lifeCycleStatus":"created"}}`, id, f.bcasts[id].chat)
+		case r.Method == http.MethodDelete && r.URL.Path == "/liveBroadcasts":
+			f.deletes = append(f.deletes, q.Get("id"))
+			delete(f.bcasts, q.Get("id"))
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts/bind":
 			if b := f.bcasts[q.Get("id")]; b != nil {
 				b.bound = q.Get("streamId")
@@ -186,7 +202,7 @@ func TestAnEnabledYouTubeDestinationOpensItsOwnBroadcastAndPointsChatAtIt(t *tes
 	sweep(c, 1)
 
 	calls, inserts, trans := f.snapshot()
-	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
+	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
 	if strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
@@ -556,5 +572,173 @@ func TestAnAutoStartRaceRefusalRaisesNoAlertOnAShowThatIsLive(t *testing.T) {
 	sweep(c, 1)
 	if len(*faults) != 0 {
 		t.Errorf("faults = %+v: an auto-start race alerted on a show that is live", *faults)
+	}
+}
+
+func (f *ynFake) deleted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deletes...)
+}
+
+// ITEM 1. A broadcast polyemesis opened that has been ended on a switched-off destination is forgotten, so the
+// announcement mirror drives the next scheduled show instead of the finished id.
+func TestAnEndedOwnBroadcastIsForgottenSoTheAnnouncementMirrorDrivesTheNextShow(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
+	c.forgetLiveRecheck(3)
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.rows[3].Facebook.BroadcastID = "ann-1" // the next scheduled show's announcement
+	store.mu.Unlock()
+	sweep(c, 3) // end, then the terminal row is let go
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID != "" || got.Lifecycle.Opened {
+		t.Fatalf("lifecycle = %+v, want the ended broadcast forgotten", got.Lifecycle)
+	}
+	if got.ActiveBroadcastID() != "ann-1" {
+		t.Errorf("active broadcast = %q, want the announced show", got.ActiveBroadcastID())
+	}
+}
+
+// After a scheduled show has completed, switching the destination on again opens a live-now broadcast instead of
+// stopping at the completed-broadcast fault.
+func TestAdHocGoLiveAfterACompletedScheduledShowOpensALiveNowBroadcast(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ann-1"] = &ynBroadcast{status: "complete", bound: "stream-77"}
+	row := ynRow(true)
+	row.Facebook.BroadcastID = "ann-1"
+	c, store, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	got := store.get(3)
+	if _, inserts, _ := f.snapshot(); inserts != 1 || got.Lifecycle.BroadcastID != "bcast-1" || !got.Lifecycle.Opened {
+		t.Errorf("inserts=%d lifecycle=%+v, want a live-now broadcast after the completed scheduled one", inserts, got.Lifecycle)
+	}
+}
+
+// ITEM 2. Switching to Studio's Stream now stops polyemesis driving the broadcast it opened.
+func TestSwitchingToStudioStreamNowReleasesTheBroadcastPolyemesisOpened(t *testing.T) {
+	f := newYnFake()
+	c, store, _, chat := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	sweep(c, 3)
+	if _, _, trans := f.snapshot(); len(trans) != 0 {
+		t.Errorf("transitions %v sent for a destination that now uses Stream now", trans)
+	}
+	if got := store.get(3); got.Lifecycle.BroadcastID != "" || got.Lifecycle.Opened {
+		t.Errorf("lifecycle = %+v, want the record cleared", got.Lifecycle)
+	}
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want the never-aired broadcast polyemesis created removed", d)
+	}
+	if ids := chat.all(); ids[len(ids)-1] != "" {
+		t.Errorf("chat pointers = %v, want chat released", ids)
+	}
+}
+
+func TestSwitchingToStudioStreamNowLeavesALiveBroadcastAloneAndForgetsIt(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
+	store.mu.Lock()
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	sweep(c, 3)
+	if d := f.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v: a broadcast that may be live is never deleted", d)
+	}
+	if _, _, trans := f.snapshot(); len(trans) != 0 {
+		t.Errorf("transitions %v", trans)
+	}
+	if got := store.get(3); got.Lifecycle.BroadcastID != "" {
+		t.Errorf("lifecycle = %+v", got.Lifecycle)
+	}
+}
+
+// ITEM 3. A broadcast polyemesis CREATED that never aired is deleted on switch-off; an adopted event never is.
+func TestACreatedBroadcastThatNeverAiredIsDeletedOnSwitchOffAndAnAdoptedEventNeverIs(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.mu.Unlock()
+	sweep(c, 5)
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want the never-aired broadcast removed once", d)
+	}
+	if got := store.get(3); got.Lifecycle.BroadcastID != "" {
+		t.Errorf("lifecycle = %+v, want it cleared", got.Lifecycle)
+	}
+	before, _, _ := f.snapshot()
+	sweep(c, 20)
+	if after, _, _ := f.snapshot(); len(after) != len(before) {
+		t.Error("a deleted broadcast kept being asked about")
+	}
+
+	f2 := newYnFake()
+	f2.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c2, store2, _, _ := ynFixture(t, f2, row)
+	sweep(c2, 1)
+	store2.mu.Lock()
+	store2.rows[3].Enabled = false
+	store2.mu.Unlock()
+	sweep(c2, 5)
+	if d := f2.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v: a picked event must never be deleted", d)
+	}
+}
+
+// ITEM 4a. If the record of a just-created broadcast cannot be written, the broadcast is deleted rather than orphaned.
+func TestABroadcastWhoseRecordCannotBeWrittenIsDeleted(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	f.set(func(f *ynFake) { f.onInsert = func() { store.mu.Lock(); store.failUpdates = true; store.mu.Unlock() } })
+	sweep(c, 1)
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want the unrecorded broadcast removed", d)
+	}
+}
+
+// ITEM 4b. An insert whose answer never arrives still created the broadcast; the next attempt finds and reuses it
+// instead of making another.
+func TestAnInsertWhoseAnswerWasLostIsReusedNotRepeated(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	f.set(func(f *ynFake) { f.dropInsert = true })
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.dropInsert = false })
+	sweep(c, 1)
+	if _, inserts, _ := f.snapshot(); inserts != 1 {
+		t.Errorf("inserts = %d, want the lost insert reused", inserts)
+	}
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID != "bcast-1" || f.bcasts["bcast-1"].bound != "stream-77" {
+		t.Errorf("lifecycle=%+v bound=%q, want bcast-1 recorded and bound", got.Lifecycle, f.bcasts["bcast-1"].bound)
+	}
+}
+
+// ITEM 5. A broadcast waiting for video is read on the slow cadence, not every sweep.
+func TestABroadcastWaitingForVideoIsReadOnTheSlowCadence(t *testing.T) {
+	f := newYnFake()
+	f.streamState = "inactive"
+	c, _, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	start, _, _ := f.snapshot()
+	const sweepsPerHour = 240
+	sweep(c, sweepsPerHour)
+	end, _, _ := f.snapshot()
+	calls := len(end) - len(start)
+	if limit := (sweepsPerHour/lifecycleLiveRecheckEvery + 2) * 2; calls > limit {
+		t.Errorf("%d YouTube calls in an hour of waiting for video, want at most %d (every %d sweeps)", calls, limit, lifecycleLiveRecheckEvery)
 	}
 }

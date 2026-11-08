@@ -133,6 +133,10 @@ type BroadcastControl struct {
 	// YouTube Studio. Only an opened one is renewed when it completes while the destination is still on: a
 	// completed announced broadcast stays a fault. Meaningful only beside a BroadcastID; not part of Empty.
 	Opened bool `json:"opened,omitempty"`
+	// Created is the ORIGIN of an Opened broadcast: true when polyemesis created it, false when it adopted an event
+	// the operator picked. Only a created broadcast that never aired is ever deleted (on switch-off, or when the
+	// destination is switched to Studio's Stream now); an adopted event is never deleted.
+	Created bool `json:"created,omitempty"`
 }
 
 // Empty reports whether this block says anything at all.

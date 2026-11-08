@@ -125,6 +125,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.lifecycle.goLiveAttemptMs": sPublic, // when the first go-live for the pending X source was sent
 	"destination.lifecycle.pendingSource":   sPublic, // X stream source id (not the stream key) of a destination waiting for video
 	"destination.lifecycle.renewed":         sPublic, // whether this broadcast was reopened within the show (X renew)
+	"destination.lifecycle.created":         sPublic, // whether polyemesis created (rather than adopted) the opened broadcast
 	"destination.lifecycle.opened":          sPublic, // whether polyemesis itself created this YouTube broadcast at go-live
 	// The reason a stream key could not be decrypted on this machine. sPublic
 	// despite sitting next to two sSecret leaves and despite the word "key"
