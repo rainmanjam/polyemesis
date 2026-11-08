@@ -485,3 +485,28 @@ func TestASavesKeyRenewalDoesNotHoldTheTrackGainLock(t *testing.T) {
 	}
 	<-done
 }
+
+// A save that will be refused must not leave an orphan live video on the
+// operator's Facebook page: the renewal waits for the same checks the write
+// runs.
+//
+// Mutation: delete the planDestinationUpdate pre-check in
+// handleUpdateDestination. Red: one live video created, then a 400.
+func TestARefusedSaveCreatesNoLiveVideo(t *testing.T) {
+	for name, body := range map[string]map[string]any{
+		"unknown field":  {"enabled": true, "noSuchField": 1},
+		"unknown preset": {"enabled": true, "presetId": "no-such-preset"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRefreshFixture(t, false)
+			send(t, f.h, f.sign, http.MethodPut, destinationPath(f.dest.ID, ""), body, http.StatusBadRequest)
+			if n := facebookCreates(f.stub); n != 0 {
+				t.Fatalf("%d live videos created for a save that was refused, want 0", n)
+			}
+			d, _ := f.store.GetDestination(f.dest.ID)
+			if d.Enabled || d.StreamKey != "sk-live-old" {
+				t.Fatalf("a refused save changed the row: enabled=%v key=%q", d.Enabled, d.StreamKey)
+			}
+		})
+	}
+}

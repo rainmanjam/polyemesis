@@ -3055,6 +3055,97 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 	return true
 }
 
+// putDestinationPlan is a PUT /destinations/{id} body decoded over the stored
+// row and validated: what the save will write, and the warnings it carries.
+type putDestinationPlan struct {
+	existing       *db.Destination
+	storedSourceID *int64
+	warnings       []string
+}
+
+// planDestinationUpdate reads the stored row, decodes the body over it and runs
+// EVERY check the save can refuse on, writing the refusal to w and returning
+// false when there is one. It is the ONE place those checks live: the handler
+// calls it once before a key renewal (so a save that would be refused creates no
+// live video) and again under trackGainMu for the write itself, so the two
+// cannot drift.
+func (s *Server) planDestinationUpdate(w http.ResponseWriter, id int64, body []byte) (*putDestinationPlan, bool) {
+	existing, err := s.store.GetDestination(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return nil, false
+	}
+	// The programme the destination runs on before this save, read before the
+	// decode below can move it: what it is running now is asked of that engine.
+	storedSourceID := existing.SourceID
+	// Decode over the existing row so a client sending only a routing profile
+	// does not wipe the URL.
+	saved := expertArgsOf(existing)
+	// The stored values the write checks compare against, read BEFORE the decode
+	// below writes over them, so a save that changes one can be told apart from
+	// one that leaves it alone. See refuseBadDestinationWrite.
+	before := destinationBeforeWrite(existing)
+	// The stored go-live title and whether its X broadcast is on air, read
+	// before the decode for the same reason: the body could name a phase too.
+	storedGoLiveTitle := existing.GoLiveTitle
+	storedXControls := xControlsKey(existing.Compliance.X)
+	// The stored preset, so only a save that CHANGES it is checked: an id the
+	// catalogue no longer has must not make the row unsaveable.
+	storedPresetID := existing.PresetID
+	// PRE_PUBLISHED counts as live here: the PUBLISH has already gone to X with
+	// the title it carried, so a change now could not reach X either.
+	xBroadcastLive := existing.Platform == db.PlatformX &&
+		(strings.EqualFold(existing.Lifecycle.Phase, phaseLive) ||
+			strings.EqualFold(existing.Lifecycle.Phase, phasePrePublished))
+	if err := decodeJSONInto(body, existing); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	existing.ID = id
+	if existing.PresetID != storedPresetID {
+		if p := existing.PresetProblem(); p != "" {
+			writeError(w, http.StatusBadRequest, p)
+			return nil, false
+		}
+	}
+	if s.refuseBadDestinationWrite(w, existing, &before) {
+		return nil, false
+	}
+	// X takes a title only when the broadcast is published, and has no write
+	// that changes a running one, so a change saved now would never reach X.
+	if xBroadcastLive && existing.GoLiveTitle != storedGoLiveTitle {
+		writeError(w, http.StatusConflict, xTitleLiveRefusal)
+		return nil, false
+	}
+	// The chat access mode and language travel on the same PUBLISH.
+	if xBroadcastLive && xControlsKey(existing.Compliance.X) != storedXControls {
+		writeError(w, http.StatusConflict, xControlsLiveRefusal)
+		return nil, false
+	}
+	// Whatever the body said about expert arguments, the stored ones win. Only
+	// the expert routes enforce the confirm step and the guard acknowledgement,
+	// and decodeJSON's DisallowUnknownFields means these fields are accepted
+	// here the moment they exist on the model — so a plain PUT carrying
+	// extraOutputArgs would otherwise be a way around both.
+	existing.ExtraInputArgs = saved.InputArgs
+	existing.ExtraOutputArgs = saved.OutputArgs
+	existing.ExpertAckReencode = saved.AckReencode
+
+	// Deliberately AFTER the decode-over-existing above, because that is the
+	// path that produces the state worth catching: a body carrying nothing but
+	// {"platform":"kick"} leaves the stored compliance untouched, so the row
+	// ends up on a platform that cannot send what it is holding without the
+	// client ever mentioning compliance. Checking the request body instead of
+	// the merged row would see nothing at all.
+	warnings, err := s.destinationWriteWarnings(existing)
+	if err != nil {
+		writeStoreError(w, err)
+		return nil, false
+	}
+
+	return &putDestinationPlan{existing: existing, storedSourceID: storedSourceID, warnings: warnings}, true
+}
+
 // bodyEnables reports whether a PUT body asks for enabled:true. Lenient on
 // purpose: the strict decode that follows is what refuses a bad body.
 func bodyEnables(body []byte) bool {
@@ -3094,6 +3185,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// carries it.
 	var keyWarning string
 	if peek, perr := s.store.GetDestination(id); perr == nil && !peek.Enabled && bodyEnables(body) {
+		// ONLY A SAVE THAT WILL SUCCEED RENEWS: a refused one would leave a live
+		// video on the operator's page that nothing publishes to. The refusal
+		// is written by the same check the write below runs.
+		if _, ok := s.planDestinationUpdate(w, id, body); !ok {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)
 		_, keyWarning = s.renewFacebookKeyLocked(ctx, id, false)
 		cancel()
@@ -3116,78 +3213,11 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	s.trackGainMu.Lock()
 	defer s.trackGainMu.Unlock()
 
-	existing, err := s.store.GetDestination(id)
-	if err != nil {
-		writeStoreError(w, err)
+	plan, ok := s.planDestinationUpdate(w, id, body)
+	if !ok {
 		return
 	}
-	// The programme the destination runs on before this save, read before the
-	// decode below can move it: what it is running now is asked of that engine.
-	storedSourceID := existing.SourceID
-	// Decode over the existing row so a client sending only a routing profile
-	// does not wipe the URL.
-	saved := expertArgsOf(existing)
-	// The stored values the write checks compare against, read BEFORE the decode
-	// below writes over them, so a save that changes one can be told apart from
-	// one that leaves it alone. See refuseBadDestinationWrite.
-	before := destinationBeforeWrite(existing)
-	// The stored go-live title and whether its X broadcast is on air, read
-	// before the decode for the same reason: the body could name a phase too.
-	storedGoLiveTitle := existing.GoLiveTitle
-	storedXControls := xControlsKey(existing.Compliance.X)
-	// The stored preset, so only a save that CHANGES it is checked: an id the
-	// catalogue no longer has must not make the row unsaveable.
-	storedPresetID := existing.PresetID
-	// PRE_PUBLISHED counts as live here: the PUBLISH has already gone to X with
-	// the title it carried, so a change now could not reach X either.
-	xBroadcastLive := existing.Platform == db.PlatformX &&
-		(strings.EqualFold(existing.Lifecycle.Phase, phaseLive) ||
-			strings.EqualFold(existing.Lifecycle.Phase, phasePrePublished))
-	if err := decodeJSONInto(body, existing); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	existing.ID = id
-	if existing.PresetID != storedPresetID {
-		if p := existing.PresetProblem(); p != "" {
-			writeError(w, http.StatusBadRequest, p)
-			return
-		}
-	}
-	if s.refuseBadDestinationWrite(w, existing, &before) {
-		return
-	}
-	// X takes a title only when the broadcast is published, and has no write
-	// that changes a running one, so a change saved now would never reach X.
-	if xBroadcastLive && existing.GoLiveTitle != storedGoLiveTitle {
-		writeError(w, http.StatusConflict, xTitleLiveRefusal)
-		return
-	}
-	// The chat access mode and language travel on the same PUBLISH.
-	if xBroadcastLive && xControlsKey(existing.Compliance.X) != storedXControls {
-		writeError(w, http.StatusConflict, xControlsLiveRefusal)
-		return
-	}
-	// Whatever the body said about expert arguments, the stored ones win. Only
-	// the expert routes enforce the confirm step and the guard acknowledgement,
-	// and decodeJSON's DisallowUnknownFields means these fields are accepted
-	// here the moment they exist on the model — so a plain PUT carrying
-	// extraOutputArgs would otherwise be a way around both.
-	existing.ExtraInputArgs = saved.InputArgs
-	existing.ExtraOutputArgs = saved.OutputArgs
-	existing.ExpertAckReencode = saved.AckReencode
-
-	// Deliberately AFTER the decode-over-existing above, because that is the
-	// path that produces the state worth catching: a body carrying nothing but
-	// {"platform":"kick"} leaves the stored compliance untouched, so the row
-	// ends up on a platform that cannot send what it is holding without the
-	// client ever mentioning compliance. Checking the request body instead of
-	// the merged row would see nothing at all.
-	warnings, err := s.destinationWriteWarnings(existing)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
+	existing, storedSourceID, warnings := plan.existing, plan.storedSourceID, plan.warnings
 
 	// What is running for this destination before the write, so the answer
 	// below is read back from what the reconcile did rather than predicted.
