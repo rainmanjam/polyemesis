@@ -33,6 +33,11 @@ const noteRebuildsHistory = "rebuilds the history checker"
 // noteRecompilesPatterns explains the automod rule fields.
 const noteRecompilesPatterns = "recompiles the patterns"
 
+// noteRebuildsProtection explains the automod protection fields: the pack
+// checker and the ladder are rebuilt on every save, and the strike counts, raid
+// window and learned names are kept by the server across the rebuild.
+const noteRebuildsProtection = "rebuilds the protection pack and the ladder; strikes and the raid window survive"
+
 // noteRunnerPolls and the notes below are the reload-class explanations shown for each setting.
 const noteRunnerPolls = "polled by the runner"
 
@@ -385,6 +390,25 @@ var settingsReload = map[string]ReloadRule{
 	"automod.history.idleEvictionSeconds":   {ClassLive, applyAutomod, noteRebuildsHistory},
 	"automod.history.action":                {ClassLive, applyAutomod, noteRebuildsHistory},
 	"automod.history.timeoutSeconds":        {ClassLive, applyAutomod, noteRebuildsHistory},
+
+	// -------------------------------------------------- automod: protection
+	"automod.protection.state":                  {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.pack":                   {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.packVersion":            {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.categories.enabled":     {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.categories.detectors":   {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.ceilings":               {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.addTerms.term":          {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.addTerms.category":      {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.addTerms.tier":          {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.allowTerms":             {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.allowDomains":           {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.holdDetectors":          {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.impersonation.protect":  {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.impersonation.allowIds": {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.strikeWindowSeconds":    {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.ladderTimeoutSeconds":   {ClassLive, applyAutomod, noteRebuildsProtection},
+	"automod.protection.offer":                  {ClassLive, applyAutomod, "derived on the way out and never stored; nothing reads it back"},
 
 	// --------------------------------------------------------- automod: model
 	"automod.model.enabled":             {ClassLive, applyAutomod, noteRebuildsModel},

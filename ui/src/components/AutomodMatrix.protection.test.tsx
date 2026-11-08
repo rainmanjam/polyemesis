@@ -64,11 +64,25 @@ describe("AutomodMatrix: the protection column", () => {
 });
 
 describe("the protection checker's label and readiness", () => {
-  it("has a label and reads as not on until the pack can be switched on", () => {
+  it("has a label and reads as ready only while the pack is on", () => {
     expect(CHECKER_KEYS.protection).toBe("automod.checkerProtection");
     expect(checkerReady(undefined, "protection")).toEqual({
       ready: false,
       reason: "automod.protectionOff",
     });
+    const base = {
+      enabled: true,
+      history: {},
+      model: {},
+      protection: { pack: "en", packVersion: 1, impersonation: {} },
+    } as never as AutomodSettings;
+    for (const state of ["", "off"] as const) {
+      expect(
+        checkerReady({ ...base, protection: { ...base.protection!, state } }, "protection"),
+      ).toEqual({ ready: false, reason: "automod.protectionOff" });
+    }
+    expect(
+      checkerReady({ ...base, protection: { ...base.protection!, state: "on" } }, "protection"),
+    ).toEqual({ ready: true });
   });
 });

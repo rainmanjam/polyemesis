@@ -22,7 +22,9 @@ type Engine struct {
 	// it on. Set by WithProtection after New, so New's signature (and every
 	// caller of it) is unchanged.
 	protection *Protection
-	now        func() time.Time
+	// ladder is the strike policy, nil unless the pack is on. See strikes.go.
+	ladder *Ladder
+	now    func() time.Time
 }
 
 // New returns an engine. Any checker may be nil, and a nil one simply
@@ -114,7 +116,15 @@ func (e *Engine) CheckFast(p db.Platform, s Subject) Verdict {
 	findings = append(findings, e.rules.Check(s.Text)...)
 	hist := e.protection.markHistory(e.history.Observe(p, s.AuthorID, s.Text))
 	findings = append(findings, hist...)
-	findings = append(findings, e.protection.check(p, s, e.clock(), hist)...)
+	pf := e.protection.check(p, s, e.clock(), hist)
+	findings = append(findings, pf...)
+	// One strike per message, not per finding, and only for a message the pack
+	// itself flagged. Explain, CheckText and CheckModel never reach this: they
+	// record nothing, and the model has its own category table (D3).
+	if e.ladder != nil && len(pf) > 0 && s.AuthorID != "" {
+		strike := e.ladder.Strikes.Record(p, s.AuthorID, e.clock(), e.ladder.window())
+		e.climb(p, findings, strike)
+	}
 	return e.decide(p, sortByConsequence(findings))
 }
 
@@ -186,7 +196,10 @@ func (e *Engine) holdAllowed(p db.Platform) bool {
 // Matrix returns the current matrix, for the API to render.
 func (e *Engine) Matrix() Matrix { return e.matrix }
 
-func (e *Engine) SetMatrix(m Matrix) { e.matrix = m }
+func (e *Engine) SetMatrix(m Matrix) {
+	e.matrix = m
+	e.syncArming()
+}
 
 // Capabilities returns the gate, so the API can render unavailable cells with
 // their reason rather than the UI guessing at them.

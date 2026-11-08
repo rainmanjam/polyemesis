@@ -617,6 +617,10 @@ type Server struct {
 	// the primary's allowance -- each checker's ceiling is the one the operator
 	// set for it.
 	automodSecondaryBudget *automod.Budget
+	// automodState is what must outlive a settings save: strike counts, the
+	// raid window and the learned moderator names. ApplyAutomod rebuilds the
+	// engine on every save; a save in the middle of a raid must not wipe them.
+	automodState *automod.Persistent
 	// automodTestPrimary / automodTestSecondary allow one Test run per
 	// checker at a time. A Test is three paid calls, and an impatient
 	// double-click should not be six.
@@ -945,6 +949,7 @@ func New(o Options) *Server {
 		whisper:       o.Whisper,
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
+		automodState:  automod.NewPersistent(),
 		automodSecondaryBudget: func() *automod.Budget {
 			if o.AutomodSecondaryBudget != nil {
 				return o.AutomodSecondaryBudget

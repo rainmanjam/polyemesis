@@ -180,13 +180,77 @@ different accounts are the job of the protection pack, below.
 A compiled term list and a set of detectors, in `internal/automod/pack`, that
 run as their own checker, so that arming an action for the pack never arms your
 own regex rules. A hit is **flagged in the console and can be held off every
-overlay**; it asks for no platform action, and the matrix is still the only
-thing that can permit one. This release builds the pack, its tests and the test
-box. The matrix API carries a `protection` checker, but the console does not
-show it yet, and **nothing turns it on**: no setting enables it, an install
-keeps behaving exactly as before, and a matrix cell for that checker is refused
-on save ("recommended protection is not on") until the settings that switch it
-on arrive.
+overlay**; it asks for no platform action by itself, and the matrix is still the
+only thing that can permit one.
+
+### Who has it on
+
+A **fresh install** has the pack on, with every platform action off. An
+**existing install is never switched on silently**: its settings carry no
+answer yet (`automod.protection.state` is empty), nothing new runs, and
+`GET /settings` reports `automod.protection.offer: true` so the console can ask.
+Answering writes `on` or `off`, a recorded answer rather than a dismissed
+notice. A matrix cell for the `protection` checker is refused on save
+("recommended protection is not on") unless the pack is on in the same save.
+
+The console does not show the pack's controls yet; the settings below are
+reachable through the API. What you change is stored as a **difference over the
+pack**, never as a copy of it, so a release that updates the pack reaches every
+install that is on and nothing you chose is overwritten:
+
+| Key under `automod.protection` | Meaning |
+|---|---|
+| `state` | `""` (undecided), `"on"` or `"off"` |
+| `pack`, `packVersion` | the pack id (`en`) and the version you last accepted |
+| `categories` | `{category: {enabled, detectors: {name: bool}}}`. Absent means the pack's default. Categories: `hate_speech`, `profanity` (off by default), `doxxing`, `scam`, `flood`, `impersonation`, `raid`. A detector is named by what follows the slash (`address` for `doxxing/address`) |
+| `ceilings` | `{category: "hold" \| "delete" \| "timeout" \| "ban"}`, how high a category may climb the ladder |
+| `holdDetectors` | `{detector: bool}`, whether a detector also holds the message off the overlay |
+| `addTerms`, `allowTerms`, `allowDomains` | your terms (2 to 100 characters, hate tier `severe` or `contextual`, profanity tier `mild` or `strong`), pack terms to ignore, and domains that are never a shortener or lookalike |
+| `impersonation` | `protect`: extra names to guard, `allowIds`: author ids that are never an impostor |
+| `strikeWindowSeconds`, `ladderTimeoutSeconds` | how long a strike counts, and the timeout rung's length (both 600 by default; never zero, because a zero timeout is a permanent ban) |
+
+A sent `categories`, `ceilings`, `holdDetectors`, `addTerms`, `allowTerms`,
+`allowDomains` or `impersonation` list **replaces** the stored one, so removing
+an entry saves and takes effect. A misspelt key is a 400, and so is a category,
+detector or ceiling the pack does not have.
+
+### The action ladder
+
+Each platform has up to three rungs for the pack: **delete**, **timeout** and
+**ban**. You arm one by switching on its matrix cell, `platform/rung/protection`
+(for example `twitch/ban/protection`). None is armed by default, so on a fresh
+install a hit only flags the message and holds it off the overlay.
+
+Every pack hit is a strike against its author on that platform, counted once
+per message however many detectors fired, inside `strikeWindowSeconds`. Strike 1
+asks for a delete, strike 2 for a timeout and strike 3 and later for a ban,
+**capped by the category's ceiling** and then lowered to the highest rung you
+have actually armed at or below it. If none is armed the hit stays a flag. So
+with only Ban armed, the first two hits flag and the third bans.
+
+| Category | Highest rung by default |
+|---|---|
+| Hate terms, severe | ban |
+| Scams | ban |
+| Doxxing | timeout |
+| Floods (any detector) | timeout |
+| Raid | delete |
+| Profanity | delete |
+| Impersonation, contextual hate terms, self-harm | hold only |
+
+Two properties are deliberate:
+
+- **Arming starts the count again.** Strikes belong to an arming epoch for the
+  platform, and any change to the set of rungs armed there starts a new one. An
+  install that ran unarmed for a week cannot ban someone for their third message
+  the moment Ban is armed: arming affects only what happens afterwards.
+- **A settings save in the middle of a raid forgets nothing.** Strike counts,
+  the raid window and the names learned from moderators belong to the server,
+  not to the rebuilt engine.
+
+Strikes are kept in memory only, are bounded (idle authors are dropped, and at
+most 20,000 are tracked), and are not carried across a restart. The model
+checker has its own category table and is not part of the ladder.
 
 | Detector | What it catches | Held off the overlay |
 |---|---|---|
@@ -215,7 +279,9 @@ distinct texts and of accounts per text), so a raid cannot grow it without
 limit, and it survives a settings save.
 
 The test box is `POST /automod/explain` (see below). It runs the pack and your
-rules on text you type and leaves no trace.
+rules on text you type and leaves no trace. It uses the pack as you have
+configured it (a category off, a term added, a domain allowed), and it never
+counts a strike.
 
 ### A timeout of zero is a permanent ban
 
@@ -436,7 +502,7 @@ on their own:
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
 | `GET` | `/automod/stats` | what the checkers have done |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
-| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine (not yet), `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
+| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine, `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |
 
 Keys are write-only: `automod.model.hasApiKey` and

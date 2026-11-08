@@ -62,6 +62,9 @@ func TestAutomodReadinessContract(t *testing.T) {
 		{"primary has none, the fallback has one", "model", `{"model":{"enabled":true,"endpoint":""},"secondary":{"enabled":true,"endpoint":"https://s.example/v1"}}`},
 		{"history is always built", "history", `{}`},
 		{"the pack is not switched on yet", "protection", `{}`},
+		{"the pack is undecided", "protection", `{"protection":{"state":""}}`},
+		{"the pack was declined", "protection", `{"protection":{"state":"off"}}`},
+		{"the pack is on", "protection", `{"protection":{"state":"on"}}`},
 	}
 
 	var out []automodReadinessCase

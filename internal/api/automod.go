@@ -122,10 +122,15 @@ func (s *Server) handleAutomodExplain(w http.ResponseWriter, r *http.Request) {
 		rules = nil
 	}
 	hl := historyFromSettings(a)
-	prot, err := automod.NewProtection(automod.ProtectionConfig{
-		Pack:    pack.Config{Names: pack.NewNameSet(req.Protect), Reserved: pack.DefaultReservedPolicy()},
-		History: &hl,
-	})
+	// The pack as the operator has configured it, so the test box reflects their
+	// edits (a category off, an added term, an allowed domain) -- built as if it
+	// were on, because the box shows what turning it on does. No windowed
+	// trackers: nothing here remembers.
+	explainSet := a
+	explainSet.Protection.State = db.ProtectionOn
+	cfg, hold := packConfigFromSettings(explainSet.Protection)
+	cfg.Names = pack.NewNameSet(append(append([]string(nil), explainSet.Protection.Impersonation.Protect...), req.Protect...))
+	prot, err := automod.NewProtection(automod.ProtectionConfig{Pack: cfg, Hold: hold, History: &hl})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "the protection pack did not load")
 		return
@@ -216,7 +221,7 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("automod key stored, but settings could not be re-read to "+
 			"rebuild the model checker; it will pick the key up on restart", "err", err)
 	} else {
-		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget)
+		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
 	}
 
 	// A key set while debug recording is on is a literal the recording's
@@ -335,6 +340,7 @@ func automodProviderProblems(a db.AutomodSettings) error {
 			probs = append(probs, fmt.Sprintf("category %q asks for unknown action %q", k, a.Model.CategoryActions[k]))
 		}
 	}
+	probs = append(probs, protectionVocabProblems(a.Protection)...)
 	if len(probs) == 0 {
 		return nil
 	}
@@ -415,11 +421,14 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 		}
 		return false, "the model checker has no endpoint"
 	case automod.CheckerProtection:
-		// The pack has no settings to switch it on yet, so the engine
-		// ApplyAutomod builds carries none: a cell armed for it would be stored
-		// and never fire, then go live the day the pack is turned on. Refusing
-		// the arm is the same rule the model and rules columns follow.
-		return false, "recommended protection is not on"
+		// The pack is its own switch (protection.state). A cell armed for it
+		// while the pack is off would be stored and never fire, then go live the
+		// day the pack is turned on -- the same rule the model and rules
+		// columns follow. An undecided install (state "") is off too.
+		if !protectionOn(a) {
+			return false, "recommended protection is not on"
+		}
+		return true, ""
 	}
 	// History is built from DefaultHistoryLimits on every save and is never
 	// nil. A checker this build does not know is dropped by matrixFromSettings
@@ -601,7 +610,7 @@ func newChecker(conn, shared db.AutomodModel, key, binding string, budget *autom
 }
 
 func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
-	budget, secondaryBudget *automod.Budget) {
+	budget, secondaryBudget *automod.Budget, persist *automod.Persistent) {
 	if hub == nil {
 		return
 	}
@@ -630,12 +639,30 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		model = automod.NewChain(primary, secondary)
 	}
 
+	if persist == nil {
+		// A caller with no long-lived state (a test) still gets a working
+		// ladder; it just forgets across applies.
+		persist = automod.NewPersistent()
+	}
+	hl := historyFromSettings(a)
 	engine := automod.New(
 		matrixFromSettings(a),
 		automod.PlatformCaps{},
 		rules,
-		automod.NewHistory(historyFromSettings(a)),
+		automod.NewHistory(hl),
 		model,
 	)
+	// The pack only when the install has it on. An undecided or declined
+	// install builds no pack checker, which is what keeps an upgrade silent.
+	prot, err := protectionFromSettings(a, hl, persist)
+	if err != nil {
+		// Degrade, like a rule that does not compile: chat still flows and the
+		// other checkers still run.
+		log.Error("automod protection pack did not load; running without it", "err", err)
+		prot = nil
+	}
+	if prot != nil {
+		engine.WithProtection(prot).WithLadder(ladderFromSettings(a.Protection, persist.Strikes))
+	}
 	hub.SetModerator(engine)
 }

@@ -1400,6 +1400,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	// gives. The console unlocks a checker's switch on it.
 	settings.Automod.Model.Tested = s.checkerTested(automod.SlotPrimary, settings.Automod.Model)
 	settings.Automod.Secondary.Tested = s.checkerTested(automod.SlotSecondary, settings.Automod.Secondary)
+	// And whether the protection pack is still waiting on an answer: derived,
+	// never stored, so there is no second copy of "undecided" to drift.
+	settings.Automod.Protection.Offer = settings.Automod.Protection.State == ""
 	// The ingest credentials are sealed the same way the MQTT password and the
 	// automod key already were, except that they cannot be moved out of the
 	// blob -- the settings page reads and writes them -- so they are blanked on
@@ -1444,6 +1447,7 @@ func settingsVersion(st db.Settings) string {
 	st.Automod.Secondary.HasAPIKey = false
 	st.Automod.Model.Tested = false
 	st.Automod.Secondary.Tested = false
+	st.Automod.Protection.Offer = false
 	b, err := json.Marshal(st)
 	if err != nil {
 		return ""
@@ -1848,6 +1852,7 @@ func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVers
 	// these is not a fact about this server.
 	settings.Automod.Model.Tested = false
 	settings.Automod.Secondary.Tested = false
+	settings.Automod.Protection.Offer = false
 	if err := s.checkSettingsAgainstStored(settings, stored); err != nil {
 		return false, err
 	}
@@ -2216,7 +2221,7 @@ func (s *Server) ApplySettings(settings db.Settings) {
 	// sample skip the initial delay. handlePutSettings wakes it after a save.
 	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
 	// Rebuilding the automod engine is also what recompiles a changed rule.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
 	ApplyAlertSettings(s.mgr, settings.Alerts)
 }
 

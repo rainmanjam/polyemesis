@@ -98,9 +98,12 @@ export function checkerReady(
     return READY;
   }
   if (checker === "protection") {
-    // The server builds no pack checker until the pack can be switched on, so
-    // the column has nothing behind it yet (checkerConfigured, internal/api).
-    return { ready: false, reason: "automod.protectionOff" };
+    // The server builds the pack checker only while protection.state is "on"
+    // (checkerConfigured, internal/api). Undecided ("") and declined ("off")
+    // both mean nothing is behind the column.
+    return a?.protection?.state === "on"
+      ? READY
+      : { ready: false, reason: "automod.protectionOff" };
   }
   // History is built from DefaultHistoryLimits on every save, so it is never
   // nil and never unconfigured. A checker this build does not know is left

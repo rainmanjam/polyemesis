@@ -28,7 +28,9 @@ type explainResponse struct {
 }
 
 func TestAutomodExplainRunsThePackAndNamesDetectorsOnly(t *testing.T) {
-	h, _, sign := sourceServer(t)
+	h, store, sign := sourceServer(t)
+	// An upgraded, undecided install: the pack is not on in the live engine.
+	setProtectionState(t, store, "")
 	secret := "someone.private@example.com"
 	raw := send(t, h, sign, http.MethodPost, "/api/v1/automod/explain", map[string]any{
 		"text": "mail me at " + secret + " from kestrel_demo's twin", "authorName": "kestrel_demo_official",
@@ -94,8 +96,9 @@ func TestAutomodExplainDoesNotObserve(t *testing.T) {
 	}
 }
 
-func TestAProtectionCellCannotBeArmedYet(t *testing.T) {
-	h, _, sign := sourceServer(t)
+func TestAProtectionCellCannotBeArmedWhileTheStateIsUndecided(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	setProtectionState(t, store, "")
 	var doc map[string]any
 	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &doc)
 	am := doc["automod"].(map[string]any)

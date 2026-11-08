@@ -3913,6 +3913,57 @@ export interface AutomodSettings {
   /** The optional fallback, asked only when the primary could not answer.
    *  Optional here so a document from an older server still types. */
   secondary?: AutomodModel;
+  /** The recommended-protection pack. Optional so a document from an older
+   *  server still types. */
+  protection?: AutomodProtection;
+}
+
+/** "" is undecided: an install that predates the pack, offered it and not yet
+ *  answered. A fresh install is "on". */
+export type AutomodProtectionState = "" | "on" | "off";
+
+/** A platform action a category may climb to, lowest first. */
+export type AutomodCeiling = "hold" | "delete" | "timeout" | "ban";
+
+/** The operator's DIFF over the built-in pack, never a copy of it: an absent
+ *  key is the pack's own default, so a release that updates the pack reaches
+ *  every install that is on. Arming a platform action is not here; it is the
+ *  matrix cell `platform/rung/protection`. */
+export interface AutomodProtection {
+  state: AutomodProtectionState;
+  pack: string;
+  /** The pack version the operator last accepted. */
+  packVersion: number;
+  categories?: Record<string, AutomodProtectionCategory> | null;
+  ceilings?: Record<string, AutomodCeiling> | null;
+  addTerms?: AutomodProtectionTerm[] | null;
+  allowTerms?: string[] | null;
+  allowDomains?: string[] | null;
+  holdDetectors?: Record<string, boolean> | null;
+  impersonation: AutomodProtectionImpersonation;
+  strikeWindowSeconds: number;
+  ladderTimeoutSeconds: number;
+  /** Derived: true while `state` is "". A value sent back is ignored. */
+  offer?: boolean;
+}
+
+/** One category's diff. An absent `enabled` is the pack default. */
+export interface AutomodProtectionCategory {
+  enabled?: boolean;
+  /** One detector inside the category, by its name after the slash. */
+  detectors?: Record<string, boolean>;
+}
+
+/** A term the operator added to the pack. */
+export interface AutomodProtectionTerm {
+  term: string;
+  category: string;
+  tier: string;
+}
+
+export interface AutomodProtectionImpersonation {
+  protect?: string[] | null;
+  allowIds?: string[] | null;
 }
 
 /** What the operator sees about model spend and health. */
