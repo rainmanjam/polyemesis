@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.16.0] — 2026-11-08
+
 ### Added
 
 - **Viewer card: platform tools and private notes.** The viewer card now has a row of tools where the
@@ -143,6 +147,9 @@ its first tagged release.
   first paint by an external `/theme-init.js`, so neither theme flashes the other and the
   Content-Security-Policy is not loosened. The meters and the clip timeline repaint when the theme
   changes. The public player (`/watch`) and the OBS overlay pages are never themed.
+- **`GET /api/v1/platforms/registry`** serves the platform registry (names, the stored platform value,
+  which platforms carry destinations and chat, and the IVS and X title rules) for scripted clients.
+  `GET /platforms/accounts` gains `isPage` on a Facebook account that is a Page.
 
 ### Changed
 
@@ -162,6 +169,28 @@ its first tagged release.
   the webhook; and polyemesis ended both broadcasts. In the capability matrix the X row's Metadata, Chat
   read and Start / end cells now read Works. Chat send, moderation (delete, ban) and viewer stats were not
   exercised and stay Unverified.
+- **New Twitch destinations connected through an account default to the RTMPS ingest.** Fetching the
+  stream key hands back `rtmps://live.twitch.tv:443/app` (the same ingest and key over TLS, which also
+  passes networks that block port 1935) for a destination with no URL yet. Refreshing a key keeps the
+  transport an existing destination already uses: the "Twitch" preset stays on plain RTMP, "Twitch (RTMPS)"
+  on RTMPS, and an unlabelled one keeps its stored scheme, so the plain-RTMP fallback for networks that
+  refuse TLS survives a refresh. The "Twitch (RTMPS)" preset now spells out `:443`, and the destination
+  dialog recognises an RTMPS Twitch URL with or without the port.
+- **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
+  failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
+  available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).
+  A job of that kind stored by an earlier version still lists, as "Archive compression", and fails with
+  a message that says so instead of pointing at a Settings switch that does not exist.
+- **Audio and video ceilings follow the platforms' own pages.** Twitch's audio ceiling is 160 kbps (its
+  help page), not OBS's 320, so a destination sending more than 160 kbps to Twitch now shows the
+  audio-bitrate warning. Kick has no audio ceiling (no source gives one), so the 160 kbps warning for Kick
+  is gone. Twitch's 6000 kbps video figure is advice and no longer a ceiling. YouTube keeps 12000 kbps as
+  the recommended figure and 51000 as the maximum. `GET /services` reflects these.
+- **Connecting X now asks for `tweet.write` and `media.write`** so clips can be posted to X. An X account
+  connected before this release shows as needing a reconnect, once, before it can publish clips; the
+  prompt says that only posting clips needs it and that livestreaming and chat are unaffected.
+- **A destination's `presetId` appears in destination responses** when it has one, and
+  `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
 
 ### Fixed
 
@@ -452,37 +481,6 @@ its first tagged release.
   start through the shared FFmpeg runner, which gives up on the pipes five seconds after the kill.
 - **`polyemesis mcp` accepts `http://LOCALHOST`.** The stdio relay matched `localhost` case-sensitively
   and refused a mixed-case loopback URL that the API treats as loopback.
-
-### Added
-
-- **`GET /api/v1/platforms/registry`** serves the platform registry (names, the stored platform value,
-  which platforms carry destinations and chat, and the IVS and X title rules) for scripted clients.
-  `GET /platforms/accounts` gains `isPage` on a Facebook account that is a Page.
-
-### Changed
-
-- **New Twitch destinations connected through an account default to the RTMPS ingest.** Fetching the
-  stream key hands back `rtmps://live.twitch.tv:443/app` (the same ingest and key over TLS, which also
-  passes networks that block port 1935) for a destination with no URL yet. Refreshing a key keeps the
-  transport an existing destination already uses: the "Twitch" preset stays on plain RTMP, "Twitch (RTMPS)"
-  on RTMPS, and an unlabelled one keeps its stored scheme, so the plain-RTMP fallback for networks that
-  refuse TLS survives a refresh. The "Twitch (RTMPS)" preset now spells out `:443`, and the destination
-  dialog recognises an RTMPS Twitch URL with or without the port.
-- **Archive compression is hidden until it can be switched on.** It had no setting, so every archive job
-  failed. `POST /library/recordings/{id}/jobs/media.archive` now answers 400 "archive compression is not
-  available yet", and the Jobs page no longer lists the kind (`GET /jobs/overview`).
-  A job of that kind stored by an earlier version still lists, as "Archive compression", and fails with
-  a message that says so instead of pointing at a Settings switch that does not exist.
-- **Audio and video ceilings follow the platforms' own pages.** Twitch's audio ceiling is 160 kbps (its
-  help page), not OBS's 320, so a destination sending more than 160 kbps to Twitch now shows the
-  audio-bitrate warning. Kick has no audio ceiling (no source gives one), so the 160 kbps warning for Kick
-  is gone. Twitch's 6000 kbps video figure is advice and no longer a ceiling. YouTube keeps 12000 kbps as
-  the recommended figure and 51000 as the maximum. `GET /services` reflects these.
-- **Connecting X now asks for `tweet.write` and `media.write`** so clips can be posted to X. An X account
-  connected before this release shows as needing a reconnect, once, before it can publish clips; the
-  prompt says that only posting clips needs it and that livestreaming and chat are unaffected.
-- **A destination's `presetId` appears in destination responses** when it has one, and
-  `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
 
 ### Documentation
 
@@ -7587,7 +7585,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/rainmanjam/polyemesis/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/rainmanjam/polyemesis/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/rainmanjam/polyemesis/compare/v0.12.0...v0.13.0
