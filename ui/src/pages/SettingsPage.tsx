@@ -1491,7 +1491,7 @@ function PipelineSettings({
 
           Reading order is therefore the causal order: write the rules, key the
           model, then say what each may do. */}
-      <AutomodProtectionCard settings={draft} onChange={setDraft} />
+      <AutomodProtectionCard settings={draft} onChange={setDraft} saved={settings} />
 
       <AutomodConfig settings={draft} onChange={setDraft} saveError={saveError} />
 

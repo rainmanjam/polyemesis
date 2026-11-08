@@ -3951,8 +3951,46 @@ export interface AutomodProtection {
    *  cases the free checkers cannot settle; "all" asks about every message.
    *  A fresh install is "hard"; an upgraded one stays "all". */
   modelScope?: "all" | "hard";
+  /** What the pack has pushed to a platform's own filters. Server-owned: the
+   *  Twitch actions write it and a save cannot change it. */
+  native?: AutomodProtectionNative;
   /** Derived: true while `state` is "". A value sent back is ignored. */
   offer?: boolean;
+}
+
+/** The Twitch half of the pack's platform bookkeeping, one record per channel. */
+export interface AutomodProtectionNative {
+  twitch?: {
+    channels?: Array<{
+      broadcasterId: string;
+      /** Twitch blocked-term id to a hash of the term (never the term), for the terms polyemesis itself added. */
+      addedTermIds?: Record<string, string> | null;
+      /** The pack version whose terms were last fully pushed to this channel; 0 is never. */
+      pushedPackVersion?: number;
+    }> | null;
+  };
+}
+
+/** GET /chat/twitch/pack-terms: counts only, never the terms. */
+export interface TwitchPackStatus {
+  eligible: number;
+  recorded: number;
+  pushedPackVersion: number;
+  packVersion: number;
+  on: boolean;
+}
+
+/** One pass of POST pack-terms-sync, or DELETE pack-terms. */
+export interface TwitchPackSync {
+  added: number;
+  present: number;
+  removed: number;
+  /** Terms polyemesis had added, the operator removed on Twitch, and this pass put back. */
+  restored?: number;
+  skipped: number;
+  skipWhy?: Record<string, number>;
+  remaining: number;
+  done: boolean;
 }
 
 /** One category's diff. An absent `enabled` is the pack default. */

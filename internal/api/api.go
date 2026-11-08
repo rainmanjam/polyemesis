@@ -621,6 +621,9 @@ type Server struct {
 	// raid window and the learned moderator names. ApplyAutomod rebuilds the
 	// engine on every save; a save in the middle of a raid must not wipe them.
 	automodState *automod.Persistent
+	// packMu serialises the Twitch pack term sync and its reversal: two at once
+	// would both list, both add, and race to record.
+	packMu sync.Mutex
 	// automodTestPrimary / automodTestSecondary allow one Test run per
 	// checker at a time. A Test is three paid calls, and an impatient
 	// double-click should not be six.

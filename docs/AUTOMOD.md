@@ -215,6 +215,33 @@ on the Chat page) with **Turn on** and **Not now**; both record an answer, and
   the same save. The Twitch row repeats a note worth knowing: Twitch's own AutoMod
   and blocked terms only see Twitch chat, so a YouTube or Kick message shown on
   your Twitch stream is kept off it by an overlay hold, not by Twitch.
+- **Twitch's own filters**, shown when a Twitch account is connected. Four
+  buttons, each off until you click it because each changes your Twitch
+  channel's own settings. **Copy the severe hate terms to Twitch blocked terms**
+  sends the pack's severe hate terms (plus your added severe terms, minus the
+  words you allowed) to Twitch's blocked terms; it adds a batch at a time and the
+  card repeats until none are left, so it is safe to click again after a failure.
+  polyemesis records the Twitch id of a term only when that very request created
+  it (the term was not in the list just read, and its `created_at`, which Twitch
+  gives in whole seconds on its own clock, is within seconds of Twitch's answer),
+  because Twitch answers a duplicate with the term that was already there and
+  hides private ones. The record is kept per Twitch channel and holds a hash of
+  each term, never the term, so connecting a second channel cannot orphan the
+  first one's terms and the settings document carries no slur list. If you
+  remove one of those terms on Twitch yourself, the next copy puts it back (the
+  answer's `restored` says how many); to keep a term off Twitch, allow it in
+  polyemesis. Copying uses the saved settings, so the card holds the button back
+  while protection edits are unsaved. A term you or Twitch's AutoMod added is
+  therefore never recorded,
+  and **Remove the terms polyemesis added**, turning hate & slurs off, a word you
+  allow, or a pack update that drops a term (the next sync reconciles) delete only
+  the ones polyemesis really added. **Set Twitch AutoMod to level 1 or 2** raises
+  every AutoMod category except swearing to at least that level; it never lowers
+  one you set stricter, and it sends all eight categories because Twitch's
+  settings update replaces. **Refresh protected names from Twitch roles** reads
+  your moderators and VIPs (broadcaster only; the VIP list also needs Twitch's
+  own requirements) into the impersonation detector's in-memory protected names.
+  The card shows counts, never the terms.
 - **A test box** that calls `POST /automod/explain`. It shows which detectors
   fire, whether the line would be held, and, for a pack hit, what the strike
   ladder would ask the platform to do at strikes 1, 2 and 3 given the rungs you

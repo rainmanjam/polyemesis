@@ -48,6 +48,7 @@ type twitchToolBody struct {
 	Status          string                `json:"status"`
 	ResolutionText  string                `json:"resolutionText"`
 	Role            string                `json:"role"`
+	Level           int                   `json:"level"`
 	Settings        *chat.AutoModSettings `json:"settings"`
 
 	// terms is filled by the server from the automod rules, never decoded.
@@ -75,6 +76,9 @@ func (s *Server) handleTwitchToolDelete(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table map[string]toolFn, failStatus int, hasBody bool) {
+	if s.servePackTool(w, r) {
+		return
+	}
 	if !s.requireChat(w) {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1977,6 +1978,12 @@ type AutomodProtection struct {
 	// stored blob predates the field is "all" (mergeBaseSettings), so an upgrade
 	// never quietly stops checking messages it used to check.
 	ModelScope string `json:"modelScope"`
+	// Native is the bookkeeping for what the pack has pushed to a platform's
+	// own filters. It is SERVER-OWNED: the platform actions write it, and a
+	// PUT /settings can neither set nor clear it (mergeSavedSettings puts the
+	// stored value back), so a stale tab cannot make polyemesis forget which
+	// platform terms it added.
+	Native ProtectionNative `json:"native"`
 	// Offer is DERIVED: true while State is undecided, so the console can show
 	// the banner. Filled on the way out of GET /settings and ignored when sent,
 	// like AutomodModel.Tested.
@@ -1988,6 +1995,105 @@ const (
 	ModelScopeAll  = "all"
 	ModelScopeHard = "hard"
 )
+
+// ProtectionNative is what the pack has pushed to platforms' own filters.
+type ProtectionNative struct {
+	Twitch ProtectionTwitchNative `json:"twitch"`
+}
+
+// ProtectionTwitchNative is the Twitch half: one record per channel, because a
+// term id means something only on the channel that issued it and polyemesis can
+// moderate several (one runner per Twitch account).
+type ProtectionTwitchNative struct {
+	Channels []ProtectionTwitchChannel `json:"channels"`
+}
+
+// ProtectionTwitchChannel is what the pack pushed to ONE Twitch channel.
+type ProtectionTwitchChannel struct {
+	// BroadcasterID is the channel's numeric Twitch id.
+	BroadcasterID string `json:"broadcasterId"`
+	// AddedTermIDs maps a Twitch blocked-term id to a hash of its term
+	// (chat.TermKey), never the term itself: the document is readable by any
+	// read token and must not carry the slur list. It holds exactly the terms
+	// polyemesis's own sync created; a term the operator, a moderator or
+	// AutoMod added is never recorded, so removing the pack's terms removes
+	// only polyemesis's own.
+	AddedTermIDs map[string]string `json:"addedTermIds"`
+	// PushedPackVersion is the pack version whose terms were last fully pushed
+	// to this channel; zero is never.
+	PushedPackVersion int `json:"pushedPackVersion"`
+}
+
+// Channel returns the record for a broadcaster, zero when there is none.
+func (n ProtectionTwitchNative) Channel(broadcasterID string) ProtectionTwitchChannel {
+	for _, c := range n.Channels {
+		if c.BroadcasterID == broadcasterID {
+			return c
+		}
+	}
+	return ProtectionTwitchChannel{BroadcasterID: broadcasterID}
+}
+
+// Put stores a channel's record, dropping it when it is empty.
+func (n *ProtectionTwitchNative) Put(c ProtectionTwitchChannel) {
+	out := n.Channels[:0:0]
+	for _, o := range n.Channels {
+		if o.BroadcasterID != c.BroadcasterID {
+			out = append(out, o)
+		}
+	}
+	if len(c.AddedTermIDs) > 0 || c.PushedPackVersion != 0 {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BroadcasterID < out[j].BroadcasterID })
+	n.Channels = out
+}
+
+// MaxNativeTermIDs bounds one channel's AddedTermIDs. Twitch allows 1,000
+// blocked terms in a channel, so a larger record is not Twitch's.
+const MaxNativeTermIDs = 1000
+
+// MaxNativeChannels bounds the channel records.
+const MaxNativeChannels = 20
+
+// UpdateProtectionNative changes ONLY the platform-term record. It skips the
+// whole-document Validate that UpdateSettings runs, on purpose: this records
+// terms Twitch has already accepted, and an unrelated problem elsewhere in the
+// stored document must not make polyemesis forget them. The record's own
+// bounds are checked here.
+func (d *DB) UpdateProtectionNative(mutate func(*ProtectionNative)) error {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+	s, err := d.GetSettings()
+	if err != nil {
+		return err
+	}
+	mutate(&s.Automod.Protection.Native)
+	var bad error
+	s.Automod.Protection.Native.problems(func(f string, a ...any) { bad = fmt.Errorf(f, a...) })
+	if bad != nil {
+		return InvalidSettingsError{Err: bad}
+	}
+	return d.PutSettings(s)
+}
+
+func (n ProtectionNative) problems(add problemAdder) {
+	if len(n.Twitch.Channels) > MaxNativeChannels {
+		add("automod protection records more than %d Twitch channels", MaxNativeChannels)
+	}
+	seen := map[string]bool{}
+	for _, c := range n.Twitch.Channels {
+		switch {
+		case c.BroadcasterID == "" || seen[c.BroadcasterID]:
+			add("automod protection has a Twitch channel record with no id, or two for one channel")
+		case len(c.AddedTermIDs) > MaxNativeTermIDs:
+			add("automod protection records more than %d Twitch term ids", MaxNativeTermIDs)
+		case c.PushedPackVersion < 0:
+			add("automod protection pushedPackVersion cannot be negative")
+		}
+		seen[c.BroadcasterID] = true
+	}
+}
 
 // ProtectionCategory is one category's diff. A nil Enabled is the pack default.
 type ProtectionCategory struct {
@@ -2916,6 +3022,7 @@ func (p AutomodProtection) problems(add problemAdder) {
 	if len(p.AddTerms) > protectionMaxTerms {
 		add("automod protection has more than %d added terms", protectionMaxTerms)
 	}
+	p.Native.problems(add)
 	for _, t := range p.AddTerms {
 		if n := utf8.RuneCountInString(strings.TrimSpace(t.Term)); n < 2 || n > protectionMaxEntry {
 			add("an automod protection added term must be 2-%d characters", protectionMaxEntry)

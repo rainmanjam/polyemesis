@@ -282,19 +282,26 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.automod.protection.impersonation.protect":  sPublic,
 	"settings.automod.protection.ladderTimeoutSeconds":   sPublic,
 	"settings.automod.protection.offer":                  sPublic,
-	"settings.automod.protection.modelScope":             sPublic,
-	"settings.automod.protection.pack":                   sPublic,
-	"settings.automod.protection.packVersion":            sPublic,
-	"settings.automod.protection.state":                  sPublic,
-	"settings.automod.protection.strikeWindowSeconds":    sPublic,
-	"settings.automod.rules.action":                      sPublic,
-	"settings.automod.rules.category":                    sPublic,
-	"settings.automod.rules.holdOverlay":                 sPublic,
-	"settings.automod.rules.enabled":                     sPublic,
-	"settings.automod.rules.id":                          sPublic,
-	"settings.automod.rules.name":                        sPublic,
-	"settings.automod.rules.pattern":                     sPublic,
-	"settings.automod.rules.timeoutSeconds":              sPublic,
+	// The per-channel record of the blocked terms polyemesis added: the
+	// channel's numeric id (public on the channel page), Twitch's opaque term
+	// ids, a hash of each term (never the term), and the pack version pushed.
+	// A read token needs the counts to draw the card.
+	"settings.automod.protection.native.twitch.channels.broadcasterId":     sPublic,
+	"settings.automod.protection.native.twitch.channels.addedTermIds":      sPublic,
+	"settings.automod.protection.native.twitch.channels.pushedPackVersion": sPublic,
+	"settings.automod.protection.modelScope":                               sPublic,
+	"settings.automod.protection.pack":                                     sPublic,
+	"settings.automod.protection.packVersion":                              sPublic,
+	"settings.automod.protection.state":                                    sPublic,
+	"settings.automod.protection.strikeWindowSeconds":                      sPublic,
+	"settings.automod.rules.action":                                        sPublic,
+	"settings.automod.rules.category":                                      sPublic,
+	"settings.automod.rules.holdOverlay":                                   sPublic,
+	"settings.automod.rules.enabled":                                       sPublic,
+	"settings.automod.rules.id":                                            sPublic,
+	"settings.automod.rules.name":                                          sPublic,
+	"settings.automod.rules.pattern":                                       sPublic,
+	"settings.automod.rules.timeoutSeconds":                                sPublic,
 	// An IANA zone name. It says how times are WRITTEN DOWN and reveals
 	// nothing about the install beyond roughly where its operator sits, which
 	// the destinations already say louder.

@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { AddTermEditor, StringListEditor } from "@/components/AutomodProtectionEditors";
 import { AutomodProtectionLadder } from "@/components/AutomodProtectionLadder";
 import { AutomodProtectionTest } from "@/components/AutomodProtectionTest";
+import { AutomodProtectionTwitch } from "@/components/AutomodProtectionTwitch";
 import { ProtectionOfferBanner, type ProtectionAnswer } from "@/components/ProtectionOfferBanner";
 import {
   categoryEnabled,
@@ -57,6 +58,9 @@ import type {
 export interface AutomodProtectionCardProps {
   settings: Settings;
   onChange: (next: Settings) => void;
+  /** The last SAVED settings. The Twitch actions use them, not the draft, so the
+   *  card says so while the two differ. */
+  saved?: Settings;
 }
 
 const HOLD_KEYS = {
@@ -65,7 +69,7 @@ const HOLD_KEYS = {
   console: "automod.protConsoleOnly",
 } as const;
 
-export function AutomodProtectionCard({ settings, onChange }: Readonly<AutomodProtectionCardProps>) {
+export function AutomodProtectionCard({ settings, onChange, saved }: Readonly<AutomodProtectionCardProps>) {
   const t = useT();
   const automod = settings.automod;
   const [cells, setCells] = useState<AutomodCell[]>([]);
@@ -92,6 +96,11 @@ export function AutomodProtectionCard({ settings, onChange }: Readonly<AutomodPr
 
   if (!automod) return null;
   const prot = protectionOf(automod);
+  // The server's own bookkeeping (native) is not an edit.
+  const keyOf = (s: Settings | undefined) =>
+    s?.automod ? JSON.stringify({ ...protectionOf(s.automod), native: undefined, offer: undefined }) : "";
+  const draftKey = keyOf(settings);
+  const savedKey = saved ? keyOf(saved) : draftKey;
   const state = prot.state;
 
   function setProt(next: AutomodProtection) {
@@ -150,6 +159,7 @@ export function AutomodProtectionCard({ settings, onChange }: Readonly<AutomodPr
             </ul>
 
             <AutomodProtectionLadder settings={settings} onChange={onChange} platforms={platforms} cells={cells} />
+            <AutomodProtectionTwitch unsaved={savedKey !== draftKey} savedKey={savedKey} />
             <AutomodProtectionTest platforms={platforms} />
             <Advanced prot={prot} onChange={setProt} />
           </>

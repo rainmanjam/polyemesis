@@ -1448,6 +1448,9 @@ func settingsVersion(st db.Settings) string {
 	st.Automod.Model.Tested = false
 	st.Automod.Secondary.Tested = false
 	st.Automod.Protection.Offer = false
+	// Server bookkeeping, not the operator's document: a Twitch sync that
+	// records term ids must not make every open settings page stale.
+	st.Automod.Protection.Native = db.ProtectionNative{}
 	b, err := json.Marshal(st)
 	if err != nil {
 		return ""
@@ -1835,9 +1838,13 @@ func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVers
 	}
 	stored := snapshotStoredSettings(settings)
 	*storedJSON = stored.json
+	// Copied BEFORE the decode: it merges into the stored map in place.
+	native := cloneNative(settings.Automod.Protection.Native)
 	if err := decodeJSONInto(body, settings); err != nil {
 		return false, err
 	}
+	// The platform-term record is the server's, never the client's.
+	settings.Automod.Protection.Native = native
 	// A per-install MQTT instance when MQTT is first set up with the shared
 	// default, so two installs on one broker cannot collide. Never for an
 	// install that was ever configured: its topic tree is a contract.

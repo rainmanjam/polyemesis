@@ -879,6 +879,8 @@ const NOT_A_VALUE: Record<string, string> = {
     "a sparse map keyed by category; the card's Advanced section writes into it, and an absent key means the default ceiling",
   "automod.protection.holdDetectors":
     "a sparse map keyed by detector; the card's per-detector hold checkbox writes into it, and an absent key means the pack default",
+  "automod.protection.native.twitch.channels":
+    "server bookkeeping, one record per Twitch channel (broadcaster id; blocked-term id to a hash of its term; pack version last pushed), written by the Twitch pack actions on the protection card (AutomodProtectionTwitch) and not by a save. A save cannot change it (the server puts the stored value back), so a control would only be a field that looks editable and is not",
   "automod.model.categoryActions":
     "a sparse map keyed by model category; the per-category selects on the model card (automod-category-<name>) write into it, and an absent key means the default action",
   "automod.secondary.categoryActions":
