@@ -511,3 +511,50 @@ func TestAScheduledShowGetsTheDestinationsCreateFieldsOnlyOnYouTube(t *testing.T
 		t.Errorf("a non-YouTube destination produced event fields: %+v", f)
 	}
 }
+
+// A broadcast polyemesis opened that never went live, on a destination then switched off, is read ONCE after the
+// switch-off and then left alone. Without that bound each 15 s sweep spends two quota units for the rest of the
+// daemon's life (the arithmetic lifecycle.go's skipStateRead spells out), and re-enabling must still find it.
+func TestAnOpenedBroadcastThatNeverAiredIsNotReadForEverAfterTheSwitchOff(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1) // opens bcast-1, phase created
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.mu.Unlock()
+	sweep(c, 2)
+	before, _, trans := f.snapshot()
+	sweep(c, 50)
+	after, _, _ := f.snapshot()
+	if len(after) != len(before) {
+		t.Errorf("%d more YouTube calls over 50 sweeps of a switched-off, never-aired broadcast", len(after)-len(before))
+	}
+	if len(trans) != 0 {
+		t.Errorf("transitions = %v: a never-aired broadcast has nothing to end", trans)
+	}
+	// Switching it on again reuses the broadcast: no second insert.
+	store.mu.Lock()
+	store.rows[3].Enabled = true
+	store.mu.Unlock()
+	sweep(c, 1)
+	if _, inserts, _ := f.snapshot(); inserts != 1 {
+		t.Errorf("inserts = %d after re-enabling, want the same broadcast reused", inserts)
+	}
+	if store.get(3).Lifecycle.BroadcastID != "bcast-1" {
+		t.Errorf("lifecycle = %+v", store.get(3).Lifecycle)
+	}
+}
+
+// Auto-start getting there first must not alert: the refusal is a race, and the next read clears it.
+func TestAnAutoStartRaceRefusalRaisesNoAlertOnAShowThatIsLive(t *testing.T) {
+	f := newYnFake()
+	c, _, faults, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.refuseTrans = "invalidTransition" })
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
+	sweep(c, 1)
+	if len(*faults) != 0 {
+		t.Errorf("faults = %+v: an auto-start race alerted on a show that is live", *faults)
+	}
+}

@@ -820,7 +820,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		return
 	}
 
-	if d.Enabled && d.Platform == db.PlatformX {
+	if d.Enabled && (d.Platform == db.PlatformX || d.Platform == db.PlatformYouTube) {
 		// Switched on again: the next switch-off earns its own read.
 		c.noteQuietX(d.ID, "")
 	}
@@ -1110,6 +1110,14 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		}
 		c.untrack(d.ID)
 		return true
+	case !d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && c.quietXAt(d.ID) == broadcastID &&
+		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)):
+		// A BROADCAST POLYEMESIS OPENED THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF, AND READ ONCE SINCE. Nothing
+		// can end it (YouTube documents no created-to-complete), so reading it every sweep would spend two units
+		// each, for the life of the daemon. The one read after the switch-off is kept; re-enabling reads it again and
+		// reuses the broadcast.
+		c.untrack(d.ID)
+		return true
 	case !d.Enabled && d.Platform == db.PlatformX && isTerminalPhase(d.Lifecycle.Phase):
 		// Finished, as below, and the finished broadcast is forgotten as well, so
 		// switching the destination on again opens a new one. This is the release
@@ -1277,7 +1285,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 		// fault, and so does a revoked one.
 		plan.Fault, plan.Renew = "", true
 	}
-	if !d.Enabled && d.Platform == db.PlatformX && plan.Send == "" {
+	if !d.Enabled && (d.Platform == db.PlatformX || d.Platform == db.PlatformYouTube) && plan.Send == "" {
 		c.noteQuietX(d.ID, broadcastID)
 	}
 	if cleared && plan.Wait == xEndedWhileSending {
@@ -2088,6 +2096,24 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 		})
 		c.log.Debug("broadcast lifecycle: no data at the platform's ingest yet",
 			"destination", d.Name, bcAttr(broadcastID))
+		return
+	}
+	if d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && to != oauth.PhaseComplete &&
+		ref.Refusal == oauth.RefusalInvalidTransition {
+		// A BROADCAST POLYEMESIS OPENED HAS AUTO-START ON, so YouTube moves it on its own and this sweep can lose
+		// the race: the refusal says the broadcast is already where it was being sent, and the next read shows it.
+		// Counted, but the alert waits for a SECOND consecutive refusal so a show that is live does not page anyone.
+		why := refusalMessage(ref, broadcastID)
+		updated := c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.Attempts++; b.Fault = why })
+		if updated != nil {
+			switch n := updated.Lifecycle.Attempts; {
+			case n == 2:
+				c.log.Warn("broadcast lifecycle: "+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+				c.raise(d, broadcastID, why)
+			case n >= lifecycleGiveUpAfter:
+				c.noteRearm(d.ID)
+			}
+		}
 		return
 	}
 	c.noteFailure(d, broadcastID, refusalMessage(ref, broadcastID))

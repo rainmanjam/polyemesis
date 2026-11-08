@@ -136,3 +136,40 @@ func proveYouTubeEvents(t *testing.T) proofResult {
 		Sentinels: []string{ytpKeyA},
 	}
 }
+
+// Refreshing a destination's key never creates a broadcast. A refresh on a YouTube destination that holds a listed
+// key re-reads the stream and answers; a POST to liveBroadcasts or bind from it would put a second public broadcast
+// on the channel every time somebody pressed the button.
+func TestRefreshingAYouTubeKeyNeverCreatesOrBindsABroadcast(t *testing.T) {
+	var posts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			posts = append(posts, r.Method+" "+r.URL.Path)
+		}
+		switch r.URL.Path {
+		case "/channels":
+			_, _ = io.WriteString(w, `{"items":[{"id":"chan-ref","snippet":{"title":"Chan"}}]}`)
+		case "/liveStreams":
+			_, _ = io.WriteString(w, ypeStreams)
+		default:
+			_, _ = io.WriteString(w, `{"items":[]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	s, h, store, sign := engineServer(t, defaultTools(), Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+	addSource(t, h, sign, "main")
+	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	d := ytpDest(t, store, acct, "main", ytpKeyA, "")
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+itoa(d.ID)+"/refresh-key", nil)
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("refresh = %d: %s", w.Code, w.Body.String())
+	}
+	if len(posts) != 0 {
+		t.Errorf("refresh sent %v; it must not create or bind a broadcast", posts)
+	}
+}
