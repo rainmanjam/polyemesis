@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  alertsWidgetPathUrl,
+  alertsWidgetUrl,
+  alertStyleOf,
+  OVERLAY_ALERT_KINDS,
+  DEFAULT_ALERT_STYLE,
   OVERLAY_KEY_HEADER,
   SSEParser,
   addLine,
@@ -220,5 +225,60 @@ describe("runOverlayStream and the poll", () => {
     const onLine = vi.fn();
     await run({ onLine, onRemove: vi.fn(), onDenied });
     expect(onLine).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the alerts overlay (/overlay/alerts)", () => {
+  it("builds the fragment and path URLs like the poll widget's", () => {
+    const f = new URL(alertsWidgetUrl("https://box.example", "pov_a-1"));
+    expect(f.pathname).toBe("/overlay/alerts");
+    expect(f.search).toBe("");
+    expect(keyFromHash(f.hash)).toBe("pov_a-1");
+    const p = new URL(alertsWidgetPathUrl("https://box.example", "pov_a-1"));
+    expect(p.pathname).toBe("/overlay/alerts/k/pov_a-1");
+    expect(p.hash).toBe("");
+    expect(alertsWidgetPathUrl("https://box.example", "a/b")).toBe("https://box.example/overlay/alerts/k/a%2Fb");
+  });
+
+  it("is a third page mode of the one parser", () => {
+    expect(overlayLocation("/overlay/alerts", "#key=pov_a")).toEqual({ key: "pov_a", dock: false, poll: false, alerts: true });
+    expect(overlayLocation("/overlay/alerts/k/pov_b/", "")).toEqual({ key: "pov_b", dock: false, poll: false, alerts: true });
+    // the other pages do not claim it
+    expect(overlayLocation("/overlay/poll", "")?.alerts).toBeUndefined();
+    expect(overlayLocation("/overlay/dock", "")?.alerts).toBeUndefined();
+    expect(overlayLocation("/overlay", "")?.alerts).toBeUndefined();
+    expect(overlayLocation("/overlay/alerts/extra", "")).toBeNull();
+    expect(overlayLocation("/overlay/alert", "")).toBeNull();
+  });
+
+  it("fills the defaults under a partial or absent style", () => {
+    expect(alertStyleOf(undefined)).toEqual(DEFAULT_ALERT_STYLE);
+    expect(alertStyleOf({})).toEqual(DEFAULT_ALERT_STYLE);
+    expect(DEFAULT_ALERT_STYLE).toMatchObject({ layout: "banner", seconds: 6, showMessage: true, showAmount: true, sound: "none", accent: "#7c3aed" });
+    expect(DEFAULT_ALERT_STYLE.kinds).toHaveLength(9);
+    const some = alertStyleOf({ alerts: { ...DEFAULT_ALERT_STYLE, seconds: 9, layout: "card" } });
+    expect(some.seconds).toBe(9);
+    expect(some.layout).toBe("card");
+  });
+
+  it("delivers activity.display to onActivity and drops a frame with no id or kind", async () => {
+    const onActivity = vi.fn();
+    const good = { id: "a1", platform: "twitch", kind: "tip", name: "n", at: "" };
+    const stream =
+      frame("x-1", "activity.display", good) +
+      frame("x-2", "activity.display", { platform: "twitch", name: "no id" }) +
+      frame("x-3", "chat.display", { id: "d1", platform: "twitch", name: "n", text: "hi", at: "" });
+    const responses = [sseResponse(stream), new Response("{}", { status: 401 })];
+    await runOverlayStream("pov_k", { onActivity, onDenied: vi.fn() }, new AbortController().signal,
+      (async () => responses.shift()!) as unknown as typeof fetch, async () => {});
+    expect(onActivity).toHaveBeenCalledTimes(1);
+    expect(onActivity).toHaveBeenCalledWith(good);
+  });
+});
+
+describe("alertStyleOf with kinds missing", () => {
+  it.each([null, undefined])("falls back to every overlay kind for %s", (kinds) => {
+    const a = alertStyleOf({ alerts: { ...DEFAULT_ALERT_STYLE, kinds } as never });
+    expect(a.kinds).toEqual([...OVERLAY_ALERT_KINDS]);
   });
 });

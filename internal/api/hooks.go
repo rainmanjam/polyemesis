@@ -234,8 +234,11 @@ func (s *Server) handleHookDeliveries(w http.ResponseWriter, r *http.Request) {
 // a new trigger is added in exactly one place.
 func (s *Server) handleHooksMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"triggers":    hooks.AllTriggers(),
-		"specVersion": hooks.SpecVersion,
+		"triggers": hooks.AllTriggers(),
+		// Received only by a hook that names them: an empty triggers list does
+		// not include these. Listed apart so the picker can say so.
+		"optInTriggers": hooks.OptInTriggers(),
+		"specVersion":   hooks.SpecVersion,
 		"headers": map[string]string{
 			"signature": hooks.SignatureHeader,
 			"timestamp": hooks.TimestampHeader,

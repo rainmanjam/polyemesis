@@ -88,6 +88,15 @@ const (
 	// taken against, so it is chat content in the sense the read scope is
 	// refused.
 	TypeChatModeration Type = "chatModeration"
+	// TypeActivity carries one viewer or platform activity -- a follow, a sub, a
+	// tip, a raid -- as an activity.Event, published by internal/activityhub
+	// once it has been validated, deduplicated and allowed by the settings.
+	//
+	// NOT a chat message and NOT an operator alert: the name is "activity" on
+	// every wire so that "alert" keeps meaning internal/alerts. It names viewers
+	// and carries text they wrote, so like TypeChat it is chat content as far as
+	// the read scope is concerned (the /ws policy drops it for a read token).
+	TypeActivity Type = "activity"
 )
 
 // AllTypes is every Type declared above, in declaration order.
@@ -107,6 +116,7 @@ func AllTypes() []Type {
 		TypeStatus, TypeLevels, TypeLog, TypeStats, TypeSource,
 		TypeRecordings, TypeLoudness, TypeClips, TypeCaption,
 		TypeChat, TypeChatState, TypeChatRetract, TypeChatModeration,
+		TypeActivity,
 	}
 }
 

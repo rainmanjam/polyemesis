@@ -13,6 +13,11 @@ import type {
   CaptionExportFormat,
   CaptionExportSource,
   RenditionConcern,
+  ActivityFeedResponse,
+  ActivityKind,
+  ActivitySourcesResponse,
+  ActivityTestRequest,
+  ActivityTestResponse,
   AccountStats,
   AnalyticsLive,
   AnalyticsReport,
@@ -1508,6 +1513,25 @@ export const api = {
     if (account) q.set("account", account);
     return patch<{ status: string }>(`/chat/settings?${q.toString()}`, s);
   },
+
+  // --- viewer activity ---
+  /** Newest first. Admin-only: a read-scoped token is refused with 403. */
+  getActivity: (opts: { limit?: number; platform?: string; kind?: ActivityKind } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.platform) q.set("platform", opts.platform);
+    if (opts.kind) q.set("kind", opts.kind);
+    const qs = q.toString();
+    return get<ActivityFeedResponse>(`/activity${qs ? `?${qs}` : ""}`);
+  },
+  getActivitySources: () => get<ActivitySourcesResponse>("/activity/sources"),
+  /** Sends a synthetic event through the same path a real one takes. 429 when
+   *  sent faster than 2/s; 400 on an unknown kind or platform. */
+  sendTestActivity: (body: ActivityTestRequest) => post<ActivityTestResponse>("/activity/test", body),
+  /** Draws a held alert on the overlay again. 404 when it is no longer held
+   *  or is not an overlay kind. */
+  replayActivity: (id: string) =>
+    post<{ replayed: boolean }>(`/activity/${encodeURIComponent(id)}/replay`),
 
   // --- platforms ---
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),

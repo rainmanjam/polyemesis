@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirty `GET`s among the thirty-two refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-two `GET`s among the thirty-four refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirty-two routes are refused outright**, for three different reasons. Masking
+**Thirty-four routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last twenty-three are `403` because of what
+are `403` because of what they *do*. The last twenty-five are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -174,6 +174,8 @@ are `403` because of what they *do*. The last twenty-three are `403` because of 
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
 | `GET /clipper/recordings/{id}/highlights` | each highlight suggestion carries a transcript excerpt: the words again |
+| `GET /activity` | the viewer-activity feed names each viewer and carries what they wrote with a tip or a sub: chat content again |
+| `GET /activity/sources` | which accounts' activity is flowing, with their account refs |
 | `GET /clipper/templates` | the operator's saved short layouts, with the fonts directory's listing and whether this FFmpeg can draw text |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
@@ -2345,6 +2347,38 @@ A poll is counts per option and per platform, and never names a voter, so the
 three `GET`s are open to `read` tokens. Starting and ending post into every
 chat as you and need `admin`. The rules, the poll widget and native Twitch polls
 are in [POLLS.md](POLLS.md).
+
+### Viewer activity
+
+| Method | Path |
+|---|---|
+| `GET` | `/activity`, `/activity/sources` |
+| `POST` | `/activity/test`, `/activity/{id}/replay` |
+
+Follows, subs, gifts, tips, raids and the platform's own stream reports, as one
+event ([ACTIVITY.md](ACTIVITY.md)). The word is *activity*, never *alert*: that
+stays the operator's alert. An activity names viewers and carries words they
+wrote, so both `GET`s are refused to `read` tokens, as chat is; both `POST`s need
+`admin`, because they reach the on-air overlay.
+
+`GET /activity?limit=&platform=&kind=` is `{"enabled": true, "events": […]}`,
+newest first, up to 500, from memory (a restart empties it). `GET
+/activity/sources` is `{"enabled", "kinds", "platforms", "sources", "stats",
+"overlay"?}`: per account, whether activity is flowing and which kinds are on,
+unavailable to that account, or need a reconnect.
+
+`POST /activity/test` sends a canned event through the real path with no account
+connected: `{"kind": "tip", "platform": "twitch", "overrides": {"name": "Mara",
+"amount": {"unit": "bits", "units": 500}}}`. It answers `200` with `{"accepted",
+"reason"?, "detail"?, "event"}` (`accepted: false` means your settings turned
+that kind off), `400` for an unknown kind or platform or overrides that make an
+invalid event, and `429` with `Retry-After: 1` past two a second. `POST
+/activity/{id}/replay` draws a remembered event on the alerts overlay again and
+answers `404` if it is no longer held or is not a kind an overlay shows.
+
+The same events arrive live on `GET /events?topics=activity` ([EVENTS.md](EVENTS.md#activity))
+and as the opt-in `activity` [webhook trigger](HOOKS.md#the-activity-trigger-opt-in).
+The settings are `settings.activity` on `GET`/`PUT /settings`.
 
 ## WebSocket
 
