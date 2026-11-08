@@ -461,3 +461,21 @@ func TestSameProtectionIgnoresTheDerivedOffer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// EffectiveAutomodMatrix is what the acceptance driver's gate reads: it must be
+// the engine's conversion (unknown keys dropped), not the raw stored map.
+func TestEffectiveAutomodMatrixIsTheEnginesConversion(t *testing.T) {
+	a := db.DefaultSettings().Automod
+	if n := len(EffectiveAutomodMatrix(a).On); n != 0 {
+		t.Fatalf("a fresh install has %d cells armed, want 0", n)
+	}
+	a.On = map[string]bool{
+		"twitch/delete/protection":  true,
+		"twitch/delete/not_a_check": true, // dropped by matrixFromSettings
+		"twitch/ban/protection":     false,
+	}
+	got := EffectiveAutomodMatrix(a).On
+	if len(got) != 1 || !got["twitch/delete/protection"] {
+		t.Fatalf("effective On = %v, want only twitch/delete/protection", got)
+	}
+}

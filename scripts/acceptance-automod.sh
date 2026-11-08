@@ -113,9 +113,9 @@ if [ "${PROTECTION:-}" = 1 ]; then
   fi
 
   if [ "$(val "$OUT" mismatches)" = 0 ] && [ -n "$(val "$OUT" expectedHeld)" ]; then
-    ok "every synthetic positive was flagged and held, and the flag-only one was not held"
+    ok "every synthetic positive was flagged, the pack held the hold ones, and its three flag-only groups (contextual hate, emote wall, near-duplicate) were flagged by the pack and not held"
   else
-    bad "held/not-held disagreed with the pack's policy for: $(printf '%s\n' "$OUT" | sed -n 's/^wrong=//p' | tr '\n' ',')"
+    bad "flag/held disagreed with the pack's policy for: $(printf '%s\n' "$OUT" | sed -n 's/^wrong=//p' | tr '\n' ',')"
   fi
 
   [ "$(val "$OUT" benignFlagged)" = 0 ] \
@@ -486,6 +486,16 @@ fi
 #                         term (held 11)
 #   Pf no platform call   the arming change: 9 deletes reached the adapter
 #   Pg no acted lines     the arming change: 9 "automod acted" lines
+#   Pg canary in log      a scratch copy (go run -overlay) of chat/automod.go
+#                         with h.log.Debug("...", "text", m.Text) after
+#                         CheckFast: canaryInLog=true, check red
+#   Pb flag-only groups   pack/checker.go defaultHold GroupHateContextual,
+#                         GroupEmote or GroupNearDuplicate set to true: each
+#                         names its own case. Dropping the contextual term from
+#                         AddTerms: notFlagged names it (a silent detector)
+#   Pa effective matrix   armed cells are counted over
+#                         api.EffectiveAutomodMatrix, the conversion the engine
+#                         uses; the arming change above still reads 1
 #
 # 7a and 7b have been proven able to FAIL and never proven able to PASS: no key
 # was available when this was written. They are the honest state of the

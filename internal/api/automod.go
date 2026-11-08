@@ -382,6 +382,11 @@ func matrixFromSettings(a db.AutomodSettings) automod.Matrix {
 	return m
 }
 
+// EffectiveAutomodMatrix is the matrix the engine runs with for these
+// settings: matrixFromSettings, exported for the acceptance driver so its gate
+// reads what the engine enforces rather than the raw stored map.
+func EffectiveAutomodMatrix(a db.AutomodSettings) automod.Matrix { return matrixFromSettings(a) }
+
 // checkerConfigured reports whether a checker exists at all in the engine
 // ApplyAutomod would build from these settings, and in the operator's terms why
 // not when it does not.

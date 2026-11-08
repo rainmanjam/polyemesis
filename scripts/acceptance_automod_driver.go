@@ -706,6 +706,9 @@ func classify() {
 // or in a CI transcript.
 const canaryHate = "polyemesis-canary-hate"
 
+// canaryContextual is the contextual-tier twin: the pack flags it, never holds.
+const canaryContextual = "polyemesis-canary-context"
+
 // protCase is one synthetic line the protection tier injects.
 type protCase struct {
 	name string
@@ -714,28 +717,46 @@ type protCase struct {
 	text   string
 	// hold says whether the pack should keep the line off the overlay.
 	hold bool
+	// flag says the line must be flagged at all. Every non-benign case sets it,
+	// so a detector that silently stopped firing is a mismatch even when its
+	// policy is hold=false.
+	flag bool
+	// byPack says the finding must come from the protection pack, not from the
+	// legacy history checker that also sees the line (it flags caps on its own).
+	byPack bool
+	// repeat delivers the line this many times (default 1), for the
+	// near-duplicate detector.
+	repeat int
 }
 
 // protCases are written here and never sampled from chat. The positives use
 // documentation addresses and the example.com domain; the negatives are the
 // shapes the corpus's trap slices exist for (scores, times, versions, hype).
 var protCases = []protCase{
-	{"canary hate term", "u-hate", "hello " + canaryHate + " there", true},
-	{"email", "u-email", "mail me at canary.person@example.com", true},
-	{"phone", "u-phone", "call +44 20 7946 0958 now", true},
-	{"ipv4", "u-ip", "his ip is 198.18.0.1", true},
-	{"scam giveaway", "u-scam", "free nitro for everyone", true},
-	{"link shortener", "u-short", "look https://bit.ly/abc123", true},
-	{"character flood", "u-char", "wow " + strings.Repeat("#", 40), true},
-	{"impersonation", "kestrelcanary_official", "hi chat", true},
-	// A flag-only detector: shouting is logged, never held.
-	{"caps (flag only)", "u-caps", "THIS IS A VERY LOUD MESSAGE", false},
-	{"benign hype", "u-b1", "LETS GOOOO that was clean", false},
-	{"benign score", "u-b2", "final score was 3-2 at 12:30:45", false},
-	{"benign version", "u-b3", "running jev-1.14.0 on 1920x1080 at 6000 kbps", false},
-	{"benign banter", "u-b4", "that boss fight was a nightmare, I died ten times", false},
-	{"benign place name", "u-b5", "I grew up near Scunthorpe and Penistone", false},
+	{name: "canary hate term", author: "u-hate", text: "hello " + canaryHate + " there", hold: true, flag: true, byPack: true},
+	{name: "email", author: "u-email", text: "mail me at canary.person@example.com", hold: true, flag: true, byPack: true},
+	{name: "phone", author: "u-phone", text: "call +44 20 7946 0958 now", hold: true, flag: true, byPack: true},
+	{name: "ipv4", author: "u-ip", text: "his ip is 198.18.0.1", hold: true, flag: true, byPack: true},
+	{name: "scam giveaway", author: "u-scam", text: "free nitro for everyone", hold: true, flag: true, byPack: true},
+	{name: "link shortener", author: "u-short", text: "look https://bit.ly/abc123", hold: true, flag: true, byPack: true},
+	{name: "character flood", author: "u-char", text: "wow " + strings.Repeat("#", 40), hold: true, flag: true, byPack: true},
+	{name: "impersonation", author: "kestrelcanary_official", text: "hi chat", hold: true, flag: true, byPack: true},
+	// The pack's own flag-only groups (GroupHateContextual, GroupEmote,
+	// GroupNearDuplicate): each must be flagged BY THE PACK and not held. The
+	// legacy history checker flags shouting on its own, so caps proves nothing
+	// about the pack and is not used for this.
+	{name: "contextual hate term (flag only)", author: "u-ctx", text: "that was " + canaryContextual + " honestly", flag: true, byPack: true},
+	{name: "emote wall (flag only)", author: "u-emote", text: strings.TrimSpace(strings.Repeat("LUL ", 14)), flag: true, byPack: true},
+	{name: "near-duplicate repeat (flag only)", author: "u-dup", text: "this is the exact same line again and again", flag: true, byPack: true, repeat: 6},
+	{name: "caps (legacy checker)", author: "u-caps", text: "THIS IS A VERY LOUD MESSAGE", flag: true},
+	{name: "benign hype", author: "u-b1", text: "LETS GOOOO that was clean"},
+	{name: "benign score", author: "u-b2", text: "final score was 3-2 at 12:30:45"},
+	{name: "benign version", author: "u-b3", text: "running jev-1.14.0 on 1920x1080 at 6000 kbps"},
+	{name: "benign banter", author: "u-b4", text: "that boss fight was a nightmare, I died ten times"},
+	{name: "benign place name", author: "u-b5", text: "I grew up near Scunthorpe and Penistone"},
 }
+
+var nearSuffix = []string{"please", "kindly", "today", "now", "thanks", "ok", "yes", "hello"}
 
 // protAdapter delivers every protCase, then the raid burst, then waits.
 type protAdapter struct {
@@ -763,7 +784,20 @@ func (a *protAdapter) Run(ctx context.Context, sink chat.Sink) error {
 		})
 	}
 	for _, c := range protCases {
-		deliver(c.author, c.author, c.text)
+		reps := c.repeat
+		if reps < 1 {
+			reps = 1
+		}
+		for i := 0; i < reps; i++ {
+			text := c.text
+			if reps > 1 {
+				// Near copies, not exact ones: the pack drops a near-duplicate
+				// finding when the history checker already reported the exact
+				// repeat, so an exact repeat would never reach the pack.
+				text = fmt.Sprintf("%s %s", c.text, nearSuffix[i%len(nearSuffix)])
+			}
+			deliver(c.author, c.author, text)
+		}
 	}
 	// Five distinct authors sending the same long line inside the window is a
 	// raid; the fifth and later are held (the spec 11 defaults).
@@ -808,11 +842,16 @@ func protection() {
 	set.Enabled = true
 	set.Model.Enabled = false
 	set.Secondary.Enabled = false
-	set.Protection.AddTerms = []db.ProtectionTerm{{Term: canaryHate, Category: "hate_speech", Tier: "severe"}}
+	set.Protection.AddTerms = []db.ProtectionTerm{
+		{Term: canaryHate, Category: "hate_speech", Tier: "severe"},
+		{Term: canaryContextual, Category: "hate_speech", Tier: "contextual"},
+	}
 	set.Protection.Impersonation.Protect = []string{"kestrelcanary"}
 	emit("protectionState", set.Protection.State)
+	// Counted over the matrix the engine runs with (the same conversion
+	// ApplyAutomod uses), not over the raw map this function just built.
 	armed := 0
-	for k, on := range set.On {
+	for k, on := range api.EffectiveAutomodMatrix(set).On {
 		if on && strings.HasSuffix(k, "/protection") {
 			armed++
 		}
@@ -852,12 +891,26 @@ func protection() {
 		if c.hold {
 			wantHeld++
 		}
-		if c.hold != (isFlagged && f.Held) {
+		bad := c.hold != (isFlagged && f.Held)
+		if c.flag && !isFlagged {
+			bad = true
+			emit("notFlagged", c.name)
+		}
+		if c.byPack && isFlagged {
+			fromPack := false
+			for _, fd := range f.Findings {
+				if fd.Checker == automod.CheckerProtection {
+					fromPack = true
+				}
+			}
+			if !fromPack {
+				bad = true
+				emit("notFromPack", c.name)
+			}
+		}
+		if bad {
 			wrong++
 			emit("wrong", c.name)
-		}
-		if c.hold && !isFlagged {
-			emit("notFlagged", c.name)
 		}
 	}
 	benignFlagged := 0
