@@ -10,6 +10,8 @@ its first tagged release.
 
 ### Added
 
+- **X: choose who can chat and the broadcast language per destination.** The X card in the destination dialog (step 4) has a **Who can chat** setting (off, everyone, verified accounts, accounts you follow, your subscribers, or accounts you follow and theirs) and a **Language** setting. They are sent with the go-live as `chat_option` and `locale`, and left unset they send nothing, so X decides. They are stored in `compliance.x` with no schema change.
+
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
   A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
   overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and

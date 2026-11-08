@@ -221,6 +221,16 @@ refuses a change then (HTTP 409). Turning the destination off ends the
 broadcast. After a go-live the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
+**Who can chat, and the broadcast language.** Step 4 of the destination dialog, in the X card, has a
+**Who can chat** and a **Language** setting. Both ride the same go-live call (`POST /2/broadcasts`) as
+`chat_option` and `locale`, so like the title they cannot change while the broadcast is live (HTTP 409). X
+documents `chat_option` as a JSON integer from 0 to 6: 0 default, 1 chat off, 2 everyone, 3 verified accounts,
+4 accounts the broadcaster follows, 5 the broadcaster's subscribers, and 6 accounts followed by an account the
+broadcaster follows. The picker offers 1 to 6, and **X decides (default)** sends nothing, so X applies its own;
+`locale` is a language tag such as `en` or `pt-BR`. Left unset, neither field is sent. They are stored in the
+destination's `compliance.x` block (see [API.md](API.md)), built from X's documentation and not yet checked on
+a live account.
+
 **The go-live announcement, once per show by default.** X's go-live step makes
 an announcement post on the account unless the request asks it not to
 (`should_not_tweet`, a JSON boolean, confirmed live on 2026-11-07). The **X Livestream** card has

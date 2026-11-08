@@ -1231,7 +1231,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // drop the flag here, or the operator gets a save error about a control
         // that is no longer on screen to turn off.
         audio: { ...audio, copy: copyOn },
-        compliance,
+        // Only X sends the chat access mode and language; any other platform
+        // clears them (null), as the server would, so a stale block from a
+        // platform switch is never saved.
+        compliance: platform === "x" ? compliance : { ...compliance, x: null },
         facebook,
         backupIngestWanted,
         // The bare boolean, for the reason spelled out at the backup toggle
@@ -2269,6 +2272,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               onTitleChange={setGoLiveTitle}
               tweet={xGoLiveTweet}
               onTweetChange={setXGoLiveTweet}
+              controls={compliance.x}
+              onControlsChange={(x) => setCompliance({ ...compliance, x })}
             />
           )}
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
