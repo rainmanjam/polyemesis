@@ -95,6 +95,8 @@ type YouTubeAdapter struct {
 	mu     sync.Mutex
 	health Health
 	chatID string
+	// act is the activity decoder's state: what it has seen, when it began.
+	act ytActivity
 	// tallies is the last count each poll message was seen with in a list page;
 	// see PollTally.
 	tallies map[string]ytTally
@@ -277,7 +279,15 @@ type ytChatItem struct {
 				ChannelID string `json:"channelId"`
 			} `json:"bannedUserDetails"`
 		} `json:"userBannedDetails"`
-		PollDetails *struct {
+		// The event detail blocks, one per type, named as the liveChatMessages
+		// resource names them. See youtube_activity.go.
+		SuperChatDetails              *ytPaidDetails `json:"superChatDetails"`
+		SuperStickerDetails           *ytPaidDetails `json:"superStickerDetails"`
+		NewSponsorDetails             *ytNewSponsor  `json:"newSponsorDetails"`
+		MemberMilestoneChatDetails    *ytMilestone   `json:"memberMilestoneChatDetails"`
+		MembershipGiftingDetails      *ytGifting     `json:"membershipGiftingDetails"`
+		GiftMembershipReceivedDetails *ytGiftRecv    `json:"giftMembershipReceivedDetails"`
+		PollDetails                   *struct {
 			Metadata struct {
 				Status  string `json:"status"`
 				Options []struct {
@@ -396,7 +406,13 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 // to show. cutoff is zero for every page after the first.
 func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Sink) int {
 	delivered := 0
+	if len(items) > 0 {
+		y.beginActivity()
+	}
 	for _, it := range items {
+		// Activity first, and before messageFrom drops an item with no text: a
+		// gifting event has none. The chat line is delivered below as before.
+		y.activityFrom(it, sink)
 		// A tombstone marks where a deleted message used to be: its id and
 		// publish time with nothing else. The reference says it is NOT sent at
 		// the moment of deletion, only shown in place of the message, so this
@@ -526,6 +542,9 @@ func (y *YouTubeAdapter) fatalFor(err error) error {
 	}
 	switch reason := reasonOf(err); {
 	case reason == "insufficientPermissions", reason == "insufficientScope", reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT":
+		y.mu.Lock()
+		y.act.scope = true
+		y.mu.Unlock()
 		return Fatal(fmt.Errorf("the connected YouTube account has not granted the permission this needs; reconnect the YouTube account in Settings → Platforms and approve every permission"))
 	case reason == "liveStreamingNotEnabled":
 		return Fatal(fmt.Errorf("live streaming is not enabled on this YouTube channel; enable it in YouTube Studio (it can take up to 24 hours), then restart chat"))

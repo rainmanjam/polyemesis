@@ -262,7 +262,7 @@ gets them and what it needs here. **Nothing below is connected in this release.*
 | Twitch | EventSub over a WebSocket (its own transport) | not yet |
 | Kick | webhook events on the existing chat webhook | not yet |
 | X | Activity API events on the existing webhook | not yet |
-| YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
+| YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | tips (Super Chat, Sticker), new members, member milestones and gifted memberships; each shows as unknown until the first one is seen, since YouTube cannot say whether a channel is monetised. No new permission |
 | Rumble | the follower, subscriber, gift and rant blocks in the existing poll | not yet |
 | Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
 
