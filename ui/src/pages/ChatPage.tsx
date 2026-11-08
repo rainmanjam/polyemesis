@@ -32,6 +32,7 @@ import { useChatSearch } from "@/hooks/useChatSearch";
 import { ActivityTab } from "@/features/activity/ActivityTab";
 import { useChatFlags } from "@/features/chat/useChatFlags";
 import { useConfirm } from "@/hooks/useConfirm";
+import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { mayClaim, readFailed } from "@/lib/readState";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
@@ -91,6 +92,7 @@ export function ChatPage() {
   // results, rather than firing a search nobody can see (#945 review).
   const flagsOpen = showFlags && !search.active;
   const flagsRead = useChatFlags(flagsOpen);
+  const reloadFlags = flagsRead.reload;
   const allFlags = useMemo(
     () => (mayClaim(flagsRead.read) ? flagsRead.read.value.flags : []),
     [flagsRead.read],
@@ -169,6 +171,23 @@ export function ChatPage() {
    */
   const confirmDelete = useConfirm<ChatMessage>();
 
+  const release = useCallback(
+    async (m: ChatMessage) => {
+      try {
+        await api.releaseChatFlag({ platform: m.platform, account: m.account, id: m.id });
+        toast.success(t("chatFlags.released"));
+      } catch (err) {
+        // The server says which of the three reasons it was.
+        toast.error(err instanceof Error ? err.message : t("chatFlags.releaseFailed"));
+      } finally {
+        // Either way the list is stale: a released line is no longer held, and a
+        // refused one was not (or no longer is).
+        reloadFlags();
+      }
+    },
+    [t, reloadFlags],
+  );
+
   const del = useCallback(
     async (m: ChatMessage) => {
       try {
@@ -196,6 +215,7 @@ export function ChatPage() {
           failed={readFailed(flagsRead.read)}
           filtered={flags.length === 0 && allFlags.length > 0}
           onOpenUser={setCard}
+          onRelease={release}
         />
       );
     }

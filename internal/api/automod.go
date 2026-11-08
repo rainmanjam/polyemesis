@@ -415,6 +415,8 @@ func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
 			Pattern:        r.Pattern,
 			Action:         automod.Action(r.Action),
 			TimeoutSeconds: r.TimeoutSeconds,
+			Category:       automod.Category(r.Category),
+			HoldOverlay:    r.HoldOverlay,
 		})
 	}
 	return automod.NewRuleSet(rules)

@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 327,
+    "methodPatternPairs": 328,
     "swept": 80,
     "excused": 64,
-    "denied": 183,
+    "denied": 184,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -206,6 +206,12 @@
       "method": "GET",
       "pattern": "/api/v1/chat/flags",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/flags/release",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {

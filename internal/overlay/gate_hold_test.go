@@ -1,0 +1,326 @@
+package overlay
+
+import (
+	"testing"
+	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
+)
+
+func expectNothing(t *testing.T, sub *eventstream.Subscription, why string) {
+	t.Helper()
+	if env, ok := next(t, sub); ok {
+		t.Fatalf("%s: got %+v", why, env)
+	}
+}
+
+func TestAHeldMessageIsNotShownUntilReleased(t *testing.T) {
+	g, _, sub, c := newGate(t)
+	g.Offer(m("m1", "maybe a slur"), chat.DisplayHeld)
+	expectNothing(t, sub, "a held message was shown")
+	if st := g.Stats(); st.Blocked != 1 || st.Held != 1 || st.Shown != 0 {
+		t.Fatalf("stats after hold = %+v", st)
+	}
+
+	c.add(2 * time.Minute)
+	if !g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("Release found nothing to release")
+	}
+	env, ok := next(t, sub)
+	if !ok || env.Type != eventstream.TypeChatDisplay {
+		t.Fatalf("released line: %+v", env)
+	}
+	line := env.Data.(eventstream.DisplayLine)
+	if line.Text != "maybe a slur" {
+		t.Errorf("line = %+v", line)
+	}
+	// The envelope is stamped at release (the replay window reads it); the
+	// line keeps the time it was said.
+	if !env.At.Equal(c.now()) || !line.At.Equal(m("m1", "").At) {
+		t.Errorf("envelope At %v (want %v), line At %v (want %v)", env.At, c.now(), line.At, m("m1", "").At)
+	}
+	if st := g.Stats(); st.Released != 1 || st.Shown != 1 {
+		t.Fatalf("stats after release = %+v", st)
+	}
+	// Once: a second click finds nothing and shows nothing.
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Error("released twice")
+	}
+	expectNothing(t, sub, "a second release published")
+}
+
+// A line that was REMOVED rather than held has no way back.
+func TestABlockedMessageCannotBeReleased(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "deleted"), chat.DisplayBlocked)
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a removed message")
+	}
+	if g.Release(db.PlatformTwitch, "acct", "never-seen") {
+		t.Fatal("released a message the gate never saw")
+	}
+	expectNothing(t, sub, "release of a non-held line published")
+}
+
+func TestAHeldLineExpiresAfterTenMinutes(t *testing.T) {
+	g, _, sub, c := newGate(t)
+	g.Offer(m("m1", "old"), chat.DisplayHeld)
+	c.add(heldTTL + time.Second)
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a line past its ttl")
+	}
+	expectNothing(t, sub, "an expired line was published")
+
+	// Sweep frees the memory without anyone clicking.
+	g.Offer(m("m2", "old too"), chat.DisplayHeld)
+	c.add(heldTTL + time.Second)
+	g.Sweep()
+	g.mu.Lock()
+	n := len(g.heldLines) + len(g.heldOrder)
+	g.mu.Unlock()
+	if n != 0 {
+		t.Errorf("sweep left %d held entries", n)
+	}
+}
+
+func TestTheHeldBufferKeepsOnlyTheLastTwoHundred(t *testing.T) {
+	g, _, _, _ := newGate(t)
+	for i := 0; i < heldCap+5; i++ {
+		g.Offer(m(string(rune('a'+i%26))+string(rune('A'+i/26)), "x"), chat.DisplayHeld)
+	}
+	g.mu.Lock()
+	n, o := len(g.heldLines), len(g.heldOrder)
+	g.mu.Unlock()
+	if n != heldCap || o != heldCap {
+		t.Fatalf("held %d lines / %d order entries, want %d", n, o, heldCap)
+	}
+	if g.Release(db.PlatformTwitch, "acct", "aA") {
+		t.Error("the oldest line survived the cap")
+	}
+}
+
+// Offering the same line twice keeps one entry.
+func TestAHeldLineOfferedTwiceIsKeptOnce(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "again"), chat.DisplayHeld)
+	g.Offer(m("m1", "again"), chat.DisplayHeld)
+	g.mu.Lock()
+	n := len(g.heldOrder)
+	g.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("order entries = %d", n)
+	}
+	g.Release(db.PlatformTwitch, "acct", "m1")
+	next(t, sub)
+	expectNothing(t, sub, "a duplicate hold published twice")
+}
+
+// The operator's removal outranks the earlier "maybe".
+func TestADeletedHeldLineCannotBeReleased(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "held then deleted"), chat.DisplayHeld)
+	g.Retract(db.PlatformTwitch, "acct", []string{"m1"})
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a line the operator had deleted")
+	}
+	expectNothing(t, sub, "published")
+}
+
+// A model verdict of Held on a pending line withholds it and keeps it.
+func TestAPendingLineJudgedHeldIsKeptForRelease(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "pending"), chat.DisplayPending)
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayHeld)
+	expectNothing(t, sub, "a held judgement showed the line")
+	if !g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("a line judged Held was not releasable")
+	}
+	if _, ok := next(t, sub); !ok {
+		t.Fatal("nothing published on release")
+	}
+}
+
+// A line the fast pass held that the model then removes is no longer a maybe.
+func TestAHeldLineTheModelThenRemovesCannotBeReleased(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "held"), chat.DisplayHeld)
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayBlocked)
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a line the model removed")
+	}
+	expectNothing(t, sub, "published")
+}
+
+// A released line can then be retracted like any other.
+func TestAReleasedLineCanStillBeRetracted(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "x"), chat.DisplayHeld)
+	g.Release(db.PlatformTwitch, "acct", "m1")
+	next(t, sub)
+	g.Retract(db.PlatformTwitch, "acct", []string{"m1"})
+	env, ok := next(t, sub)
+	if !ok || env.Type != eventstream.TypeChatUndisplay {
+		t.Fatalf("got %+v, want an undisplay", env)
+	}
+}
+
+// FINDING 1. A ban reaches the gate by id only for lines the hub's ring still
+// holds; a held line older than that must still go, by author.
+func TestABannedAuthorsHeldLinesCannotBeReleased(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	mine := m("m1", "from the banned")
+	other := m("m2", "from someone else")
+	other.Author.ID = "author-other"
+	otherChannel := m("m3", "same author, other channel")
+	otherChannel.Account = "acct-2"
+	for _, x := range []chat.Message{mine, other, otherChannel} {
+		g.Offer(x, chat.DisplayHeld)
+	}
+	g.RetractAuthor(db.PlatformTwitch, "acct", "author-1234")
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a banned author's held line")
+	}
+	if !g.Release(db.PlatformTwitch, "acct", "m2") {
+		t.Error("a ban took another author's held line with it")
+	}
+	if !g.Release(db.PlatformTwitch, "acct-2", "m3") {
+		t.Error("a ban on one channel took the same author's held line on another")
+	}
+	next(t, sub)
+	next(t, sub)
+	expectNothing(t, sub, "the banned author's line was published")
+}
+
+func TestAClearedRoomEmptiesThatChannelsHeldLines(t *testing.T) {
+	g, _, _, _ := newGate(t)
+	g.Offer(m("m1", "a"), chat.DisplayHeld)
+	other := m("m2", "b")
+	other.Account = "acct-2"
+	g.Offer(other, chat.DisplayHeld)
+	g.RetractAuthor(db.PlatformTwitch, "acct", "")
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Error("a cleared room left a held line releasable")
+	}
+	if !g.Release(db.PlatformTwitch, "acct-2", "m2") {
+		t.Error("clearing one room cleared another")
+	}
+}
+
+// FINDING 2. Released before the model answered, then the model removes it:
+// the line comes back off the screen.
+func TestAModelRemovalAfterAReleaseRetractsTheShownLine(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "held, model still asking"), chat.DisplayHeld)
+	g.Release(db.PlatformTwitch, "acct", "m1")
+	shown, _ := next(t, sub)
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayBlocked)
+	env, ok := next(t, sub)
+	if !ok || env.Type != eventstream.TypeChatUndisplay {
+		t.Fatalf("got %+v, want an undisplay of the released line", env)
+	}
+	rm := env.Data.(eventstream.DisplayRemoval)
+	if len(rm.IDs) != 1 || rm.IDs[0] != shown.Data.(eventstream.DisplayLine).ID || rm.Platform != "twitch" {
+		t.Errorf("undisplay %+v does not name the released line %+v", rm, shown.Data)
+	}
+	// A clear verdict after a release changes nothing.
+	g.Offer(m("m2", "x"), chat.DisplayHeld)
+	g.Release(db.PlatformTwitch, "acct", "m2")
+	next(t, sub)
+	g.Judge(db.PlatformTwitch, "acct", "m2", chat.DisplayClear)
+	expectNothing(t, sub, "a Clear judgement after release published")
+}
+
+// FINDING 3. IsHeld follows the buffer.
+func TestIsHeldFollowsTheBuffer(t *testing.T) {
+	g, _, _, c := newGate(t)
+	held := func(id string) bool { return g.IsHeld(db.PlatformTwitch, "acct", id) }
+	g.Offer(m("m1", "a"), chat.DisplayHeld)
+	g.Offer(m("m2", "b"), chat.DisplayHeld)
+	g.Offer(m("m3", "c"), chat.DisplayHeld)
+	if !held("m1") || held("nope") {
+		t.Fatal("IsHeld wrong on a fresh hold")
+	}
+	g.Release(db.PlatformTwitch, "acct", "m1")
+	g.Retract(db.PlatformTwitch, "acct", []string{"m2"})
+	if held("m1") || held("m2") {
+		t.Error("IsHeld still true after release or retraction")
+	}
+	c.add(heldTTL + time.Second)
+	if held("m3") {
+		t.Error("IsHeld true past the ttl")
+	}
+}
+
+// A line awaiting the model has no entry in the hub's ring if the chat flooded
+// past it, so the ban reaches the gate by author only. A Clear verdict that
+// arrives afterwards must not show the banned author's line.
+func TestAPendingLineFromABannedAuthorIsNeverShown(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "from the banned"), chat.DisplayPending)
+	other := m("m2", "from someone else")
+	other.Author.ID = "author-other"
+	g.Offer(other, chat.DisplayPending)
+
+	g.RetractAuthor(db.PlatformTwitch, "acct", "author-1234")
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayClear)
+	expectNothing(t, sub, "a banned author's pending line was shown by a Clear verdict")
+	if st := g.Stats(); st.Blocked != 1 || st.Shown != 0 {
+		t.Fatalf("stats = %+v, want the pending line counted Blocked", st)
+	}
+
+	// The other author's line is untouched.
+	g.Judge(db.PlatformTwitch, "acct", "m2", chat.DisplayClear)
+	if _, ok := next(t, sub); !ok {
+		t.Error("a ban took another author's pending line with it")
+	}
+}
+
+func TestARoomClearEmptiesThePendingLines(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "a"), chat.DisplayPending)
+	elsewhere := m("m2", "b")
+	elsewhere.Account = "acct-2"
+	g.Offer(elsewhere, chat.DisplayPending)
+
+	g.RetractAuthor(db.PlatformTwitch, "acct", "")
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayClear)
+	expectNothing(t, sub, "a pending line survived a room clear")
+	g.Judge(db.PlatformTwitch, "acct-2", "m2", chat.DisplayClear)
+	if _, ok := next(t, sub); !ok {
+		t.Error("clearing one room cleared another's pending line")
+	}
+}
+
+// The ban is remembered, so a verdict or a release for a line that reached the
+// gate's books only afterwards (a Held judgement of a pending line racing the
+// ban) is still refused, and the memory expires and stays bounded.
+func TestABanIsRememberedBrieflyAndBounded(t *testing.T) {
+	g, _, sub, c := newGate(t)
+	g.Offer(m("m1", "x"), chat.DisplayHeld)
+	g.RetractAuthor(db.PlatformTwitch, "acct", "author-1234")
+	// Re-held by a late path (same offer instant): still refused on release.
+	g.Offer(m("m1", "x"), chat.DisplayHeld)
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a line from a just-banned author")
+	}
+	expectNothing(t, sub, "published")
+
+	// After the ttl a returning author's new line is a new line.
+	c.add(banTTL + time.Second)
+	g.Offer(m("m2", "back"), chat.DisplayHeld)
+	if !g.Release(db.PlatformTwitch, "acct", "m2") {
+		t.Fatal("an expired ban still blocks a later line")
+	}
+
+	for i := 0; i < banCap+50; i++ {
+		g.RetractAuthor(db.PlatformTwitch, "acct", string(rune(0x4e00+i)))
+	}
+	g.mu.Lock()
+	n := len(g.bans)
+	g.mu.Unlock()
+	if n > banCap {
+		t.Fatalf("ban memory grew to %d, cap %d", n, banCap)
+	}
+}

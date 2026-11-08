@@ -2944,6 +2944,8 @@ export interface ChatFlagFinding {
   confidence?: number;
   decidedBy?: AutomodSlot;
   provider?: string;
+  /** This finding keeps the message off every overlay. */
+  hold?: boolean;
 }
 
 /** One message automod flagged, with every finding about it. */
@@ -2953,6 +2955,9 @@ export interface ChatFlaggedMessage {
   /** An action automod performed on this message succeeded. A flag-only
    *  finding, or an action refused or dropped, leaves this false. */
   acted: boolean;
+  /** The message was actually kept off the overlays by a hold, so it can be
+   *  released. A finding's own `hold` is not enough: a removal outranks it. */
+  held?: boolean;
   at: string;
 }
 
@@ -3776,6 +3781,10 @@ export interface AutomodRule {
   pattern: string;
   action: AutomodAction;
   timeoutSeconds?: number;
+  /** Closed-set reason a match carries; empty means filter_match. */
+  category?: string;
+  /** Keep a match off every on-screen overlay. The console still shows it. */
+  holdOverlay?: boolean;
 }
 
 /** Bounds for the per-author sequence detectors — the only checker that can see

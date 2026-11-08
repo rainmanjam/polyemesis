@@ -59,8 +59,9 @@ It follows the same rules as the chat overlay:
 - **The platform filter applies.** A Twitch-only overlay is never sent a Kick
   follow. The platform name is shown as text.
 - **Words and names are judged before they go on air.** A viewer's message is
-  held until automod has passed it. If automod removes it, or gives no answer
-  within four seconds, the alert **still shows, without the message**. A name
+  held until automod has passed it. If automod removes it, holds it (a rule
+  with **Hold off the overlay**), or gives no answer within four seconds, the
+  alert **still shows, without the message**. A name
   that matches your blocked terms is shown as "Someone". The names are checked
   against the blocked terms only; the model checker is asked about messages, not
   names. You can also turn viewer messages off for the overlay entirely under
@@ -157,6 +158,14 @@ An overlay shows a message only after automatic moderation has judged it:
   hasn't arrived after 4 seconds, the overlay leaves that message out. The
   console still shows it. If the model endpoint fails, messages pass, just as
   they do in the console.
+
+- **A rule that holds its matches:** a rule with **Hold off the overlay** on
+  (see [AUTOMOD.md](AUTOMOD.md#hold-a-match-off-the-overlay)) keeps its matches
+  off every overlay without removing them anywhere. The console still shows the
+  message, flagged. Select **Show on overlay** on it in the **Flagged** list on
+  the Chat page to put it on screen after all. The server keeps the last 200
+  held lines for ten minutes for this. A held line counts in the "held back by
+  moderation" figure below, and again as shown if you release it.
 
 If you hide or delete a message, or ban its author, after it's on screen, it
 leaves every overlay straight away. An overlay that reconnects, for example

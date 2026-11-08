@@ -15,9 +15,9 @@ type perTextModerator struct {
 	fast map[string]automod.Verdict
 }
 
-func (p *perTextModerator) CheckFast(pl db.Platform, authorID, text string) automod.Verdict {
-	p.stubModerator.CheckFast(pl, authorID, text)
-	return p.fast[text]
+func (p *perTextModerator) CheckFast(pl db.Platform, sub automod.Subject) automod.Verdict {
+	p.stubModerator.CheckFast(pl, sub)
+	return p.fast[sub.Text]
 }
 
 // THE SPEND FIX. The model used to be asked about EVERY non-empty message

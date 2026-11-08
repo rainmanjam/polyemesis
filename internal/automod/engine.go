@@ -41,18 +41,36 @@ func New(matrix Matrix, caps Capabilities, rules *RuleSet, history *History, mod
 	return &Engine{rules: rules, history: history, model: chain, matrix: matrix, caps: caps}
 }
 
+// Subject is everything the fast checkers are told about one message.
+//
+// A struct rather than a growing argument list: the detectors planned for it
+// (emote floods, impersonation, replies) each need one more fact about the
+// message, and every added positional argument would be an edit to the
+// Moderator interface and to every fake of it. Only AuthorID and Text are read
+// today; the rest are carried so those detectors arrive without another
+// signature change.
+type Subject struct {
+	AuthorID   string
+	AuthorName string
+	Text       string
+	// EmoteCount is how many emotes the platform marked in Text.
+	EmoteCount int
+	// ReplyToID is the id of the message this one replies to, if any.
+	ReplyToID string
+}
+
 // CheckFast runs only the free, deterministic checkers.
 //
 // This is the hot path, called for every message. It never blocks on a network
 // and never allocates a request: the model is asked separately, off the path
 // that decides whether a message is displayed.
-func (e *Engine) CheckFast(p db.Platform, authorID, text string) Verdict {
+func (e *Engine) CheckFast(p db.Platform, s Subject) Verdict {
 	if e == nil {
 		return Verdict{}
 	}
 	var findings []Finding
-	findings = append(findings, e.rules.Check(text)...)
-	findings = append(findings, e.history.Observe(p, authorID, text)...)
+	findings = append(findings, e.rules.Check(s.Text)...)
+	findings = append(findings, e.history.Observe(p, s.AuthorID, s.Text)...)
 	return e.decide(p, sortByConsequence(findings))
 }
 
@@ -100,8 +118,24 @@ func (e *Engine) decide(p db.Platform, findings []Finding) Verdict {
 		if e.matrix.Allows(e.caps, k) {
 			v.Act = append(v.Act, f)
 		}
+		if f.Hold && e.holdAllowed(p) {
+			v.Hold = true
+		}
 	}
 	return v
+}
+
+// holdAllowed reports whether a finding's overlay hold may take effect on this
+// platform: the global switch is on and the platform's is not off. The same two
+// switches Matrix.Allows checks, but NOT the per-cell set or the capability
+// table -- a hold performs nothing on any platform, so there is no cell to arm
+// and nothing a platform could be unable to do.
+func (e *Engine) holdAllowed(p db.Platform) bool {
+	if !e.matrix.Enabled {
+		return false
+	}
+	on, ok := e.matrix.PlatformEnabled[p]
+	return !ok || on
 }
 
 // Matrix returns the current matrix, for the API to render.

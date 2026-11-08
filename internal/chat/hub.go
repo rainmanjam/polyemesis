@@ -100,6 +100,9 @@ type Hub struct {
 	// rather than performed. The Hub acts; it never decides -- see automod.go.
 	automod    *automodState
 	automodGen uint64
+	// modelAsked is the messages the model has been queued to judge and has
+	// not answered, with when. See ModelPending.
+	modelAsked map[string]time.Time
 	// flags is automod's review list, oldest first and bounded by flagCap.
 	// See flags.go.
 	flags []FlaggedMessage
@@ -619,6 +622,9 @@ func (h *Hub) retractUser(r *runner, authorID string) {
 	// Outside the len(ids) check: the person was removed whether or not the
 	// ring still held anything they said.
 	h.tapAuthor(r.platform, r.account, authorID)
+	// And the display, by person: a held line older than the ring has no id
+	// above to be retracted by.
+	h.retractDisplayAuthor(r.platform, r.account, authorID)
 }
 
 // forgetHistory drops every history entry matching drop, preserving order, and

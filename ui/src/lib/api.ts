@@ -1519,6 +1519,14 @@ export const api = {
     return get<ChatUserCard>(`/chat/users?${q.toString()}`);
   },
 
+  /** Put a message a rule held back on the overlays ("Show on overlay"). 404
+   *  when it is no longer held: released already, removed, or past ten minutes. */
+  releaseChatFlag: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return post<{ status: string; detail: string }>(`/chat/flags/release?${q.toString()}`, {});
+  },
+
   /** What automod flagged, newest first (UX Council A48). */
   chatFlags: (m: { platform?: ChatPlatform; limit?: number } = {}) => {
     const q = new URLSearchParams();

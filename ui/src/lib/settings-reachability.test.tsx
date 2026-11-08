@@ -1018,6 +1018,8 @@ const NO_CONTROL_YET: Record<string, string> = {
   "automod.history.timeoutSeconds": "#788 sweep. No sequence-detector editor exists",
   "automod.history.retainPerAuthor": "#788 sweep. No sequence-detector editor exists",
   "automod.history.idleEvictionSeconds": "#788 sweep. No sequence-detector editor exists",
+  "automod.rules[].category":
+    "hold-and-subject plumbing: the closed-set reason a rule's match carries is stored and honoured, and the editor gets a picker with the protection pack, which is what gives it a category worth choosing",
 
 };
 

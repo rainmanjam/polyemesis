@@ -64,6 +64,7 @@ vote. Only the digits 1 to 6 count, and only up to the number of options.
 | The last vote counts | A viewer who types `1` and then `3` has voted for option 3. Typing the same number twice is still one vote. |
 | Two channels on one platform | A viewer in both of your Twitch channels is one Twitch viewer and has one vote. |
 | Automod blocks the message | It is not a vote. |
+| A rule with **Hold off the overlay** matches the message | It is not a vote, and releasing the message to the overlay later does not make it one. A held vote is never counted: the poll fails closed on a message automod was unsure enough about to keep off the stream. |
 | Automod's model is still judging the message | The vote counts once the message is cleared. With no verdict within 4 seconds, it is dropped. |
 | A moderator deletes or hides the vote message | That vote no longer counts. The viewer may vote again; an earlier vote does not come back. |
 | A moderator bans or times out the viewer | Their vote no longer counts, and they are ignored for the rest of the poll on that platform. This holds whether the ban comes from polyemesis, from automod, or from the platform's own dashboard. |

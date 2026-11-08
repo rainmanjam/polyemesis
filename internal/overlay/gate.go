@@ -50,6 +50,23 @@ const sweepEvery = 250 * time.Millisecond
 // is for a line that has long since scrolled or faded off every overlay.
 const shownCap = 4096
 
+// heldCap and heldTTL bound the lines kept for release: the last 200, for up to
+// ten minutes. A false positive worth rescuing is rescued while the moment is
+// still live; a line older than this has scrolled off any overlay anyway.
+const (
+	heldCap = 200
+	heldTTL = 10 * time.Minute
+)
+
+// banCap and banTTL bound the memory of recent bans (RetractAuthor). A ban is
+// remembered long enough to refuse a verdict or a release that arrives after
+// it for a line offered before it -- the model's answer takes seconds, the
+// release button minutes -- and no longer.
+const (
+	banCap = 1024
+	banTTL = 5 * time.Minute
+)
+
 // Publisher is where display events go: the events hub.
 type Publisher interface {
 	Publish(eventstream.Envelope)
@@ -66,10 +83,27 @@ type Stats struct {
 	Shown   int64 `json:"shown"`
 	Blocked int64 `json:"blocked"`
 	Expired int64 `json:"expired"`
+	// Held counts the lines kept off overlays by a finding's hold (also in
+	// Blocked), and Released how many of those an operator then put back.
+	Held     int64 `json:"held"`
+	Released int64 `json:"released"`
+}
+
+// heldLine is a withheld line kept for Release.
+type heldLine struct {
+	line eventstream.DisplayLine
+	at   time.Time
+	// platform, account and author say whose line it is, so a ban or a cleared
+	// room can take it out of the buffer when the hub no longer has its id.
+	platform db.Platform
+	account  string
+	author   string
 }
 
 type held struct {
 	line     eventstream.DisplayLine
+	msg      chat.Message
+	offered  time.Time
 	deadline time.Time
 }
 
@@ -88,6 +122,15 @@ type Gate struct {
 	shownRing []string
 	shownAt   int
 	stats     Stats
+
+	// heldLines are lines a finding's hold kept off the overlay, newest last,
+	// bounded by heldCap and heldTTL. See Release.
+	heldLines map[string]heldLine
+	heldOrder []string
+
+	// bans remembers recent RetractAuthor calls: channel + author ("" for a
+	// cleared room) -> when. See bannedSinceLocked.
+	bans map[string]time.Time
 }
 
 var _ chat.DisplaySink = (*Gate)(nil)
@@ -103,6 +146,8 @@ func New(pub Publisher, opts ...Option) *Gate {
 		pending:   map[string]held{},
 		shown:     map[string]string{},
 		shownRing: make([]string, shownCap),
+		heldLines: map[string]heldLine{},
+		bans:      map[string]time.Time{},
 	}
 	for _, o := range opts {
 		o(g)
@@ -149,13 +194,164 @@ func (g *Gate) Offer(m chat.Message, d chat.Display) {
 	defer g.mu.Unlock()
 	switch d {
 	case chat.DisplayClear:
-		g.releaseLocked(key(m.Platform, m.Account, m.ID), g.project(m))
+		line := g.project(m)
+		g.releaseLocked(key(m.Platform, m.Account, m.ID), line, line.At)
 	case chat.DisplayPending:
-		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), deadline: g.now().Add(MaxHold)}
+		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), msg: m, offered: g.now(), deadline: g.now().Add(MaxHold)}
+	case chat.DisplayHeld:
+		g.stats.Blocked++
+		g.holdLocked(key(m.Platform, m.Account, m.ID), g.project(m), m)
 	default:
 		// Blocked, and anything this build does not know: fail closed.
 		g.stats.Blocked++
 	}
+}
+
+// holdLocked keeps a withheld line for Release, shedding the oldest past the
+// cap. A key offered twice is kept once, at its latest position.
+func (g *Gate) holdLocked(k string, line eventstream.DisplayLine, m chat.Message) {
+	g.stats.Held++
+	g.dropHeldLocked(k)
+	g.heldLines[k] = heldLine{line: line, at: g.now(), platform: m.Platform, account: m.Account, author: m.Author.ID}
+	g.heldOrder = append(g.heldOrder, k)
+	for len(g.heldOrder) > heldCap {
+		delete(g.heldLines, g.heldOrder[0])
+		g.heldOrder = g.heldOrder[1:]
+	}
+}
+
+// dropHeldLocked forgets a held line, if there is one.
+func (g *Gate) dropHeldLocked(k string) {
+	if _, ok := g.heldLines[k]; !ok {
+		return
+	}
+	delete(g.heldLines, k)
+	for i, o := range g.heldOrder {
+		if o == k {
+			g.heldOrder = append(g.heldOrder[:i], g.heldOrder[i+1:]...)
+			break
+		}
+	}
+}
+
+// platformOf is the platform half of a key.
+func platformOf(k string) string {
+	for i := 0; i < len(k); i++ {
+		if k[i] == 0 {
+			return k[:i]
+		}
+	}
+	return k
+}
+
+// RetractAuthor implements chat.AuthorRetractor: a person was banned or timed
+// out (or, with an empty authorID, the room was cleared), so none of their held
+// lines on that channel may be shown afterwards. Retract takes ids the hub's
+// 500-message ring still holds; a held line older than that has none.
+func (g *Gate) RetractAuthor(p db.Platform, account, authorID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rememberBanLocked(p, account, authorID)
+	for k, h := range g.heldLines {
+		if h.platform != p || h.account != account {
+			continue
+		}
+		if authorID != "" && h.author != authorID {
+			continue
+		}
+		g.dropHeldLocked(k)
+	}
+	// Lines still awaiting the model. One that has fallen out of the hub's
+	// ring has no id for Retract, and a Clear verdict would show it.
+	for k, h := range g.pending {
+		if h.msg.Platform != p || h.msg.Account != account {
+			continue
+		}
+		if authorID != "" && h.msg.Author.ID != authorID {
+			continue
+		}
+		delete(g.pending, k)
+		g.stats.Blocked++
+	}
+}
+
+func banKey(p db.Platform, account, authorID string) string {
+	return string(p) + "\x00" + account + "\x00" + authorID
+}
+
+// rememberBanLocked records a ban, bounded: expired entries go on every
+// insert, and past banCap the oldest does.
+func (g *Gate) rememberBanLocked(p db.Platform, account, authorID string) {
+	now := g.now()
+	for k, at := range g.bans {
+		if now.Sub(at) > banTTL {
+			delete(g.bans, k)
+		}
+	}
+	for len(g.bans) >= banCap {
+		var oldest string
+		var oldestAt time.Time
+		for k, at := range g.bans {
+			if oldest == "" || at.Before(oldestAt) {
+				oldest, oldestAt = k, at
+			}
+		}
+		delete(g.bans, oldest)
+	}
+	g.bans[banKey(p, account, authorID)] = now
+}
+
+// bannedSinceLocked reports whether the author (or the whole room) was banned
+// at or after a line was offered, within banTTL.
+func (g *Gate) bannedSinceLocked(p db.Platform, account, authorID string, offered time.Time) bool {
+	now := g.now()
+	for _, id := range []string{authorID, ""} {
+		if at, ok := g.bans[banKey(p, account, id)]; ok && now.Sub(at) <= banTTL && !at.Before(offered) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsHeld reports whether a line is in the release buffer right now: held, not
+// yet released, retracted or removed, and inside heldTTL. The review list asks
+// it, so its "Show on overlay" is true to the gate and not to a flag set once.
+func (g *Gate) IsHeld(p db.Platform, account, id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	h, ok := g.heldLines[key(p, account, id)]
+	return ok && g.now().Sub(h.at) <= heldTTL
+}
+
+// Release puts a held line on the overlay: the "Show on overlay" for a
+// misfire. It reports whether there was one to release -- false for a line that
+// was never held, was removed rather than held, has aged past heldTTL, or was
+// already released.
+//
+// The line is published as a new chat.display, so it joins what a reconnecting
+// overlay is replayed like any other line, and a later retraction (the operator
+// then deletes it) takes it off again.
+func (g *Gate) Release(p db.Platform, account, id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	k := key(p, account, id)
+	h, ok := g.heldLines[k]
+	if !ok {
+		return false
+	}
+	g.dropHeldLocked(k)
+	if g.now().Sub(h.at) > heldTTL {
+		return false
+	}
+	if g.bannedSinceLocked(h.platform, h.account, h.author, h.at) {
+		return false
+	}
+	g.stats.Released++
+	// The ENVELOPE is stamped now: the event hub's replay window is measured
+	// from it, and the line's own time may be minutes old. The line keeps its
+	// own time -- when it was said.
+	g.releaseLocked(k, h.line, g.now())
+	return true
 }
 
 // Judge implements chat.DisplaySink.
@@ -165,19 +361,41 @@ func (g *Gate) Judge(p db.Platform, account, id string, d chat.Display) {
 	k := key(p, account, id)
 	h, ok := g.pending[k]
 	if !ok {
-		// Already dropped (expired or retracted), or never held.
+		// Already dropped (expired or retracted), or never pending. A line the
+		// fast pass held that the model then REMOVES is no longer a maybe: take
+		// it out of the release buffer -- and off the screen if it was
+		// released before the model answered.
+		if d == chat.DisplayBlocked {
+			g.dropHeldLocked(k)
+			if did, shown := g.shown[k]; shown {
+				delete(g.shown, k)
+				g.pub.Publish(eventstream.Envelope{
+					Type: eventstream.TypeChatUndisplay,
+					Data: eventstream.DisplayRemoval{Platform: platformOf(k), IDs: []string{did}},
+				})
+			}
+		}
 		return
 	}
 	delete(g.pending, k)
+	// The author was banned (or the room cleared) after this line was offered:
+	// whatever the verdict, it does not go on air, nor is it kept to release.
+	if g.bannedSinceLocked(h.msg.Platform, h.msg.Account, h.msg.Author.ID, h.offered) {
+		g.stats.Blocked++
+		return
+	}
 	if d != chat.DisplayClear {
 		g.stats.Blocked++
+		if d == chat.DisplayHeld {
+			g.holdLocked(k, h.line, h.msg)
+		}
 		return
 	}
 	if g.now().After(h.deadline) {
 		g.stats.Expired++
 		return
 	}
-	g.releaseLocked(k, h.line)
+	g.releaseLocked(k, h.line, h.line.At)
 }
 
 // Retract implements chat.DisplaySink.
@@ -187,6 +405,9 @@ func (g *Gate) Retract(p db.Platform, account string, ids []string) {
 	var gone []string
 	for _, id := range ids {
 		k := key(p, account, id)
+		// A line deleted, hidden or banned after being held must not be
+		// releasable: the operator's removal outranks their earlier "maybe".
+		g.dropHeldLocked(k)
 		if _, ok := g.pending[k]; ok {
 			delete(g.pending, k)
 			g.stats.Blocked++
@@ -205,7 +426,7 @@ func (g *Gate) Retract(p db.Platform, account string, ids []string) {
 	}
 }
 
-func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine) {
+func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine, at time.Time) {
 	if old := g.shownRing[g.shownAt]; old != "" {
 		delete(g.shown, old)
 	}
@@ -213,7 +434,7 @@ func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine) {
 	g.shownAt = (g.shownAt + 1) % len(g.shownRing)
 	g.shown[k] = line.ID
 	g.stats.Shown++
-	g.pub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, At: line.At, Data: line})
+	g.pub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, At: at, Data: line})
 }
 
 // Sweep drops every hold past its deadline.
@@ -226,6 +447,11 @@ func (g *Gate) Sweep() {
 			delete(g.pending, k)
 			g.stats.Expired++
 		}
+	}
+	// heldOrder is oldest first, so the expired are a prefix.
+	for len(g.heldOrder) > 0 && now.Sub(g.heldLines[g.heldOrder[0]].at) > heldTTL {
+		delete(g.heldLines, g.heldOrder[0])
+		g.heldOrder = g.heldOrder[1:]
 	}
 }
 

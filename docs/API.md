@@ -1961,6 +1961,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
+| `POST` | `/chat/flags/release` — put a message a rule held off the overlay back on it |
 | `POST` `DELETE` | `/chat/bans` |
 | `POST` `DELETE` | `/chat/moderators` — on X, appoint or remove a moderator by `userId`; on YouTube, make a channel a moderator (`channelId`) or remove one (`id`, as the list returned it), 200 quota units each, and only the chat's channel owner may. X answers `{ids, appliesToAllBroadcasts}`; YouTube answers the moderator added, or `{"status":"removed"}`. Errors: 400 for a missing parameter or a platform that is not connected or cannot manage moderators, 502 when the platform itself refuses or fails |
 | `PATCH` | `/chat/settings` |
@@ -2118,6 +2119,7 @@ segment reliably.
 |---|---|
 | `DELETE /chat/messages` | `platform`, `id` (both required), `account` |
 | `POST /chat/messages/hide` | `platform`, `id` (both required), `account`, `scope`, `hidden` |
+| `POST /chat/flags/release` | `platform`, `id` (both required), `account` |
 | `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason`, `messageId` (X only: mute and remove that message in one call) |
 | `POST /chat/moderators` | `platform`, `userId` (both required), `account`. X only. A moderator acts on every broadcast the account hosts, not one, and X allows 20 |
 | `DELETE /chat/moderators` | `platform`, `userId` (both required), `account`. X only |

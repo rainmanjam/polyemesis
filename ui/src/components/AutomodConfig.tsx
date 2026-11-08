@@ -394,6 +394,24 @@ export function AutomodConfig({
                   )}
                 </div>
                 {timeout && <Problem>{t(timeout.key)}</Problem>}
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`${idp}-hold`}
+                      checked={rule.holdOverlay === true}
+                      onCheckedChange={(v) =>
+                        patchRule(rule.id, { holdOverlay: v })
+                      }
+                    />
+                    <Label htmlFor={`${idp}-hold`}>
+                      {t("automod.ruleHoldOverlay")}
+                    </Label>
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {t("automod.ruleHoldOverlayNote")}
+                  </span>
+                </div>
               </div>
             );
           })}

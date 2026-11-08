@@ -1781,6 +1781,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Automod's review list: what it flagged, for the Chat page's
 			// Flagged chip (UX Council A48). Content, so read-scope denied.
 			api.Get(r, "/chat/flags", s.handleChatFlags, readDenied)
+			// Puts a message a rule held back on the overlays. Local and
+			// reversible, so a POST like the local hide, not a delete.
+			r.Post("/chat/flags/release", s.handleChatFlagRelease)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
 			// Hiding is POST rather than DELETE because it is reversible, and
 			// separate from delete because the two are different decisions:
