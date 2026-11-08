@@ -53,3 +53,12 @@ describe("the YouTube picker api calls", () => {
     expect((err as ApiError).status).toBe(404);
   });
 });
+
+describe("the Studio events call", () => {
+  it("reads Studio's events from one route", async () => {
+    const calls = fakeFetch(200, { events: [], stale: ["chan"] });
+    const r = await api.youtubeStudioEvents();
+    expect(r.stale).toEqual(["chan"]);
+    expect(path(calls[0].url)).toBe("/youtube/studio-events");
+  });
+});
