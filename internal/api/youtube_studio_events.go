@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -86,15 +87,19 @@ func (s *Server) handleYouTubeStudioEvents(w http.ResponseWriter, r *http.Reques
 // studioEventsFor is the account's cached events, refreshed when older than studioEventsTTL. A refresh that fails
 // keeps the last good events, records the error and the attempt time (so it is not retried for another TTL).
 func (s *Server) studioEventsFor(ctx context.Context, a db.PlatformAccount, now time.Time) studioCacheEntry {
-	// Single flight: requests that arrive while a refresh is running wait for it and then read what it stored,
-	// rather than each making the three calls.
-	s.ytStudioFlight.Lock()
-	defer s.ytStudioFlight.Unlock()
-	s.ytStudioMu.Lock()
-	if cur, ok := s.ytStudio[a.ID]; ok && now.Sub(cur.at) < studioEventsTTL {
-		s.ytStudioMu.Unlock()
+	// The cache is checked FIRST and without any flight lock, so a hit never waits behind a refresh.
+	if cur, ok := s.studioCached(a.ID, now); ok {
 		return cur
 	}
+	// Single flight, PER ACCOUNT: callers for one account that arrive while its refresh runs wait for it and then read
+	// what it stored.
+	flight := s.studioFlight(a.ID)
+	flight.Lock()
+	defer flight.Unlock()
+	if cur, ok := s.studioCached(a.ID, now); ok {
+		return cur
+	}
+	s.ytStudioMu.Lock()
 	prev := s.ytStudio[a.ID]
 	s.ytStudioMu.Unlock()
 
@@ -103,7 +108,9 @@ func (s *Server) studioEventsFor(ctx context.Context, a db.PlatformAccount, now 
 	if !ok {
 		next.err = "polyemesis lists events only for YouTube"
 	} else {
-		cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+		// DETACHED FROM THE CALLER. The refresh serves every later caller for 15 minutes, so a first caller that
+		// disconnects must not cancel it and leave its cancellation cached as the answer.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
 		defer cancel()
 		acct, err := s.tokenFor(cctx, a.ID)
 		if err == nil {
@@ -121,4 +128,27 @@ func (s *Server) studioEventsFor(ctx context.Context, a db.PlatformAccount, now 
 	s.ytStudio[a.ID] = next
 	s.ytStudioMu.Unlock()
 	return next
+}
+
+// studioCached is the account's entry when it is younger than studioEventsTTL.
+func (s *Server) studioCached(id int64, now time.Time) (studioCacheEntry, bool) {
+	s.ytStudioMu.Lock()
+	defer s.ytStudioMu.Unlock()
+	cur, ok := s.ytStudio[id]
+	return cur, ok && now.Sub(cur.at) < studioEventsTTL
+}
+
+// studioFlight is the account's refresh lock.
+func (s *Server) studioFlight(id int64) *sync.Mutex {
+	s.ytStudioMu.Lock()
+	defer s.ytStudioMu.Unlock()
+	if s.ytStudioFlight == nil {
+		s.ytStudioFlight = map[int64]*sync.Mutex{}
+	}
+	m := s.ytStudioFlight[id]
+	if m == nil {
+		m = &sync.Mutex{}
+		s.ytStudioFlight[id] = m
+	}
+	return m
 }

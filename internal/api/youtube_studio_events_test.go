@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,16 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
+// ysGate, when set, holds every YouTube answer until it is closed.
+var ysGate atomic.Pointer[chan struct{}]
+
 func ysFixture(t *testing.T, calls *atomic.Int64, fail *atomic.Bool) (*Server, http.Handler, *db.DB, func(*http.Request), int64) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if g := ysGate.Load(); g != nil {
+			<-*g
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if fail.Load() {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -129,4 +136,55 @@ func TestConcurrentStudioEventReadsShareOneRefresh(t *testing.T) {
 	if n := calls.Load(); n != 3 {
 		t.Errorf("eight simultaneous reads made %d YouTube calls, want one refresh of 3", n)
 	}
+}
+
+// A caller that disconnects mid-refresh must not poison the cache for 15 minutes with its cancelled context.
+func TestADisconnectingFirstCallerDoesNotCacheAnErrorForTheNextFifteenMinutes(t *testing.T) {
+	var calls atomic.Int64
+	var fail atomic.Bool
+	s, _, _, _, _ := ysFixture(t, &calls, &fail)
+	accts, _ := s.store.ListPlatformAccounts()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the first caller is already gone
+	entry := s.studioEventsFor(ctx, accts[0], s.clock())
+	if entry.err != "" || len(entry.events) == 0 {
+		t.Errorf("entry = %+v: the refresh was cut short by the first caller's context", entry)
+	}
+}
+
+// Cache hits never wait behind another account's slow refresh.
+func TestACacheHitDoesNotWaitBehindAnotherAccountsSlowRefresh(t *testing.T) {
+	var calls atomic.Int64
+	var fail atomic.Bool
+	s, _, store, _, a1 := ysFixture(t, &calls, &fail)
+	a2 := connectAccount(t, store, s.box, db.PlatformYouTube, "chan2")
+	accts, _ := s.store.ListPlatformAccounts()
+	byID := map[int64]db.PlatformAccount{}
+	for _, a := range accts {
+		byID[a.ID] = a
+	}
+	clock := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
+	s.studioEventsFor(context.Background(), byID[a1], clock)
+	s.studioEventsFor(context.Background(), byID[a2], clock)
+	// account 1's entry goes stale; its refresh will hang
+	s.ytStudioMu.Lock()
+	e := s.ytStudio[a1]
+	e.at = clock.Add(-time.Hour)
+	s.ytStudio[a1] = e
+	s.ytStudioMu.Unlock()
+	gate := make(chan struct{})
+	ysGate.Store(&gate)
+	t.Cleanup(func() { ysGate.Store(nil) })
+	done := make(chan struct{})
+	go func() { s.studioEventsFor(context.Background(), byID[a1], clock); close(done) }()
+	time.Sleep(100 * time.Millisecond) // the refresh is in flight
+	got := make(chan studioCacheEntry, 1)
+	go func() { got <- s.studioEventsFor(context.Background(), byID[a2], clock) }()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Error("a cache hit waited behind another account's slow refresh")
+	}
+	close(gate)
+	<-done
 }

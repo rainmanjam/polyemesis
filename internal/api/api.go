@@ -461,8 +461,9 @@ type Server struct {
 	ytVideosMu    sync.Mutex
 	// ytStudio caches each YouTube account's upcoming events for the calendar; see youtube_studio_events.go.
 	ytStudioMu sync.Mutex
-	// ytStudioFlight serialises refreshes, so simultaneous requests share one (single flight).
-	ytStudioFlight sync.Mutex
+	// ytStudioFlight is one lock per account, so simultaneous requests for one account share a refresh (single flight)
+	// while other accounts, and every cache hit, never wait behind it.
+	ytStudioFlight map[int64]*sync.Mutex
 	ytStudio       map[int64]studioCacheEntry
 	ytVideos       map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
