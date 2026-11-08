@@ -595,6 +595,29 @@ warns when another destination already uses the one you pick. One chat adapter
 serves a channel, so with two destinations on one channel the chat that is read
 is the one opened last.
 
+**Use an existing YouTube event.** Instead of creating a broadcast, a destination
+can use an upcoming or active event you already made (**Use an existing YouTube
+event** in the dialog). At go-live polyemesis binds the event to the
+destination's stream if it is not already, records it, reads chat from it and
+creates nothing. An event bound to a different stream is moved only after you
+confirm it in the dialog, and never while that other stream is receiving video.
+A finished event is never reused: once it ends, the destination creates
+broadcasts again. The picker lists the event's own settings and changes none of
+them: if auto-start is off the dialog says the event will not go live by itself
+and that polyemesis will move it to live once video is flowing, and offers one
+button, **Turn auto-start on for this event**, that changes it only when you
+click it. If auto-stop is off, polyemesis ends the event when you switch the
+destination off.
+
+**What a created broadcast carries.** The title, a description, a category (a
+YouTube category name, applied to the video after the create, about 52 quota
+units), whether it is made for kids (stated explicitly, and *not made for kids*
+unless you declare otherwise in the YouTube controls), latency, DVR and a 360
+projection switch. These also apply to a scheduled show polyemesis creates, from
+the destination's settings; a recurring show's template then sets its own title
+and description. Not yet confirmed against a live channel: whether YouTube
+honours latency on a create (the same read-back caveat the update path has).
+
 If Studio's *Stream now* still creates a second broadcast beside polyemesis's,
 turn *Stream now* off in Studio, or switch the destination to use it.
 

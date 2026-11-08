@@ -383,7 +383,17 @@
                     "object"
                   ],
                   "fields": {
+                    "category": {
+                      "types": [
+                        "string"
+                      ]
+                    },
                     "closedCaptionsType": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "description": {
                       "types": [
                         "string"
                       ]
@@ -406,9 +416,24 @@
                         "null"
                       ]
                     },
+                    "eventId": {
+                      "types": [
+                        "string"
+                      ]
+                    },
                     "latencyPreference": {
                       "types": [
                         "string"
+                      ]
+                    },
+                    "projection360": {
+                      "types": [
+                        "boolean"
+                      ]
+                    },
+                    "rebindEvent": {
+                      "types": [
+                        "boolean"
                       ]
                     },
                     "recordFromStart": {

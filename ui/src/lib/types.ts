@@ -3197,6 +3197,33 @@ export interface YouTubeBroadcastControls {
   /** True turns off the broadcast polyemesis creates at go-live ("use YouTube Studio's Stream now
    *  instead"). Absent is the default: polyemesis creates and drives its own. */
   studioStreamNow?: boolean;
+  /** An existing YouTube event (broadcast id) to use at go-live instead of creating one. */
+  eventId?: string;
+  /** The operator's confirmation to move the picked event off a different, idle stream. */
+  rebindEvent?: boolean;
+  /** Applied when polyemesis creates the broadcast (or a scheduled show). */
+  description?: string;
+  /** A YouTube category name, applied to the broadcast polyemesis creates. */
+  category?: string;
+  /** Makes the broadcast 360-degree. */
+  projection360?: boolean;
+}
+
+/** One upcoming or active event of the connected channel, as GET /platforms/accounts/{id}/youtube/events
+ *  lists it. No key or ingest address: the server never sends one. */
+export interface YouTubeEventRow {
+  id: string;
+  title: string;
+  scheduledStart?: string;
+  privacy?: string;
+  status: string;
+  enableAutoStart: boolean;
+  enableAutoStop: boolean;
+  boundStreamId?: string;
+  /** Whether the bound stream is receiving video. Absent when the event is bound to no stream. */
+  streamActive?: boolean;
+  /** True when the event is bound to the stream the queried destination publishes with. */
+  onThisStream?: boolean;
 }
 
 /** One reusable stream of the connected channel, as GET /platforms/accounts/{id}/youtube/streams

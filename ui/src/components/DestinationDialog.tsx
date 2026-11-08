@@ -2271,6 +2271,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               destinationId={destination?.id}
               controls={compliance.youtube}
               onChange={(patch) => setCompliance(withYouTubeControl(compliance, patch))}
+              title={goLiveTitle}
+              onTitleChange={setGoLiveTitle}
             />
           )}
           {platform === "x" && (

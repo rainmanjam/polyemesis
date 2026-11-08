@@ -20,6 +20,16 @@ its first tagged release.
 - **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
   reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
   ingest address; the destination dialog stores an optional pinned stream.
+- **Use an existing YouTube event.** A destination can use an upcoming or active event instead of creating a
+  broadcast (`compliance.youtube.eventId`): polyemesis binds it to the destination's stream (moving it off a
+  different idle stream only on confirmation, never off an active one), uses its chat and never reuses a finished
+  event. `GET /api/v1/platforms/accounts/{id}/youtube/events` lists events (never keys) with their auto-start and
+  auto-stop flags; an event with auto-start off is taken live by polyemesis, and
+  `POST /api/v1/platforms/accounts/{id}/youtube/events/{eventId}/auto-start` is the operator's one click to turn
+  auto-start on.
+- **YouTube create fields.** Description, category, made-for-kids (explicit, default not for kids), latency, DVR and
+  a 360 switch apply when polyemesis creates a go-live broadcast or a scheduled show
+  (`compliance.youtube.description`, `category`, `projection360`).
 - **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
 
 ### Fixed

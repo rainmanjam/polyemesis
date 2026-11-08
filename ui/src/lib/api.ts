@@ -39,6 +39,7 @@ import type {
   AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
+  YouTubeEventRow,
   YouTubeStreamRow,
   YouTubeVerticalView,
   BulkDestReport,
@@ -963,6 +964,17 @@ export const api = {
     get<{ supported: boolean; reason?: string; streams?: YouTubeStreamRow[] }>(
       `/platforms/accounts/${accountId}/youtube/streams` +
         (destinationId === undefined ? "" : `?destinationId=${destinationId}`),
+    ),
+  /** The channel's upcoming and active events, for the event picker. No keys. */
+  youtubeEvents: (accountId: number, destinationId?: DestinationId) =>
+    get<{ supported: boolean; reason?: string; events?: YouTubeEventRow[] }>(
+      `/platforms/accounts/${accountId}/youtube/events` +
+        (destinationId === undefined ? "" : `?destinationId=${destinationId}`),
+    ),
+  /** The operator's click: turns auto-start on for one event. */
+  youtubeEventAutoStart: (accountId: number, eventId: string) =>
+    post<{ eventId: string; enableAutoStart: boolean }>(
+      `/platforms/accounts/${accountId}/youtube/events/${encodeURIComponent(eventId)}/auto-start`,
     ),
   /* --- YouTube vertical half (#7) ------------------------------------- */
   /** Pairs a YouTube destination with a new 9:16 vertical half. `tier` is a key
