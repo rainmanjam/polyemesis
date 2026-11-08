@@ -67,6 +67,8 @@ type xChatStub struct {
 	putFixes bool
 	// subs is what GET /2/activity/subscriptions lists, as raw JSON objects, and what POST appends to.
 	subs []map[string]any
+	// refuseEvent makes POST /2/activity/subscriptions for that event type fail with the given status and body.
+	refuseEvent map[string]xStubRefusal
 	// subscription overrides the POST /2/activity/subscriptions answer.
 	subscription string
 	nextID       int
@@ -82,6 +84,15 @@ type xChatStub struct {
 	appRevoked atomic.Bool
 	// sendBody overrides the POST /2/broadcasts/{id}/chat answer.
 	sendBody string
+}
+
+// xStubRefusal is one canned failure of a subscription create.
+type xStubRefusal struct {
+	status int
+	body   string
+	// times limits it to the first n creates; 0 means every one.
+	times int
+	used  int
 }
 
 func newXChatStub(t *testing.T) *xChatStub {
@@ -231,6 +242,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
+		if rf, ok := st.refuseEvent[req.EventType]; ok && (rf.times == 0 || rf.used < rf.times) {
+			rf.used++
+			st.refuseEvent[req.EventType] = rf
+			w.WriteHeader(rf.status)
+			_, _ = io.WriteString(w, rf.body)
+			return
+		}
 		st.subscribeCalls++
 		if st.failSubscribeAt != 0 && st.subscribeCalls == st.failSubscribeAt {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -243,7 +261,7 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		st.nextID++
 		sub := map[string]any{"subscription_id": fmt.Sprint(st.nextID), "event_type": req.EventType,
-			"filter": map[string]any{"user_id": req.Filter["user_id"]}, "webhook_id": req.WebhookID, "tag": req.Tag}
+			"filter": xStubFilter(req.Filter), "webhook_id": req.WebhookID, "tag": req.Tag}
 		st.subs = append(st.subs, sub)
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"subscription": sub}})
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/2/activity/subscriptions/"):
@@ -360,4 +378,13 @@ func (st *xChatStub) adapterFor(t *testing.T, account string, now time.Time) *XA
 		t.Fatalf("NewX: %v", err)
 	}
 	return a
+}
+
+// xStubFilter is the filter X lists back: the user id, and the direction when the subscription asked for one.
+func xStubFilter(f map[string]string) map[string]any {
+	out := map[string]any{"user_id": f["user_id"]}
+	if d := f["direction"]; d != "" {
+		out["direction"] = d
+	}
+	return out
 }

@@ -88,6 +88,8 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"iterating common words rebuilds the scrollback, as /library/search would a transcript"},
 		{http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=someone", nil,
 			"everything one viewer has said"},
+		{http.MethodGet, "/api/v1/chat/users/notes?platform=twitch&authorId=someone", nil,
+			"the operator's private note and tags about one viewer"},
 		{http.MethodGet, "/api/v1/chat/export?from=1", nil,
 			"the scrollback again, streamed for any window: every viewer's message, with their name"},
 		{http.MethodGet, "/api/v1/recordings/1/chat", nil,

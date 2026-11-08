@@ -358,6 +358,25 @@
                     "string"
                   ]
                 },
+                "x": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "chatOption": {
+                      "types": [
+                        "null",
+                        "number"
+                      ]
+                    },
+                    "locale": {
+                      "types": [
+                        "string"
+                      ]
+                    }
+                  }
+                },
                 "youtube": {
                   "types": [
                     "null",

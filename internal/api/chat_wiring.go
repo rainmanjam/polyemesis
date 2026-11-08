@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rainmanjam/polyemesis/internal/activity"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -661,6 +662,9 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:       s.chatToken(a.ID),
 			LiveVideoID: s.facebookLiveVideoID(a.ID),
 			PageAccess:  s.facebookPageAccess(a.ID, a.AccountRef),
+			// Off unless the operator switched the tally on; read per sample so
+			// the toggle needs no reconnect.
+			ReactionsEnabled: s.facebookReactionsOn,
 		})
 	}
 	return nil, fmt.Errorf("polyemesis has no chat adapter for %s", a.Platform)
@@ -969,4 +973,13 @@ func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}), true
+}
+
+// facebookReactionsOn reports whether the Facebook reaction tally is switched on
+// in the Activity settings. Without an activity hub it is off.
+func (s *Server) facebookReactionsOn() bool {
+	if s.activity == nil {
+		return false
+	}
+	return s.activity.Settings().KindEnabled(string(db.PlatformFacebook), activity.KindReaction)
 }

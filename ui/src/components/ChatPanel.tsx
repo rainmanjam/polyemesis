@@ -1,3 +1,4 @@
+import { useViewerTags } from "@/hooks/useViewerTags";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, useTN, type TranslationKey } from "@/lib/i18n";
 import { toast } from "sonner";
@@ -233,6 +234,8 @@ function MessageRow({
 
   // The platform's colour for this author, darkened on the light theme.
   const authorColour = useAuthorInk(m.author.color);
+  // The operator's tags on this viewer, from one list-wide lookup.
+  const viewerTags = useViewerTags(m.platform, m.account, m.author.id);
 
   return (
     <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
@@ -296,6 +299,16 @@ function MessageRow({
       >
         {m.author.name}
       </button>
+      {viewerTags.length > 0 && (
+        <span
+          className="ml-1 rounded border border-border px-1 align-baseline text-xs text-muted-foreground"
+          title={t("viewerCard.tagBadgeTitle", { tags: viewerTags.join(", ") })}
+          data-testid="viewer-tag-badge"
+        >
+          {viewerTags[0]}
+          {viewerTags.length > 1 ? ` +${viewerTags.length - 1}` : ""}
+        </span>
+      )}
       <span className="text-muted-foreground">{m.action ? " " : ": "}</span>
       <span
         className={cn(
@@ -1030,6 +1043,7 @@ export function ChatPanel({
           account={card.account}
           authorId={card.author.id ?? ""}
           authorName={card.author.name}
+          channel={card.channel}
           open
           onOpenChange={(o) => !o && setCard(null)}
         />

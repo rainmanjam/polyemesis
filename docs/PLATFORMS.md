@@ -8,7 +8,9 @@ Two separate questions, often confused:
    platform's published API offers, and it varies enormously.
 
 This page answers both, then gives the OAuth app setup for each platform that
-supports sign-in.
+supports sign-in. For the walk-through from an installed server to streaming
+and chat, including the server prerequisites, see
+[CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md).
 
 - [Capability matrix](#capability-matrix)
 - [The platforms that need a sentence each](#the-platforms-that-need-a-sentence-each)
@@ -26,6 +28,10 @@ below. The table is what each platform's **published API** allows today.
 
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
+
+For what each platform's chat allows action by action (send, delete, hide, time out,
+ban, polls, chat settings), see
+[Chat actions by platform](CONNECTING-PLATFORMS.md#chat-actions-by-platform).
 
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end | Channel tools |
 |---|---|---|---|---|---|---|---|---|---|
@@ -186,8 +192,9 @@ on every broadcast the account hosts, not one. Viewer count is the running
 broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
 `GET /2/broadcasts`, read by the analytics sampler through its own seam rather
 than as a `LiveStatter`. All of it uses scopes the connection already holds
-(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), so scope
-version 2 is unchanged. A chat message's id is the `timestamp` X answers a send
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), except
+`follows.read` (part of scope version 2), which the Premium-subscription alert
+needs and, per part of X's docs, the follow alert too (see ACTIVITY.md). A chat message's id is the `timestamp` X answers a send
 with (nanoseconds, as a string), which is also what delete takes as `message_id`.
 
 The calls use the routes in X's
@@ -203,7 +210,7 @@ broadcast and makes it public in one step, and X ends it as `TIMED_OUT` if no
 video arrives within five minutes, so polyemesis does not call it early. When an
 X destination turns on, polyemesis records the destination's stream source and
 waits. Once video arrives, polyemesis takes the source live with the
-destination's **go-live title**, set in the X console in the destination editor
+destination's **go-live title**, set in the **X Livestream** card on the destination editor's **Video and advanced** step
 (at most 280 characters: X says the title is "subject to X post length limits"
 and gives no number, PROVISIONAL). During the first 30 minutes of a recurring
 show, the show's template title is sent instead (see
@@ -214,9 +221,19 @@ refuses a change then (HTTP 409). Turning the destination off ends the
 broadcast. After a go-live the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
+**Who can chat, and the broadcast language.** Step 4 of the destination dialog, in the X card, has a
+**Who can chat** and a **Language** setting. Both ride the same go-live call (`POST /2/broadcasts`) as
+`chat_option` and `locale`, so like the title they cannot change while the broadcast is live (HTTP 409). X
+documents `chat_option` as a JSON integer from 0 to 6: 0 default, 1 chat off, 2 everyone, 3 verified accounts,
+4 accounts the broadcaster follows, 5 the broadcaster's subscribers, and 6 accounts followed by an account the
+broadcaster follows. The picker offers 1 to 6, and **X decides (default)** sends nothing, so X applies its own;
+`locale` is a language tag such as `en` or `pt-BR`. Left unset, neither field is sent. They are stored in the
+destination's `compliance.x` block (see [API.md](API.md)), built from X's documentation and not yet checked on
+a live account.
+
 **The go-live announcement, once per show by default.** X's go-live step makes
 an announcement post on the account unless the request asks it not to
-(`should_not_tweet`, a JSON boolean, PROVISIONAL until a live run confirms it). The X console has
+(`should_not_tweet`, a JSON boolean, confirmed live on 2026-11-07). The **X Livestream** card has
 a **Go-live announcement** setting with three choices:
 
 - **On the first go-live of a show only** (the default). A show lasts while the
@@ -262,7 +279,7 @@ a webhook** ([Accessing Live Chat](https://docs.x.com/livestream-api/chat/access
    DNS name, `tls.mode: acme`, and inbound **443** reachable from the internet.
    X rejects a webhook URL with a port and cannot validate a self-signed
    certificate.
-3. The app's OAuth 2.0 client secret saved in Settings → Platforms. It keys the
+3. The app's OAuth 2.0 client secret saved in Settings → Platform credentials. It keys the
    challenge-response check and the signature on each delivery.
 
 When chat starts, polyemesis registers `https://<tls.hostname>/api/v1/webhooks/x`
@@ -280,15 +297,8 @@ a lost answer, so a second attempt that creates the broadcast more than about 25
 as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
 from X's documentation and unconfirmed live.
 
-**Known rare edge cases of the X Livestream path.** A go-live is sent only after its marker is written. If
-polyemesis has to stop tracking a broadcast a go-live may have made, the destination shows the fault "polyemesis may
-have left a broadcast live on X" so you can end it in X's producer tooling. The attempt time is not refreshed after
-a lost answer, so a second attempt that creates the broadcast more than about 25 seconds after the first is refused
-as not started by polyemesis. How X's `created_at_ms`, `Date` header and 200-versus-201 answers behave is modelled
-from X's documentation and unconfirmed live.
-
 **The Livestream paths were verified live on 2026-11-07.** On staging, against a
-real X account (`@RainmanJam`), with X Livestream on, two runs went through
+real X account, with X Livestream on, two runs went through
 polyemesis. The destination was linked to the account and the stream source was
 created through the API on save. The go-live published the broadcast with the
 configured title ("Polyemesis Test Flight"). Run 1, with the go-live
@@ -478,7 +488,8 @@ below reads as *not configured* — never an error — and destinations with a
 pasted URL and key work exactly as well.
 
 `Settings → Platform credentials` has step-by-step instructions and renders the
-exact redirect URI to whitelist. In summary:
+exact redirect URI to whitelist. [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md)
+walks the whole path, server prerequisites included. In summary:
 
 **Four of the five platforms can prove the pair you pasted before you connect
 anything.** Twitch, Kick, Facebook and Vimeo each publish a client-credentials
@@ -757,6 +768,12 @@ Build a Community requirement; the refusal says so. Receiving a message AutoMod
 is holding needs EventSub and is not built: the approve and deny call is, by id.
 Accounts connected earlier are marked "reconnect needed" once.
 
+Scope version 6 also carries six read scopes for [viewer activity](ACTIVITY.md#twitch):
+`moderator:read:followers`, `channel:read:subscriptions`, `bits:read`,
+`channel:read:redemptions`, `channel:read:hype_train` and
+`channel:read:predictions`. They are in version 6 rather than a version 7
+because the release that introduces version 6 has not shipped.
+
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
 that is already there keeps it, and its destinations, linked; disconnecting
@@ -772,6 +789,14 @@ granted. Accounts connected before the version existed are judged on the scopes
 the platform actually returned, so an account that already holds everything is
 left alone rather than nagged.
 
+When a scope bump unlocks something you would want (Twitch version 6: moderation
+tools, Shield Mode, mods and VIPs, AutoMod and activity alerts; X version 2: follow
+and subscription alerts and clip posting), a **"reconnect to enable" banner** also
+shows at the top of the console, naming the platform and what the reconnect turns
+on, with a one-click **Reconnect** (the same sign-in as Settings → Platform
+credentials → Connect). Dismiss it per account; it returns if a later release bumps
+the version again. It is shown to administrators only, like the account list.
+
 ### Facebook Live (Meta)
 
 **Read this first: Meta requires App Review before anyone but you can connect an
@@ -782,7 +807,10 @@ anyone else's behalf needs Advanced Access to `publish_video` (profiles) or
 minutes, and start it before you need it.
 
 1. <https://developers.facebook.com/apps> → **Create app**, use case *Other*,
-   type *Business*.
+   type *Business*. A **Live Video API** use case is being verified as the
+   alternative; see [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md#facebook-being-verified),
+   which also notes that an app set up with Facebook Login for Business may need
+   a configuration rather than scopes.
 2. Add the **Facebook Login** product; under its settings enable Client and Web
    OAuth login and add the redirect URI:
    `https://YOUR_HOST/api/v1/oauth/facebook/callback`
@@ -949,7 +977,7 @@ sessions of a token that is no longer valid. polyemesis does this for each
 connected Twitch account. On a 401 it spends one refresh to rule out a merely
 stale token; if Twitch still refuses (or refuses the refresh itself), the
 account's chat session is stopped and the account shows as needing a reconnect
-in Settings → Platforms. Reconnecting clears it. A Twitch outage or network
+in Settings → Platform credentials. Reconnecting clears it. A Twitch outage or network
 failure is never treated as a revocation.
 
 ## Multiple accounts
@@ -1013,6 +1041,34 @@ two that disagree, the whole push — every account in it, not just that one —
 does not go out.
 
 ---
+
+## The viewer card: platform tools and notes
+
+The viewer card (Chat page, a message's menu, *View history & all actions*) shows
+the same history and moderation controls on every platform, plus a row of tools
+for the platforms that have them. It reuses the routes the other panels use; there
+is no separate API behind it.
+
+- **Twitch:** warn (with a reason), make or remove VIP, make or remove moderator,
+  and open Twitch's own moderator card. VIPs need the channel to have finished
+  Twitch's Build a Community requirement, and moderator and VIP changes work only for the channel's owner; the card
+  shows Twitch's refusal as it is worded.
+- **X:** make or remove a chat moderator. A moderator acts on every broadcast the
+  account hosts, not one, and the card says so.
+- **YouTube:** make or remove a chat moderator, which only the owner of the chat's
+  channel may do. Removing one reads the moderator list first (50 quota units).
+- Other platforms show nothing extra; the open-profile link stays.
+
+Role changes ask a second time on the card before they are sent.
+
+**Notes.** The card also keeps a private note (up to 1,000 characters) and up to 10
+tags (such as *regular*, *known troll*, *VIP*, *watch*) about the viewer, saved with
+an explicit Save. A viewer who has tags shows a small tag badge beside their name in
+the chat list. Notes are personal data about the people in your chat: they are stored
+only in this server's database (the `viewer_notes` table, so they travel in a backup
+of the data directory), are readable by admins only and never by a `read` API token,
+and are never sent to a platform, an overlay, the event stream or a webhook. They are
+not removed when chat retention prunes the scrollback; delete the note to remove it.
 
 ## See also
 

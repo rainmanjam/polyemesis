@@ -383,6 +383,7 @@ export function ChatPage() {
               account={card.account}
               authorId={card.author.id ?? ""}
               authorName={card.author.name}
+              channel={card.channel}
               open
               onOpenChange={(o) => !o && setCard(null)}
             />

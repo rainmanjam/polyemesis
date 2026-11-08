@@ -232,7 +232,11 @@ type xSubRec struct {
 	ID        string `json:"subscription_id"`
 	EventType string `json:"event_type"`
 	Filter    struct {
-		UserID string `json:"user_id"`
+		UserID    string `json:"user_id"`
+		Direction string `json:"direction"`
+		// Qualifiers carries the direction too when X lists it there (docs.x.com: the qualifier "is equivalent to
+		// the top-level filter.direction field").
+		Qualifiers map[string]any `json:"qualifiers"`
 	} `json:"filter"`
 	WebhookID string `json:"webhook_id"`
 	Tag       string `json:"tag"`
@@ -250,6 +254,15 @@ func (x *XAdapter) listSubscriptions(ctx context.Context, userID string) ([]xSub
 		return nil, xFail("X would not list the activity subscriptions", err)
 	}
 	return out.Data, nil
+}
+
+// direction is the direction the subscription was made with, from either place X may list it, or "".
+func (s xSubRec) direction() string {
+	if d := strings.TrimSpace(s.Filter.Direction); d != "" {
+		return d
+	}
+	d, _ := s.Filter.Qualifiers["direction"].(string)
+	return strings.TrimSpace(d)
 }
 
 func (s xSubRec) expired(now time.Time) bool {
@@ -313,6 +326,10 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 			return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
 				"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
 		}
+	}
+	// The viewer-activity events come after chat, so a refusal of one can never keep chat from registering.
+	if x.act.want() {
+		return x.ensureActivity(ctx, userID, webhookID, existing)
 	}
 	return nil
 }
@@ -454,6 +471,9 @@ func (x *XAdapter) Health() Health {
 	if x.replacedNote != "" {
 		parts = append(parts, x.replacedNote)
 	}
+	if n := x.activityNote(); n != "" {
+		parts = append(parts, n)
+	}
 	h := Health{Detail: strings.Join(parts, ". ")}
 	// The Hub never marks a runner live itself; an adapter that reports Health must say so. Run holds ready from the
 	// moment the webhook and subscriptions are in place, which is when X can deliver.
@@ -562,6 +582,10 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 	}
 
 	inbox := make(chan xWebhookEvent, xInboxSize)
+	// Activity is subscribed only when the sink can take it: a sink that cannot would receive events nobody reads.
+	_, canActivity := sink.(ActivitySink)
+	x.act.reset()
+	x.act.setWanted(canActivity)
 	x.goLive(userID, inbox)
 	// Registered last in the defers' order of running: goDark closes the door (no further event can be accepted once
 	// it returns), and the drain then delivers everything already accepted, on every exit path. An event answered
@@ -598,6 +622,7 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 			if err := x.recheckSubscriptions(ctx, userID, hookID); err != nil {
 				return err
 			}
+			x.recheckActivity(ctx, userID, hookID)
 		}
 	}
 }
@@ -649,6 +674,8 @@ func (x *XAdapter) goDark(inbox chan xWebhookEvent) {
 			x.notLiveSince = x.cfg.Now()
 		}
 		x.ready, x.replacedNote, x.invalidNote = false, "", ""
+		x.act.setWanted(false)
+		x.act.reset()
 	}
 	x.liveMu.Unlock()
 }
@@ -769,7 +796,7 @@ func (x *XAdapter) IngestWebhook(body []byte) XIngest {
 	if ev.UserID != x.liveUser {
 		return XIngestWrongAccount
 	}
-	if ev.Type != xEventChat && ev.Type != xEventChatRemove {
+	if ev.Type != xEventChat && ev.Type != xEventChatRemove && !(xIsActivityEvent(ev.Type) && x.act.want()) {
 		return XIngestIgnored
 	}
 	select {
@@ -796,8 +823,8 @@ func (x *XAdapter) Unavailable(grace time.Duration) bool {
 // Logger is the logger the adapter was built with, or nil.
 func (x *XAdapter) Logger() *slog.Logger { return x.cfg.Log }
 
-// RemoveSubscriptions deletes this install's chat subscriptions for this account: the polyemesis-tagged
-// broadcast.chat and broadcast.chat.remove ones on OUR webhook. It is the explicit disconnect; a Run's exit never
+// RemoveSubscriptions deletes this install's subscriptions for this account: the polyemesis-tagged chat and
+// viewer-activity ones on OUR webhook. It is the explicit disconnect; a Run's exit never
 // does this. userToken is passed in because the account's own token is gone by the time a disconnect finishes.
 func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) error {
 	if strings.TrimSpace(x.cfg.AppBearer) == "" || strings.TrimSpace(x.cfg.WebhookURL) == "" || strings.TrimSpace(userToken) == "" {
@@ -818,7 +845,7 @@ func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) er
 	var first error
 	for _, s := range subs {
 		if s.Tag != xSubTag || s.WebhookID != ours.ID || s.Filter.UserID != x.cfg.AccountRef ||
-			(s.EventType != xEventChat && s.EventType != xEventChatRemove) || strings.TrimSpace(s.ID) == "" {
+			(s.EventType != xEventChat && s.EventType != xEventChatRemove && !xIsActivityEvent(s.EventType)) || strings.TrimSpace(s.ID) == "" {
 			continue
 		}
 		if err := doJSON(ctx, x.cfg.HTTP, http.MethodDelete, x.cfg.APIBase+"/2/activity/subscriptions/"+url.PathEscape(s.ID),
@@ -862,6 +889,10 @@ func (x *XAdapter) deliver(sink Sink, ev xWebhookEvent) {
 		}
 		if json.Unmarshal(ev.Payload, &p) == nil {
 			retract(sink, strings.TrimSpace(p.MessageID))
+		}
+	case xEventFollow, xEventSubscribe, xEventBroadcastStart, xEventBroadcastEnd:
+		if act, ok := x.activityEvent(ev); ok {
+			emitActivity(sink, act)
 		}
 	}
 	x.seen.add(ev.UUID)

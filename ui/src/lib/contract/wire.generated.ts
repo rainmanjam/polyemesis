@@ -153,6 +153,17 @@ export const WIRE = {
     "minPinSeconds": 30,
     "maxPinSeconds": 1800
   },
+  "viewerNotes": {
+    "maxNote": 1000,
+    "maxTags": 10,
+    "maxTagLen": 32,
+    "presetTags": [
+      "regular",
+      "known troll",
+      "VIP",
+      "watch"
+    ]
+  },
   "overlay": {
     "fonts": [
       "sans",

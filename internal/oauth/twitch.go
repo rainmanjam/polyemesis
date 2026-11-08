@@ -102,9 +102,27 @@ func (t *Twitch) Scopes() []string {
 		"moderator:manage:suspicious_users", // suspicious-user flags
 		"channel:manage:moderators",         // add, remove and list moderators
 		"channel:manage:vips",               // add, remove and list VIPs
+		// Viewer activity (Twitch EventSub, internal/activityhub/twitch.go).
+		// Same ScopeVersion 6: v0.16.0 has not shipped it, so these join the
+		// set an account reconnects for once. Each is the read scope its
+		// EventSub subscription type names. Polls ride channel:manage:polls and
+		// shoutouts ride moderator:manage:shoutouts, both held above, because
+		// Twitch accepts either the read or the manage scope for those types.
+		"moderator:read:followers",   // channel.follow
+		"channel:read:subscriptions", // channel.subscribe, .subscription.message, .subscription.gift
+		"bits:read",                  // channel.cheer
+		"channel:read:redemptions",   // channel points redemptions
+		"channel:read:hype_train",    // channel.hype_train.*
+		"channel:read:predictions",   // channel.prediction.*
 	}
 }
 
+// ScopeVersion 6 also carries six read scopes for viewer activity over EventSub
+// (followers, subscriptions, bits, channel points, hype trains, predictions).
+// They joined version 6 rather than bumping again because v0.16.0, the release
+// that introduces version 6, has not shipped; once it has, a further scope is
+// version 7.
+//
 // ScopeVersion 6 adds twelve scopes for the channel tools (announcements,
 // shoutouts, Shield Mode, warnings, blocked terms, chatters, AutoMod, unban
 // requests, suspicious users, moderator and VIP management). Every connected
@@ -125,6 +143,15 @@ func (t *Twitch) Scopes() []string {
 // "reconnect to enable moderation" and an operator finding out when the delete
 // button fails on the message they needed gone.
 func (t *Twitch) ScopeVersion() int { return 6 }
+
+// ScopeUnlocks says what each bump gave an operator who reconnects, as UI i18n
+// keys, for the console's "reconnect to enable" banner. It lives beside
+// ScopeVersion so a bump updates both in one diff; TestEveryBumpedScopeVersionHasAnUnlockNote
+// fails when it does not. An empty value is an explicit "no banner for this
+// bump".
+func (t *Twitch) ScopeUnlocks() map[int]string {
+	return map[int]string{6: "reconnect.unlock.twitch6"}
+}
 
 // PKCE is on, and it is ADDITIVE: the flow stays a confidential client that
 // sends its client_secret on every token request, and the code_verifier rides

@@ -85,6 +85,7 @@ func TestRoutePolicyIsWhatWasRegistered(t *testing.T) {
 		"/api/v1/chat/settings",
 		"/api/v1/chat/twitch/{resource}",
 		"/api/v1/chat/users",
+		"/api/v1/chat/users/notes",
 		"/api/v1/clipper/jobs/{id}/download",
 		"/api/v1/clipper/recordings/{id}/highlights",
 		"/api/v1/clipper/recordings/{id}/keyframes",

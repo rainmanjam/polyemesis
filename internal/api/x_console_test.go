@@ -165,6 +165,53 @@ func TestTheGoLiveTitleCannotChangeWhileTheXBroadcastIsLive(t *testing.T) {
 	}
 }
 
+// TestTheXChatControlsAreRefusedAtSaveWhenInvalidAndCannotChangeWhileLive covers the PUT: a bad chat option is a
+// 400, a good one round-trips, and once the broadcast is live a change is a 409 because the PUBLISH already went.
+func TestTheXChatControlsAreRefusedAtSaveWhenInvalidAndCannotChangeWhileLive(t *testing.T) {
+	_, h, store, sign := engineServer(t, defaultTools(), Options{})
+	x, err := store.CreateDestination(&db.Destination{
+		Name: "x main", Kind: db.DestRTMP, Platform: db.PlatformX,
+		URL: "rtmps://a.live.x.com:443/x", StreamKey: "abc123", AudioBitrate: 160,
+	})
+	if err != nil {
+		t.Fatalf("create X destination: %v", err)
+	}
+	put := func(body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		r := jsonRequest(t, http.MethodPut, "/api/v1/destinations/"+strconv.FormatInt(x.ID, 10), body)
+		sign(r)
+		return do(t, h, r)
+	}
+	ctl := func(opt int, loc string) map[string]any {
+		return map[string]any{"compliance": map[string]any{"x": map[string]any{"chatOption": opt, "locale": loc}}}
+	}
+	if w := put(ctl(9, "en")); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "chat option") {
+		t.Fatalf("chat option 9: status %d %s, want 400 naming the chat option", w.Code, w.Body.String())
+	}
+	if w := put(ctl(3, "not a tag")); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad language: status %d, want 400", w.Code)
+	}
+	if w := put(ctl(3, "fr")); w.Code != http.StatusOK {
+		t.Fatalf("valid controls: status %d %s, want 200", w.Code, w.Body.String())
+	}
+	got, err := store.GetDestination(x.ID)
+	if err != nil || got.Compliance.X == nil || got.Compliance.X.ChatOption == nil || *got.Compliance.X.ChatOption != 3 || got.Compliance.X.Locale != "fr" {
+		t.Fatalf("stored = %+v, %v; want chat option 3 and fr", got.Compliance.X, err)
+	}
+	if _, err := store.UpdateLifecycle(x.ID, func(d *db.Destination) bool {
+		d.Lifecycle.BroadcastID, d.Lifecycle.Phase = "bc-1", phaseLive
+		return true
+	}); err != nil {
+		t.Fatalf("mark live: %v", err)
+	}
+	if w := put(ctl(2, "fr")); w.Code != http.StatusConflict {
+		t.Fatalf("change while live: status %d %s, want 409", w.Code, w.Body.String())
+	}
+	if w := put(map[string]any{"name": "x renamed"}); w.Code != http.StatusOK {
+		t.Fatalf("unrelated save while live: status %d %s, want 200", w.Code, w.Body.String())
+	}
+}
+
 // TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen: the console shows "needs X Livestream, which is switched off" while the gate
 // is closed, and it reads that from the guide rather than guessing, because only the server knows whether the
 // operator switched the gate on (POLYEMESIS_X_LIVESTREAM). Platforms without a gate carry no field.

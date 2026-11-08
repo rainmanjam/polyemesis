@@ -64,6 +64,8 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.compliance.madeForKids":     sPublic,
 	"destination.compliance.privacy":         sPublic,
 	// YouTube broadcast controls: latency, DVR, recording, captions. Settings.
+	"destination.compliance.x.chatOption":               sPublic, // who may chat on the X broadcast: a setting, not a secret
+	"destination.compliance.x.locale":                   sPublic, // the X broadcast language tag
 	"destination.compliance.youtube.closedCaptionsType": sPublic,
 	"destination.compliance.youtube.enableAutoStart":    sPublic,
 	"destination.compliance.youtube.enableAutoStop":     sPublic,

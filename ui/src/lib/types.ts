@@ -2344,6 +2344,12 @@ export interface PlatformAccount {
    *  against the running build's to spot a token issued before a permission
    *  was added. 0 means the row predates the field. */
   scopeVer: number;
+  /** The scope version this build asks for; the account is behind when
+   *  scopeVer is below it. Absent on an older server. */
+  currentScopeVersion?: number;
+  /** i18n keys for what the versions between scopeVer and currentScopeVersion
+   *  unlock, from the provider's ScopeUnlocks (internal/oauth/scopever.go). */
+  scopeUnlocks?: string[];
   createdAt: string;
   updatedAt: string;
   /** Whether this account still holds the permissions this build needs.
@@ -2900,6 +2906,31 @@ export interface TwitchShoutouts {
  *  own card cannot do. The cost is depth, which is why `truncated` and
  *  `retentionNote` exist and must be rendered: a moderator who reads a bounded
  *  window as a complete record judges a pattern from a sample. */
+/** The operator's private note about a viewer. Personal data: shown on the
+ *  card only, as text. */
+export interface ViewerNote {
+  platform: ChatPlatform;
+  account?: string;
+  authorId: string;
+  note: string;
+  tags: string[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** One tagged viewer in the chat list's lookup: tags only. */
+export interface ViewerTagSummary {
+  platform: ChatPlatform;
+  account?: string;
+  authorId: string;
+  tags: string[];
+}
+
+export interface ViewerTagList {
+  viewers: ViewerTagSummary[];
+  presetTags: string[];
+}
+
 export interface ChatUserCard {
   platform: ChatPlatform;
   authorId: string;
@@ -3133,6 +3164,21 @@ export interface Compliance {
   /** YouTube broadcast contentDetails controls. null clears the block (an
    *  update is decoded over the stored row, so undefined would keep it). */
   youtube?: YouTubeBroadcastControls | null;
+  /** X's chat access mode and broadcast language, sent when the X broadcast
+   *  goes live. null clears the block (an update is decoded over the stored
+   *  row). Only an X destination may hold it. Mirrors db.XBroadcastControls. */
+  x?: XBroadcastControls | null;
+}
+
+/** What an X go-live carries besides its title. Every field omitted means
+ *  "leave it out", so X applies its own. */
+export interface XBroadcastControls {
+  /** Who may chat: 1 chat off, 2 everyone, 3 verified accounts, 4 accounts
+   *  the broadcaster follows, 5 the broadcaster's subscribers, 6 accounts
+   *  followed by an account the broadcaster follows. 0 is X's own default. */
+  chatOption?: number;
+  /** The broadcast language tag, such as "en" or "pt-BR". */
+  locale?: string;
 }
 
 /** YouTube's liveBroadcasts contentDetails toggles, per destination. Every

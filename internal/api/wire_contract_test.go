@@ -114,6 +114,15 @@ type wireTwitchTools struct {
 	MaxPinSeconds   int `json:"maxPinSeconds"`
 }
 
+// wireViewerNotes are internal/db's limits on a viewer note and the preset tag
+// chips; the card checks them before it sends.
+type wireViewerNotes struct {
+	MaxNote    int      `json:"maxNote"`
+	MaxTags    int      `json:"maxTags"`
+	MaxTagLen  int      `json:"maxTagLen"`
+	PresetTags []string `json:"presetTags"`
+}
+
 type wireRange struct {
 	Min int `json:"min"`
 	Max int `json:"max"`
@@ -216,6 +225,7 @@ type wireContract struct {
 	Limits          wireLimits          `json:"limits"`
 	Polls           wirePolls           `json:"polls"`
 	TwitchTools     wireTwitchTools     `json:"twitchTools"`
+	ViewerNotes     wireViewerNotes     `json:"viewerNotes"`
 	Overlay         wireOverlay         `json:"overlay"`
 	Auth            wireAuth            `json:"auth"`
 	Captions        wireCaptions        `json:"captions"`
@@ -502,6 +512,10 @@ func buildWireContract(t *testing.T) wireContract {
 			MaxAnnouncement: chat.TwitchMaxAnnouncement, MaxWarning: chat.TwitchMaxWarning,
 			MinTerm: chat.TwitchMinTerm, MaxTerm: chat.TwitchMaxTerm,
 			MinPinSeconds: chat.TwitchMinPinSeconds, MaxPinSeconds: chat.TwitchMaxPinSeconds,
+		},
+		ViewerNotes: wireViewerNotes{
+			MaxNote: db.MaxViewerNoteLen, MaxTags: db.MaxViewerTags, MaxTagLen: db.MaxViewerTagLen,
+			PresetTags: db.ViewerPresetTags,
 		},
 		Overlay: wireOverlay{
 			Fonts:             mapKeys(t, "internal/overlay", "fonts"),

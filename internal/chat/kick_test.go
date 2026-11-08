@@ -680,12 +680,18 @@ type fakeKickEvents struct {
 	subs     []map[string]any
 	requests []string
 	posts    []map[string]any
+	actPosts []map[string]any
 	// postStatus/postBody override the POST answer; 0 means 200 and success.
 	postStatus int
 	postBody   string
 	getStatus  int
 	auth       []string
 	listEmpty  bool
+	// reject4xx: any POST naming one of these events is a 400 in Kick's words.
+	// refuse: a 200 whose item for the event carries this error (Kick's way of
+	// saying "not for this account").
+	reject4xx map[string]string
+	refuse    map[string]string
 }
 
 // forget drops our subscription but leaves an unrelated one in the listing:
@@ -744,7 +750,22 @@ func (f *fakeKickEvents) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		f.posts = append(f.posts, body)
+		// Chat and activity subscriptions are separate requests. Activity ones
+		// are logged as POST-ACT so the chat tests below keep counting what they
+		// always counted: how often CHAT was subscribed.
+		if evs, _ := body["events"].([]any); !postsChat(evs) {
+			f.requests[len(f.requests)-1] = "POST-ACT " + r.URL.Path
+			f.actPosts = append(f.actPosts, body)
+		} else {
+			f.posts = append(f.posts, body)
+		}
+		for _, e := range body["events"].([]any) {
+			if msg, bad := f.reject4xx[e.(map[string]any)["name"].(string)]; bad {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, `{"message":%q}`, msg)
+				return
+			}
+		}
 		if f.postStatus != 0 {
 			w.WriteHeader(f.postStatus)
 			fmt.Fprint(w, f.postBody)
@@ -758,6 +779,10 @@ func (f *fakeKickEvents) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var data []map[string]any
 		for i, e := range evs {
 			em := e.(map[string]any)
+			if msg, no := f.refuse[em["name"].(string)]; no {
+				data = append(data, map[string]any{"name": em["name"], "version": em["version"], "error": msg})
+				continue
+			}
 			f.subs = append(f.subs, map[string]any{
 				"id": fmt.Sprintf("sub-%d-%d", len(f.posts), i), "event": em["name"], "version": em["version"],
 				"method": "webhook", "broadcaster_user_id": 99, "app_id": "app",
@@ -768,6 +793,15 @@ func (f *fakeKickEvents) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func postsChat(evs []any) bool {
+	for _, e := range evs {
+		if m, ok := e.(map[string]any); ok && m["name"] == "chat.message.sent" {
+			return true
+		}
+	}
+	return false
 }
 
 // runKick starts the adapter's Run and returns a stop that waits for it.

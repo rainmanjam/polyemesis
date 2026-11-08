@@ -56,6 +56,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
@@ -179,6 +180,11 @@ type RumbleAdapter struct {
 	health Health
 	// noteUntil is when the dropped-messages note stops being shown.
 	noteUntil time.Time
+	// activityBlocks is which activity lists the last poll carried; see
+	// rumble_activity.go.
+	activityBlocks rumbleActivitySeen
+	// activityIgnored counts unusable activity entries; no payload is kept.
+	activityIgnored atomic.Int64
 }
 
 // NewRumble builds the adapter. A missing key is a named "not configured"
@@ -376,27 +382,53 @@ type rumbleLivestream struct {
 
 // rumbleResponse is the subset of get-data this adapter reads.
 //
-// The follower, subscriber and gifted-sub blocks are ignored: they are
-// alert-overlay material rather than chat, and decoding them would mean
-// modelling five more shapes for data nothing here renders.
+// The recent follower, subscriber and gifted-sub lists feed the activity
+// source (rumble_activity.go); the chat path ignores them.
 type rumbleResponse struct {
 	// MaxNumResults is the cap Rumble applies to recent chat, echoed back.
 	MaxNumResults int `json:"max_num_results"`
 	// Followers and Subscribers are the channel counts, pointers so that "not
-	// sent" stays distinct from zero. The recent lists are not decoded.
+	// sent" stays distinct from zero. The recent lists are decoded for activity only.
 	//
 	// AMBIGUITY: the payload also carries num_followers_total, and Rumble's
 	// article does not say how the two differ. num_followers may be a recent or
 	// windowed figure, in which case it understates the channel. Only
 	// num_followers is decoded; confirm against the channel page on the first
 	// live-account check, and switch (or decode both) if it is the smaller.
-	Followers struct {
-		Count *int `json:"num_followers"`
-	} `json:"followers"`
-	Subscribers struct {
-		Count *int `json:"num_subscribers"`
-	} `json:"subscribers"`
+	Followers   rumbleBlock        `json:"followers"`
+	Subscribers rumbleBlock        `json:"subscribers"`
+	GiftedSubs  rumbleBlock        `json:"gifted_subs"`
 	Livestreams []rumbleLivestream `json:"livestreams"`
+}
+
+// rumbleBlock is one of the followers / subscribers / gifted_subs containers.
+// It decodes leniently: a container of the wrong JSON type (PHP's json_encode
+// writes an empty associative array as []) or a wrong-typed field inside it
+// leaves the affected part zero and never fails the response, so activity
+// data can never cost the chat decode. Which fields apply depends on the block.
+type rumbleBlock struct {
+	Count  *int
+	Recent json.RawMessage
+}
+
+func (b *rumbleBlock) UnmarshalJSON(data []byte) error {
+	*b = rumbleBlock{}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	for _, k := range []string{"num_followers", "num_subscribers"} {
+		var n int
+		if raw, ok := m[k]; ok && json.Unmarshal(raw, &n) == nil {
+			b.Count = &n
+		}
+	}
+	for _, k := range []string{"recent_followers", "recent_subscribers", "recent_gifted_subs"} {
+		if raw, ok := m[k]; ok {
+			b.Recent = raw
+		}
+	}
+	return nil
 }
 
 // chatCap is the per-response chat cap in force for this response.
@@ -460,6 +492,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		prev  map[string]struct{}
 
 		failures int
+		acts     = newRumbleActivityState()
 	)
 
 	for ctx.Err() == nil {
@@ -482,6 +515,20 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		failures = 0
 
 		live, ok := liveStream(resp)
+		// Activity first, and before the offline branch: follows and
+		// subscriptions are channel-level and arrive with nothing live. The
+		// events leave through the activity door, never as chat.
+		var liveForActivity *rumbleLivestream
+		if ok {
+			liveForActivity = &live
+		} else {
+			acts.resetRants()
+		}
+		for _, ev := range r.observeActivity(acts, rumbleActivityLists{
+			followers: resp.Followers.Recent, subscribers: resp.Subscribers.Recent, gifted: resp.GiftedSubs.Recent,
+		}, liveForActivity) {
+			emitActivity(sink, ev)
+		}
 		if !ok {
 			r.setHealth(StateDegraded,
 				"waiting for a Rumble live stream to start; chat begins when it does")

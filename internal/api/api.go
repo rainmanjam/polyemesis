@@ -666,6 +666,13 @@ type Server struct {
 	activity      *activityhub.Hub
 	activityGate  *overlay.ActivityGate
 	activityTests activityTestLimiter
+	// mirroredPolls lists the native Twitch polls polyemesis created when it
+	// mirrored a chat poll, so the EventSub source does not report them a
+	// second time (D9). Its zero value is ready. polls.go, activity_wiring.go.
+	mirroredPolls activityhub.MirrorLedger
+	// twitchEventSub aims the EventSub source at a stub. A test seam: the zero
+	// value is Twitch itself.
+	twitchEventSub twitchEventSubSeam
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -1790,6 +1797,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The moderator's user card: what one person has said. Read from
 			// our own scrollback, because no platform publishes this.
 			api.Get(r, "/chat/users", s.handleChatUser, readDenied)
+			// The operator's private notes and tags about a viewer. Personal data:
+			// read-denied like the card itself, never published anywhere.
+			api.Get(r, "/chat/users/notes", s.handleViewerNoteGet, readDenied)
+			r.Put("/chat/users/notes", s.handleViewerNotePut)
+			r.Delete("/chat/users/notes", s.handleViewerNoteDelete)
 			// Automod's review list: what it flagged, for the Chat page's
 			// Flagged chip (UX Council A48). Content, so read-scope denied.
 			api.Get(r, "/chat/flags", s.handleChatFlags, readDenied)

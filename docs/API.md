@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-three `GET`s among the thirty-five refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-four `GET`s among the thirty-six refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirty-five routes are refused outright**, for three different reasons. Masking
+**Thirty-six routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last twenty-six are `403` because of what
+are `403` because of what they *do*. The last twenty-seven are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -166,6 +166,7 @@ are `403` because of what they *do*. The last twenty-six are `403` because of wh
 | `GET /chat/export` | the same scrollback, streamed for any window as JSON, CSV or NDJSON |
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
+| `GET /chat/users/notes` | the operator's private note and tags about a viewer: personal data, stored locally |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 | `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
 | `GET /chat/mutes` | the viewers the operator has muted on X, by user id and name, with when each timed mute ends |
@@ -1079,6 +1080,15 @@ guidance can be found for Instagram, LinkedIn, Dailymotion, Owncast and Rumble,
 whose destinations have `platform: "custom"`. It is advisory and gates nothing.
 A stored id the catalogue no longer has is ignored, never an error.
 
+**X chat access mode and broadcast language.** An X destination's `compliance.x` holds
+`{"chatOption": 0-6, "locale": "en"}`, both optional. They are sent with the go-live as `chat_option` (a JSON
+integer: 0 default, 1 chat off, 2 everyone, 3 verified accounts, 4 accounts the broadcaster follows, 5 the
+broadcaster's subscribers, 6 accounts followed by an account the broadcaster follows) and `locale` (a language
+tag such as `en` or `pt-BR`); an absent field is not sent, so X applies its own. A `chatOption` outside 0 to 6
+or a `locale` that is not a language tag is `400`. A change while the X broadcast is live is `409`, because the
+go-live has already carried them. A destination that is not X has the block removed on save, with a warning. Send `"compliance": {"x": null}` to clear it. It lives in the existing `compliance`
+JSON, so there is no new column.
+
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
@@ -1967,7 +1977,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
-| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/users/notes`, `/chat/flags` |
 | `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query. `/chat/moderators` answers `{moderators, appliesToAllBroadcasts}` for X, each moderator `{userId, username, name}`; for YouTube it answers `{moderators}` only, each `{id, channelId, displayName, ...}` (fields a platform does not use are left out) |
 | `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
@@ -2050,6 +2060,15 @@ scheduled broadcast in, because they disagree and the composer has to say so
 before you fill the form in rather than after.
 
 #### Moderation
+
+**Viewer notes.** `/chat/users/notes` keeps the operator's private note and tags
+about one viewer, keyed by platform, account and author id. They are personal
+data about people who chatted, so they are stored locally in the polyemesis
+database (the `viewer_notes` table, copied with every backup of the data
+directory), are admin-only, and `GET` is refused to a `read` token like
+`/chat/users`. They are never sent to a platform, an overlay, the event stream
+or a hook, and they are not removed when the chat retention window prunes the
+scrollback: only deleting the note (or saving it empty) removes it.
 
 `/chat/users` is the moderator's user card: what one person has said, newest
 last. It reads polyemesis's own retained scrollback, not the platform — **no**
@@ -2146,6 +2165,9 @@ segment reliably.
 | `DELETE /chat/moderators` | `platform`, `id` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
 | `GET /chat/users` | `platform`, `authorId` (both required), `account`, `limit` |
+| `GET /chat/users/notes` | `platform`, `authorId` (both required), `account`. Answers the viewer's `{platform, account, authorId, note, tags, updatedAt, updatedBy}`; a viewer with no note answers an empty one. With no `authorId` it lists the tagged viewers instead, `{viewers: [{platform, account, authorId, tags}], presetTags}`, tags only and never note text |
+| `PUT /chat/users/notes` | `platform`, `authorId` (both required), `account`; body `{note, tags}`. `note` is at most 1,000 characters, `tags` at most 10 of up to 32 characters each (over either is `400`). A note with no text and no tags is deleted |
+| `DELETE /chat/users/notes` | `platform`, `authorId` (both required), `account`. A missing note is success |
 | `GET /chat/flags` | `platform`, `limit` |
 | `GET /chat/messages` | `platform`, `limit` |
 | `GET /chat/search` | `q`, `platform`, `limit` |
