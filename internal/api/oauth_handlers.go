@@ -229,6 +229,12 @@ func scrubSecret(text, secret string) string {
 type accountView struct {
 	db.PlatformAccount
 	Reconnect oauth.ReconnectReason `json:"reconnect"`
+	// CurrentScopeVersion is the scope version this build asks for; the granted
+	// one is the embedded scopeVer. Additive, admin-only like the listing.
+	CurrentScopeVersion int `json:"currentScopeVersion,omitempty"`
+	// ScopeUnlocks are i18n keys naming what the versions between the two
+	// unlock, for the "reconnect to enable" banner. Empty when none.
+	ScopeUnlocks []string `json:"scopeUnlocks,omitempty"`
 	// Health is the last refresh's outcome and the token's own expiry, read
 	// per request (A5). See account_health.go.
 	Health AccountHealth `json:"health"`
@@ -261,6 +267,10 @@ func (s *Server) accountViewFor(a db.PlatformAccount, now time.Time) accountView
 		// accountHealthCache: see destsignals.go.
 		Health: s.accountHealthNow(a, now),
 		IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
+	}
+	if p, err := oauth.Get(a.Platform); err == nil {
+		v.CurrentScopeVersion = p.ScopeVersion()
+		v.ScopeUnlocks = oauth.ScopeUnlocksSince(p, a.ScopeVer)
 	}
 	// The platform itself said this token is dead (Twitch's hourly validation):
 	// that is a reconnect, whatever the stored scopes say.

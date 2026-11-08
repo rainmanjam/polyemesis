@@ -4307,5 +4307,11 @@
   "xmod.loadFailed": "Não foi possível ler isto do X: {reason}",
   "xmod.refresh": "Atualizar",
   "xmod.idInvalid": "Um ID de usuário do X tem apenas dígitos.",
-  "xmod.unverified": "Criado a partir da documentação do X e ainda não testado em uma conta real."
+  "xmod.unverified": "Criado a partir da documentação do X e ainda não testado em uma conta real.",
+  "reconnect.banner.line": "{platform}: reconecte para ativar {unlocks}",
+  "reconnect.banner.action": "Reconectar",
+  "reconnect.banner.actionAria": "Reconectar {platform}",
+  "reconnect.banner.dismissAria": "Dispensar o aviso de reconexão de {platform}",
+  "reconnect.unlock.twitch6": "ferramentas de moderação, Modo Escudo, mods e VIPs, AutoMod e alertas ao vivo",
+  "reconnect.unlock.x2": "alertas de seguidores e inscrições, e a publicação de clipes"
 }

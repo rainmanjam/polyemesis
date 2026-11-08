@@ -7,6 +7,7 @@ import { StatusReason } from "@/components/signature/StatusReason";
 import { useMotionTransition } from "@/lib/motion";
 import { NavLink, Outlet, useLocation } from "react-router";
 
+import { ReconnectBanner } from "./ReconnectBanner";
 import { UpdateBanner } from "./UpdateBanner";
 import { VersionTag } from "./VersionTag";
 
@@ -255,6 +256,9 @@ export function AppLayout({
           status bar would hide the one thing an operator mid-broadcast is
           watching. See components/Tour.tsx. */}
       <TourOffer />
+      {/* Accounts granted under an older scope version, with what a reconnect
+          unlocks. Same placement as the strips above, for the same reason. */}
+      <ReconnectBanner />
 
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-background px-3 sm:gap-3">
         {/* Icon-only, and one of the two places in the shell where that is the

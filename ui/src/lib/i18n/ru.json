@@ -4307,5 +4307,11 @@
   "xmod.loadFailed": "Не удалось прочитать это из X: {reason}",
   "xmod.refresh": "Обновить",
   "xmod.idInvalid": "ID пользователя X состоит только из цифр.",
-  "xmod.unverified": "Создано по документации X и ещё не проверено на настоящем аккаунте."
+  "xmod.unverified": "Создано по документации X и ещё не проверено на настоящем аккаунте.",
+  "reconnect.banner.line": "{platform}: переподключите, чтобы включить: {unlocks}",
+  "reconnect.banner.action": "Переподключить",
+  "reconnect.banner.actionAria": "Переподключить {platform}",
+  "reconnect.banner.dismissAria": "Скрыть уведомление о переподключении {platform}",
+  "reconnect.unlock.twitch6": "инструменты модерации, режим Shield, модераторов и VIP, AutoMod и оповещения в прямом эфире",
+  "reconnect.unlock.x2": "оповещения о подписчиках и подписках, а также публикацию клипов"
 }

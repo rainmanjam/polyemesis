@@ -4307,5 +4307,11 @@
   "xmod.loadFailed": "Tidak dapat membaca ini dari X: {reason}",
   "xmod.refresh": "Segarkan",
   "xmod.idInvalid": "ID pengguna X hanya berisi angka.",
-  "xmod.unverified": "Dibuat dari dokumentasi X dan belum dijalankan pada akun sungguhan."
+  "xmod.unverified": "Dibuat dari dokumentasi X dan belum dijalankan pada akun sungguhan.",
+  "reconnect.banner.line": "{platform}: sambungkan ulang untuk mengaktifkan {unlocks}",
+  "reconnect.banner.action": "Sambungkan ulang",
+  "reconnect.banner.actionAria": "Sambungkan ulang {platform}",
+  "reconnect.banner.dismissAria": "Tutup pemberitahuan sambung ulang {platform}",
+  "reconnect.unlock.twitch6": "alat moderasi, Shield Mode, mod dan VIP, AutoMod, dan notifikasi langsung",
+  "reconnect.unlock.x2": "notifikasi follow dan langganan, serta posting klip"
 }

@@ -10,6 +10,10 @@ its first tagged release.
 
 ### Added
 
+- **"Reconnect to enable" banner.** When a connected Twitch (version 5 to 6) or X (1 to 2) account was
+  granted under an older scope version, the console names the platform and what a reconnect unlocks,
+  with a one-click Reconnect; dismissible per account and version. `GET /api/v1/platforms/accounts`
+  gains `currentScopeVersion` and `scopeUnlocks` (additive).
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
   A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
   overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and

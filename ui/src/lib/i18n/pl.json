@@ -4307,5 +4307,11 @@
   "xmod.loadFailed": "Nie udało się odczytać tego z X: {reason}",
   "xmod.refresh": "Odśwież",
   "xmod.idInvalid": "Identyfikator użytkownika X składa się tylko z cyfr.",
-  "xmod.unverified": "Zbudowane na podstawie dokumentacji X i jeszcze nie wypróbowane na prawdziwym koncie."
+  "xmod.unverified": "Zbudowane na podstawie dokumentacji X i jeszcze nie wypróbowane na prawdziwym koncie.",
+  "reconnect.banner.line": "{platform}: połącz ponownie, aby włączyć: {unlocks}",
+  "reconnect.banner.action": "Połącz ponownie",
+  "reconnect.banner.actionAria": "Połącz ponownie {platform}",
+  "reconnect.banner.dismissAria": "Zamknij powiadomienie o ponownym połączeniu {platform}",
+  "reconnect.unlock.twitch6": "narzędzia moderacji, tryb Shield, moderatorów i VIP-ów, AutoMod oraz alerty na żywo",
+  "reconnect.unlock.x2": "alerty o obserwujących i subskrypcjach oraz publikowanie klipów"
 }

@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -113,13 +114,46 @@ func missingScopes(granted string, want []string) []string {
 	return missing
 }
 
+// ScopeNoter is implemented by providers that say what a ScopeVersion bump
+// unlocks, as UI i18n keys, so the console can name it in a "reconnect to
+// enable" banner. The map sits next to the provider's ScopeVersion on purpose:
+// a bump without a note fails TestEveryBumpedScopeVersionHasAnUnlockNote. An
+// empty value is an explicit "no banner for this bump".
+type ScopeNoter interface {
+	ScopeUnlocks() map[int]string
+}
+
+// ScopeUnlocksSince lists the i18n keys for every bump between the version an
+// account was granted under and the provider's current one, oldest first.
+// A granted version of 0 (a row from before the column) yields none: that row
+// is judged on its scopes and is told to reconnect in Settings.
+func ScopeUnlocksSince(p Provider, granted int) []string {
+	n, ok := p.(ScopeNoter)
+	if !ok || granted <= 0 {
+		return nil
+	}
+	notes := n.ScopeUnlocks()
+	var vers []int
+	for v, key := range notes {
+		if key != "" && v > granted && v <= p.ScopeVersion() {
+			vers = append(vers, v)
+		}
+	}
+	sort.Ints(vers)
+	out := make([]string, 0, len(vers))
+	for _, v := range vers {
+		out = append(out, notes[v])
+	}
+	return out
+}
+
 // reconnectScope says what a reconnect is for, where it is for one thing only.
 // X's scope version 2 added the two permissions that post clips; livestream and
 // chat work on the older grant, and a livestream-only operator should not read
 // the prompt as a fault.
 func reconnectScope(p db.Platform) string {
 	if p == db.PlatformX {
-		return " Reconnecting only matters for posting clips to X; livestreaming and chat are unaffected."
+		return " Reconnecting only matters for posting clips and follow/subscription alerts on X; livestreaming and chat are unaffected."
 	}
 	return ""
 }
