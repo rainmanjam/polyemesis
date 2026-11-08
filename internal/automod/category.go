@@ -50,6 +50,24 @@ const (
 	// CategoryFlood is the history checker: rate, repetition, shouting,
 	// mention spam. Also not offered to the model.
 	CategoryFlood Category = "flood"
+	// CategoryDoxxing is personal information shared about someone: a phone
+	// number, an email address, an IP address. Pack checker only.
+	CategoryDoxxing Category = "doxxing"
+	// CategoryScam is a lure or a phishing shape: giveaway and crypto bait,
+	// fake platform support, shortened and lookalike links. Pack checker only.
+	// The model's "spam" maps to it, but the two stay distinct so a pack ladder
+	// can be armed without arming the model's.
+	CategoryScam Category = "scam"
+	// CategoryImpersonation is an account named to pass for a protected one.
+	// Pack checker only, and held, never acted on: the name might be a fan's.
+	CategoryImpersonation Category = "impersonation"
+	// CategorySelfHarm is a message expressing intent or a wish to self-harm.
+	// Offered to the model only on installs with protection on (spec D14), and
+	// never above a hold.
+	CategorySelfHarm Category = "self_harm"
+	// CategoryRaid is the same text from many accounts at once. Pack checker
+	// only; its own category so a ladder can be armed for it separately.
+	CategoryRaid Category = "raid"
 )
 
 // AllCategories is every Category declared above, in declaration order.
@@ -64,6 +82,7 @@ func AllCategories() []Category {
 		CategoryHarassment, CategoryHateSpeech, CategoryThreat,
 		CategorySexualContent, CategorySpam, CategoryOther,
 		CategoryFilterMatch, CategoryFlood,
+		CategoryDoxxing, CategoryScam, CategoryImpersonation, CategorySelfHarm, CategoryRaid,
 	}
 }
 
@@ -96,6 +115,11 @@ var categoryReasons = map[Category]string{
 	CategoryOther:         "Automated moderation: chat rules.",
 	CategoryFilterMatch:   "Automated moderation: matched a chat filter.",
 	CategoryFlood:         "Automated moderation: flooding or repetition.",
+	CategoryDoxxing:       "Automated moderation: sharing personal information.",
+	CategoryScam:          "Automated moderation: scam or phishing.",
+	CategoryImpersonation: "Automated moderation: impersonation.",
+	CategorySelfHarm:      "Automated moderation: self-harm.",
+	CategoryRaid:          "Automated moderation: coordinated flooding.",
 }
 
 // unclassifiedReason covers the zero Category, so a Finding built by a future

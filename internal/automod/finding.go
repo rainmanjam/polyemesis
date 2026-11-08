@@ -57,6 +57,11 @@ type Finding struct {
 	// the message, nothing goes to a platform -- so it needs no matrix cell and
 	// no capability row. See Engine.decide for the two switches that bound it.
 	Hold bool `json:"hold,omitempty"`
+	// Detector names which detector inside a checker fired, for a policy that
+	// differs per detector: history's "repeats" and "caps", the pack checker's
+	// group ("doxxing/phone"). Empty for the rules and model checkers. Display
+	// and policy only; nothing acts on it.
+	Detector string `json:"detector,omitempty"`
 }
 
 // PlatformReason is the only text this package will let out to a third party.

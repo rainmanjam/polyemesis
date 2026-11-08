@@ -2,6 +2,7 @@ package automod
 
 import (
 	"context"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -17,6 +18,11 @@ type Engine struct {
 	model   *Chain
 	matrix  Matrix
 	caps    Capabilities
+	// protection is the recommended-protection pack, nil unless an install has
+	// it on. Set by WithProtection after New, so New's signature (and every
+	// caller of it) is unchanged.
+	protection *Protection
+	now        func() time.Time
 }
 
 // New returns an engine. Any checker may be nil, and a nil one simply
@@ -38,7 +44,34 @@ func New(matrix Matrix, caps Capabilities, rules *RuleSet, history *History, mod
 	default:
 		chain = NewChain(m, nil)
 	}
-	return &Engine{rules: rules, history: history, model: chain, matrix: matrix, caps: caps}
+	return &Engine{rules: rules, history: history, model: chain, matrix: matrix, caps: caps, now: time.Now}
+}
+
+// WithProtection attaches the recommended-protection pack and returns the
+// engine. A nil p leaves the engine as it was. Call it before the engine is
+// shared: it is not synchronised with CheckFast.
+func (e *Engine) WithProtection(p *Protection) *Engine {
+	if e != nil {
+		e.protection = p
+	}
+	return e
+}
+
+// Protection returns the attached pack, or nil.
+func (e *Engine) Protection() *Protection {
+	if e == nil {
+		return nil
+	}
+	return e.protection
+}
+
+// LearnProtectedName tells the pack about a broadcaster or moderator name, so a
+// look-alike account is caught. Called by internal/chat for messages that are
+// otherwise exempt from automod. A no-op without the pack.
+func (e *Engine) LearnProtectedName(name string) {
+	if e != nil {
+		e.protection.LearnProtectedName(name)
+	}
 }
 
 // Subject is everything the fast checkers are told about one message.
@@ -70,7 +103,9 @@ func (e *Engine) CheckFast(p db.Platform, s Subject) Verdict {
 	}
 	var findings []Finding
 	findings = append(findings, e.rules.Check(s.Text)...)
-	findings = append(findings, e.history.Observe(p, s.AuthorID, s.Text)...)
+	hist := e.protection.markHistory(e.history.Observe(p, s.AuthorID, s.Text))
+	findings = append(findings, hist...)
+	findings = append(findings, e.protection.check(p, s, e.now(), hist)...)
 	return e.decide(p, sortByConsequence(findings))
 }
 
@@ -83,7 +118,8 @@ func (e *Engine) CheckText(p db.Platform, text string) Verdict {
 	}
 	var findings []Finding
 	findings = append(findings, e.rules.Check(text)...)
-	findings = append(findings, e.history.CheckText(text)...)
+	findings = append(findings, e.protection.markHistory(e.history.CheckText(text))...)
+	findings = append(findings, e.protection.checkText(p, text)...)
 	return e.decide(p, sortByConsequence(findings))
 }
 

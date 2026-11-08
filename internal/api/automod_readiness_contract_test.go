@@ -42,6 +42,7 @@ var automodReasonCodes = map[string]string{
 	"no enabled rule is written":        "noRules",
 	"the model checker is switched off": "modelOff",
 	"the model checker has no endpoint": "modelNoEndpoint",
+	"recommended protection is not on":  "protectionOff",
 }
 
 func TestAutomodReadinessContract(t *testing.T) {
@@ -60,6 +61,7 @@ func TestAutomodReadinessContract(t *testing.T) {
 		{"both on, neither has an endpoint", "model", `{"model":{"enabled":true,"endpoint":""},"secondary":{"enabled":true,"endpoint":""}}`},
 		{"primary has none, the fallback has one", "model", `{"model":{"enabled":true,"endpoint":""},"secondary":{"enabled":true,"endpoint":"https://s.example/v1"}}`},
 		{"history is always built", "history", `{}`},
+		{"the pack is not switched on yet", "protection", `{}`},
 	}
 
 	var out []automodReadinessCase

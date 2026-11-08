@@ -1505,6 +1505,7 @@ partial file behind.
 | `GET` | `/automod/matrix` |
 | `GET` | `/automod/stats` |
 | `POST` | `/automod/test` |
+| `POST` | `/automod/explain` |
 
 Automod's *configuration* lives inside `/settings` — the matrix, the rules and
 the model options all round-trip through that blob. Only a few things need
@@ -1522,6 +1523,17 @@ to drift.
 the ceiling, failures, and the last error. The top-level numbers are the
 primary model checker's; `primary` and `secondary` carry each checker's own,
 with `fallbacks`, `failedOpen` and `lastDecidedBy` beside them.
+
+`POST /automod/explain` is the test box for the recommended-protection pack:
+`{text, authorName?, platform?, protect?, emoteCount?}` returns each detector
+that fired (`detector`, `category`, `tier`, `form`, `reason`, `hold`, `action`,
+`act`), whether the message would be held off the overlay, and the detectors that
+depend on what the author sent recently and so cannot be answered for one message
+(`windowed`). **Offline and stateless**: it records nothing in any window, makes
+no network call and logs no text, and a detection names its detector, never the
+matched value. `text` is bounded at 2,000 characters; `protect` names accounts to
+treat as protected for this one test. It is a read-denied POST, like any POST a
+read-scoped token does not get.
 
 `POST /automod/test` is the Test button. It sends three synthetic messages to
 the connection in the body (`checker`, `protocol`, `preset`, `endpoint`,

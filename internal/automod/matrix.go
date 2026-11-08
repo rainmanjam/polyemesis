@@ -64,12 +64,17 @@ const (
 	CheckerRules Checker = "rules"
 	// CheckerHistory is deterministic too, over a sequence from one author.
 	CheckerHistory Checker = "history"
+	// CheckerProtection is the recommended-protection pack: a compiled term
+	// list and detector set (internal/automod/pack). Deterministic, and its own
+	// column so arming "Twitch / ban" for the pack never arms the operator's
+	// regex rules. Absent cells are off, so an existing install has none.
+	CheckerProtection Checker = "protection"
 	// CheckerModel is an external model. Probabilistic, and cannot be replayed.
 	CheckerModel Checker = "model"
 )
 
 // Checkers is every checker, cheapest first.
-var Checkers = []Checker{CheckerRules, CheckerHistory, CheckerModel}
+var Checkers = []Checker{CheckerRules, CheckerHistory, CheckerProtection, CheckerModel}
 
 // Platforms is every platform automod lists: the registry rows that carry a
 // Moderation profile. Rumble is listed with every upstream action unavailable

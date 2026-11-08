@@ -25,6 +25,7 @@ turning it off costs you enforcement and not visibility.
 |---|---|---|
 | **Rules** | your regexes, each with its own action | free, in-process |
 | **History** | rate, repeats, links, mentions, capitals over a window | free, in-process |
+| **Protection** | the recommended-protection pack: hate terms, doxxing, scams, impersonation, floods, raids | free, in-process |
 | **Model** | one message, when the other two could not settle it | an API call |
 
 Rules and history run on the messages already arriving for the chat pane.
@@ -166,6 +167,52 @@ the same as in every other section, rather than accepted and ignored.
 
 Because `maxRepeats` compares the **normalised** text, a spammer varying case,
 padding or doubled letters still trips it.
+
+Two limits to know. The history checker is **per author and per platform**: one
+person with an account on Twitch and another on YouTube is two authors, because
+there is no reliable link between the accounts, so a spammer who alternates
+platforms is counted on each separately. And `maxRepeats` counts exact repeats
+only. Near-copies ("buy now 1", "buy now 2") and the same text from many
+different accounts are the job of the protection pack, below.
+
+## The recommended-protection pack
+
+A compiled term list and a set of detectors, in `internal/automod/pack`, that
+run in their own **Protection** column of the matrix so that arming an action
+for the pack never arms your own regex rules. A hit is **flagged in the console
+and can be held off every overlay**; it asks for no platform action, and the
+matrix is still the only thing that can permit one. This release builds the
+pack, its tests and the test box. **Nothing turns it on yet**: no setting
+enables it, an install keeps behaving exactly as before, and a matrix cell for
+the Protection column is refused on save ("recommended protection is not on")
+until the settings that switch it on arrive.
+
+| Detector | What it catches | Held off the overlay |
+|---|---|---|
+| Hate terms, severe | slurs whose meaning does not depend on context. Whole-token match on a normalised form (confusables, leetspeak, zero-width characters, letter-spacing, stretched letters) | yes |
+| Hate terms, contextual | reclaimable or ambiguous terms; flagged only | no |
+| Doxxing | phone numbers, email addresses (also `name [at] host [dot] com`), IPv4 and IPv6 addresses. A street address detector exists and ships off. Private, loopback and documentation address ranges are never reported, and neither are version strings, scores, dates and times | yes |
+| Scams | giveaway and crypto lures, check-my-bio pitches, fake platform support, URL shorteners, lookalike domains | yes |
+| Impersonation | an author name that folds onto the broadcaster's or a moderator's (look-alike letters, `_official`, `tv`, a digit suffix), or is one edit away while the message carries a link or handle | yes |
+| Floods | zalgo text, one character repeated, mass mentions, too many links | yes |
+| Floods, flag only | emote walls, shouting, near-duplicate repeats | no |
+| Raid | five or more different accounts, on any platform, posting the same or near-same text (at least 12 characters) within 20 seconds | yes |
+
+A finding names its detector and never the matched value, because a finding's
+reason is written to the server log and the value of a doxxing hit is the thing
+being kept out of it.
+
+Near-duplicate repeats count a message as a repeat of an earlier one by the same
+author when most of their words match (a Jaccard overlap of 0.8) or when they
+are the same once digits are removed, still over `maxRepeats` in the window.
+Raids are counted by text, not by author, and a chant such as `F` or `GG`, an
+emote-only line, a command like `!play` and anything a moderator or the
+broadcaster says never counts. The tracker is bounded (a fixed number of
+distinct texts and of accounts per text), so a raid cannot grow it without
+limit, and it survives a settings save.
+
+The test box is `POST /automod/explain` (see below). It runs the pack and your
+rules on text you type and leaves no trace.
 
 ### A timeout of zero is a permanent ban
 
@@ -386,6 +433,7 @@ on their own:
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
 | `GET` | `/automod/stats` | what the checkers have done |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
+| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |
 
 Keys are write-only: `automod.model.hasApiKey` and

@@ -205,7 +205,7 @@ func TestOverridesApplyAndStaleKeysFail(t *testing.T) {
 
 	// A drop removes the term; a key that matches nothing is an error, so an
 	// override can't go stale silently when a pin moves.
-	out, _, err := generate(".", write("drop: ["+term+"]\n"))
+	out, _, err := generate(".", write("drop: ["+term+"]\ndropExcept: {spic: [spicks]}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +217,7 @@ func TestOverridesApplyAndStaleKeysFail(t *testing.T) {
 		"drop: [zzzz qqqq]\n",
 		"tier: {zzzz qqqq: severe}\n",
 		"except: {zzzz qqqq: [zzzzqqqqs]}\n",
+		"dropExcept: {zzzz qqqq: [zzzzqqqqs]}\n",
 		"unknown_key: 1\n",
 	} {
 		if _, _, err := generate(".", write(body)); err == nil {

@@ -41,6 +41,7 @@ export const ACTION_KEYS: Record<AutomodAction, TranslationKey> = {
 export const CHECKER_KEYS: Record<AutomodChecker, TranslationKey> = {
   rules: "automod.checkerRules",
   history: "automod.checkerHistory",
+  protection: "automod.checkerProtection",
   model: "automod.checkerModel",
 };
 
@@ -95,6 +96,11 @@ export function checkerReady(
       return { ready: false, reason: "automod.modelNoEndpoint" };
     }
     return READY;
+  }
+  if (checker === "protection") {
+    // The server builds no pack checker until the pack can be switched on, so
+    // the column has nothing behind it yet (checkerConfigured, internal/api).
+    return { ready: false, reason: "automod.protectionOff" };
   }
   // History is built from DefaultHistoryLimits on every save, so it is never
   // nil and never unconfigured. A checker this build does not know is left

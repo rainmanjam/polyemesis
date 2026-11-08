@@ -32,6 +32,13 @@ type Moderator interface {
 	ModelStats() automod.ModelStats
 }
 
+// nameLearner is the optional half of a Moderator that wants to hear about the
+// broadcaster's and moderators' names. A separate interface, found by type
+// assertion, so adding it changes no fake of Moderator.
+type nameLearner interface {
+	LearnProtectedName(name string)
+}
+
 // automodQueueDepth bounds the pending action queue.
 //
 // Bounded, and it DROPS when full rather than blocking. Blocking would put a
@@ -141,6 +148,15 @@ func (h *Hub) checkAutomod(m Message) {
 		// No automod, or a message automod does not judge (the operator's own,
 		// the broadcaster's, a moderator's): nothing will act on it, so
 		// nothing need be waited for.
+		//
+		// But this is where the broadcaster and moderators are SEEN: an
+		// account named like one of them is an impostor, and these are the only
+		// messages that say who they are.
+		if s != nil && (m.Author.Broadcaster || m.Author.Moderator) && m.Author.Name != "" {
+			if l, ok := s.mod.(nameLearner); ok {
+				l.LearnProtectedName(m.Author.Name)
+			}
+		}
 		h.offerDisplay(m, DisplayClear)
 		return
 	}

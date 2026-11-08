@@ -181,6 +181,13 @@
       "settings": {},
       "checker": "history",
       "ready": true
+    },
+    {
+      "name": "the pack is not switched on yet",
+      "settings": {},
+      "checker": "protection",
+      "ready": false,
+      "reason": "protectionOff"
     }
   ]
 }

@@ -797,7 +797,10 @@ def gen_impersonation():
                      author=nm, platform=p["platform"], detector="fold", obf=kind if kind == "homoglyph" else "", protects=p["name"], esc=(kind == "homoglyph"))
             n_pos += ok
     # edit distance 1 with a link, handle or scam hit -> hold
-    links = ["https://nitro-gift.example/claim", "https://bit.ly/demo11", "@free_robux_team", "free nitro giveaway at https://example.com/x"]
+    # The signals are neutral on purpose: the scorer counts a line once, in its own
+    # group, so a signal that a scam detector also flags would score as a scam
+    # false positive. The scam-hit arm is covered in checker_test.go instead.
+    links = ["https://example.com/x", "https://example.org/join", "@dusk_runner", "https://example.net/live"]
     for j, p in enumerate(PROTECTED):
         nm = p["name"]
         if len(nm.replace(" ", "")) < 6:
@@ -810,7 +813,7 @@ def gen_impersonation():
             if mutated.lower() == nm.lower():
                 continue
             text = "hey it's me, join " + links[(j + k) % len(links)]
-            add(MAIN, text, "impersonation", "hold", "edit distance 1 from a protected name plus a link, handle or scam hit", "positive", "impersonation",
+            add(MAIN, text, "impersonation", "hold", "edit distance 1 from a protected name plus a link or handle", "positive", "impersonation",
                 author=mutated, platform=p["platform"], detector="edit1", protects=nm)
             # same name, no link: must pass
             add(MAIN, benign_msgs[(j + k) % len(benign_msgs)], "impersonation", "pass", "edit distance 1 but no link, handle or scam hit: a fan, not an impersonator",

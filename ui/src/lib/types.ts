@@ -3757,7 +3757,7 @@ export type AutomodAction =
   | "timeout"
   | "ban";
 
-export type AutomodChecker = "rules" | "history" | "model";
+export type AutomodChecker = "rules" | "history" | "protection" | "model";
 
 /** One switch, plus whether the platform can do it at all.
  *

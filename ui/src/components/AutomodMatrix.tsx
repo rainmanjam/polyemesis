@@ -77,7 +77,12 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
 
   const refresh = useCallback(async () => {
     try {
-      setView(await api.automodMatrix());
+      const v = await api.automodMatrix();
+      // The protection column is not a grid of switches: the pack is armed one
+      // rung at a time on its own card, and its cells ride in `cells` for that
+      // card. Dropped from the columns here so the table draws what it always
+      // has.
+      setView({ ...v, checkers: v.checkers.filter((c) => c !== "protection") });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }

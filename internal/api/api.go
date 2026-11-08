@@ -1467,6 +1467,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// process, so no API token -- admin or not -- may drive it
 			// without a human present. keyMayGoTo bounds where the key goes;
 			// this bounds who can make it go.
+			// The test box for the pack. Offline and stateless, so it has no
+			// need of a session, but it is a POST a read-scoped token does not
+			// get: the default policy, since it answers from the operator's
+			// own rules.
+			r.Post("/automod/explain", s.handleAutomodExplain)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
 				r.Post("/automod/test", s.handleAutomodTest)

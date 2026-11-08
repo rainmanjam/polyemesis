@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/automod/pack"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -64,6 +66,76 @@ func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
 		"presets":         automod.Presets(),
 		"modelCategories": automod.ModelCategories(),
 	})
+}
+
+// explainMaxRunes bounds the pretend message. Chat messages are far shorter; the
+// bound keeps a request from spending a long regex pass on a megabyte.
+const explainMaxRunes = 2000
+
+// handleAutomodExplain is the test box: what would the checkers say about this
+// pretend message?
+//
+// OFFLINE, STATELESS, UNLOGGED. It builds a fresh engine from the stored rules,
+// history limits and matrix, runs the pack and RuleSet.Check on the text, and
+// returns. It never calls History.Observe, a windowed detector or a strike
+// counter (all of which mutate per-author state), never makes a network call,
+// and the text appears in no log line and in no response field: a detection
+// names its detector and never the matched value. It is a different route from
+// /automod/test on purpose, which sends canned text to a model provider.
+func (s *Server) handleAutomodExplain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text       string   `json:"text"`
+		AuthorName string   `json:"authorName"`
+		Platform   string   `json:"platform"`
+		Protect    []string `json:"protect"`
+		EmoteCount int      `json:"emoteCount"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if utf8.RuneCountInString(req.Text) > explainMaxRunes {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("text is over %d characters", explainMaxRunes))
+		return
+	}
+	plat := db.Platform(strings.ToLower(strings.TrimSpace(req.Platform)))
+	if plat == "" {
+		plat = db.PlatformTwitch
+	}
+	if !automod.KnownPlatform(plat) {
+		writeError(w, http.StatusBadRequest, "platform is not one automod moderates")
+		return
+	}
+	if len(req.Protect) > 50 {
+		writeError(w, http.StatusBadRequest, "at most 50 protected names")
+		return
+	}
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	a := settings.Automod
+	rules, err := rulesFromSettings(a)
+	if err != nil {
+		// A rule that does not compile is the operator's to fix elsewhere; the
+		// test box still explains everything else.
+		rules = nil
+	}
+	hl := historyFromSettings(a)
+	prot, err := automod.NewProtection(automod.ProtectionConfig{
+		Pack:    pack.Config{Names: pack.NewNameSet(req.Protect), Reserved: pack.DefaultReservedPolicy()},
+		History: &hl,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the protection pack did not load")
+		return
+	}
+	// No windowed trackers are passed: nothing here remembers.
+	engine := automod.New(matrixFromSettings(a), automod.PlatformCaps{}, rules, automod.NewHistory(hl), nil).
+		WithProtection(prot)
+	writeJSON(w, http.StatusOK, engine.Explain(plat, automod.Subject{
+		AuthorName: req.AuthorName, Text: req.Text, EmoteCount: req.EmoteCount,
+	}))
 }
 
 // handleAutomodStats reports model spend and health.
@@ -338,6 +410,12 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 			}
 		}
 		return false, "the model checker has no endpoint"
+	case automod.CheckerProtection:
+		// The pack has no settings to switch it on yet, so the engine
+		// ApplyAutomod builds carries none: a cell armed for it would be stored
+		// and never fire, then go live the day the pack is turned on. Refusing
+		// the arm is the same rule the model and rules columns follow.
+		return false, "recommended protection is not on"
 	}
 	// History is built from DefaultHistoryLimits on every save and is never
 	// nil. A checker this build does not know is dropped by matrixFromSettings
