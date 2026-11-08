@@ -144,6 +144,15 @@ func (t *Twitch) Scopes() []string {
 // button fails on the message they needed gone.
 func (t *Twitch) ScopeVersion() int { return 6 }
 
+// ScopeUnlocks says what each bump gave an operator who reconnects, as UI i18n
+// keys, for the console's "reconnect to enable" banner. It lives beside
+// ScopeVersion so a bump updates both in one diff; TestEveryBumpedScopeVersionHasAnUnlockNote
+// fails when it does not. An empty value is an explicit "no banner for this
+// bump".
+func (t *Twitch) ScopeUnlocks() map[int]string {
+	return map[int]string{6: "reconnect.unlock.twitch6"}
+}
+
 // PKCE is on, and it is ADDITIVE: the flow stays a confidential client that
 // sends its client_secret on every token request, and the code_verifier rides
 // alongside it.

@@ -4318,5 +4318,11 @@
   "xmod.loadFailed": "无法从 X 读取此内容：{reason}",
   "xmod.refresh": "刷新",
   "xmod.idInvalid": "X 用户 ID 只包含数字。",
-  "xmod.unverified": "根据 X 的文档构建，尚未在真实账号上运行过。"
+  "xmod.unverified": "根据 X 的文档构建，尚未在真实账号上运行过。",
+  "reconnect.banner.line": "{platform}：重新连接即可启用{unlocks}",
+  "reconnect.banner.action": "重新连接",
+  "reconnect.banner.actionAria": "重新连接 {platform}",
+  "reconnect.banner.dismissAria": "关闭 {platform} 的重新连接提示",
+  "reconnect.unlock.twitch6": "审核工具、护盾模式、管理员和 VIP、AutoMod 以及直播提醒",
+  "reconnect.unlock.x2": "关注和订阅提醒，以及发布剪辑"
 }

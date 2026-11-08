@@ -4318,5 +4318,11 @@
   "xmod.loadFailed": "X からこれを読み込めませんでした: {reason}",
   "xmod.refresh": "更新",
   "xmod.idInvalid": "X のユーザー ID は数字のみです。",
-  "xmod.unverified": "X のドキュメントに基づいて作成しており、実際のアカウントではまだ動作確認していません。"
+  "xmod.unverified": "X のドキュメントに基づいて作成しており、実際のアカウントではまだ動作確認していません。",
+  "reconnect.banner.line": "{platform}：再接続すると{unlocks}が使えるようになります",
+  "reconnect.banner.action": "再接続",
+  "reconnect.banner.actionAria": "{platform}を再接続",
+  "reconnect.banner.dismissAria": "{platform}の再接続のお知らせを閉じる",
+  "reconnect.unlock.twitch6": "モデレーションツール、シールドモード、モデレーターと VIP、AutoMod、ライブ通知",
+  "reconnect.unlock.x2": "フォローとサブスクリプションの通知、クリップの投稿"
 }

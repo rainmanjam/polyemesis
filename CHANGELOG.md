@@ -10,6 +10,10 @@ its first tagged release.
 
 ### Added
 
+- **"Reconnect to enable" banner.** When a connected Twitch (version 5 to 6) or X (1 to 2) account was
+  granted under an older scope version, the console names the platform and what a reconnect unlocks,
+  with a one-click Reconnect; dismissible per account and version. `GET /api/v1/platforms/accounts`
+  gains `currentScopeVersion` and `scopeUnlocks` (additive).
 - **X: choose who can chat and the broadcast language per destination.** The X card in the destination dialog (step 4) has a **Who can chat** setting (off, everyone, verified accounts, accounts you follow, your subscribers, or accounts you follow and theirs) and a **Language** setting. They are sent with the go-live as `chat_option` and `locale`, and left unset they send nothing, so X decides. They are stored in `compliance.x` with no schema change.
 
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**

@@ -4318,5 +4318,11 @@
   "xmod.loadFailed": "Bu bilgi X'ten okunamadı: {reason}",
   "xmod.refresh": "Yenile",
   "xmod.idInvalid": "X kullanıcı kimliği yalnızca rakamlardan oluşur.",
-  "xmod.unverified": "X'in belgelerine göre geliştirildi, henüz gerçek bir hesapta denenmedi."
+  "xmod.unverified": "X'in belgelerine göre geliştirildi, henüz gerçek bir hesapta denenmedi.",
+  "reconnect.banner.line": "{platform}: {unlocks} özelliklerini açmak için yeniden bağlanın",
+  "reconnect.banner.action": "Yeniden bağlan",
+  "reconnect.banner.actionAria": "{platform} hesabını yeniden bağla",
+  "reconnect.banner.dismissAria": "{platform} yeniden bağlanma bildirimini kapat",
+  "reconnect.unlock.twitch6": "moderasyon araçları, Shield Mode, moderatörler ve VIP’ler, AutoMod ve canlı uyarılar",
+  "reconnect.unlock.x2": "takip ve abonelik uyarıları ile klip paylaşımı"
 }
