@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "일치한 형태: {form}",
   "automod.protTestAct": "플랫폼 동작: {action}",
   "automod.protTestLadder": "반복되면: {a}, 다음 {b}, 그다음 {c}",
+  "automod.protTestWithDelete": "{action} 후 해당 줄 삭제",
   "automod.protTestNotLive": "아직 적용되지 않음",
   "automod.protTestWindowed": "속도, 반복, 거의 같은 메시지, 레이드 검사는 시청자가 최근에 보낸 내용에 따라 달라지므로 여기서는 판단하지 않습니다.",
   "automod.protAdvanced": "고급",

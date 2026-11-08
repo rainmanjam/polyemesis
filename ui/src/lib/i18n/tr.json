@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Eşleşen biçim: {form}",
   "automod.protTestAct": "Platform eylemi: {action}",
   "automod.protTestLadder": "Tekrarlanırsa: {a}, sonra {b}, sonra {c}",
+  "automod.protTestWithDelete": "{action} ve satırı sil",
   "automod.protTestNotLive": "henüz etkin değil",
   "automod.protTestWindowed": "Hız, tekrar, hemen hemen aynı mesaj ve baskın denetimleri bir izleyicinin yakın zamanda gönderdiklerine bağlıdır, bu yüzden burada yanıtlanmaz.",
   "automod.protAdvanced": "Gelişmiş",

@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Знайдено у формі: {form}",
   "automod.protTestAct": "Дія на платформі: {action}",
   "automod.protTestLadder": "У разі повторення: {a}, потім {b}, потім {c}",
+  "automod.protTestWithDelete": "{action} і видалити рядок",
   "automod.protTestNotLive": "ще не діє",
   "automod.protTestWindowed": "Перевірки частоти, повторів, майже-дублікатів і рейдів залежать від того, що глядач надсилав нещодавно, тому тут на них немає відповіді.",
   "automod.protAdvanced": "Додатково",

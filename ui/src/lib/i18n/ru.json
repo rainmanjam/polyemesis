@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Найдено в форме: {form}",
   "automod.protTestAct": "Действие на платформе: {action}",
   "automod.protTestLadder": "При повторении: {a}, затем {b}, затем {c}",
+  "automod.protTestWithDelete": "{action} и удалить строку",
   "automod.protTestNotLive": "пока не действует",
   "automod.protTestWindowed": "Проверки частоты, повторов, почти-дубликатов и рейдов зависят от того, что зритель присылал недавно, поэтому здесь на них нет ответа.",
   "automod.protAdvanced": "Дополнительно",

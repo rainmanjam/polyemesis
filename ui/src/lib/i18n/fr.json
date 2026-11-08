@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Trouvé dans la forme : {form}",
   "automod.protTestAct": "Action sur la plateforme : {action}",
   "automod.protTestLadder": "En cas de récidive : {a}, puis {b}, puis {c}",
+  "automod.protTestWithDelete": "{action}, et supprimer la ligne",
   "automod.protTestNotLive": "pas encore actif",
   "automod.protTestWindowed": "Les vérifications de cadence, de répétition, de quasi-doublons et de raid dépendent de ce qu'un spectateur a envoyé récemment ; elles ne sont donc pas évaluées ici.",
   "automod.protAdvanced": "Avancé",

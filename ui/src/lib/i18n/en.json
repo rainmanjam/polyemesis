@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Matched on: {form}",
   "automod.protTestAct": "Platform action: {action}",
   "automod.protTestLadder": "If repeated: {a}, then {b}, then {c}",
+  "automod.protTestWithDelete": "{action}, and delete the line",
   "automod.protTestNotLive": "not live yet",
   "automod.protTestWindowed": "Rate, repeat, near-duplicate and raid checks depend on what a viewer sent recently, so they are not answered here.",
   "automod.protAdvanced": "Advanced",

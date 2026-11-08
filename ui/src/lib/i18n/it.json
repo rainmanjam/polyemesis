@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Trovato nella forma: {form}",
   "automod.protTestAct": "Azione sulla piattaforma: {action}",
   "automod.protTestLadder": "Se si ripete: {a}, poi {b}, poi {c}",
+  "automod.protTestWithDelete": "{action} ed eliminare la riga",
   "automod.protTestNotLive": "non ancora attivo",
   "automod.protTestWindowed": "I controlli di frequenza, ripetizione, quasi-duplicati e raid dipendono da ciò che uno spettatore ha inviato di recente, quindi qui non hanno risposta.",
   "automod.protAdvanced": "Avanzate",

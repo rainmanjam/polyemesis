@@ -347,6 +347,37 @@ describe("the test box", () => {
     expect(screen.queryAllByText(/secret-ish text/)).toHaveLength(0);
   });
 
+  it("shows the delete a sanction step keeps", async () => {
+    explain.mockResolvedValue(
+      explanation({
+        held: true,
+        wouldHoldIfOn: true,
+        detections: [
+          {
+            checker: "protection",
+            category: "doxxing",
+            detector: "doxxing/phone",
+            reason: "phone number",
+            hold: true,
+            action: "flag",
+            act: true,
+            ladder: [
+              { strike: 1, action: "delete" },
+              { strike: 2, action: "timeout", alsoDelete: true },
+              { strike: 3, action: "ban", alsoDelete: true },
+            ],
+            live: true,
+          },
+        ],
+      }),
+    );
+    show(settingsOf(prot()));
+    await run("anything");
+    expect(
+      await screen.findByText(/If repeated: Delete, then .*, and delete the line, then Ban, and delete the line/),
+    ).toBeTruthy();
+  });
+
   it("says plainly when nothing fired, and what it cannot answer", async () => {
     explain.mockResolvedValue(explanation());
     show(settingsOf(prot()));

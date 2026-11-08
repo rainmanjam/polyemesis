@@ -4078,7 +4078,7 @@ export interface AutomodDetection {
   /** What the strike ladder would ask a platform to do at strikes 1, 2 and 3,
    *  from the saved arming and ceiling ("flag" where nothing is armed). Only on
    *  a pack finding that holds, the only kind on the ladder. */
-  ladder?: { strike: number; action: AutomodAction }[];
+  ladder?: { strike: number; action: AutomodAction; alsoDelete?: boolean }[];
   /** The live engine would produce this finding: false for a pack detection
    *  while the pack is off. */
   live: boolean;

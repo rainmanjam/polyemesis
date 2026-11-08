@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Coincidencia en: {form}",
   "automod.protTestAct": "Acción en la plataforma: {action}",
   "automod.protTestLadder": "Si se repite: {a}, luego {b}, luego {c}",
+  "automod.protTestWithDelete": "{action} y borrar la línea",
   "automod.protTestNotLive": "aún no activo",
   "automod.protTestWindowed": "Las comprobaciones de ritmo, repetición, casi duplicados y raids dependen de lo que un espectador envió hace poco, así que aquí no se responden.",
   "automod.protAdvanced": "Avanzado",

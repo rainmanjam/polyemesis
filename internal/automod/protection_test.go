@@ -508,3 +508,33 @@ func TestExplainAsPreviewsTheLadderPerStrikeWithoutCountingOne(t *testing.T) {
 		}
 	}
 }
+
+// The test box shows the delete a sanction rung keeps: a ban step with delete
+// armed says AlsoDelete, a plain delete step and a platform with neither do not.
+func TestLadderPreviewShowsTheDeleteASanctionKeeps(t *testing.T) {
+	hl := DefaultHistoryLimits()
+	m := DefaultMatrix()
+	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionBan, Checker: CheckerProtection}, true)
+	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionDelete, Checker: CheckerProtection}, true)
+	m.Set(Key{Platform: db.PlatformKick, Action: ActionBan, Checker: CheckerProtection}, true)
+	e := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(newProtection(t, ProtectionConfig{History: &hl})).
+		WithLadder(&Ladder{Strikes: NewStrikes(), Ceilings: map[string]Rung{string(CategoryDoxxing): RungBan}})
+	sub := Subject{AuthorID: "a", Text: "mail me at someone.private@example.com"}
+	steps := func(plat db.Platform) []LadderStep {
+		for _, d := range e.ExplainAs(plat, sub, true).Detections {
+			if d.Detector == pack.GroupEmail {
+				return d.Ladder
+			}
+		}
+		return nil
+	}
+	tw := steps(db.PlatformTwitch)
+	if len(tw) != 3 || tw[0].AlsoDelete || tw[1].AlsoDelete || tw[2].Action != ActionBan || !tw[2].AlsoDelete {
+		t.Errorf("twitch preview = %+v, want only the ban step to also delete", tw)
+	}
+	for _, s := range steps(db.PlatformKick) {
+		if s.AlsoDelete {
+			t.Errorf("kick has no delete armed but previews one: %+v", s)
+		}
+	}
+}

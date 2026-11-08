@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Gefunden in Form: {form}",
   "automod.protTestAct": "Plattformaktion: {action}",
   "automod.protTestLadder": "Bei Wiederholung: {a}, dann {b}, dann {c}",
+  "automod.protTestWithDelete": "{action} und die Zeile löschen",
   "automod.protTestNotLive": "noch nicht aktiv",
   "automod.protTestWindowed": "Raten-, Wiederholungs-, Fast-Duplikat- und Raid-Prüfungen hängen davon ab, was ein Zuschauer zuletzt gesendet hat, und werden hier nicht beantwortet.",
   "automod.protAdvanced": "Erweitert",

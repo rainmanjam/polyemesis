@@ -657,7 +657,7 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 	}
 
 	rules, clamped, err := rulesFromSettingsClamped(a)
-	if len(clamped) > 0 {
+	if len(clamped) > 0 && persist.NoteClamped(clamped) {
 		log.Warn("automod: stored self_harm rules asked for more than flag; clamped to flag",
 			"rule_ids", clamped)
 	}

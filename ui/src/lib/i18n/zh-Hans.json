@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "匹配形式：{form}",
   "automod.protTestAct": "平台操作：{action}",
   "automod.protTestLadder": "如果重复：{a}，然后{b}，然后{c}",
+  "automod.protTestWithDelete": "{action}，并删除该行",
   "automod.protTestNotLive": "尚未生效",
   "automod.protTestWindowed": "频率、重复、近似重复和突袭检查取决于观众最近发送的内容，因此这里不作判断。",
   "automod.protAdvanced": "高级",

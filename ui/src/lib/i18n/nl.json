@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Gevonden in vorm: {form}",
   "automod.protTestAct": "Platformactie: {action}",
   "automod.protTestLadder": "Bij herhaling: {a}, dan {b}, dan {c}",
+  "automod.protTestWithDelete": "{action} en de regel verwijderen",
   "automod.protTestNotLive": "nog niet actief",
   "automod.protTestWindowed": "Controles op snelheid, herhaling, bijna-duplicaten en raids hangen af van wat een kijker onlangs stuurde, dus ze worden hier niet beantwoord.",
   "automod.protAdvanced": "Geavanceerd",

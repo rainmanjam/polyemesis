@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Dopasowano w postaci: {form}",
   "automod.protTestAct": "Działanie na platformie: {action}",
   "automod.protTestLadder": "Przy powtórzeniu: {a}, potem {b}, potem {c}",
+  "automod.protTestWithDelete": "{action} i usunięcie wiersza",
   "automod.protTestNotLive": "jeszcze nieaktywne",
   "automod.protTestWindowed": "Kontrole tempa, powtórzeń, niemal-duplikatów i raidów zależą od tego, co widz wysłał niedawno, więc nie są tu rozstrzygane.",
   "automod.protAdvanced": "Zaawansowane",

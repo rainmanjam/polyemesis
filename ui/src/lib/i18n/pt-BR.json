@@ -4060,6 +4060,7 @@
   "automod.protTestForm": "Encontrado na forma: {form}",
   "automod.protTestAct": "Ação na plataforma: {action}",
   "automod.protTestLadder": "Se repetir: {a}, depois {b}, depois {c}",
+  "automod.protTestWithDelete": "{action} e apagar a linha",
   "automod.protTestNotLive": "ainda não ativo",
   "automod.protTestWindowed": "As verificações de ritmo, repetição, quase duplicatas e raid dependem do que um espectador enviou há pouco, então não são respondidas aqui.",
   "automod.protAdvanced": "Avançado",

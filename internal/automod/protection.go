@@ -245,6 +245,10 @@ type Detection struct {
 type LadderStep struct {
 	Strike int    `json:"strike"`
 	Action Action `json:"action"`
+	// AlsoDelete is set when the step is a timeout or ban that keeps the delete
+	// the hit is entitled to (see keepDelete): the user is sanctioned and the
+	// line is removed as well.
+	AlsoDelete bool `json:"alsoDelete,omitempty"`
 }
 
 // ladderPreview resolves a pack finding's rung for strikes 1 to 3 exactly as
@@ -268,7 +272,12 @@ func (e *Engine) ladderPreview(plat db.Platform, f Finding) []LadderStep {
 				break
 			}
 		}
-		steps = append(steps, LadderStep{Strike: strike, Action: act})
+		step := LadderStep{Strike: strike, Action: act}
+		if (act == ActionTimeout || act == ActionBan) && e.ladder.ceilingOf(f) >= RungDelete &&
+			e.matrix.Allows(e.caps, Key{Platform: plat, Action: ActionDelete, Checker: CheckerProtection}) {
+			step.AlsoDelete = true
+		}
+		steps = append(steps, step)
 	}
 	return steps
 }

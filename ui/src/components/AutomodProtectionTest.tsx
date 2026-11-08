@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { ACTION_KEYS, CATEGORY_KEYS } from "@/lib/automodConfig";
 import { detectorLabelKey, TIER_KEYS } from "@/lib/automodProtection";
 import { useT } from "@/lib/i18n";
-import type { AutomodExplanation } from "@/lib/types";
+import type { AutomodAction, AutomodExplanation } from "@/lib/types";
 
 /* THE TEST BOX.
  *
@@ -53,6 +53,10 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
   }
 
   const over = [...text].length > MAX_RUNES;
+
+  // A timeout or ban that also deletes the line says so.
+  const stepLabel = (r: { action: AutomodAction; alsoDelete?: boolean }) =>
+    r.alsoDelete ? t("automod.protTestWithDelete", { action: t(ACTION_KEYS[r.action]) }) : t(ACTION_KEYS[r.action]);
 
   return (
     <section aria-labelledby="automod-test-title" className="grid gap-2 rounded-md border p-3">
@@ -139,9 +143,9 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
                     {rungs && (
                       <div className="text-muted-foreground">
                         {t("automod.protTestLadder", {
-                          a: t(ACTION_KEYS[rungs[0].action]),
-                          b: t(ACTION_KEYS[rungs[1]?.action ?? rungs[0].action]),
-                          c: t(ACTION_KEYS[rungs[2]?.action ?? rungs[0].action]),
+                          a: stepLabel(rungs[0]),
+                          b: stepLabel(rungs[1] ?? rungs[0]),
+                          c: stepLabel(rungs[2] ?? rungs[0]),
                         })}
                       </div>
                     )}

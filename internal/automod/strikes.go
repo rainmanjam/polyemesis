@@ -1,6 +1,7 @@
 package automod
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -435,6 +436,27 @@ type Persistent struct {
 	// Gate is the hard-case gate's per-author table, verdict cache and raid
 	// brake (gate.go): a save in the middle of a raid must not refill them.
 	Gate *ModelGate
+
+	clampMu     sync.Mutex
+	clampWarned string
+}
+
+// NoteClamped records the IDs of stored rules that were clamped on load and
+// reports whether this set differs from the last one noted, so the caller logs
+// a clamp once per distinct set instead of on every settings save. A nil
+// Persistent always says yes.
+func (p *Persistent) NoteClamped(ids []int64) bool {
+	if p == nil {
+		return true
+	}
+	key := fmt.Sprint(ids)
+	p.clampMu.Lock()
+	defer p.clampMu.Unlock()
+	if p.clampWarned == key {
+		return false
+	}
+	p.clampWarned = key
+	return true
 }
 
 // NewPersistent returns the long-lived state with its default bounds.
