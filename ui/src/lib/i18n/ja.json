@@ -4537,5 +4537,12 @@
   "yt.live.categoryLabel": "カテゴリ",
   "yt.live.categoryHelp": "Gaming や Music などの YouTube カテゴリ名です。空欄の場合は YouTube の既定値のままになります。polyemesis が作成するブロードキャストに適用されます。",
   "yt.live.projection360": "360° 動画",
-  "yt.live.kidsNote": "polyemesis が作成するブロードキャストは、下の YouTube 設定（レイテンシと DVR も設定できます）で別途指定しない限り、子ども向けではないと宣言されます。子ども向けの設定はコメント、広告、通知に影響するため、コンテンツに合わせて設定してください。"
+  "yt.live.kidsNote": "polyemesis が作成するブロードキャストは、下の YouTube 設定（レイテンシと DVR も設定できます）で別途指定しない限り、子ども向けではないと宣言されます。子ども向けの設定はコメント、広告、通知に影響するため、コンテンツに合わせて設定してください。",
+  "studioEvents.title": "YouTube Studio から",
+  "studioEvents.badge": "YouTube Studio から",
+  "studioEvents.open": "Studio で開く",
+  "studioEvents.useFor": "{destination} に使用",
+  "studioEvents.used": "{destination} がライブ配信を開始すると、{title} が使用されます。",
+  "studioEvents.useFailed": "このイベントを使用できませんでした: {reason}",
+  "studioEvents.stale": "{accounts} のイベントを更新できませんでした。以前に読み込んだ内容を表示しています。"
 }

@@ -459,7 +459,10 @@ type Server struct {
 	// a file each.
 	exportNamesMu sync.Mutex
 	ytVideosMu    sync.Mutex
-	ytVideos      map[int64]ytLiveVideo
+	// ytStudio caches each YouTube account's upcoming events for the calendar; see youtube_studio_events.go.
+	ytStudioMu sync.Mutex
+	ytStudio   map[int64]studioCacheEntry
+	ytVideos   map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -1772,6 +1775,8 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The account's upcoming and active YouTube events, and the one click that turns an event's
 			// auto-start on. Both call YouTube; neither carries a key.
 			api.Get(r, "/platforms/accounts/{id}/youtube/events", s.handleYouTubeEvents, readDenied)
+			// YouTube Studio's upcoming events for the schedule calendar, cached 15 minutes per account.
+			api.Get(r, "/youtube/studio-events", s.handleYouTubeStudioEvents, readDenied)
 			api.Post(r, "/platforms/accounts/{id}/youtube/events/{eventId}/auto-start", s.handleYouTubeEventAutoStart, readDenied)
 			// Cross-platform analytics (Wave 4 #4): the live audience picture
 			// and the per-stream reports. Reads of what the sampler stored --

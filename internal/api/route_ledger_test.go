@@ -605,6 +605,7 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/platforms/accounts/{id}/stats":           denied(),
 	"GET /api/v1/platforms/accounts/{id}/youtube/streams": deniedWithCounterpart("youtubeStreams"),
 	"GET /api/v1/platforms/accounts/{id}/youtube/events":  deniedWithCounterpart("youtubeEvents"),
+	"GET /api/v1/youtube/studio-events":                   deniedWithCounterpart("youtubeStudioEvents"),
 	// Same reason as the stats route above it, and the reason is the outbound
 	// call rather than the bytes: reaching this spends the operator's Graph
 	// budget on somebody holding a read token.
@@ -1314,6 +1315,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"youtubeStreams":                        proveYouTubeStreams,
 	"youtubeEvents":                         proveYouTubeEvents,
+	"youtubeStudioEvents":                   proveYouTubeStudioEvents,
 	"chatFlags":                             proveChatFlags,
 	"viewerNotes":                           proveViewerNotes,
 	"chatExport":                            proveChatExport,

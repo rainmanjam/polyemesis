@@ -4537,5 +4537,12 @@
   "yt.live.categoryLabel": "类别",
   "yt.live.categoryHelp": "YouTube 类别名称，例如 Gaming 或 Music。留空则保留 YouTube 默认值。会应用到 polyemesis 创建的直播。",
   "yt.live.projection360": "360° 视频",
-  "yt.live.kidsNote": "除非你在下方的 YouTube 控制项中另行声明（这里也可设置延迟和 DVR），否则 polyemesis 创建的直播会被声明为非面向儿童。“面向儿童”会影响评论、广告和通知，请根据你的内容进行设置。"
+  "yt.live.kidsNote": "除非你在下方的 YouTube 控制项中另行声明（这里也可设置延迟和 DVR），否则 polyemesis 创建的直播会被声明为非面向儿童。“面向儿童”会影响评论、广告和通知，请根据你的内容进行设置。",
+  "studioEvents.title": "来自 YouTube Studio",
+  "studioEvents.badge": "来自 YouTube Studio",
+  "studioEvents.open": "在 Studio 中打开",
+  "studioEvents.useFor": "用于 {destination}",
+  "studioEvents.used": "{destination} 开始直播时将使用 {title}。",
+  "studioEvents.useFailed": "无法使用此活动：{reason}",
+  "studioEvents.stale": "无法刷新 {accounts} 的活动；显示的是之前读取的内容。"
 }

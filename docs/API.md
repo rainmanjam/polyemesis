@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-six `GET`s among the thirty-nine refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-seven `GET`s among the forty refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,7 +135,7 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirty-nine routes are refused outright**, for three different reasons. Masking
+**Forty routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last twenty-seven are `403` because of what
@@ -147,6 +147,7 @@ are `403` because of what they *do*. The last twenty-seven are `403` because of 
 | `POST /destinations/{id}/expert/preview` | the same argv |
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /youtube/studio-events` | calls YouTube for every connected YouTube account (cached 15 minutes); lists Studio's upcoming events, never keys |
 | `GET /platforms/accounts/{id}/youtube/events` | calls YouTube with the account's token; lists upcoming and active events (never keys) |
 | `POST /platforms/accounts/{id}/youtube/events/{eventId}/auto-start` | writes to YouTube: turns an event's auto-start on. A `POST`, so the method rule already denies it; listed so the table matches the `readDenied` routes |
 | `GET /platforms/accounts/{id}/youtube/streams` | calls YouTube with the account's token; lists the channel's reusable streams (never keys) |
@@ -1979,6 +1980,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/platforms/accounts/{id}/youtube/streams` — the connected channel's reusable streams for the destination picker: `{supported, streams: [{id, title, resolution, frameRate, streamStatus, health, current, usedBy}]}`; `?destinationId=` marks that destination's own stream `current` and lists the other destinations on each stream in `usedBy`. **Never a stream key or ingest address.** Refused to a read token. One YouTube quota unit per page |
 | `GET` | `/platforms/accounts/{id}/youtube/events` — the channel's upcoming and active YouTube events for the destination dialog's event picker: `{supported, events: [{id, title, scheduledStart, privacy, status, enableAutoStart, enableAutoStop, boundStreamId, streamActive, onThisStream}]}`; `?destinationId=` sets `onThisStream` for that destination's own stream. **Never a stream key or ingest address.** Refused to a read token. Three YouTube quota units |
 | `POST` | `/platforms/accounts/{id}/youtube/events/{eventId}/auto-start` — turn auto-start on for one event (`liveBroadcasts.update`, every other field carried through); only while the event is created or ready. The one place polyemesis edits an event's own flags, and only on this request |
+| `GET` | `/youtube/studio-events` — YouTube Studio's own upcoming events for every connected YouTube account, for the schedule calendar: `{events: [{accountId, accountName, id, title, scheduledStart, privacy, status, enableAutoStart, studioUrl}], stale, refreshedAt}`. Read-only, **never a key**, refused to a read token. Each account is asked at most once every 15 minutes (three YouTube quota units); in between the cached answer is served, and a failed refresh serves the last one with the account named in `stale` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |

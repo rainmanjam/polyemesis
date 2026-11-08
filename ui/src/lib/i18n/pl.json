@@ -4537,5 +4537,12 @@
   "yt.live.categoryLabel": "Kategoria",
   "yt.live.categoryHelp": "Nazwa kategorii YouTube, np. Gaming lub Music. Puste pole zachowuje ustawienie domyślne YouTube. Stosowana do transmisji tworzonej przez polyemesis.",
   "yt.live.projection360": "Wideo 360°",
-  "yt.live.kidsNote": "Transmisja tworzona przez polyemesis jest deklarowana jako niewykonana z myślą o dzieciach, chyba że zadeklarujesz inaczej w ustawieniach YouTube poniżej, które określają też opóźnienie i DVR. Oznaczenie „dla dzieci” wpływa na komentarze, reklamy i powiadomienia, więc ustaw je zgodnie ze swoją treścią."
+  "yt.live.kidsNote": "Transmisja tworzona przez polyemesis jest deklarowana jako niewykonana z myślą o dzieciach, chyba że zadeklarujesz inaczej w ustawieniach YouTube poniżej, które określają też opóźnienie i DVR. Oznaczenie „dla dzieci” wpływa na komentarze, reklamy i powiadomienia, więc ustaw je zgodnie ze swoją treścią.",
+  "studioEvents.title": "Z YouTube Studio",
+  "studioEvents.badge": "z YouTube Studio",
+  "studioEvents.open": "Otwórz w Studio",
+  "studioEvents.useFor": "Użyj dla {destination}",
+  "studioEvents.used": "{title} zostanie użyty, gdy {destination} wystartuje na żywo.",
+  "studioEvents.useFailed": "Nie udało się użyć tego wydarzenia: {reason}",
+  "studioEvents.stale": "Nie udało się odświeżyć wydarzeń z {accounts}; wyświetlane są wcześniej odczytane."
 }

@@ -4437,6 +4437,20 @@ export interface OccurrenceView {
   eventId: string;
 }
 
+/** One of YouTube Studio's own upcoming events, from GET /youtube/studio-events. Read-only; no key or ingest address. */
+export interface StudioEventView {
+  accountId: number;
+  accountName: string;
+  id: string;
+  title: string;
+  scheduledStart: string;
+  privacy?: string;
+  status: string;
+  enableAutoStart: boolean;
+  /** Opens the event in YouTube Studio. */
+  studioUrl: string;
+}
+
 /* ----------------------------------------------------- planned rollover (#19) */
 
 /** The planned-rollover settings one destination carries (#19). */

@@ -4537,5 +4537,12 @@
   "yt.live.categoryLabel": "카테고리",
   "yt.live.categoryHelp": "Gaming, Music 같은 YouTube 카테고리 이름입니다. 비워 두면 YouTube 기본값이 유지됩니다. polyemesis가 만드는 방송에 적용됩니다.",
   "yt.live.projection360": "360° 동영상",
-  "yt.live.kidsNote": "polyemesis가 만드는 방송은 아래 YouTube 설정에서 달리 지정하지 않는 한 아동용이 아닌 것으로 선언되며, 같은 설정에서 지연 시간과 DVR도 정할 수 있습니다. 아동용 설정은 댓글, 광고, 알림에 영향을 주므로 콘텐츠에 맞게 설정하세요."
+  "yt.live.kidsNote": "polyemesis가 만드는 방송은 아래 YouTube 설정에서 달리 지정하지 않는 한 아동용이 아닌 것으로 선언되며, 같은 설정에서 지연 시간과 DVR도 정할 수 있습니다. 아동용 설정은 댓글, 광고, 알림에 영향을 주므로 콘텐츠에 맞게 설정하세요.",
+  "studioEvents.title": "YouTube Studio에서 가져옴",
+  "studioEvents.badge": "YouTube Studio에서",
+  "studioEvents.open": "Studio에서 열기",
+  "studioEvents.useFor": "{destination}에 사용",
+  "studioEvents.used": "{destination}이(가) 라이브를 시작하면 {title}이(가) 사용됩니다.",
+  "studioEvents.useFailed": "이 이벤트를 사용할 수 없습니다: {reason}",
+  "studioEvents.stale": "{accounts}의 이벤트를 새로 고치지 못했습니다. 이전에 읽은 내용을 표시합니다."
 }

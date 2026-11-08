@@ -109,6 +109,7 @@ func TestRoutePolicyIsWhatWasRegistered(t *testing.T) {
 		"/api/v1/recordings/stems/{name}/download",
 		"/api/v1/recordings/{id}/chat",
 		"/api/v1/recordings/{id}/download",
+		"/api/v1/youtube/studio-events",
 	}; !equalStrings(got, want) {
 		t.Errorf("readDenied = %v\nwant %v\n(docs/API.md's refused-route table says the same)", got, want)
 	}
