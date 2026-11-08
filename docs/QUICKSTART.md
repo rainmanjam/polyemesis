@@ -137,7 +137,9 @@ labels belong to the feed, so every destination sees the same set.
 **Destinations → Add.**
 
 - **Platform** — pick one, and the form takes on that platform's limits.
-- **URL and stream key** — from the platform's own dashboard. The key is stored
+- **URL and stream key** — from the platform's own dashboard, or leave them
+  empty and pick a **Connected account** to have polyemesis fetch them; see
+  [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md). The key is stored
   encrypted and is never shown again or returned by the API.
 - **Tracks** — tick the ones this destination should carry. This is the whole
   point: your main channel gets mic + music, the second-language stream gets
@@ -164,6 +166,7 @@ do.
 | Keep a recording | **Recordings** — the *Recording* card on that page, not Settings |
 | Stay on air when the encoder drops | **Settings → Pipeline → Failover** — off by default |
 | Serve a player from polyemesis itself | **Playout** |
+| Sign in to X, Twitch, Kick, YouTube or Facebook, for stream keys, go-live and chat | [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md) |
 | Something is wrong | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 
 ## Common first-run problems

@@ -18,6 +18,8 @@ its first tagged release.
   refused to a read token, stored in the new `viewer_notes` table with no schema-version change and
   never sent to overlays, events or hooks). A tagged viewer shows a tag badge in the chat list.
 
+- **X: choose who can chat and the broadcast language per destination.** The X card in the destination dialog (step 4) has a **Who can chat** setting (off, everyone, verified accounts, accounts you follow, your subscribers, or accounts you follow and theirs) and a **Language** setting. They are sent with the go-live as `chat_option` and `locale`, and left unset they send nothing, so X decides. They are stored in `compliance.x` with no schema change.
+
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
   A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
   overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and
@@ -431,6 +433,18 @@ its first tagged release.
   prompt says that only posting clips needs it and that livestreaming and chat are unaffected.
 - **A destination's `presetId` appears in destination responses** when it has one, and
   `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
+
+### Documentation
+
+- **A guide for connecting your platforms end to end.** `docs/CONNECTING-PLATFORMS.md` walks an operator
+  from an installed server to streaming and reading chat on X, Twitch, Kick, YouTube and Facebook:
+  the server prerequisites (a real hostname with a trusted certificate, ports 80 and 443 reachable from
+  outside, opening the dashboard by hostname so OAuth callbacks match), each platform's app setup and
+  scopes, the X bearer token and webhook, the Kick **Enable webhooks** step, and a short troubleshooting
+  table. YouTube and Facebook are marked as being verified. It is linked from the README, the Quickstart
+  and `docs/PLATFORMS.md`. `docs/PLATFORMS.md` and `docs/CONFIGURATION.md` now name the settings tab
+  "Platform credentials" (they said "Platforms"), say where the X go-live title and announcement settings
+  live (**Video and advanced**), and no longer carry a duplicated edge-case paragraph.
 
 ## [0.15.0] — 2026-11-06
 
