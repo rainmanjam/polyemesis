@@ -331,6 +331,9 @@ type lifecycleTarget struct {
 	// ended or sentMS is old enough that none can appear. sentMS is the local time the go-live was sent.
 	maybeLive bool
 	sentMS    int64
+	// created is DB.BroadcastControl.Created for a YouTube broadcast polyemesis opened: a never-aired one is deleted
+	// when the row is deleted, an adopted event never is.
+	created bool
 }
 
 // lifecycleCoordinator drives every tracked broadcast towards the state the
@@ -797,12 +800,7 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		c.considerUnopened(ctx, d, prov, mode)
 		return
 	}
-	if d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && d.AccountID != nil && !d.YouTubeLiveNow() {
-		// Switched to Studio's Stream now (or its account was unlinked) while polyemesis holds a broadcast it opened:
-		// stop driving it. See releaseYouTube.
-		c.releaseYouTube(ctx, prov, d, broadcastID)
-		return
-	}
+
 	if d.AccountID == nil {
 		// No connected account means no token, and a broadcast id nothing here
 		// can act on. Not a fault: it is what a destination looks like after its
@@ -821,6 +819,14 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		return
 	}
 
+	if d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && !d.YouTubeLiveNow() {
+		// Switched to Studio's Stream now (or its account was unlinked) while polyemesis holds a broadcast it opened:
+		// stop driving it. AFTER the delayed-tail check above, and only for an enabled row: a disabled one keeps its
+		// ordinary end (a live broadcast ended, a never-aired created one deleted), which is why a destination
+		// switched off and then moved to Stream now still has its broadcast ended. See releaseYouTube.
+		c.releaseYouTube(ctx, prov, d, broadcastID)
+		return
+	}
 	cleared := c.takeClearFault(d.ID)
 	if d = c.resetOnUpEdge(d, broadcastID, cleared); d == nil {
 		return
@@ -893,6 +899,7 @@ func (c *lifecycleCoordinator) trackAs(d *db.Destination, broadcastID, phase str
 		AccountID:   accountID,
 		BroadcastID: broadcastID,
 		Phase:       phase,
+		created:     d.Lifecycle.Opened && d.Lifecycle.Created,
 		maybeLive:   d.Lifecycle.GoLiveSentMS > 0 && publicBroadcastID(broadcastID) == "",
 		sentMS:      d.Lifecycle.GoLiveSentMS,
 	}
@@ -1075,6 +1082,13 @@ func (c *lifecycleCoordinator) resetOnUpEdge(d *db.Destination, broadcastID stri
 	// while the encoder was away, so the row's `live` is exactly the label the
 	// ten-minute cadence exists to catch -- caught here in one sweep instead.
 	c.forgetLiveRecheck(d.ID)
+	if d.Platform == db.PlatformYouTube && (strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) {
+		// VIDEO ARRIVED for a broadcast that was waiting for it: read it NOW, not within the post-edge floor, so an
+		// event whose auto-start is off is moved on the very next sweep.
+		c.mu.Lock()
+		delete(c.liveSkips, d.ID)
+		c.mu.Unlock()
+	}
 	if d.Lifecycle.Fault == "" && d.Lifecycle.Attempts <= 0 {
 		return d
 	}
@@ -1201,7 +1215,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// for the full arithmetic, and forgetLiveRecheck for why the case that
 		// actually happens is noticed in one sweep rather than forty.
 		return true
-	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" &&
+	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && d.Lifecycle.Created && d.Lifecycle.Fault == "" &&
 		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
 		!c.dueForLiveRecheck(d.ID):
 		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
@@ -1303,11 +1317,12 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	plan := planLifecycle(d.Enabled, st)
 	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.YouTubeLiveNow() &&
 		strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
-		((d.Lifecycle.Opened && d.Lifecycle.BroadcastID == broadcastID) || !endableFromPhase(d.Lifecycle.Phase)) {
+		((d.Lifecycle.Opened && d.Lifecycle.BroadcastID == broadcastID) || (!d.Lifecycle.Opened && d.Lifecycle.Phase == "")) {
 		// The broadcast polyemesis opened is finished and the destination is still on air (Studio's End, an
-		// operator's end, or YouTube's own timeout): open the next. So is an ANNOUNCED broadcast that this process
-		// never saw on air (a scheduled show that has long completed, and an ad-hoc go-live now): the fault is for one
-		// that went live under us and ended while the destination stayed on. A revoked one keeps the fault.
+		// operator's end, or YouTube's own timeout): open the next. So is an ANNOUNCED broadcast that carries NO recorded
+		// phase, which is what clearing a finished one leaves (a scheduled show that completed long ago, and an ad-hoc
+		// go-live now). A recorded phase means this process saw the show, and a completed one (the operator ended it in
+		// Studio) keeps its fault even after an UP edge clears the fault text. A revoked one keeps it too.
 		plan.Fault, plan.Renew = "", true
 	}
 	if !d.Enabled && (d.Platform == db.PlatformX || d.Platform == db.PlatformYouTube) && plan.Send == "" {
@@ -1324,7 +1339,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	// cadence as a live one: every sweep would spend 480 units an hour, 11,500 a day, for as long as the encoder is
 	// away. The UP edge that video arriving produces spends the budget at once (forgetLiveRecheck), and with
 	// auto-start on YouTube moves the broadcast itself in the meantime.
-	waiting := d.Platform == db.PlatformYouTube && d.Enabled && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
+	waiting := d.Platform == db.PlatformYouTube && d.Enabled && d.Lifecycle.Opened && d.Lifecycle.Created && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
 		(strings.EqualFold(plan.Phase, phaseCreated) || strings.EqualFold(plan.Phase, phaseReady))
 	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive) || waiting)
 	switch {
@@ -1720,6 +1735,10 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	prov, ok := oauth.As[oauth.BroadcastLifecycler](c.providers, t.Platform)
 	if !ok {
 		c.untrack(t.destinationID)
+		return
+	}
+
+	if c.deleteOrphanedNeverAired(ctx, prov, t) {
 		return
 	}
 

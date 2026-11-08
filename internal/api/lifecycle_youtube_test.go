@@ -210,7 +210,7 @@ func TestAnEnabledYouTubeDestinationOpensItsOwnBroadcastAndPointsChatAtIt(t *tes
 	sweep(c, 1)
 
 	calls, inserts, trans := f.snapshot()
-	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
+	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
 	if strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
@@ -746,5 +746,153 @@ func TestABroadcastWaitingForVideoIsReadOnTheSlowCadence(t *testing.T) {
 	calls := len(end) - len(start)
 	if limit := (sweepsPerHour/lifecycleLiveRecheckEvery + 2) * 2; calls > limit {
 		t.Errorf("%d YouTube calls in an hour of waiting for video, want at most %d (every %d sweeps)", calls, limit, lifecycleLiveRecheckEvery)
+	}
+}
+
+// ---------------------------------------------------------------- second review
+
+func upEdge(c *lifecycleCoordinator) {
+	c.mu.Lock()
+	c.clearFaults[3] = true
+	c.mu.Unlock()
+}
+
+// R1. The operator ends an ANNOUNCED show in Studio while the destination is still on. The completed-broadcast fault
+// stands and a later UP edge clears the fault, but nothing may open a new Public broadcast over the operator's end.
+func TestAnAnnouncedShowTheOperatorEndedIsNotRenewedAfterAnUpEdge(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ann-1"] = &ynBroadcast{status: "live", bound: "stream-77"}
+	row := ynRow(true)
+	row.Facebook.BroadcastID = "ann-1"
+	row.Lifecycle = db.BroadcastControl{BroadcastID: "ann-1", Phase: "live"}
+	c, store, _, _ := ynFixture(t, f, row)
+	f.set(func(f *ynFake) { f.bcasts["ann-1"].status = "complete" })
+	sweep(c, 1) // reads complete on a show that was live: the fault
+	if got := store.get(3); got.Lifecycle.Phase != "complete" || got.Lifecycle.Fault == "" {
+		t.Fatalf("lifecycle = %+v, want the completed-broadcast fault", got.Lifecycle)
+	}
+	upEdge(c) // the encoder reconnects: the fault is cleared and the row is read again
+	sweep(c, 3)
+	if _, inserts, _ := f.snapshot(); inserts != 0 {
+		t.Errorf("inserts = %d: a new Public broadcast was opened after the operator ended the show", inserts)
+	}
+}
+
+// R2a. A failed read during the Stream-now release keeps the record, so the next sweep tries again.
+func TestAFailedReadDuringTheStreamNowReleaseKeepsTheCreatedBroadcastForARetry(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	f.set(func(f *ynFake) { f.quotaSpent = true })
+	sweep(c, 2)
+	if got := store.get(3); got.Lifecycle.BroadcastID != "bcast-1" || !got.Lifecycle.Created {
+		t.Fatalf("lifecycle = %+v, want the created broadcast still recorded while the read fails", got.Lifecycle)
+	}
+	f.set(func(f *ynFake) { f.quotaSpent = false })
+	sweep(c, 1)
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want the never-aired broadcast removed once reads work", d)
+	}
+}
+
+// R2b. A destination that is switched OFF with a live broadcast and then moved to Stream now has its broadcast ENDED,
+// not forgotten.
+func TestADisabledDestinationMovedToStreamNowStillHasItsLiveBroadcastEnded(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
+	readNow(c)
+	sweep(c, 1) // confirmed live
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	sweep(c, 2)
+	if _, _, trans := f.snapshot(); len(trans) != 1 || trans[0] != "complete" {
+		t.Errorf("transitions = %v, want the live broadcast ended", trans)
+	}
+}
+
+// R3. An operator's own Studio event that happens to match the shape of a live-now broadcast is not adopted, not
+// stamped as polyemesis's, and not deleted at switch-off.
+func TestAnOperatorsOwnStudioEventLookingLikeOursIsNeverAdoptedOrDeleted(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["studio-ev"] = &ynBroadcast{status: "ready", title: "yt main", autoStart: true, autoStop: false, chat: "chat-s"}
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID == "studio-ev" {
+		t.Fatalf("lifecycle = %+v: the operator's event was adopted", got.Lifecycle)
+	}
+	if _, inserts, _ := f.snapshot(); inserts != 1 {
+		t.Fatalf("inserts = %d, want a fresh broadcast", inserts)
+	}
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.mu.Unlock()
+	sweep(c, 4)
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want only polyemesis's own broadcast removed", d)
+	}
+	if _, ok := f.bcasts["studio-ev"]; !ok {
+		t.Error("the operator's event was deleted")
+	}
+}
+
+// R4. Only a polyemesis-created (auto-start on) broadcast waits on the slow cadence. A picked event with auto-start
+// off is read every sweep, and an UP edge reads at once for everything.
+func TestAPickedAutoStartOffEventIsReadEverySweepAndACreatedOneIsReadAtOnceOnAnUpEdge(t *testing.T) {
+	f := newYnFake()
+	f.streamState = "inactive"
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	start, _, _ := f.snapshot()
+	sweep(c, 10)
+	end, _, _ := f.snapshot()
+	if n := len(end) - len(start); n < 10 {
+		t.Errorf("a picked event was read %d times in 10 sweeps, want every sweep", n)
+	}
+
+	f2 := newYnFake()
+	f2.streamState = "inactive"
+	c2, _, _, _ := ynFixture(t, f2, ynRow(true))
+	sweep(c2, 6) // armed on the slow cadence
+	f2.set(func(f *ynFake) { f.streamState = "active" })
+	upEdge(c2)
+	sweep(c2, 1)
+	if _, _, trans := f2.snapshot(); len(trans) == 0 {
+		t.Error("video arrived (an UP edge) and the created broadcast was not read and moved in the very next sweep")
+	}
+}
+
+// R5. A never-aired broadcast polyemesis created is deleted when its destination is DELETED, and an adopted event
+// never is.
+func TestDeletingADestinationDeletesItsNeverAiredCreatedBroadcastButNeverAnAdoptedEvent(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.remove(3)
+	sweep(c, 2)
+	if d := f.deleted(); len(d) != 1 || d[0] != "bcast-1" {
+		t.Errorf("deleted = %v, want the orphaned never-aired broadcast removed", d)
+	}
+
+	f2 := newYnFake()
+	f2.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c2, store2, _, _ := ynFixture(t, f2, row)
+	sweep(c2, 1)
+	store2.remove(3)
+	sweep(c2, 2)
+	if d := f2.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v: an adopted event must never be deleted", d)
 	}
 }

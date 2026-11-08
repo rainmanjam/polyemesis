@@ -573,14 +573,16 @@ What happens, in order, when the destination is switched on:
    says so on the card, quietly, with no alert. Switching the destination off
    and on checks again. This is also what a destination that was already on air
    when you upgraded looks like.
-3. It looks for a broadcast of its own that an earlier attempt made and did not
-   finish recording (one unit), and reuses it rather than making another. Only
-   if there is none does it create the broadcast (one unit) and bind it to the
+3. When an earlier attempt began and left a marker (the answer was lost, or the
+   daemon stopped mid-open) it looks for the broadcast that attempt made (one
+   unit) and reuses it rather than making another; nothing is ever adopted
+   without that marker, so an event you made yourself is never taken. Otherwise
+   it creates the broadcast (one unit) and bind it to the
    stream (one unit):
    **auto-start on, auto-stop off**, visibility **Public** unless the
    destination's visibility says otherwise, and the **go-live title** (or the
    recurring show's title, or the destination's name). YouTube allows a title of
-   up to 100 characters. Five units in all, charged to the shared daily
+   up to 100 characters. Four units in all (five on a retry), charged to the shared daily
    allowance. If the record of the new broadcast cannot be written, it is deleted
    rather than left behind.
 4. Video reaches the stream and YouTube takes the broadcast live by itself.

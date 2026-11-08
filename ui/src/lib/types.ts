@@ -3309,6 +3309,8 @@ export interface BroadcastControl {
   /** YouTube only: with `opened`, true when polyemesis created the broadcast and false when it adopted a picked
    *  event. Only a created broadcast that never aired is deleted on switch-off. */
   created?: boolean;
+  /** YouTube only: when polyemesis began opening a broadcast, kept until the open is recorded (milliseconds). */
+  openAttemptMs?: number;
   /** What went wrong, in the operator's words, or absent when nothing has.
    *
    *  A fault here NEVER means the stream stopped: the server does not stop a

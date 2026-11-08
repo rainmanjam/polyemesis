@@ -173,3 +173,49 @@ func TestRefreshingAYouTubeKeyNeverCreatesOrBindsABroadcast(t *testing.T) {
 		t.Errorf("refresh sent %v; it must not create or bind a broadcast", posts)
 	}
 }
+
+// DELETE /destinations/{id} removes a never-aired broadcast polyemesis created (so a delete made while the daemon was
+// down is covered), and never an adopted event.
+func TestDeletingADestinationOverHTTPDeletesItsNeverAiredCreatedBroadcastOnly(t *testing.T) {
+	var deletes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/liveBroadcasts":
+			deletes = append(deletes, r.URL.Query().Get("id"))
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/liveBroadcasts":
+			_, _ = io.WriteString(w, `{"items":[`+ypeEvent(r.URL.Query().Get("id"), "created", "stream-A", true)+`]}`)
+		case r.URL.Path == "/liveStreams":
+			_, _ = io.WriteString(w, ypeStreams)
+		default:
+			_, _ = io.WriteString(w, `{"items":[]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	s, h, store, sign := engineServer(t, defaultTools(), Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+	addSource(t, h, sign, "main")
+	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	mk := func(name, id string, created bool) int64 {
+		d := ytpDest(t, store, acct, name, ytpKeyA, "")
+		if _, err := store.UpdateLifecycle(d.ID, func(x *db.Destination) bool {
+			x.Lifecycle = db.BroadcastControl{BroadcastID: id, Phase: "created", Opened: true, Created: created}
+			return true
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	own := mk("own", "bcast-own", true)
+	picked := mk("picked", "ev-picked", false)
+	for _, id := range []int64{own, picked} {
+		r := jsonRequest(t, http.MethodDelete, "/api/v1/destinations/"+itoa(id), nil)
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusOK {
+			t.Fatalf("delete %d = %d: %s", id, w.Code, w.Body.String())
+		}
+	}
+	if len(deletes) != 1 || deletes[0] != "bcast-own" {
+		t.Errorf("YouTube deletes = %v, want only the broadcast polyemesis created", deletes)
+	}
+}

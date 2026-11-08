@@ -74,6 +74,10 @@ type LiveNowRequest struct {
 	// confirmation to move it off a different, idle stream.
 	EventID     string
 	RebindEvent bool
+	// MayReuse allows reusing an upcoming broadcast that looks like one an earlier attempt of ours made. The caller
+	// sets it only when it persisted a marker before that earlier attempt's insert, which is the proof the broadcast
+	// is ours; without it nothing is adopted, because a Studio event of the operator's can match the same shape.
+	MayReuse bool
 	// Category is a YouTube category name applied to the created broadcast's video; a failure is a warning.
 	Category string
 	// StreamKey is the key the destination publishes with. It selects the stream and is never sent anywhere.
@@ -111,8 +115,10 @@ func (y *YouTube) DeleteUnairedBroadcast(ctx context.Context, accessToken, broad
 // LiveNowResult is the broadcast that was made, or the picked event that was taken over.
 type LiveNowResult struct {
 	// Existing is true when a picked event was used and nothing was created. A result with Existing false is a
-	// broadcast polyemesis created (or reused from its own earlier attempt).
+	// broadcast polyemesis created: freshly inserted, or Reused from its own earlier attempt.
 	Existing bool
+	// Reused is true when the broadcast came from an earlier attempt of ours (MayReuse) and was not inserted now.
+	Reused bool
 	// Warnings are parts that did not apply (the category) without failing the open.
 	Warnings    []string
 	BroadcastID string
@@ -157,8 +163,8 @@ func (y *YouTube) OpenBroadcast(ctx context.Context, accessToken, sourceKey stri
 }
 
 // OpenLiveNow lists the channel's streams, finds the destination's, refuses to double up on a live broadcast, then
-// inserts a broadcast and binds it. Quota: the list, the active read, the upcoming read, the insert and the bind are one unit each, so
-// five units a go-live (a failed bind adds one for the delete).
+// inserts a broadcast and binds it. Quota: the list, the active read, the insert and the bind are one unit each, plus the upcoming read on a retry, so
+// four units a go-live, five when it looks for an earlier attempt's broadcast (a failed bind adds one for the delete).
 func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveNowRequest) (*LiveNowResult, error) {
 	if strings.TrimSpace(req.StreamKey) == "" {
 		return nil, errors.New("this destination has no stream key, so there is no stream to bind a broadcast to")
@@ -186,17 +192,25 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 		return nil, &ErrActiveBroadcastOnStream{BroadcastID: active}
 	}
 	// A broadcast of ours that an earlier attempt made and did not finish recording (the answer was lost, the daemon
-	// died, the record write failed) is reused instead of making another. One more unit.
-	created, err := y.ownUpcoming(ctx, accessToken, req, stream.ID)
-	if err != nil {
-		return nil, err
+	// died, the record write failed) is reused instead of making another, but only when the caller can prove an
+	// earlier attempt happened (MayReuse). One more unit when it looks.
+	var created *ytBroadcast
+	if req.MayReuse {
+		if created, err = y.ownUpcoming(ctx, accessToken, req, stream.ID); err != nil {
+			return nil, err
+		}
 	}
+	reused := created != nil
 	if created == nil {
 		if created, err = y.insertLiveNow(ctx, accessToken, req); err != nil {
 			return nil, err
 		}
 	}
 	if err := y.bindBroadcast(ctx, accessToken, created.ID, stream.ID); err != nil {
+		if reused {
+			// Not ours to delete on the strength of a heuristic match: leave it, and say so.
+			return nil, fmt.Errorf("YouTube would not bind broadcast %s, left from an earlier attempt, to the stream: %w", created.ID, err)
+		}
 		// Deleted, not named in a message: see IngestFor's long comment for why an orphan is the worse outcome.
 		if y.deleteBroadcast(ctx, accessToken, created.ID) == nil {
 			return nil, fmt.Errorf("YouTube would not bind the new broadcast %s to the stream, so it was deleted "+
@@ -205,7 +219,7 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 		return nil, fmt.Errorf("YouTube created broadcast %s, would not bind it to the stream, and would not delete "+
 			"it either; delete broadcast %s in YouTube Studio: %w", created.ID, created.ID, err)
 	}
-	res := &LiveNowResult{BroadcastID: created.ID, LiveChatID: created.Snippet.LiveChatID, StreamID: stream.ID}
+	res := &LiveNowResult{BroadcastID: created.ID, LiveChatID: created.Snippet.LiveChatID, StreamID: stream.ID, Reused: reused}
 	if strings.TrimSpace(req.Category) != "" {
 		// The category lives on the video, a second round trip (about 52 units). The broadcast is already made and
 		// bound, so a refusal here is a warning and never fails the open.

@@ -3409,6 +3409,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		// YouTube stream, and the platform events, while the row, its account
 		// and its token still exist. See delete_cascade.go.
 		leftovers = s.beforeDestinationsRemoved(r.Context(), []*db.Destination{dest}, time.Now())
+		// A YouTube broadcast polyemesis created that never aired would stay a Public event on the channel.
+		if note := s.deleteNeverAiredOnDestinationDelete(r.Context(), dest); note != "" {
+			leftovers = append(leftovers, note)
+		}
 	}
 	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
 	// airing what is buffered. Marked before the reconcile so no drain starts,

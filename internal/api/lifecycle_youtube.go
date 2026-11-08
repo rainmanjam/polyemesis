@@ -107,6 +107,15 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 	if sendsCaptionPOST(d) {
 		req.CaptionPOST, req.CaptionDelay = true, time.Duration(d.DelaySeconds)*time.Second
 	}
+	// THE ATTEMPT MARKER IS PERSISTED BEFORE THE INSERT. If it cannot be, nothing is inserted: a broadcast made with
+	// no marker could never be recognised as ours later. A marker already on the row (an earlier attempt) is what
+	// allows the open to reuse an unrecorded broadcast of ours.
+	req.MayReuse = d.Lifecycle.OpenAttemptMS != 0
+	if !req.MayReuse {
+		if c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = c.clock().UnixMilli() }) == nil {
+			return
+		}
+	}
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 	res, err := op.OpenLiveNow(cctx, acct.AccessToken, req)
@@ -115,9 +124,15 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 		return
 	}
 	c.forgetTarget(d.ID)
-	if c.recordControl(d, res.BroadcastID, func(b *db.BroadcastControl) {
+	recorded := c.recordControl(d, res.BroadcastID, func(b *db.BroadcastControl) {
 		b.Phase, b.Attempts, b.Fault, b.Opened, b.Created = phaseCreated, 0, "", true, !res.Existing
-	}) == nil {
+		b.OpenAttemptMS = 0
+	})
+	if recorded != nil {
+		// Tracked at once, so a destination deleted before the next sweep still has its never-aired broadcast cleaned up.
+		c.trackAs(recorded, res.BroadcastID, phaseCreated)
+	}
+	if recorded == nil {
 		// THE RECORD COULD NOT BE WRITTEN (the row was reset, or the store failed), so nothing here would ever find
 		// this broadcast again and the next sweep would make another. One polyemesis created is deleted; a picked
 		// event is left as it was.
@@ -210,16 +225,102 @@ func (c *lifecycleCoordinator) forgetBroadcast(d *db.Destination) {
 // adopted event) is left exactly as it is and simply forgotten: the operator's Studio runs it from here.
 func (c *lifecycleCoordinator) releaseYouTube(ctx context.Context, prov oauth.BroadcastLifecycler, d *db.Destination, broadcastID string) {
 	if d.Lifecycle.Created {
-		if acct, err := c.tokenFor(ctx, *d.AccountID); err == nil {
-			cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
-			st, serr := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
-			cancel()
-			if serr == nil && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
-				return
-			}
+		// A created broadcast is forgotten only once its state has been read: a failed token or read keeps the record
+		// and the next sweep tries again, because forgetting it unread could strand a never-aired Public broadcast.
+		acct, err := c.tokenFor(ctx, *d.AccountID)
+		if err != nil {
+			c.log.Warn("broadcast lifecycle: could not release the broadcast polyemesis created; will retry",
+				"destination", d.Name, bcAttr(broadcastID), "err", scrubSourceKey(err.Error(), d.StreamKey))
+			return
+		}
+		cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+		st, serr := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
+		cancel()
+		if serr != nil {
+			c.log.Warn("broadcast lifecycle: could not read the broadcast polyemesis created to release it; will retry",
+				"destination", d.Name, bcAttr(broadcastID), "err", scrubSourceKey(serr.Error(), d.StreamKey))
+			return
+		}
+		if c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
+			return
 		}
 	}
 	c.forgetBroadcast(d)
 	c.log.Info("broadcast lifecycle: this destination now uses YouTube Studio's Stream now, so polyemesis stopped "+
 		"driving the broadcast it had opened", "destination", d.Name, bcAttr(broadcastID))
+}
+
+// deleteNeverAiredByID reads a broadcast polyemesis created and deletes it if it is still created or ready. It is the
+// shared tail of every cleanup that has no row to compare-and-set against (a deleted destination).
+func deleteNeverAiredByID(ctx context.Context, prov oauth.BroadcastLifecycler, accessToken, broadcastID string) (bool, error) {
+	del, ok := prov.(oauth.UnairedDeleter)
+	if !ok {
+		return false, nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+	defer cancel()
+	st, err := prov.BroadcastState(cctx, accessToken, broadcastID)
+	if err != nil {
+		return false, err
+	}
+	if !(strings.EqualFold(st.Status, phaseCreated) || strings.EqualFold(st.Status, phaseReady)) {
+		return false, nil
+	}
+	return true, del.DeleteUnairedBroadcast(cctx, accessToken, broadcastID, st.Status)
+}
+
+// deleteOrphanedNeverAired is endOrphan's first step for a deleted YouTube destination whose recorded broadcast
+// polyemesis CREATED and that has not aired: delete it. It reports whether it handled the target (it never handles an
+// adopted event, a broadcast that went live, or another platform).
+func (c *lifecycleCoordinator) deleteOrphanedNeverAired(ctx context.Context, prov oauth.BroadcastLifecycler, t lifecycleTarget) bool {
+	if t.Platform != db.PlatformYouTube || !t.created ||
+		!(strings.EqualFold(t.Phase, phaseCreated) || strings.EqualFold(t.Phase, phaseReady)) {
+		return false
+	}
+	if _, err := c.store.GetDestination(t.destinationID); !errors.Is(err, db.ErrNotFound) {
+		return true // the row is there, or the store cannot say: do nothing now, the next sweep asks again
+	}
+	acct, err := c.tokenFor(ctx, t.AccountID)
+	if err != nil {
+		c.noteOrphanFailure(t, err)
+		return true
+	}
+	deleted, err := deleteNeverAiredByID(ctx, prov, acct.AccessToken, t.BroadcastID)
+	if err != nil {
+		c.noteOrphanFailure(t, err)
+		return true
+	}
+	c.untrack(t.destinationID)
+	c.forgetTarget(t.destinationID)
+	if deleted {
+		c.log.Info("broadcast lifecycle: deleted the never-aired broadcast of a deleted destination",
+			"destination", t.Name, bcAttr(t.BroadcastID))
+	}
+	return true
+}
+
+// deleteNeverAiredOnDestinationDelete is the same cleanup made by DELETE /destinations/{id}, which already holds the
+// row, so a delete made while the daemon was down is covered too. It returns a sentence for the response's leftovers
+// when the broadcast could not be removed.
+func (s *Server) deleteNeverAiredOnDestinationDelete(ctx context.Context, d *db.Destination) string {
+	if d == nil || d.Platform != db.PlatformYouTube || !d.Lifecycle.Opened || !d.Lifecycle.Created ||
+		d.AccountID == nil || d.Lifecycle.BroadcastID == "" ||
+		!(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) {
+		return ""
+	}
+	prov, ok := oauth.As[oauth.BroadcastLifecycler](s.providers, d.Platform)
+	if !ok {
+		return ""
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	acct, err := s.tokenFor(cctx, *d.AccountID)
+	if err == nil {
+		_, err = deleteNeverAiredByID(cctx, prov, acct.AccessToken, d.Lifecycle.BroadcastID)
+	}
+	if err != nil {
+		return "the broadcast polyemesis created for " + d.Name + " (" + d.Lifecycle.BroadcastID +
+			") never aired and could not be deleted; delete it in YouTube Studio: " + scrubSourceKey(err.Error(), d.StreamKey)
+	}
+	return ""
 }

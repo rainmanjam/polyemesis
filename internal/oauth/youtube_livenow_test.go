@@ -69,11 +69,11 @@ func TestOpenLiveNowListsThenInsertsThenBindsWithAutoStartOnAndAutoStopOff(t *te
 	if err != nil {
 		t.Fatalf("OpenLiveNow: %v", err)
 	}
-	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
+	want := []string{"GET /liveStreams", "GET /liveBroadcasts", "POST /liveBroadcasts", "POST /liveBroadcasts/bind"}
 	if got := callsOf(log); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}
-	ins := log[3]
+	ins := log[2]
 	if q := mustQuery(t, &ins); q.Get("part") != "snippet,status,contentDetails" {
 		t.Errorf("insert part = %q, want exactly the parts the body carries", q.Get("part"))
 	}
@@ -91,7 +91,7 @@ func TestOpenLiveNowListsThenInsertsThenBindsWithAutoStartOnAndAutoStopOff(t *te
 	if st, _ := ins.Body["status"].(map[string]any); st["privacyStatus"] != "public" {
 		t.Errorf("default privacy = %v, want public", st["privacyStatus"])
 	}
-	bq := mustQuery(t, &log[4])
+	bq := mustQuery(t, &log[3])
 	if bq.Get("id") != "bcast-9" || bq.Get("streamId") != "stream-77" {
 		t.Errorf("bind query = %v, want the new broadcast bound to the stream holding the key", bq)
 	}
@@ -208,9 +208,9 @@ func TestOpenLiveNowSendsTheCaptionSettingsAHTTPPostDestinationNeeds(t *testing.
 	}
 }
 
-// QUOTA: one open is five calls, and each is priced at the production host's published unit cost. The stub's own
+// QUOTA: one open is four calls, and each is priced at the production host's published unit cost. The stub's own
 // host is priced by method (a write at 50), so the calls the open made are re-priced as the real host would be.
-func TestOpenLiveNowIsFiveUnitsOnTheProductionHost(t *testing.T) {
+func TestOpenLiveNowIsFourUnitsOnTheProductionHost(t *testing.T) {
 	var log []capture
 	y := lnStub(t, &log, nil)
 	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey}); err != nil {
@@ -225,8 +225,8 @@ func TestOpenLiveNowIsFiveUnitsOnTheProductionHost(t *testing.T) {
 		}
 		total += cost
 	}
-	if total != 5 || len(log) != 5 {
-		t.Errorf("an open is %d calls costing %d units, want 5 and 5", len(log), total)
+	if total != 4 || len(log) != 4 {
+		t.Errorf("an open is %d calls costing %d units, want 4 and 4", len(log), total)
 	}
 }
 

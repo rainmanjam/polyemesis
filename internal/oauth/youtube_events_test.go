@@ -327,7 +327,7 @@ func TestOpenLiveNowReusesItsOwnEarlierUnrecordedBroadcastInsteadOfMakingAnother
 			io.WriteString(w, `{"items":[]}`)
 		},
 	})
-	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday"})
+	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestOpenLiveNowDoesNotReuseABroadcastThatIsNotItsOwn(t *testing.T) {
 				io.WriteString(w, `{"items":[]}`)
 			},
 		})
-		r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday"})
+		r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true})
 		if err != nil || r.BroadcastID != "bcast-9" {
 			t.Errorf("%s: result %+v err %v, want a new broadcast", name, r, err)
 		}
@@ -383,5 +383,47 @@ func TestDeleteUnairedBroadcastDeletesOnlyACreatedOrReadyOne(t *testing.T) {
 		if err := y.DeleteUnairedBroadcast(context.Background(), "tok", "b-1", st); err != nil {
 			t.Errorf("status %q: %v", st, err)
 		}
+	}
+}
+
+// Without the caller's proof of an earlier attempt, even a perfect lookalike is never adopted; and a reused broadcast
+// whose bind is refused is left alone, not deleted.
+func TestAnUpcomingLookalikeIsAdoptedOnlyWithProofAndNeverDeletedOnABindRefusal(t *testing.T) {
+	start := time.Now().Add(90 * time.Second).UTC().Format(time.RFC3339)
+	look := `{"items":[{"id":"studio-1","snippet":{"title":"Friday","scheduledStartTime":"` + start + `"},"status":{"lifeCycleStatus":"created"},` +
+		`"contentDetails":{"boundStreamId":"","enableAutoStart":true,"enableAutoStop":false}}]}`
+	handlers := func(bindStatus int) map[string]http.HandlerFunc {
+		h := map[string]http.HandlerFunc{
+			"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("broadcastStatus") == "upcoming" {
+					io.WriteString(w, look)
+					return
+				}
+				io.WriteString(w, `{"items":[]}`)
+			},
+			"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		}
+		if bindStatus != 0 {
+			h["POST "+ytBindPath] = func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(bindStatus)
+				io.WriteString(w, `{"error":{"errors":[{"reason":"liveBroadcastBindingNotAllowed"}]}}`)
+			}
+		}
+		return h
+	}
+	var log []capture
+	y := lnStub(t, &log, handlers(0))
+	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday"})
+	if err != nil || r.BroadcastID != "bcast-9" || r.Reused {
+		t.Errorf("without MayReuse: result %+v err %v, want a fresh broadcast and the lookalike untouched", r, err)
+	}
+
+	log = nil
+	y = lnStub(t, &log, handlers(http.StatusForbidden))
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true}); err == nil {
+		t.Fatal("a refused bind was not an error")
+	}
+	if find(log, http.MethodDelete, ytBroadcastsPath) != nil {
+		t.Error("a reused broadcast was deleted after a refused bind")
 	}
 }

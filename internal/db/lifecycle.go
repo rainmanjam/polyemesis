@@ -137,6 +137,11 @@ type BroadcastControl struct {
 	// the operator picked. Only a created broadcast that never aired is ever deleted (on switch-off, or when the
 	// destination is switched to Studio's Stream now); an adopted event is never deleted.
 	Created bool `json:"created,omitempty"`
+	// OpenAttemptMS is when polyemesis began opening a YouTube broadcast for this destination, persisted BEFORE the
+	// insert and cleared when the open is recorded. Its presence on a later attempt proves an earlier attempt of ours
+	// may have created a broadcast it never recorded, which is the only case in which an upcoming broadcast that looks
+	// like ours is reused (and then treated as created by polyemesis). Without it nothing is ever adopted.
+	OpenAttemptMS int64 `json:"openAttemptMs,omitempty"`
 }
 
 // Empty reports whether this block says anything at all.
