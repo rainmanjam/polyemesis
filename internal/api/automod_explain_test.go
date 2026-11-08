@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 type explainResponse struct {
@@ -154,5 +155,54 @@ func TestAnAPITokenCannotUseTheExplainTestBox(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+plaintext)
 	if w := do(t, h, r); w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
 		t.Fatalf("an API token used the test box: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The test box answers what the strike ladder would ask for, from the stored
+// arming and ceiling: a flag is not a platform action, so an armed Ban on
+// Twitch shows a ban at strike 3 and an unarmed platform shows flag.
+func TestAutomodExplainPreviewsTheLadderFromTheStoredArming(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	s, err := store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Automod.Protection.State = db.ProtectionOn
+	s.Automod.Protection.Ceilings = map[string]string{"doxxing": "ban"}
+	if s.Automod.On == nil {
+		s.Automod.On = map[string]bool{}
+	}
+	s.Automod.On["twitch/ban/protection"] = true
+	if err := store.PutSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	ladder := func(platform string) []string {
+		var got struct {
+			Detections []struct {
+				Detector string `json:"detector"`
+				Ladder   []struct {
+					Strike int    `json:"strike"`
+					Action string `json:"action"`
+				} `json:"ladder"`
+			} `json:"detections"`
+		}
+		decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/automod/explain", map[string]any{
+			"text": "mail me at someone.private@example.com", "platform": platform,
+		}, http.StatusOK), &got)
+		var out []string
+		for _, d := range got.Detections {
+			if d.Detector == "doxxing/email" {
+				for _, st := range d.Ladder {
+					out = append(out, st.Action)
+				}
+			}
+		}
+		return out
+	}
+	if got := strings.Join(ladder("twitch"), ","); got != "flag,flag,ban" {
+		t.Errorf("twitch ladder = %q", got)
+	}
+	if got := strings.Join(ladder("youtube"), ","); got != "flag,flag,flag" {
+		t.Errorf("youtube ladder = %q", got)
 	}
 }

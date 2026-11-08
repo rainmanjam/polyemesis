@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -460,5 +461,50 @@ func TestExplainAsWithThePackOffDoesNotClaimAHold(t *testing.T) {
 	}
 	if !found {
 		t.Error("the pack's detections are not shown at all while it is off")
+	}
+}
+
+// The test box must answer what the ladder would ask a platform to do at
+// strikes 1, 2 and 3, from the arming and the ceiling, not from the finding's
+// own flag action: with Ban armed on Twitch only, a Twitch hit reaches a ban at
+// strike 3 and YouTube stays a flag.
+func TestExplainAsPreviewsTheLadderPerStrikeWithoutCountingOne(t *testing.T) {
+	hl := DefaultHistoryLimits()
+	p := newProtection(t, ProtectionConfig{History: &hl})
+	m := DefaultMatrix()
+	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionBan, Checker: CheckerProtection}, true)
+	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionDelete, Checker: CheckerProtection}, true)
+	st := NewStrikes()
+	e := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(p).
+		WithLadder(&Ladder{Strikes: st, Ceilings: map[string]Rung{string(CategoryDoxxing): RungBan}})
+	sub := Subject{AuthorID: "a", Text: "mail me at someone.private@example.com"}
+
+	steps := func(plat db.Platform) []Action {
+		var out []Action
+		for _, d := range e.ExplainAs(plat, sub, true).Detections {
+			if d.Detector == pack.GroupEmail {
+				for _, s := range d.Ladder {
+					out = append(out, s.Action)
+				}
+			}
+		}
+		return out
+	}
+	// Delete armed, timeout not: strike 2 lowers to the delete, strike 3 bans.
+	if got, want := steps(db.PlatformTwitch), []Action{ActionDelete, ActionDelete, ActionBan}; !slices.Equal(got, want) {
+		t.Errorf("twitch ladder = %v, want %v", got, want)
+	}
+	if got, want := steps(db.PlatformYouTube), []Action{ActionFlag, ActionFlag, ActionFlag}; !slices.Equal(got, want) {
+		t.Errorf("youtube ladder = %v, want %v", got, want)
+	}
+	if st.Tracked() != 0 {
+		t.Errorf("the preview recorded a strike: %d tracked", st.Tracked())
+	}
+	// Without a ladder there is no preview to claim.
+	bare := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(p)
+	for _, d := range bare.ExplainAs(db.PlatformTwitch, sub, true).Detections {
+		if len(d.Ladder) != 0 {
+			t.Errorf("a ladder preview without a ladder: %+v", d)
+		}
 	}
 }

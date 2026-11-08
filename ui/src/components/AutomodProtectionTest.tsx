@@ -12,7 +12,7 @@ import type { AutomodExplanation } from "@/lib/types";
  *
  * Type a pretend message, optionally say who "sent" it and on which platform,
  * and see which detectors would fire, whether the line would be held off the
- * overlays, and what each would ask a platform to do. It calls
+ * overlays, and what the strike ladder would ask a platform to do at strikes 1, 2 and 3. It calls
  * POST /automod/explain, which is offline, stateless and unlogged: it never
  * counts a strike and never reaches a network. The text is kept in this
  * component's state only, and the answer names detectors, never the matched
@@ -117,7 +117,11 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
               {result.detections.map((d) => {
                 const catKey = CATEGORY_KEYS[d.category];
                 const detKey = detectorLabelKey(d.detector);
-                const actKey = ACTION_KEYS[d.action];
+                // A flag is not a platform action, and a pack finding always
+                // arrives as one: what the platform would be asked is the
+                // ladder's answer, never the finding's own action.
+                const actKey = d.checker === "protection" || d.action === "flag" ? undefined : ACTION_KEYS[d.action];
+                const rungs = d.ladder && d.ladder.length > 0 ? d.ladder : null;
                 return (
                   <li key={`${d.checker}:${d.detector}:${d.reason}`} className="rounded-md border p-2 text-sm">
                     <div className="font-medium">
@@ -132,6 +136,15 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
                       {d.act && actKey ? ` · ${t("automod.protTestAct", { action: t(actKey) })}` : ""}
                       {d.live ? "" : ` · ${t("automod.protTestNotLive")}`}
                     </div>
+                    {rungs && (
+                      <div className="text-muted-foreground">
+                        {t("automod.protTestLadder", {
+                          a: t(ACTION_KEYS[rungs[0].action]),
+                          b: t(ACTION_KEYS[rungs[1]?.action ?? rungs[0].action]),
+                          c: t(ACTION_KEYS[rungs[2]?.action ?? rungs[0].action]),
+                        })}
+                      </div>
+                    )}
                   </li>
                 );
               })}

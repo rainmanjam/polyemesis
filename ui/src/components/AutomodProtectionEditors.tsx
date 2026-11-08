@@ -21,10 +21,13 @@ export function StringListEditor({
   placeholder,
   values,
   onChange,
+  min = 1,
 }: Readonly<{
   id: string;
   label: string;
   placeholder?: string;
+  /** The fewest characters an entry may have (the server's bound for it). */
+  min?: number;
   values: readonly string[];
   onChange: (next: string[]) => void;
 }>) {
@@ -32,8 +35,9 @@ export function StringListEditor({
   const [draft, setDraft] = useState("");
   const value = draft.trim();
   const dup = values.includes(value);
+  const short = value !== "" && [...value].length < min;
   const add = () => {
-    if (value === "" || dup) return;
+    if (value === "" || dup || short) return;
     onChange([...values, value]);
     setDraft("");
   };
@@ -46,6 +50,7 @@ export function StringListEditor({
           value={draft}
           placeholder={placeholder}
           maxLength={TERM_MAX}
+          aria-invalid={short}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -54,10 +59,11 @@ export function StringListEditor({
             }
           }}
         />
-        <Button type="button" size="sm" variant="secondary" disabled={value === "" || dup} onClick={add}>
+        <Button type="button" size="sm" variant="secondary" disabled={value === "" || dup || short} onClick={add}>
           {t("automod.protAdd")}
         </Button>
       </div>
+      {short && <p className="text-sm text-destructive">{t("automod.protTermLength", { min, max: TERM_MAX })}</p>}
       {values.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label={label}>
           {values.map((v) => (

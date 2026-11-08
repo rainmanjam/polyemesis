@@ -132,6 +132,14 @@ describe("the existing-install banner", () => {
 });
 
 describe("the toggle", () => {
+  it("turning the pack off removes only the ladder rungs, not the fresh-install flag cells", () => {
+    const latest = show(
+      settingsOf(prot(), { "twitch/flag/protection": true, "twitch/delete/protection": true, "youtube/timeout/protection": true }),
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Recommended protection" }));
+    expect(latest.current.automod!.on).toEqual({ "twitch/flag/protection": true });
+  });
+
   it("turning the pack off disarms its rungs in the same draft, and leaves other checkers' cells", () => {
     const latest = show(
       settingsOf(prot(), { "twitch/ban/protection": true, "twitch/ban/rules": true }),
@@ -177,8 +185,8 @@ describe("categories", () => {
     expect(latest.current.automod!.protection!.addTerms).toEqual([
       { term: "zz", category: "hate_speech", tier: "severe" },
     ]);
-    fireEvent.change(screen.getByLabelText("Allow a pack word"), { target: { value: "ok" } });
-    fireEvent.keyDown(screen.getByLabelText("Allow a pack word"), { key: "Enter" });
+    fireEvent.change(screen.getByLabelText("Allow a pack word (all categories)"), { target: { value: "ok" } });
+    fireEvent.keyDown(screen.getByLabelText("Allow a pack word (all categories)"), { key: "Enter" });
     expect(latest.current.automod!.protection!.allowTerms).toEqual(["ok"]);
     fireEvent.click(screen.getByRole("button", { name: "Remove zz" }));
     expect(latest.current.automod!.protection!.addTerms).toEqual([]);
@@ -195,7 +203,7 @@ describe("categories", () => {
   it("edits the domain allow-list and the protected names", () => {
     const latest = show(settingsOf(prot()));
     fireEvent.click(screen.getByRole("button", { name: "Details for Scams and bait links" }));
-    fireEvent.change(screen.getByLabelText("Allow a domain"), { target: { value: "mysponsor.com" } });
+    fireEvent.change(screen.getByLabelText("Allow a domain (all categories)"), { target: { value: "mysponsor.com" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]);
     expect(latest.current.automod!.protection!.allowDomains).toEqual(["mysponsor.com"]);
 
@@ -209,7 +217,10 @@ describe("categories", () => {
     const latest = show(settingsOf(prot()));
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Timeout length (seconds)"), { target: { value: "0" } });
-    expect(latest.current.automod!.protection!.ladderTimeoutSeconds).toBe(1);
+    // Zero is never committed (it is a permanent ban); blurring restores the saved value.
+    expect(latest.current.automod!.protection!.ladderTimeoutSeconds).toBe(600);
+    fireEvent.blur(screen.getByLabelText("Timeout length (seconds)"));
+    expect((screen.getByLabelText("Timeout length (seconds)") as HTMLInputElement).value).toBe("600");
     fireEvent.change(screen.getByLabelText("Strike window (seconds)"), { target: { value: "120" } });
     expect(latest.current.automod!.protection!.strikeWindowSeconds).toBe(120);
     fireEvent.change(screen.getByLabelText("Highest action: Scams and bait links"), { target: { value: "delete" } });
@@ -308,8 +319,13 @@ describe("the test box", () => {
             detector: "doxxing/phone",
             reason: "phone number",
             hold: true,
-            action: "delete",
+            action: "flag",
             act: true,
+            ladder: [
+              { strike: 1, action: "flag" },
+              { strike: 2, action: "delete" },
+              { strike: 3, action: "ban" },
+            ],
             live: true,
           },
         ],
@@ -321,7 +337,12 @@ describe("the test box", () => {
     expect(await screen.findByText("This message would be held off your overlays.")).toBeTruthy();
     expect(explain).toHaveBeenCalledWith({ text: "secret-ish text", platform: "twitch", authorName: "bob" });
     expect(screen.getByText("Doxxing (phone, email, IP) · Phone numbers")).toBeTruthy();
-    expect(screen.getByText(/Flags and holds · Platform action: Delete/)).toBeTruthy();
+    // The finding's own action is a flag, which is not a platform action: the
+    // box shows the ladder's answer for strikes 1, 2 and 3 instead.
+    expect(screen.queryByText(/Platform action/)).toBeNull();
+    expect(
+      screen.getByText("If repeated: Flag for review, then Delete, then Ban"),
+    ).toBeTruthy();
     // The typed text appears in the input and nowhere in the answer.
     expect(screen.queryAllByText(/secret-ish text/)).toHaveLength(0);
   });
@@ -380,6 +401,37 @@ describe("the test box", () => {
   });
 });
 
+describe("form fields", () => {
+  it("allow-word entries below the server's two-character bound cannot be added", () => {
+    show(settingsOf(prot()));
+    fireEvent.click(screen.getByRole("button", { name: "Details for Hate and slurs" }));
+    const add = screen.getByLabelText("Allow a pack word (all categories)");
+    fireEvent.change(add, { target: { value: "x" } });
+    const btn = add.parentElement!.querySelector("button") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(screen.getByText("A word is 2 to 100 characters.")).toBeTruthy();
+    fireEvent.change(add, { target: { value: "xy" } });
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("clearing a seconds field to retype it does not turn into 1 on the way, and is clamped to the server's bound", () => {
+    const latest = show(settingsOf(prot()));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const f = screen.getByLabelText("Timeout length (seconds)") as HTMLInputElement;
+    fireEvent.change(f, { target: { value: "" } });
+    expect(f.value).toBe("");
+    fireEvent.change(f, { target: { value: "3" } });
+    fireEvent.change(f, { target: { value: "30" } });
+    expect(f.value).toBe("30");
+    expect(latest.current.automod!.protection!.ladderTimeoutSeconds).toBe(30);
+    fireEvent.change(f, { target: { value: "99999999" } });
+    expect(latest.current.automod!.protection!.ladderTimeoutSeconds).toBe(1209600);
+    fireEvent.change(f, { target: { value: "" } });
+    fireEvent.blur(f);
+    expect(f.value).toBe("1209600");
+  });
+});
+
 describe("the standalone offer (chat review list)", () => {
   const stored = (state: "" | "on") => settingsOf(prot({ state }));
 
@@ -403,6 +455,16 @@ describe("the standalone offer (chat review list)", () => {
     const again = render(<ProtectionOfferStandalone />);
     await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
     expect(again.container.textContent).toBe("");
+  });
+
+  it("re-reads the settings after a failed save so a retry carries the current version", async () => {
+    getSettings.mockResolvedValue(stored(""));
+    putSettings.mockRejectedValueOnce(new Error("settings_conflict")).mockImplementation(async (s) => s);
+    render(<ProtectionOfferStandalone />);
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(putSettings).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the banner when the save fails", async () => {

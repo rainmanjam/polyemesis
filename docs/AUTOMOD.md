@@ -216,7 +216,9 @@ on the Chat page) with **Turn on** and **Not now**; both record an answer, and
   and blocked terms only see Twitch chat, so a YouTube or Kick message shown on
   your Twitch stream is kept off it by an overlay hold, not by Twitch.
 - **A test box** that calls `POST /automod/explain`. It shows which detectors
-  fire, whether the line would be held, and what each would ask a platform to do.
+  fire, whether the line would be held, and, for a pack hit, what the strike
+  ladder would ask the platform to do at strikes 1, 2 and 3 given the rungs you
+  have armed and the category's ceiling ("flag for review" where none is armed).
   It uses the settings you have **saved**, and it never stores, logs or sends the
   text.
 - **Advanced**: the ladder's timeout length, the strike window and each

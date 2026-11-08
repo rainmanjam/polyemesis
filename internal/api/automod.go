@@ -140,8 +140,11 @@ func (s *Server) handleAutomodExplain(w http.ResponseWriter, r *http.Request) {
 	// is the live engine's own rule (checkerConfigured): while the pack is off
 	// the response says so, rather than showing holds chat will not make.
 	packOn, _ := checkerConfigured(a, automod.CheckerProtection)
+	// The ladder is attached only to preview what each strike would ask for; the
+	// Strikes it holds is a throwaway nothing ever records into.
 	engine := automod.New(matrixFromSettings(a), automod.PlatformCaps{}, rules, automod.NewHistory(hl), nil).
-		WithProtection(prot)
+		WithProtection(prot).
+		WithLadder(ladderFromSettings(a.Protection, automod.NewStrikes()))
 	writeJSON(w, http.StatusOK, engine.ExplainAs(plat, automod.Subject{
 		AuthorName: req.AuthorName, Text: req.Text, EmoteCount: req.EmoteCount,
 	}, packOn))

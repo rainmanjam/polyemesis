@@ -19,6 +19,7 @@ import {
   CEILINGS,
   detectorEnabled,
   detectorHolds,
+  LADDER_RUNGS,
   protectionOf,
   PROTECTION_CATEGORIES,
   RISK_KEYS,
@@ -102,7 +103,11 @@ export function AutomodProtectionCard({ settings, onChange }: Readonly<AutomodPr
     // protection cell while the pack is off.
     const on = { ...(automod!.on ?? {}) };
     if (a !== "on") {
-      for (const k of Object.keys(on)) if (k.endsWith("/protection")) delete on[k];
+      // Only the ladder's rungs: the fresh-install flag cells are not the pack's
+      // to remove, and a pack switched off and on again must leave the matrix
+      // as it found it.
+      const rung = new RegExp(`/(${LADDER_RUNGS.join("|")})/protection$`);
+      for (const k of Object.keys(on)) if (rung.test(k)) delete on[k];
     }
     onChange({ ...settings, automod: { ...automod!, on, protection: { ...prot, state: a as AutomodProtectionState } } });
   }
@@ -279,6 +284,7 @@ function CategoryDetails({
           <StringListEditor
             id={`automod-prot-allow-${cat.id}`}
             label={t("automod.protAllowWord")}
+            min={2}
             values={prot.allowTerms ?? []}
             onChange={(next) => set("allowTerms", next)}
           />
@@ -314,15 +320,50 @@ function CategoryDetails({
   );
 }
 
+/** The longest timeout the server accepts (two weeks, Twitch's own limit). */
+const MAX_SECONDS = 14 * 24 * 3600;
+
+/** A seconds field that keeps what is typed. Clearing it to type a new number
+ *  must not become a 1 on the way (600 cleared then 30 typed is 30, not 130),
+ *  so the raw text is local and only a whole number from 1 up is committed to
+ *  the draft; on blur the text snaps to the value that will be saved. Never
+ *  zero (a zero timeout is a permanent ban) and never over the server's bound. */
+function SecondsInput({
+  id,
+  value,
+  onCommit,
+}: Readonly<{ id: string; value: number; onCommit: (n: number) => void }>) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => {
+    setRaw((r) => (Number(r) === value ? r : String(value)));
+  }, [value]);
+  const parse = (v: string) => {
+    const n = Math.floor(Number(v));
+    return v.trim() !== "" && Number.isFinite(n) && n >= 1 ? Math.min(n, MAX_SECONDS) : null;
+  };
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={1}
+      max={MAX_SECONDS}
+      value={raw}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        const n = parse(e.target.value);
+        if (n !== null) onCommit(n);
+      }}
+      onBlur={() => setRaw(String(parse(raw) ?? value))}
+    />
+  );
+}
+
 function Advanced({
   prot,
   onChange,
 }: Readonly<{ prot: AutomodProtection; onChange: (next: AutomodProtection) => void }>) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  // Never zero: a zero timeout is a permanent ban, so the field holds at one
-  // and the server refuses less.
-  const num = (v: string) => Math.max(1, Math.floor(Number(v)) || 1);
   return (
     <div className="rounded-md border">
       <button
@@ -339,22 +380,18 @@ function Advanced({
           <div className="flex flex-wrap gap-3">
             <div className="flex flex-col gap-1">
               <Label htmlFor="automod-prot-timeout">{t("automod.protTimeoutSeconds")}</Label>
-              <Input
+              <SecondsInput
                 id="automod-prot-timeout"
-                type="number"
-                min={1}
                 value={prot.ladderTimeoutSeconds}
-                onChange={(e) => onChange({ ...prot, ladderTimeoutSeconds: num(e.target.value) })}
+                onCommit={(n) => onChange({ ...prot, ladderTimeoutSeconds: n })}
               />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="automod-prot-window">{t("automod.protStrikeWindow")}</Label>
-              <Input
+              <SecondsInput
                 id="automod-prot-window"
-                type="number"
-                min={1}
                 value={prot.strikeWindowSeconds}
-                onChange={(e) => onChange({ ...prot, strikeWindowSeconds: num(e.target.value) })}
+                onCommit={(n) => onChange({ ...prot, strikeWindowSeconds: n })}
               />
             </div>
           </div>

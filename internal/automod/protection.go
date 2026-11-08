@@ -229,11 +229,48 @@ type Detection struct {
 	// would let it happen on the platform asked about.
 	Action Action `json:"action"`
 	Act    bool   `json:"act"`
+	// Ladder is what the strike ladder would ask a platform to do at strikes 1,
+	// 2 and 3, given the current arming and the category's ceiling. Present only
+	// for a pack finding that holds (the only kind on the ladder) and only when
+	// the engine has a ladder. Action is "flag" where nothing is armed.
+	Ladder []LadderStep `json:"ladder,omitempty"`
 	// Live is whether the engine running in chat would produce this finding. A
 	// pack detection is not live while the pack is off for the install: it is
 	// what the pack WOULD say, shown so the operator can see what turning it on
 	// does.
 	Live bool `json:"live"`
+}
+
+// LadderStep is one strike's outcome in a Detection's Ladder preview.
+type LadderStep struct {
+	Strike int    `json:"strike"`
+	Action Action `json:"action"`
+}
+
+// ladderPreview resolves a pack finding's rung for strikes 1 to 3 exactly as
+// climb does for a lone finding (ceiling, then the highest armed rung at or
+// below it), without touching Strikes. It returns nil for a finding that is
+// not on the ladder.
+func (e *Engine) ladderPreview(plat db.Platform, f Finding) []LadderStep {
+	if e.ladder == nil || f.Checker != CheckerProtection || !f.Hold {
+		return nil
+	}
+	steps := make([]LadderStep, 0, int(maxRung))
+	for strike := 1; strike <= int(maxRung); strike++ {
+		want := Rung(strike)
+		if c := e.ladder.ceilingOf(f); c < want {
+			want = c
+		}
+		act := ActionFlag
+		for r := want; r > RungHold; r-- {
+			if e.matrix.Allows(e.caps, Key{Platform: plat, Action: r.Action(), Checker: CheckerProtection}) {
+				act = r.Action()
+				break
+			}
+		}
+		steps = append(steps, LadderStep{Strike: strike, Action: act})
+	}
+	return steps
 }
 
 // Explanation is what the test box shows for one pretend message.
@@ -306,6 +343,7 @@ func (e *Engine) ExplainAs(plat db.Platform, s Subject, packOn bool) Explanation
 			Act:  e.matrix.Allows(e.caps, Key{Platform: plat, Action: f.Action, Checker: f.Checker}),
 			Live: packOn || f.Checker != CheckerProtection,
 		}
+		d.Ladder = e.ladderPreview(plat, f)
 		if h, ok := hits[f.Detector]; ok && f.Checker == CheckerProtection {
 			d.Tier, d.Form = h.Tier, h.Form
 		}

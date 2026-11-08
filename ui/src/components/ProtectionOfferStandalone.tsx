@@ -39,6 +39,14 @@ export function ProtectionOfferStandalone() {
       setSettings(saved);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("automod.protOfferFailed"));
+      // A save carries the version that was read, so after any other settings
+      // write a retry would be refused for ever: read again so it uses the
+      // current one. A failed re-read leaves the snapshot as it was.
+      try {
+        setSettings(await api.getSettings());
+      } catch {
+        /* keep the banner and the old snapshot */
+      }
     }
   }
 
