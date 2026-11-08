@@ -167,6 +167,10 @@ type ModelStats struct {
 	// Lines with a hard-case signal that were skipped for this reason are on
 	// the review list. Set on the engine's aggregate only.
 	CeilingSpent bool `json:"ceilingSpent,omitempty"`
+	// UncheckedUnlisted counts lines nothing checked that got no review-list
+	// entry because the list's cap for them was reached (they were still held
+	// where the hold setting is on). Filled by the chat hub.
+	UncheckedUnlisted int `json:"uncheckedUnlisted,omitempty"`
 }
 
 // Model is the connector.

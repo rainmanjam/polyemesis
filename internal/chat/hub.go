@@ -103,6 +103,12 @@ type Hub struct {
 	// modelAsked is the messages the model has been queued to judge and has
 	// not answered, with when. See ModelPending.
 	modelAsked map[string]time.Time
+	// The review list's cap on lines nothing checked (listUnchecked): when the
+	// list was last found full, how many lines were left unlisted since start,
+	// and when that was last logged.
+	uncheckedFullUntil time.Time
+	uncheckedUnlisted  int
+	uncheckedWarnedAt  time.Time
 	// flags is automod's review list, oldest first and bounded by flagCap.
 	// See flags.go.
 	flags []FlaggedMessage

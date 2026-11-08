@@ -464,9 +464,11 @@ func (h *Hub) holdUnjudged(job automodJob) {
 // bounded memory; releasing it as clear instead would air exactly what an
 // operator who turned the hold on asked not to air.
 func (h *Hub) listUnchecked(p db.Platform, account, msgID, authorID, reason string, hold bool) {
-	if h.unjudgedHeld() >= unjudgedHoldCap {
-		h.log.Warn("automod: too many unchecked lines on the review list; this one is not listed",
-			"platform", p, "cap", unjudgedHoldCap, "held", hold)
+	// The cap is checked BEFORE anything is looked up, and not rescanned for
+	// every line once it is hit: this runs on the adapter's read loop for each
+	// declined line, and under a raid brake that is every line.
+	if h.uncheckedListFull() {
+		h.countUnlisted(p, hold)
 		return
 	}
 	h.noteFlag(h.messageFor(p, account, msgID, authorID), []automod.Finding{{
@@ -478,6 +480,45 @@ func (h *Hub) listUnchecked(p db.Platform, account, msgID, authorID, reason stri
 	}})
 	if hold {
 		h.markFlagHeld(p, account, msgID)
+	}
+}
+
+// uncheckedFullRecheck is how long a full list is believed to still be full.
+const uncheckedFullRecheck = time.Second
+
+// uncheckedListFull reports whether the shared cap on unchecked entries is
+// reached. A positive answer is remembered for a second, so a flood does not
+// scan the review list per line.
+func (h *Hub) uncheckedListFull() bool {
+	h.mu.Lock()
+	if h.now().Before(h.uncheckedFullUntil) {
+		h.mu.Unlock()
+		return true
+	}
+	h.mu.Unlock()
+	if h.unjudgedHeld() < unjudgedHoldCap {
+		return false
+	}
+	h.mu.Lock()
+	h.uncheckedFullUntil = h.now().Add(uncheckedFullRecheck)
+	h.mu.Unlock()
+	return true
+}
+
+// countUnlisted counts a line that got no review entry, and warns once per
+// window (the time an entry can still hold a line) rather than per line.
+func (h *Hub) countUnlisted(p db.Platform, held bool) {
+	h.mu.Lock()
+	h.uncheckedUnlisted++
+	now := h.now()
+	warn := now.Sub(h.uncheckedWarnedAt) >= unjudgedHeldFor
+	if warn {
+		h.uncheckedWarnedAt = now
+	}
+	h.mu.Unlock()
+	if warn {
+		h.log.Warn("automod: too many unchecked lines on the review list; further ones are not listed (counted in the model stats)",
+			"platform", p, "cap", unjudgedHoldCap, "held", held)
 	}
 }
 
@@ -577,7 +618,11 @@ func (h *Hub) ModelStats() automod.ModelStats {
 	if s == nil {
 		return automod.ModelStats{}
 	}
-	return s.mod.ModelStats()
+	st := s.mod.ModelStats()
+	h.mu.Lock()
+	st.UncheckedUnlisted = h.uncheckedUnlisted
+	h.mu.Unlock()
+	return st
 }
 
 // Moderator returns the moderator currently attached, or nil.
