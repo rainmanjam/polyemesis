@@ -72,13 +72,13 @@ describe("viewer card platform tools", () => {
   });
 
   it("Twitch: a refusal is shown in the server's words and the card stays usable", async () => {
-    twPost.mockRejectedValue(new Error("VIPs need the channel to be an Affiliate or Partner"));
+    twPost.mockRejectedValue(new Error("The channel has not finished Twitch's Build a Community requirement"));
     twRead.mockResolvedValue({ holders: [] } as never);
     draw("twitch");
     await waitFor(() => expect(screen.getByText("VIP: no")).toBeTruthy());
     fireEvent.click(btn("Make VIP"));
     fireEvent.click(btn(/Make VIP — confirm/));
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Affiliate or Partner"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Build a Community requirement"));
     expect(btn("Make VIP").disabled).toBe(false);
   });
 

@@ -1029,8 +1029,8 @@ for the platforms that have them. It reuses the routes the other panels use; the
 is no separate API behind it.
 
 - **Twitch:** warn (with a reason), make or remove VIP, make or remove moderator,
-  and open Twitch's own moderator card. VIPs need the channel to be an Affiliate or
-  Partner, and moderator and VIP changes work only for the channel's owner; the card
+  and open Twitch's own moderator card. VIPs need the channel to have finished
+  Twitch's Build a Community requirement, and moderator and VIP changes work only for the channel's owner; the card
   shows Twitch's refusal as it is worded.
 - **X:** make or remove a chat moderator. A moderator acts on every broadcast the
   account hosts, not one, and the card says so.

@@ -13,7 +13,7 @@ its first tagged release.
 - **Viewer card: platform tools and private notes.** The viewer card now has a row of tools where the
   platform supports them: on Twitch warn, VIP and moderator (with current status) and a link to
   Twitch's own moderator card; on X and YouTube make or remove a chat moderator. Role changes ask
-  again inline and show the platform's own refusal (Affiliate for VIPs, owner-only roles). It also
+  again inline and show the platform's own refusal (Build a Community for VIPs, owner-only roles). It also
   keeps a private note and tags per viewer (`GET`/`PUT`/`DELETE /api/v1/chat/users/notes`, admin-only,
   refused to a read token, stored in the new `viewer_notes` table with no schema-version change and
   never sent to overlays, events or hooks). A tagged viewer shows a tag badge in the chat list.
