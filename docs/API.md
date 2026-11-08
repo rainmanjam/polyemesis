@@ -1532,8 +1532,11 @@ depend on what the author sent recently and so cannot be answered for one messag
 (`windowed`). **Offline and stateless**: it records nothing in any window, makes
 no network call and logs no text, and a detection names its detector, never the
 matched value. `text` is bounded at 2,000 characters; `protect` names accounts to
-treat as protected for this one test. It is a read-denied POST, like any POST a
-read-scoped token does not get.
+treat as protected for this one test. It is **session-only**, like `/automod/test`: it answers from
+your rule names and pack policy, so no API token can call it. `protection` says
+whether the pack is on in the live engine (it is not yet), `held` is what chat
+would do, `wouldHoldIfOn` is what it would do with the pack on, and a detection
+with `live: false` is the pack's, shown for that second case.
 
 `POST /automod/test` is the Test button. It sends three synthetic messages to
 the connection in the body (`checker`, `protocol`, `preset`, `endpoint`,

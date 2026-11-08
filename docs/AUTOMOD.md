@@ -178,14 +178,15 @@ different accounts are the job of the protection pack, below.
 ## The recommended-protection pack
 
 A compiled term list and a set of detectors, in `internal/automod/pack`, that
-run in their own **Protection** column of the matrix so that arming an action
-for the pack never arms your own regex rules. A hit is **flagged in the console
-and can be held off every overlay**; it asks for no platform action, and the
-matrix is still the only thing that can permit one. This release builds the
-pack, its tests and the test box. **Nothing turns it on yet**: no setting
-enables it, an install keeps behaving exactly as before, and a matrix cell for
-the Protection column is refused on save ("recommended protection is not on")
-until the settings that switch it on arrive.
+run as their own checker, so that arming an action for the pack never arms your
+own regex rules. A hit is **flagged in the console and can be held off every
+overlay**; it asks for no platform action, and the matrix is still the only
+thing that can permit one. This release builds the pack, its tests and the test
+box. The matrix API carries a `protection` checker, but the console does not
+show it yet, and **nothing turns it on**: no setting enables it, an install
+keeps behaving exactly as before, and a matrix cell for that checker is refused
+on save ("recommended protection is not on") until the settings that switch it
+on arrive.
 
 | Detector | What it catches | Held off the overlay |
 |---|---|---|
@@ -435,7 +436,7 @@ on their own:
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
 | `GET` | `/automod/stats` | what the checkers have done |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
-| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
+| `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine (not yet), `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |
 
 Keys are write-only: `automod.model.hasApiKey` and

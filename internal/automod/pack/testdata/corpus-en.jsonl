@@ -365,6 +365,24 @@
 {"text": "which version is that? mine says v1.1.1.1-beta", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "version string", "slice": "number_trap"}
 {"text": "running jev-1.14.0-rc1 here, no issues", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "version string, must not read as IPv4 or a phone", "slice": "number_trap"}
 {"text": "which version is that? mine says jev-1.14.0-rc1", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "version string", "slice": "number_trap"}
+{"text": "set your dns to 8.8.8.8 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 8.8.8.8 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 8.8.4.4 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 8.8.4.4 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 1.1.1.1 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 1.1.1.1 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 1.0.0.1 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 1.0.0.1 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 9.9.9.9 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 9.9.9.9 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 149.112.112.112 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 149.112.112.112 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 208.67.222.222 and retry", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 208.67.222.222 lol", "category": "doxxing", "group": "doxxing/ipv4", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 2001:4860:4860::8888 and retry", "category": "doxxing", "group": "doxxing/ipv6", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 2001:4860:4860::8888 lol", "category": "doxxing", "group": "doxxing/ipv6", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "set your dns to 2606:4700:4700::1111 and retry", "category": "doxxing", "group": "doxxing/ipv6", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
+{"text": "ping me at 2606:4700:4700::1111 lol", "category": "doxxing", "group": "doxxing/ipv6", "expect": "pass", "note": "public DNS resolver, not a person's address", "slice": "number_trap"}
 {"text": "the deck costs $1,299.99 lol", "category": "doxxing", "group": "doxxing/phone", "expect": "pass", "note": "price", "slice": "number_trap"}
 {"text": "the deck costs $19.99 lol", "category": "doxxing", "group": "doxxing/phone", "expect": "pass", "note": "price", "slice": "number_trap"}
 {"text": "the deck costs 299.99 lol", "category": "doxxing", "group": "doxxing/phone", "expect": "pass", "note": "price", "slice": "number_trap"}

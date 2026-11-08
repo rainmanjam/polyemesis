@@ -57,6 +57,15 @@ func (e *Engine) WithProtection(p *Protection) *Engine {
 	return e
 }
 
+// clock is the engine's time source. An Engine built as a struct literal rather
+// than through New has no now, and must not panic on the hot path for it.
+func (e *Engine) clock() time.Time {
+	if e.now == nil {
+		return time.Now()
+	}
+	return e.now()
+}
+
 // Protection returns the attached pack, or nil.
 func (e *Engine) Protection() *Protection {
 	if e == nil {
@@ -105,7 +114,7 @@ func (e *Engine) CheckFast(p db.Platform, s Subject) Verdict {
 	findings = append(findings, e.rules.Check(s.Text)...)
 	hist := e.protection.markHistory(e.history.Observe(p, s.AuthorID, s.Text))
 	findings = append(findings, hist...)
-	findings = append(findings, e.protection.check(p, s, e.now(), hist)...)
+	findings = append(findings, e.protection.check(p, s, e.clock(), hist)...)
 	return e.decide(p, sortByConsequence(findings))
 }
 

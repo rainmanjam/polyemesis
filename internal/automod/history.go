@@ -340,7 +340,8 @@ func (h *History) capAuthorsLocked() {
 		all = append(all, aged{k, log.last})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
-	for i := 0; i < len(all)-limit; i++ {
+	// To a low-water mark, not to the cap: see pack.LowWater.
+	for i := 0; i < len(all)-pack.LowWater(limit); i++ {
 		delete(h.authors, all[i].key)
 	}
 }

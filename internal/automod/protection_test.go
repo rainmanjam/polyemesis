@@ -420,3 +420,45 @@ func TestARuleCannotActOnSelfHarm(t *testing.T) {
 		t.Errorf("a scam rule that bans was refused: %v", err)
 	}
 }
+
+// An Engine built as a struct literal has no clock. CheckFast must not panic on
+// it, with or without the pack.
+func TestCheckFastWithoutAClockDoesNotPanic(t *testing.T) {
+	p := newProtection(t, ProtectionConfig{})
+	for _, e := range []*Engine{(&Engine{}).WithProtection(p), {history: NewHistory(DefaultHistoryLimits())}} {
+		if e.history == nil {
+			e.history = NewHistory(DefaultHistoryLimits())
+		}
+		e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "a", Text: "hello there everyone"})
+	}
+}
+
+// ExplainAs with the pack off reports what chat would do: the pack's findings
+// are listed, marked not live, and do not hold.
+func TestExplainAsWithThePackOffDoesNotClaimAHold(t *testing.T) {
+	hl := DefaultHistoryLimits()
+	p := newProtection(t, ProtectionConfig{History: &hl})
+	e := New(DefaultMatrix(), PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(p)
+	sub := Subject{AuthorID: "a", Text: "mail me at someone.private@example.com"}
+
+	on := e.ExplainAs(db.PlatformTwitch, sub, true)
+	if !on.Protection || !on.Held || !on.WouldHoldIfOn {
+		t.Fatalf("pack on: %+v", on)
+	}
+	off := e.ExplainAs(db.PlatformTwitch, sub, false)
+	if off.Protection || off.Held || !off.WouldHoldIfOn {
+		t.Fatalf("pack off still claims a live hold: %+v", off)
+	}
+	found := false
+	for _, d := range off.Detections {
+		if d.Checker == CheckerProtection {
+			found = true
+			if d.Live {
+				t.Errorf("a pack detection is live while the pack is off: %+v", d)
+			}
+		}
+	}
+	if !found {
+		t.Error("the pack's detections are not shown at all while it is off")
+	}
+}

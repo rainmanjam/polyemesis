@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/automod/pack"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -424,5 +425,21 @@ func TestEvictionDoesNotScanEveryAuthorPerMessage(t *testing.T) {
 	h.Observe(db.PlatformTwitch, "trigger", "hi")
 	if after := h.Tracked(); after > 2 {
 		t.Fatalf("the sweep did not run: %d authors remain", after)
+	}
+}
+
+// Trimming to exactly the cap re-sorts the whole table on every arrival once it
+// is full, under the detector's mutex, in a bot raid. The trim goes below the
+// cap so the next arrivals have room.
+func TestTheCapTrimsToALowWaterMark(t *testing.T) {
+	limits := DefaultHistoryLimits()
+	limits.MaxAuthors = 100
+	limits.IdleEviction = time.Hour
+	h, _ := newTestHistory(limits)
+	for i := 0; i <= 100; i++ {
+		h.Observe(db.PlatformTwitch, fmt.Sprintf("raider-%d", i), "hello")
+	}
+	if got, want := h.Tracked(), pack.LowWater(100); got != want {
+		t.Fatalf("after the cap was passed %d authors remain, want %d", got, want)
 	}
 }

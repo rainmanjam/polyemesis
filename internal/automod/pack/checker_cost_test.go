@@ -14,7 +14,22 @@ import (
 const plainMessage = "that was an amazing play, did you see the last round? lol i cannot believe it"
 
 func benchChecker(b *testing.B, text string) {
-	c, err := New(Config{Shape: DefaultShapeLimits(), Names: NewNameSet([]string{"kestrel_demo", "tidewalker_mod"})})
+	benchCheckerNames(b, text, NewNameSet([]string{"kestrel_demo", "tidewalker_mod"}))
+}
+
+// learnedNames is a name set at the spec's cap of learned names, with folded
+// lengths clustered around the author's own (nine), the worst spread for the
+// edit-distance arm.
+func learnedNames() *NameSet {
+	ns := NewNameSet([]string{"kestrel_demo", "tidewalker_mod"})
+	for i := 0; ns.Len() < DefaultMaxLearnedNames+2; i++ {
+		ns.Learn(raidWord(i) + raidWord(i + 7)[:i%3])
+	}
+	return ns
+}
+
+func benchCheckerNames(b *testing.B, text string, names *NameSet) {
+	c, err := New(Config{Shape: DefaultShapeLimits(), Names: names})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -27,7 +42,11 @@ func benchChecker(b *testing.B, text string) {
 }
 
 func BenchmarkCheckerPlain(b *testing.B) { benchChecker(b, plainMessage) }
-func BenchmarkCheckerBusy(b *testing.B)  { benchChecker(b, benchMessage) }
+
+// A plain line from an author who matches no one, with 500 learned names: the
+// impersonation check runs against every name it could be.
+func BenchmarkCheckerManyNames(b *testing.B) { benchCheckerNames(b, plainMessage, learnedNames()) }
+func BenchmarkCheckerBusy(b *testing.B)      { benchChecker(b, benchMessage) }
 func BenchmarkCheckerDigits(b *testing.B) {
 	benchChecker(b, "score is 21-19 at 12:30:45, running v1.2.3.4, order 4412 7788")
 }
@@ -41,6 +60,7 @@ func TestCheckerCostGate(t *testing.T) {
 	}
 	for name, fn := range map[string]func(*testing.B){
 		"plain": BenchmarkCheckerPlain, "busy": BenchmarkCheckerBusy, "digits": BenchmarkCheckerDigits,
+		"500-names": BenchmarkCheckerManyNames,
 	} {
 		r := testing.Benchmark(fn)
 		t.Logf("%s: %d ns/op, %d allocs/op", name, r.NsPerOp(), r.AllocsPerOp())
@@ -79,19 +99,40 @@ func BenchmarkNearDupWorst(b *testing.B) {
 	}
 }
 
-// A raid in full cry: MaxClusters live, distinct, same-length texts, and one
-// more message that matches none of them.
+// A raid in full cry, and the worst case for it: MaxClusters live clusters of
+// the SAME size as the probe (so the size precheck rejects none of them), and a
+// probe that differs on every call (so it never matches the cluster the last
+// call created and stops there). Every message is ordinary busy chat of distinct
+// nine-word lines, each one scanned against every live cluster.
 func BenchmarkRaidWorst(b *testing.B) {
 	r := NewRaid(RaidConfig{})
 	for i := 0; i < r.cfg.MaxClusters; i++ {
-		r.Observe(t0.Add(time.Duration(i)*time.Microsecond), fmt.Sprintf("a%d", i),
-			NewForms(fmt.Sprintf("alpha%d bravo%d charlie%d delta%d echo%d", i, i, i, i, i)), 0)
+		r.Observe(t0.Add(time.Duration(i)*time.Microsecond), fmt.Sprintf("a%d", i), raidLine(i), 0)
 	}
-	probe := NewForms("completely different words appear in this one line")
+	const ring = 8192 // longer than MaxClusters, so a probe's old cluster is gone when it returns
+	probes := make([]Forms, ring)
+	for i := range probes {
+		probes[i] = raidLine(100000 + i)
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		r.Observe(t0.Add(time.Second), "probe", probe, 0)
+		r.Observe(t0.Add(time.Second), "probe", probes[i%ring], 0)
+	}
+}
+
+// The author table at its cap, in a bot raid: every message is a new author, so
+// every message is over the cap.
+func BenchmarkNearDupCapEvict(b *testing.B) {
+	d := NewNearDup(NearDupConfig{})
+	f := NewForms("this is some ordinary chat text")
+	for i := 0; i < d.cfg.MaxAuthors; i++ {
+		d.Observe(t0.Add(time.Duration(i)*time.Microsecond), fmt.Sprintf("twitch:u%d", i), f)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		d.Observe(t0.Add(time.Second+time.Duration(i)*time.Microsecond), fmt.Sprintf("twitch:n%d", i), f)
 	}
 }
 
@@ -100,7 +141,7 @@ func TestWindowedCostGate(t *testing.T) {
 	if testing.CoverMode() != "" {
 		gate *= 10
 	}
-	for name, fn := range map[string]func(*testing.B){"near-dup": BenchmarkNearDupWorst, "raid": BenchmarkRaidWorst} {
+	for name, fn := range map[string]func(*testing.B){"near-dup": BenchmarkNearDupWorst, "raid": BenchmarkRaidWorst, "near-dup-at-cap": BenchmarkNearDupCapEvict} {
 		r := testing.Benchmark(fn)
 		t.Logf("%s worst case: %d ns/op, %d allocs/op", name, r.NsPerOp(), r.AllocsPerOp())
 		if r.NsPerOp() > gate {

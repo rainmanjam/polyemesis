@@ -51,8 +51,29 @@ var (
 	}
 )
 
+// publicServices are well-known public resolver addresses (Google, Cloudflare,
+// Quad9, OpenDNS). Tech and networking chat quotes them constantly ("set your
+// dns to 1.1.1.1"), and they identify a service, never a person's connection,
+// so they are rejected the way a private range is. A short fixed list: it does
+// not try to know every service address.
+var publicServices = map[netip.Addr]bool{}
+
+func init() {
+	for _, s := range []string{
+		"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112",
+		"208.67.222.222", "208.67.220.220",
+		"2001:4860:4860::8888", "2001:4860:4860::8844",
+		"2606:4700:4700::1111", "2606:4700:4700::1001", "2620:fe::fe", "2620:fe::9",
+	} {
+		publicServices[netip.MustParseAddr(s)] = true
+	}
+}
+
 func (r ReservedPolicy) reserved(a netip.Addr) bool {
 	a = a.Unmap()
+	if publicServices[a] {
+		return true
+	}
 	if a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
 		a.IsMulticast() || a.IsUnspecified() {
 		return true

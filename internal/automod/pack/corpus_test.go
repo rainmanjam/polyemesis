@@ -516,7 +516,7 @@ func TestCorpusUsesReservedDataOnly(t *testing.T) {
 			}
 		}
 		for _, m := range reV6.FindAllString(text, -1) {
-			if a, err := netip.ParseAddr(m); err == nil && a.Is6() && !doc6.Contains(a) {
+			if a, err := netip.ParseAddr(m); err == nil && a.Is6() && !doc6.Contains(a) && l.Slice != "number_trap" {
 				t.Errorf("%s: IPv6 outside 2001:db8::/32", w)
 			}
 		}

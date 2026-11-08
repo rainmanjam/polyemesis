@@ -506,6 +506,14 @@ def gen_number_traps():
     for v in versions:
         add(MAIN, "running %s here, no issues" % v, "doxxing", "pass", "version string, must not read as IPv4 or a phone", "number_trap", "doxxing/ipv4")
         add(MAIN, "which version is that? mine says %s" % v, "doxxing", "pass", "version string", "number_trap", "doxxing/ipv4")
+    # Well-known public service addresses: tech chat names them all the time, and
+    # they identify a DNS provider, not a person. The detector rejects them like
+    # a private range, so these are traps and not positives.
+    resolvers = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112", "208.67.222.222", "2001:4860:4860::8888", "2606:4700:4700::1111"]
+    for a in resolvers:
+        g = "doxxing/ipv6" if ":" in a else "doxxing/ipv4"
+        add(MAIN, "set your dns to %s and retry" % a, "doxxing", "pass", "public DNS resolver, not a person's address", "number_trap", g)
+        add(MAIN, "ping me at %s lol" % a, "doxxing", "pass", "public DNS resolver, not a person's address", "number_trap", g)
     prices = ["$1,299.99", "$19.99", "299.99", "$1,000,000", "49.95", "$5.00", "1,299.00", "$0.99", "$12,345.67", "89.99 usd"]
     for p in prices:
         add(MAIN, "the deck costs %s lol" % p, "doxxing", "pass", "price", "number_trap", G)

@@ -2,6 +2,7 @@ package pack
 
 import (
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,43 @@ func setOf(toks []string) tokenSet {
 		s[t] = struct{}{}
 	}
 	return s
+}
+
+// sketch is a 64-bit Bloom-style summary of a token set: one bit per token,
+// chosen by hash. It exists to reject non-matches cheaply (see mayMatch), so a
+// detector holding hundreds of texts does not run a map-walking Jaccard against
+// every one of them for every message.
+type sketch uint64
+
+func sketchOf(s tokenSet) sketch {
+	var k sketch
+	for t := range s {
+		h := uint32(2166136261)
+		for i := 0; i < len(t); i++ {
+			h = (h ^ uint32(t[i])) * 16777619
+		}
+		k |= 1 << (h >> 26) // top six bits
+	}
+	return k
+}
+
+// mayMatch is false only when a and b (sets of na and nb tokens) CANNOT reach
+// the similarity threshold. A bit set in a and clear in b proves at least one
+// token of a is missing from b, so the intersection is at most na minus the
+// number of such bits; the Jaccard that bound allows is then compared to sim.
+// Collisions only make the bound looser, never wrong: it never rejects a pair
+// that Jaccard would accept.
+func mayMatch(a, b sketch, na, nb int, sim float64) bool {
+	missA := bits.OnesCount64(uint64(a &^ b))
+	missB := bits.OnesCount64(uint64(b &^ a))
+	inter := na - missA
+	if m := nb - missB; m < inter {
+		inter = m
+	}
+	if inter <= 0 {
+		return false
+	}
+	return float64(inter)/float64(na+nb-inter) >= sim
 }
 
 // jaccard is |a and b| over |a or b|. Two empty sets are not similar: a message
@@ -258,9 +296,22 @@ func (d *NearDup) capLocked() {
 		all = append(all, aged{k, a.last})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
-	for i := 0; i < len(all)-d.cfg.MaxAuthors; i++ {
+	for i := 0; i < len(all)-LowWater(d.cfg.MaxAuthors); i++ {
 		delete(d.authors, all[i].key)
 	}
+}
+
+// LowWater is where an over-full author table is trimmed to: 90% of the cap.
+//
+// Trimming to exactly the cap meant that once the table was full EVERY new
+// author paid a sort of all of it under the detector's mutex, on the adapter
+// goroutine, which is what a bot raid is. Trimming a tenth below the cap
+// spreads one sort over the next cap/10 arrivals instead.
+func LowWater(max int) int {
+	if max < 10 {
+		return max
+	}
+	return max - max/10
 }
 
 // ---------------------------------------------------------------------- raid
@@ -301,6 +352,8 @@ type raidSeen struct {
 
 type raidCluster struct {
 	set     tokenSet
+	n       int // len(set), kept here so the scan does not chase the map header
+	sketch  sketch
 	seen    []raidSeen
 	last    time.Time
 	firedAt time.Time // zero until it fires
@@ -326,6 +379,11 @@ type Raid struct {
 	cfg      RaidConfig
 	clusters []*raidCluster
 	allow    map[string]bool
+	// pruneAt is a time before which no cluster can have expired: the oldest
+	// cluster's last-seen time as of the last prune, plus the window. A cluster's
+	// last only moves later, and a new one starts at now, so it stays a safe bound
+	// and lets a busy detector skip the pass over every cluster.
+	pruneAt time.Time
 }
 
 // NewRaid returns an empty detector. Create it once and keep it: a settings
@@ -371,6 +429,7 @@ func (r *Raid) Observe(at time.Time, author string, f Forms, platformEmotes int)
 		return RaidHit{}, false
 	}
 	set := setOf(f.Tokens)
+	sk := sketchOf(set)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -379,19 +438,24 @@ func (r *Raid) Observe(at time.Time, author string, f Forms, platformEmotes int)
 	var cl *raidCluster
 	for i := len(r.clusters) - 1; i >= 0; i-- {
 		c := r.clusters[i]
-		if sizeCompatible(len(set), len(c.set), r.cfg.Similarity) && jaccard(set, c.set) >= r.cfg.Similarity {
+		if sizeCompatible(len(set), c.n, r.cfg.Similarity) &&
+			mayMatch(sk, c.sketch, len(set), c.n, r.cfg.Similarity) &&
+			jaccard(set, c.set) >= r.cfg.Similarity {
 			cl = c
 			break
 		}
 	}
 	if cl == nil {
-		cl = &raidCluster{set: set, last: at}
+		cl = &raidCluster{set: set, n: len(set), sketch: sk, last: at}
 		r.clusters = append(r.clusters, cl)
 		if len(r.clusters) > r.cfg.MaxClusters {
 			r.evictLocked()
 		}
 	}
 	cl.last = at
+	if exp := at.Add(r.cfg.Window); exp.Before(r.pruneAt) {
+		r.pruneAt = exp // a message stamped earlier than the rest: keep the bound safe
+	}
 
 	// Already flagged and still inside its window: hold without recounting.
 	if !cl.firedAt.IsZero() && at.Sub(cl.firedAt) <= r.cfg.Window {
@@ -439,9 +503,15 @@ func sizeCompatible(a, b int, sim float64) bool {
 }
 
 func (r *Raid) pruneLocked(now time.Time) {
+	if len(r.clusters) == 0 || !now.After(r.pruneAt) {
+		return
+	}
+	// Before, not Sub: the same test (last >= now - Window), without the
+	// duration arithmetic, on a loop that runs over every live cluster.
+	cutoff := now.Add(-r.cfg.Window)
 	live := r.clusters[:0]
 	for _, c := range r.clusters {
-		if now.Sub(c.last) <= r.cfg.Window {
+		if !c.last.Before(cutoff) {
 			live = append(live, c)
 		}
 	}
@@ -449,6 +519,12 @@ func (r *Raid) pruneLocked(now time.Time) {
 		r.clusters[i] = nil
 	}
 	r.clusters = live
+	r.pruneAt = time.Time{}
+	for i, c := range live {
+		if i == 0 || c.last.Add(r.cfg.Window).Before(r.pruneAt) {
+			r.pruneAt = c.last.Add(r.cfg.Window)
+		}
+	}
 }
 
 // evictLocked drops the least recently seen cluster, the one nearest expiry.

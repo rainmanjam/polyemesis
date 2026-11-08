@@ -9,10 +9,11 @@ import (
 )
 
 type explainResponse struct {
-	Protection bool `json:"protection"`
-	Held       bool `json:"held"`
-	Windowed   []string
-	Detections []struct {
+	Protection    bool `json:"protection"`
+	Held          bool `json:"held"`
+	WouldHoldIfOn bool `json:"wouldHoldIfOn"`
+	Windowed      []string
+	Detections    []struct {
 		Checker  string `json:"checker"`
 		Category string `json:"category"`
 		Detector string `json:"detector"`
@@ -22,6 +23,7 @@ type explainResponse struct {
 		Hold     bool   `json:"hold"`
 		Action   string `json:"action"`
 		Act      bool   `json:"act"`
+		Live     bool   `json:"live"`
 	} `json:"detections"`
 }
 
@@ -37,14 +39,19 @@ func TestAutomodExplainRunsThePackAndNamesDetectorsOnly(t *testing.T) {
 	}
 	var got explainResponse
 	decodeInto(t, raw, &got)
-	if !got.Protection || !got.Held {
-		t.Fatalf("explanation: %s", raw)
+	// The pack is not on in the live engine, so chat would hold nothing for it:
+	// the test box must say so and keep the pack's view apart.
+	if got.Protection || got.Held || !got.WouldHoldIfOn {
+		t.Fatalf("explanation claims live behaviour the engine does not have: %s", raw)
 	}
 	seen := map[string]bool{}
 	for _, d := range got.Detections {
 		seen[d.Detector] = true
 		if d.Checker != "protection" || d.Action != "flag" || !d.Hold {
 			t.Errorf("detection %+v", d)
+		}
+		if d.Live {
+			t.Errorf("a pack detection is marked live while the pack is off: %+v", d)
 		}
 		// Act follows the stored matrix, where a fresh install arms nothing:
 		// a flag is recorded whatever the cell says.
@@ -132,5 +139,17 @@ func TestTheMatrixCarriesTheProtectionColumnAndNothingIsArmed(t *testing.T) {
 		if n != 0 {
 			t.Errorf("%s: %d automatic actions on a fresh install", p, n)
 		}
+	}
+}
+
+// The test box is SESSION-ONLY (spec 7.3): it answers from the operator's own
+// rule names and pack policy, so no API token, admin or not, may read it.
+func TestAnAPITokenCannotUseTheExplainTestBox(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	plaintext := createToken(t, h, sign, "automation")
+	r := jsonRequest(t, http.MethodPost, "/api/v1/automod/explain", map[string]any{"text": "hello there"})
+	r.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, r); w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+		t.Fatalf("an API token used the test box: %d %s", w.Code, w.Body.String())
 	}
 }

@@ -130,12 +130,16 @@ func (s *Server) handleAutomodExplain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the protection pack did not load")
 		return
 	}
-	// No windowed trackers are passed: nothing here remembers.
+	// No windowed trackers are passed: nothing here remembers. The pack always
+	// runs here so the operator can see what it would say, but whether it counts
+	// is the live engine's own rule (checkerConfigured): while the pack is off
+	// the response says so, rather than showing holds chat will not make.
+	packOn, _ := checkerConfigured(a, automod.CheckerProtection)
 	engine := automod.New(matrixFromSettings(a), automod.PlatformCaps{}, rules, automod.NewHistory(hl), nil).
 		WithProtection(prot)
-	writeJSON(w, http.StatusOK, engine.Explain(plat, automod.Subject{
+	writeJSON(w, http.StatusOK, engine.ExplainAs(plat, automod.Subject{
 		AuthorName: req.AuthorName, Text: req.Text, EmoteCount: req.EmoteCount,
-	}))
+	}, packOn))
 }
 
 // handleAutomodStats reports model spend and health.

@@ -65,8 +65,8 @@ func TestEveryDetectorFiresOnItsOwnShape(t *testing.T) {
 		{GroupProfanityMild, Message{Text: "oh " + prof}},
 		{GroupPhone, Message{Text: "call +44 20 7946 0958 now"}},
 		{GroupEmail, Message{Text: "mail me at someone@example.com"}},
-		{GroupIPv4, Message{Text: "his ip is 8.8.4.4"}},
-		{GroupIPv6, Message{Text: "ddos 2606:4700:4700:0:0:0:0:1111"}},
+		{GroupIPv4, Message{Text: "his ip is 198.18.0.1"}},
+		{GroupIPv6, Message{Text: "ddos 2a01:4f8:1c1a:0:0:0:0:1"}},
 		{GroupAddress, Message{Text: "he lives at 1600 Pennsylvania Avenue"}},
 		{GroupGiveaway, Message{Text: "free nitro for everyone"}},
 		{GroupBio, Message{Text: "check out my bio"}},
@@ -109,7 +109,7 @@ func keys(m map[string]Hit) []string {
 func TestAHitNeverEchoesTheMatchedValue(t *testing.T) {
 	c := newChecker(t, Config{Names: NewNameSet([]string{"kestrel_demo"})})
 	sev := firstTerm(t, CategoryHate, TierSevere, func(string) bool { return true })
-	secrets := []string{"someone.private@example.com", "8.8.4.4", "+44 20 7946 0958", "(202) 555-0175", sev}
+	secrets := []string{"someone.private@example.com", "198.18.0.1", "+44 20 7946 0958", "(202) 555-0175", sev}
 	for _, s := range secrets {
 		for _, h := range c.Inspect(Message{Text: "x " + s + " y", AuthorName: "viewer"}) {
 			if strings.Contains(strings.ToLower(h.Reason), strings.ToLower(s)) {
@@ -694,5 +694,22 @@ func TestPackValidateRejectsAnExceptionThatIsASevereTerm(t *testing.T) {
 	}
 	if err := mk(nil).Validate(); err != nil {
 		t.Errorf("a clean pack was refused: %v", err)
+	}
+}
+
+// Well-known public resolvers are chat about networking, not a leaked address,
+// under the production policy and under the corpus's.
+func TestPublicResolversAreNotDoxxing(t *testing.T) {
+	for _, a := range []string{"8.8.8.8", "1.1.1.1", "9.9.9.9", "208.67.222.222", "2001:4860:4860::8888", "2606:4700:4700::1111"} {
+		for _, pol := range []ReservedPolicy{DefaultReservedPolicy(), {AllowDocumentation: true}} {
+			if hasIPv4(" ping me at "+a+" lol", pol) || hasIPv6(" ping me at "+a+" lol", pol) {
+				t.Errorf("%s is read as a leaked address (policy %+v)", a, pol)
+			}
+		}
+	}
+	// And a public-looking address that is not on the list still is one (RFC 2544
+	// benchmarking space: owned by no one, but not a reserved range here).
+	if !hasIPv4("he lives at 198.18.0.1", DefaultReservedPolicy()) {
+		t.Error("an ordinary public address stopped being reported")
 	}
 }

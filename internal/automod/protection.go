@@ -229,16 +229,27 @@ type Detection struct {
 	// would let it happen on the platform asked about.
 	Action Action `json:"action"`
 	Act    bool   `json:"act"`
+	// Live is whether the engine running in chat would produce this finding. A
+	// pack detection is not live while the pack is off for the install: it is
+	// what the pack WOULD say, shown so the operator can see what turning it on
+	// does.
+	Live bool `json:"live"`
 }
 
 // Explanation is what the test box shows for one pretend message.
 type Explanation struct {
-	// Protection is whether the pack ran.
+	// Protection is whether the pack is on in the live engine, which is the
+	// question a test box has to answer truthfully: detections it lists with
+	// live=false are the pack's, shown for what turning it on would do.
 	Protection bool        `json:"protection"`
 	Detections []Detection `json:"detections"`
-	// Held is whether any detection holds the message off the overlay, given the
-	// global and platform switches.
+	// Held is whether the LIVE engine would hold the message off the overlay,
+	// given the global and platform switches: pack detections count only while
+	// the pack is on.
 	Held bool `json:"held"`
+	// WouldHoldIfOn is Held with the pack counted. It differs from Held only
+	// while the pack is off.
+	WouldHoldIfOn bool `json:"wouldHoldIfOn"`
 	// Windowed lists the detectors that depend on what the author sent recently
 	// and so cannot be answered for one pretend message.
 	Windowed []string `json:"windowed"`
@@ -249,31 +260,51 @@ type Explanation struct {
 // strike counter, which keep per-author state, and it never touches the network.
 // The text is not logged by this function or retained by it.
 func (e *Engine) Explain(plat db.Platform, s Subject) Explanation {
+	return e.ExplainAs(plat, s, true)
+}
+
+// ExplainAs is Explain for a caller that knows whether the pack is on in the
+// live engine. The pack still runs when it is off, so the operator can see what
+// it would say, but its findings are marked not live and do not count toward
+// Held: the answer is what chat would do, with WouldHoldIfOn for the other case.
+func (e *Engine) ExplainAs(plat db.Platform, s Subject, packOn bool) Explanation {
 	ex := Explanation{Detections: []Detection{}, Windowed: []string{
 		DetectorMessageRate, DetectorRepeats, pack.GroupNearDuplicate, pack.GroupRaid,
 	}}
 	if e == nil {
 		return ex
 	}
-	ex.Protection = e.protection != nil
-	var findings []Finding
-	findings = append(findings, e.rules.Check(s.Text)...)
-	hist := e.history.CheckText(s.Text)
-	findings = append(findings, e.protection.markHistory(hist)...)
+	ex.Protection = e.protection != nil && packOn
+	ruleF := e.rules.Check(s.Text)
+	histRaw := e.history.CheckText(s.Text)
 	hits := map[string]pack.Hit{} // keyed by group, for tier and form
+	var packF []Finding
 	if e.protection != nil {
 		for _, h := range e.protection.chk.Inspect(messageOf(plat, s, time.Time{})) {
 			hits[h.Group] = h
-			findings = append(findings, findingOf(h))
+			packF = append(packF, findingOf(h))
 		}
 	}
-	v := e.decide(plat, sortByConsequence(findings))
-	ex.Held = v.Hold
-	for _, f := range findings {
+	// With the pack on, history findings carry the pack's hold policy
+	// (markHistory); with it off they do not, which is what the live engine
+	// reports, so the live verdict is built from the unmarked ones.
+	histMarked := e.protection.markHistory(append([]Finding(nil), histRaw...))
+	withPack := append(append(append([]Finding(nil), ruleF...), histMarked...), packF...)
+	ex.WouldHoldIfOn = e.decide(plat, sortByConsequence(withPack)).Hold
+	shown := withPack
+	if packOn {
+		ex.Held = ex.WouldHoldIfOn
+	} else {
+		shown = append(append(append([]Finding(nil), ruleF...), histRaw...), packF...)
+		live := append(append([]Finding(nil), ruleF...), histRaw...)
+		ex.Held = e.decide(plat, sortByConsequence(live)).Hold
+	}
+	for _, f := range shown {
 		d := Detection{
 			Checker: f.Checker, Category: f.Category, Detector: f.Detector, Reason: f.Reason,
 			Hold: f.Hold, Action: f.Action,
-			Act: e.matrix.Allows(e.caps, Key{Platform: plat, Action: f.Action, Checker: f.Checker}),
+			Act:  e.matrix.Allows(e.caps, Key{Platform: plat, Action: f.Action, Checker: f.Checker}),
+			Live: packOn || f.Checker != CheckerProtection,
 		}
 		if h, ok := hits[f.Detector]; ok && f.Checker == CheckerProtection {
 			d.Tier, d.Form = h.Tier, h.Form
