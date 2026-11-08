@@ -8,12 +8,12 @@ way for every platform.**
 Find it on the **Chat** page, under the **Activity** tab. The OBS side is the
 [alerts overlay](OVERLAY.md#alerts-overlay).
 
-> **Status of this release.** This is the shared core: the model, the
+> **Status of this release.** This is the shared core (the model, the
 > ingestion point, the fan-out, the console feed, the overlay, the settings and
-> **Send test alert**. Each platform's own events are added one platform at a
-> time (see [Platforms](#platforms)); until a platform's source is in your build,
-> nothing real arrives from it, and **Send test alert** is how you see and style
-> everything. The console says so on the empty feed rather than showing a blank.
+> **Send test alert**) plus the first platform, Twitch. The others are added one
+> platform at a time (see [Platforms](#platforms)); until a platform's source is
+> in your build, nothing real arrives from it, and **Send test alert** is how you
+> see and style everything. The console says so on the empty feed rather than showing a blank.
 
 ## What "activity" means, and what it does not
 
@@ -259,7 +259,7 @@ gets them and what it needs here. The Status column says which are connected.
 
 | Platform | How the events arrive | Status |
 |---|---|---|
-| Twitch | EventSub over a WebSocket (its own transport) | not yet |
+| Twitch | EventSub over a WebSocket (its own transport) | [connected](#twitch) |
 | Kick | webhook events on the existing chat webhook | yes (below) |
 | X | Activity API events on the existing chat webhook: `follow.follow` and `subscriptions.subscribe` (inbound only), `broadcast.start` and `broadcast.end` | follow, Premium subscribe, stream |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | tips (Super Chat, Sticker), new members, member milestones and gifted memberships; each shows as unknown until the first one is seen, since YouTube cannot say whether a channel is monetised. No new permission |
@@ -305,6 +305,60 @@ an account the kind shows `unavailable` with X's reason and chat is unaffected.
 An event created before polyemesis started, or more than 15 minutes ago, is
 dropped: X redelivering history after a restart does not replay alerts. The
 X webhook needs the same public HTTPS address and app bearer as X chat.
+
+### Twitch
+
+One EventSub WebSocket per connected Twitch account, opened with the account's
+own token: no public address and no callback to set up. It starts with the
+account's chat and stops with it. Subscriptions live and die with the socket, so
+a restart is a new session and Twitch replays nothing; Twitch sends each
+notification at least once under one message id, and that id is what
+de-duplicates it (a notification stamped more than ten minutes before Twitch's own
+clock is not news and is dropped; this host's clock is never consulted).
+
+| Kind | EventSub type | Needs | Channel |
+|---|---|---|---|
+| `follow` | `channel.follow` v2 | `moderator:read:followers` | any |
+| `subscribe` | `channel.subscribe` | `channel:read:subscriptions` | Affiliate or Partner |
+| `resub` | `channel.subscription.message` | `channel:read:subscriptions` | Affiliate or Partner |
+| `gift` | `channel.subscription.gift` | `channel:read:subscriptions` | Affiliate or Partner |
+| `tip` (bits) | `channel.cheer` | `bits:read` | Affiliate or Partner |
+| `raid` | `channel.raid`, once for each direction | none | any |
+| `redemption` | `channel.channel_points_custom_reward_redemption.add` | `channel:read:redemptions` | Affiliate or Partner |
+| `hypetrain` | `channel.hype_train.begin`, `.progress`, `.end` v2 | `channel:read:hype_train` | what Twitch allows |
+| `poll` | `channel.poll.begin`, `.progress`, `.end` | `channel:manage:polls` | Affiliate or Partner |
+| `prediction` | `channel.prediction.begin`, `.progress`, `.lock`, `.end` | `channel:read:predictions` | Affiliate or Partner |
+| `stream` | `stream.online`, `stream.offline`, `channel.update` v2 | none | any |
+| `shoutout` | `channel.shoutout.create` (out), `.receive` (in) | `moderator:manage:shoutouts` | any |
+
+- **Not an Affiliate or Partner?** The kinds marked so are reported
+  `unavailable` ("Twitch only sends this to Affiliates and Partners") on
+  `GET /api/v1/activity/sources`. That is not a failure: the source stays
+  `live` and everything else flows. The channel's type is read again every 24
+  hours.
+- **Connected before this release?** The six new read scopes are part of scope
+  version 6, and so is `moderator:manage:shoutouts`; an account connected on an
+  earlier version needs one reconnect to grant them. Until then each kind that
+  needs one is reported `reconnect`, and the kinds that need none (raids and
+  stream status) already work, as do polls (`channel:manage:polls` has been
+  requested since scope version 5). The check is the account's granted scopes,
+  not its scope version.
+- **Bits** are reported as `{"unit": "bits", "units": 1000}` and are never turned
+  into money. **A gifted-sub bomb** is one `gift` event; the per-recipient
+  subscribes Twitch also sends are dropped. **A resub** is reported when the
+  viewer shares a resubscription message, which is when Twitch sends one.
+- **Polls polyemesis mirrored** (a chat poll also run as a Twitch poll) are not
+  reported a second time. A poll a moderator starts on Twitch is. Known edge:
+  the notification waits up to 2 s for the Twitch create call to return; if
+  Twitch is slower than that, the poll's `begin` is reported once as a native
+  poll (its progress and end are still dropped once the id is known).
+- **Never on air:** `poll`, `prediction`, `stream` and a raid you sent are in the
+  console feed and the events stream only. Viewer text (a cheer, a resub message,
+  a channel-points input) reaches the overlay only through the same gating as
+  chat.
+- **Limits.** Twitch allows 300 subscriptions and a cost of 10 per user token;
+  these need about 23 and cost nothing. A 429 on one kind marks that kind
+  `unavailable` and the rest carry on.
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is

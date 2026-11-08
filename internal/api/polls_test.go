@@ -275,6 +275,14 @@ func TestAPollIsMirroredToTwitchAndItsVotesMerged(t *testing.T) {
 		t.Errorf("created = %v", fake.created)
 	}
 	fake.mu.Unlock()
+	// The native poll's id is recorded, so the EventSub source skips Twitch's
+	// own announcement of it instead of reporting the poll twice (D9).
+	if !s.mirroredPolls.Mirrored(t.Context(), "np1", 0) {
+		t.Error("the mirrored poll's id was not recorded for the activity source")
+	}
+	if s.mirroredPolls.Mirrored(t.Context(), "someone-elses-poll", 0) {
+		t.Error("a poll polyemesis did not create is marked as its own")
+	}
 	cur, _ := s.polls.Current()
 	if len(cur.Native) != 2 {
 		t.Fatalf("native = %+v", cur.Native)

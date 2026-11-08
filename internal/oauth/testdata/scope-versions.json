@@ -63,11 +63,16 @@
     "platform": "twitch",
     "scopeVersion": 6,
     "scopes": [
+      "bits:read",
       "channel:manage:broadcast",
       "channel:manage:moderators",
       "channel:manage:polls",
       "channel:manage:vips",
+      "channel:read:hype_train",
+      "channel:read:predictions",
+      "channel:read:redemptions",
       "channel:read:stream_key",
+      "channel:read:subscriptions",
       "chat:edit",
       "chat:read",
       "moderator:manage:announcements",
@@ -82,7 +87,8 @@
       "moderator:manage:suspicious_users",
       "moderator:manage:unban_requests",
       "moderator:manage:warnings",
-      "moderator:read:chatters"
+      "moderator:read:chatters",
+      "moderator:read:followers"
     ]
   },
   {

@@ -758,6 +758,12 @@ Build a Community requirement; the refusal says so. Receiving a message AutoMod
 is holding needs EventSub and is not built: the approve and deny call is, by id.
 Accounts connected earlier are marked "reconnect needed" once.
 
+Scope version 6 also carries six read scopes for [viewer activity](ACTIVITY.md#twitch):
+`moderator:read:followers`, `channel:read:subscriptions`, `bits:read`,
+`channel:read:redemptions`, `channel:read:hype_train` and
+`channel:read:predictions`. They are in version 6 rather than a version 7
+because the release that introduces version 6 has not shipped.
+
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
 that is already there keeps it, and its destinations, linked; disconnecting
