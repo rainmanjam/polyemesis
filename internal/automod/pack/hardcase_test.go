@@ -284,3 +284,77 @@ func TestEdgeStandInsCountWhenTheWordIsALexiconTerm(t *testing.T) {
 		}
 	}
 }
+
+// contextualTerms lists the pack's single-word contextual-tier hate terms, read
+// at run time. Only the model judges these, so a cut one that earns neither a
+// finding nor a signal is shown as clear.
+func contextualTerms(t *testing.T) []string {
+	t.Helper()
+	pk, err := Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range pk.Entries {
+		if e.Category == CategoryHate && e.Tier == TierContextual && !strings.Contains(e.Term, " ") && Fold(e.Term) == e.Term {
+			out = append(out, e.Term)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("pack has no single-word contextual term")
+	}
+	return out
+}
+
+// The literal defect: a term split by dots and a slash earned no signal.
+func TestTheLiteralKysCutHasASignal(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{"k.y/s", "k.y.s", "K.Y/S"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+			t.Errorf("%q gave no signal: %v", text, got)
+		}
+	}
+}
+
+// A contextual term cut on a fragment that is also a TLD, and cut plainly, must
+// each earn a hard-case signal, or under scope "hard" the line is never asked.
+func TestACutContextualTermHasASignal(t *testing.T) {
+	h := hc(t)
+	tldCuts, plainCuts := 0, 0
+	for _, term := range contextualTerms(t) {
+		for frag := range linkTLDs {
+			if len(frag) != 2 {
+				continue
+			}
+			if i := strings.Index(term, frag); i > 0 && i+len(frag) < len(term) {
+				text := term[:i] + "." + frag + "/" + term[i+len(frag):]
+				tldCuts++
+				if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+					t.Errorf("TLD cut %q of %q gave no signal: %v", text, term, got)
+				}
+			}
+		}
+		if len(term) >= 3 {
+			m := len(term) / 2
+			for _, text := range []string{term[:m] + "." + term[m:], term[:m] + "/" + term[m:], term[:1] + "." + term[1:2] + "/" + term[2:]} {
+				plainCuts++
+				if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+					t.Errorf("plain cut %q of %q gave no signal: %v", text, term, got)
+				}
+			}
+		}
+	}
+	if tldCuts == 0 || plainCuts == 0 {
+		t.Fatalf("exercised %d TLD cuts and %d plain cuts", tldCuts, plainCuts)
+	}
+}
+
+// Real links and ordinary dotted words are still not obfuscation.
+func TestCutTermLeavesOrdinaryDottedTextAlone(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{"twitch.tv/gg", "clips.twitch.tv/AbCdEf", "e.g. this", "wait.. what", "1/2 and 3.5", "v1.2.3 is out"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); has(got, SignalObfuscation) {
+			t.Errorf("%q wrongly read as obfuscation", text)
+		}
+	}
+}

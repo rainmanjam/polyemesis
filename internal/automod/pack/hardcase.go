@@ -107,7 +107,33 @@ type HardCase struct {
 	Version int
 	address map[string]struct{}
 	lex     map[string]*lexicon
+	// terms is every single-word term the cut test knows: the lexicons' words
+	// and, for the default pack, its contextual-tier hate terms (which only the
+	// model judges, and which nothing else can catch once cut up). minTerm and
+	// maxTerm bound their lengths so most words are rejected without folding.
+	terms            map[string]struct{}
+	minTerm, maxTerm int
 }
+
+// addTerm registers one folded single-word term.
+func (h *HardCase) addTerm(t string) {
+	if t == "" || len(t) > maxCutTerm || strings.Contains(t, " ") {
+		return
+	}
+	if h.terms == nil {
+		h.terms = map[string]struct{}{}
+	}
+	h.terms[t] = struct{}{}
+	if h.minTerm == 0 || len(t) < h.minTerm {
+		h.minTerm = len(t)
+	}
+	if len(t) > h.maxTerm {
+		h.maxTerm = len(t)
+	}
+}
+
+// maxCutTerm bounds the stack buffer a candidate word is folded into.
+const maxCutTerm = 32
 
 var (
 	hardcaseOnce sync.Once
@@ -117,7 +143,21 @@ var (
 
 // DefaultHardCase returns the embedded English hard-case lexicons. Parsed once.
 func DefaultHardCase() (*HardCase, error) {
-	hardcaseOnce.Do(func() { hardcaseVal, hardcaseErr = ParseHardCase(hardcaseEN) })
+	hardcaseOnce.Do(func() {
+		hardcaseVal, hardcaseErr = ParseHardCase(hardcaseEN)
+		if hardcaseErr != nil {
+			return
+		}
+		// A contextual term cut up with dots and slashes has no fast finding
+		// and, without this, no signal: the model would never be asked.
+		if pk, err := Default(); err == nil {
+			for _, e := range pk.Entries {
+				if e.Category == CategoryHate && e.Tier == TierContextual {
+					hardcaseVal.addTerm(Fold(e.Term))
+				}
+			}
+		}
+	})
 	return hardcaseVal, hardcaseErr
 }
 
@@ -150,6 +190,11 @@ func ParseHardCase(b []byte) (*HardCase, error) {
 			return nil, err
 		}
 		h.lex[name] = l
+	}
+	for _, l := range h.lex {
+		for w := range l.words {
+			h.addTerm(w)
+		}
 	}
 	if len(f.Lexicons) != len(h.lex) {
 		return nil, fmt.Errorf("hardcase: unknown lexicon name")
@@ -232,12 +277,84 @@ func substitutions(raw string) int { return (*HardCase)(nil).substitutions(raw) 
 func (h *HardCase) substitutions(raw string) int {
 	n := 0
 	for _, field := range strings.Fields(raw) {
+		// BEFORE the link test: "k.y/s", or a term cut on a fragment that is
+		// also a TLD (".gg/", ".to/"), reads as an address and would be skipped.
+		// A field that is a term once its dots and slashes are gone is
+		// obfuscation, whatever else it looks like.
+		if h.cutTerm(field) {
+			n += obfuscationMin
+			continue
+		}
 		if urlLike(field) {
 			continue
 		}
 		n += h.fieldSubstitutions(field)
 	}
 	return n
+}
+
+// cutTerm reports whether a field containing '.' or '/' is a term once those
+// are stripped and the rest is leet-folded. Allocation-free, and rejected by
+// length before any folding.
+func (h *HardCase) cutTerm(field string) bool {
+	if h == nil || h.maxTerm == 0 || strings.IndexAny(field, "./") < 0 {
+		return false
+	}
+	// Stripped length is at least len-separators, and at most len.
+	if len(field) < h.minTerm {
+		return false
+	}
+	var buf [maxCutTerm]byte
+	n := 0
+	for _, r := range field {
+		if r == '.' || r == '/' {
+			continue
+		}
+		b, ok := leetByte(r)
+		if !ok {
+			if r >= utf8.RuneSelf && unicode.Is(unicode.Cf, r) {
+				continue
+			}
+			return false
+		}
+		if n == len(buf) {
+			return false
+		}
+		buf[n] = b
+		n++
+	}
+	if n < h.minTerm || n > h.maxTerm {
+		return false
+	}
+	_, ok := h.terms[string(buf[:n])]
+	return ok
+}
+
+// leetByte folds one rune to the lower-case ASCII letter it reads as, or
+// reports that it is not one: the non-allocating counterpart of Fold for the
+// ASCII spellings leet uses.
+func leetByte(r rune) (byte, bool) {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return byte(r), true
+	case r >= 'A' && r <= 'Z':
+		return byte(r) + 'a' - 'A', true
+	}
+	switch r {
+	case '0':
+		return 'o', true
+	case '1', '!', '|':
+		return 'i', true
+	case '3':
+		return 'e', true
+	case '4', '@':
+		return 'a', true
+	case '5', '$':
+		return 's', true
+	case '7':
+		return 't', true
+	}
+	return 0, false
 }
 
 // urlLike reports whether a whitespace-delimited field is a link, whose digits
@@ -276,21 +393,22 @@ var linkTLDs = func() map[string]struct{} {
 	return m
 }()
 
-// isTerm reports whether a word, leet-folded, is a lexicon term.
+// isTerm reports whether a word, leet-folded, is a known term. No allocation:
+// a length check first, then a stack-buffer fold.
 func (h *HardCase) isTerm(word []rune) bool {
-	if h == nil {
+	if h == nil || h.maxTerm == 0 || len(word) < h.minTerm || len(word) > h.maxTerm {
 		return false
 	}
-	f := Fold(string(word))
-	if f == "" {
-		return false
-	}
-	for _, l := range h.lex {
-		if _, ok := l.words[f]; ok {
-			return true
+	var buf [maxCutTerm]byte
+	for i, r := range word {
+		b, ok := leetByte(r)
+		if !ok {
+			return false
 		}
+		buf[i] = b
 	}
-	return false
+	_, ok := h.terms[string(buf[:len(word)])]
+	return ok
 }
 
 func (h *HardCase) fieldSubstitutions(field string) int {
