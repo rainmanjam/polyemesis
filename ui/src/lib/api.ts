@@ -49,6 +49,8 @@ import type {
   XChatModerator,
   ChatSettings,
   ChatUserCard,
+  ViewerNote,
+  ViewerTagList,
   ChatFlagsResult,
   CredentialCheck,
   Destination,
@@ -1518,6 +1520,26 @@ export const api = {
     if (m.limit) q.set("limit", String(m.limit));
     return get<ChatUserCard>(`/chat/users?${q.toString()}`);
   },
+
+  /** The operator's private note and tags about one viewer. Admin-only
+   *  personal data; an empty note answers for a viewer with none. */
+  viewerNote: (m: { platform: ChatPlatform; account?: string; authorId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, authorId: m.authorId });
+    if (m.account) q.set("account", m.account);
+    return get<ViewerNote>(`/chat/users/notes?${q.toString()}`);
+  },
+  saveViewerNote: (m: { platform: ChatPlatform; account?: string; authorId: string }, body: { note: string; tags: string[] }) => {
+    const q = new URLSearchParams({ platform: m.platform, authorId: m.authorId });
+    if (m.account) q.set("account", m.account);
+    return put<ViewerNote>(`/chat/users/notes?${q.toString()}`, body);
+  },
+  deleteViewerNote: (m: { platform: ChatPlatform; account?: string; authorId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, authorId: m.authorId });
+    if (m.account) q.set("account", m.account);
+    return del<{ status: string }>(`/chat/users/notes?${q.toString()}`);
+  },
+  /** Every tagged viewer, tags only (never the note text), for the chat list's badge. */
+  viewerTags: () => get<ViewerTagList>("/chat/users/notes"),
 
   /** Put a message a rule held back on the overlays ("Show on overlay"). 404
    *  when it is no longer held: released already, removed, or past ten minutes. */

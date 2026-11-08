@@ -798,6 +798,8 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
 	"GET /api/v1/chat/users":    denied(),
+	// The operator's private notes about a viewer: personal data, planted and scanned.
+	"GET /api/v1/chat/users/notes": deniedWithCounterpart("viewerNotes"),
 	// Viewer activity: the feed is viewers' names and words, and the source list
 	// carries account refs. Both are readDenied; the POSTs are denied by method.
 	"GET /api/v1/activity":         denied(),
@@ -1309,6 +1311,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"chatFlags":                             proveChatFlags,
+	"viewerNotes":                           proveViewerNotes,
 	"chatExport":                            proveChatExport,
 	"recordingChat":                         proveRecordingChat,
 	"chatSettings":                          proveChatSettings,

@@ -5,6 +5,8 @@ import { Ban, Eye, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/StatusPill";
+import { ChatUserTools } from "@/components/ChatUserTools";
+import { ChatUserNotes } from "@/components/ChatUserNotes";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +54,7 @@ export function ChatUserCard({
   account,
   authorId,
   authorName,
+  channel,
   open,
   onOpenChange,
 }: Readonly<{
@@ -59,6 +62,8 @@ export function ChatUserCard({
   account?: string;
   authorId: string;
   authorName: string;
+  /** The channel the card was opened from (Twitch: for the moderator-card link). */
+  channel?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }>) {
@@ -269,7 +274,7 @@ export function ChatUserCard({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span style={cardColour ? { color: cardColour } : undefined}>
@@ -527,6 +532,18 @@ export function ChatUserCard({
             )}
           </div>
         </div>
+
+        {/* ---- the platform's own tools, where it has them ---- */}
+        <ChatUserTools
+          platform={platform}
+          account={account}
+          authorId={authorId}
+          authorName={card?.name || authorName}
+          channel={channel ?? messages.find((m) => m.channel)?.channel}
+        />
+
+        {/* ---- the operator's private notes ---- */}
+        <ChatUserNotes platform={platform} account={account} authorId={authorId} />
       </DialogContent>
     </Dialog>
   );

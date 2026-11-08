@@ -2900,6 +2900,31 @@ export interface TwitchShoutouts {
  *  own card cannot do. The cost is depth, which is why `truncated` and
  *  `retentionNote` exist and must be rendered: a moderator who reads a bounded
  *  window as a complete record judges a pattern from a sample. */
+/** The operator's private note about a viewer. Personal data: shown on the
+ *  card only, as text. */
+export interface ViewerNote {
+  platform: ChatPlatform;
+  account?: string;
+  authorId: string;
+  note: string;
+  tags: string[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** One tagged viewer in the chat list's lookup: tags only. */
+export interface ViewerTagSummary {
+  platform: ChatPlatform;
+  account?: string;
+  authorId: string;
+  tags: string[];
+}
+
+export interface ViewerTagList {
+  viewers: ViewerTagSummary[];
+  presetTags: string[];
+}
+
 export interface ChatUserCard {
   platform: ChatPlatform;
   authorId: string;

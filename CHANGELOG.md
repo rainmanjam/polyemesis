@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Added
 
+- **Viewer card: platform tools and private notes.** The viewer card now has a row of tools where the
+  platform supports them: on Twitch warn, VIP and moderator (with current status) and a link to
+  Twitch's own moderator card; on X and YouTube make or remove a chat moderator. Role changes ask
+  again inline and show the platform's own refusal (Affiliate for VIPs, owner-only roles). It also
+  keeps a private note and tags per viewer (`GET`/`PUT`/`DELETE /api/v1/chat/users/notes`, admin-only,
+  refused to a read token, stored in the new `viewer_notes` table with no schema-version change and
+  never sent to overlays, events or hooks). A tagged viewer shows a tag badge in the chat list.
+
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
   A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
   overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and

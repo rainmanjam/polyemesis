@@ -365,6 +365,7 @@ var migrationSteps = []migrationStep{
 	{fn: (*DB).MigrateWave3XTitle},
 	{fn: (*DB).MigrateWave3XTweet},
 	{fn: (*DB).MigrateChatSanctions},
+	{fn: (*DB).MigrateViewerNotes},
 
 	// destinations.preset_id, with a one-time backfill from the ingest URL.
 	// Placed with the other destinations columns, before MigrateSources and the

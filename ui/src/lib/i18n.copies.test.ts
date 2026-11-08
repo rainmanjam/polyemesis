@@ -30,6 +30,7 @@ const SAME_EVERYWHERE = new Set<string>([
   "caps.cellTitle", // "{column} — {support}. {reason}": a template of slots
   "dest.transportRtmp", // "RTMP / RTMPS": protocol names
   "route.youtubeTwitchSpotify", // product names
+  "viewerCard.noteCount", // "{count} / {max}": a counter of slots
   "tour.progress", // "{{current}} / {{total}}"
   "pairing.result", // "{name} · {scope} · prefix {prefix}…": a code-like line
   "rend.marginX", // "Margin X (%)": kept where the locale uses the loanword
