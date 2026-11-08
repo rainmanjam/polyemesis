@@ -78,6 +78,11 @@ func (b *Budget) Spent() int {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// A window that has run out counts for nothing: without this a spent
+	// ceiling would read as spent until the next call reset it.
+	if b.clock().Sub(b.windowFrom) >= time.Hour {
+		return 0
+	}
 	return b.calls
 }
 

@@ -221,6 +221,7 @@
   "automod.spendFailuresOne": "{count} llamada fallida",
   "automod.spendNoCeiling": "{used} llamadas esta hora, sin techo alguno",
   "automod.spendNoCeilingOne": "{used} llamada esta hora, sin techo alguno",
+  "automod.ceilingSpent": "Límite por hora alcanzado: la moderación está degradada. Las líneas dudosas no se comprueban y aparecen en Marcados.",
   "automod.spendUnread": "No se pudo leer el gasto, así que esto no es un cero.",
   "automod.timeoutZero": "Un silencio de cero segundos es un veto permanente en todas las plataformas. Indica una duración.",
   "automod.unnamedRule": "Regla sin nombre",

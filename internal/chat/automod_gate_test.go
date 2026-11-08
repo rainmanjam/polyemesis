@@ -142,8 +142,8 @@ func automodCeilingErr(t *testing.T) error {
 	return err
 }
 
-// A long outage cannot bury real findings: only unjudgedHoldCap lines are held
-// and listed, the rest pass.
+// A long outage cannot bury real findings: only unjudgedHoldCap lines are
+// listed; the rest stay held, with no entry.
 func TestHoldWhenUnavailableIsCappedOnTheReviewList(t *testing.T) {
 	stub := &stubModerator{modelOn: true, modelErr: errors.New("503")}
 	mod := &gatedModerator{stubModerator: stub, want: func(automod.Subject) bool { return true }, holds: true}
@@ -152,8 +152,15 @@ func TestHoldWhenUnavailableIsCappedOnTheReviewList(t *testing.T) {
 		msgs = append(msgs, msg(fmt.Sprintf("m%d", i), fmt.Sprintf("u%d", i), "hello"))
 	}
 	h, sink, _ := displayHub(t, mod, msgs...)
+	// The cap bounds the LIST, not the hold: the line past it stays held off
+	// the overlay (the overlay's hold TTL drops it) and is simply not listed.
 	last := fmt.Sprintf("m%d", unjudgedHoldCap+9)
-	sink.waitFor(t, fmt.Sprintf("judge %s %d", last, DisplayClear))
+	sink.waitFor(t, fmt.Sprintf("judge %s %d", last, DisplayHeld))
+	for _, c := range sink.got() {
+		if c == fmt.Sprintf("judge %s %d", last, DisplayClear) {
+			t.Fatalf("a line past the cap was released as clear: %v", c)
+		}
+	}
 	if got := len(h.Flagged(db.PlatformTwitch, 0)); got != unjudgedHoldCap {
 		t.Fatalf("%d lines listed, want the cap of %d", got, unjudgedHoldCap)
 	}
@@ -177,5 +184,97 @@ func TestTheUnjudgedHoldCapForgetsFinishedOutages(t *testing.T) {
 	now = now.Add(unjudgedHeldFor + time.Second)
 	if got := h.unjudgedHeld(); got != 0 {
 		t.Fatalf("unjudgedHeld = %d after the outage's lines could no longer be released, want 0", got)
+	}
+}
+
+// engineModerator is the stub with a REAL engine answering the gate question,
+// so the tests below exercise the actual per-author cap and raid brake.
+type engineModerator struct {
+	*stubModerator
+	eng   *automod.Engine
+	holds bool
+}
+
+func (m *engineModerator) ModelOutcome(p db.Platform, s automod.Subject, v automod.Verdict) automod.GateOutcome {
+	return m.eng.ModelOutcome(p, s, v)
+}
+func (m *engineModerator) HoldOnModelError() bool { return m.holds }
+
+// passChecker is a model checker that answers "clean".
+type passChecker struct{}
+
+func (passChecker) Check(context.Context, string) ([]automod.Finding, error) { return nil, nil }
+func (passChecker) Stats() automod.ModelStats                                { return automod.ModelStats{} }
+func (passChecker) Enabled() bool                                            { return true }
+
+const abusiveLine = "i will find you and kill you" // address + violence: a hard-case signal
+
+func hardEngineModerator(t *testing.T, cfg automod.GateConfig, holds bool, modelErr error) *engineModerator {
+	t.Helper()
+	eng := automod.New(automod.DefaultMatrix(), automod.PlatformCaps{}, nil, nil, passChecker{}).
+		WithModelGate(automod.ScopeHard, automod.NewModelGate(cfg))
+	return &engineModerator{stubModerator: &stubModerator{modelOn: true, modelErr: modelErr}, eng: eng, holds: holds}
+}
+
+// A decoy first, then the real message inside AuthorEvery: the second was never
+// judged and must not be shown as clear. With the hold on it waits; with it off
+// it passes as an outage would; the review list has it either way.
+func TestAGateCappedSignalLineIsNeverShownAsClear(t *testing.T) {
+	for _, holds := range []bool{true, false} {
+		t.Run(fmt.Sprintf("holds=%v", holds), func(t *testing.T) {
+			mod := hardEngineModerator(t, automod.GateConfig{}, holds, nil)
+			h, sink, _ := displayHub(t, mod, msg("decoy", "u1", abusiveLine), msg("real", "u1", abusiveLine+" tonight"))
+			sink.waitFor(t, fmt.Sprintf("offer decoy %d", DisplayPending))
+			if holds {
+				sink.waitFor(t, fmt.Sprintf("offer real %d", DisplayHeld))
+			} else {
+				sink.waitFor(t, fmt.Sprintf("offer real %d", DisplayClear))
+			}
+			waitFor(t, "the unchecked line on the review list", func() bool { return len(h.Flagged(db.PlatformTwitch, 10)) == 1 })
+			f := h.Flagged(db.PlatformTwitch, 10)[0]
+			if f.Message.ID != "real" || f.Held != holds || f.Findings[0].Reason != uncheckedGateReason {
+				t.Fatalf("flag = %+v", f)
+			}
+		})
+	}
+}
+
+// Flooding past RaidMax trips the brake; the line after it was never judged
+// either, and the line that tripped it was declined too.
+func TestARaidBrakedSignalLineIsNeverShownAsClear(t *testing.T) {
+	for _, holds := range []bool{true, false} {
+		t.Run(fmt.Sprintf("holds=%v", holds), func(t *testing.T) {
+			mod := hardEngineModerator(t, automod.GateConfig{RaidMax: 3}, holds, nil)
+			var msgs []Message
+			for i := 0; i < 5; i++ { // distinct authors: only the brake can decline
+				msgs = append(msgs, msg(fmt.Sprintf("m%d", i), fmt.Sprintf("u%d", i), abusiveLine))
+			}
+			h, sink, _ := displayHub(t, mod, msgs...)
+			want := DisplayClear
+			if holds {
+				want = DisplayHeld
+			}
+			sink.waitFor(t, fmt.Sprintf("offer m4 %d", want))
+			sink.waitFor(t, fmt.Sprintf("offer m3 %d", want))
+			waitFor(t, "m3 and m4 listed", func() bool { return len(h.Flagged(db.PlatformTwitch, 10)) == 2 })
+			for _, f := range h.Flagged(db.PlatformTwitch, 10) {
+				if f.Held != holds {
+					t.Fatalf("flag %s held=%v, want %v", f.Message.ID, f.Held, holds)
+				}
+			}
+		})
+	}
+}
+
+// A spent hourly ceiling does not hold the line, but a line with a hard-case
+// signal that skipped the model for it is listed for review (never held).
+func TestASpentCeilingListsASignalLineWithoutHoldingIt(t *testing.T) {
+	mod := hardEngineModerator(t, automod.GateConfig{}, true, fmt.Errorf("primary checker: %w", automod.ErrBudgetSpent))
+	h, sink, _ := displayHub(t, mod, msg("s1", "u1", abusiveLine))
+	sink.waitFor(t, fmt.Sprintf("judge s1 %d", DisplayClear))
+	waitFor(t, "the listed line", func() bool { return len(h.Flagged(db.PlatformTwitch, 10)) == 1 })
+	f := h.Flagged(db.PlatformTwitch, 10)[0]
+	if f.Held || f.Findings[0].Reason != uncheckedBudgetReason || f.Findings[0].Hold {
+		t.Fatalf("flag = %+v", f)
 	}
 }

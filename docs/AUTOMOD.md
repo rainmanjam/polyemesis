@@ -302,8 +302,12 @@ Only a detector that **holds** is on the ladder. Emote walls, shouting and
 near-duplicate messages ship flag-only (see the table below), so they stay a
 flag however many rungs you arm; turning `holdDetectors` on for one of them
 opts it in. Where another checker (the flood history checker's timeout, a rule)
-already acts on the same message, the ladder adds a second action only if its
-rung is more severe, and then the ban is performed first.
+already acts on the same message, the ladder adds a second *sanction* only if
+its rung is more severe, and then the ban is performed first. A timeout or ban
+is a sanction on the author and does not remove the line, so when delete is also
+armed on that platform and the hit is entitled to it (its category ceiling
+reaches delete), the message is **also deleted**, as a separate action after the
+sanction. One sanction per message, plus the delete.
 
 Two properties are deliberate:
 
@@ -561,19 +565,36 @@ the pack off the request is exactly what it was.
 
 ### When the model cannot answer
 
-By default a message the model was asked about and could not judge (an outage,
-a rejected key, a spent hourly ceiling) passes, on the overlay too. Turn on
+By default a message the model was asked about and could not judge (an outage
+or a rejected key) passes, on the overlay too. Turn on
 `automod.model.holdWhenUnavailable` (**Hold the overlay when the model cannot
 answer**, off by default) and such a message waits off every overlay instead,
 and appears in the **Flagged** list so you can release it. It is read from the
 primary and covers both checkers.
 
-Two limits keep the hold from becoming its own outage. A **spent hourly
-ceiling is not an outage**: the model was not down, your spend limit worked, so
-those messages pass and are not held (a chain with one checker at its ceiling
-and the other down still counts as an outage). And at most **50** such messages
-are listed as held at once; past that they pass, so a long outage cannot push
-real findings off the 500-entry review list.
+The same setting covers a hard-case line the **gate** kept from the model (the
+per-author limit, a full author table or the raid brake, with `modelScope`
+`hard`): it was judged by nothing, so it is treated exactly like a model outage.
+Held when the setting is on, passing as before when it is off, and on the
+**Flagged** list either way. A decoy followed by the real message, or a flood
+past the brake, therefore cannot slip an unchecked line onto the overlay as
+clear.
+
+A **spent hourly ceiling is not an outage**, and it does not hold lines: the
+model was not down, your spend limit worked, and holding every line after call
+500 would freeze the overlay for most of an hour on a busy chat. Those messages
+pass. But moderation is degraded, and the console says so: the model checker
+shows **Hourly ceiling reached** beside its spend line, and a line that showed a
+hard-case signal and was skipped for this reason is put on the **Flagged** list
+(not held) so a person can look. A chain with one checker at its ceiling and the
+other down still counts as an outage.
+
+At most **50** lines that nothing checked (outage, gate decline or spent
+ceiling together) are listed at once. The cap bounds the **list**, not the
+hold: past it a held line stays off the overlay without an entry, and is dropped
+after the overlay's ten-minute hold time. A long outage therefore cannot push
+real findings off the 500-entry review list, and never airs a line you asked to
+hold.
 
 The Test button and the moderation log say what went wrong in plain words
 instead of a bare status: `Jev rejected the API key -- paste a new one` for a

@@ -4125,6 +4125,9 @@ export interface AutomodModelStats {
   /** The hard-case gate's counters: the real ones under the "hard" scope, the
    *  dry run (`considered`, `wouldSkip`) under "all" once it has seen a message. */
   gate?: AutomodGateStats;
+  /** The hourly ceiling is used up, so the model is not being asked: moderation
+   *  is degraded though nothing is down. Set on the aggregate only. */
+  ceilingSpent?: boolean;
 }
 
 export interface AutomodGateStats {

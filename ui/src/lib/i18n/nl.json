@@ -221,6 +221,7 @@
   "automod.spendFailuresOne": "{count} aanroep mislukt",
   "automod.spendNoCeiling": "{used} aanroepen dit uur, zonder enig plafond",
   "automod.spendNoCeilingOne": "{used} aanroep dit uur, zonder enig plafond",
+  "automod.ceilingSpent": "Uurlimiet bereikt: moderatie is verminderd. Lastige regels worden niet gecontroleerd en staan onder Gemarkeerd.",
   "automod.spendUnread": "De uitgaven konden niet worden gelezen, dus dit is geen nul.",
   "automod.timeoutZero": "Een zwijgduur van nul seconden is op elk platform een blijvende verbanning. Stel een duur in.",
   "automod.unnamedRule": "Naamloze regel",

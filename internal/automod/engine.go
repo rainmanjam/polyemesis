@@ -239,6 +239,7 @@ func (e *Engine) ModelStats() ModelStats {
 	}
 	st := e.model.Stats()
 	st.Gate = e.gateStats()
+	st.CeilingSpent = st.Ceiling > 0 && st.CallsThisHour >= st.Ceiling
 	return st
 }
 

@@ -221,6 +221,7 @@
   "automod.spendFailuresOne": "실패한 호출 {count}회",
   "automod.spendNoCeiling": "이번 시간에 {used}회, 상한 없음",
   "automod.spendNoCeilingOne": "이번 시간에 {used}회, 상한 없음",
+  "automod.ceilingSpent": "시간당 한도에 도달해 중재 기능이 저하되었습니다. 판단이 어려운 줄은 검사되지 않고 플래그됨 목록에 표시됩니다.",
   "automod.spendUnread": "사용량을 읽지 못했으므로 0이라는 뜻이 아닙니다.",
   "automod.timeoutZero": "0초 침묵은 모든 플랫폼에서 영구 차단입니다. 시간을 정하세요.",
   "automod.unnamedRule": "이름 없는 규칙",

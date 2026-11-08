@@ -47,6 +47,14 @@ type modelGate interface {
 	WantsModel(p db.Platform, s automod.Subject, v automod.Verdict) bool
 }
 
+// modelOutcomer is the optional half of the gate that also says WHY it declined:
+// whether the message showed a hard-case signal. A declined message with a
+// signal was not cleared by anything and is handled as the model being
+// unavailable (see checkAutomod). A gate without it is read through WantsModel.
+type modelOutcomer interface {
+	ModelOutcome(p db.Platform, s automod.Subject, v automod.Verdict) automod.GateOutcome
+}
+
 // modelFailureHolder is the optional half that says whether a message the model
 // could not answer should wait off the overlay instead of passing.
 type modelFailureHolder interface {
@@ -74,6 +82,9 @@ type automodJob struct {
 	msgID    string
 	authorID string
 	finding  automod.Finding
+	// signal marks a model question about a line that showed a hard-case
+	// signal, so a spent hourly ceiling can list it for review.
+	signal bool
 }
 
 // automodState is everything the worker needs, replaced atomically on each
@@ -193,8 +204,26 @@ func (h *Hub) checkAutomod(m Message) {
 	// settle, with a sign of a hard case, is worth the call. Asked LAST, after
 	// the cheap tests: the gate spends a per-author allowance when it says yes.
 	// A message it declines is not Pending, so it reaches the overlay at once.
-	if g, ok := s.mod.(modelGate); ok && askModel {
-		askModel = g.WantsModel(m.Platform, subj, v)
+	var signal, declined bool
+	if askModel {
+		if o, ok := s.mod.(modelOutcomer); ok {
+			out := o.ModelOutcome(m.Platform, subj, v)
+			askModel, signal, declined = out.Ask, out.Signal, out.Declined()
+		} else if g, ok := s.mod.(modelGate); ok {
+			askModel = g.WantsModel(m.Platform, subj, v)
+		}
+	}
+	// A line with a hard-case signal that the gate's limits kept from the
+	// model (the per-author cap, a full table, the raid brake) was judged by
+	// nothing. Treating it as clear is what a decoy-then-attack or a flood past
+	// the brake would engineer, so it follows the model-outage policy exactly:
+	// held off the overlay when holdWhenUnavailable is on, as before when off,
+	// and review-listed either way.
+	holdDeclined := false
+	if declined && !removes(v) && !v.Hold {
+		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
+			holdDeclined = true
+		}
 	}
 
 	// The overlay is told BEFORE anything is queued, so neither an action the
@@ -207,6 +236,8 @@ func (h *Hub) checkAutomod(m Message) {
 		// Flagged in the console, off every overlay, and releasable from the
 		// review list (overlay.Gate.Release). Nothing goes to a platform.
 		h.offerDisplay(m, DisplayHeld)
+	case holdDeclined:
+		h.offerDisplay(m, DisplayHeld)
 	case askModel:
 		h.offerDisplay(m, DisplayPending)
 	default:
@@ -216,6 +247,9 @@ func (h *Hub) checkAutomod(m Message) {
 	if !removes(v) && v.Hold {
 		h.markFlagHeld(m.Platform, m.Account, m.ID)
 	}
+	if declined && !removes(v) && !v.Hold {
+		h.listUnchecked(m.Platform, m.Account, m.ID, m.Author.ID, uncheckedGateReason, holdDeclined)
+	}
 
 	// The model runs off the read loop, on the worker, so a slow endpoint
 	// cannot stall chat. Queued through the same bounded channel as an action,
@@ -224,7 +258,7 @@ func (h *Hub) checkAutomod(m Message) {
 		h.setModelAsked(m.Key(), true)
 		if !h.enqueueAutomod(s, automodJob{
 			gen: s.gen, platform: m.Platform, account: m.Account,
-			msgID: m.ID, authorID: m.Author.ID,
+			msgID: m.ID, authorID: m.Author.ID, signal: signal,
 			// A zero Action marks this as "ask the model", which the worker
 			// tells apart from an action to perform.
 			finding: automod.Finding{Checker: automod.CheckerModel},
@@ -325,11 +359,20 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		// overlay that went silent whenever the model endpoint did would be a
 		// second, invisible outage.
 		//
-		// Not for a spent hourly ceiling, though: the model was not down, the
-		// spend limit did its job, and every line after call N holding off the
-		// overlay would turn a cost control into an outage (and bury real
-		// findings on the review list). Those pass, like any decline.
-		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() && !automod.IsBudgetSpent(err) {
+		// Not HELD for a spent hourly ceiling, though: the model was not down,
+		// the spend limit did its job, and every line after call N holding off
+		// the overlay would turn a cost control into an outage. It passes like
+		// any decline. But a line that showed a hard-case signal was not
+		// checked, and that is not left silent: it is listed for review
+		// (never held), and the engine's stats say moderation is degraded.
+		if automod.IsBudgetSpent(err) {
+			if job.signal {
+				h.listUnchecked(job.platform, job.account, job.msgID, job.authorID, uncheckedBudgetReason, false)
+			}
+			h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+			return
+		}
+		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
 			// The operator asked for it: a message nobody could judge waits off
 			// the overlay, and is listed for review so it can be released.
 			h.holdUnjudged(job)
@@ -379,36 +422,63 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	}
 }
 
-// unjudgedReason marks the review-list entry for a line held because the model
-// could not answer.
-const unjudgedReason = "the model could not answer, so the line is held"
+// The review-list entries for a line nothing checked. All three count against
+// one cap (unjudgedHoldCap), so no mix of outage, gate decline and spent
+// ceiling can push real findings off the 500-entry list.
+const (
+	// unjudgedReason: the model was asked and could not answer.
+	unjudgedReason = "the model could not answer, so the line is held"
+	// uncheckedGateReason: the gate's per-author cap or raid brake kept a
+	// hard-case line from the model.
+	uncheckedGateReason = "the model was not asked (author limit or raid brake), so the line was not checked"
+	// uncheckedBudgetReason: the hourly ceiling was spent.
+	uncheckedBudgetReason = "the hourly ceiling was spent, so the model was not asked and the line was not checked"
+)
 
-// unjudgedHoldCap is how many such lines may sit on the review list at once.
+// unjudgedHoldCap is how many such entries may sit on the review list at once.
+// It bounds the LIST, not the hold: past it a held line stays held off the
+// overlay and simply has no entry, and the overlay gate's hold TTL drops it.
 const unjudgedHoldCap = 50
 
+func isUncheckedReason(r string) bool {
+	return r == unjudgedReason || r == uncheckedGateReason || r == uncheckedBudgetReason
+}
+
 // holdUnjudged keeps a message the model could not judge off every overlay and
-// puts it on the review list. The finding is a flag, with no category beyond
-// "other" and no platform action: nothing was found, only not looked at.
+// puts it on the review list (while there is room for the entry). The caller has already
+// judged the overlay.
 func (h *Hub) holdUnjudged(job automodJob) {
-	// An outage can last as long as it likes and every line asked in it lands
-	// here. The review list is bounded and shared with real findings, so only
-	// a few are listed: past unjudgedHoldCap the line passes, which is what the
-	// setting being off would have done.
+	// The line is Pending on the overlay; hold it, entry or no entry.
+	h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
+	h.listUnchecked(job.platform, job.account, job.msgID, job.authorID, unjudgedReason, true)
+}
+
+// listUnchecked puts a line nothing checked on the review list, and keeps it
+// off the overlay when hold is set. The finding is a flag, with no category
+// beyond "other" and no platform action: nothing was found, only not looked at.
+//
+// An outage can last as long as it likes and every line asked in it lands
+// here, and the review list is bounded and shared with real findings. So the
+// cap is on ENTRIES: past unjudgedHoldCap the line gets none. A held line with
+// no entry stays held and is dropped by the overlay's hold TTL, which is
+// bounded memory; releasing it as clear instead would air exactly what an
+// operator who turned the hold on asked not to air.
+func (h *Hub) listUnchecked(p db.Platform, account, msgID, authorID, reason string, hold bool) {
 	if h.unjudgedHeld() >= unjudgedHoldCap {
-		h.log.Warn("automod: too many lines held for an unavailable model; this one passes",
-			"platform", job.platform, "cap", unjudgedHoldCap)
-		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+		h.log.Warn("automod: too many unchecked lines on the review list; this one is not listed",
+			"platform", p, "cap", unjudgedHoldCap, "held", hold)
 		return
 	}
-	h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
-	h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), []automod.Finding{{
+	h.noteFlag(h.messageFor(p, account, msgID, authorID), []automod.Finding{{
 		Checker:  automod.CheckerModel,
 		Action:   automod.ActionFlag,
 		Category: automod.CategoryOther,
-		Reason:   unjudgedReason,
-		Hold:     true,
+		Reason:   reason,
+		Hold:     hold,
 	}})
-	h.markFlagHeld(job.platform, job.account, job.msgID)
+	if hold {
+		h.markFlagHeld(p, account, msgID)
+	}
 }
 
 // textFor returns a stored message's text, or "" if it is no longer held.

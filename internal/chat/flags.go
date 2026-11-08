@@ -89,7 +89,7 @@ func (h *Hub) unjudgedHeld() int {
 	now := h.now()
 	n := 0
 	for _, f := range h.flags {
-		if len(f.Findings) == 1 && f.Findings[0].Reason == unjudgedReason && now.Sub(f.At) < unjudgedHeldFor {
+		if len(f.Findings) == 1 && isUncheckedReason(f.Findings[0].Reason) && now.Sub(f.At) < unjudgedHeldFor {
 			n++
 		}
 	}

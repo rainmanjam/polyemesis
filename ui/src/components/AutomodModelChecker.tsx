@@ -353,6 +353,9 @@ export function AutomodModelChecker({
               {spendText(stats)}
             </span>
           )}
+          {stats && stats.ceiling > 0 && stats.callsThisHour >= stats.ceiling && (
+            <Problem>{t("automod.ceilingSpent")}</Problem>
+          )}
           {stats && (stats.decisions ?? 0) > 0 && (
             <span className="text-sm text-muted-foreground">
               {t((stats.decisions ?? 0) === 1 ? "automod.decisionsOne" : "automod.decisions", { count: stats.decisions ?? 0 })}

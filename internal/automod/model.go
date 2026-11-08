@@ -162,6 +162,11 @@ type ModelStats struct {
 	// Gate is the hard-case gate's counters. Set on the engine's aggregate,
 	// and only while the scope is "hard".
 	Gate *GateStats `json:"gate,omitempty"`
+	// CeilingSpent is set when the hourly ceiling is used up, so the model is
+	// not being asked: moderation is degraded, even though nothing is down.
+	// Lines with a hard-case signal that were skipped for this reason are on
+	// the review list. Set on the engine's aggregate only.
+	CeilingSpent bool `json:"ceilingSpent,omitempty"`
 }
 
 // Model is the connector.

@@ -457,37 +457,61 @@ func hardCaseInput(s Subject, fs []Finding) pack.SignalInput {
 	return in
 }
 
+// GateOutcome is the gate's answer about one message.
+//
+// Ask is whether the model should be asked. Signal is whether the message shows
+// a hard-case signal and was not settled by the pack. A message with a signal
+// that the gate nevertheless declined (Ask false, Signal true: the per-author
+// cap, a full author table or the raid brake) was NOT cleared by anything: it
+// is the case an attacker engineers by sending a decoy first or flooding past
+// RaidMax, so the caller must treat it like a model outage, never as clear.
+type GateOutcome struct {
+	Ask    bool
+	Signal bool
+}
+
+// Declined reports a hard-case line the gate's limits kept from the model.
+func (o GateOutcome) Declined() bool { return !o.Ask && o.Signal }
+
 // WantsModel reports whether the model should be asked about a message whose
 // fast verdict was v. Under ScopeAll it is always true (the caller has already
 // checked the model is on and the verdict did not remove the message). Under
 // ScopeHard it is true only for an unsettled message with a hard-case signal
-// that the gate's limits admit.
+// that the gate's limits admit. See ModelOutcome for the reason behind a no.
 func (e *Engine) WantsModel(p db.Platform, s Subject, v Verdict) bool {
+	return e.ModelOutcome(p, s, v).Ask
+}
+
+// ModelOutcome is WantsModel with the reason: whether the message carried a
+// hard-case signal, so a decline by the gate's limits can be told from a line
+// that simply had nothing to ask about.
+func (e *Engine) ModelOutcome(p db.Platform, s Subject, v Verdict) GateOutcome {
 	if e == nil {
-		return false
+		return GateOutcome{}
 	}
 	if e.gate == nil || e.hardcase == nil {
-		return true
+		return GateOutcome{Ask: true}
 	}
 	if e.scope != ScopeHard {
 		// Scope "all": ask, as always, but note what "hard" would have done.
-		e.gate.countDryRun(e.wouldSkip(s, v))
-		return true
+		skip := e.wouldSkip(s, v)
+		e.gate.countDryRun(skip)
+		return GateOutcome{Ask: true, Signal: !skip}
 	}
 	if settledByPack(v.Findings) {
 		e.gate.countSettled()
-		return false
+		return GateOutcome{}
 	}
 	f := pack.NewForms(s.Text)
 	if len(e.hardcase.Signals(f, hardCaseInput(s, v.Findings))) == 0 {
 		e.gate.countNoSignal()
-		return false
+		return GateOutcome{}
 	}
 	author := ""
 	if s.AuthorID != "" {
 		author = authorKey(p, s.AuthorID)
 	}
-	return e.gate.admit(author)
+	return GateOutcome{Ask: e.gate.admit(author), Signal: true}
 }
 
 // wouldSkip is whether the hard scope would decline a message before its own

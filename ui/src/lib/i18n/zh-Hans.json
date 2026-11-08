@@ -221,6 +221,7 @@
   "automod.spendFailuresOne": "失败调用 {count} 次",
   "automod.spendNoCeiling": "本小时 {used} 次，未设任何上限",
   "automod.spendNoCeilingOne": "本小时 {used} 次，未设任何上限",
+  "automod.ceilingSpent": "已达到每小时上限：审核能力下降。疑难内容不会被检查，而是列在“已标记”中。",
   "automod.spendUnread": "支出读不出来，所以这并不是零。",
   "automod.timeoutZero": "零秒禁言在每个平台上都等于永久封禁。请设置一个时长。",
   "automod.unnamedRule": "未命名规则",

@@ -42,13 +42,13 @@ its first tagged release.
     are separate switches (matrix cell `platform/rung/protection`). Each pack hit is a strike; strike
     1 asks for delete, 2 a timeout (600 s by default, `ladderTimeoutSeconds`), 3 a ban, capped by
     the category's highest rung and lowered to the highest rung you armed, otherwise it stays a flag.
-    Self-harm and contextual hate never climb the ladder; impersonation stays at hold unless you raise its ceiling. One platform action per message.
+    Self-harm and contextual hate never climb the ladder; impersonation stays at hold unless you raise its ceiling. One sanction per message, and a timeout or ban still deletes the line when delete is armed.
     Strikes survive a settings save.
   - **Jev only for the hard cases.** `automod.protection.modelScope` is `hard` on a fresh install
     (the model is asked only about lines the free checkers could not settle and that show a sign of
     a hard case, with a per-author cap, de-duplication and a raid brake) and `all`, as before, on an
     existing one. A new `self_harm` category is asked only when protection is on, and is hold-only.
-    **Hold the overlay when the model cannot answer** is a new option. Friendlier Jev error messages.
+    **Hold the overlay when the model cannot answer** is a new option, and also covers a hard-case line the gate's per-author cap or raid brake kept from the model; a spent hourly ceiling does not hold lines but is shown as degraded moderation and lists skipped hard-case lines for review. Friendlier Jev error messages.
   - **Twitch's own filters.** From the card: copy the pack's severe hate terms to Twitch's blocked
     terms (a batch at a time, resumable, recording a hash of each term it really added so **Remove
     the terms polyemesis added** and turning a category off undo only those), set Twitch AutoMod to
