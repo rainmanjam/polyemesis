@@ -13,9 +13,12 @@ func TestStoredSelfHarmRuleIsClampedNotFatalOnLoad(t *testing.T) {
 	if _, err := NewRuleSet(rules); err == nil {
 		t.Fatal("the strict (save) path accepted self_harm+timeout")
 	}
-	set, err := LoadRuleSet(rules)
+	set, clamped, err := LoadRuleSet(rules)
 	if err != nil {
 		t.Fatalf("LoadRuleSet failed the whole set: %v", err)
+	}
+	if len(clamped) != 1 || clamped[0] != 1 {
+		t.Fatalf("clamped = %v, want [1]", clamped)
 	}
 	got := set.Check("this is a crisis")
 	if len(got) != 1 || got[0].Action != ActionFlag {

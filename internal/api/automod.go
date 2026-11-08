@@ -504,16 +504,27 @@ func newlyArmedOnUnconfigured(stored map[string]bool, sent db.AutomodSettings) e
 // dropping one leaves an operator believing a protection exists when it does
 // not, which is the same silent-failure shape the capability gate prevents.
 func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
+	rs, _, err := rulesFromSettingsClamped(a)
+	return rs, err
+}
+
+// rulesFromSettingsClamped is rulesFromSettings that also reports the IDs of
+// stored self_harm rules it clamped to flag, for the caller to log once.
+func rulesFromSettingsClamped(a db.AutomodSettings) (*automod.RuleSet, []int64, error) {
 	return compileSettingsRules(a, automod.LoadRuleSet)
 }
 
 // rulesFromSettingsStrict is the SAVE-time check: the self_harm ceiling is a
-// refusal here, where rulesFromSettings (loading) clamps it.
+// refusal here, where loading clamps it.
 func rulesFromSettingsStrict(a db.AutomodSettings) (*automod.RuleSet, error) {
-	return compileSettingsRules(a, automod.NewRuleSet)
+	rs, _, err := compileSettingsRules(a, func(r []automod.Rule) (*automod.RuleSet, []int64, error) {
+		rs, err := automod.NewRuleSet(r)
+		return rs, nil, err
+	})
+	return rs, err
 }
 
-func compileSettingsRules(a db.AutomodSettings, build func([]automod.Rule) (*automod.RuleSet, error)) (*automod.RuleSet, error) {
+func compileSettingsRules(a db.AutomodSettings, build func([]automod.Rule) (*automod.RuleSet, []int64, error)) (*automod.RuleSet, []int64, error) {
 	rules := make([]automod.Rule, 0, len(a.Rules))
 	for _, r := range a.Rules {
 		rules = append(rules, automod.Rule{
@@ -645,7 +656,11 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		return
 	}
 
-	rules, err := rulesFromSettings(a)
+	rules, clamped, err := rulesFromSettingsClamped(a)
+	if len(clamped) > 0 {
+		log.Warn("automod: stored self_harm rules asked for more than flag; clamped to flag",
+			"rule_ids", clamped)
+	}
 	if err != nil {
 		// Named loudly. A rule that does not compile is a protection the
 		// operator believes they have.

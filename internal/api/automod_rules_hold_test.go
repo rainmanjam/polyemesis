@@ -55,3 +55,24 @@ func TestSavingSelfHarmRuleAboveFlagIs400(t *testing.T) {
 	}
 	send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusBadRequest)
 }
+
+// The load path: a stored self_harm+timeout row (written before the ceiling
+// existed) must not take the other rules down with it.
+func TestStoredSelfHarmTimeoutRowDoesNotDisarmTheOtherRules(t *testing.T) {
+	rs, clamped, err := rulesFromSettingsClamped(db.AutomodSettings{Rules: []db.AutomodRule{
+		{ID: 1, Name: "sh", Enabled: true, Pattern: "crisis", Action: "timeout", TimeoutSeconds: 60, Category: "self_harm"},
+		{ID: 2, Name: "other", Enabled: true, Pattern: "spamword", Action: "delete"},
+	}})
+	if err != nil {
+		t.Fatalf("a stored self_harm+timeout row failed the whole set: %v", err)
+	}
+	if len(clamped) != 1 {
+		t.Errorf("clamped = %v", clamped)
+	}
+	if f := rs.Check("buy spamword"); len(f) != 1 || f[0].Action != automod.ActionDelete {
+		t.Errorf("the other rule stopped firing: %+v", f)
+	}
+	if f := rs.Check("in crisis"); len(f) != 1 || f[0].Action != automod.ActionFlag {
+		t.Errorf("self_harm rule not clamped to flag: %+v", f)
+	}
+}
