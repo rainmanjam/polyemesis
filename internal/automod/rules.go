@@ -2,6 +2,7 @@ package automod
 
 import (
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -115,6 +116,31 @@ type RuleSet struct {
 func NewRuleSet(rules []Rule) (*RuleSet, error) {
 	out := make([]Rule, 0, len(rules))
 	for _, r := range rules {
+		if err := r.Compile(); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return &RuleSet{rules: out}, nil
+}
+
+// LoadRuleSet is NewRuleSet for rules ALREADY STORED. It differs in one way: a
+// stored self_harm rule whose action is above flag is clamped to flag (logged
+// once) instead of failing the whole set.
+//
+// The ceiling is enforced at SAVE time by Compile. A row stored before that
+// existed, or written around the API, must not take every other rule down with
+// it: NewRuleSet is all-or-nothing, so one over-reaching self_harm rule would
+// start automod with no rules at all, silently, on upgrade.
+func LoadRuleSet(rules []Rule) (*RuleSet, error) {
+	out := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if r.Category == CategorySelfHarm && r.Action != ActionFlag && KnownActions(r.Action) {
+			slog.Warn("automod: a stored self_harm rule asked for more than flag; clamped to flag",
+				"rule_id", r.ID, "was", string(r.Action))
+			r.Action = ActionFlag
+			r.TimeoutSeconds = 0
+		}
 		if err := r.Compile(); err != nil {
 			return nil, err
 		}

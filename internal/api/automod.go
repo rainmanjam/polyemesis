@@ -504,6 +504,16 @@ func newlyArmedOnUnconfigured(stored map[string]bool, sent db.AutomodSettings) e
 // dropping one leaves an operator believing a protection exists when it does
 // not, which is the same silent-failure shape the capability gate prevents.
 func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
+	return compileSettingsRules(a, automod.LoadRuleSet)
+}
+
+// rulesFromSettingsStrict is the SAVE-time check: the self_harm ceiling is a
+// refusal here, where rulesFromSettings (loading) clamps it.
+func rulesFromSettingsStrict(a db.AutomodSettings) (*automod.RuleSet, error) {
+	return compileSettingsRules(a, automod.NewRuleSet)
+}
+
+func compileSettingsRules(a db.AutomodSettings, build func([]automod.Rule) (*automod.RuleSet, error)) (*automod.RuleSet, error) {
 	rules := make([]automod.Rule, 0, len(a.Rules))
 	for _, r := range a.Rules {
 		rules = append(rules, automod.Rule{
@@ -517,7 +527,7 @@ func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
 			HoldOverlay:    r.HoldOverlay,
 		})
 	}
-	return automod.NewRuleSet(rules)
+	return build(rules)
 }
 
 // historyFromSettings converts the stored bounds.

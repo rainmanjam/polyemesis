@@ -2060,7 +2060,7 @@ func (s *Server) checkAutomodChange(settings *db.Settings, stored storedSettings
 	// a valid rule is. This handler is the only place both are visible, and
 	// it is the only writer a person can reach.
 	if !sameAutomodRules(stored.rules, settings.Automod.Rules) {
-		if _, err := rulesFromSettings(settings.Automod); err != nil {
+		if _, err := rulesFromSettingsStrict(settings.Automod); err != nil {
 			return db.InvalidSettingsError{Err: err}
 		}
 	}

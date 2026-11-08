@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
@@ -40,4 +41,17 @@ func TestRulesFromSettingsCarriesHoldAndCategory(t *testing.T) {
 	}}); err == nil {
 		t.Error("an unknown category was accepted")
 	}
+}
+
+// Saving a self_harm rule above flag is refused with 400; the load path clamps.
+func TestSavingSelfHarmRuleAboveFlagIs400(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	var before map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &before)
+	am := before["automod"].(map[string]any)
+	am["enabled"] = true
+	am["rules"] = []map[string]any{
+		{"id": 1, "name": "sh", "enabled": true, "pattern": "crisis", "action": "timeout", "timeoutSeconds": 60, "category": "self_harm"},
+	}
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusBadRequest)
 }
