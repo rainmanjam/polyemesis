@@ -126,7 +126,7 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 	}
 	granted := strings.Fields(q.Get("scope"))
 	sort.Strings(granted)
-	want := []string{"broadcast.read", "broadcast.write", "media.write", "offline.access", "tweet.read", "tweet.write", "users.read"}
+	want := []string{"broadcast.read", "broadcast.write", "follows.read", "media.write", "offline.access", "tweet.read", "tweet.write", "users.read"}
 	if !reflect.DeepEqual(granted, want) {
 		t.Errorf("scope = %v, want exactly %v. broadcast.read/write are the Livestream family; "+
 			"offline.access issues a refresh token; users.read and tweet.read let GET /2/users/me "+
@@ -136,12 +136,12 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 
 // TestXScopesAreTheListTheLedgerRecords keeps Scopes and ScopeVersion honest
 // against the append-only ledger. Version 2 added tweet.write and media.write so
-// clips can be posted; an account connected at version 1 reconnects once.
+// clips can be posted; version 3 added follows.read; an older account reconnects once.
 func TestXScopesAreTheListTheLedgerRecords(t *testing.T) {
 	x := &X{}
-	if got := x.ScopeVersion(); got != 2 {
-		t.Errorf("ScopeVersion() = %d, want 2: version 2 asks for the two publish scopes, and "+
-			"an account on version 1 has to be told to reconnect", got)
+	if got := x.ScopeVersion(); got != 3 {
+		t.Errorf("ScopeVersion() = %d, want 3: version 2 asks for the two publish scopes, version 3 adds "+
+			"follows.read for Premium-subscription activity, and an older account has to be told to reconnect", got)
 	}
 	if got := x.Platform(); got != db.PlatformX {
 		t.Errorf("Platform() = %q, want db.PlatformX", got)

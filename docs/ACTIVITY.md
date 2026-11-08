@@ -255,16 +255,30 @@ are separate, and automod judges each.
 ## Platforms
 
 Each platform's source is added by its own change and lists its kinds, how it
-gets them and what it needs here. **Nothing below is connected in this release.**
+gets them and what it needs here. A platform marked *not yet* is not connected.
 
 | Platform | How the events arrive | Status |
 |---|---|---|
 | Twitch | EventSub over a WebSocket (its own transport) | not yet |
 | Kick | webhook events on the existing chat webhook | not yet |
-| X | Activity API events on the existing webhook | not yet |
+| X | Activity API events on the existing chat webhook: `follow.follow` and `subscriptions.subscribe` (inbound only), `broadcast.start` and `broadcast.end` | follow, Premium subscribe, stream |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
 | Rumble | the follower, subscriber, gift and rant blocks in the existing poll | not yet |
 | Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
+
+**X** subscribes four Activity API events on the account's existing webhook and
+needs the `follows.read` scope for the Premium one, so an X account connected
+before that scope was added reconnects once (follows and broadcasts work without
+it, and the subscribe kind reports `reconnect`). Follows and subscriptions are
+requested with `direction: inbound`, and each delivery is checked against its
+`target` again, so the broadcaster following someone is never an alert. A
+Premium subscription arrives only when Creator Subscriptions are on for the
+account, which polyemesis cannot read, so it shows `unknown` until one arrives; X
+sends no price, so a subscription carries no amount. If X refuses an event for
+an account the kind shows `unavailable` with X's reason and chat is unaffected.
+An event created before polyemesis started, or more than 15 minutes ago, is
+dropped: X redelivering history after a restart does not replay alerts. The
+X webhook needs the same public HTTPS address and app bearer as X chat.
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is

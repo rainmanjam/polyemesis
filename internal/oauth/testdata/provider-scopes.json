@@ -71,13 +71,14 @@
   },
   {
     "platform": "x",
-    "scopeVersion": 2,
+    "scopeVersion": 3,
     "scopes": [
       "broadcast.read",
       "broadcast.write",
       "offline.access",
       "users.read",
       "tweet.read",
+      "follows.read",
       "tweet.write",
       "media.write"
     ],
