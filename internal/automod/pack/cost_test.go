@@ -2,7 +2,12 @@
 
 package pack
 
-import "testing"
+import (
+	"math"
+	"strings"
+	"testing"
+	"unicode"
+)
 
 // costGateNs is the ceiling for the whole per-message pack form and lookup.
 // CheckFast runs on the chat adapter goroutine, and at a raid's 2,000 msgs/s
@@ -14,10 +19,7 @@ import "testing"
 const costGateNs = 15_000
 
 func TestPackFormCostGate(t *testing.T) {
-	gate := int64(costGateNs)
-	if testing.CoverMode() != "" {
-		gate *= 10
-	}
+	gate := gateNs(t, costGateNs)
 	r := fastestOf(BenchmarkPackForm)
 	ns := r.NsPerOp()
 	t.Logf("pack form + lookup: %d ns/op, %d allocs/op", ns, r.AllocsPerOp())
@@ -39,4 +41,50 @@ func fastestOf(fn func(*testing.B)) testing.BenchmarkResult {
 		}
 	}
 	return best
+}
+
+// calibrationRefNs is what calibrationWork costs on the machine the gates were
+// set on (an Apple M-series laptop, about 6.9 µs). The 15 µs budget is a budget on that
+// hardware: a shared CI runner measured the same checker at about twice the
+// time, every run, so an absolute gate there fails on the runner, not on the
+// code.
+const calibrationRefNs = 6_900
+
+// calibrationWork is a fixed workload shaped like the checker's -- splitting a
+// chat line, lower-casing runes and probing a small map -- and sharing none of
+// its code, so a regression in the pack cannot also slow the yardstick.
+func calibrationWork(b *testing.B) {
+	words := map[string]bool{"amazing": true, "round": true, "believe": true, "play": true}
+	line := "that was an amazing play, did you see the last round? lol i cannot believe it"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		n := 0
+		for _, f := range strings.Fields(line) {
+			if words[strings.ToLower(strings.Trim(f, ",.?!"))] {
+				n++
+			}
+		}
+		for j := 0; j < 20; j++ {
+			for _, f := range strings.FieldsFunc(line, unicode.IsSpace) {
+				n += len(f)
+			}
+		}
+		_ = n
+	}
+}
+
+// gateNs scales a time budget to this machine: by how much slower than the
+// reference machine calibrationWork runs here (never below 1, never above 4,
+// so no runner is slow enough to hide a quadratic), and by ten under coverage
+// instrumentation, which slows every statement.
+func gateNs(t *testing.T, budget int64) int64 {
+	t.Helper()
+	scale := float64(fastestOf(calibrationWork).NsPerOp()) / calibrationRefNs
+	scale = math.Min(math.Max(scale, 1), 4)
+	if testing.CoverMode() != "" {
+		scale *= 10
+	}
+	g := int64(float64(budget) * scale)
+	t.Logf("time gate %d ns (budget %d ns x %.2f for this machine)", g, budget, scale)
+	return g
 }

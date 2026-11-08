@@ -39,21 +39,19 @@ func BenchmarkSignalsEdgeDigits(b *testing.B) { benchSignals(b, edgeLine) }
 func BenchmarkSignalsCutFields(b *testing.B)  { benchSignals(b, cutLine) }
 
 func TestSignalsCostGate(t *testing.T) {
-	mult := int64(1)
-	if testing.CoverMode() != "" {
-		mult = 10
-	}
+
+	edgeGate, cutGate := gateNs(t, signalsEdgeLineGateNs), gateNs(t, signalsCutFieldGateNs)
 	edge := fastestOf(BenchmarkSignalsEdgeDigits)
 	cut := fastestOf(BenchmarkSignalsCutFields)
 	t.Logf("edge digits: %d ns/op %d allocs/op; cut fields: %d ns/op %d allocs/op",
 		edge.NsPerOp(), edge.AllocsPerOp(), cut.NsPerOp(), cut.AllocsPerOp())
-	if edge.NsPerOp() > signalsEdgeLineGateNs*mult {
-		t.Errorf("edge-digit line costs %d ns/op, over %d", edge.NsPerOp(), signalsEdgeLineGateNs*mult)
+	if edge.NsPerOp() > edgeGate {
+		t.Errorf("edge-digit line costs %d ns/op, over %d", edge.NsPerOp(), edgeGate)
 	}
 	if edge.AllocsPerOp() > signalsAllocGate {
 		t.Errorf("edge-digit line makes %d allocs/op, over %d", edge.AllocsPerOp(), signalsAllocGate)
 	}
-	if cut.NsPerOp() > signalsCutFieldGateNs*mult {
-		t.Errorf("cut fields cost %d ns/op, over %d", cut.NsPerOp(), signalsCutFieldGateNs*mult)
+	if cut.NsPerOp() > cutGate {
+		t.Errorf("cut fields cost %d ns/op, over %d", cut.NsPerOp(), cutGate)
 	}
 }
