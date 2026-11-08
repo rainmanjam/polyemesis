@@ -2658,8 +2658,11 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// capability has to be resolved through the SAME provider set the push
 	// resolves it through, or a test can aim the push at a stub and leave this
 	// answering for production.
+	// The X chat controls ride in the same blob but are not compliance: they are
+	// kept through this clearing on X and dropped on every other platform below.
+	xControls := row.Compliance.X
 	if _, ok := oauth.As[oauth.CompliancePusher](s.providers, row.Platform); !ok && !row.Compliance.Empty() {
-		row.Compliance = db.Compliance{}
+		row.Compliance = db.Compliance{X: xControls}
 		warnings = append(warnings, fmt.Sprintf(
 			"Compliance settings were removed: %s has no compliance surface, so a "+
 				"privacy or COPPA declaration stored here would never be sent — and "+
@@ -2676,6 +2679,14 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 			"Facebook crossposting and donate settings were removed: they are "+
 				"arguments to Facebook's broadcast create call and %s does not have one.",
 			row.Platform))
+	}
+
+	// The X chat access mode and language, the same: only an X PUBLISH carries them.
+	if row.Platform != db.PlatformX && !row.Compliance.X.Empty() {
+		row.Compliance.X = nil
+		warnings = append(warnings, fmt.Sprintf(
+			"The X chat access mode and language were removed: they are sent only "+
+				"when an X broadcast is published, and %s has no such step.", row.Platform))
 	}
 
 	// The X go-live title, one platform wide too: only an X PUBLISH carries it.
@@ -3075,6 +3086,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
+	storedXControls := xControlsKey(existing.Compliance.X)
 	// The stored preset, so only a save that CHANGES it is checked: an id the
 	// catalogue no longer has must not make the row unsaveable.
 	storedPresetID := existing.PresetID
@@ -3101,6 +3113,11 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// that changes a running one, so a change saved now would never reach X.
 	if xBroadcastLive && existing.GoLiveTitle != storedGoLiveTitle {
 		writeError(w, http.StatusConflict, xTitleLiveRefusal)
+		return
+	}
+	// The chat access mode and language travel on the same PUBLISH.
+	if xBroadcastLive && xControlsKey(existing.Compliance.X) != storedXControls {
+		writeError(w, http.StatusConflict, xControlsLiveRefusal)
 		return
 	}
 	// Whatever the body said about expert arguments, the stored ones win. Only
@@ -4064,4 +4081,18 @@ func (s *Server) mqttInstanceForThisInstall() string {
 		return ""
 	}
 	return fmt.Sprintf("%s-%x", db.DefaultMQTTInstance, s.box.Derive("mqtt-instance")[:3])
+}
+
+// xControlsKey is a comparable form of an X chat access mode and language, so a
+// save that changes either can be told from one that leaves them alone. Empty
+// and nil are the same key.
+func xControlsKey(x *db.XBroadcastControls) string {
+	if x.Empty() {
+		return ""
+	}
+	opt := "-"
+	if x.ChatOption != nil {
+		opt = strconv.Itoa(*x.ChatOption)
+	}
+	return opt + "|" + strings.TrimSpace(x.Locale)
 }

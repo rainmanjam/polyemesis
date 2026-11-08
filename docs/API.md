@@ -1079,6 +1079,15 @@ guidance can be found for Instagram, LinkedIn, Dailymotion, Owncast and Rumble,
 whose destinations have `platform: "custom"`. It is advisory and gates nothing.
 A stored id the catalogue no longer has is ignored, never an error.
 
+**X chat access mode and broadcast language.** An X destination's `compliance.x` holds
+`{"chatOption": 0-6, "locale": "en"}`, both optional. They are sent with the go-live as `chat_option` (a JSON
+integer: 0 default, 1 chat off, 2 everyone, 3 verified accounts, 4 accounts the broadcaster follows, 5 the
+broadcaster's subscribers, 6 accounts followed by an account the broadcaster follows) and `locale` (a language
+tag such as `en` or `pt-BR`); an absent field is not sent, so X applies its own. A `chatOption` outside 0 to 6
+or a `locale` that is not a language tag is `400`. A change while the X broadcast is live is `409`, because the
+go-live has already carried them. A destination that is not X has the block removed on save, with a warning. Send `"compliance": {"x": null}` to clear it. It lives in the existing `compliance`
+JSON, so there is no new column.
+
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the

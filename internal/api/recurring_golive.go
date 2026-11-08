@@ -265,5 +265,8 @@ func (s *Server) xGoLiveTitleAt(d *db.Destination, now time.Time) string {
 // broadcast runs. X documents no write that changes a running broadcast's title
 // (the PUBLISH transition is the only one that takes one), so the copy says the
 // change is not available, not that it is unverified.
+const xControlsLiveRefusal = "X cannot change the chat access mode or language of a broadcast that is live: they are sent " +
+	"only when the broadcast is published. Save them after this show ends, and the next show uses them"
+
 const xTitleLiveRefusal = "X cannot change the title of a broadcast that is live: the title is sent " +
 	"only when the broadcast is published. Save the new title after this show ends, and the next show uses it"
