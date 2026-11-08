@@ -233,10 +233,17 @@ with only Ban armed, the first two hits flag and the third bans.
 | Hate terms, severe | ban |
 | Scams | ban |
 | Doxxing | timeout |
-| Floods (any detector) | timeout |
+| Floods (only a detector that holds) | timeout |
 | Raid | delete |
 | Profanity | delete |
 | Impersonation, contextual hate terms, self-harm | hold only |
+
+Only a detector that **holds** is on the ladder. Emote walls, shouting and
+near-duplicate messages ship flag-only (see the table below), so they stay a
+flag however many rungs you arm; turning `holdDetectors` on for one of them
+opts it in. Where another checker (the flood history checker's timeout, a rule)
+already acts on the same message, the ladder adds a second action only if its
+rung is more severe, and then the ban is performed first.
 
 Two properties are deliberate:
 

@@ -2097,6 +2097,16 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		a.Model.Protocol = AutomodProtocolOpenAI
 		a.Model.Preset = "custom"
 	}
+	// PackVersion is the version the operator last ACCEPTED, and turning the
+	// pack on is accepting it. An upgraded install starts undecided at version
+	// 0 (mergeBaseSettings) and a client that sends only {state:"on"} never
+	// names a version, so without this the answer would be stored as "on, v0"
+	// and a later pack-update offer keyed on the version would misfire for
+	// exactly the installs that upgraded. Here, with the other decode-time
+	// repairs, so it also heals a blob already stored that way.
+	if a.Protection.State == ProtectionOn && a.Protection.PackVersion == 0 {
+		a.Protection.PackVersion = DefaultProtectionPackVersion
+	}
 	return nil
 }
 

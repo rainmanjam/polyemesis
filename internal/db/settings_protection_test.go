@@ -195,3 +195,41 @@ func TestProtectionProblems(t *testing.T) {
 		})
 	}
 }
+
+// Accepting the pack records the version accepted: an undecided install that
+// says yes with only {state:"on"} is on v1, not on v0.
+func TestAcceptingTheProtectionPackRecordsItsVersion(t *testing.T) {
+	d := testDB(t)
+	legacy := `{"automod":{"enabled":true}}`
+	if _, err := d.SQL().Exec(`INSERT INTO settings (id, json) VALUES (1, ?)`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	s, err := d.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Automod.Protection.State != "" || s.Automod.Protection.PackVersion != 0 {
+		t.Fatalf("not undecided: %+v", s.Automod.Protection)
+	}
+	// The operator says yes: the API decodes the sent body over the stored one.
+	if err := json.Unmarshal([]byte(`{"automod":{"protection":{"state":"on"}}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Automod.Protection; got.State != ProtectionOn || got.PackVersion != DefaultProtectionPackVersion {
+		t.Fatalf("accepted pack: state %q packVersion %d, want on / %d", got.State, got.PackVersion, DefaultProtectionPackVersion)
+	}
+	if err := d.PutSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.GetSettings(); got.Automod.Protection.PackVersion != DefaultProtectionPackVersion {
+		t.Fatalf("stored packVersion %d", got.Automod.Protection.PackVersion)
+	}
+	// Saying no does not accept anything.
+	s2, _ := d.GetSettings()
+	if err := json.Unmarshal([]byte(`{"automod":{"protection":{"state":"off","packVersion":0}}}`), &s2); err != nil {
+		t.Fatal(err)
+	}
+	if s2.Automod.Protection.PackVersion != 0 {
+		t.Fatalf("off recorded version %d", s2.Automod.Protection.PackVersion)
+	}
+}

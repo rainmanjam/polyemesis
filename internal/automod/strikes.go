@@ -188,14 +188,38 @@ func (e *Engine) syncArming() {
 // one issued after a greater (a timeout landing on a ban). The winning finding
 // carries the action; the others stay the flags they were. A finding no rung is
 // armed for stays a flag.
+//
+// Only a finding that HOLDS is on the ladder. The pack ships the flood
+// detectors that are culture on Twitch (emote walls, shouting) and near
+// duplicates flag-only: a detector not even trusted to hide a line from the
+// overlay must not be able to remove it from the platform. An operator who
+// turns holdDetectors on for one has opted that detector in. A hold the
+// overlay does not honour (the engine or platform switched off) does not matter
+// here: Hold is the pack's verdict on the detector, not the overlay's state.
+//
+// The ladder also yields to the other checkers. Their findings keep the action
+// the operator gave them, and decide puts every armed one in Act, so a rung no
+// more severe than one already armed there (a history timeout, a rule's
+// delete) adds nothing but a second action. It stays a flag. A rung MORE severe
+// than theirs does win, and then both reach the Hub, worst first: the ban, then
+// the history timeout, the same shape that rules and history already had.
 func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
 	if strike > int(maxRung) {
 		strike = int(maxRung)
 	}
+	floor := -1 // actionRank of the worst armed action another checker already asks for
+	for _, f := range fs {
+		if f.Checker == CheckerProtection {
+			continue
+		}
+		if r := actionRank(f.Action); r > floor && e.matrix.Allows(e.caps, Key{Platform: p, Action: f.Action, Checker: f.Checker}) {
+			floor = r
+		}
+	}
 	best, bestRung := -1, RungHold
 	for i := range fs {
 		f := &fs[i]
-		if f.Checker != CheckerProtection {
+		if f.Checker != CheckerProtection || !f.Hold {
 			continue
 		}
 		want := Rung(strike)
@@ -204,7 +228,7 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
 		}
 		for r := want; r > RungHold; r-- {
 			if e.matrix.Allows(e.caps, Key{Platform: p, Action: r.Action(), Checker: CheckerProtection}) {
-				if r > bestRung {
+				if r > bestRung && actionRank(r.Action()) > floor {
 					best, bestRung = i, r
 				}
 				break

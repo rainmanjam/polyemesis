@@ -360,3 +360,108 @@ func TestOneMessageNeverYieldsTwoPlatformActions(t *testing.T) {
 		t.Fatalf("doxxing %q hate %q, want flag and ban", doxx.Action, hate.Action)
 	}
 }
+
+func emoteWall() Subject {
+	return Subject{AuthorID: "u1", AuthorName: "viewer", Text: strings.TrimSpace(strings.Repeat("Kappa ", 14)), EmoteCount: 14}
+}
+
+// A flag-only detector is not on the ladder: an emote wall the pack will not
+// even hold off the overlay must not be deleted or timed out on the platform.
+func TestAFlagOnlyFloodHitNeverClimbsTheLadder(t *testing.T) {
+	e, clk := ladderEngine(t, NewStrikes(), nil, ActionDelete, ActionTimeout, ActionBan)
+	for i := 0; i < 4; i++ {
+		v := e.CheckFast(db.PlatformTwitch, emoteWall())
+		var seen bool
+		for _, f := range v.Findings {
+			if f.Checker == CheckerProtection {
+				seen = true
+				if f.Detector != pack.GroupEmote || f.Hold {
+					t.Fatalf("expected the flag-only emote hit, got %+v", f)
+				}
+				if f.Action != ActionFlag {
+					t.Fatalf("emote wall %d: action %q with delete, timeout and ban armed, want flag", i+1, f.Action)
+				}
+			}
+		}
+		if !seen {
+			t.Fatalf("emote wall %d raised no protection finding: %+v", i+1, v.Findings)
+		}
+		for _, f := range v.Act {
+			if f.Action != ActionFlag {
+				t.Fatalf("emote wall %d acted: %+v", i+1, f)
+			}
+		}
+		clk.advance(time.Second)
+	}
+}
+
+// An operator who turns hold on for the detector has opted it onto the ladder.
+func TestAnOperatorHoldOptsAFloodDetectorOntoTheLadder(t *testing.T) {
+	hl := DefaultHistoryLimits()
+	m := DefaultMatrix()
+	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionDelete, Checker: CheckerProtection}, true)
+	p := newProtection(t, ProtectionConfig{History: &hl, Hold: map[string]bool{"emote": true}})
+	e := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(p).WithLadder(&Ladder{Strikes: NewStrikes()})
+	v := e.CheckFast(db.PlatformTwitch, emoteWall())
+	if len(v.Act) != 1 || v.Act[0].Action != ActionDelete {
+		t.Fatalf("a held emote wall with delete armed: %+v", v.Act)
+	}
+}
+
+// The ladder yields to another checker that already acts on the message.
+func TestTheLadderAddsNoSecondActionBesideAHistoryOne(t *testing.T) {
+	// History asks for a timeout on a repeat; the ladder's first strike would
+	// ask for a delete of the slur. Both armed.
+	hl := DefaultHistoryLimits()
+	hl.MaxRepeats = 1
+	mk := func(rungs ...Action) *Engine {
+		m := DefaultMatrix()
+		m.Set(Key{Platform: db.PlatformTwitch, Action: ActionTimeout, Checker: CheckerHistory}, true)
+		for _, r := range rungs {
+			m.Set(Key{Platform: db.PlatformTwitch, Action: r, Checker: CheckerProtection}, true)
+		}
+		e := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(newProtection(t, ProtectionConfig{History: &hl}))
+		clk := &fakeClock{t: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
+		e.now = clk.now
+		return e.WithLadder(&Ladder{Strikes: NewStrikes()})
+	}
+	send := func(e *Engine) Verdict {
+		var v Verdict
+		for i := 0; i < 3; i++ { // repeats past the limit
+			v = e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", AuthorName: "viewer", Text: slur(t)})
+		}
+		return v
+	}
+	actions := func(v Verdict) []Action {
+		var out []Action
+		for _, f := range v.Act {
+			out = append(out, f.Action)
+		}
+		return out
+	}
+
+	// Delete (less severe than the history timeout) adds nothing.
+	v := send(mk(ActionDelete))
+	if a := actions(v); len(a) == 0 || a[0] != ActionTimeout {
+		t.Fatalf("the history timeout never fired, so this proves nothing: %v", a)
+	}
+	for _, f := range v.Act {
+		if f.Checker == CheckerProtection && f.Action != ActionFlag {
+			t.Fatalf("a ladder delete rode along with a history timeout: %v", actions(v))
+		}
+	}
+	// Timeout (equal) adds nothing either.
+	v = send(mk(ActionTimeout))
+	for _, f := range v.Act {
+		if f.Checker == CheckerProtection && f.Action != ActionFlag {
+			t.Fatalf("a ladder timeout rode along with a history timeout: %v", actions(v))
+		}
+	}
+	// A ban is more severe and does win; the Hub then performs it first, then
+	// the history timeout (worst first). Pinned so the behaviour is deliberate.
+	v = send(mk(ActionBan))
+	got := actions(v)
+	if len(got) < 2 || got[0] != ActionBan {
+		t.Fatalf("with ban armed the Hub should see the ban first, got %v", got)
+	}
+}
