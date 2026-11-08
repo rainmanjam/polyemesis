@@ -41,6 +41,16 @@ type Actuator interface {
 	Reconcile() error
 }
 
+// StartPreparer is an optional Actuator capability. PrepareStarts is called ONCE
+// per start schedule with every destination about to be enabled, before the
+// first SetDestinationEnabled, so slow per-destination work (a platform round
+// trip for a fresh stream key) can run concurrently instead of one destination
+// at a time inside the sweep. The returned release is always called after the
+// last flag is written. It cannot fail the start.
+type StartPreparer interface {
+	PrepareStarts(ids []int64) (release func())
+}
+
 // Result is what happened to one schedule in one sweep.
 type Result struct {
 	ID      int64     `json:"id"`
@@ -286,6 +296,11 @@ func (r *Runner) setDestinations(s Schedule, targets []int64) (bool, error) {
 	enabled := s.Enables()
 	changed := false
 	var failed error
+	if sp, ok := r.act.(StartPreparer); ok && enabled && len(targets) > 0 {
+		if release := sp.PrepareStarts(targets); release != nil {
+			defer release()
+		}
+	}
 	for _, id := range targets {
 		if err := r.act.SetDestinationEnabled(id, enabled); err != nil {
 			failed = err

@@ -83,6 +83,10 @@ type platformStub struct {
 	// fbBackupKey the one inside the secondary URL beside it.
 	fbKey       string
 	fbBackupKey string
+	// fbKeys, when set, hands out one stream key per create in order, the way
+	// Facebook issues a single-use key per live video. Once it runs dry the
+	// last one repeats.
+	fbKeys []string
 	// fbBackups, when false, strips the secondary ingest URLs from the create
 	// response so a test can watch the missing-backup warning.
 	fbBackups bool
@@ -126,6 +130,12 @@ func (p *platformStub) serve(w http.ResponseWriter, r *http.Request) {
 	call := p.seen[len(p.seen)-1]
 	reject, onCall, liveID, createErr := p.rejectIf, p.onCall, p.nextLiveIDLocked(r), p.fbCreateErr
 	key, backupKey := p.fbKey, p.fbBackupKey
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/live_videos") && len(p.fbKeys) > 0 {
+		key = p.fbKeys[0]
+		if len(p.fbKeys) > 1 {
+			p.fbKeys = p.fbKeys[1:]
+		}
+	}
 	backups, during := p.fbBackups, p.duringFacebookCreate
 	p.mu.Unlock()
 

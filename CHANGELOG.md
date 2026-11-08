@@ -8,7 +8,18 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **An account-linked Facebook destination can be stopped and started again without pressing "Refresh
+  stream key".** A Facebook stream key is valid for one live video, so after a stop the saved key
+  belonged to an ended video: Facebook refused the RTMPS open ("Input/output error"), the verdict was
+  `key_rejected`, and after three quick refusals the destination was held, over a key polyemesis could
+  have renewed itself. A new start of a destination linked to a connected Facebook account (Start,
+  Start all, a schedule's start, a save that switches it on, or Restart of one that is switched on but held) now fetches a fresh live video first, the same
+  call Refresh stream key makes. A respawn inside one live session, and Start pressed on a process
+  that is already up, keep the same live video, so a network drop never splits the broadcast. A
+  destination with a pasted key, or one whose announced event is the show being started (kept up to 15 minutes past its time), is unchanged; so is one the engine is already carrying, including a delay buffer still filling or draining; renewals are serialised per destination, and a schedule's run concurrently under a 10 second deadline; if Facebook will not
+  issue a key the destination still starts on the stored one and the response carries a warning.
 
 ## [0.16.0] — 2026-11-08
 

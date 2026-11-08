@@ -365,6 +365,9 @@ func (s *Server) bulkOne(row *db.Destination, enabled bool) bulkDestResult {
 
 	res.State = ctl.Effect.State
 	res.Outcome, res.Message = classifyBulkEffect(ctl.Effect.Error, ctl.Effect.Warning, enabled)
+	if ctl.KeyWarning != "" && res.Outcome == bulkStarted {
+		res.Outcome, res.Message = bulkWarned, ctl.KeyWarning
+	}
 	return res
 }
 

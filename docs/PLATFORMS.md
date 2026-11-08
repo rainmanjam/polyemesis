@@ -82,7 +82,10 @@ measured in days. Start it before you need it.
 
 **Two ways to get a Facebook key, and they are not the same key.** Connecting
 the account is what creates the broadcast: the key polyemesis fetches belongs to
-one live video, and pressing *Refresh key* starts a new one. Facebook also
+one live video. polyemesis starts a new one itself each time you start the
+destination, by hand or from a schedule (or restart one that is held or stopped), so a stop and start never
+reuses a finished video's key; a network drop during a show reuses the same
+video, and pressing *Refresh key* starts a new one on demand. Facebook also
 offers a **persistent stream key** — Live Producer → *Advanced settings* — which
 is reusable every time you go live and therefore does **not** go stale in a
 saved destination. Meta's Graph reference documents no way to mint or read that
@@ -819,7 +822,9 @@ minutes, and start it before you need it.
 4. **Connect account**, then pick your profile or a Page.
 
 The key this fetches belongs to one live video, so *Refresh key* on a Facebook
-destination starts a new broadcast rather than re-reading an existing one.
+destination starts a new broadcast rather than re-reading an existing one, and
+so does every fresh start of the destination: you do not need to press it after
+a stop. A reconnect inside one show keeps the same broadcast.
 
 If you would rather paste a key that lasts, Live Producer → *Advanced settings*
 → **Persistent stream key** issues one that is reusable every time you go live.
