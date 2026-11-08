@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "用于 {destination}",
   "studioEvents.used": "{destination} 开始直播时将使用 {title}。",
   "studioEvents.useFailed": "无法使用此活动：{reason}",
-  "studioEvents.stale": "无法刷新 {accounts} 的活动；显示的是之前读取的内容。"
+  "studioEvents.stale": "无法刷新 {accounts} 的活动；显示的是之前读取的内容。",
+  "studioEvents.studioNow": "{destination} 使用 YouTube Studio 的“Stream now”，因此 polyemesis 不会使用此活动。请先在目标设置中将其关闭。"
 }

@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "Gunakan untuk {destination}",
   "studioEvents.used": "{title} akan digunakan saat {destination} tayang langsung.",
   "studioEvents.useFailed": "Tidak dapat menggunakan acara ini: {reason}",
-  "studioEvents.stale": "Tidak dapat menyegarkan acara dari {accounts}; menampilkan data yang dibaca sebelumnya."
+  "studioEvents.stale": "Tidak dapat menyegarkan acara dari {accounts}; menampilkan data yang dibaca sebelumnya.",
+  "studioEvents.studioNow": "{destination} menggunakan \"Stream now\" dari YouTube Studio, sehingga polyemesis tidak akan memakai acara ini. Nonaktifkan dulu di pengaturan tujuan."
 }

@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "Użyj dla {destination}",
   "studioEvents.used": "{title} zostanie użyty, gdy {destination} wystartuje na żywo.",
   "studioEvents.useFailed": "Nie udało się użyć tego wydarzenia: {reason}",
-  "studioEvents.stale": "Nie udało się odświeżyć wydarzeń z {accounts}; wyświetlane są wcześniej odczytane."
+  "studioEvents.stale": "Nie udało się odświeżyć wydarzeń z {accounts}; wyświetlane są wcześniej odczytane.",
+  "studioEvents.studioNow": "{destination} korzysta z funkcji „Stream now” w YouTube Studio, więc polyemesis nie użyłby tego wydarzenia. Najpierw wyłącz ją w ustawieniach miejsca docelowego."
 }

@@ -51,10 +51,17 @@ export function StudioEventsCalendar({ ownEventIds }: Readonly<{ ownEventIds: Re
   const use = async (e: StudioEventView, destinationId: number) => {
     const d = dests.find((x) => x.id === destinationId);
     if (!d) return;
+    if (d.compliance?.youtube?.studioStreamNow) {
+      // polyemesis makes no broadcast for a destination on Studio's Stream now, so a pick would be ignored.
+      toast.error(t("studioEvents.studioNow", { destination: d.name }));
+      return;
+    }
     setBusy(true);
     try {
+      // rebindEvent is sent false, not left out: the server merges a save over the stored row, so leaving it out
+      // would keep an earlier event's confirmation and move this one off its stream unasked.
       await api.updateDestination(d.id, {
-        compliance: { ...d.compliance, youtube: { ...(d.compliance?.youtube ?? {}), eventId: e.id } },
+        compliance: { ...d.compliance, youtube: { ...(d.compliance?.youtube ?? {}), eventId: e.id, rebindEvent: false } },
       });
       toast.success(t("studioEvents.used", { title: e.title, destination: d.name }));
     } catch (err) {

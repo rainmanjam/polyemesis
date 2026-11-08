@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "Gebruiken voor {destination}",
   "studioEvents.used": "{title} wordt gebruikt zodra {destination} live gaat.",
   "studioEvents.useFailed": "Kon dit evenement niet gebruiken: {reason}",
-  "studioEvents.stale": "Kon de evenementen van {accounts} niet vernieuwen; de eerder gelezen evenementen worden getoond."
+  "studioEvents.stale": "Kon de evenementen van {accounts} niet vernieuwen; de eerder gelezen evenementen worden getoond.",
+  "studioEvents.studioNow": "{destination} gebruikt \"Stream now\" van YouTube Studio, dus polyemesis zou dit evenement niet gebruiken. Zet dat eerst uit in de instellingen van de bestemming."
 }

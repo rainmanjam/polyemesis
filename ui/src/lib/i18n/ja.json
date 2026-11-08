@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "{destination} に使用",
   "studioEvents.used": "{destination} がライブ配信を開始すると、{title} が使用されます。",
   "studioEvents.useFailed": "このイベントを使用できませんでした: {reason}",
-  "studioEvents.stale": "{accounts} のイベントを更新できませんでした。以前に読み込んだ内容を表示しています。"
+  "studioEvents.stale": "{accounts} のイベントを更新できませんでした。以前に読み込んだ内容を表示しています。",
+  "studioEvents.studioNow": "{destination} は YouTube Studio の「Stream now」を使用しているため、polyemesis はこのイベントを使用しません。先に配信先の設定でこれをオフにしてください。"
 }

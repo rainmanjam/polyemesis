@@ -461,8 +461,10 @@ type Server struct {
 	ytVideosMu    sync.Mutex
 	// ytStudio caches each YouTube account's upcoming events for the calendar; see youtube_studio_events.go.
 	ytStudioMu sync.Mutex
-	ytStudio   map[int64]studioCacheEntry
-	ytVideos   map[int64]ytLiveVideo
+	// ytStudioFlight serialises refreshes, so simultaneous requests share one (single flight).
+	ytStudioFlight sync.Mutex
+	ytStudio       map[int64]studioCacheEntry
+	ytVideos       map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()

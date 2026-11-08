@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "{destination}에 사용",
   "studioEvents.used": "{destination}이(가) 라이브를 시작하면 {title}이(가) 사용됩니다.",
   "studioEvents.useFailed": "이 이벤트를 사용할 수 없습니다: {reason}",
-  "studioEvents.stale": "{accounts}의 이벤트를 새로 고치지 못했습니다. 이전에 읽은 내용을 표시합니다."
+  "studioEvents.stale": "{accounts}의 이벤트를 새로 고치지 못했습니다. 이전에 읽은 내용을 표시합니다.",
+  "studioEvents.studioNow": "{destination}은(는) YouTube Studio의 \"Stream now\"를 사용하므로 polyemesis는 이 이벤트를 사용하지 않습니다. 먼저 대상 설정에서 이를 끄세요."
 }

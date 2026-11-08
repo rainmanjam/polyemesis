@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "Використати для {destination}",
   "studioEvents.used": "{title} буде використано, коли {destination} вийде в ефір.",
   "studioEvents.useFailed": "Не вдалося використати цю подію: {reason}",
-  "studioEvents.stale": "Не вдалося оновити події {accounts}; показано раніше завантажені."
+  "studioEvents.stale": "Не вдалося оновити події {accounts}; показано раніше завантажені.",
+  "studioEvents.studioNow": "{destination} використовує «Stream now» з YouTube Studio, тому polyemesis не використовуватиме цю подію. Спершу вимкніть це в налаштуваннях призначення."
 }

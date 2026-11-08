@@ -3,6 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { toast } from "sonner";
+
 import { StudioEventsCalendar } from "./StudioEventsCalendar";
 
 const api = vi.hoisted(() => ({
@@ -52,9 +54,35 @@ describe("YouTube Studio events in the calendar", () => {
     fireEvent.click(btn);
     await waitFor(() =>
       expect(api.updateDestination).toHaveBeenCalledWith(7, {
-        compliance: { youtube: { latencyPreference: "low", eventId: "ev-1" } },
+        compliance: { youtube: { latencyPreference: "low", eventId: "ev-1", rebindEvent: false } },
       }),
     );
+  });
+
+  it("does not carry over a stale rebind confirmation to the newly picked event", async () => {
+    api.youtubeStudioEvents.mockResolvedValue({ events: [events[0]], stale: [] });
+    api.listDestinations.mockResolvedValue([
+      { destination: { ...dests[0], compliance: { youtube: { eventId: "old", rebindEvent: true } } } },
+    ]);
+    api.updateDestination.mockResolvedValue({});
+    render(<StudioEventsCalendar ownEventIds={new Set()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Use for Main YT/ }));
+    await waitFor(() =>
+      expect(api.updateDestination).toHaveBeenCalledWith(7, {
+        compliance: { youtube: { eventId: "ev-1", rebindEvent: false } },
+      }),
+    );
+  });
+
+  it("blocks the pick, with an explanation, when the destination uses Studio's Stream now", async () => {
+    api.youtubeStudioEvents.mockResolvedValue({ events: [events[0]], stale: [] });
+    api.listDestinations.mockResolvedValue([
+      { destination: { ...dests[0], compliance: { youtube: { studioStreamNow: true } } } },
+    ]);
+    render(<StudioEventsCalendar ownEventIds={new Set()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Use for Main YT/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/Stream now/)));
+    expect(api.updateDestination).not.toHaveBeenCalled();
   });
 
   it("renders nothing when the read fails, so the calendar's own rows are unaffected", async () => {

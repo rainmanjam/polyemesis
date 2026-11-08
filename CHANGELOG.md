@@ -38,7 +38,7 @@ its first tagged release.
   read-only and marked "from YouTube Studio", with a link to open each in Studio and a "Use for destination"
   action that stores it as the destination's event. `GET /api/v1/youtube/studio-events` (refused to a read token,
   never a key) asks each account at most once every 15 minutes (three quota units) and serves the cached answer
-  between, or the last one marked stale when a refresh fails.
+  between, or the last one marked stale when a refresh fails. Simultaneous requests share one refresh, and "Use for" clears an earlier rebind confirmation and refuses a destination on Stream now, with a reason.
 - **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
 
 ### Fixed

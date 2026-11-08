@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "Für {destination} verwenden",
   "studioEvents.used": "{title} wird verwendet, wenn {destination} live geht.",
   "studioEvents.useFailed": "Dieses Event konnte nicht verwendet werden: {reason}",
-  "studioEvents.stale": "Die Events von {accounts} konnten nicht aktualisiert werden; es werden die zuvor gelesenen angezeigt."
+  "studioEvents.stale": "Die Events von {accounts} konnten nicht aktualisiert werden; es werden die zuvor gelesenen angezeigt.",
+  "studioEvents.studioNow": "{destination} nutzt „Stream now“ von YouTube Studio, daher würde polyemesis dieses Event nicht verwenden. Deaktiviere das zuerst in den Einstellungen des Ziels."
 }

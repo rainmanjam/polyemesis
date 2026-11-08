@@ -86,6 +86,10 @@ func (s *Server) handleYouTubeStudioEvents(w http.ResponseWriter, r *http.Reques
 // studioEventsFor is the account's cached events, refreshed when older than studioEventsTTL. A refresh that fails
 // keeps the last good events, records the error and the attempt time (so it is not retried for another TTL).
 func (s *Server) studioEventsFor(ctx context.Context, a db.PlatformAccount, now time.Time) studioCacheEntry {
+	// Single flight: requests that arrive while a refresh is running wait for it and then read what it stored,
+	// rather than each making the three calls.
+	s.ytStudioFlight.Lock()
+	defer s.ytStudioFlight.Unlock()
 	s.ytStudioMu.Lock()
 	if cur, ok := s.ytStudio[a.ID]; ok && now.Sub(cur.at) < studioEventsTTL {
 		s.ytStudioMu.Unlock()

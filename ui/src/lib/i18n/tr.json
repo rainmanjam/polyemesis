@@ -4544,5 +4544,6 @@
   "studioEvents.useFor": "{destination} için kullan",
   "studioEvents.used": "{destination} canlı yayına geçtiğinde {title} kullanılacak.",
   "studioEvents.useFailed": "Bu etkinlik kullanılamadı: {reason}",
-  "studioEvents.stale": "{accounts} etkinlikleri yenilenemedi; daha önce okunanlar gösteriliyor."
+  "studioEvents.stale": "{accounts} etkinlikleri yenilenemedi; daha önce okunanlar gösteriliyor.",
+  "studioEvents.studioNow": "{destination}, YouTube Studio'nun \"Stream now\" özelliğini kullanıyor, bu yüzden polyemesis bu etkinliği kullanmaz. Önce hedefin ayarlarından bunu kapatın."
 }

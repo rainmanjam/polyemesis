@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -106,5 +107,26 @@ func proveYouTubeStudioEvents(t *testing.T) proofResult {
 		High:      bodyOf(t, h, sign, "/api/v1/destinations"),
 		Read:      low,
 		Sentinels: []string{ytpKeyA},
+	}
+}
+
+// Requests that arrive together while the cache is cold share ONE refresh: three units, not three times three.
+func TestConcurrentStudioEventReadsShareOneRefresh(t *testing.T) {
+	var calls atomic.Int64
+	var fail atomic.Bool
+	_, h, _, sign, _ := ysFixture(t, &calls, &fail)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := jsonRequest(t, http.MethodGet, "/api/v1/youtube/studio-events", nil)
+			sign(r)
+			do(t, h, r)
+		}()
+	}
+	wg.Wait()
+	if n := calls.Load(); n != 3 {
+		t.Errorf("eight simultaneous reads made %d YouTube calls, want one refresh of 3", n)
 	}
 }
