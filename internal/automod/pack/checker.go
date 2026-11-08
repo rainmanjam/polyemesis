@@ -88,7 +88,9 @@ func Groups() []string {
 	}
 }
 
-// Config configures a Checker. The zero value is the pack's defaults.
+// Config configures a Checker. The zero value is the pack's defaults, except
+// Shape: a zero ShapeLimits switches every shape detector off, so a caller that
+// wants them passes DefaultShapeLimits() (automod.NewProtection does).
 type Config struct {
 	// Pack is the term list. Nil means the embedded English pack.
 	Pack *Pack
@@ -107,7 +109,8 @@ type Config struct {
 	AllowDomains []string
 	// Shape sets the per-message limits. A zero field disables its detector.
 	Shape ShapeLimits
-	// Reserved is the address-range policy for IP detection.
+	// Reserved is the address-range policy for IP detection. The zero value is
+	// production's: documentation ranges are rejected.
 	Reserved ReservedPolicy
 	// PhoneMinSeps is how many separators a bare 10 or 11 digit run needs (2 by
 	// default, 3 for channels whose game posts scores).
@@ -273,7 +276,7 @@ func (c *Checker) inspect(m Message, f Forms) []Hit {
 
 func (c *Checker) doxx(hits []Hit, f Forms) []Hit {
 	s := f.NFKC
-	digits, hasAt, hasColon, hasDot := 0, false, false, false
+	digits, hasAt, colons, dots, brackets := 0, false, 0, 0, false
 	for _, r := range s {
 		switch {
 		case unicode.IsDigit(r):
@@ -281,16 +284,20 @@ func (c *Checker) doxx(hits []Hit, f Forms) []Hit {
 		case r == '@':
 			hasAt = true
 		case r == ':':
-			hasColon = true
+			colons++
 		case r == '.':
-			hasDot = true
+			dots++
+		case r == ']' || r == ')':
+			brackets = true
 		}
 	}
-	lower := strings.ToLower(s)
+	// Prechecks, so a plain line costs a pass over its runes and nothing more:
+	// an address needs digits and three dots, a v6 address two colons ("https:"
+	// has one), and a spelled-out email a closing bracket.
 	if c.on[GroupPhone] && digits >= 8 && hasPhone(s, c.cfg.PhoneMinSeps) {
 		hits = c.add(hits, GroupPhone, "nfkc", "phone number")
 	}
-	if c.on[GroupEmail] && (hasAt || strings.Contains(lower, "at]") || strings.Contains(lower, "at)")) {
+	if c.on[GroupEmail] && (hasAt || brackets && strings.Contains(strings.ToLower(s), "at")) {
 		for _, d := range emailDomains(s) {
 			if !domainAllowed(d, c.cfg.AllowDomains) {
 				hits = c.add(hits, GroupEmail, "nfkc", "email address")
@@ -298,10 +305,10 @@ func (c *Checker) doxx(hits []Hit, f Forms) []Hit {
 			}
 		}
 	}
-	if c.on[GroupIPv4] && digits >= 4 && hasDot && hasIPv4(s, c.cfg.Reserved) {
+	if c.on[GroupIPv4] && digits >= 4 && dots >= 3 && hasIPv4(s, c.cfg.Reserved) {
 		hits = c.add(hits, GroupIPv4, "nfkc", "IP address")
 	}
-	if c.on[GroupIPv6] && hasColon && hasIPv6(s, c.cfg.Reserved) {
+	if c.on[GroupIPv6] && colons >= 2 && hasIPv6(s, c.cfg.Reserved) {
 		hits = c.add(hits, GroupIPv6, "nfkc", "IP address")
 	}
 	if c.on[GroupAddress] && digits >= 1 && hasAddress(s) {
@@ -356,8 +363,8 @@ func (c *Checker) shape(hits []Hit, m Message, f Forms) []Hit {
 	for _, h := range hits {
 		charHit = charHit || h.Group == GroupChar
 	}
-	if c.on[GroupCaps] && lim.MaxCapsRatio > 0 && !charHit && !emoteOnly(f.NFKC, m.EmoteCount) {
-		if r, ok := CapsRatio(m.Text, lim.MinCapsLetters); ok && r > lim.MaxCapsRatio {
+	if c.on[GroupCaps] && lim.MaxCapsRatio > 0 && !charHit {
+		if r, ok := CapsRatio(m.Text, lim.MinCapsLetters); ok && r > lim.MaxCapsRatio && !emoteOnly(f.NFKC, m.EmoteCount) {
 			hits = c.add(hits, GroupCaps, "raw", "shouting")
 		}
 	}

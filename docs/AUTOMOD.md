@@ -204,7 +204,9 @@ being kept out of it.
 
 Near-duplicate repeats count a message as a repeat of an earlier one by the same
 author when most of their words match (a Jaccard overlap of 0.8) or when they
-are the same once digits are removed, still over `maxRepeats` in the window.
+are the same once digits are removed. More than three of them in 30 seconds
+counts, the same numbers as the exact-repeat detector's defaults; this detector
+does not yet follow your `maxRepeats` and `windowSeconds`.
 Raids are counted by text, not by author, and a chant such as `F` or `GG`, an
 emote-only line, a command like `!play` and anything a moderator or the
 broadcaster says never counts. The tracker is bounded (a fixed number of

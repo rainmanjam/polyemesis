@@ -134,11 +134,14 @@ func TestOnlyTheStrongestTierIsReported(t *testing.T) {
 
 func TestDocumentationRangesAreRejectedInProductionOnly(t *testing.T) {
 	msg := Message{Text: "his ip is 203.0.113.45 and 2001:db8:85a3:0:0:8a2e:370:7334"}
-	prod := newChecker(t, Config{Reserved: DefaultReservedPolicy()})
+	prod := newChecker(t, Config{}) // the zero value is production
+	if DefaultReservedPolicy() != (ReservedPolicy{}) {
+		t.Fatal("the default policy is not the zero value")
+	}
 	if got := groupsOf(prod.Inspect(msg)); len(got) != 0 {
 		t.Errorf("production reported a documentation address: %v", keys(got))
 	}
-	test := newChecker(t, Config{Reserved: ReservedPolicy{Documentation: false}})
+	test := newChecker(t, Config{Reserved: ReservedPolicy{AllowDocumentation: true}})
 	got := groupsOf(test.Inspect(msg))
 	if _, ok := got[GroupIPv4]; !ok {
 		t.Error("the harness policy missed the documentation IPv4")

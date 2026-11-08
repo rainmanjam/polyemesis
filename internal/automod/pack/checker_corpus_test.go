@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -13,7 +14,7 @@ import (
 // the reserved-range policy. Production rejects the RFC 5737 and RFC 3849
 // documentation ranges as addresses (a chat message quoting one is harmless);
 // the corpus may not contain real addresses, so it uses exactly those ranges
-// and the harness runs the detector with Documentation false. Private and
+// and the harness runs the detector with AllowDocumentation. Private and
 // loopback ranges stay rejected under both policies.
 
 func corpusNames(tb testing.TB) *NameSet {
@@ -46,7 +47,7 @@ func corpusNames(tb testing.TB) *NameSet {
 func corpusConfig(tb testing.TB) Config {
 	return Config{
 		Shape:    DefaultShapeLimits(),
-		Reserved: ReservedPolicy{Documentation: false},
+		Reserved: ReservedPolicy{AllowDocumentation: true},
 		Names:    corpusNames(tb),
 	}
 }
@@ -62,16 +63,19 @@ func hitsToFindings(hs []Hit) []corpusFinding {
 var corpusEpoch = time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 
 func init() {
-	// The harness is wired lazily: TestMain-free, so build on first use.
-	var chk *Checker
+	// Built on first use, once, and safe to share: the harness is TestMain-free.
+	var (
+		once sync.Once
+		chk  *Checker
+	)
 	corpusUnderTest = func(l corpusLine, _ Forms) []corpusFinding {
-		if chk == nil {
+		once.Do(func() {
 			c, err := New(corpusConfig(nil))
 			if err != nil {
 				panic(err)
 			}
 			chk = c
-		}
+		})
 		return hitsToFindings(chk.Inspect(Message{
 			Platform: l.Platform, AuthorName: l.Author, Text: l.Text,
 		}))

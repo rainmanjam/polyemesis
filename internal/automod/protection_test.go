@@ -396,3 +396,27 @@ func TestHistoryOwnedFloodLinesThroughTheRealEngine(t *testing.T) {
 		t.Errorf("only %d positives and %d traps were run", positives, traps)
 	}
 }
+
+// self_harm is never acted against, and the rule editor is another way to try:
+// a category an operator's rule may borrow must not let it climb.
+func TestARuleCannotActOnSelfHarm(t *testing.T) {
+	mk := func(a Action, hold bool) error {
+		_, err := NewRuleSet([]Rule{{ID: 1, Name: "r", Enabled: true, Pattern: `x`, Action: a, TimeoutSeconds: 60, Category: CategorySelfHarm, HoldOverlay: hold}})
+		return err
+	}
+	for _, a := range []Action{ActionHideLocal, ActionHide, ActionDelete, ActionTimeout, ActionBan} {
+		if mk(a, false) == nil {
+			t.Errorf("a self_harm rule with action %s was accepted", a)
+		}
+	}
+	if err := mk(ActionFlag, false); err != nil {
+		t.Errorf("a flag-only self_harm rule was refused: %v", err)
+	}
+	if err := mk(ActionFlag, true); err != nil {
+		t.Errorf("a flag-and-hold self_harm rule was refused: %v", err)
+	}
+	// Other pack categories may be borrowed at any action.
+	if _, err := NewRuleSet([]Rule{{ID: 1, Name: "r", Enabled: true, Pattern: `x`, Action: ActionBan, Category: CategoryScam}}); err != nil {
+		t.Errorf("a scam rule that bans was refused: %v", err)
+	}
+}

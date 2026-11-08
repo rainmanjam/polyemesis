@@ -18,18 +18,24 @@ import (
 // address because they cannot identify a person's connection.
 //
 // Private, loopback, link-local and multicast ranges are always reserved. The
-// documentation ranges (RFC 5737, RFC 3849) are reserved in production, where a
-// chat message quoting one is harmless. The fixture corpus uses them, because
-// it may not contain real addresses, so the harness runs the same detector with
-// Documentation false rather than the detector having a test-only branch.
+// documentation ranges (RFC 5737, RFC 3849) are reserved too, so that a chat
+// message quoting one, which is harmless, is not reported. The fixture corpus
+// uses exactly those ranges, because it may not contain real addresses, so the
+// harness opts in to AllowDocumentation and runs the same detector rather than
+// the detector having a test-only branch.
+//
+// THE ZERO VALUE IS THE PRODUCTION POLICY. A caller that builds a Config and
+// says nothing about this rejects documentation ranges; only a caller that
+// names the field accepts them.
 type ReservedPolicy struct {
-	// Documentation rejects 192.0.2/24, 198.51.100/24, 203.0.113/24 and
-	// 2001:db8::/32.
-	Documentation bool
+	// AllowDocumentation counts 192.0.2/24, 198.51.100/24, 203.0.113/24 and
+	// 2001:db8::/32 as ordinary addresses. For the corpus harness only.
+	AllowDocumentation bool
 }
 
-// DefaultReservedPolicy is what production runs.
-func DefaultReservedPolicy() ReservedPolicy { return ReservedPolicy{Documentation: true} }
+// DefaultReservedPolicy is what production runs. It is the zero value, named so
+// a call site reads as a decision.
+func DefaultReservedPolicy() ReservedPolicy { return ReservedPolicy{} }
 
 var (
 	docPrefixes = []netip.Prefix{
@@ -56,7 +62,7 @@ func (r ReservedPolicy) reserved(a netip.Addr) bool {
 			return true
 		}
 	}
-	if r.Documentation {
+	if !r.AllowDocumentation {
 		for _, p := range docPrefixes {
 			if p.Contains(a) {
 				return true

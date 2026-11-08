@@ -75,6 +75,13 @@ func (r *Rule) Compile() error {
 	if r.Category != "" && !KnownCategory(r.Category) {
 		return fmt.Errorf("rule %q has unknown category %q", r.Name, r.Category)
 	}
+	// Self-harm is never acted against: a person in crisis is not removed from
+	// the chat by a pattern. A rule may flag it (and hold it off the overlay,
+	// which is an attribute, not an action), and that is the ceiling.
+	if r.Category == CategorySelfHarm && r.Action != ActionFlag {
+		return fmt.Errorf("rule %q: the self_harm category can only flag; "+
+			"acting against someone in crisis is never automatic", r.Name)
+	}
 	// (?i) rather than lowercasing the subject: an operator writing a pattern
 	// with a character class should not have to think about case folding, and
 	// folding the subject would break any pattern that deliberately matches

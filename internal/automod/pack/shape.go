@@ -210,6 +210,11 @@ func EmoteWall(text string, platformCount int, lim ShapeLimits) bool {
 	if lim.EmoteWall <= 0 {
 		return false
 	}
+	// A wall needs EmoteWall tokens, so at least that many minus one spaces:
+	// the common line is cleared by one scan, without splitting it.
+	if platformCount < lim.EmoteWall && strings.Count(text, " ") < lim.EmoteWall-1 {
+		return false
+	}
 	e, t := EmoteCount(text, platformCount)
 	if e < lim.EmoteWall || t == 0 {
 		return false

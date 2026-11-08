@@ -99,11 +99,16 @@ type ndEntry struct {
 	at     time.Time
 	set    tokenSet
 	digits string // the digit-stripped message
+	// gid names the group of near copies this entry belongs to. Groups are
+	// merged as messages arrive, so counting one is a pass over the entries and
+	// not a search over their pairs.
+	gid int
 }
 
 type ndAuthor struct {
 	entries []ndEntry
 	last    time.Time
+	nextGid int
 }
 
 // NearDup counts, per author, messages that are near copies of each other: token
@@ -146,9 +151,7 @@ func NewNearDup(cfg NearDupConfig) *NearDup {
 
 // Observe records a message and reports how many near copies of it the author
 // sent inside the window (this one included), and whether that is over the
-// limit. A message too short to repeat is recorded as nothing. The count is
-// only computed once the author has more than MaxRepeats messages in the
-// window; below that it is zero.
+// limit. A message too short to repeat is recorded as nothing.
 func (d *NearDup) Observe(at time.Time, author string, f Forms) (count int, over bool) {
 	if d == nil || author == "" || len(f.Pack) < d.cfg.MinChars {
 		return 0, false
@@ -172,43 +175,51 @@ func (d *NearDup) Observe(at time.Time, author string, f Forms) (count int, over
 			live = append(live, e)
 		}
 	}
-	a.entries = append(live, ndEntry{at: at, set: set, digits: digits})
+	a.nextGid++
+	a.entries = append(live, ndEntry{at: at, set: set, digits: digits, gid: a.nextGid})
 	if len(a.entries) > d.cfg.Retain {
 		a.entries = a.entries[len(a.entries)-d.cfg.Retain:]
 	}
 	a.last = at
 	d.capLocked()
 
-	return d.componentLocked(a.entries)
+	return d.groupLocked(a.entries)
 }
 
-// componentLocked sizes the group of entries connected to the newest one, where
-// two messages are connected when they are near copies of each other. A spammer
+// groupLocked joins the newest entry to every retained entry it is a near copy
+// of, and sizes the group it ends up in. Two messages are near copies when most
+// of their words match or they are the same once digits are removed. A spammer
 // who varies one word at a time ("a great product", "a really great product",
 // "a great product now") produces copies that each resemble the first but not
-// always each other, and that is still one message repeated.
-func (d *NearDup) componentLocked(entries []ndEntry) (count int, over bool) {
+// always each other, and joining groups as they arrive counts that as the one
+// message repeated.
+//
+// One comparison per retained entry, once, on arrival: the earlier version
+// searched the pairs and cost 48 µs on a chain of 24 near copies, on the adapter
+// goroutine. An entry that ages out of the window leaves its group's other
+// members joined; that can over-count a chain whose middle has expired, and the
+// finding is flag-only.
+func (d *NearDup) groupLocked(entries []ndEntry) (count int, over bool) {
 	n := len(entries)
-	if n <= d.cfg.MaxRepeats {
-		// Too few messages to be over the limit: skip the comparisons, which
-		// are what an author in a normal conversation never needs.
-		return 0, false
-	}
-	similar := func(a, b ndEntry) bool {
-		return (a.digits != "" && a.digits == b.digits) || jaccard(a.set, b.set) >= d.cfg.Similarity
-	}
-	seen := make([]bool, n)
-	queue := []int{n - 1}
-	seen[n-1] = true
-	for len(queue) > 0 {
-		i := queue[0]
-		queue = queue[1:]
-		count++
-		for j := 0; j < n; j++ {
-			if !seen[j] && similar(entries[i], entries[j]) {
-				seen[j] = true
-				queue = append(queue, j)
+	newest := &entries[n-1]
+	for i := 0; i < n-1; i++ {
+		e := &entries[i]
+		if e.gid == newest.gid {
+			continue
+		}
+		if (newest.digits != "" && newest.digits == e.digits) ||
+			sizeCompatible(len(newest.set), len(e.set), d.cfg.Similarity) && jaccard(newest.set, e.set) >= d.cfg.Similarity {
+			old := e.gid
+			for k := range entries {
+				if entries[k].gid == old {
+					entries[k].gid = newest.gid
+				}
 			}
+		}
+	}
+	for _, e := range entries {
+		if e.gid == newest.gid {
+			count++
 		}
 	}
 	return count, count > d.cfg.MaxRepeats
