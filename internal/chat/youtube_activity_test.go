@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -322,4 +323,47 @@ func TestYouTubeActivityIgnoredByASinkThatCannotTakeIt(t *testing.T) {
 func withPlatform(e activity.Event) activity.Event {
 	e.Platform = "youtube"
 	return e.Normalise(nil)
+}
+
+func TestYouTubeActivityQuietChatFirstEventAfterEmptyPageEmits(t *testing.T) {
+	var late atomic.Bool
+	base := time.Date(2026, 3, 1, 20, 0, 0, 0, time.UTC)
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		if call == 1 {
+			late.Store(true) // the clock moves on once the empty page is read
+			fmt.Fprint(w, `{"nextPageToken":"p2","items":[]}`)
+			return
+		}
+		// Published at 20:00:03, after watching began and before the poll that
+		// reads it (the clock has moved on by then).
+		fmt.Fprint(w, `{"offlineAt":"x","items":[
+		 {"id":"sc","snippet":{"type":"superChatEvent","publishedAt":"2026-03-01T20:00:03Z","displayMessage":"hi",
+		  "superChatDetails":{"amountMicros":"20000000","currency":"USD","amountDisplayString":"$20.00"}},"authorDetails":{"channelId":"U","displayName":"U"}}]}`)
+	})
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) {
+		c.Now = func() time.Time {
+			if late.Load() {
+				return base.Add(5 * time.Second)
+			}
+			return base
+		}
+		c.Sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
+	})
+	s := &actSink{}
+	if err := a.pump(context.Background(), "c", s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.acts) != 1 || s.acts[0].Source.ID != "sc" {
+		t.Fatalf("activities = %+v, want the Super Chat sent after an empty first page", s.acts)
+	}
+}
+
+func TestYouTubeActivityModerationScopeRefusalDoesNotFlagKinds(t *testing.T) {
+	a := ytAdapter(t, "http://unused.invalid", ytNoSleep)
+	_ = a.classify(&apiError{Status: http.StatusForbidden, Reason: "insufficientPermissions"})
+	for _, k := range a.ActivityKinds() {
+		if k.State == activity.KindReconnect {
+			t.Errorf("a refused write flagged %+v", k)
+		}
+	}
 }

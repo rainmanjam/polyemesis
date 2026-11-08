@@ -99,9 +99,9 @@ type ActivityCounters struct {
 	Received, Emitted, Deduped, Baseline, Unparseable, Ignored int
 }
 
-// beginActivity fixes the moment this adapter began watching. Nothing
-// published before it is ever emitted, so a restart replays no history: the
-// first page seeds the seen-set and emits nothing older than the start. Set once
+// beginActivity fixes the moment this adapter began watching (pump calls it
+// before the first list). Nothing published before it is ever emitted, so a
+// restart replays no history. Set once
 // per adapter, so a reconnect (a second Run or pump) keeps the same baseline and
 // the same seen-set.
 func (y *YouTubeAdapter) beginActivity() {
