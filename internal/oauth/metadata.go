@@ -210,6 +210,11 @@ type statusError struct {
 	// wait is how long the platform asked callers to hold off (Retry-After, or
 	// Graph's estimated_time_to_regain_access); zero when it said nothing.
 	wait time.Duration
+	// RetryAfter and Edge are what StatusError carries for the getJSON path:
+	// the platform's Retry-After, and whether a proxy rather than the API
+	// answered. Set by requestJSON from the response.
+	RetryAfter time.Duration
+	Edge       bool
 }
 
 func (e *statusError) Error() string {
@@ -279,8 +284,12 @@ func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToke
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw),
-			wait: GraphWait(resp.Header)}
+		return &statusError{
+			Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw),
+			wait:       GraphWait(resp.Header),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			Edge:       isEdgeAnswer(resp.Header, raw),
+		}
 	}
 	// A successful PATCH is a 204 on Helix; there is nothing to decode.
 	if out == nil || len(raw) == 0 {

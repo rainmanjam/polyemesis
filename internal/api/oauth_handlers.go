@@ -858,7 +858,11 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := st.Stats(ctx, creds.ClientID, acct.AccessToken)
+	var stats *oauth.LiveStats
+	err = s.kickRetry(ctx, acct, func(token string) (e error) {
+		stats, e = st.Stats(ctx, creds.ClientID, token)
+		return e
+	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -1454,7 +1458,11 @@ func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientI
 	if tp, ok := oauth.As[oauth.TargetedProvider](s.providers, acct.Platform); ok {
 		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
-	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
+	var ing *oauth.Ingest
+	err := s.kickRetry(ctx, acct, func(token string) (e error) {
+		ing, e = provider.Ingest(ctx, clientID, token)
+		return e
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1596,7 +1604,17 @@ func (s *Server) tokenForRejected(ctx context.Context, accountID int64, rejected
 	// span a reconnect can slip into. Taking it any later would witness a row
 	// this function never actually reasoned about.
 	seen := acct.Revision()
+	// A Kick grant already found gone is not asked about again: every call that
+	// needs the token would otherwise send the dead refresh token to id.kick.com
+	// (the 10-minute RefreshLoop, every chat send, every sampler tick) and fail
+	// the same way. A reconnect replaces the row and clears the mark.
+	if s.kickRevoked(acct) {
+		return nil, errKickReconnect()
+	}
 	if acct.RefreshToken == "" {
+		if acct.Platform == db.PlatformKick {
+			s.markKickRevoked(acct, seen)
+		}
 		why := "has expired"
 		if rejected != "" {
 			why = "was refused"
@@ -1622,6 +1640,11 @@ func (s *Server) tokenForRejected(ctx context.Context, accountID int64, rejected
 		s.acctHealth.fail(acct.ID, err, time.Now())
 		if errors.Is(err, oauth.ErrReconnectRequired) {
 			s.acctHealth.markDead(acct.ID, acct.ExpiresAt)
+			if acct.Platform == db.PlatformKick {
+				// invalid_grant: the refresh token is dead. Terminal until the
+				// operator reconnects, not retried.
+				s.markKickRevoked(acct, seen)
+			}
 		}
 		return nil, fmt.Errorf("could not refresh the %s token: %w", acct.Platform, err)
 	}
@@ -1711,10 +1734,10 @@ func (s *Server) refreshDue(ctx context.Context) {
 		if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
 			continue
 		}
-		if s.acctHealth.isDead(a.ID, a.ExpiresAt) {
-			// The platform refused the grant itself; retrying every
-			// ten minutes forever cannot help. A reconnect stores a new
-			// expiry, which lifts this.
+		if s.acctHealth.isDead(a.ID, a.ExpiresAt) || s.kickRevoked(&a) {
+			// The platform refused the grant itself (or Kick's is gone);
+			// retrying every ten minutes forever cannot help. A reconnect
+			// stores a new expiry and replaces the row, which lifts this.
 			continue
 		}
 		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)

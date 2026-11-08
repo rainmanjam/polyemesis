@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,6 +59,17 @@ type Kick struct {
 	// package var for api.kick.com -- two mechanisms for one concept, which is
 	// how Facebook's split base went unnoticed. See endpoints.go.
 	endpoints
+}
+
+// getJSON and requestJSON shadow the shared transport so that every Kick API
+// failure leaves this file as one typed *StatusError carrying Kick's own words
+// (see kickError), whichever transport produced it.
+func (k *Kick) getJSON(ctx context.Context, endpoint, accessToken string, headers map[string]string, out any) error {
+	return kickError(k.endpoints.getJSON(ctx, endpoint, accessToken, headers, out))
+}
+
+func (k *Kick) requestJSON(ctx context.Context, method, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
+	return kickError(k.endpoints.requestJSON(ctx, method, endpoint, accessToken, payload, headers, out))
 }
 
 func (k *Kick) idEndpoint() string  { return k.authBase(kickIDBase) }
@@ -277,6 +289,142 @@ func (k *Kick) Ingest(ctx context.Context, clientID, accessToken string) (*Inges
 	return &Ingest{URL: c.Stream.URL, Key: c.Stream.Key}, nil
 }
 
+// ------------------------------------------------------------------- errors
+
+// kickRejectedToken is what a 401 from Kick means to the operator. Kick
+// answers a revoked, expired or otherwise unacceptable token with a bare 401
+// and {"data":{},"message":"Unauthorized"} (recorded live, 2026-11); there is no
+// machine-readable code to tell those apart, so one refresh-and-retry in the
+// caller decides whether the access token alone was bad.
+const kickRejectedToken = "Kick rejected the access token (401); reconnect the Kick account in Settings → Platforms"
+
+const kickEdgeBlocked = "Kick's edge (a CDN or firewall in front of its API) refused this server rather than the API itself, " +
+	"so the account and its permissions are fine and reconnecting will not help. This usually clears on its own; " +
+	"if it does not, Kick is blocking this server's IP address"
+
+// kickMaxWait caps the wait quoted for a rate limit, and kickWaitJitter spreads
+// callers that were all told the same Retry-After so they do not return together.
+const (
+	kickMaxWait    = 5 * time.Minute
+	kickWaitJitter = 0.2
+)
+
+// kickError rewrites any error from a Kick API call as a *StatusError whose
+// message is safe to show: Kick's envelope "message" (never the raw body, which
+// may be a proxy's HTML page), no URL or query string, and the right diagnosis
+// for the status. Errors that are not an HTTP answer pass through.
+//
+//   - 401: the token is not accepted. Reconnect.
+//   - 403: Kick accepted the token and refused the action. The scope, or the
+//     account's standing. Unless what answered was Kick's edge, not Kick.
+//   - 429: rate limited. Retry-After is kept on the error, capped.
+func kickError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var (
+		status     int
+		retryAfter time.Duration
+		edge       bool
+		body       string
+	)
+	var se *StatusError
+	var st *statusError
+	switch {
+	case errors.As(err, &se):
+		status, retryAfter, edge, body = se.Status, se.RetryAfter, se.Edge, se.body
+	case errors.As(err, &st):
+		status, retryAfter, edge, body = st.Status, st.RetryAfter, st.Edge, st.payload()
+	default:
+		return err
+	}
+	retryAfter = min(retryAfter, kickMaxWait)
+	said := kickSaid(body)
+	out := &StatusError{Status: status, RetryAfter: retryAfter, Edge: edge}
+	if retryAfter > 0 {
+		// Spread the callers that were all told the same wait. The message
+		// above keeps Kick's figure; only the value a scheduler acts on moves.
+		out.RetryAfter += time.Duration(rand.Float64() * kickWaitJitter * float64(retryAfter)) // #nosec G404 -- jitter, not a secret
+	}
+	if se != nil {
+		out.QuotaExceeded = se.QuotaExceeded
+	}
+	switch {
+	case status == http.StatusUnauthorized:
+		out.msg = kickRejectedToken
+	case edge && (status == http.StatusForbidden || status == http.StatusTooManyRequests):
+		out.msg = kickEdgeBlocked
+	case edge:
+		out.msg = fmt.Sprintf("Kick's edge answered %d with a web page instead of its API; try again shortly", status)
+	case status == http.StatusForbidden:
+		out.msg = "Kick refused the request (403): " + said
+	case status == http.StatusTooManyRequests:
+		out.msg = "Kick is rate-limiting requests; " + kickWaitText(retryAfter) + ". Kick said: " + said
+	case status >= 200 && status < 300:
+		// A 2xx whose body would not decode: not a refusal, so keep the
+		// original sentence rather than inventing a status story.
+		return err
+	default:
+		out.msg = fmt.Sprintf("Kick answered %d: %s", status, said)
+	}
+	return out
+}
+
+// kickSaid is Kick's own message from its {"data":..,"message":".."} envelope,
+// or the body with markup stripped when it is not one. Never empty, and bounded.
+func kickSaid(body string) string {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &env) == nil && strings.TrimSpace(env.Message) != "" {
+		return strings.TrimSpace(env.Message)
+	}
+	var b strings.Builder
+	inTag := false
+	for _, r := range body {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>' && inTag:
+			inTag = false
+			b.WriteByte(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	text := strings.Join(strings.Fields(b.String()), " ")
+	if text == "" {
+		return "no details"
+	}
+	if r := []rune(text); len(r) > 200 {
+		text = string(r[:200]) + "..."
+	}
+	return text
+}
+
+func kickWaitText(d time.Duration) string {
+	if d <= 0 {
+		return "wait a moment and try again"
+	}
+	return "wait " + d.Round(time.Second).String() + " and try again"
+}
+
+// kickScopeAdvice is scopeAdvice for Kick's metadata writes, with 401 and 403
+// told apart. scopeAdvice cannot do it: it reads only the generic statusError
+// and blames the scope for both.
+func kickScopeAdvice(err error, scope string) error {
+	var se *StatusError
+	if !errors.As(err, &se) || se.Edge {
+		return err
+	}
+	if se.Status == http.StatusForbidden {
+		return &StatusError{Status: se.Status, msg: fmt.Sprintf(
+			"Kick refused the write (403). If this account was connected before metadata push existed it never "+
+				"granted %q; disconnect and reconnect it in Settings → Platforms. %s", scope, strings.TrimPrefix(se.msg, "Kick refused the request (403): "))}
+	}
+	return err
+}
+
 // ---------------------------------------------------------------- categories
 
 // kickCategoryMinName is the shortest name filter /public/v2/categories accepts.
@@ -421,7 +569,7 @@ func (k *Kick) PushBroadcastSettings(ctx context.Context, clientID, accessToken 
 	// ten and this does not enforce it, for the reason KickChannelUpdate
 	// gives: Kick's own rejection names the limit and stays right if it moves.
 	if err := k.UpdateChannel(ctx, accessToken, KickChannelUpdate{CustomTags: *s.Tags}); err != nil {
-		return nil, scopeAdvice(err, db.PlatformKick, k.MetadataCaps().Scope)
+		return nil, kickScopeAdvice(err, k.MetadataCaps().Scope)
 	}
 	res.Applied = append(res.Applied, FieldTags)
 	return res, nil
@@ -475,7 +623,7 @@ func (k *Kick) PushMetadata(ctx context.Context, clientID, accessToken, accountR
 		return res, nil
 	}
 	if err := k.UpdateChannel(ctx, accessToken, upd); err != nil {
-		return nil, scopeAdvice(err, db.PlatformKick, k.MetadataCaps().Scope)
+		return nil, kickScopeAdvice(err, k.MetadataCaps().Scope)
 	}
 
 	if upd.StreamTitle != "" {
@@ -539,19 +687,23 @@ func (l kickLivestream) viewers() (int, bool) {
 // decodeKickData accepts both shapes Kick's envelopes use: a list of
 // livestreams and a single object. Guessing one and getting it wrong would turn
 // a working stats read into a decode error.
-func decodeKickData(raw json.RawMessage) []kickLivestream {
+//
+// A field that is present but neither shape is an error, not an empty list: the
+// dashboard would otherwise call a live channel offline on the strength of a
+// body nobody read.
+func decodeKickData(raw json.RawMessage) ([]kickLivestream, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var list []kickLivestream
 	if err := json.Unmarshal(raw, &list); err == nil {
-		return list
+		return list, nil
 	}
 	var one kickLivestream
 	if err := json.Unmarshal(raw, &one); err == nil {
-		return []kickLivestream{one}
+		return []kickLivestream{one}, nil
 	}
-	return nil
+	return nil, errors.New("Kick returned livestream data in a shape polyemesis does not recognise")
 }
 
 func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([]kickLivestream, error) {
@@ -561,7 +713,7 @@ func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([
 	if err := k.getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
-	return decodeKickData(out.Data), nil
+	return decodeKickData(out.Data)
 }
 
 const (
@@ -628,6 +780,16 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 	// the condition stays on Live rather than on the count.
 	if stats.Live && stats.ViewerCount != nil {
 		return stats, nil
+	}
+
+	// A token Kick rejects, or a rate limit, answers the second call the same
+	// way: asking again only doubles the traffic against a dead token or a
+	// limit, on every sampler tick.
+	if userErr != nil {
+		var se *StatusError
+		if errors.As(userErr, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusTooManyRequests) {
+			return nil, userErr
+		}
 	}
 
 	ch, chErr := k.channel(ctx, accessToken)

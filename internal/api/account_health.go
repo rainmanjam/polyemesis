@@ -26,6 +26,9 @@ type accountHealthBook struct {
 	// refresh book for the same reason it is in memory: it is a reading, and
 	// the next validation pass or a reconnect replaces it.
 	revoked map[string]revocation
+	// reauthAt is when each account last had a forced refresh, so a token the
+	// platform keeps rejecting is not refreshed once per failing request.
+	reauthAt map[int64]time.Time
 }
 
 type revocation struct {
@@ -50,6 +53,21 @@ func (b *accountHealthBook) markRevoked(key string, reason string) bool {
 	_, had := b.revoked[key]
 	b.revoked[key] = revocation{reason: reason, at: time.Now()}
 	return !had
+}
+
+// reauthDue reports whether a forced refresh may run for the account now, and
+// if so records that one is starting.
+func (b *accountHealthBook) reauthDue(id int64, now time.Time, cooldown time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.reauthAt == nil {
+		b.reauthAt = make(map[int64]time.Time)
+	}
+	if last, ok := b.reauthAt[id]; ok && now.Sub(last) < cooldown {
+		return false
+	}
+	b.reauthAt[id] = now
+	return true
 }
 
 // clearRevoked removes the mark and reports whether there was one.

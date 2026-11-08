@@ -466,6 +466,11 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 	return func(ctx context.Context) (string, error) {
 		acct, err := s.tokenFor(ctx, id)
 		if err != nil {
+			// A grant the platform refuses to renew is not a blip: Fatal stops
+			// the retry loops that would otherwise ask again on every tick.
+			if errors.Is(err, oauth.ErrReconnectRequired) {
+				return "", chat.Fatal(err)
+			}
 			return "", err
 		}
 		return acct.AccessToken, nil
@@ -565,6 +570,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			BroadcasterUserID: id,
 			Channel:           a.AccountName,
 			Token:             s.chatToken(a.ID),
+			Reauth:            s.kickChatReauth(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
 			CallbackPath:      kickWebhookPath,

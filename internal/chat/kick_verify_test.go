@@ -305,7 +305,7 @@ func TestKickVerifierRefusesWhenTheKeyCannotBeFetched(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(body)))
 	signKick(t, testKickKey(t), req, body)
 
-	if err := verify(req, body); !errors.Is(err, ErrKickSignature) {
-		t.Fatalf("an unfetchable key returned %v, want ErrKickSignature", err)
+	if err := verify(req, body); !errors.Is(err, ErrKickKeyUnavailable) {
+		t.Fatalf("an unfetchable key returned %v, want ErrKickKeyUnavailable", err)
 	}
 }

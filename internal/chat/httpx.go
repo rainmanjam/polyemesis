@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
@@ -67,6 +68,13 @@ type apiError struct {
 	// None of Problem, Types or Header is part of Error().
 	Problem string
 	Types   string
+	// Message is the top-level "message" of the {"data":..,"message":".."}
+	// envelope Kick and a few others use, empty when the body is not one.
+	Message string
+	// Edge is set when the answer came from a proxy or CDN in front of the
+	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
+	// rather than from its API. Its status says nothing about the account.
+	Edge bool
 }
 
 // payload is the body to parse: whole when captured, truncated otherwise.
@@ -197,12 +205,48 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
 			Problem: oauth.XProblemText(raw),
 			Types:   oauth.XProblemTypes(raw),
+			Message: errorMessage(raw),
+			Edge:    isEdgeAnswer(resp.Header, raw),
 		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	if err := json.Unmarshal(raw, out); err != nil {
+		if isEdgeAnswer(resp.Header, raw) {
+			return fmt.Errorf("%s answered %d with a web page instead of JSON; a proxy or the platform's edge may be blocking this server",
+				stripQuery(endpoint), resp.StatusCode)
+		}
+		return err
+	}
+	return nil
+}
+
+// errorMessage reads the "message" string of a {"data":..,"message":".."}
+// error envelope. Anything else yields empty.
+func errorMessage(raw []byte) string {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &env) != nil {
+		return ""
+	}
+	return strings.TrimSpace(env.Message)
+}
+
+// isEdgeAnswer reports whether a response is a proxy's page rather than the
+// API's JSON: the body is not JSON and either looks like HTML or carries a
+// CDN's headers. A real API error, including Kick's, is JSON even when it
+// travelled through Cloudflare, so the JSON check comes first.
+func isEdgeAnswer(h http.Header, raw []byte) bool {
+	if len(bytes.TrimSpace(raw)) == 0 || json.Valid(raw) {
+		return false
+	}
+	lead := strings.ToLower(strings.TrimSpace(string(raw[:min(len(raw), 64)])))
+	if strings.HasPrefix(lead, "<") {
+		return true
+	}
+	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes
@@ -247,7 +291,13 @@ func stripQuery(endpoint string) string {
 func shorten(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 300 {
-		return s[:300] + "..."
+		// On a rune boundary: a cut through a multi-byte character is invalid
+		// UTF-8 in a message the UI renders.
+		cut := 300
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "..."
 	}
 	return s
 }
