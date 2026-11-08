@@ -13,15 +13,15 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/activity"
 )
 
-// actSink collects chat lines AND activities, as runnerSink does.
-type actSink struct {
+// ytActSink collects chat lines AND activities, as runnerSink does.
+type ytActSink struct {
 	mu   sync.Mutex
 	msgs []Message
 	acts []activity.Event
 }
 
-func (s *actSink) Deliver(m Message) { s.mu.Lock(); s.msgs = append(s.msgs, m); s.mu.Unlock() }
-func (s *actSink) Activity(e activity.Event) {
+func (s *ytActSink) Deliver(m Message) { s.mu.Lock(); s.msgs = append(s.msgs, m); s.mu.Unlock() }
+func (s *ytActSink) Activity(e activity.Event) {
 	s.mu.Lock()
 	s.acts = append(s.acts, e)
 	s.mu.Unlock()
@@ -63,7 +63,7 @@ func TestYouTubeActivityMapsPaidMessagesWithoutConvertingMoney(t *testing.T) {
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
 	// The adapter began at 20:00; give the clock a start before the items.
-	s := &actSink{}
+	s := &ytActSink{}
 	if err := a.pump(context.Background(), "chat-1", s); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestYouTubeActivityMembershipsAndGiftCollapse(t *testing.T) {
 		fmt.Fprint(w, `{"offlineAt":"x","items":[]}`)
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
-	s := &actSink{}
+	s := &ytActSink{}
 	if err := a.pump(context.Background(), "c", s); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestYouTubeActivityDedupesAcrossPagesAndReconnect(t *testing.T) {
 		fmt.Fprintf(w, `{"items":[%s]}`, item)
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
-	s := &actSink{}
+	s := &ytActSink{}
 	for i := 0; i < 2; i++ { // two pumps on one adapter: a reconnect
 		_ = a.pump(context.Background(), "c", s)
 	}
@@ -200,7 +200,7 @@ func TestYouTubeActivityRestartDoesNotReplayHistory(t *testing.T) {
 		  "superChatDetails":{"amountMicros":"3000000","currency":"USD","amountDisplayString":"$3.00"}},"authorDetails":{"channelId":"U","displayName":"U"}}]}`)
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
-	s := &actSink{}
+	s := &ytActSink{}
 	if err := a.pump(context.Background(), "c", s); err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestYouTubeActivityMalformedPayloadsAreCountedNotFatal(t *testing.T) {
 		fmt.Fprint(w, `{"offlineAt":"x","items":[]}`)
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
-	s := &actSink{}
+	s := &ytActSink{}
 	if err := a.pump(context.Background(), "c", s); err != nil {
 		t.Fatalf("a malformed item stopped the poll: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestYouTubeActivityKindsAreUnknownUntilSeenAndNeverAnError(t *testing.T) {
 			t.Errorf("%s = %s before anything was seen", k, st)
 		}
 	}
-	if err := a.pump(context.Background(), "c", &actSink{}); err != nil {
+	if err := a.pump(context.Background(), "c", &ytActSink{}); err != nil {
 		t.Fatal(err)
 	}
 	got := state()
@@ -293,7 +293,7 @@ func TestYouTubeActivityScopeRefusalReportsReconnect(t *testing.T) {
 		fmt.Fprint(w, `{"error":{"code":403,"message":"scope","errors":[{"reason":"insufficientPermissions"}]}}`)
 	})
 	a := ytAdapter(t, stub.URL, ytNoSleep)
-	err := a.pump(context.Background(), "c", &actSink{})
+	err := a.pump(context.Background(), "c", &ytActSink{})
 	if err == nil || !IsFatal(err) {
 		t.Fatalf("err = %v, want fatal", err)
 	}
@@ -349,7 +349,7 @@ func TestYouTubeActivityQuietChatFirstEventAfterEmptyPageEmits(t *testing.T) {
 		}
 		c.Sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
 	})
-	s := &actSink{}
+	s := &ytActSink{}
 	if err := a.pump(context.Background(), "c", s); err != nil {
 		t.Fatal(err)
 	}

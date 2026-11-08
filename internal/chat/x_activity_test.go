@@ -43,26 +43,26 @@ func broadcastEnvelope(uuid, createdAt, typ, state, userID string) []byte {
 		uuid, createdAt, xActMe, typ, userID, state))
 }
 
-// actSink is a Sink that also takes activity, as the runner's sink does.
-type actSink struct {
+// xActSink is a Sink that also takes activity, as the runner's sink does.
+type xActSink struct {
 	recordingSink
 	amu    sync.Mutex
 	events []activity.Event
 }
 
-func (s *actSink) Activity(ev activity.Event) {
+func (s *xActSink) Activity(ev activity.Event) {
 	s.amu.Lock()
 	s.events = append(s.events, ev)
 	s.amu.Unlock()
 }
 
-func (s *actSink) got() []activity.Event {
+func (s *xActSink) got() []activity.Event {
 	s.amu.Lock()
 	defer s.amu.Unlock()
 	return append([]activity.Event(nil), s.events...)
 }
 
-func (s *actSink) wait(t *testing.T, n int) []activity.Event {
+func (s *xActSink) wait(t *testing.T, n int) []activity.Event {
 	t.Helper()
 	xWaitFor(t, fmt.Sprintf("%d activity event(s)", n), func() bool { return len(s.got()) >= n })
 	return s.got()
@@ -71,7 +71,7 @@ func (s *actSink) wait(t *testing.T, n int) []activity.Event {
 // settle gives a delivery that should NOT produce an event time to be wrongly produced, by feeding a chat line
 // behind it: the inbox is FIFO and one goroutine drains it, so once the chat line is out, everything before it has
 // been handled.
-func settle(t *testing.T, a *XAdapter, sink *actSink, uuid string) {
+func settle(t *testing.T, a *XAdapter, sink *xActSink, uuid string) {
 	t.Helper()
 	before := len(sink.recordingSink.messages)
 	if got := a.IngestWebhook(chatEnvelope(uuid, xActMe, "B", "m-"+uuid, "marker")); got != XIngestQueued {
@@ -100,7 +100,7 @@ func actAdapter(t *testing.T, st *xChatStub, start time.Time, log *slog.Logger) 
 	return a, clock
 }
 
-func kindState(t *testing.T, a *XAdapter, k activity.Kind) activity.KindStatus {
+func xKindState(t *testing.T, a *XAdapter, k activity.Kind) activity.KindStatus {
 	t.Helper()
 	for _, ks := range a.ActivityKinds() {
 		if ks.Kind == k {
@@ -121,7 +121,7 @@ func TestXActivitySubscribesToTheFourEventsOnlyWhenTheSinkTakesActivity(t *testi
 
 	st = newXChatStub(t)
 	a, _ := actAdapter(t, st, xActNow, nil)
-	xRun(t, a, &actSink{})
+	xRun(t, a, &xActSink{})
 	subs := st.subList()
 	if len(subs) != 6 {
 		t.Fatalf("subscriptions = %+v, want chat, chat.remove and the four activity events", subs)
@@ -145,10 +145,10 @@ func TestXActivitySubscribesToTheFourEventsOnlyWhenTheSinkTakesActivity(t *testi
 			t.Errorf("event %s direction = %q (present %v), want %q", ev, got, ok, d)
 		}
 	}
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOn {
 		t.Errorf("follow = %+v, want on", k)
 	}
-	if k := kindState(t, a, activity.KindStream); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindStream); k.State != activity.KindOn {
 		t.Errorf("stream = %+v, want on", k)
 	}
 }
@@ -156,7 +156,7 @@ func TestXActivitySubscribesToTheFourEventsOnlyWhenTheSinkTakesActivity(t *testi
 func TestXActivityFollowReachesTheSinkAndDedupesOnTheDeliveryID(t *testing.T) {
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
@@ -198,7 +198,7 @@ func TestXActivityFollowReachesTheSinkAndDedupesOnTheDeliveryID(t *testing.T) {
 func TestXActivityOnlyInboundFollowsAndSubscriptionsAreAlerts(t *testing.T) {
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
@@ -225,11 +225,11 @@ func TestXActivityOnlyInboundFollowsAndSubscriptionsAreAlerts(t *testing.T) {
 func TestXActivitySubscriptionIsPremiumWithNoInventedAmount(t *testing.T) {
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
-	k := kindState(t, a, activity.KindSubscribe)
+	k := xKindState(t, a, activity.KindSubscribe)
 	if k.State != activity.KindUnknown || k.Detail == "" {
 		t.Fatalf("subscribe before any event = %+v, want unknown with the reason (Creator Subscriptions cannot be read)", k)
 	}
@@ -244,7 +244,7 @@ func TestXActivitySubscriptionIsPremiumWithNoInventedAmount(t *testing.T) {
 	if err := e.Validate(); err != nil {
 		t.Errorf("Validate: %v", err)
 	}
-	if k := kindState(t, a, activity.KindSubscribe); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindSubscribe); k.State != activity.KindOn {
 		t.Errorf("subscribe after one arrived = %+v, want on", k)
 	}
 }
@@ -252,7 +252,7 @@ func TestXActivitySubscriptionIsPremiumWithNoInventedAmount(t *testing.T) {
 func TestXActivityBroadcastStartAndEndAreStreamPhases(t *testing.T) {
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
@@ -285,7 +285,7 @@ func TestXActivityNeverReplaysHistory(t *testing.T) {
 	st := newXChatStub(t)
 	restart := time.Date(2026, 10, 7, 19, 30, 0, 0, time.UTC)
 	a, clock := actAdapter(t, st, restart, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 
 	// Delivered right after the restart, but created at 19:17: before this adapter existed.
@@ -327,15 +327,15 @@ func TestXActivityTierGatedKindsAreUnavailableNotErrors(t *testing.T) {
 		"subscriptions.subscribe": {status: 403, body: `{"title":"Forbidden","detail":"This account is not eligible for subscription events","type":"about:blank","status":403}`},
 	}
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	stop := xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
-	k := kindState(t, a, activity.KindSubscribe)
+	k := xKindState(t, a, activity.KindSubscribe)
 	if k.State != activity.KindUnavailable || !strings.Contains(k.Detail, "not eligible") {
 		t.Errorf("subscribe = %+v, want unavailable with X's words", k)
 	}
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOn {
 		t.Errorf("follow = %+v, want on: one refused kind does not take the others down", k)
 	}
 	if h := a.Health(); h.State != StateLive || !strings.Contains(h.Detail, "Premium subscription alerts are off") {
@@ -361,12 +361,12 @@ func TestXActivityMissingScopeAsksForAReconnect(t *testing.T) {
 		"subscriptions.subscribe": {status: 403, body: `{"title":"Forbidden","detail":"Token is missing the follows.read scope","type":"https://api.x.com/2/problems/missing-scopes","status":403}`},
 	}
 	a, _ := actAdapter(t, st, xActNow, nil)
-	stop := xRun(t, a, &actSink{})
-	k := kindState(t, a, activity.KindSubscribe)
+	stop := xRun(t, a, &xActSink{})
+	k := xKindState(t, a, activity.KindSubscribe)
 	if k.State != activity.KindReconnect || !strings.Contains(k.Detail, "reconnect") {
 		t.Errorf("subscribe = %+v, want reconnect", k)
 	}
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOn {
 		t.Errorf("follow = %+v, want on", k)
 	}
 	if err := stop(); err != nil {
@@ -384,9 +384,9 @@ func TestXActivityTransientRefusalIsRetriedAtTheNextCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xRun(t, a, &actSink{})
+	xRun(t, a, &xActSink{})
 	xWaitFor(t, "stream to come on after the retry", func() bool {
-		return kindState(t, a, activity.KindStream).State == activity.KindOn
+		return xKindState(t, a, activity.KindStream).State == activity.KindOn
 	})
 	if n := st.countCalls("POST /2/activity/subscriptions"); n != 7 {
 		t.Errorf("creates = %d, want 7 (six, and the one that failed made again)", n)
@@ -400,7 +400,7 @@ func TestXActivityMalformedPayloadIsDroppedAndNeverLogged(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, log)
-	sink := &actSink{}
+	sink := &xActSink{}
 	xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
@@ -438,7 +438,7 @@ func TestXActivityMalformedPayloadIsDroppedAndNeverLogged(t *testing.T) {
 func TestXActivityReconnectKeepsSubscriptionsAndDedupe(t *testing.T) {
 	st := newXChatStub(t)
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	ctxStop := xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 	a.IngestWebhook(followEnvelope("f-1", xActCreated, xActMe, xActViewer, xActMe))
@@ -458,7 +458,7 @@ func TestXActivityReconnectKeepsSubscriptionsAndDedupe(t *testing.T) {
 	if n := st.countCalls("POST /2/activity/subscriptions"); n != creates {
 		t.Errorf("the reconnect created %d new subscription(s)", n-creates)
 	}
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOn {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOn {
 		t.Errorf("follow after the reconnect = %+v, want on", k)
 	}
 	// X redelivers f-1 after the reconnect (a retry that crossed the restart): known, so not shown twice.
@@ -483,7 +483,7 @@ func TestXActivityReplacesASubscriptionWithoutTheInboundFilter(t *testing.T) {
 		{"subscription_id": "8002", "event_type": "broadcast.start", "filter": map[string]any{"user_id": xActMe}, "webhook_id": "56", "tag": "polyemesis"},
 	}
 	a, _ := actAdapter(t, st, xActNow, nil)
-	xRun(t, a, &actSink{})
+	xRun(t, a, &xActSink{})
 	if n := st.countCalls("DELETE /2/activity/subscriptions/8001"); n != 1 {
 		t.Errorf("the direction-less follow subscription was deleted %d time(s), want 1", n)
 	}
@@ -508,7 +508,7 @@ func TestXActivityIsIgnoredWhenTheSinkTakesNone(t *testing.T) {
 	if got := a.IngestWebhook(followEnvelope("f", xActCreated, xActMe, xActViewer, xActMe)); got != XIngestIgnored {
 		t.Errorf("follow into a chat-only run = %v, want ignored", got)
 	}
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOff {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOff {
 		t.Errorf("follow = %+v, want off", k)
 	}
 }
@@ -541,7 +541,7 @@ func TestXActivityRefusedKindIsNotAskedAgainAtEveryCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xRun(t, a, &actSink{})
+	xRun(t, a, &xActSink{})
 	xWaitFor(t, "several checks", func() bool { return st.countCalls("GET /2/activity/subscriptions") >= 6 })
 	n := 0
 	for _, c := range st.recorded() {
@@ -562,11 +562,11 @@ func TestXActivityRateLimitedCreateNeverStopsChat(t *testing.T) {
 		"follow.follow": {status: 429, body: `{"title":"Too Many Requests","detail":"Too Many Requests","type":"about:blank","status":429}`},
 	}
 	a, clock := actAdapter(t, st, xActNow, nil)
-	sink := &actSink{}
+	sink := &xActSink{}
 	stop := xRun(t, a, sink)
 	clock.Store(time.Date(2026, 10, 7, 19, 17, 40, 0, time.UTC).UnixNano())
 
-	if k := kindState(t, a, activity.KindFollow); k.State != activity.KindOff || k.Detail == "" {
+	if k := xKindState(t, a, activity.KindFollow); k.State != activity.KindOff || k.Detail == "" {
 		t.Errorf("follow = %+v, want off with a reason", k)
 	}
 	if h := a.Health(); h.State != StateLive {
@@ -596,7 +596,7 @@ func TestXActivityListedDirectionMayBeUnderQualifiers(t *testing.T) {
 	}
 	st.subs = []map[string]any{q("1", "follow.follow"), q("2", "subscriptions.subscribe")}
 	a, _ := actAdapter(t, st, xActNow, nil)
-	xRun(t, a, &actSink{})
+	xRun(t, a, &xActSink{})
 	if n := st.countCalls("DELETE /2/activity/subscriptions"); n != 0 {
 		t.Errorf("%d subscription(s) deleted although they carry the inbound qualifier", n)
 	}
