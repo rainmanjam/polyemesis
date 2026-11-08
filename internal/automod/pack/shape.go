@@ -212,7 +212,7 @@ func EmoteWall(text string, platformCount int, lim ShapeLimits) bool {
 	}
 	// A wall needs EmoteWall tokens, so at least that many minus one spaces:
 	// the common line is cleared by one scan, without splitting it.
-	if platformCount < lim.EmoteWall && strings.Count(text, " ") < lim.EmoteWall-1 {
+	if platformCount < lim.EmoteWall && spaceRunes(text) < lim.EmoteWall-1 {
 		return false
 	}
 	e, t := EmoteCount(text, platformCount)
@@ -220,6 +220,19 @@ func EmoteWall(text string, platformCount int, lim ShapeLimits) bool {
 		return false
 	}
 	return float64(e) >= lim.EmoteShare*float64(t)
+}
+
+// spaceRunes counts Unicode whitespace runes, the same notion of a separator
+// strings.Fields uses, so the EmoteWall precheck cannot disagree with the
+// tokeniser (a wall split by tabs, U+3000 or NBSP has no ASCII spaces).
+func spaceRunes(text string) int {
+	n := 0
+	for _, r := range text {
+		if unicode.IsSpace(r) {
+			n++
+		}
+	}
+	return n
 }
 
 // emoteOnly reports a message made of nothing but emotes.
