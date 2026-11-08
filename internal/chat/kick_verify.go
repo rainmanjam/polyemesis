@@ -61,8 +61,15 @@ const KickPublicKeyURL = platform.KickAPIHost + "/public/v1/public-key"
 // delivery could be neither accepted nor rejected on its merits. The handler
 // answers 503 for it rather than 401: Kick counts a 401 as a failed delivery
 // toward its one-day auto-disable, and a 503 is the answer that says "try
-// again", which is what is true.
+// again", which is what is true. (Kick counts any failure to process, so a 503
+// counts too; only the retry semantics differ.)
 var ErrKickKeyUnavailable = errors.New("kick signing key unavailable")
+
+// ErrKickStale means the signature verified but the timestamp is outside
+// kickMaxSkew. The delivery is genuinely Kick's, so it is acknowledged with 200
+// and not ingested (a replay must not be accepted), rather than refused: a 401
+// or 503 on a legitimate late retry would count toward Kick's auto-disable.
+var ErrKickStale = errors.New("kick webhook delivery is outside the freshness window")
 
 // ErrKickDuplicate means this Message-Id was already accepted. Kick retries a
 // delivery it believes failed, so a repeat is expected and the handler answers
@@ -391,7 +398,7 @@ func kickVerifier(f *KickKeyFetcher, now func() time.Time) func(r *http.Request,
 			return fmt.Errorf("%w: timestamp is not RFC 3339: %v", ErrKickSignature, perr)
 		}
 		if skew := now().Sub(ts); skew > kickMaxSkew || skew < -kickMaxSkew {
-			return fmt.Errorf("%w: timestamp %s is outside the %s window", ErrKickSignature, ts.Format(time.RFC3339), kickMaxSkew)
+			return fmt.Errorf("%w: timestamp %s is outside the %s window", ErrKickStale, ts.Format(time.RFC3339), kickMaxSkew)
 		}
 		if !guard.firstSight(r.Header.Get(KickHeaderMessageID)) {
 			return ErrKickDuplicate

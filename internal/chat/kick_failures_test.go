@@ -79,7 +79,7 @@ func staticKeyServer(t *testing.T, pub *rsa.PublicKey) *httptest.Server {
 
 // --- replay ------------------------------------------------------------------
 
-func TestKickVerifierRejectsAStaleTimestamp(t *testing.T) {
+func TestKickVerifierFlagsAStaleTimestamp(t *testing.T) {
 	key := testKickKey(t)
 	srv := staticKeyServer(t, &key.PublicKey)
 	verify := kickVerifier(&KickKeyFetcher{HTTP: srv.Client(), URL: srv.URL}, func() time.Time { return kickNow })
@@ -90,8 +90,8 @@ func TestKickVerifierRejectsAStaleTimestamp(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, body := newSignedReq(t, key, "01HSTALE"+name, at)
-			if err := verify(req, body); !errors.Is(err, ErrKickSignature) {
-				t.Fatalf("a correctly signed delivery %s returned %v, want ErrKickSignature", name, err)
+			if err := verify(req, body); !errors.Is(err, ErrKickStale) || errors.Is(err, ErrKickSignature) {
+				t.Fatalf("a correctly signed delivery %s returned %v, want ErrKickStale", name, err)
 			}
 		})
 	}
@@ -522,7 +522,9 @@ func TestKickRevokedGrantIsTerminalAndNotRetried(t *testing.T) {
 	defer srv.Close()
 	a := kickAdapter(t, func(c *KickConfig) {
 		c.APIBase = srv.URL
-		c.Reauth = func(context.Context) (string, error) { return "", errors.New("invalid_grant") }
+		c.Reauth = func(context.Context) (string, error) {
+			return "", Fatal(errors.New("invalid_grant: reconnect the Kick account"))
+		}
 	})
 	_, err := a.Send(context.Background(), "hi")
 	if err == nil || !IsFatal(err) || !strings.Contains(err.Error(), "reconnect") {
@@ -644,5 +646,82 @@ func TestKickSubscriptionCheckSaysEdgeBlockNotWebhooksDisabled(t *testing.T) {
 	problem := a.syncSubscription(context.Background())
 	if !strings.Contains(problem, "edge") || strings.Contains(problem, "webhook not enabled") || strings.Contains(problem, "<") {
 		t.Fatalf("problem = %q, want the edge-block explanation", problem)
+	}
+}
+
+// A genuine but late delivery is acknowledged (so Kick does not count a failure
+// toward auto-disable) without being ingested or counted as a forgery.
+func TestKickHandlerAcknowledgesAStaleSignedDeliveryWithoutIngestingIt(t *testing.T) {
+	key := testKickKey(t)
+	keySrv := staticKeyServer(t, &key.PublicKey)
+	var got atomic.Int32
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.Verify = kickVerifier(&KickKeyFetcher{HTTP: keySrv.Client(), URL: keySrv.URL}, func() time.Time { return kickNow })
+	})
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+	a.sink = SinkFunc(func(Message) { got.Add(1) })
+	for i := 0; i < kickRejectedAfter+1; i++ {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(kickFullEvent))
+		signKickAt(t, key, req, []byte(kickFullEvent), fmt.Sprintf("01HLATE%d", i), kickNow.Add(-time.Hour).Format(time.RFC3339))
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200 for a signed stale delivery", resp.StatusCode)
+		}
+	}
+	a.mu.Lock()
+	rejected := a.rejected
+	a.mu.Unlock()
+	if rejected != 0 || got.Load() != 0 {
+		t.Fatalf("rejected=%d ingested=%d, want 0 and 0", rejected, got.Load())
+	}
+}
+
+func runKickWith401(t *testing.T, reauth TokenFunc) (ended bool, err error) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, kickUnauthorized)
+	}))
+	defer srv.Close()
+	a := kickAdapter(t, func(c *KickConfig) {
+		c.APIBase = srv.URL
+		c.Tick = 10 * time.Millisecond
+		c.Reauth = reauth
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
+	select {
+	case err := <-done:
+		return true, err
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	<-done
+	return false, nil
+}
+
+func TestKickRunSurvivesATransientRefreshFailure(t *testing.T) {
+	ended, err := runKickWith401(t, func(context.Context) (string, error) {
+		return "", errors.New("token endpoint returned 503")
+	})
+	if ended {
+		t.Fatalf("Run ended with %v on a transient refresh failure", err)
+	}
+}
+
+func TestKickRunSurvivesARefreshCooldownHandingBackTheSameToken(t *testing.T) {
+	// kickAdapter's default token is what the first attempt used.
+	ended, err := runKickWith401(t, func(ctx context.Context) (string, error) {
+		return "kick-token", nil
+	})
+	if ended {
+		t.Fatalf("Run ended with %v when the refresh returned the same token", err)
 	}
 }

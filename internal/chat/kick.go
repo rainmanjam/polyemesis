@@ -784,10 +784,17 @@ func (k *KickAdapter) Handler() http.Handler {
 				// Kick retried something it already has. 200 so it stops, and
 				// nothing is ingested a second time.
 				w.WriteHeader(http.StatusOK)
+			case errors.Is(err, ErrKickStale):
+				// Genuinely from Kick (the signature held) but outside the
+				// freshness window, e.g. a retry after an outage. 200 so Kick
+				// stops and does not auto-disable the subscription; not
+				// ingested and not counted as a forgery.
+				w.WriteHeader(http.StatusOK)
 			case errors.Is(err, ErrKickKeyUnavailable):
 				// Not a verdict on the delivery: the key could not be fetched.
-				// 503 asks Kick to retry; a 401 would count toward its one-day
-				// auto-disable of the subscription.
+				// 503 asks Kick to retry. It still counts as a failed delivery
+				// toward Kick's one-day auto-disable, as a 401 does; only the
+				// retry semantics differ.
 				k.mu.Lock()
 				k.keyDown++
 				k.mu.Unlock()
@@ -1147,7 +1154,15 @@ func kickWait(ae *apiError) string {
 // polyemesis believed valid gets exactly one refresh-and-retry through Reauth
 // before it is believed.
 func (k *KickAdapter) api(ctx context.Context, method, endpoint string, payload, out any) error {
-	err := doJSON(ctx, k.cfg.HTTP, method, endpoint, k.cfg.Token, payload, out)
+	// Remember which token the first attempt used, so a refresh that hands the
+	// same one back (the cooldown does) is not mistaken for a retry that ran.
+	var used string
+	tf := func(c context.Context) (string, error) {
+		t, e := k.cfg.Token(c)
+		used = t
+		return t, e
+	}
+	err := doJSON(ctx, k.cfg.HTTP, method, endpoint, tf, payload, out)
 	if statusOf(err) != http.StatusUnauthorized || k.cfg.Reauth == nil {
 		return err
 	}
@@ -1156,8 +1171,16 @@ func (k *KickAdapter) api(ctx context.Context, method, endpoint string, payload,
 		// The grant is gone, which is a stronger statement than the 401.
 		return rerr
 	}
-	if rerr != nil || tok == "" {
-		return err
+	if rerr != nil || tok == "" || tok == used {
+		// No new token was obtained (a 5xx or timeout from the token endpoint,
+		// or the refresh cooldown handing the old one back). That says nothing
+		// about the grant, so it must not read as "refreshed and still refused":
+		// return a retryable, non-401 error.
+		cause := rerr
+		if cause == nil {
+			cause = errors.New("no new token was issued")
+		}
+		return fmt.Errorf("Kick returned 401 and the token could not be refreshed: %w", cause)
 	}
 	return doJSON(ctx, k.cfg.HTTP, method, endpoint, StaticToken(tok), payload, out)
 }
