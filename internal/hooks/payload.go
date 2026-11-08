@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -72,6 +73,11 @@ type Envelope struct {
 	// KeyChanged is set when the connected platform account reports a stream
 	// key different from the stored one.
 	KeyChanged bool `json:"keyChanged,omitempty"`
+	// Activity is the follow, sub, tip or raid behind an `activity` trigger
+	// (internal/activity), absent for every other trigger. A new omitempty
+	// field, so SpecVersion stays "1" by the rule above: it changes nothing a
+	// receiver already reads. Source is the zero value on these deliveries.
+	Activity *activity.Event `json:"activity,omitempty"`
 }
 
 // Encode marshals an envelope. The bytes it returns are exactly what is signed
@@ -120,5 +126,47 @@ func (e Event) redacted() Event {
 		e.Destination = &d
 	}
 	e.Source.Name = redact.Redact(e.Source.Name)
+	if e.Activity != nil {
+		a := redactActivity(*e.Activity)
+		e.Activity = &a
+	}
 	return e
+}
+
+// redactActivity runs the text redactor over every free-text field of an
+// activity, on a copy. Viewer-written text is exactly what could carry a key a
+// streamer read out loud, or a URL somebody pasted.
+func redactActivity(a activity.Event) activity.Event {
+	a.Message = redact.Redact(a.Message)
+	a.Title = redact.Redact(a.Title)
+	a.Status = redact.Redact(a.Status)
+	a.Actor = redactActor(a.Actor)
+	a.Other = redactActor(a.Other)
+	if len(a.Recipients) > 0 {
+		rs := make([]activity.Recipient, len(a.Recipients))
+		for i, r := range a.Recipients {
+			rs[i] = activity.Recipient{ID: r.ID, Name: redact.Redact(r.Name)}
+		}
+		a.Recipients = rs
+	}
+	if a.Progress != nil {
+		p := *a.Progress
+		p.Options = make([]activity.ProgressOption, len(a.Progress.Options))
+		for i, o := range a.Progress.Options {
+			o.Label = redact.Redact(o.Label)
+			p.Options[i] = o
+		}
+		a.Progress = &p
+	}
+	return a
+}
+
+func redactActor(a *activity.Actor) *activity.Actor {
+	if a == nil {
+		return nil
+	}
+	c := *a
+	c.Name = redact.Redact(c.Name)
+	c.Login = redact.Redact(c.Login)
+	return &c
 }

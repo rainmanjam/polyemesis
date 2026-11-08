@@ -71,7 +71,8 @@ export const WIRE = {
     "chat",
     "chatState",
     "chatRetract",
-    "chatModeration"
+    "chatModeration",
+    "activity"
   ],
   "sourceKinds": [
     "",

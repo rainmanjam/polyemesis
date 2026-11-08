@@ -7,6 +7,10 @@ import { useT, type TranslationKey } from "@/lib/i18n";
 import { copyToClipboard } from "@/lib/clipboard";
 import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState } from "@/lib/readState";
 import {
+  alertsWidgetPathUrl,
+  alertsWidgetUrl,
+  alertStyleOf,
+  OVERLAY_ALERT_KINDS,
   OVERLAY_FONTS,
   OVERLAY_LIMITS,
   overlayPathUrl,
@@ -21,6 +25,8 @@ import {
   type ShownLine,
 } from "@/lib/overlay";
 import { ChatOverlayView } from "@/components/overlay/ChatOverlayView";
+import { AlertsStyleEditor } from "@/components/overlay/AlertsStyleEditor";
+import { TestAlert } from "@/features/activity/TestAlert";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -312,7 +318,9 @@ export function OverlayEditor({
             value={style.preset}
             onValueChange={(v) => {
               const p = meta.presets[v as OverlayPreset];
-              if (p) setStyle({ ...p });
+              // A preset is a chat look; the alerts block is a separate part
+              // of the style and must survive choosing one.
+              if (p) setStyle((cur) => ({ ...p, ...(cur.alerts ? { alerts: cur.alerts } : {}) }));
             }}
           >
             <SelectTrigger id="overlay-preset">
@@ -375,6 +383,11 @@ export function OverlayEditor({
           ))}
         </div>
 
+        {/* Written into style.alerts only when something here changes: an
+            overlay nobody touches is saved without an alerts block, so it
+            stays readable by an older polyemesis. */}
+        <AlertsStyleEditor value={alertStyleOf(style)} style={style} onChange={(next) => set("alerts", next)} />
+
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={save} disabled={saving || !dirty || !name.trim()}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("overlay.save")}
@@ -423,7 +436,19 @@ export function OverlayEditor({
                   onClick={() => copyToClipboard(t, pollWidgetUrl(origin, overlay.obsKey), t("overlay.pollUrl"))}>
                   <Copy /> {t("overlay.copyPollUrl")}
                 </Button>
+                {/* The alerts overlay: the same key, its own browser source. */}
+                <Button size="sm" variant="outline"
+                  onClick={() => copyToClipboard(t, alertsWidgetUrl(origin, overlay.obsKey), t("overlay.alertsUrl"))}>
+                  <Copy /> {t("overlay.copyAlertsUrl")}
+                </Button>
               </div>
+              <span className="text-tiny font-medium">{t("overlay.alertsTitle")}</span>
+              <TestAlert
+                kinds={OVERLAY_ALERT_KINDS}
+                defaultKind="tip"
+                kindLabel="overlay.alertsTestKind"
+                idPrefix="overlay-alerts-test"
+              />
               <span className="font-mono text-micro text-muted-foreground">
                 {overlay.obsKey.slice(0, 12)}…
               </span>
@@ -446,9 +471,14 @@ export function OverlayEditor({
                   onClick={() => copyToClipboard(t, pollWidgetPathUrl(origin, overlay.obsKey), t("overlay.pollUrl"))}>
                   <Copy /> {t("overlay.copyPollPathUrl")}
                 </Button>
+                <Button size="sm" variant="ghost"
+                  onClick={() => copyToClipboard(t, alertsWidgetPathUrl(origin, overlay.obsKey), t("overlay.alertsUrl"))}>
+                  <Copy /> {t("overlay.copyAlertsPathUrl")}
+                </Button>
               </div>
               <span className="text-micro text-muted-foreground">{t("overlay.pathHint")}</span>
               <span className="text-micro text-muted-foreground">{t("overlay.pollHint")}</span>
+              <span className="text-sm text-muted-foreground">{t("overlay.alertsHint")}</span>
               <span className="text-micro text-muted-foreground">
                 {t("overlay.holdHint", { seconds: Math.round(meta.maxHoldMs / 1000) })}
               </span>

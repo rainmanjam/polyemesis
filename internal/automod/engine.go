@@ -56,6 +56,19 @@ func (e *Engine) CheckFast(p db.Platform, authorID, text string) Verdict {
 	return e.decide(p, sortByConsequence(findings))
 }
 
+// CheckText is CheckFast for text that has no author: the rules, plus the
+// history's per-message shape detectors, with nothing recorded. See
+// History.CheckText.
+func (e *Engine) CheckText(p db.Platform, text string) Verdict {
+	if e == nil {
+		return Verdict{}
+	}
+	var findings []Finding
+	findings = append(findings, e.rules.Check(text)...)
+	findings = append(findings, e.history.CheckText(text)...)
+	return e.decide(p, sortByConsequence(findings))
+}
+
 // CheckModel asks the model, for a caller that has decided this message is
 // worth the call.
 //

@@ -7,13 +7,16 @@ import (
 )
 
 // busTypes maps the in-process bus types the stream carries onto stream types.
-// Only chat comes this way: it is install-wide, so the bus message needs no
+// Only chat and activity come this way: it is install-wide, so the bus message needs no
 // programme stamped on it, and the chat hub already publishes every message,
 // retraction and moderation action there exactly once.
 var busTypes = map[events.Type]Type{
 	events.TypeChat:           TypeChatMessage,
 	events.TypeChatRetract:    TypeChatRetract,
 	events.TypeChatModeration: TypeChatModeration,
+	// Activity rides the bus like chat does, and for the same reason: it is
+	// install-wide, and the activity hub is the one place it is published.
+	events.TypeActivity: TypeActivity,
 }
 
 // BridgeBus forwards the chat family from the in-process bus until ctx ends.

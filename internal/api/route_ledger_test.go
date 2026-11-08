@@ -692,6 +692,9 @@ var excusedRoutes = map[string]coverageExcus{
 	// forms.
 	"GET /overlay/poll":         spa(),
 	"GET /overlay/poll/k/{key}": spa(),
+	// The alerts overlay: the same SPA bundle, sessionless, in both key forms.
+	"GET /overlay/alerts":         spa(),
+	"GET /overlay/alerts/k/{key}": spa(),
 	// The overlay key's two routes. Outside every auth group, and a read
 	// token is nothing to them: without the overlay's own key in its own
 	// header every principal gets the same 401. The counterparts open them
@@ -793,13 +796,17 @@ var excusedRoutes = map[string]coverageExcus{
 	// and got the scrollback -- until the readDenied flag listed them.
 	"GET /api/v1/chat":          denied(),
 	"GET /api/v1/chat/messages": denied(),
+	"GET /api/v1/chat/search":   denied(),
+	"GET /api/v1/chat/users":    denied(),
+	// Viewer activity: the feed is viewers' names and words, and the source list
+	// carries account refs. Both are readDenied; the POSTs are denied by method.
+	"GET /api/v1/activity":         denied(),
+	"GET /api/v1/activity/sources": denied(),
 	// The same viewers' words, saved with a recording or exported for a window.
 	// Denied to a read token at the router; each proof plants a viewer's line and
 	// shows the admin receives it.
 	"GET /api/v1/chat/export":          deniedWithCounterpart("chatExport"),
 	"GET /api/v1/recordings/{id}/chat": deniedWithCounterpart("recordingChat"),
-	"GET /api/v1/chat/search":          denied(),
-	"GET /api/v1/chat/users":           denied(),
 	// UX Council A48: the flagged list carries the flagged message's text,
 	// which is the same content as the scrollback.
 	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),

@@ -325,6 +325,18 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
+	"GET /api/v1/activity": "the activity hub is not wired into this fixture (Options.Activity is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"hub unconditionally, and activity needs no programme. Driven with a hub by activity_test.go.",
+	"GET /api/v1/activity/sources": "the activity hub is not wired into this fixture (Options.Activity is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"hub unconditionally, and activity needs no programme. Driven with a hub by activity_test.go.",
+	"POST /api/v1/activity/test": "the activity hub is not wired into this fixture (Options.Activity is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"hub unconditionally, and activity needs no programme. Driven with a hub by activity_test.go.",
+	"POST /api/v1/activity/{id}/replay": "the activity hub is not wired into this fixture (Options.Activity is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"hub unconditionally, and activity needs no programme. Driven with a hub by activity_test.go.",
 	"GET /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
 		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
 		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +

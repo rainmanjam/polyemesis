@@ -160,7 +160,7 @@ func TestRumbleTransportErrorCarriesNoKey(t *testing.T) {
 	base := srv.URL
 	srv.Close() // connection refused: the error text embeds the full URL
 	a := rumbleAdapter(t, base, nil)
-	_, err := rumbleRun(t, a, 1)
+	_, err := rumbleRunExhaust(t, a)
 	if err == nil {
 		t.Fatal("want a transport error")
 	}

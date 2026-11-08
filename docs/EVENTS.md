@@ -6,7 +6,7 @@ happens.**
 `GET /api/v1/events` is a [Server-Sent Events][sse] stream. Each event is a
 small JSON body: a destination went down and why, the ingest started, the
 programme failed over to its slate, a broadcast went live, the recorder
-stopped, a chat message arrived, an alert fired. A browser reads it with
+stopped, a chat message arrived, an alert fired, a viewer followed or tipped. A browser reads it with
 `EventSource`, and anything else reads it with a plain HTTP client. There is
 no WebSocket handshake and no SDK.
 
@@ -187,6 +187,8 @@ real producer, to actually be emitted.
 | `poll.vote` | poll | yes | A poll's running tallies changed; sent at most once a second, never once per vote. |
 | `poll.ended` | poll | yes | A poll closed, at its time or early: the final tallies with the per-platform breakdown. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
+| `activity` | activity | partly | A viewer or platform activity -- a follow, sub, tip, raid or the platform's own stream report; data.kind says which. |
+| `activity.display` | overlay | no | An activity as the alerts overlay draws it: judged by automod and stripped to what an overlay shows. |
 | `obs.connection` | obs | yes | Polyemesis's link to obs-websocket connected, dropped, or was refused. |
 | `obs.stream` | obs | yes | OBS started or stopped streaming, as reported by obs-websocket or the OBS script. |
 | `obs.scene` | obs | yes | OBS switched its program scene; preset names the routing rule the scene triggers, if any. |
@@ -462,6 +464,54 @@ courtesy to a chat channel and does not apply here: a destination flapping 12
 times is 12 `alert` events. A `read` token is sent only the alert types that
 appear on `GET /timeline`; see [Connecting](#connecting).
 
+### Activity
+
+`activity` is one viewer or platform doing something: a follow, a sub, a tip, a
+raid. It is **not** `alert`, which stays the operator's alert; the word
+"activity" is used on every wire (topic, type, [hook trigger](HOOKS.md), the
+[`/api/v1/activity`](ACTIVITY.md) routes). One type carries every kind, so a
+new platform never adds a row here: `data.kind` says which.
+
+```json
+{"specVersion":"1","id":"lq3k8c1w-1042","type":"activity","at":"2026-11-07T20:14:03.512Z",
+ "data":{"id":"act_3f9a0c1d","kind":"tip","platform":"youtube","account":"UCabc","at":"2026-11-07T20:14:03.100Z",
+   "actor":{"id":"UCxyz","name":"Mara"},
+   "amount":{"currency":"USD","minor":500,"exponent":2,"display":"$5.00"},
+   "message":"great stream!","source":{"type":"superChatEvent","id":"LCC.Cg8K"}}}
+```
+
+`data.kind` is one of `follow`, `subscribe`, `resub`, `gift`, `tip`, `raid`,
+`redemption`, `hypetrain`, `poll`, `prediction`, `stream`, `shoutout`,
+`moderation` and `reaction`. The fields of each kind, the `amount` rules (money
+or a platform unit, never converted) and the test-alert event are in
+[ACTIVITY.md](ACTIVITY.md). Remember that `stream` here is the **platform's**
+report that the stream went online or offline; `broadcast.live` is polyemesis
+moving a broadcast on air.
+
+`activity` names viewers and carries words they wrote, which is why chat is
+A `read` token is sent only `data.kind: "stream"`, cut down to
+`{kind, platform, at, phase}`: no account, source, title or person, live or on replay. `message`, names and titles go through the same text
+redaction as every other event before they are numbered. An `activity` is
+**not stored**: the replay window above is all the history there is, and a
+restart empties it.
+
+`activity.display` is the alerts overlay's projection (see
+[OVERLAY.md](OVERLAY.md#alerts-overlay)): `{id, platform, kind, name, amount?,
+tier?, months?, count?, recipient?, title?, viewers?, level?, message?, test?,
+at}`. There is no actor id, account, source id, recipient id or moderation
+field. `name` is `""` for an anonymous viewer or one whose name failed the
+blocked-terms check (the overlay says "Someone"). `message` is present only if
+automod let it stand: **an alert whose message automod removed, or did not rule
+on within four seconds, is still published, without the message.** Only the
+overlay kinds are projected (never `moderation`, `stream`, `poll`, `prediction`,
+`reaction`, or a raid or shoutout you sent *out*). `id` is opaque and different for every
+showing, including a replay from the console.
+
+Replay treats an `activity.display` differently for an overlay key: it is
+replayed only if it is under 10 seconds old, so reloading the OBS browser source
+does not play the last five minutes of follows again. An admin subscriber is
+replayed everything still held.
+
 ### Redaction
 
 All events go through the webhook redaction rules before they are numbered and
@@ -604,5 +654,6 @@ consumer against them yet.
 - [HOOKS.md](HOOKS.md): the same envelope, pushed to you and signed.
 - [API.md](API.md): authentication, tokens and scopes.
 - [MONITORING.md](MONITORING.md): alert types and rules.
+- [ACTIVITY.md](ACTIVITY.md): follows, subs, tips and raids: the `activity` kinds and the alerts overlay.
 - [MONITORING.md](MONITORING.md#why-a-destination-is-failing): why a
   destination is failing, the retry hold and the key cross-check.

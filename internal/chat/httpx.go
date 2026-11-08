@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,14 @@ type apiError struct {
 	// Wait is how long the platform asked callers to hold off (Retry-After, or
 	// Graph's estimated_time_to_regain_access); zero when it said nothing.
 	Wait time.Duration
+	// Raw is the start of the response body, untruncated by shorten, for
+	// adapters that must tell the platform's own JSON envelope from an edge
+	// (WAF/CDN) HTML page. It is never part of Error().
+	Raw []byte
+	// Header is the response header, for edge signals such as cf-mitigated.
+	Header http.Header
+	// RetryAfter is the parsed Retry-After header, zero when absent or invalid.
+	RetryAfter time.Duration
 }
 
 // payload is the body to parse: whole when captured, truncated otherwise.
@@ -67,6 +76,26 @@ func (e *apiError) Error() string {
 		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Body)
 	}
 	return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Body)
+}
+
+// parseRetryAfter reads RFC 9110 Retry-After: delay-seconds or an HTTP-date.
+func parseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 {
+			return 0
+		}
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func statusOf(err error) int {
@@ -148,12 +177,15 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &apiError{
-			Status: resp.StatusCode,
-			URL:    stripQuery(endpoint),
-			Body:   shorten(raw),
-			Reason: errorReason(raw),
-			full:   string(raw),
-			Wait:   oauth.GraphWait(resp.Header),
+			Status:     resp.StatusCode,
+			URL:        stripQuery(endpoint),
+			Body:       shorten(raw),
+			Reason:     errorReason(raw),
+			full:       string(raw),
+			Wait:       oauth.GraphWait(resp.Header),
+			Raw:        raw[:min(len(raw), 4096)],
+			Header:     resp.Header,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 	if out == nil || len(raw) == 0 {
