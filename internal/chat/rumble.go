@@ -56,6 +56,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
@@ -179,6 +180,11 @@ type RumbleAdapter struct {
 	health Health
 	// noteUntil is when the dropped-messages note stops being shown.
 	noteUntil time.Time
+	// activityBlocks is which activity lists the last poll carried; see
+	// rumble_activity.go.
+	activityBlocks rumbleActivitySeen
+	// activityIgnored counts unusable activity entries; no payload is kept.
+	activityIgnored atomic.Int64
 }
 
 // NewRumble builds the adapter. A missing key is a named "not configured"
@@ -376,14 +382,13 @@ type rumbleLivestream struct {
 
 // rumbleResponse is the subset of get-data this adapter reads.
 //
-// The follower, subscriber and gifted-sub blocks are ignored: they are
-// alert-overlay material rather than chat, and decoding them would mean
-// modelling five more shapes for data nothing here renders.
+// The recent follower, subscriber and gifted-sub lists feed the activity
+// source (rumble_activity.go); the chat path ignores them.
 type rumbleResponse struct {
 	// MaxNumResults is the cap Rumble applies to recent chat, echoed back.
 	MaxNumResults int `json:"max_num_results"`
 	// Followers and Subscribers are the channel counts, pointers so that "not
-	// sent" stays distinct from zero. The recent lists are not decoded.
+	// sent" stays distinct from zero. The recent lists are decoded for activity only.
 	//
 	// AMBIGUITY: the payload also carries num_followers_total, and Rumble's
 	// article does not say how the two differ. num_followers may be a recent or
@@ -391,11 +396,16 @@ type rumbleResponse struct {
 	// num_followers is decoded; confirm against the channel page on the first
 	// live-account check, and switch (or decode both) if it is the smaller.
 	Followers struct {
-		Count *int `json:"num_followers"`
+		Count  *int            `json:"num_followers"`
+		Recent json.RawMessage `json:"recent_followers"`
 	} `json:"followers"`
 	Subscribers struct {
-		Count *int `json:"num_subscribers"`
+		Count  *int            `json:"num_subscribers"`
+		Recent json.RawMessage `json:"recent_subscribers"`
 	} `json:"subscribers"`
+	GiftedSubs struct {
+		Recent json.RawMessage `json:"recent_gifted_subs"`
+	} `json:"gifted_subs"`
 	Livestreams []rumbleLivestream `json:"livestreams"`
 }
 
@@ -460,6 +470,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		prev  map[string]struct{}
 
 		failures int
+		acts     = newRumbleActivityState()
 	)
 
 	for ctx.Err() == nil {
@@ -482,6 +493,20 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		failures = 0
 
 		live, ok := liveStream(resp)
+		// Activity first, and before the offline branch: follows and
+		// subscriptions are channel-level and arrive with nothing live. The
+		// events leave through the activity door, never as chat.
+		var liveForActivity *rumbleLivestream
+		if ok {
+			liveForActivity = &live
+		} else {
+			acts.resetRants()
+		}
+		for _, ev := range r.observeActivity(acts, rumbleActivityLists{
+			followers: resp.Followers.Recent, subscribers: resp.Subscribers.Recent, gifted: resp.GiftedSubs.Recent,
+		}, liveForActivity) {
+			emitActivity(sink, ev)
+		}
 		if !ok {
 			r.setHealth(StateDegraded,
 				"waiting for a Rumble live stream to start; chat begins when it does")

@@ -263,7 +263,7 @@ gets them and what it needs here. **Nothing below is connected in this release.*
 | Kick | webhook events on the existing chat webhook | not yet |
 | X | Activity API events on the existing webhook | not yet |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
-| Rumble | the follower, subscriber, gift and rant blocks in the existing poll | not yet |
+| Rumble | the recent follower, subscriber, gifted-sub and rant lists in the existing get-data poll; no extra request, no new key | built, not yet checked against a live account. Rumble sends no event id, so each item is identified by its own fields, and the first poll after a start only records what is already there (nothing is replayed). A gifted sub carries no timestamp, so it is stamped when seen. A list Rumble does not send for your channel shows as unavailable |
 | Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
