@@ -3137,7 +3137,7 @@ func (s *Server) planDestinationUpdate(w http.ResponseWriter, id int64, body []b
 		}
 	}
 	if refuseUnsendableGoLiveTitle(w, existing, storedGoLiveTitle) {
-		return
+		return nil, false
 	}
 	if s.refuseBadDestinationWrite(w, existing, &before) {
 		return nil, false
