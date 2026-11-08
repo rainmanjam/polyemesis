@@ -268,7 +268,7 @@ func (s *Server) accountViewFor(a db.PlatformAccount, now time.Time) accountView
 		Health: s.accountHealthNow(a, now),
 		IsPage: a.Platform == db.PlatformFacebook && oauth.IsPageRef(a.AccountRef),
 	}
-	if p, err := oauth.Get(a.Platform); err == nil {
+	if p, err := s.providers.Get(a.Platform); err == nil {
 		v.CurrentScopeVersion = p.ScopeVersion()
 		v.ScopeUnlocks = oauth.ScopeUnlocksSince(p, a.ScopeVer)
 	}
