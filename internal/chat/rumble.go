@@ -271,7 +271,6 @@ func (r *RumbleAdapter) setLive(viewers, followers, subscribers *int) {
 	r.mu.Unlock()
 }
 
-// noteDrop arms the dropped-messages note for rumbleDropNoteFor.
 // setTransient records a retryable failure without discarding what the last
 // good poll reported: the viewer, follower and subscriber counts stay, only the
 // state and the note change. A blip should not make the audience vanish.
@@ -306,6 +305,7 @@ func retryAfterOf(err error) time.Duration {
 	return 0
 }
 
+// noteDrop arms the dropped-messages note for rumbleDropNoteFor.
 func (r *RumbleAdapter) noteDrop() {
 	r.mu.Lock()
 	r.noteUntil = r.cfg.Now().Add(rumbleDropNoteFor)
