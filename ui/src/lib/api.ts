@@ -44,6 +44,8 @@ import type {
   ChatPlatform,
   ChatSearchResult,
   ChatSendResponse,
+  ChatMute,
+  ChatModerator,
   ChatSettings,
   ChatUserCard,
   ChatFlagsResult,
@@ -1437,12 +1439,38 @@ export const api = {
     userId: string;
     seconds?: number;
     reason?: string;
+    /** X only: mute and remove this message in the same platform call. */
+    messageId?: string;
   }) => {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     if (m.seconds && m.seconds > 0) q.set("seconds", String(m.seconds));
     if (m.reason) q.set("reason", m.reason);
+    if (m.messageId) q.set("messageId", m.messageId);
     return post<ChatModerationResult>(`/chat/bans?${q.toString()}`, {});
+  },
+
+  /** X's muted viewers, with when each timed mute ends. */
+  getChatMutes: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ mutes: ChatMute[]; truncated?: boolean }>(`/chat/mutes?${q.toString()}`);
+  },
+  /** X's chat moderators. They act across every broadcast the account hosts. */
+  getChatModerators: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ moderators: ChatModerator[]; appliesToAllBroadcasts: boolean }>(`/chat/moderators?${q.toString()}`);
+  },
+  addChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return post<{ ids: string[] }>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return del<{ ids: string[] }>(`/chat/moderators?${q.toString()}`);
   },
 
   unbanChatUser: (m: { platform: ChatPlatform; account?: string; userId: string }) => {

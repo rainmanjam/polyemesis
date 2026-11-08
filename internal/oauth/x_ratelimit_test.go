@@ -308,3 +308,37 @@ func TestTheXHoldMapIsCappedEvenWhileEveryHoldIsLive(t *testing.T) {
 		t.Errorf("hold map has %d entries (cap %d), newest kept = %v", n, xHoldsMax, newest)
 	}
 }
+
+// X's limits are per endpoint. A read of GET /2/broadcasts that answers remaining 0 holds that read, not the END
+// call: a sampler that used up its read window must not leave a stream running after the operator turned it off.
+func TestAnExhaustedXReadWindowDoesNotHoldTheEndCall(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	var reads, ends atomic.Int32
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			ends.Add(1)
+			_, _ = io.WriteString(w, `{"data":{"id":"b1","state":"ENDED"}}`)
+			return
+		}
+		reads.Add(1)
+		w.Header().Set("x-rate-limit-remaining", "0")
+		w.Header().Set("x-rate-limit-reset", strconv.FormatInt(now.Add(10*time.Minute).Unix(), 10))
+		_, _ = io.WriteString(w, `{"data":[]}`)
+	})
+	x.calls.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	if _, err := x.Broadcasts(ctx, "client", "tok"); err != nil {
+		t.Fatalf("the read itself succeeded: %v", err)
+	}
+	if _, err := x.Broadcasts(ctx, "client", "tok"); err == nil {
+		t.Fatal("a second read went out inside its own exhausted window")
+	}
+	res, err := x.TransitionBroadcast(ctx, "tok", "b1", PhaseComplete)
+	if err != nil {
+		t.Fatalf("END was refused by a read hold: %v", err)
+	}
+	if res.Status != XStateEnded || ends.Load() != 1 || reads.Load() != 1 {
+		t.Fatalf("status %q, ends %d, reads %d; want ENDED, 1, 1", res.Status, ends.Load(), reads.Load())
+	}
+}

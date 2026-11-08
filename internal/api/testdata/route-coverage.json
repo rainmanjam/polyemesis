@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 318,
+    "methodPatternPairs": 322,
     "swept": 80,
     "excused": 64,
-    "denied": 174,
+    "denied": 178,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -284,6 +284,30 @@
       "method": "POST",
       "pattern": "/api/v1/chat/messages/hide",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/mutes",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -2616,6 +2640,26 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/chat/moderators",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatModerators"
+    },
+    {
+      "route": "GET /api/v1/chat/mutes",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatMutes"
     },
     {
       "route": "GET /api/v1/chat/search",

@@ -1557,11 +1557,24 @@ func (k *keyedMutex) Lock(key int64) func() {
 // close to it. Refresh-on-use plus the background loop in RefreshLoop means a
 // long broadcast never hits an expired token mid-stream.
 func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAccount, error) {
+	return s.tokenForRejected(ctx, accountID, "")
+}
+
+// tokenForRejected is tokenFor for a caller whose platform refused the stored access token before its recorded
+// expiry (revoked, or rotated elsewhere). A non-empty rejected is that token: it is refreshed even though the clock
+// says it is good. If the stored token is no longer the rejected one, somebody has already refreshed or reconnected,
+// and the stored token is returned without spending the refresh token again (X rotates them, so a second spend of the
+// same one would fail for a healthy account).
+func (s *Server) tokenForRejected(ctx context.Context, accountID int64, rejected string) (*db.PlatformAccount, error) {
 	acct, err := s.store.GetPlatformAccount(s.box, accountID)
 	if err != nil {
 		return nil, err
 	}
-	if !acct.Expired() {
+	// usable: not expired by the clock, and not the very token the platform just refused.
+	usable := func(a *db.PlatformAccount) bool {
+		return !a.Expired() && (rejected == "" || a.AccessToken != rejected)
+	}
+	if usable(acct) {
 		return acct, nil
 	}
 
@@ -1575,7 +1588,7 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	if err != nil {
 		return nil, err
 	}
-	if !acct.Expired() {
+	if usable(acct) {
 		return acct, nil
 	}
 	// The row version this refresh is entitled to overwrite, taken HERE --
@@ -1584,8 +1597,12 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	// this function never actually reasoned about.
 	seen := acct.Revision()
 	if acct.RefreshToken == "" {
-		return nil, fmt.Errorf("the %s token has expired and there is no refresh token: %w",
-			acct.Platform, oauth.ErrReconnectRequired)
+		why := "has expired"
+		if rejected != "" {
+			why = "was refused"
+		}
+		return nil, fmt.Errorf("the %s token %s and there is no refresh token: %w",
+			acct.Platform, why, oauth.ErrReconnectRequired)
 	}
 
 	provider, err := s.providers.Get(acct.Platform)

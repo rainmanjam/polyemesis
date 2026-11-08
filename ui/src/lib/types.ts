@@ -2785,6 +2785,23 @@ export interface ChatModerationResult {
   detail?: string;
 }
 
+/** One viewer an X account has muted. `endsAt` is absent for an indefinite
+ *  mute; X leaves expired timed mutes out of its list. */
+export interface ChatMute {
+  userId: string;
+  username?: string;
+  name?: string;
+  endsAt?: string;
+}
+
+/** One of an X account's chat moderators. They act on every broadcast the
+ *  account hosts, so `appliesToAllBroadcasts` is true on the list answer. */
+export interface ChatModerator {
+  userId: string;
+  username?: string;
+  name?: string;
+}
+
 /** Channel-wide chat rules. Only Twitch publishes an API for these.
  *
  *  Every field is optional and an omitted one means LEAVE IT ALONE, not "off".

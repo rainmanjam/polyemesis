@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -92,6 +93,9 @@ type xcFake struct {
 	liveCalls int
 	// seq numbers broadcasts so a second show gets a different id.
 	seq int
+	// goodToken, when set, is the only access token X accepts: any other answers the 403 "Unsupported Authentication"
+	// X gave a garbage user bearer on a live probe.
+	goodToken string
 	// limited makes every call answer 429 with a reset a minute ahead; requests counts every call that reached X.
 	limited  bool
 	requests int
@@ -110,6 +114,11 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			w.Header()["Date"] = nil
 		}
 		f.requests++
+		if f.goodToken != "" && r.Header.Get("Authorization") != "Bearer "+f.goodToken {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"title":"Unsupported Authentication","detail":"Authenticating with OAuth 2.0 Application-Only is forbidden for this endpoint.","type":"https://api.twitter.com/2/problems/unsupported-authentication","status":403}`)
+			return
+		}
 		if f.limited {
 			w.Header().Set("x-rate-limit-reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -644,7 +653,7 @@ func TestXRefusedCreateWhoseDetailEchoesTheKeyLeaksItNowhere(t *testing.T) {
 // every sweep for ever. The hold is released by an UP edge, which arrives through Observe
 // and must survive the untrack that branch does first.
 func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
-	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	fake := &xcFake{active: true, createStatus: http.StatusBadRequest}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
 
 	for i := 0; i < lifecycleGiveUpAfter+5; i++ {
@@ -666,7 +675,7 @@ func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
 // fresh budget. Without it a held X row nobody tracks could stay held for good, because
 // an untracked row opens no observe gate and so may never see an UP edge.
 func TestXHeldCreateIsReleasedWhenTheOperatorDisablesTheDestination(t *testing.T) {
-	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	fake := &xcFake{active: true, createStatus: http.StatusBadRequest}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{Attempts: lifecycleGiveUpAfter, Fault: "refused"}))
 	c.noteRearm(5) // held in this process just now, so the re-arm interval is running
 
@@ -1754,4 +1763,149 @@ func TestXLeftLiveFaultWriteFailureKeepsTrackingAndDoesNotAlert(t *testing.T) {
 		t.Fatalf("fault %q escalations %d, want the fault recorded and raised exactly once after the write recovered",
 			store.rows[5].Lifecycle.Fault, len(*faults))
 	}
+}
+
+// X refuses a token the clock still calls good (revoked on X, or rotated by another install) with a 403 "Unsupported
+// Authentication". The sweep refreshes that token once and reads again, instead of faulting the destination.
+func TestAnXRefusedButUnexpiredTokenIsRefreshedOnceAndTheReadRetried(t *testing.T) {
+	fake := &xcFake{goodToken: "fresh", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}, nil
+	}
+	var rejected []string
+	c.retokenFor = func(_ context.Context, _ int64, bad string) (*db.PlatformAccount, error) {
+		rejected = append(rejected, bad)
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "fresh"}, nil
+	}
+	row := xcSweep(t, c, store)
+	if len(rejected) != 1 || rejected[0] != "stale" {
+		t.Fatalf("forced refreshes = %v, want exactly one, of the refused token", rejected)
+	}
+	if row.Lifecycle.Fault != "" || row.Lifecycle.Attempts != 0 || len(*faults) != 0 {
+		t.Fatalf("fault = %q, attempts = %d, escalations = %d after a recovered read, want none", row.Lifecycle.Fault, row.Lifecycle.Attempts, len(*faults))
+	}
+}
+
+// A grant X no longer honours is a reconnect, said once and not retried for twenty sweeps.
+func TestAnXRevokedGrantStopsTheLifecycleWithAReconnectFault(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return nil, fmt.Errorf("could not refresh the x token: %w", oauth.ErrReconnectRequired)
+	}
+	var row *db.Destination
+	for range 3 {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.Attempts < lifecycleGiveUpAfter {
+		t.Fatalf("attempts = %d, want the give-up count at once", row.Lifecycle.Attempts)
+	}
+	if len(*faults) != 1 || !strings.Contains(row.Lifecycle.Fault, "could not refresh") {
+		t.Fatalf("escalations = %d, fault = %q, want one raised fault naming the refresh", len(*faults), row.Lifecycle.Fault)
+	}
+	fake.mu.Lock()
+	n := fake.requests
+	fake.mu.Unlock()
+	if n != 0 {
+		t.Errorf("X was asked %d times with no token, want 0", n)
+	}
+}
+
+// A token X refuses and a refresh that finds the grant gone is the same reconnect, reached through the read.
+func TestAnXRefusedTokenWithADeadGrantIsAReconnectFault(t *testing.T) {
+	fake := &xcFake{goodToken: "never", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.retokenFor = func(context.Context, int64, string) (*db.PlatformAccount, error) {
+		return nil, fmt.Errorf("could not refresh the x token: %w", oauth.ErrReconnectRequired)
+	}
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.Attempts < lifecycleGiveUpAfter || len(*faults) != 1 {
+		t.Fatalf("attempts = %d, escalations = %d, want the give-up count and one fault", row.Lifecycle.Attempts, len(*faults))
+	}
+}
+
+// Even without a refresher, a refused token reads as a reconnect rather than as twenty retries.
+func TestAnXRefusedTokenWithNoRefresherStillSaysReconnect(t *testing.T) {
+	fake := &xcFake{goodToken: "never", state: oauth.XStateRunning, id: "bc-1", active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	row := xcSweep(t, c, store)
+	if !strings.Contains(row.Lifecycle.Fault, "reconnect the X account") || strings.Contains(row.Lifecycle.Fault, "://") {
+		t.Fatalf("fault = %q, want the reconnect instruction and no URL", row.Lifecycle.Fault)
+	}
+}
+
+// staleThenFresh wires a token source that hands out a token X refuses, and a forced refresh that returns the good one.
+func staleThenFresh(c *lifecycleCoordinator) *[]string {
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}, nil
+	}
+	var rejected []string
+	c.retokenFor = func(_ context.Context, _ int64, bad string) (*db.PlatformAccount, error) {
+		rejected = append(rejected, bad)
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "fresh"}, nil
+	}
+	return &rejected
+}
+
+// A DELETED DESTINATION WHOSE TOKEN X REVOKED, BUT WHOSE REFRESH TOKEN STILL WORKS, IS STILL ENDED. The orphan pass
+// refreshes once on a refused token instead of counting the refusal against its give-up budget.
+//
+// MUTATION, internal/api/lifecycle.go, endOrphan: call prov.BroadcastState / TransitionBroadcast directly with
+// acct.AccessToken instead of through withRetoken. Observed: FAIL -- ended 0, orphan attempts counted.
+func TestADeletedXDestinationWithARefusedTokenIsRefreshedAndItsBroadcastEnded(t *testing.T) {
+	fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateRunning, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.sweepOnce(context.Background(), sweepEverything) // tracks it with a good-enough token
+	rejected := staleThenFresh(c)
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+		t.Fatalf("ended %d (state %s), want the deleted destination's broadcast ended after a refresh; refreshes %v", ended, state, *rejected)
+	}
+	if n := c.orphanAttemptCount(5); n != 0 {
+		t.Errorf("orphan attempts = %d, want 0: a recovered refusal is not a failure", n)
+	}
+}
+
+// The END and the go-live transition each refresh once on a refused token. The state read passed with a good token and
+// the token was revoked after it, so the account handed to end/transition is the stale one.
+func TestAnXEndAndGoLiveWithARefusedTokenAreRefreshedAndRetried(t *testing.T) {
+	stale := &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}
+
+	t.Run("end", func(t *testing.T) {
+		fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateRunning, id: "bc-1", seq: 1}
+		c, store, faults := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+		rejected := staleThenFresh(c)
+		prov, _ := oauth.As[oauth.BroadcastLifecycler](c.providers, db.PlatformX)
+		store.mu.Lock()
+		d := *store.rows[5]
+		store.mu.Unlock()
+		c.end(context.Background(), prov, stale, &d, "bc-1", lifecyclePlan{Send: oauth.PhaseComplete, Phase: phaseLive})
+		if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+			t.Fatalf("ended %d (state %s), want one END after a refresh; refreshes %v", ended, state, *rejected)
+		}
+		if len(*faults) != 0 || store.rows[5].Lifecycle.Attempts != 0 {
+			t.Fatalf("escalations %d attempts %d after a recovered END, want none", len(*faults), store.rows[5].Lifecycle.Attempts)
+		}
+	})
+
+	t.Run("go-live", func(t *testing.T) {
+		fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateNotStarted, id: "bc-1", seq: 1}
+		c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+		rejected := staleThenFresh(c)
+		prov, _ := oauth.As[oauth.BroadcastLifecycler](c.providers, db.PlatformX)
+		store.mu.Lock()
+		d := *store.rows[5]
+		store.mu.Unlock()
+		if _, err := c.transition(context.Background(), prov, stale, &d, "bc-1", oauth.PhaseLive); err != nil {
+			t.Fatalf("go-live = %v, want it to succeed after one refresh", err)
+		}
+		if len(*rejected) != 1 || (*rejected)[0] != "stale" {
+			t.Fatalf("forced refreshes = %v, want exactly one, of the refused token", *rejected)
+		}
+	})
 }

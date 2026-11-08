@@ -198,12 +198,60 @@ func (x *X) Refresh(ctx context.Context, clientID, clientSecret, refreshToken st
 		"grant_type":    {"refresh_token"},
 	}, xClientAuth(clientID, clientSecret))
 	if err != nil {
-		return nil, err
+		return nil, xRefreshFailure(err)
 	}
 	if tok.RefreshToken == "" {
 		tok.RefreshToken = refreshToken
 	}
 	return tok, nil
+}
+
+// xRefreshError is a refused refresh in the operator's terms. The raw token-endpoint body stays out of its text; the
+// wrapped error keeps it for errors.Is.
+type xRefreshError struct {
+	msg   string
+	inner error
+	gone  bool
+}
+
+func (e *xRefreshError) Error() string { return e.msg }
+func (e *xRefreshError) Unwrap() error { return e.inner }
+
+// Is makes a refresh X refused because the grant is gone satisfy ErrReconnectRequired.
+func (e *xRefreshError) Is(target error) bool { return target == ErrReconnectRequired && e.gone }
+
+// xRefreshFailure words a failed refresh from the token endpoint's error and error_description. Anything that is not a
+// token-endpoint answer (a network failure) passes through unchanged.
+//
+// PROVISIONAL: invalid_grant is RFC 6749's code for a dead refresh token. X's docs describe it only for the OAuth 1.0a
+// exchange, and X has been seen answering a dead OAuth 2.0 refresh token with 400 invalid_request ("Value passed for
+// the token was invalid"), so that pairing is treated as a gone grant too. invalid_client is NOT: the developer
+// credentials are wrong, which reconnecting the account cannot fix.
+func xRefreshFailure(err error) error {
+	var te *tokenStatusError
+	if !errors.As(err, &te) {
+		return err
+	}
+	var body struct {
+		Error string `json:"error"`
+		Desc  string `json:"error_description"`
+	}
+	_ = json.Unmarshal([]byte(te.body), &body)
+	switch {
+	case body.Error == "invalid_client" || body.Error == "unauthorized_client":
+		return &xRefreshError{inner: err, msg: fmt.Sprintf("X rejected the app credentials (%s): check the client id and secret in Settings → Platforms", body.Error)}
+	case grantGone(te.body) || (body.Error == "invalid_request" && strings.Contains(strings.ToLower(body.Desc), "token")):
+		code := body.Error
+		if code == "" {
+			code = "invalid_grant"
+		}
+		return &xRefreshError{inner: err, gone: true, msg: fmt.Sprintf("X no longer accepts this account's refresh token (%s): reconnect the X account in Settings → Platforms", code)}
+	}
+	msg := fmt.Sprintf("X would not refresh the token (HTTP %d", te.code)
+	if body.Error != "" {
+		msg += ", " + body.Error
+	}
+	return &xRefreshError{inner: err, msg: msg + ")"}
 }
 
 // ------------------------------------------------------------------ transport
@@ -214,13 +262,61 @@ func (x *X) Refresh(ctx context.Context, clientID, clientSecret, refreshToken st
 type xStatusError struct {
 	Status   int
 	Problems string
+	// Types holds the problem type URIs X sent. They are kept out of Problems, which is operator text and must not
+	// carry URLs, and are what the classifiers match on.
+	Types string
 }
 
 func (e *xStatusError) Error() string {
-	if e.Problems == "" {
-		return fmt.Sprintf("X returned %d", e.Status)
+	msg := fmt.Sprintf("X returned %d", e.Status)
+	if e.Problems != "" {
+		msg += ": " + e.Problems
 	}
-	return fmt.Sprintf("X returned %d: %s", e.Status, e.Problems)
+	if e.credentialRejected() {
+		msg += "; the connected X account's token was refused, so reconnect the X account in Settings → Platforms"
+	}
+	return msg
+}
+
+// credentialRejected reports an answer that says the token itself was not accepted, as against an account X will not
+// serve. X answers a bad or revoked user bearer with 403 "Unsupported Authentication" (it parses the token as an
+// app-only one, probed live) rather than 401, so the 403 is told apart by its problem type or title. The documented
+// 403s (about:blank for an ineligible account, missing-scopes) are NOT credential failures.
+func (e *xStatusError) credentialRejected() bool {
+	return xCredentialRejectedText(e.Status, e.Problems+" "+e.Types)
+}
+
+// xCredentialRejectedText is the shared test: any 401, or a 403 whose problem names unsupported-authentication or
+// unauthorized.
+func xCredentialRejectedText(status int, problem string) bool {
+	if status == http.StatusUnauthorized {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	p := strings.ToLower(problem)
+	return strings.Contains(p, "unsupported-authentication") || strings.Contains(p, "unsupported authentication") ||
+		strings.Contains(p, "unauthorized")
+}
+
+// Is lets errors.Is(err, ErrReconnectRequired) see a token X refused, so a caller that stops on a gone grant stops on
+// this too.
+func (e *xStatusError) Is(target error) bool {
+	return target == ErrReconnectRequired && e.credentialRejected()
+}
+
+// XCredentialRejected reports whether err is X refusing the access token itself (a 401, or a 403 "Unsupported
+// Authentication"). A forced refresh followed by one retry may fix it.
+func XCredentialRejected(err error) bool {
+	var se *xStatusError
+	return errors.As(err, &se) && se.credentialRejected()
+}
+
+// XCredentialRejectedProblem is XCredentialRejected for a caller that holds the status and problem text rather than
+// an xStatusError (the chat adapter's own HTTP).
+func XCredentialRejectedProblem(status int, problem string) bool {
+	return xCredentialRejectedText(status, problem)
 }
 
 // do performs one authenticated JSON call. payload nil sends no body. out nil
@@ -234,7 +330,10 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 // doStatus is do, and it also returns the HTTP status of an answer that was read (0 when none was).
 func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, payload, out any) (int, error) {
 	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
-	if until, held := x.calls.heldUntil(fp); held {
+	// X's limits are per endpoint, so a hold is kept per token and route: a read window that ran out must not
+	// refuse the go-live or END call.
+	holdKey := xHoldKey(fp, method, endpoint)
+	if until, held := x.calls.heldUntil(holdKey); held {
 		return 0, &xRateLimitedError{Until: until, Held: true}
 	}
 	var body io.Reader
@@ -263,13 +362,13 @@ func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, 
 	x.calls.noteDate(fp, resp.Header.Get("Date"))
 
 	if until, limited := x.calls.rateHoldFrom(resp); limited {
-		x.calls.hold(fp, until)
+		x.calls.hold(holdKey, until)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			return resp.StatusCode, &xRateLimitedError{Until: until, Problems: xProblemText(raw)}
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw)}
+		return resp.StatusCode, &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw), Types: xProblemTypes(raw)}
 	}
 	if readErr != nil {
 		// A body cut off mid-read is not an answer: a truncated body that happens to parse, or a write whose
@@ -280,6 +379,30 @@ func (x *X) doStatus(ctx context.Context, method, endpoint, accessToken string, 
 		return resp.StatusCode, nil
 	}
 	return resp.StatusCode, json.Unmarshal(raw, out)
+}
+
+// XProblemText is X's own words from an error body, for the chat adapter. See xProblemText.
+func XProblemText(raw []byte) string { return xProblemText(raw) }
+
+// XProblemTypes is the problem type URIs of an error body (see xStatusError.Types).
+func XProblemTypes(raw []byte) string { return xProblemTypes(raw) }
+
+// xProblemTypes joins the type of every problem object in an error body. Nothing but the types is read.
+func xProblemTypes(raw []byte) string {
+	var env struct {
+		Errors []xProblem `json:"errors"`
+		xProblem
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	var parts []string
+	for _, p := range append(env.Errors, env.xProblem) {
+		if t := strings.TrimSpace(p.Type); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // xProblemText extracts X's own words from an error body and nothing else. A
@@ -405,8 +528,19 @@ func (x *X) CheckEntitlement(ctx context.Context, clientID, accessToken string) 
 		return nil
 	}
 	var se *xStatusError
-	if errors.As(err, &se) && (se.Status == http.StatusForbidden || se.Status == http.StatusPreconditionFailed) {
-		return fmt.Errorf("%w: %s", ErrNotEntitled, err.Error())
+	if errors.As(err, &se) {
+		// A refused token is not a refused tier: X answers a bad or revoked bearer with 403 as well, and calling that
+		// "reserved for a paid tier" sends the operator to the wrong fix. The error already says to reconnect.
+		if se.credentialRejected() {
+			return err
+		}
+		if se.Status == http.StatusForbidden && strings.Contains(se.Types+" "+se.Problems, "missing-scopes") {
+			return fmt.Errorf("the connected X token lacks a permission the Livestream API needs, so reconnect the X account to grant it: %w (%w)",
+				ErrReconnectRequired, err)
+		}
+		if se.Status == http.StatusForbidden || se.Status == http.StatusPreconditionFailed {
+			return fmt.Errorf("%w: %s", ErrNotEntitled, err.Error())
+		}
 	}
 	return err
 }
@@ -584,11 +718,15 @@ type XBroadcast struct {
 	// CreatedAtMS is when X created the broadcast (milliseconds since the epoch, as a string). It is the only
 	// documented field that says whether a broadcast is one polyemesis just started, so adoption reads it.
 	CreatedAtMS string `json:"created_at_ms"`
+	// TotalWatching is the live viewer count, a decimal string, as X's Broadcast schema describes it ("total_watching:
+	// live viewers"; total_watched is the cumulative figure). It is empty when X sent none, which is not zero: it
+	// is read through XLiveViewers, which keeps absent as nil.
+	TotalWatching string `json:"total_watching"`
 }
 
 // xBroadcastFields is the broadcast.fields parameter, sent explicitly on every
 // read so an empty field means X sent nothing rather than that it was not asked.
-const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms,created_at_ms"
+const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms,created_at_ms,total_watching"
 
 // xProblem is X's typed error object. Two shapes reach it: the RFC 7807 problem
 // (title, detail, type) X uses for a 400, and {error_type, message}, which the
@@ -607,9 +745,12 @@ type xProblem struct {
 func (p xProblem) String() string {
 	parts := make([]string, 0, 5)
 	for _, s := range []string{p.Title, p.Message, p.Detail, p.ErrorType, p.Type} {
-		if strings.TrimSpace(s) != "" {
-			parts = append(parts, s)
+		// A type is a URI (https://api.twitter.com/2/problems/...). It identifies the problem to a program and
+		// tells an operator nothing, so it stays out of the text; xStatusError.Types keeps it for the classifiers.
+		if strings.TrimSpace(s) == "" || strings.Contains(s, "://") {
+			continue
 		}
+		parts = append(parts, s)
 	}
 	return strings.Join(parts, ": ")
 }
@@ -911,6 +1052,10 @@ type XPublish struct {
 	// ChatOption is nil when unset, which leaves the field out so X applies its
 	// default. Otherwise it must be 0 to 6, and it is sent as a JSON integer.
 	ChatOption *int
+	// Locale is the broadcast language, sent as the go-live "locale" string. Empty leaves the field out so X uses its
+	// own. X's page gives "en" as its example and states no stricter format, so the value is passed through trimmed
+	// and X's refusal, if any, is shown in X's words.
+	Locale string
 	// ShouldNotTweet suppresses the announcement post X makes by default. False
 	// leaves the field out, so X posts as it always has. It is sent as a JSON
 	// boolean, which is the only type the route accepts.
@@ -940,6 +1085,11 @@ func classifyXGoLive(err error, pending bool, broadcastID string) error {
 	if !errors.As(err, &se) {
 		return wrapped
 	}
+	if se.credentialRejected() {
+		// A refused token is not a refused account: a reconnect or a refresh fixes it, so it must not read as the
+		// terminal "not eligible". It stays an ordinary error that satisfies ErrReconnectRequired.
+		return wrapped
+	}
 	id := broadcastID
 	if pending {
 		id = ""
@@ -956,7 +1106,7 @@ func classifyXGoLive(err error, pending bool, broadcastID string) error {
 	// Both 409s share a type, so they are told apart by the doc's own phrases; a 409 that matches neither is not assumed
 	// to be the harmless wait and is returned as an ordinary error, which the coordinator counts and escalates.
 	switch {
-	case se.Status == http.StatusForbidden && strings.Contains(se.Problems, "missing-scopes"):
+	case se.Status == http.StatusForbidden && strings.Contains(se.Types+" "+se.Problems, "missing-scopes"):
 		return refuse(RefusalMissingScopes, "missingScopes")
 	case se.Status == http.StatusForbidden:
 		return refuse(RefusalNotEligible, "notEligible")
@@ -1033,6 +1183,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	body := map[string]any{}
 	if title := strings.TrimSpace(p.Title); title != "" {
 		body["title"] = title
+	}
+	if loc := strings.TrimSpace(p.Locale); loc != "" {
+		body["locale"] = loc
 	}
 	if p.ChatOption != nil {
 		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {

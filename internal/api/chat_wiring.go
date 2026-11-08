@@ -472,6 +472,18 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 	}
 }
 
+// chatTokenRefresher is the forced refresh an adapter asks for when the platform
+// refuses the token it was given, which the stored expiry cannot predict.
+func (s *Server) chatTokenRefresher(id int64) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, rejected string) (string, error) {
+		acct, err := s.tokenForRejected(ctx, id, rejected)
+		if err != nil {
+			return "", err
+		}
+		return acct.AccessToken, nil
+	}
+}
+
 // chatAdapter builds the adapter for one account, or explains why it cannot.
 func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Adapter, error) {
 	switch a.Platform {
@@ -578,6 +590,9 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			AccountRef: a.AccountRef,
 			Channel:    a.AccountName,
 			Token:      s.chatToken(a.ID),
+			// A token X refuses before its stored expiry is refreshed once and
+			// the call retried; a grant that is gone ends the run Fatal.
+			RefreshToken: s.chatTokenRefresher(a.ID),
 			// The webhook calls need an app-only bearer token, which the
 			// operator supplies from the X developer console. Nothing here
 			// mints it. Empty makes the adapter's Run refuse with a Fatal

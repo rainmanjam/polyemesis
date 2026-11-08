@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,6 +62,11 @@ type apiError struct {
 	Header http.Header
 	// RetryAfter is the parsed Retry-After header, zero when absent or invalid.
 	RetryAfter time.Duration
+	// Problem is the platform's own words from an RFC 7807 or {errors:[...]} body, with no URLs and nothing else
+	// from the body (see oauth.XProblemText). Types is the problem type URIs, for matching, never for display.
+	// None of Problem, Types or Header is part of Error().
+	Problem string
+	Types   string
 }
 
 // payload is the body to parse: whole when captured, truncated otherwise.
@@ -99,14 +105,16 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 }
 
 func statusOf(err error) int {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Status
 	}
 	return 0
 }
 
 func reasonOf(err error) string {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Reason
 	}
 	return ""
@@ -186,6 +194,9 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			Raw:        raw[:min(len(raw), 4096)],
 			Header:     resp.Header,
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
+			Problem: oauth.XProblemText(raw),
+			Types:   oauth.XProblemTypes(raw),
 		}
 	}
 	if out == nil || len(raw) == 0 {

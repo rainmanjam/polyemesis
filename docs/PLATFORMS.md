@@ -174,6 +174,22 @@ is off the operator sees "needs X Livestream, which is switched off
 X's producer tooling works exactly as before. The paste also remains the way in
 for an account that cannot use the API.
 
+Beyond the single mute and delete, the chat side also has, all built from X's
+documentation and **none run against a live account** (the matrix cells stay
+Unverified): `GET /2/broadcasts/chat/mutes` lists who is muted with the end of
+each timed mute (`broadcast_chat_mute.fields=end_at_ms`; the owner's own mutes
+only), `POST /2/broadcasts/chat/mutes` with `broadcast_id` and `message_id`
+mutes and removes one message in a single call (the broadcast must be live), and
+`GET`/`POST /2/broadcasts/chat/moderators` plus `DELETE
+/2/broadcasts/chat/moderators/{user_id}` manage up to 20 chat moderators, who act
+on every broadcast the account hosts, not one. Viewer count is the running
+broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
+`GET /2/broadcasts`, read by the analytics sampler through its own seam rather
+than as a `LiveStatter`. All of it uses scopes the connection already holds
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), so scope
+version 2 is unchanged. A chat message's id is the `timestamp` X answers a send
+with (nanoseconds, as a string), which is also what delete takes as `message_id`.
+
 The calls use the routes in X's
 [migration guide](https://docs.x.com/livestream-api/migration-guide): `POST
 /2/sources` and `GET /2/sources` (the owner comes from the access token),
