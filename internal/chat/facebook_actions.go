@@ -170,12 +170,19 @@ func (f *FacebookAdapter) dropPageToken(err error) {
 // and Ban needs that id, so a Page account reads with its Page token. A
 // profile, or a Page whose token cannot be minted, keeps the user token.
 func (f *FacebookAdapter) commentToken(ctx context.Context) TokenFunc {
+	tok, _ := f.commentTokenSource(ctx)
+	return tok
+}
+
+// commentTokenSource is commentToken plus whether it is a Page token, so a
+// caller can tell a rejected Page token from a rejected user token.
+func (f *FacebookAdapter) commentTokenSource(ctx context.Context) (TokenFunc, bool) {
 	if f.cfg.PageAccess != nil {
 		if _, tok, err := f.cachedPageAccess(ctx); err == nil && tok != "" {
-			return StaticToken(tok)
+			return StaticToken(tok), true
 		}
 	}
-	return f.cfg.Token
+	return f.cfg.Token, false
 }
 
 // Ban blocks a person from the Page: POST /{page-id}/blocked?user={id}.

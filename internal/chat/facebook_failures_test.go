@@ -45,7 +45,7 @@ func TestFacebookClassifyUnderstandsGraphEnvelopesOnHTTP400(t *testing.T) {
 	}{
 		{"expired token as 400/190 is fatal", fbBody190, false, true, StateFailed},
 		{"api session 102 is fatal", `{"error":{"message":"Session key invalid","type":"OAuthException","code":102}}`, false, true, StateFailed},
-		{"a deleted live video as 400/100/33 ends the chat", fbBody100, true, false, StateStopped},
+		{"400/100/33 is ambiguous (gone or no access) so the chat keeps polling", fbBody100, false, false, StateDegraded},
 		{"a throttle is neither fatal nor terminal", fbBody4, false, false, ""},
 	}
 	for _, tc := range tests {
@@ -290,5 +290,97 @@ func TestFacebookModerationUnderstandsGraphEnvelopes(t *testing.T) {
 				t.Fatalf("want a clean wait sentence, got %v", err)
 			}
 		})
+	}
+}
+
+func TestFacebookClassifyEndsTheChatOnlyOnA404ForTheVideo(t *testing.T) {
+	srv := fbFailServer(t, http.StatusNotFound, `{"error":{"message":"gone","code":803}}`, nil)
+	a := fbAdapter(t, srv.URL, nil)
+	_, err := a.poll(context.Background(), "live-1", SinkFunc(func(Message) {}))
+	if done, fatal := a.classify(err); !done || fatal != nil || a.Health().State != StateStopped {
+		t.Fatalf("done=%v fatal=%v state=%q", done, fatal, a.Health().State)
+	}
+}
+
+func TestFacebookRunKeepsTheAmbiguousVideoGoneDetail(t *testing.T) {
+	srv := fbFailServer(t, http.StatusBadRequest, fbBody100, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	a := fbAdapter(t, srv.URL, func(c *FacebookConfig) {
+		c.Sleep = func(context.Context, time.Duration) bool { cancel(); return false }
+	})
+	_ = a.Run(ctx, SinkFunc(func(Message) {}))
+	h := a.Health()
+	if h.State != StateDegraded || !strings.Contains(h.Detail, "lost access") {
+		t.Fatalf("health = %+v", h)
+	}
+}
+
+// A Page token that alone was invalidated must not end a chat whose user token
+// is fine: drop it, mint a fresh one, retry once.
+func TestFacebookPollRetriesOnceWithAFreshPageTokenAfter190(t *testing.T) {
+	var mints atomic.Int32
+	var auths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		if strings.HasSuffix(r.Header.Get("Authorization"), "page-old") {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, fbBody190)
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":"c1","message":"hi","created_time":"2026-03-01T19:59:59+0000","from":{"id":"u","name":"U"}}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	a := fbAdapter(t, srv.URL, func(c *FacebookConfig) {
+		c.PageAccess = func(context.Context) (string, string, error) {
+			if mints.Add(1) == 1 {
+				return "123", "page-old", nil
+			}
+			return "123", "page-new", nil
+		}
+	})
+	var got []Message
+	n, err := a.poll(context.Background(), "live-1", SinkFunc(func(m Message) { got = append(got, m) }))
+	if err != nil || n != 1 || len(got) != 1 {
+		t.Fatalf("n=%d err=%v got=%d", n, err, len(got))
+	}
+	if mints.Load() != 2 || len(auths) != 2 || !strings.HasSuffix(auths[1], "page-new") {
+		t.Fatalf("mints=%d auths=%v", mints.Load(), auths)
+	}
+
+	// Through Run: the chat stays Live.
+	mints.Store(0)
+	auths = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	b := fbAdapter(t, srv.URL, func(c *FacebookConfig) {
+		c.PageAccess = a.cfg.PageAccess
+		c.Sleep = func(context.Context, time.Duration) bool { cancel(); return false }
+	})
+	if err := b.Run(ctx, SinkFunc(func(Message) {})); err != nil {
+		t.Fatalf("a dead Page token with a good user token ended the chat: %v", err)
+	}
+	if b.Health().State != StateLive {
+		t.Fatalf("state = %q", b.Health().State)
+	}
+}
+
+// If the retry is rejected too, the login really is gone.
+func TestFacebookPollIsFatalWhenTheRetryAlso190s(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, fbBody190)
+	}))
+	t.Cleanup(srv.Close)
+	a := fbAdapter(t, srv.URL, func(c *FacebookConfig) { c.PageAccess = fbPage("123", "page-tok") })
+	_, err := a.poll(context.Background(), "live-1", SinkFunc(func(Message) {}))
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if _, fatal := a.classify(err); fatal == nil {
+		t.Fatal("a second 190 must be fatal")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want exactly one retry", calls.Load())
 	}
 }

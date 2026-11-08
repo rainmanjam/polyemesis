@@ -78,6 +78,41 @@ func TestFacebookRefreshFailuresThatReconnectingCannotFix(t *testing.T) {
 	}
 }
 
+// The refresh path must honour the same wait signals as the metadata calls, and
+// treat code 341 (temporary application limit) as a throttle.
+func TestFacebookRefreshRateLimitHonoursWaitHeaders(t *testing.T) {
+	tests := []struct {
+		name, body string
+		headers    map[string]string
+		want       string
+	}{
+		{"Retry-After", `{"error":{"message":"(#4) Application request limit reached","code":4}}`,
+			map[string]string{"Retry-After": "120"}, "2m0s"},
+		{"BUC regain time", `{"error":{"message":"(#80001) too many calls","code":80001}}`,
+			map[string]string{"X-Business-Use-Case-Usage": `{"1":[{"estimated_time_to_regain_access":7}]}`}, "7m0s"},
+		{"code 341 is a throttle", `{"error":{"message":"(#341) Application limit reached","code":341}}`,
+			map[string]string{"Retry-After": "60"}, "1m0s"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+				for k, v := range tc.headers {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			_, err := fb.Refresh(context.Background(), "cid", "secret", "old-token")
+			if err == nil || errors.Is(err, ErrReconnectRequired) {
+				t.Fatalf("want a non-reconnect failure, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "rate-limiting") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("%q lacks rate-limiting / %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestFbAdviceHandlesRateLimitsAndMissingObjects(t *testing.T) {
 	tests := []struct {
 		name    string

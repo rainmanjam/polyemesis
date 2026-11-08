@@ -521,6 +521,9 @@ type tokenStatusError struct {
 	// full is the untruncated body, for parsing (see statusError.full): body is
 	// cut at 300 characters for display, and a Graph envelope can be longer.
 	full string
+	// header is the response header, kept so a rate-limit refusal can report
+	// the wait Graph asked for (Retry-After, X-Business-Use-Case-Usage).
+	header http.Header
 }
 
 // payload is the body to parse: whole when captured, truncated otherwise.
@@ -593,7 +596,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body), full: string(body)}
+		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body), full: string(body), header: resp.Header.Clone()}
 	}
 
 	var out struct {

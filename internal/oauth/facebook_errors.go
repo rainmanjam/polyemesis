@@ -31,10 +31,11 @@ const maxGraphWait = 30 * time.Minute
 func IsGraphTokenDead(code int) bool { return code == 190 || code == 102 }
 
 // IsGraphRateLimit reports whether a Graph error code is a throttle: 4 (app),
-// 17 (user), 32 (Pages API), 613 (custom) and the 80000-80014 BUC family.
+// 17 (user), 32 (Pages API), 341 (application limit, temporary), 613 (custom)
+// and the 80000-80014 BUC family.
 func IsGraphRateLimit(code int) bool {
 	switch code {
-	case 4, 17, 32, 613:
+	case 4, 17, 32, 341, 613:
 		return true
 	}
 	return code >= 80000 && code <= 80014
@@ -121,7 +122,7 @@ func fbRefreshError(err error) error {
 			"Facebook said: %s", metaMessage(ge))
 	case IsGraphRateLimit(ge.Code):
 		return fmt.Errorf("Facebook is rate-limiting polyemesis, so the token could not be refreshed. %s "+
-			"Facebook said: %s", graphWaitAdvice(0), metaMessage(ge))
+			"Facebook said: %s", graphWaitAdvice(GraphWait(te.header)), metaMessage(ge))
 	}
 	return fmt.Errorf("Facebook's token endpoint returned %d: %s", te.code, GraphErrorSummary(te.payload()))
 }

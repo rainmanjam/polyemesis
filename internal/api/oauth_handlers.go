@@ -1677,29 +1677,36 @@ func (s *Server) RefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			accts, err := s.store.ListPlatformAccounts()
-			if err != nil {
-				continue
-			}
-			for _, a := range accts {
-				if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
-					continue
-				}
-				if s.acctHealth.isDead(a.ID, a.ExpiresAt) {
-					// The platform refused the grant itself; retrying every
-					// ten minutes forever cannot help. A reconnect stores a new
-					// expiry, which lifts this.
-					continue
-				}
-				rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				if _, err := s.tokenFor(rctx, a.ID); err != nil {
-					s.log.Warn("token refresh failed", "platform", a.Platform, "account", a.AccountName, "err", err)
-				} else {
-					s.log.Info("token refreshed", "platform", a.Platform, "account", a.AccountName)
-				}
-				cancel()
-			}
+			s.refreshDue(ctx)
 		}
+	}
+}
+
+// refreshDue is one RefreshLoop tick: refresh every account whose token is
+// within 30 minutes of expiring, skipping those whose grant the platform has
+// already refused for good.
+func (s *Server) refreshDue(ctx context.Context) {
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return
+	}
+	for _, a := range accts {
+		if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
+			continue
+		}
+		if s.acctHealth.isDead(a.ID, a.ExpiresAt) {
+			// The platform refused the grant itself; retrying every
+			// ten minutes forever cannot help. A reconnect stores a new
+			// expiry, which lifts this.
+			continue
+		}
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if _, err := s.tokenFor(rctx, a.ID); err != nil {
+			s.log.Warn("token refresh failed", "platform", a.Platform, "account", a.AccountName, "err", err)
+		} else {
+			s.log.Info("token refreshed", "platform", a.Platform, "account", a.AccountName)
+		}
+		cancel()
 	}
 }
 
