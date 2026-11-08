@@ -40,10 +40,13 @@ import type {
   BulkDestReport,
   DelayDumpResult,
   ChatModerationResult,
+  ChatModerator,
   ChatOverview,
   ChatPlatform,
   ChatSearchResult,
   ChatSendResponse,
+  ChatMute,
+  XChatModerator,
   ChatSettings,
   ChatUserCard,
   ChatFlagsResult,
@@ -419,6 +422,16 @@ export function mutationWarnings(body: unknown): string[] {
   const b = body as { reconcileFailed?: unknown; warnings?: unknown };
   const list = Array.isArray(b.warnings) ? b.warnings.filter((w): w is string => typeof w === "string") : [];
   return b.reconcileFailed === true ? list.slice(0, -1) : list;
+}
+
+/** The query string of one Twitch channel tool call; see api.twitchTool. The
+ *  path itself stays a template literal at each call so the console contract
+ *  test can see which server route it reaches. */
+function twitchToolQuery(account: string | undefined, params: Record<string, string> = {}) {
+  const q = new URLSearchParams(params);
+  if (account) q.set("account", account);
+  const qs = q.toString();
+  return qs ? `?${qs}` : "";
 }
 
 const get = <T,>(p: string) => request<T>(p);
@@ -1437,18 +1450,62 @@ export const api = {
     userId: string;
     seconds?: number;
     reason?: string;
+    /** X only: mute and remove this message in the same platform call. */
+    messageId?: string;
   }) => {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     if (m.seconds && m.seconds > 0) q.set("seconds", String(m.seconds));
     if (m.reason) q.set("reason", m.reason);
+    if (m.messageId) q.set("messageId", m.messageId);
     return post<ChatModerationResult>(`/chat/bans?${q.toString()}`, {});
+  },
+
+  /** X's muted viewers, with when each timed mute ends. */
+  getChatMutes: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ mutes: ChatMute[]; truncated?: boolean }>(`/chat/mutes?${q.toString()}`);
+  },
+  /** X's chat moderators. They act across every broadcast the account hosts. */
+  getChatModerators: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ moderators: XChatModerator[]; appliesToAllBroadcasts: boolean }>(`/chat/moderators?${q.toString()}`);
+  },
+  addChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return post<{ ids: string[] }>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return del<{ ids: string[] }>(`/chat/moderators?${q.toString()}`);
   },
 
   unbanChatUser: (m: { platform: ChatPlatform; account?: string; userId: string }) => {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     return del<ChatModerationResult>(`/chat/bans?${q.toString()}`);
+  },
+
+  /** Who may moderate a YouTube live chat. Costs 50 quota units a read, so it
+   *  is only ever called on an explicit request. */
+  youTubeChatModerators: (m: { platform: ChatPlatform; account?: string }) => {
+    const q = new URLSearchParams({ platform: m.platform });
+    if (m.account) q.set("account", m.account);
+    return get<{ moderators: ChatModerator[] }>(`/chat/moderators?${q.toString()}`);
+  },
+  addYouTubeChatModerator: (m: { platform: ChatPlatform; account?: string; channelId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, channelId: m.channelId });
+    if (m.account) q.set("account", m.account);
+    return post<ChatModerator>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeYouTubeChatModerator: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return del<ChatModerationResult>(`/chat/moderators?${q.toString()}`);
   },
 
   /** One person's recent messages, from this server's own scrollback. No
@@ -1504,6 +1561,21 @@ export const api = {
    *  or is not an overlay kind. */
   replayActivity: (id: string) =>
     post<{ replayed: boolean }>(`/activity/${encodeURIComponent(id)}/replay`),
+  /** Twitch channel tools: one /chat/twitch/{resource} path, the method is the
+   *  verb. Reads and deletes carry their parameters in the query; the rest in a
+   *  JSON body. See docs/API.md, "Twitch channel tools". */
+  twitchTool: {
+    read: <T,>(resource: string, account: string | undefined, params: Record<string, string> = {}) =>
+      get<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
+    post: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      post<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body ?? {}),
+    put: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      put<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
+    patch: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      patch<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
+    remove: <T,>(resource: string, account: string | undefined, params: Record<string, string>) =>
+      del<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
+  },
 
   // --- platforms ---
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),

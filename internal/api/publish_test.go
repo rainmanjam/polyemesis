@@ -547,9 +547,12 @@ func TestTargetsQuoteTheUploadCostTheRegistryCharges(t *testing.T) {
 	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/targets?clip="+strconv.FormatInt(f.clip, 10), nil, http.StatusOK), &targets)
 	for _, p := range targets.Platforms {
 		if p.ID == "youtube" {
-			want := 1600
+			want := 1
 			if p.QuotaUnits != want {
 				t.Fatalf("quotaUnits = %d, want %d", p.QuotaUnits, want)
+			}
+			if platform.YouTubeUploadDailyCalls != 100 {
+				t.Fatalf("videos.insert bucket = %d calls a day; the table and the 15 locale strings say 100", platform.YouTubeUploadDailyCalls)
 			}
 			if got := platform.YouTubeCostUploadVideo; got != want {
 				t.Fatalf("the registry charges %d for an upload and the API quotes %d", got, want)

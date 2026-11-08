@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ban, ExternalLink, Reply, Timer, Trash2, UserSearch } from "lucide-react";
+import { Ban, ExternalLink, Reply, Timer, Trash2, UserSearch, VolumeX } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +58,11 @@ import type { ChatMessage } from "@/lib/types";
    still on the overlay. The gate is now lib/chatModeration.ts, which answers
    about ONE ACTION and hands back the sentence to put on screen.
    =========================================================================== */
+
+/** The message ids X's mute call takes. X's own ids are digits; a line that
+ *  arrived without one, or an echo that fell back to polyemesis's own, cannot
+ *  be removed that way, so the item stays inert instead of failing on press. */
+const X_MUTE_MESSAGE_ID = /^[1-9][0-9]{0,18}$/;
 
 export interface MenuAnchor {
   x: number;
@@ -307,6 +312,33 @@ export function ChatMessageMenu({
           <Ban className="mr-2 h-3.5 w-3.5 text-down" />
           {t("chatMenu.banPermanently")}
         </DropdownMenuItem>
+
+        {/* X only: its mute call can also remove one message, in the same
+            request. Shown beside the ban rather than replacing delete, since
+            delete alone leaves the viewer free to post again. */}
+        {message.platform === ("x" as ChatMessage["platform"]) && (
+          <DropdownMenuItem
+            disabled={!person.ok || !X_MUTE_MESSAGE_ID.test(message.id)}
+            title={person.reason || t("chatMenu.muteAndRemoveTitle")}
+            onSelect={() => {
+              close();
+              void run(
+                t("chatMenu.muteAndRemoved", { name: message.author.name }),
+                t("chatMenu.muteAndRemoveFailed", { name: message.author.name }),
+                () =>
+                  api.banChatUser({
+                    platform: message.platform,
+                    account: message.account,
+                    userId: authorId,
+                    messageId: message.id,
+                  }),
+              );
+            }}
+          >
+            <VolumeX className="mr-2 h-3.5 w-3.5" />
+            {t("chatMenu.muteAndRemove")}
+          </DropdownMenuItem>
+        )}
 
         {/* STILL RENDERED when the platform cannot delete, and inert with the
             reason — the rule every other item here follows, and the one this

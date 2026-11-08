@@ -28,7 +28,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 const youtube: PublishPlatform = {
-  id: "youtube", enabled: true, configured: true, quotaUnits: 1600,
+  id: "youtube", enabled: true, configured: true, quotaUnits: 1,
   privacy: { default: "private", options: ["private", "unlisted", "public"], forced: false },
   accounts: [{ id: 7, name: "My Channel" }],
 };

@@ -27,22 +27,22 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
-|---|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
-| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works |
-| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
-| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible |
-| *Everything else* | — | By hand | — | — | — | — | — | — |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end | Channel tools |
+|---|---|---|---|---|---|---|---|---|---|
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works | Unverified |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible | Unverified |
+| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible | Unverified |
+| *Everything else* | — | By hand | — | — | — | — | — | — | — |
 
 | Term | Means |
 |---|---|
@@ -173,6 +173,22 @@ is off the operator sees "needs X Livestream, which is switched off
 (POLYEMESIS_X_LIVESTREAM=0)", and pasting the server URL and stream key from
 X's producer tooling works exactly as before. The paste also remains the way in
 for an account that cannot use the API.
+
+Beyond the single mute and delete, the chat side also has, all built from X's
+documentation and **none run against a live account** (the matrix cells stay
+Unverified): `GET /2/broadcasts/chat/mutes` lists who is muted with the end of
+each timed mute (`broadcast_chat_mute.fields=end_at_ms`; the owner's own mutes
+only), `POST /2/broadcasts/chat/mutes` with `broadcast_id` and `message_id`
+mutes and removes one message in a single call (the broadcast must be live), and
+`GET`/`POST /2/broadcasts/chat/moderators` plus `DELETE
+/2/broadcasts/chat/moderators/{user_id}` manage up to 20 chat moderators, who act
+on every broadcast the account hosts, not one. Viewer count is the running
+broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
+`GET /2/broadcasts`, read by the analytics sampler through its own seam rather
+than as a `LiveStatter`. All of it uses scopes the connection already holds
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), so scope
+version 2 is unchanged. A chat message's id is the `timestamp` X answers a send
+with (nanoseconds, as a string), which is also what delete takes as `message_id`.
 
 The calls use the routes in X's
 [migration guide](https://docs.x.com/livestream-api/migration-guide): `POST
@@ -532,7 +548,16 @@ every poll spends from a daily allowance:
 |---|---|---|
 | `liveChatMessages.list` | 5 | every chat poll while a broadcast is live |
 | Looking for a broadcast to attach to | 1 | every 30s when nothing is live, backing off to every 5 minutes |
-| Sending, deleting or banning | 50 | per action |
+| Sending or deleting a chat message | 20 | per action |
+| Banning or timing out a viewer | 200 | per action |
+| Adding or removing a chat moderator | 200 | per action |
+| Listing the chat moderators | 50 | only when you press Load |
+| Any broadcast or stream call (create, update, bind, transition) | 1 | per call |
+
+These prices are from Google's quota table
+(<https://developers.google.com/youtube/v3/determine_quota_cost>). An upload
+(`videos.insert`) costs 1 unit from a **bucket of its own** (100 uploads a day),
+so it does not draw on this allowance at all.
 
 A Google Cloud project starts with **10,000 units a day**, resetting at midnight
 Pacific. That is roughly 1,960 chat polls — so polyemesis paces itself across
@@ -554,8 +579,8 @@ the same daily allowance, so a poller left to spend the whole of it leaves a
 moderator unable to type — and the message that could not be sent is the
 timeout, at the moment it was needed. The pacer therefore subtracts the reserve
 before dividing what is left by the 5 units a poll costs: (10,000 − 200) ÷ 5 =
-1,960. At 50 units a message, 200 units is four messages — enough to say "we
-are moving to Twitch" when it matters. Sending, deleting and banning spend
+1,960. At 20 units a message, 200 units is ten messages, or a single ban — enough
+to say "we are moving to Twitch" when it matters. Sending, deleting and banning spend
 *into* the reserve rather than being refused by it; that is the whole point of
 it.
 
@@ -662,6 +687,32 @@ The distinction matters because the API is destructive by part: a field omitted
 from a part that IS being sent reverts to its default, so polyemesis reads the
 current broadcast and carries every untouched field through on every write.
 
+**Built, not yet exercised against a live account.** These are implemented from
+YouTube's published reference and have not been run against a real channel, so
+they are *Unverified* and no cell in the matrix above claims otherwise:
+
+* **Chat moderators** (`liveChatModerators` list, insert, delete): add or remove a
+  moderator on the Chat page. Only the owner of the chat's channel may; YouTube
+  answers anyone else with a 403 and polyemesis says so in words. Needs no new
+  scope.
+* **Deleted messages** leave the chat pane when a list page carries a
+  `tombstone` for them (the message's id and publish time, nothing else). The
+  `messageDeletedEvent` and `messageRetractedEvent` types were removed from the
+  reference and are not read. The reference says a tombstone marks where
+  the message used to be and is not sent at the moment of deletion. The poll only
+  moves forward, so it is seen mainly when the chat is read from the start (the
+  first page after a reconnect); whether YouTube also reports a later deletion
+  in a forward page is not confirmed.
+* **Poll tallies** are read from the poll message in the chat pages, while the
+  poll runs, when the connected account is the channel owner's. YouTube sends no
+  tally to anyone else.
+* **Broadcast controls** per destination (*Compliance*, YouTube): latency
+  (normal, low, ultra-low), DVR, record from start, auto-start, auto-stop and
+  closed-caption type. Recording can be switched off only on channels YouTube
+  allows to. They freeze once a broadcast is testing or live. polyemesis never
+  sets `madeForKids` (read-only) or the deprecated `enableClosedCaptions`; the
+  made-for-kids setting is the self-declaration.
+
 ### Twitch
 
 1. <https://dev.twitch.tv/console/apps> → **Register Your Application**.
@@ -688,6 +739,23 @@ Twitch runs polls for Affiliates and Partners only, and on any other channel
 the mirror is skipped and the chat poll runs as usual. It was added in scope
 version 5, so a Twitch account connected before it is marked "reconnect
 needed" once.
+
+Scope version 6 adds twelve scopes for the **channel tools** (the *Channel tools*
+column above, `/chat/twitch/{resource}` in the [API](API.md)):
+`moderator:manage:announcements`, `moderator:manage:shoutouts`,
+`moderator:manage:shield_mode`, `moderator:manage:warnings`,
+`moderator:manage:blocked_terms`, `moderator:read:chatters`,
+`moderator:manage:automod`, `moderator:manage:automod_settings`,
+`moderator:manage:unban_requests`, `moderator:manage:suspicious_users`,
+`channel:manage:moderators` and `channel:manage:vips`. Pinning reuses
+`moderator:manage:chat_messages` and the banned list reuses
+`moderator:manage:banned_users`. These are built from Twitch's reference and not
+yet exercised against a live account, so the column reads *Unverified*. Adding
+or removing moderators and VIPs, and the banned list, work only for the
+channel's owner, and Twitch refuses VIPs until the channel has finished its
+Build a Community requirement; the refusal says so. Receiving a message AutoMod
+is holding needs EventSub and is not built: the approve and deny call is, by id.
+Accounts connected earlier are marked "reconnect needed" once.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account

@@ -58,6 +58,17 @@ const (
 	// unbuilt. An operator choosing where to run an unattended channel is
 	// choosing on exactly this.
 	CapBroadcastLifecycle Capability = "broadcastLifecycle"
+	// CapChannelTools is the room-and-role tooling beyond delete and ban:
+	// announcements, shoutouts, pins, Shield Mode, warnings, blocked terms,
+	// AutoMod levels, and moderator, VIP and appeal management.
+	//
+	// IT IS ITS OWN COLUMN, AND UNVERIFIED EVERYWHERE, because Twitch's
+	// moderation cell above means "delete and ban were exercised against a
+	// live account" and these were built from the published reference and
+	// tested against fakes only. Folding them into that cell would have
+	// quietly widened a verified claim. When one is exercised, move the
+	// Twitch cell and say which in its Reason.
+	CapChannelTools Capability = "channelTools"
 )
 
 // Support is how well one platform does one thing.
@@ -125,6 +136,7 @@ func CapabilityColumns() []CapabilityInfo {
 		{CapModeration, "Moderation", "Delete a message or time a viewer out."},
 		{CapViewerStats, "Viewer stats", "Live viewer count read back from the platform."},
 		{CapBroadcastLifecycle, "Start / end", "Tell the platform to go live and to end, rather than only sending it video."},
+		{CapChannelTools, "Channel tools", "Announcements, shoutouts, pins, Shield Mode, warnings, blocked terms, AutoMod and role management."},
 	}
 }
 
@@ -221,6 +233,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapBroadcastLifecycle: "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination \u2014 never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
@@ -236,7 +249,10 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration: "Delete a message, over the same auth/youtube scope everything else here uses — so an account " +
 				"connected before this existed can already do it, with no reconnect. The connected account still has to " +
 				"own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. " +
-				"Banning and timing out work too, over the same scope — permanent, or a timeout in seconds.",
+				"Banning and timing out work too, over the same scope — permanent, or a timeout in seconds." +
+				" Managing the chat's moderators (list, add, remove) and the per-destination " +
+				"broadcast controls (latency, DVR, recording, captions) are built but not yet exercised against " +
+				"a live account, so treat them as unverified.",
 		},
 	},
 	{
@@ -253,9 +269,16 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapChannelTools: "Built, not yet exercised against a live account, so it reads Unverified. " +
+				"Announcements, shoutouts, pins, Shield Mode, warnings, blocked terms, the chatter list, " +
+				"AutoMod levels, moderator and VIP management, the banned list, unban requests and " +
+				"suspicious-user flags, over twelve scopes added at ScopeVersion 6 — an account connected " +
+				"earlier reconnects once to grant them. Receiving a message AutoMod is holding needs " +
+				"EventSub, which is not built; approving or denying one by id is.",
 			CapViewerStats: "Live state, viewer count, title, category and start time from Helix Get Streams. It needs " +
 				"no scope of its own — Twitch asks only for an app or user access token — so every account " +
 				"already connected can answer without reconnecting. A channel that is not live returns no " +
@@ -300,6 +323,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			// WHY THIS CELL NEEDS A SENTENCE AND DID NOT HAVE ONE. Facebook and
@@ -350,6 +374,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
@@ -421,6 +446,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportUnknown,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code against api.vimeo.com, over the public and private scopes. Vimeo can also verify your client ID and secret before you connect anything, so a typo is caught on the credentials page. PKCE is not documented for Vimeo and is therefore not sent — an authorization server that validates its query string strictly refuses an unknown parameter outright.",
@@ -450,13 +476,17 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// read), and both broadcasts were ended by polyemesis (lifecycle).
 			CapMetadata: SupportYes,
 			CapChatRead: SupportYes,
-			// Send and moderation are built (XAdapter implements Sender, Deleter
-			// and Banner) but have never run against a live X account, and
-			// viewer stats were not read live either, so they stay Unverified.
+			// Send and moderation are built (XAdapter implements Sender, Deleter,
+			// Banner, MuteLister, MessageBanner and ModeratorManager) but have
+			// never run against a live X account, and the viewer count (the
+			// broadcast's total_watching, read through the sampler's own seam
+			// rather than LiveStatter) was not read live either, so they stay
+			// Unverified.
 			CapChatSend:           SupportUnknown,
 			CapModeration:         SupportUnknown,
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportYes,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:                "OAuth 2.0 authorization code with PKCE at x.com/i/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; X's consent screen accepted a PKCE S256 challenge. Verified live: an account connected on 2026-11-06, reconnected on 2026-11-07, and the token refreshes.",
@@ -464,8 +494,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast. Verified live on 2026-11-07: the go-live published the broadcast with the configured title (\"Polyemesis Test Flight\") on a real account.",
 			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, which X delivers only to a webhook. polyemesis registers https://<tls.hostname>/api/v1/webhooks/x, so reading chat needs the app's bearer token (POLYEMESIS_X_APP_BEARER), a public trusted HTTPS hostname without a port (tls.mode acme, inbound 443), and the X client secret saved here. Without them the chat pane stays empty, says what is missing, and sending still works. Verified live on 2026-11-07: 2 of 2 viewer messages arrived over the webhook.",
 			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Needs X Livestream, which is on unless POLYEMESIS_X_LIVESTREAM=0. Not yet checked against a live X account.",
-			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
-			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
+			CapModeration:         "Mute and unmute a viewer, mute and remove one of their messages in a single call, list who is muted with when each timed mute ends, and add, list or remove chat moderators (up to 20; they act on every broadcast the account hosts). X offers no hide action, so a removed message is gone, not kept back. Built from X's documentation; none of it has run against a live account.",
+			CapViewerStats:        "X's broadcast carries total_watching (live viewers) and total_watched (cumulative viewers), and the sampler reads total_watching from the running broadcast. Built from X's documentation; it has not been read from a live account, so it stays unverified.",
 			CapBroadcastLifecycle: "With Livestream on (the default), polyemesis waits on the stream source when the destination turns on, takes it live once bytes arrive (POST /2/broadcasts, with the go-live title), and ends the broadcast when the destination turns off. Verified live on 2026-11-07 in two runs: the broadcast was published with the configured title, and polyemesis ended both.",
 		},
 	},
@@ -513,6 +543,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// SupportYes here with no Stats method would fail it, correctly.
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your " +
@@ -636,6 +667,7 @@ func instagramRow() PlatformCapability {
 			CapModeration:         SupportNo,
 			CapViewerStats:        SupportNo,
 			CapBroadcastLifecycle: SupportNo,
+			CapChannelTools:       SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapStreamKey:          "Instagram shows the stream URL (rtmps://edgetee-upload-<region>.xx.fbcdn.net:443/rtmp/) and a Stream key list. A persistent key, marked Ready and managed under Manage Persistent Key, is pasted once and reused; a one-off key has to be pasted again for each live video. Meta publishes no endpoint that hands the key over.",
@@ -669,6 +701,7 @@ func manualUnverified(presetID, name, summary, readFirst string) PlatformCapabil
 			// for a lifecycle call, and this matrix's own rule is that a No
 			// must trace to something checked.
 			CapBroadcastLifecycle: SupportUnknown,
+			CapChannelTools:       SupportUnknown,
 		},
 	}
 }

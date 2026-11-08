@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/captions"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -100,6 +101,17 @@ type wirePolls struct {
 	MaxOption          int `json:"maxOption"`
 	MinDurationSeconds int `json:"minDurationSeconds"`
 	MaxDurationSeconds int `json:"maxDurationSeconds"`
+}
+
+// wireTwitchTools are internal/chat's limits on the Twitch channel tools; the
+// panel checks them before it sends.
+type wireTwitchTools struct {
+	MaxAnnouncement int `json:"maxAnnouncement"`
+	MaxWarning      int `json:"maxWarning"`
+	MinTerm         int `json:"minTerm"`
+	MaxTerm         int `json:"maxTerm"`
+	MinPinSeconds   int `json:"minPinSeconds"`
+	MaxPinSeconds   int `json:"maxPinSeconds"`
 }
 
 type wireRange struct {
@@ -203,6 +215,7 @@ type wireContract struct {
 	Routing         wireRouting         `json:"routing"`
 	Limits          wireLimits          `json:"limits"`
 	Polls           wirePolls           `json:"polls"`
+	TwitchTools     wireTwitchTools     `json:"twitchTools"`
 	Overlay         wireOverlay         `json:"overlay"`
 	Auth            wireAuth            `json:"auth"`
 	Captions        wireCaptions        `json:"captions"`
@@ -484,6 +497,11 @@ func buildWireContract(t *testing.T) wireContract {
 			MinOptions: polls.MinOptions, MaxOptions: polls.MaxOptions,
 			MaxQuestion: polls.MaxQuestion, MaxOption: polls.MaxOption,
 			MinDurationSeconds: int(polls.MinDuration.Seconds()), MaxDurationSeconds: int(polls.MaxDuration.Seconds()),
+		},
+		TwitchTools: wireTwitchTools{
+			MaxAnnouncement: chat.TwitchMaxAnnouncement, MaxWarning: chat.TwitchMaxWarning,
+			MinTerm: chat.TwitchMinTerm, MaxTerm: chat.TwitchMaxTerm,
+			MinPinSeconds: chat.TwitchMinPinSeconds, MaxPinSeconds: chat.TwitchMaxPinSeconds,
 		},
 		Overlay: wireOverlay{
 			Fonts:             mapKeys(t, "internal/overlay", "fonts"),

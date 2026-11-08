@@ -538,3 +538,42 @@ func TestFacebookPollMirrorSkipsWhenNoFacebookChatIsConnected(t *testing.T) {
 		t.Errorf("no facebook chat = %+v", got)
 	}
 }
+
+// tallyPoller is a pollerAdapter that can also report a running count.
+type tallyPoller struct {
+	*pollerAdapter
+	votes []int
+	live  bool
+	seen  bool
+}
+
+func (p *tallyPoller) PollTally(string) ([]int, bool, bool) { return p.votes, p.live, p.seen }
+
+// A running YouTube poll's count is read from the chat pages when they carried
+// one, and is "nothing yet, still live" until then; the close stays the
+// authoritative read.
+func TestAYouTubePollIsReadMidPollOnlyWhenACountHasArrived(t *testing.T) {
+	m := nativePollMirror{s: &Server{}}
+	base := &pollerAdapter{account: "a", closeV: []int{9, 9}}
+	tp := &tallyPoller{pollerAdapter: base}
+	ref := polls.Mirrored{Ref: youTubePollRef{poller: tp, pollID: "ytp-1"}}
+
+	votes, live, err := m.Read(t.Context(), ref, false)
+	if err != nil || votes != nil || !live {
+		t.Fatalf("before any count: %v %v %v", votes, live, err)
+	}
+	tp.votes, tp.live, tp.seen = []int{3, 1}, true, true
+	votes, live, err = m.Read(t.Context(), ref, false)
+	if err != nil || len(votes) != 2 || votes[0] != 3 || !live {
+		t.Fatalf("mid-poll: %v %v %v", votes, live, err)
+	}
+	// The close ignores the cache.
+	if votes, live, err = m.Read(t.Context(), ref, true); err != nil || votes[0] != 9 || live {
+		t.Fatalf("close: %v %v %v", votes, live, err)
+	}
+	// A poller with no tally reader behaves as before.
+	plain := polls.Mirrored{Ref: youTubePollRef{poller: base, pollID: "ytp-1"}}
+	if votes, live, err = m.Read(t.Context(), plain, false); err != nil || votes != nil || !live {
+		t.Fatalf("plain poller: %v %v %v", votes, live, err)
+	}
+}

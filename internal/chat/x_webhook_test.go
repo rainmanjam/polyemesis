@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -921,4 +922,51 @@ func TestXHealthReportsLiveOnceRegisteredAndDegradedWhileTheWebhookIsInvalid(t *
 	st.putFixes = true
 	st.setValid(id, true)
 	xWaitFor(t, "live again", func() bool { return a.Health().State == StateLive })
+}
+
+// A 429 on the webhook create or the re-validation keeps its type, so Run waits out the reset (the Hub's own
+// backoff is 1 to 30 seconds), does not ask X to list again, and does not blame the public address.
+func TestXRunWaitsOutARateLimitedWebhookCreateAndRevalidate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(st *xChatStub)
+		call  string
+	}{
+		{"create", func(st *xChatStub) {
+			st.createStatus = http.StatusTooManyRequests
+			st.createBody = `{"title":"Too Many Requests","detail":"Too Many Requests","type":"about:blank","status":429}`
+		}, "POST /2/webhooks"},
+		{"revalidate", func(st *xChatStub) {
+			st.webhooks = []xStubWebhook{{ID: "56", URL: xStubHookURL, Valid: false}}
+			st.putStatus = http.StatusTooManyRequests
+		}, "PUT /2/webhooks/56"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newXChatStub(t)
+			tc.setup(st)
+			var waits []time.Duration
+			a := st.adapter(t, time.Unix(1761904800, 0))
+			a.cfg.Wait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+			err := xRunErr(t, a)
+			if err == nil || IsFatal(err) {
+				t.Fatalf("Run = %v, want a retryable error", err)
+			}
+			var rl *xChatRateLimited
+			if !errors.As(err, &rl) {
+				t.Fatalf("Run = %v, want an *xChatRateLimited", err)
+			}
+			if strings.Contains(err.Error(), "CRC") || strings.Contains(err.Error(), "public HTTPS") {
+				t.Errorf("a rate limit was reported as an address problem: %v", err)
+			}
+			if len(waits) != 1 || waits[0] <= 0 {
+				t.Errorf("waits = %v, want one positive wait", waits)
+			}
+			if n := st.countCalls(tc.call); n != 1 {
+				t.Errorf("%s = %d, want 1", tc.call, n)
+			}
+			if n := st.countCalls("GET /2/webhooks"); n != 1 {
+				t.Errorf("GET /2/webhooks = %d, want 1 (no extra list after a 429)", n)
+			}
+		})
+	}
 }

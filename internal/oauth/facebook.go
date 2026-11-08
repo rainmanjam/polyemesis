@@ -183,7 +183,7 @@ func (f *Facebook) Refresh(ctx context.Context, clientID, clientSecret, refreshT
 		"fb_exchange_token": {refreshToken},
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, fbRefreshError(err)
 	}
 	// Self-referential on purpose: see Exchange.
 	tok.RefreshToken = tok.AccessToken
@@ -1549,11 +1549,24 @@ func fbAdvice(err error, what string, scopes []string) error {
 
 	// 190 is the whole token family: expired, invalidated by a password change,
 	// or de-authorised. All three have the same cure.
-	if ge.Code == 190 {
+	if IsGraphTokenDead(ge.Code) {
 		return fmt.Errorf("Facebook rejected the access token, so polyemesis could not %s. "+
 			"Facebook tokens expire (about 60 days) and are invalidated by a password change or by "+
 			"removing the app. Reconnect the Facebook account in Settings → Platforms. Facebook said: %s",
 			what, metaMessage(ge))
+	}
+
+	// Rate limits: the right move is to wait, not to reconnect or re-grant.
+	if IsGraphRateLimit(ge.Code) {
+		return fmt.Errorf("Facebook is rate-limiting polyemesis, so it could not %s. %s Facebook said: %s",
+			what, graphWaitAdvice(se.wait), metaMessage(ge))
+	}
+
+	// Code 100 with subcode 33 is how Graph says the object does not exist (or
+	// is not visible to this token); it arrives as HTTP 400, not 404.
+	if ge.Code == 100 && ge.Subcode == 33 {
+		return fmt.Errorf("Facebook no longer has the object polyemesis tried to %s; it may have been deleted "+
+			"or ended, or this account may have lost access to it. Facebook said: %s", what, metaMessage(ge))
 	}
 
 	// 200/10/3 are the permission codes; the OAuthException fallback catches the
@@ -1642,7 +1655,7 @@ func fbCreateAdvice(err error, what string, scopes []string) error {
 	// refusal it was written for. This call site arrived on a branch that
 	// forked before the fix in fbAdvice and reintroduced the bug on merge.
 	ge, ok := decodeGraphError(se.payload())
-	if !ok || ge.Code == 190 {
+	if !ok || IsGraphTokenDead(ge.Code) || IsGraphRateLimit(ge.Code) {
 		return advised
 	}
 	return fmt.Errorf("%w\n\n%s", advised, fbEligibilityNote)

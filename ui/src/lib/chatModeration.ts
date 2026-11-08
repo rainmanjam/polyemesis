@@ -94,6 +94,11 @@ const ADAPTERS: Record<
   youtube: { delete: true, ban: true, timeout: true, hideUpstream: false },
   twitch: { delete: true, ban: true, timeout: true, hideUpstream: false },
   kick: { delete: true, ban: true, timeout: true, hideUpstream: false },
+  // XAdapter implements Deleter and Banner (a mute; a zero duration is
+  // indefinite, a duration becomes end_at_ms, so it can time out). Built from
+  // X's documentation and unverified against a live account, which the
+  // capability matrix says; nothing here hides, because X has no hide action.
+  x: { delete: true, ban: true, timeout: true, hideUpstream: false },
   // A Banner that cannot time anyone out: the Page block list
   // (POST /{page-id}/blocked) has no duration, so Facebook can block a person
   // permanently and nothing shorter. Mirrors chat.NoTimeouter.

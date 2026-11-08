@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 // X publishes no rate limits for any Livestream endpoint (docs-x section 9, "read the x-rate-limit-* headers and
 // back off"). So the limits are learned from the answers: a 429, or a 2xx whose x-rate-limit-remaining is 0, holds
-// every further call for that token until x-rate-limit-reset, and a call made during the hold is refused here,
+// every further call to that endpoint (same token, method and route) until x-rate-limit-reset, and a call made during the hold is refused here,
 // without a request. Before this, a throttled account was asked again on every fifteen-second sweep, regardless of
 // the reset time, and each 429 was counted as an ordinary failure against the lifecycle's give-up budget.
 
@@ -110,6 +111,21 @@ func xTokenFingerprint(accessToken, base string) string {
 	return hex.EncodeToString(sum[:12])
 }
 
+// xHoldKey keys a hold by token fingerprint, method and route template, because X's limits are per endpoint. The
+// path is /2/<resource>[/<id>[/<action>]]; the id segment becomes ":id" so every broadcast shares one window. The
+// query string is dropped.
+func xHoldKey(fp, method, endpoint string) string {
+	path := endpoint
+	if u, err := url.Parse(endpoint); err == nil {
+		path = u.EscapedPath()
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) > 2 {
+		parts[2] = ":id"
+	}
+	return fp + " " + method + " /" + strings.Join(parts, "/")
+}
+
 // heldUntil reports the end of a hold on this token, if one is running.
 func (s *xCallState) heldUntil(fp string) (time.Time, bool) {
 	s.mu.Lock()
@@ -199,10 +215,15 @@ func (s *xCallState) rememberUser(fp string, u xUser) {
 // rateHoldFrom reads when X says the limit resets. ok is false when the answer says nothing about a limit that has
 // run out: a 2xx with calls remaining, or with no headers at all.
 func (s *xCallState) rateHoldFrom(resp *http.Response) (until time.Time, ok bool) {
-	now := s.clock()
-	limited := resp.StatusCode == http.StatusTooManyRequests
+	return XRateHoldFrom(resp.StatusCode, resp.Header, s.clock())
+}
+
+// XRateHoldFrom is the rule above for a caller that has the status and headers but not the response (the chat
+// adapter's own HTTP): when the answer asks for a pause, and until when, capped at xRateHoldMax.
+func XRateHoldFrom(status int, h http.Header, now time.Time) (until time.Time, ok bool) {
+	limited := status == http.StatusTooManyRequests
 	if !limited {
-		if strings.TrimSpace(resp.Header.Get("x-rate-limit-remaining")) == "0" {
+		if strings.TrimSpace(h.Get("x-rate-limit-remaining")) == "0" {
 			limited = true
 		}
 	}
@@ -210,9 +231,9 @@ func (s *xCallState) rateHoldFrom(resp *http.Response) (until time.Time, ok bool
 		return time.Time{}, false
 	}
 	until = now.Add(xRateHoldDefault)
-	if v, err := strconv.ParseInt(strings.TrimSpace(resp.Header.Get("x-rate-limit-reset")), 10, 64); err == nil && v > 0 {
+	if v, err := strconv.ParseInt(strings.TrimSpace(h.Get("x-rate-limit-reset")), 10, 64); err == nil && v > 0 {
 		until = time.Unix(v, 0)
-	} else if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
+	} else if secs, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After"))); err == nil && secs > 0 {
 		until = now.Add(time.Duration(secs) * time.Second)
 	}
 	if until.Before(now.Add(time.Second)) {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // rumbleRunExhaust runs the adapter with a sleep that returns at once, until
@@ -233,10 +235,10 @@ func TestRumbleCapsAHugeRetryAfterAndParsesDates(t *testing.T) {
 		t.Errorf("delay = %v, want capped at %v", d, rumbleRetryAfterCap)
 	}
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	if d := parseRetryAfter(now.Add(90*time.Second).Format(http.TimeFormat), now); d < 89*time.Second || d > 90*time.Second {
+	if d := oauth.ParseRetryAfter(now.Add(90*time.Second).Format(http.TimeFormat), now); d < 89*time.Second || d > 90*time.Second {
 		t.Errorf("HTTP-date Retry-After = %v, want ~90s", d)
 	}
-	if d := parseRetryAfter("garbage", now); d != 0 {
+	if d := oauth.ParseRetryAfter("garbage", now); d != 0 {
 		t.Errorf("garbage Retry-After = %v, want 0", d)
 	}
 	// Backoff grows, stays under the ceiling, and jitter never exceeds it.

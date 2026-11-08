@@ -245,10 +245,12 @@ func TestTheChatColumnsAreKnowinglyUnjoined(t *testing.T) {
 		}
 	}
 
-	want := map[Capability]bool{CapChatRead: true, CapChatSend: true, CapModeration: true}
+	// channelTools is implemented in internal/chat (twitch_tools.go) for the
+	// same reason the three chat columns are, and reads Unverified everywhere.
+	want := map[Capability]bool{CapChatRead: true, CapChatSend: true, CapModeration: true, CapChannelTools: true}
 	for _, c := range unjoined {
 		if !want[c] {
-			t.Errorf("%q has no capability<->code join and is not one of the three chat "+
+			t.Errorf("%q has no capability<->code join and is not one of the four chat "+
 				"columns this file knowingly excludes. A new column without a join is "+
 				"how the matrix drifts from the code, which is the whole reason this "+
 				"file exists — add it to capabilityJoins(), or say here why it cannot "+

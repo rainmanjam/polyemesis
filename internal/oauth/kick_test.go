@@ -621,8 +621,8 @@ func assertFields(t *testing.T, label string, got, want []MetadataField) {
 
 func TestKickMetadataScopeFailureNamesTheReconnect(t *testing.T) {
 	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"data":null,"message":"Forbidden"}`))
 	})
 	_, err := k.PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{Title: "t"})
 	if err == nil {

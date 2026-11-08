@@ -94,8 +94,14 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"the chat that arrived during a recording: every viewer's message, with their name"},
 		{http.MethodGet, "/api/v1/chat/flags", nil,
 			"automod's review list carries each flagged message's text, under its author's name"},
+		{http.MethodGet, "/api/v1/chat/mutes?platform=x", nil,
+			"who the operator has muted on X, by user id and name, with when each timed mute ends"},
+		{http.MethodGet, "/api/v1/chat/moderators?platform=x", nil,
+			"the operator's X chat moderators, by user id and name"},
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
+		{http.MethodGet, "/api/v1/chat/twitch/banned", nil,
+			"the banned list, the appeals' text and the chatter names are the channel's people"},
 
 		// Viewer activity: names viewers and carries what they wrote, as chat does.
 		{http.MethodGet, "/api/v1/activity", nil,
@@ -110,6 +116,9 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"the stream list carries each broadcast's title"},
 		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
 			"the report names the stream's top chatters"},
+
+		{http.MethodGet, "/api/v1/chat/moderators?platform=youtube", nil,
+			"the roster is read with the owner's token and each read spends 50 quota units"},
 
 		// Wave 4 #5: the highlight queue's excerpts are the transcript again; the
 		// template list carries the fonts listing and FFmpeg's text capability.

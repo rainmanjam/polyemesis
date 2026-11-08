@@ -297,14 +297,6 @@ func (r *RumbleAdapter) retryDelay(attempt int, retryAfter time.Duration) time.D
 	return max(d, retryAfter)
 }
 
-func retryAfterOf(err error) time.Duration {
-	var ae *apiError
-	if errors.As(err, &ae) {
-		return ae.RetryAfter
-	}
-	return 0
-}
-
 // noteDrop arms the dropped-messages note for rumbleDropNoteFor.
 func (r *RumbleAdapter) noteDrop() {
 	r.mu.Lock()
@@ -482,7 +474,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 				return cerr
 			}
 			r.setTransient(cerr.Error())
-			if !r.cfg.Sleep(ctx, r.retryDelay(failures-1, retryAfterOf(err))) {
+			if !r.cfg.Sleep(ctx, r.retryDelay(failures-1, retryAfterFrom(err))) {
 				return nil
 			}
 			continue

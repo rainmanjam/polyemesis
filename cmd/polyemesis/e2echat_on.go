@@ -97,7 +97,7 @@ func (f *fakeYouTube) serve(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	w.Header().Set(headerContentType, mimeJSON)
 	switch r.URL.Path {
-	case "/liveChatMessages":
+	case "/liveChat/messages":
 		if f.fail {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"code":403,"errors":[{"reason":"liveChatDisabled"}]}}`))
@@ -107,7 +107,7 @@ func (f *fakeYouTube) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.created = append(f.created, body)
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("e2e-poll-%d", len(f.created))})
-	case "/liveChatMessages/transition":
+	case "/liveChat/messages/transition":
 		f.closed++
 		opts := make([]map[string]string, len(f.tally))
 		for i, n := range f.tally {

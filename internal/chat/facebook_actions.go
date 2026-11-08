@@ -39,19 +39,65 @@ func (f *FacebookAdapter) NoTimeout() {}
 // not one. The body is the apiError's own, already shortened, which is whole
 // for the short envelopes the block list answers with.
 func graphCode(err error) int {
+	code, _ := graphCodes(err)
+	return code
+}
+
+// graphCodes is graphCode with the error_subcode. It parses the whole body, not
+// the 300-character display copy: a realistic Graph refusal is longer than that
+// and would otherwise decode to nothing, skipping every code-specific branch.
+func graphCodes(err error) (code, subcode int) {
 	var ae *apiError
 	if !errors.As(err, &ae) {
-		return 0
+		return 0, 0
 	}
-	var env struct {
-		Error struct {
-			Code int `json:"code"`
-		} `json:"error"`
+	code, subcode, _ = oauth.GraphErrorFields(ae.payload())
+	return code, subcode
+}
+
+// fbTokenDead reports a Graph refusal that only reconnecting fixes: HTTP 401,
+// or the 190/102 token family, which Graph usually sends as HTTP 400.
+func fbTokenDead(err error) bool {
+	return statusOf(err) == http.StatusUnauthorized || oauth.IsGraphTokenDead(graphCode(err))
+}
+
+// fbNotFound reports a deleted or unknown object: HTTP 404/410, or Graph's
+// habit of answering 400 with code 100, subcode 33.
+func fbNotFound(err error) bool {
+	switch statusOf(err) {
+	case http.StatusNotFound, http.StatusGone:
+		return true
 	}
-	if json.Unmarshal([]byte(ae.Body), &env) != nil {
-		return 0
+	code, sub := graphCodes(err)
+	return code == 100 && sub == 33
+}
+
+// fbRateLimited reports a Graph throttle (HTTP 429 or the 4/17/32/613/8000x
+// codes) and how long Graph asked the caller to wait, zero if it did not say.
+func fbRateLimited(err error) (time.Duration, bool) {
+	if statusOf(err) != http.StatusTooManyRequests && !oauth.IsGraphRateLimit(graphCode(err)) {
+		return 0, false
 	}
-	return env.Error.Code
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.Wait, true
+	}
+	return 0, true
+}
+
+// fbSummary is the one-line, operator-facing form of a failure: Meta's message
+// and code for a Graph envelope, just the status for anything else (an HTML
+// error page from a proxy is never echoed), the error text for transport
+// errors. The raw body and fbtrace_id stay out of health and warnings.
+func fbSummary(err error) string {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return err.Error()
+	}
+	if s := oauth.GraphErrorSummary(ae.payload()); s != "" {
+		return s
+	}
+	return fmt.Sprintf("HTTP %d", ae.Status)
 }
 
 // page resolves the Page this account acts as. The errors are the operator's
@@ -112,7 +158,7 @@ func (f *FacebookAdapter) cachedPageAccess(ctx context.Context) (string, string,
 // dropPageToken forgets the cached Page token when Graph rejected a token, so
 // the next call mints a fresh one.
 func (f *FacebookAdapter) dropPageToken(err error) {
-	if statusOf(err) == http.StatusUnauthorized || graphCode(err) == 190 || graphCode(err) == 102 {
+	if fbTokenDead(err) {
 		f.mu.Lock()
 		f.pageID, f.pageTok, f.pageExpiry = "", "", time.Time{}
 		f.mu.Unlock()
@@ -124,12 +170,19 @@ func (f *FacebookAdapter) dropPageToken(err error) {
 // and Ban needs that id, so a Page account reads with its Page token. A
 // profile, or a Page whose token cannot be minted, keeps the user token.
 func (f *FacebookAdapter) commentToken(ctx context.Context) TokenFunc {
+	tok, _ := f.commentTokenSource(ctx)
+	return tok
+}
+
+// commentTokenSource is commentToken plus whether it is a Page token, so a
+// caller can tell a rejected Page token from a rejected user token.
+func (f *FacebookAdapter) commentTokenSource(ctx context.Context) (TokenFunc, bool) {
 	if f.cfg.PageAccess != nil {
 		if _, tok, err := f.cachedPageAccess(ctx); err == nil && tok != "" {
-			return StaticToken(tok)
+			return StaticToken(tok), true
 		}
 	}
-	return f.cfg.Token
+	return f.cfg.Token, false
 }
 
 // Ban blocks a person from the Page: POST /{page-id}/blocked?user={id}.
@@ -211,9 +264,13 @@ func (f *FacebookAdapter) blockError(err error, verb string) error {
 			"pages_read_user_content or pages_manage_metadata), and Meta's reference does not say which one. "+
 			"Reconnect the Page in Settings → Platforms and accept every permission: %w", verb, err)
 	}
-	switch statusOf(err) {
-	case http.StatusUnauthorized:
+	if fbTokenDead(err) {
 		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
+	}
+	if wait, limited := fbRateLimited(err); limited {
+		return fmt.Errorf("Facebook is rate-limiting polyemesis, so it could not %s that person. %s", verb, fbWaitAdvice(wait))
+	}
+	switch statusOf(err) {
 	case http.StatusForbidden:
 		return fmt.Errorf("Facebook refused to %s that person. Only a Page admin's Page token may: %w", verb, err)
 	}
@@ -343,8 +400,12 @@ func (f *FacebookAdapter) pollError(err error, verb string) error {
 		return fmt.Errorf("Facebook refused to %s the poll for lack of a permission. Polls need the same access the "+
 			"broadcast was created with (publish_video for a profile, pages_manage_posts and pages_read_engagement "+
 			"for a Page), and the Live Video API feature: %w", verb, err)
-	case 190:
+	}
+	if fbTokenDead(err) {
 		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
+	}
+	if wait, limited := fbRateLimited(err); limited {
+		return fmt.Errorf("Facebook is rate-limiting polyemesis, so it could not %s the poll. %s", verb, fbWaitAdvice(wait))
 	}
 	if verb == "start" && statusOf(err) == http.StatusBadRequest {
 		var ae *apiError
