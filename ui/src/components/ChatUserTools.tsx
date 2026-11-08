@@ -94,9 +94,12 @@ export function ChatUserTools({
     setReason("");
     setStatus({ vip: null, moderator: null });
     void readStatus();
+    // The ref object is stable; holding it here keeps the cleanup from reading
+    // .current through the component's ref at unmount time.
+    const gen = generation;
     return () => {
       // Switching viewer (or closing) retires any read still in flight.
-      generation.current++;
+      gen.current++;
     };
   }, [readStatus]);
 
