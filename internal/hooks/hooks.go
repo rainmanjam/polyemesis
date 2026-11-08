@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/redact"
@@ -135,6 +136,16 @@ const (
 	// Sent once per item, on the transition. Reason names the target, the
 	// file and the last error.
 	TriggerOffloadStuck Trigger = "offload.stuck"
+	// TriggerActivity fires for a viewer or platform activity -- a follow, a
+	// sub, a tip, a raid -- and its envelope carries the event in `activity`.
+	//
+	// OPT-IN ONLY, which no other trigger is. An empty Triggers list means
+	// "every trigger", so a hook that never narrowed its subscription would
+	// start receiving every follow on upgrade; Wants therefore skips an opt-in
+	// trigger unless the hook NAMES it, and AllTriggers stays the lifecycle
+	// list. The Source in this envelope is the zero value (id 0, no name): an
+	// activity belongs to an account on a platform, not to a programme.
+	TriggerActivity Trigger = "activity"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -176,6 +187,24 @@ func AllTriggers() []Trigger {
 	}
 }
 
+// OptInTriggers are the triggers a hook receives only by naming them. An empty
+// Triggers list means every trigger in AllTriggers and none of these. Listed
+// apart so the settings picker can offer them without the contract that
+// "empty means all" quietly growing.
+func OptInTriggers() []Trigger {
+	return []Trigger{TriggerActivity}
+}
+
+// IsOptIn reports whether tr is received only by a hook that names it.
+func IsOptIn(tr Trigger) bool {
+	for _, k := range OptInTriggers() {
+		if k == tr {
+			return true
+		}
+	}
+	return false
+}
+
 // KnownTrigger reports whether tr can be subscribed to.
 func KnownTrigger(tr Trigger) bool {
 	for _, k := range AllTriggers() {
@@ -183,7 +212,7 @@ func KnownTrigger(tr Trigger) bool {
 			return true
 		}
 	}
-	return false
+	return IsOptIn(tr)
 }
 
 // SourceRef identifies the programme a transition belongs to. Always present:
@@ -221,6 +250,12 @@ type Event struct {
 	Cause      failreason.Cause
 	Held       bool
 	KeyChanged bool
+	// Activity is the viewer or platform activity behind a TriggerActivity
+	// event, nil for every other trigger. Its viewer-written text is redacted on
+	// the way in, with the rest.
+	Activity *activity.Event
+	// Test marks an event raised by a test button, mapped onto Envelope.Test.
+	Test bool
 }
 
 // Delivery bounds. The retry budget is short on purpose: retries block the
@@ -333,7 +368,8 @@ func (h Hook) Wants(tr Trigger) bool {
 		return true
 	}
 	if len(h.Triggers) == 0 {
-		return true
+		// Every LIFECYCLE trigger. An opt-in one is never received by default.
+		return !IsOptIn(tr)
 	}
 	for _, k := range h.Triggers {
 		if k == tr {

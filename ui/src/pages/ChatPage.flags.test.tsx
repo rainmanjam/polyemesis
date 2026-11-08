@@ -138,6 +138,45 @@ describe("the Flagged chip (A48)", () => {
     expect(screen.queryByText("Nothing flagged")).toBeNull();
   });
 
+  it("offers Show on overlay only for a held message, and releases it", async () => {
+    const held = flag("twitch", "t1", "ana");
+    held.findings = [{ checker: "rules", action: "flag", reason: 'matched rule "links"', hold: true }];
+    held.held = true;
+    chatFlags.mockResolvedValue(result([held, flag("youtube", "y1", "bo")]));
+    const release = vi.spyOn(api, "releaseChatFlag").mockResolvedValue({ status: "released", detail: "" });
+    draw();
+    await waitFor(() => expect(chip().textContent).toContain("2"));
+    fireEvent.click(chip());
+    const list = await screen.findByRole("list", { name: "Messages automod flagged" });
+    expect(within(list).getAllByText("Held off overlays")).toHaveLength(1);
+    expect(within(list).getAllByRole("button", { name: /Show .* message on the overlay/ })).toHaveLength(1);
+
+    const before = chatFlags.mock.calls.length;
+    // The server stops marking the line held once it is released.
+    const after = flag("twitch", "t1", "ana");
+    chatFlags.mockResolvedValue(result([after, flag("youtube", "y1", "bo")]));
+    fireEvent.click(within(list).getByRole("button", { name: "Show ana's message on the overlay" }));
+    await waitFor(() => expect(release).toHaveBeenCalledWith({ platform: "twitch", account: "acct", id: "t1" }));
+    // The list is read again, and the button goes with the hold.
+    await waitFor(() => expect(chatFlags.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /on the overlay/ })).toBeNull());
+    release.mockRestore();
+  });
+
+  // A finding that says hold but whose line was removed (or whose switch was
+  // off) went out or was deleted: nothing to release, so no button.
+  it("offers no Show on overlay for a finding that was not actually held", async () => {
+    const f = flag("twitch", "t1", "ana");
+    f.findings = [{ checker: "rules", action: "delete", reason: 'matched rule "links"', hold: true }];
+    chatFlags.mockResolvedValue(result([f]));
+    draw();
+    await waitFor(() => expect(chip().textContent).toContain("1"));
+    fireEvent.click(chip());
+    await screen.findByRole("list", { name: "Messages automod flagged" });
+    expect(screen.queryByText("Held off overlays")).toBeNull();
+    expect(screen.queryByRole("button", { name: /on the overlay/ })).toBeNull();
+  });
+
   it("opens the flagged author's user card", async () => {
     chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana")]));
     draw();

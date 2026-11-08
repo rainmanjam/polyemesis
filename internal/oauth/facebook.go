@@ -39,6 +39,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -182,7 +183,7 @@ func (f *Facebook) Refresh(ctx context.Context, clientID, clientSecret, refreshT
 		"fb_exchange_token": {refreshToken},
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, fbRefreshError(err)
 	}
 	// Self-referential on purpose: see Exchange.
 	tok.RefreshToken = tok.AccessToken
@@ -279,6 +280,37 @@ func (f *Facebook) pages(ctx context.Context, accessToken string) ([]fbPage, err
 		return nil, fbAdvice(err, "list Facebook Pages", []string{"pages_show_list"})
 	}
 	return out.Data, nil
+}
+
+// ErrNotAPage is PageAccess given a ref that names a profile rather than a Page.
+var ErrNotAPage = errors.New("this Facebook account is a personal profile, not a Page")
+
+// PageAccess returns the id and the Page access token of the Page a "page:<id>"
+// account ref names, for the calls Graph only takes from a Page: blocking a
+// person (POST /{page-id}/blocked) answers only to a Page token, and a poll on
+// a Page's live video only to the token that created the video.
+//
+// A profile ref is ErrNotAPage rather than the user token under another name:
+// handing a user token to a Page-only edge is the failure this exists to prevent,
+// and the caller can say so in one sentence.
+func (f *Facebook) PageAccess(ctx context.Context, accessToken, ref string) (pageID, pageToken string, err error) {
+	// An explicit "user:" ref (or none) is a profile with no lookup. A legacy
+	// ref with no prefix may name a Page, so it goes through the same
+	// resolution a broadcast uses and is a profile only if that says so.
+	if kind, _ := parseTargetRef(ref); kind == fbKindUser {
+		return "", "", ErrNotAPage
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, ref)
+	if err != nil {
+		return "", "", err
+	}
+	if tgt.kind != fbKindPage {
+		return "", "", ErrNotAPage
+	}
+	if tgt.token == "" {
+		return "", "", fmt.Errorf("Facebook returned no Page access token for Page %s; reconnect the account and grant access to it", tgt.node)
+	}
+	return tgt.node, tgt.token, nil
 }
 
 // Targets lists the profile first, then every Page.
@@ -1517,11 +1549,24 @@ func fbAdvice(err error, what string, scopes []string) error {
 
 	// 190 is the whole token family: expired, invalidated by a password change,
 	// or de-authorised. All three have the same cure.
-	if ge.Code == 190 {
+	if IsGraphTokenDead(ge.Code) {
 		return fmt.Errorf("Facebook rejected the access token, so polyemesis could not %s. "+
 			"Facebook tokens expire (about 60 days) and are invalidated by a password change or by "+
 			"removing the app. Reconnect the Facebook account in Settings → Platforms. Facebook said: %s",
 			what, metaMessage(ge))
+	}
+
+	// Rate limits: the right move is to wait, not to reconnect or re-grant.
+	if IsGraphRateLimit(ge.Code) {
+		return fmt.Errorf("Facebook is rate-limiting polyemesis, so it could not %s. %s Facebook said: %s",
+			what, graphWaitAdvice(se.wait), metaMessage(ge))
+	}
+
+	// Code 100 with subcode 33 is how Graph says the object does not exist (or
+	// is not visible to this token); it arrives as HTTP 400, not 404.
+	if ge.Code == 100 && ge.Subcode == 33 {
+		return fmt.Errorf("Facebook no longer has the object polyemesis tried to %s; it may have been deleted "+
+			"or ended, or this account may have lost access to it. Facebook said: %s", what, metaMessage(ge))
 	}
 
 	// 200/10/3 are the permission codes; the OAuthException fallback catches the
@@ -1610,7 +1655,7 @@ func fbCreateAdvice(err error, what string, scopes []string) error {
 	// refusal it was written for. This call site arrived on a branch that
 	// forked before the fix in fbAdvice and reintroduced the bug on merge.
 	ge, ok := decodeGraphError(se.payload())
-	if !ok || ge.Code == 190 {
+	if !ok || IsGraphTokenDead(ge.Code) || IsGraphRateLimit(ge.Code) {
 		return advised
 	}
 	return fmt.Errorf("%w\n\n%s", advised, fbEligibilityNote)

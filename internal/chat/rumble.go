@@ -46,12 +46,17 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
@@ -104,7 +109,33 @@ const (
 	// as if it had all just arrived. Five minutes is context; the rest is a
 	// flood. This mirrors ytDefaultBackfill, and for the same reason.
 	rumbleDefaultBackfill = 5 * time.Minute
+	// rumbleChatCap is how many recent messages and rants Rumble returns in one
+	// response, combined. Its article states 50 and the example payload carries
+	// max_num_results: 50; the response's own figure wins when it sends one.
+	// Taken from the docs, not observed on a live account.
+	rumbleChatCap = 50
+
+	// In-loop retry of a transient failure (5xx, edge block, timeout, 429,
+	// unreadable body). The adapter keeps its health and drop-detection history
+	// across these, which a return to the Hub (restart, state reset, backfill
+	// re-armed) would throw away. After rumbleMaxFailures in a row it returns the
+	// error so the Hub's own supervision takes over.
+	rumbleRetryBase     = 5 * time.Second
+	rumbleRetryCeil     = 2 * time.Minute
+	rumbleRetryAfterCap = 5 * time.Minute
+	rumbleMaxFailures   = 12
+	// rumbleDropNoteFor is how long the "may have dropped messages" note stays
+	// on the health line after the last poll that triggered it, so a busy chat
+	// does not flicker it on and off between polls.
+	rumbleDropNoteFor = 2 * time.Minute
+	// rumbleDropNote is the operator-facing text. Our own words, no key.
+	rumbleDropNote = "Rumble returns only the latest 50 chat messages per poll and this chat is busier than that, " +
+		"so some messages may have been missed"
 )
+
+// rumbleKeyParam finds a key in a URL-shaped string -- the third scrub layer,
+// for a spelling of the key neither the raw nor the escaped literal matches.
+var rumbleKeyParam = regexp.MustCompile(`([?&]key=)[^&\s"'<>)]+`)
 
 // rumbleKeyPlaceholder is what a scrubbed key is replaced with. It is visibly
 // not a key, so a log line containing it reads as "a secret was removed here"
@@ -147,16 +178,38 @@ type RumbleAdapter struct {
 
 	mu     sync.Mutex
 	health Health
+	// noteUntil is when the dropped-messages note stops being shown.
+	noteUntil time.Time
+	// activityBlocks is which activity lists the last poll carried; see
+	// rumble_activity.go.
+	activityBlocks rumbleActivitySeen
+	// activityIgnored counts unusable activity entries; no payload is kept.
+	activityIgnored atomic.Int64
 }
 
 // NewRumble builds the adapter. A missing key is a named "not configured"
 // state rather than a crash, as everywhere else in this package.
+// RumbleKey reduces what an operator put in the key variable to the key that
+// goes over the wire. Rumble's article calls the whole get-data URL the
+// credential, so the variable may hold that URL; only its key parameter is
+// sent. Anything that redacts the credential must cover this value as well as
+// the raw one.
+func RumbleKey(raw string) string {
+	k := strings.TrimSpace(raw)
+	if strings.Contains(k, "://") {
+		if u, err := url.Parse(k); err == nil && u.Query().Get("key") != "" {
+			return u.Query().Get("key")
+		}
+	}
+	return k
+}
+
 func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 	if strings.TrimSpace(cfg.Key) == "" {
 		return nil, fmt.Errorf("rumble chat is not configured: no live-stream API key, so set %s "+
 			"to the key from rumble.com/account/livestream-api", RumbleChatKeyEnv)
 	}
-	cfg.Key = strings.TrimSpace(cfg.Key)
+	cfg.Key = RumbleKey(cfg.Key)
 	if cfg.APIBase == "" {
 		cfg.APIBase = RumbleAPIBase
 	}
@@ -214,9 +267,46 @@ func (r *RumbleAdapter) setHealth(state State, detail string) {
 // response this adapter already polls -- so routing it through a second
 // subsystem would mean a second call to an endpoint whose rate limit Rumble
 // does not publish, which is the one thing this file is most careful about.
-func (r *RumbleAdapter) setLive(viewers *int) {
+func (r *RumbleAdapter) setLive(viewers, followers, subscribers *int) {
 	r.mu.Lock()
-	r.health = Health{State: StateLive, Viewers: viewers}
+	h := Health{State: StateLive, Viewers: viewers, Followers: followers, Subscribers: subscribers}
+	if r.cfg.Now().Before(r.noteUntil) {
+		h.Detail = rumbleDropNote
+	}
+	r.health = h
+	r.mu.Unlock()
+}
+
+// setTransient records a retryable failure without discarding what the last
+// good poll reported: the viewer, follower and subscriber counts stay, only the
+// state and the note change. A blip should not make the audience vanish.
+func (r *RumbleAdapter) setTransient(detail string) {
+	r.mu.Lock()
+	h := r.health
+	h.State = StateDegraded
+	h.Detail = r.scrub(detail)
+	r.health = h
+	r.mu.Unlock()
+}
+
+// retryDelay is the capped, jittered exponential backoff, raised to the
+// platform's Retry-After when it sent one. Jitter only subtracts, so the
+// ceiling stays a ceiling; a Retry-After is honoured in full (up to a cap) and
+// not jittered below, because retrying before a stated limit lifts just
+// extends it.
+func (r *RumbleAdapter) retryDelay(attempt int, retryAfter time.Duration) time.Duration {
+	d := backoff.Exponential(attempt, rumbleRetryBase, rumbleRetryCeil)
+	d -= time.Duration(rand.Int64N(int64(d/5) + 1))
+	if retryAfter > rumbleRetryAfterCap {
+		retryAfter = rumbleRetryAfterCap
+	}
+	return max(d, retryAfter)
+}
+
+// noteDrop arms the dropped-messages note for rumbleDropNoteFor.
+func (r *RumbleAdapter) noteDrop() {
+	r.mu.Lock()
+	r.noteUntil = r.cfg.Now().Add(rumbleDropNoteFor)
 	r.mu.Unlock()
 }
 
@@ -292,11 +382,98 @@ type rumbleLivestream struct {
 
 // rumbleResponse is the subset of get-data this adapter reads.
 //
-// The follower, subscriber and gifted-sub blocks are ignored: they are
-// alert-overlay material rather than chat, and decoding them would mean
-// modelling five more shapes for data nothing here renders.
+// The recent follower, subscriber and gifted-sub lists feed the activity
+// source (rumble_activity.go); the chat path ignores them.
 type rumbleResponse struct {
+	// MaxNumResults is the cap Rumble applies to recent chat, echoed back.
+	MaxNumResults int `json:"max_num_results"`
+	// Followers and Subscribers are the channel counts, pointers so that "not
+	// sent" stays distinct from zero. The recent lists are decoded for activity only.
+	//
+	// AMBIGUITY: the payload also carries num_followers_total, and Rumble's
+	// article does not say how the two differ. num_followers may be a recent or
+	// windowed figure, in which case it understates the channel. Only
+	// num_followers is decoded; confirm against the channel page on the first
+	// live-account check, and switch (or decode both) if it is the smaller.
+	Followers   rumbleBlock        `json:"followers"`
+	Subscribers rumbleBlock        `json:"subscribers"`
+	GiftedSubs  rumbleBlock        `json:"gifted_subs"`
 	Livestreams []rumbleLivestream `json:"livestreams"`
+}
+
+// rumbleBlock is one of the followers / subscribers / gifted_subs containers.
+// It decodes leniently: a container of the wrong JSON type (PHP's json_encode
+// writes an empty associative array as []) or a wrong-typed field inside it
+// leaves the affected part zero and never fails the response, so activity
+// data can never cost the chat decode. Which fields apply depends on the block.
+type rumbleBlock struct {
+	Count  *int
+	Recent json.RawMessage
+}
+
+func (b *rumbleBlock) UnmarshalJSON(data []byte) error {
+	*b = rumbleBlock{}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	for _, k := range []string{"num_followers", "num_subscribers"} {
+		var n int
+		if raw, ok := m[k]; ok && json.Unmarshal(raw, &n) == nil {
+			b.Count = &n
+		}
+	}
+	for _, k := range []string{"recent_followers", "recent_subscribers", "recent_gifted_subs"} {
+		if raw, ok := m[k]; ok {
+			b.Recent = raw
+		}
+	}
+	return nil
+}
+
+// chatCap is the per-response chat cap in force for this response.
+func (resp rumbleResponse) chatCap() int {
+	if resp.MaxNumResults > 0 {
+		return resp.MaxNumResults
+	}
+	return rumbleChatCap
+}
+
+// entryKey identifies a chat entry across polls. Rumble sends no id, so this
+// is the same content identity Message.Normalise hashes.
+func (e rumbleChatEntry) entryKey() string {
+	return e.Username + "\x00" + e.CreatedOn + "\x00" + e.Text
+}
+
+// droppedSince reports whether this poll's chat cannot be continuous with the
+// previous one: the response is at the cap (so older entries were cut) and
+// shares no entry with the previous batch (so what lay between is gone). It
+// returns the new batch's keys for the next comparison. A first poll has no
+// previous batch and so can never report a drop.
+//
+// The second result is how many entries are new since the previous batch. That
+// is the measure of how fast chat is moving: the snapshot always holds up to
+// the cap once a chat is busy enough, and consecutive polls overlap almost
+// completely, so len(snapshot) says nothing about the arrival rate.
+func droppedSince(prev map[string]struct{}, ls rumbleLivestream, limit int) (dropped bool, fresh int, cur map[string]struct{}) {
+	n := len(ls.Chat.RecentMessages) + len(ls.Chat.RecentRants)
+	cur = make(map[string]struct{}, n)
+	overlap := false
+	for _, list := range [][]rumbleChatEntry{ls.Chat.RecentMessages, ls.Chat.RecentRants} {
+		for _, e := range list {
+			k := e.entryKey()
+			if _, dup := cur[k]; dup {
+				continue
+			}
+			cur[k] = struct{}{}
+			if _, ok := prev[k]; ok {
+				overlap = true
+			} else {
+				fresh++
+			}
+		}
+	}
+	return len(prev) > 0 && n >= limit && !overlap, fresh, cur
 }
 
 // ------------------------------------------------------------- the loop
@@ -312,15 +489,46 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 	var (
 		first = true
 		wait  = r.pollInterval()
+		prev  map[string]struct{}
+
+		failures int
+		acts     = newRumbleActivityState()
 	)
 
 	for ctx.Err() == nil {
 		resp, err := r.fetch(ctx)
 		if err != nil {
-			return r.classify(err)
+			cerr := r.classify(err)
+			if IsFatal(cerr) {
+				return cerr
+			}
+			failures++
+			if failures >= rumbleMaxFailures {
+				return cerr
+			}
+			r.setTransient(cerr.Error())
+			if !r.cfg.Sleep(ctx, r.retryDelay(failures-1, retryAfterFrom(err))) {
+				return nil
+			}
+			continue
 		}
+		failures = 0
 
 		live, ok := liveStream(resp)
+		// Activity first, and before the offline branch: follows and
+		// subscriptions are channel-level and arrive with nothing live. The
+		// events leave through the activity door, never as chat.
+		var liveForActivity *rumbleLivestream
+		if ok {
+			liveForActivity = &live
+		} else {
+			acts.resetRants()
+		}
+		for _, ev := range r.observeActivity(acts, rumbleActivityLists{
+			followers: resp.Followers.Recent, subscribers: resp.Subscribers.Recent, gifted: resp.GiftedSubs.Recent,
+		}, liveForActivity) {
+			emitActivity(sink, ev)
+		}
 		if !ok {
 			r.setHealth(StateDegraded,
 				"waiting for a Rumble live stream to start; chat begins when it does")
@@ -338,6 +546,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 			// 8am -- does not need this line, because a poll that finds nothing
 			// live never consumed the window in the first place.
 			first = true
+			prev = nil
 			continue
 		}
 
@@ -348,19 +557,37 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		}
 
 		delivered := r.deliver(live, cutoff, sink)
+		dropped, fresh, cur := droppedSince(prev, live, resp.chatCap())
+		hadPrev := len(prev) > 0
+		prev = cur
+		if dropped {
+			r.noteDrop()
+		}
+		// Saturated means chat is arriving about as fast as the snapshot can
+		// hold it, judged by entries NEW since the last poll. The snapshot's
+		// own size cannot be the test: once a chat has 50 lines every poll
+		// returns 50, so a quiet chat would be polled at the floor for the
+		// rest of the broadcast.
+		saturated := dropped || (hadPrev && fresh >= resp.chatCap()*3/4)
 		// The viewer count is read from the poll that just succeeded rather
 		// than fetched, which is the entire cost of this feature: one field off
 		// a response already in hand, no second request, no second credential.
-		r.setLive(live.WatchingNow)
+		r.setLive(live.WatchingNow, resp.Followers.Count, resp.Subscribers.Count)
 
 		// Back off while nobody is talking and snap back the moment they are.
 		// A silent chat polled every ten seconds for eight hours is 2,880
 		// requests that told us nothing.
-		if delivered == 0 {
+		switch {
+		case saturated:
+			// Most of a full response is new, so older messages are being cut
+			// (or about to be): read as fast as the floor allows. The floor is the same
+			// conservative one no configuration can go under.
+			wait = rumbleMinPoll
+		case delivered == 0:
 			if wait *= 2; wait > rumbleMaxPoll {
 				wait = rumbleMaxPoll
 			}
-		} else {
+		default:
 			wait = r.pollInterval()
 		}
 		if !r.cfg.Sleep(ctx, wait) {
@@ -533,45 +760,117 @@ func rumbleBadgeLabel(id string) string {
 
 // ------------------------------------------------------------- failure
 
-// classify turns a failed poll into either a fatal error or a retryable one.
-//
-// THE FATAL SET IS THE POINT OF THIS FUNCTION. A key the operator revoked, or
-// mistyped, answers 403 forever. Retrying it on the Hub's schedule means a
-// request every thirty seconds, from a home IP, at an endpoint whose rate limit
-// is unpublished -- which is the twitch.go fatalNotice lesson in a different
-// spelling, and how an IP gets banned for a mistake that a sentence in the UI
-// would have fixed in ten seconds.
-//
-// Everything else falls through as retryable, including 429 and 5xx. That is
-// the fail-open direction and it is chosen: a status this function has never
-// seen is far more likely to be a bad afternoon at Rumble than a permanently
-// rejected credential, and treating an outage as fatal takes the chat pane down
-// until somebody restarts polyemesis.
-func (r *RumbleAdapter) classify(err error) error {
-	switch statusOf(err) {
-	case http.StatusBadRequest:
-		// Measured: a request with no key at all answers 400 with
-		// "No access token found in the request". Retrying an empty credential
-		// is retrying nothing.
-		r.setHealth(StateFailed,
-			"Rumble rejected the request as having no API key; check the key from rumble.com/account/livestream-api")
-		return Fatal(errors.New("rumble rejected the live-stream API request as carrying no key; " +
-			"set " + RumbleChatKeyEnv + " to the key from rumble.com/account/livestream-api"))
+// rumbleEnvelope is Rumble's own error body: {"errors":[{"code","message"}]}.
+// Cloudflare's edge in front of rumble.com answers with HTML (or its own JSON
+// with different codes), so only this shape, with the matching code, counts as
+// Rumble itself refusing the key.
+type rumbleEnvelope struct {
+	Errors []struct {
+		Code    any    `json:"code"`
+		Message string `json:"message"`
+	} `json:"errors"`
+}
 
-	case http.StatusUnauthorized, http.StatusForbidden:
-		// Measured: an invalid key answers 403 with a structured body. Rumble
-		// lets an operator reset the URL to revoke access, so a key that worked
-		// yesterday and 403s today is the expected shape of a revocation.
-		r.setHealth(StateFailed,
-			"Rumble refused the live-stream API key; it may have been reset. Issue a new one at rumble.com/account/livestream-api")
-		return Fatal(errors.New("rumble refused the live-stream API key (it may have been reset or revoked); " +
-			"issue a new one at rumble.com/account/livestream-api and update " + RumbleChatKeyEnv))
+func parseRumbleEnvelope(raw []byte) (code, message string, ok bool) {
+	var env rumbleEnvelope
+	if json.Unmarshal(raw, &env) != nil || len(env.Errors) == 0 {
+		return "", "", false
+	}
+	return fmt.Sprint(env.Errors[0].Code), env.Errors[0].Message, true
+}
+
+var (
+	htmlTag   = regexp.MustCompile(`<[^>]*>?`)
+	spaceRuns = regexp.MustCompile(`\s+`)
+)
+
+// plainReason makes a platform-supplied message safe for operator text: no
+// markup, no control characters, one line, short.
+func plainReason(s string) string {
+	s = htmlTag.ReplaceAllString(s, " ")
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(spaceRuns.ReplaceAllString(s, " "))
+	if len(s) > 120 {
+		s = s[:120] + "..."
+	}
+	return s
+}
+
+// classify turns a fetch failure into the error Run acts on.
+//
+// Credential refusals are Fatal ONLY when the body is Rumble's own JSON refusal
+// (400 invalid_request, 401/403 with the status as its code). The host sits
+// behind Cloudflare, so a WAF, bot or IP-reputation block is also a 403 -- an
+// HTML challenge page, or a response carrying cf-mitigated -- and is retried
+// with backoff: treating it as a revoked key would stop chat until a restart
+// and send the operator to rotate a key that works.
+//
+// Nothing here quotes a response body, a URL or a transport error verbatim:
+// HTML never reaches operator text, and the key-bearing request URL never
+// survives (the transport wraps it in a *url.Error).
+func (r *RumbleAdapter) classify(err error) error {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return fmt.Errorf("rumble live-stream API: %s", r.scrub(transportReason(err)))
 	}
 
-	// Retryable. The platform's own words are useful here and the key must not
-	// be in them: scrub is the second layer behind doJSON's stripQuery, so that
-	// a response body echoing the key back cannot carry it into a log.
-	return fmt.Errorf("rumble live-stream API: %s", r.scrub(err.Error()))
+	code, msg, own := parseRumbleEnvelope(ae.Raw)
+	if ae.Header.Get("Cf-Mitigated") != "" {
+		own = false
+	}
+
+	if own {
+		switch {
+		case ae.Status == http.StatusBadRequest && code == "invalid_request":
+			r.setHealth(StateFailed,
+				"Rumble rejected the request as having no API key; check the key from rumble.com/account/livestream-api")
+			return Fatal(errors.New("rumble rejected the live-stream API request as carrying no key; " +
+				"set " + RumbleChatKeyEnv + " to the key from rumble.com/account/livestream-api"))
+
+		case (ae.Status == http.StatusUnauthorized || ae.Status == http.StatusForbidden) &&
+			code == fmt.Sprint(ae.Status):
+			r.setHealth(StateFailed,
+				"Rumble refused the live-stream API key; it may have been reset. Issue a new one at rumble.com/account/livestream-api")
+			return Fatal(errors.New("rumble refused the live-stream API key (it may have been reset or revoked); " +
+				"issue a new one at rumble.com/account/livestream-api and update " + RumbleChatKeyEnv))
+		}
+	}
+
+	out := fmt.Sprintf("rumble live-stream API returned %d", ae.Status)
+	switch {
+	case ae.Status == http.StatusTooManyRequests:
+		out += " (rate limited)"
+	case !own && (ae.Status == http.StatusForbidden || ae.Status == http.StatusUnauthorized ||
+		ae.Status == http.StatusBadRequest):
+		// Not Rumble's JSON refusal, so this is the edge, not the key.
+		out += " from Rumble's network edge, not a key refusal; the host may be temporarily challenged, retrying"
+	}
+	if own {
+		if m := plainReason(msg); m != "" {
+			out += ": " + m
+		}
+	}
+	return errors.New(r.scrub(out))
+}
+
+// transportReason names a transport failure without the request URL, which
+// carries the key.
+func transportReason(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	var se *json.SyntaxError
+	var te *json.UnmarshalTypeError
+	if errors.As(err, &se) || errors.As(err, &te) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "the response was not valid JSON"
+	}
+	return plainReason(err.Error())
 }
 
 // scrub removes the API key from text on its way out of this adapter.
@@ -597,5 +896,5 @@ func (r *RumbleAdapter) scrub(s string) string {
 	if enc := url.QueryEscape(r.cfg.Key); enc != r.cfg.Key {
 		s = strings.ReplaceAll(s, enc, rumbleKeyPlaceholder)
 	}
-	return s
+	return rumbleKeyParam.ReplaceAllString(s, "${1}"+rumbleKeyPlaceholder)
 }

@@ -32,7 +32,8 @@ type stubModerator struct {
 	modelErr error
 }
 
-func (s *stubModerator) CheckFast(p db.Platform, authorID, text string) automod.Verdict {
+func (s *stubModerator) CheckFast(p db.Platform, sub automod.Subject) automod.Verdict {
+	text := sub.Text
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++

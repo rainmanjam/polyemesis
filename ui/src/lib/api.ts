@@ -1,3 +1,4 @@
+import { chatExportUrl, type ChatExportFormat } from "@/lib/chatExport";
 import { WIRE } from "@/lib/contract/wire";
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
@@ -12,6 +13,11 @@ import type {
   CaptionExportFormat,
   CaptionExportSource,
   RenditionConcern,
+  ActivityFeedResponse,
+  ActivityKind,
+  ActivitySourcesResponse,
+  ActivityTestRequest,
+  ActivityTestResponse,
   AccountStats,
   AnalyticsLive,
   AnalyticsReport,
@@ -34,10 +40,13 @@ import type {
   BulkDestReport,
   DelayDumpResult,
   ChatModerationResult,
+  ChatModerator,
   ChatOverview,
   ChatPlatform,
   ChatSearchResult,
   ChatSendResponse,
+  ChatMute,
+  XChatModerator,
   ChatSettings,
   ChatUserCard,
   ChatFlagsResult,
@@ -413,6 +422,16 @@ export function mutationWarnings(body: unknown): string[] {
   const b = body as { reconcileFailed?: unknown; warnings?: unknown };
   const list = Array.isArray(b.warnings) ? b.warnings.filter((w): w is string => typeof w === "string") : [];
   return b.reconcileFailed === true ? list.slice(0, -1) : list;
+}
+
+/** The query string of one Twitch channel tool call; see api.twitchTool. The
+ *  path itself stays a template literal at each call so the console contract
+ *  test can see which server route it reaches. */
+function twitchToolQuery(account: string | undefined, params: Record<string, string> = {}) {
+  const q = new URLSearchParams(params);
+  if (account) q.set("account", account);
+  const qs = q.toString();
+  return qs ? `?${qs}` : "";
 }
 
 const get = <T,>(p: string) => request<T>(p);
@@ -1114,6 +1133,12 @@ export const api = {
   recordingUsage: () => get<DiskUsage>("/recordings/usage"),
   deleteRecording: (id: number) => del<{ status: string }>(`/recordings/${id}`),
   downloadUrl: (id: number) => `${BASE}/recordings/${id}/download`,
+  /** One recording's chat as saved beside it (or built from the chat history
+   *  when none was saved). Fetched, not navigated: see lib/chatExport.ts. */
+  recordingChatUrl: (id: number, format: "json" | "vtt") => `${BASE}/recordings/${id}/chat?format=${format}`,
+  /** Any window of stored chat, streamed. A plain URL for the browser to save. */
+  chatExportUrl: (p: { from: Date; to: Date | null; platform: string; format: ChatExportFormat }) =>
+    chatExportUrl(BASE, p),
 
   // --- go-live metadata ---
   // The composer's own fetch used to live in Dashboard.tsx, and it parsed a
@@ -1380,6 +1405,19 @@ export const api = {
    *  verdicts are the answer, and a status code cannot say "Twitch took it and
    *  YouTube did not". */
   sendChat: (text: string) => post<ChatSendResponse>("/chat/send", { text }),
+  /** Answer one message on the platform that issued it. Not a fan-out: the
+   *  response carries a single result. asBot posts as the platform's bot
+   *  identity where it has one (Kick). */
+  replyChat: (
+    to: { platform: ChatPlatform; account?: string; id: string },
+    text: string,
+    asBot = false,
+  ) =>
+    post<ChatSendResponse>("/chat/send", {
+      text,
+      replyTo: { platform: to.platform, account: to.account ?? "", id: to.id },
+      asBot,
+    }),
   /** Moderator delete, on the platform that issued the id. A platform that
    *  cannot do it answers with a sentence saying so and naming where it can be
    *  done instead — the button is never hidden on a guess. */
@@ -1412,18 +1450,62 @@ export const api = {
     userId: string;
     seconds?: number;
     reason?: string;
+    /** X only: mute and remove this message in the same platform call. */
+    messageId?: string;
   }) => {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     if (m.seconds && m.seconds > 0) q.set("seconds", String(m.seconds));
     if (m.reason) q.set("reason", m.reason);
+    if (m.messageId) q.set("messageId", m.messageId);
     return post<ChatModerationResult>(`/chat/bans?${q.toString()}`, {});
+  },
+
+  /** X's muted viewers, with when each timed mute ends. */
+  getChatMutes: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ mutes: ChatMute[]; truncated?: boolean }>(`/chat/mutes?${q.toString()}`);
+  },
+  /** X's chat moderators. They act across every broadcast the account hosts. */
+  getChatModerators: (account: string | undefined) => {
+    const q = new URLSearchParams({ platform: "x" });
+    if (account) q.set("account", account);
+    return get<{ moderators: XChatModerator[]; appliesToAllBroadcasts: boolean }>(`/chat/moderators?${q.toString()}`);
+  },
+  addChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return post<{ ids: string[] }>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeChatModerator: (account: string | undefined, userId: string) => {
+    const q = new URLSearchParams({ platform: "x", userId });
+    if (account) q.set("account", account);
+    return del<{ ids: string[] }>(`/chat/moderators?${q.toString()}`);
   },
 
   unbanChatUser: (m: { platform: ChatPlatform; account?: string; userId: string }) => {
     const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
     if (m.account) q.set("account", m.account);
     return del<ChatModerationResult>(`/chat/bans?${q.toString()}`);
+  },
+
+  /** Who may moderate a YouTube live chat. Costs 50 quota units a read, so it
+   *  is only ever called on an explicit request. */
+  youTubeChatModerators: (m: { platform: ChatPlatform; account?: string }) => {
+    const q = new URLSearchParams({ platform: m.platform });
+    if (m.account) q.set("account", m.account);
+    return get<{ moderators: ChatModerator[] }>(`/chat/moderators?${q.toString()}`);
+  },
+  addYouTubeChatModerator: (m: { platform: ChatPlatform; account?: string; channelId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, channelId: m.channelId });
+    if (m.account) q.set("account", m.account);
+    return post<ChatModerator>(`/chat/moderators?${q.toString()}`, {});
+  },
+  removeYouTubeChatModerator: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return del<ChatModerationResult>(`/chat/moderators?${q.toString()}`);
   },
 
   /** One person's recent messages, from this server's own scrollback. No
@@ -1435,6 +1517,14 @@ export const api = {
     if (m.account) q.set("account", m.account);
     if (m.limit) q.set("limit", String(m.limit));
     return get<ChatUserCard>(`/chat/users?${q.toString()}`);
+  },
+
+  /** Put a message a rule held back on the overlays ("Show on overlay"). 404
+   *  when it is no longer held: released already, removed, or past ten minutes. */
+  releaseChatFlag: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return post<{ status: string; detail: string }>(`/chat/flags/release?${q.toString()}`, {});
   },
 
   /** What automod flagged, newest first (UX Council A48). */
@@ -1459,6 +1549,40 @@ export const api = {
     const q = new URLSearchParams({ platform });
     if (account) q.set("account", account);
     return patch<{ status: string }>(`/chat/settings?${q.toString()}`, s);
+  },
+
+  // --- viewer activity ---
+  /** Newest first. Admin-only: a read-scoped token is refused with 403. */
+  getActivity: (opts: { limit?: number; platform?: string; kind?: ActivityKind } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.platform) q.set("platform", opts.platform);
+    if (opts.kind) q.set("kind", opts.kind);
+    const qs = q.toString();
+    return get<ActivityFeedResponse>(`/activity${qs ? `?${qs}` : ""}`);
+  },
+  getActivitySources: () => get<ActivitySourcesResponse>("/activity/sources"),
+  /** Sends a synthetic event through the same path a real one takes. 429 when
+   *  sent faster than 2/s; 400 on an unknown kind or platform. */
+  sendTestActivity: (body: ActivityTestRequest) => post<ActivityTestResponse>("/activity/test", body),
+  /** Draws a held alert on the overlay again. 404 when it is no longer held
+   *  or is not an overlay kind. */
+  replayActivity: (id: string) =>
+    post<{ replayed: boolean }>(`/activity/${encodeURIComponent(id)}/replay`),
+  /** Twitch channel tools: one /chat/twitch/{resource} path, the method is the
+   *  verb. Reads and deletes carry their parameters in the query; the rest in a
+   *  JSON body. See docs/API.md, "Twitch channel tools". */
+  twitchTool: {
+    read: <T,>(resource: string, account: string | undefined, params: Record<string, string> = {}) =>
+      get<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
+    post: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      post<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body ?? {}),
+    put: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      put<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
+    patch: <T,>(resource: string, account: string | undefined, body: unknown) =>
+      patch<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
+    remove: <T,>(resource: string, account: string | undefined, params: Record<string, string>) =>
+      del<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
   },
 
   // --- platforms ---

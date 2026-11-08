@@ -31,6 +31,13 @@ type FlaggedMessage struct {
 	// dropped by a full queue or refused by the platform. Set by
 	// markFlagActed once performAutomod succeeds.
 	Acted bool `json:"acted"`
+	// Held says the message was actually kept off the overlays by a hold, which
+	// is what makes "Show on overlay" real. NOT the same as a finding's Hold:
+	// a removal outranks a hold (the line is Blocked, and is not offered back),
+	// and a switched-off automod or platform sets no hold at all, so the
+	// finding can say hold while the line went out. Set only where the hub
+	// offers or judges DisplayHeld.
+	Held bool `json:"held,omitempty"`
 	// At is when the latest finding on this message was recorded.
 	At time.Time `json:"at"`
 }
@@ -109,6 +116,70 @@ func (h *Hub) markFlagActed(p db.Platform, account, msgID string) {
 	for i := len(h.flags) - 1; i >= 0; i-- {
 		if h.flags[i].Message.Key() == key {
 			h.flags[i].Acted = true
+			return
+		}
+	}
+}
+
+// HasMessage reports whether the hub still holds a message in its history ring.
+// A held line the hub has forgotten (it aged out, or its author was banned and
+// the sweep dropped it) is not offered back to the overlay.
+func (h *Hub) HasMessage(p db.Platform, account, msgID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.history {
+		if m.ID == msgID && m.Platform == p && m.Account == account {
+			return true
+		}
+	}
+	return false
+}
+
+// modelAskedTTL bounds how long a model question counts as outstanding. A
+// question can be lost (queue full, moderator replaced), and an entry that
+// never cleared would make its line unreleasable for ever.
+const modelAskedTTL = 30 * time.Second
+
+// ModelPending reports whether the model is still being asked about a message.
+// The overlay's "Show on overlay" refuses while it is: releasing a line the
+// model is about to remove would put it on air first.
+func (h *Hub) ModelPending(p db.Platform, account, msgID string) bool {
+	k := Message{Platform: p, Account: account, ID: msgID}.Key()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	at, ok := h.modelAsked[k]
+	return ok && h.now().Sub(at) < modelAskedTTL
+}
+
+func (h *Hub) setModelAsked(k string, on bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !on {
+		delete(h.modelAsked, k)
+		return
+	}
+	if h.modelAsked == nil {
+		h.modelAsked = map[string]time.Time{}
+	}
+	now := h.now()
+	// Bounded: drop the expired whenever one is added.
+	for old, at := range h.modelAsked {
+		if now.Sub(at) >= modelAskedTTL {
+			delete(h.modelAsked, old)
+		}
+	}
+	h.modelAsked[k] = now
+}
+
+// markFlagHeld records that the message was withheld from the overlays by a
+// hold. A message no longer held in the list is simply missed.
+func (h *Hub) markFlagHeld(p db.Platform, account, msgID string) {
+	key := Message{Platform: p, Account: account, ID: msgID}.Key()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.flags) - 1; i >= 0; i-- {
+		if h.flags[i].Message.Key() == key {
+			h.flags[i].Held = true
 			return
 		}
 	}

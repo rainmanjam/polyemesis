@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/redact"
 )
@@ -29,6 +30,12 @@ const (
 	// Disconnected, it reconnects with Last-Event-ID and replays the gap from
 	// the ring, which is the recovery path that already exists.
 	DefaultClientBuffer = 256
+	// OverlayActivityReplayMax is how old an activity.display may be and still
+	// be REPLAYED to an overlay that reconnects. OBS reloads a browser source
+	// on every scene collection change and the page resumes with Last-Event-ID;
+	// a five-minute replay would play every follow of the last five minutes
+	// again, on air. Ten seconds covers a network blip and not a reload.
+	OverlayActivityReplayMax = 10 * time.Second
 )
 
 // Option tunes a Hub. Tests use them; production takes the defaults.
@@ -152,6 +159,8 @@ func displayPlatform(env Envelope) string {
 		return d.Platform
 	case DisplayRemoval:
 		return d.Platform
+	case ActivityDisplay:
+		return d.Platform
 	}
 	return ""
 }
@@ -264,8 +273,12 @@ func (h *Hub) Publish(env Envelope) {
 		if !wants(s.topics, s.read, s.overlay, env) {
 			continue
 		}
+		out := env
+		if s.read {
+			out = readView(env)
+		}
 		select {
-		case s.c <- env:
+		case s.c <- out:
 		default:
 			h.dropLocked(s, true)
 		}
@@ -355,10 +368,20 @@ func (h *Hub) Subscribe(f Filter, lastID string) (sub *Subscription, replay []En
 		if !ok {
 			gap = true
 		}
+		now := h.now()
 		for _, env := range h.ring[from:] {
-			if wants(topics, f.ReadScoped, overlay, env) {
-				replay = append(replay, env)
+			if !wants(topics, f.ReadScoped, overlay, env) {
+				continue
 			}
+			// An alert is an event on air, not a state to catch up on: an
+			// overlay is never replayed one that has had its moment.
+			if overlay != nil && env.Type == TypeActivityDisplay && now.Sub(env.At) > OverlayActivityReplayMax {
+				continue
+			}
+			if f.ReadScoped {
+				env = readView(env)
+			}
+			replay = append(replay, env)
 		}
 	}
 	c := make(chan Envelope, h.buffer)
@@ -458,6 +481,19 @@ func (e Envelope) redacted() Envelope {
 	// free text gets the same text redactor the tree pass would apply; it has
 	// no field named after a secret for the tree pass to mask.
 	switch d := e.Data.(type) {
+	case activity.Event:
+		// Keeps its type for activityReadable, like alerts.Event above. Every
+		// string a viewer or a platform wrote gets the text redactor; there is
+		// no field named after a secret for the tree pass to find.
+		e.Data = redactActivity(d)
+		return e
+	case ActivityDisplay:
+		d.Name = redact.Redact(d.Name)
+		d.Recipient = redact.Redact(d.Recipient)
+		d.Title = redact.Redact(d.Title)
+		d.Message = redact.Redact(d.Message)
+		e.Data = d
+		return e
 	case DisplayLine:
 		d.Name = redact.Redact(d.Name)
 		d.Text = redact.Redact(d.Text)
@@ -479,4 +515,59 @@ func (e Envelope) redacted() Envelope {
 		e.Data = redact.RedactTree(e.Data)
 	}
 	return e
+}
+
+// redactActivity runs the text redactor over every free-text field of an
+// activity, on a copy: the event the activity hub holds in its ring is shared
+// with the console feed and must not be rewritten under it.
+func redactActivity(a activity.Event) activity.Event {
+	a.Message = redact.Redact(a.Message)
+	a.Title = redact.Redact(a.Title)
+	a.Status = redact.Redact(a.Status)
+	a.Actor = redactActor(a.Actor)
+	a.Other = redactActor(a.Other)
+	if len(a.Recipients) > 0 {
+		rs := make([]activity.Recipient, len(a.Recipients))
+		for i, r := range a.Recipients {
+			rs[i] = activity.Recipient{ID: r.ID, Name: redact.Redact(r.Name)}
+		}
+		a.Recipients = rs
+	}
+	if a.Progress != nil {
+		p := *a.Progress
+		p.Options = make([]activity.ProgressOption, len(a.Progress.Options))
+		for i, o := range a.Progress.Options {
+			o.Label = redact.Redact(o.Label)
+			p.Options[i] = o
+		}
+		a.Progress = &p
+	}
+	return a
+}
+
+func redactActor(a *activity.Actor) *activity.Actor {
+	if a == nil {
+		return nil
+	}
+	c := *a
+	c.Name = redact.Redact(c.Name)
+	c.Login = redact.Redact(c.Login)
+	return &c
+}
+
+// readView is what a READ-scoped subscriber is sent of an envelope: the same
+// envelope, except that an activity is cut down to the platform's own report.
+// The ReadIf lets only the stream kind through, but the full event also carries
+// the connected account's ref, the source's id and whoever the platform named;
+// /activity/sources is refused to read tokens for the account ref alone, so a
+// stream would be a second door to it. Kind, platform, phase and time are what
+// is left. The title is not: broadcast titles are refused to read tokens on
+// GET /analytics/streams, so they are here too.
+func readView(env Envelope) Envelope {
+	if a, ok := env.Data.(activity.Event); ok {
+		env.Data = activity.Event{
+			Kind: a.Kind, Platform: a.Platform, At: a.At, Phase: a.Phase, Test: a.Test,
+		}
+	}
+	return env
 }

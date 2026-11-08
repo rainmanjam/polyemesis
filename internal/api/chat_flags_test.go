@@ -33,7 +33,8 @@ func (a *speakingAdapter) Run(ctx context.Context, sink chat.Sink) error {
 // flagText flags any message whose text is the given string.
 type flagText struct{ text string }
 
-func (f flagText) CheckFast(_ db.Platform, _ string, text string) automod.Verdict {
+func (f flagText) CheckFast(_ db.Platform, sub automod.Subject) automod.Verdict {
+	text := sub.Text
 	if text != f.text {
 		return automod.Verdict{}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -409,6 +410,8 @@ func (s *Server) mcpSecrets() []string {
 	// The Kick chat webhook's path secret: the URL is a credential, and a tool
 	// response that echoed it (an error quoting the URL) would leak it.
 	add(s.kickCallbackSecret())
+	add(s.env.RumbleChatKey)
+	add(chat.RumbleKey(s.env.RumbleChatKey))
 	if st, err := s.store.GetSettings(); err == nil {
 		addIngest(st.Ingest.SRT, st.Ingest.RTMP, st.Ingest.Pull)
 		b := st.Failover.Backup

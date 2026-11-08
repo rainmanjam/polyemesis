@@ -31,7 +31,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useIngestLive } from "@/hooks/useLiveData";
-import { AccountLiveStats } from "@/components/AccountLiveStats";
+import { AccountLiveStats, TwitchChattersLine } from "@/components/AccountLiveStats";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { AutomodConfig } from "@/components/AutomodConfig";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
@@ -1468,6 +1468,7 @@ function PipelineSettings({
           </span>
           <span className="text-sm text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
           <span className="text-sm text-muted-foreground">{t("set.chatSmall")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.chatSavedWithRecordings")}</span>
           <span className="text-sm text-muted-foreground">
             {tn("set.chatSendOnConnectWhy", {
               name: <strong>{t("set.chatSendOnConnectShort")}</strong>,
@@ -3059,6 +3060,7 @@ export function PlatformCredCard({
                         is a promise about. Polled while this row is open; see
                         features/accounts/viewerCount.ts for why the interval is what it is. */}
                     <AccountLiveStats accountId={a.id} />
+                    {a.platform === "twitch" && <TwitchChattersLine accountRef={a.accountRef} />}
                     {/* Said in full rather than as a bare badge: a token cannot
                         gain a permission it was not issued with, which is
                         nobody's mistake. */}

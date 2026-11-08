@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ban, ExternalLink, Timer, Trash2, UserSearch } from "lucide-react";
+import { Ban, ExternalLink, Reply, Timer, Trash2, UserSearch, VolumeX } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { platformName } from "@/lib/platforms";
-import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
+import {
+  authorReason,
+  chatActionSupport,
+  personActionSupport,
+  replySupport,
+} from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
 import { useT } from "@/lib/i18n";
 import { openPlatformLink, platformLinkFor } from "@/lib/platformLinks";
@@ -54,6 +59,11 @@ import type { ChatMessage } from "@/lib/types";
    about ONE ACTION and hands back the sentence to put on screen.
    =========================================================================== */
 
+/** The message ids X's mute call takes. X's own ids are digits; a line that
+ *  arrived without one, or an echo that fell back to polyemesis's own, cannot
+ *  be removed that way, so the item stays inert instead of failing on press. */
+const X_MUTE_MESSAGE_ID = /^[1-9][0-9]{0,18}$/;
+
 export interface MenuAnchor {
   x: number;
   y: number;
@@ -65,6 +75,7 @@ export function ChatMessageMenu({
   onClose,
   onOpenCard,
   onDelete,
+  onReply,
 }: Readonly<{
   message: ChatMessage;
   /** Viewport coordinates of the click that opened this. */
@@ -72,6 +83,8 @@ export function ChatMessageMenu({
   onClose: () => void;
   onOpenCard: (m: ChatMessage) => void;
   onDelete?: Asks<ChatMessage>;
+  /** Start a threaded reply to this message in the composer. */
+  onReply?: (m: ChatMessage) => void;
 }>) {
   // Radix positions against a trigger element, and the trigger here is a point
   // rather than a control. A zero-size fixed div at the cursor is the standard
@@ -92,10 +105,13 @@ export function ChatMessageMenu({
   // particular message arrived without a user id to address.
   const noAuthor = authorReason(message, t);
 
-  // Timeouts and a permanent ban are ONE question. Both route through Hub.Ban,
-  // which type-asserts chat.Banner, so gating them separately would only invite
-  // the two gates to drift apart.
+  // Timeouts and a permanent ban both route through Hub.Ban, which type-asserts
+  // chat.Banner, so they share this answer -- except where the Banner cannot
+  // time anyone out (Facebook's Page block has no duration), asked below.
   const person = personActionSupport(message, "ban", t);
+  // Not quite one question after all: Facebook can ban (block) a person and
+  // cannot time one out.
+  const timeoutPerson = personActionSupport(message, "timeout", t);
 
   // Deleting a message is a DIFFERENT question, and deliberately not folded in
   // with the two above: it addresses a message rather than a person, so it does
@@ -118,8 +134,10 @@ export function ChatMessageMenu({
   //                platform that can ban can also delete — and it is here so
   //                that a future adapter with the reverse shape is explained
   //                rather than silently greyed.
+  const reply = replySupport(message.platform, t);
+
   const blanket = person.reason !== "" && person.reason === del.reason ? person.reason : "";
-  const personReason = blanket === "" && noAuthor === "" ? person.reason : "";
+  const personReason = blanket === "" && noAuthor === "" ? person.reason || timeoutPerson.reason : "";
   const deleteReason = blanket === "" ? del.reason : "";
 
   const run = async (
@@ -210,6 +228,20 @@ export function ChatMessageMenu({
           {t("chatMenu.viewHistory")}
         </DropdownMenuItem>
 
+        {onReply && (
+          <DropdownMenuItem
+            disabled={!reply.ok || !message.id}
+            title={reply.reason || t("chatMenu.replyTitle")}
+            onSelect={() => {
+              close();
+              onReply(message);
+            }}
+          >
+            <Reply className="mr-2 h-3.5 w-3.5" />
+            {t("chatMenu.reply")}
+          </DropdownMenuItem>
+        )}
+
         {link && (
           <DropdownMenuItem
             onSelect={() => {
@@ -238,8 +270,8 @@ export function ChatMessageMenu({
         {TIMEOUTS.map((to) => (
           <DropdownMenuItem
             key={to.seconds}
-            disabled={!person.ok}
-            title={person.reason}
+            disabled={!timeoutPerson.ok}
+            title={timeoutPerson.reason}
             onSelect={() => {
               close();
               void run(
@@ -280,6 +312,33 @@ export function ChatMessageMenu({
           <Ban className="mr-2 h-3.5 w-3.5 text-down" />
           {t("chatMenu.banPermanently")}
         </DropdownMenuItem>
+
+        {/* X only: its mute call can also remove one message, in the same
+            request. Shown beside the ban rather than replacing delete, since
+            delete alone leaves the viewer free to post again. */}
+        {message.platform === ("x" as ChatMessage["platform"]) && (
+          <DropdownMenuItem
+            disabled={!person.ok || !X_MUTE_MESSAGE_ID.test(message.id)}
+            title={person.reason || t("chatMenu.muteAndRemoveTitle")}
+            onSelect={() => {
+              close();
+              void run(
+                t("chatMenu.muteAndRemoved", { name: message.author.name }),
+                t("chatMenu.muteAndRemoveFailed", { name: message.author.name }),
+                () =>
+                  api.banChatUser({
+                    platform: message.platform,
+                    account: message.account,
+                    userId: authorId,
+                    messageId: message.id,
+                  }),
+              );
+            }}
+          >
+            <VolumeX className="mr-2 h-3.5 w-3.5" />
+            {t("chatMenu.muteAndRemove")}
+          </DropdownMenuItem>
+        )}
 
         {/* STILL RENDERED when the platform cannot delete, and inert with the
             reason — the rule every other item here follows, and the one this

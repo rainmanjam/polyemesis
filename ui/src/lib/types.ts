@@ -1547,6 +1547,10 @@ export interface Settings {
   /** Chat commands (#6). Optional so a client that predates it can still PUT
    *  settings. */
   chatCommands?: ChatCommandSettings;
+  /** Viewer activity: follows, subs, tips, raids. Optional so a client that
+   *  predates it can still PUT settings (the server decodes over the stored
+   *  document). See ActivitySettings below. */
+  activity?: ActivitySettings;
   /** The cross-platform audience sampler (Wave 4 #4). Optional so a client
    *  that predates it can still PUT settings. */
   analytics?: AnalyticsSettings;
@@ -2072,6 +2076,9 @@ export interface Recording {
   /** The programme it was recorded from; absent on an older recording or one
    *  whose programme was deleted. Its live captions are kept per programme. */
   sourceId?: number | null;
+  /** Chat was saved beside the file when it finished (<name>.chat.json and
+   *  .chat.vtt). Absent on the library's richer rows. */
+  chatSaved?: boolean;
 }
 
 export interface DiskUsage {
@@ -2726,6 +2733,11 @@ export interface ChatStatus {
   lastError?: string;
   canSend: boolean;
   quota?: ChatQuota | null;
+  /** Audience figures where the chat transport carries them (Rumble). Absent
+   *  means the platform did not report one; it is never zero. */
+  viewers?: number;
+  followers?: number;
+  subscribers?: number;
 }
 
 /** One platform's outcome from a fan-out send. `skipped` is "this platform
@@ -2761,6 +2773,17 @@ export interface ChatStats {
   adapters: number;
 }
 
+/** One person who can moderate a live chat (YouTube liveChatModerators). `id`
+ *  is the moderator-in-this-chat id that removing one addresses; `channelId`
+ *  is what adding one takes. */
+export interface ChatModerator {
+  id?: string;
+  channelId?: string;
+  displayName?: string;
+  channelUrl?: string;
+  profileImageUrl?: string;
+}
+
 /** What a moderation call did, in the server's own words.
  *
  *  `detail` is not decoration and must be shown. It carries the difference
@@ -2771,6 +2794,23 @@ export interface ChatModerationResult {
   status: string;
   scope?: string;
   detail?: string;
+}
+
+/** One viewer an X account has muted. `endsAt` is absent for an indefinite
+ *  mute; X leaves expired timed mutes out of its list. */
+export interface ChatMute {
+  userId: string;
+  username?: string;
+  name?: string;
+  endsAt?: string;
+}
+
+/** One of an X account's chat moderators. They act on every broadcast the
+ *  account hosts, so `appliesToAllBroadcasts` is true on the list answer. */
+export interface XChatModerator {
+  userId?: string;
+  username?: string;
+  name?: string;
 }
 
 /** Channel-wide chat rules. Only Twitch publishes an API for these.
@@ -2788,6 +2828,65 @@ export interface ChatSettings {
   uniqueChatMode?: boolean;
   nonModeratorChatDelay?: boolean;
   nonModeratorChatDelaySeconds?: number;
+}
+
+/** Twitch channel tools (internal/chat/twitch_tools.go). Built from Twitch's
+ *  published reference and not yet exercised against a live account. */
+export interface TwitchPin {
+  messageId: string;
+  senderLogin: string;
+  senderName: string;
+  text: string;
+}
+export interface TwitchShield {
+  active: boolean;
+  moderatorLogin?: string;
+  lastActivatedAt?: string;
+}
+export interface TwitchBlockedTerm {
+  id: string;
+  text: string;
+}
+export interface TwitchTermSync {
+  added: string[];
+  present: string[];
+  skipped: { term: string; reason: string }[];
+}
+export interface TwitchChatters {
+  total: number;
+  chatters?: { userId: string; login: string; name: string }[];
+  truncated?: boolean;
+}
+/** AutoMod levels run 0 (off) to 4. The PUT REPLACES: send overallLevel alone
+ *  or every category, never a subset. */
+export interface TwitchAutoMod {
+  overallLevel: number | null;
+  aggression: number;
+  bullying: number;
+  disability: number;
+  misogyny: number;
+  raceEthnicityOrReligion: number;
+  sexBasedTerms: number;
+  sexualitySexOrGender: number;
+  swearing: number;
+}
+export interface TwitchRoleHolder {
+  userId: string;
+  login: string;
+  name: string;
+}
+export interface TwitchBanned extends TwitchRoleHolder {
+  reason?: string;
+  expiresAt?: string;
+}
+export interface TwitchUnbanRequest extends TwitchRoleHolder {
+  id: string;
+  text: string;
+  status: string;
+}
+export interface TwitchShoutouts {
+  nextAnyAt: string | null;
+  targets: Record<string, string>;
 }
 
 /** One viewer's recent messages and roles — the moderator's user card.
@@ -2845,6 +2944,8 @@ export interface ChatFlagFinding {
   confidence?: number;
   decidedBy?: AutomodSlot;
   provider?: string;
+  /** This finding keeps the message off every overlay. */
+  hold?: boolean;
 }
 
 /** One message automod flagged, with every finding about it. */
@@ -2854,6 +2955,9 @@ export interface ChatFlaggedMessage {
   /** An action automod performed on this message succeeded. A flag-only
    *  finding, or an action refused or dropped, leaves this false. */
   acted: boolean;
+  /** The message was actually kept off the overlays by a hold, so it can be
+   *  released. A finding's own `hold` is not enough: a removal outranks it. */
+  held?: boolean;
   at: string;
 }
 
@@ -3026,6 +3130,21 @@ export interface Compliance {
   labels?: Record<string, boolean>;
   /** Facebook's audience for a live video. undefined leaves it alone. */
   facebookPrivacy?: string;
+  /** YouTube broadcast contentDetails controls. null clears the block (an
+   *  update is decoded over the stored row, so undefined would keep it). */
+  youtube?: YouTubeBroadcastControls | null;
+}
+
+/** YouTube's liveBroadcasts contentDetails toggles, per destination. Every
+ *  field omitted means "leave it as YouTube has it". YouTube freezes them once
+ *  a broadcast is testing or live. Mirrors db.YouTubeBroadcastControls. */
+export interface YouTubeBroadcastControls {
+  latencyPreference?: "normal" | "low" | "ultraLow";
+  enableDvr?: boolean;
+  recordFromStart?: boolean;
+  enableAutoStart?: boolean;
+  enableAutoStop?: boolean;
+  closedCaptionsType?: "closedCaptionsDisabled" | "closedCaptionsHttpPost" | "closedCaptionsEmbedded";
 }
 
 /** One Page a Facebook broadcast crossposts to at create time, and whether it
@@ -3662,6 +3781,10 @@ export interface AutomodRule {
   pattern: string;
   action: AutomodAction;
   timeoutSeconds?: number;
+  /** Closed-set reason a match carries; empty means filter_match. */
+  category?: string;
+  /** Keep a match off every on-screen overlay. The console still shows it. */
+  holdOverlay?: boolean;
 }
 
 /** Bounds for the per-author sequence detectors — the only checker that can see
@@ -3850,7 +3973,10 @@ export type HookTrigger =
   | "failover.switched"
   /** Offload stopped retrying a file on a storage target; nothing moves
    *  until Retry now. Sent once per item. */
-  | "offload.stuck";
+  | "offload.stuck"
+  /** Viewer activity (a follow, a tip, a raid). OPT-IN: delivered only to a
+   *  hook that names it, never to one with an empty trigger list. */
+  | "activity";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot
@@ -3877,6 +4003,10 @@ export interface Hook {
 
 export interface HookMeta {
   triggers: HookTrigger[];
+  /** Triggers a hook receives only by naming them; an empty trigger list
+   *  means "all lifecycle triggers" and excludes these. Absent on a server
+   *  older than activity. */
+  optInTriggers?: HookTrigger[];
   specVersion: string;
   headers: Record<string, string>;
   bounds: Record<string, number>;
@@ -4254,4 +4384,185 @@ export interface RecordingOffloadOn {
 
 export interface RecordingOffload {
   targets: RecordingOffloadOn[];
+}
+
+// ------------------------------------------------- viewer activity
+
+/** Every kind of activity event, exact wire strings. Only the first nine are
+ *  drawn on the alerts overlay (see OVERLAY_ALERT_KINDS). */
+export type ActivityKind =
+  | "follow"
+  | "subscribe"
+  | "resub"
+  | "gift"
+  | "tip"
+  | "raid"
+  | "redemption"
+  | "hypetrain"
+  | "poll"
+  | "prediction"
+  | "stream"
+  | "shoutout"
+  | "moderation"
+  | "reaction";
+
+/** What a tip or cheer was worth. Money carries currency+minor(+exponent),
+ *  a platform currency carries unit+units; never both, never converted. */
+export interface ActivityAmount {
+  currency?: string;
+  minor?: number;
+  exponent?: number;
+  unit?: string;
+  units?: number;
+  /** A ready-to-draw string. Set by the server on the overlay projection and
+   *  on the REST/ws event. */
+  display?: string;
+}
+
+export interface ActivityActor {
+  id?: string;
+  login?: string;
+  name: string;
+  anonymous?: boolean;
+}
+
+/** One event as REST and the /ws socket deliver it. */
+export interface ActivityEvent {
+  id: string;
+  kind: ActivityKind;
+  platform: string;
+  account?: string;
+  at: string;
+  actor?: ActivityActor;
+  amount?: ActivityAmount;
+  message?: string;
+  tier?: string;
+  product?: string;
+  months?: number;
+  streak?: number;
+  count?: number;
+  recipients?: { id?: string; name: string }[];
+  direction?: "in" | "out";
+  viewers?: number;
+  other?: ActivityActor;
+  title?: string;
+  status?: string;
+  phase?: string;
+  action?: string;
+  level?: number;
+  progress?: {
+    total?: number;
+    goal?: number;
+    options?: { label: string; votes?: number; points?: number }[];
+    endsAt?: string;
+  };
+  breakdown?: Record<string, number>;
+  source: { type: string; id: string };
+  test?: boolean;
+}
+
+/** The overlay's allowlisted projection (eventstream.ActivityDisplay): no
+ *  actor id, account or source id. `name` "" means anonymous or blanked. */
+export interface ActivityDisplay {
+  id: string;
+  platform: string;
+  kind: ActivityKind;
+  name: string;
+  amount?: ActivityAmount;
+  tier?: string;
+  months?: number;
+  count?: number;
+  recipient?: string;
+  title?: string;
+  viewers?: number;
+  level?: number;
+  /** Only present if automod released it. */
+  message?: string;
+  test?: boolean;
+  at: string;
+}
+
+export type ActivitySourceState = "connecting" | "live" | "degraded" | "failed" | "stopped";
+export type ActivityKindState = "on" | "off" | "unavailable" | "reconnect" | "unknown";
+
+export interface ActivitySource {
+  platform: string;
+  account?: string;
+  state: ActivitySourceState;
+  detail?: string;
+  transport: "own" | "chat";
+  kinds: { kind: string; state: ActivityKindState; detail?: string }[];
+  events: number;
+}
+
+export interface ActivitySourcesResponse {
+  enabled: boolean;
+  kinds: { kind: string; overlay: boolean }[];
+  platforms: string[];
+  sources: ActivitySource[];
+  stats: { received: number; delivered: number; invalid: number; deduped: number; disabled: number };
+  overlay?: { shown: number; unworded: number; renamed: number };
+}
+
+export interface ActivityFeedResponse {
+  enabled: boolean;
+  events: ActivityEvent[];
+}
+
+export interface ActivityTestOverrides {
+  name?: string;
+  message?: string;
+  title?: string;
+  amount?: ActivityAmount;
+  count?: number;
+  viewers?: number;
+  months?: number;
+  tier?: string;
+}
+
+export interface ActivityTestRequest {
+  kind: ActivityKind;
+  platform?: string;
+  overrides?: ActivityTestOverrides;
+}
+
+export interface ActivityTestResponse {
+  accepted: boolean;
+  reason?: "disabled" | "duplicate";
+  detail?: string;
+  event: ActivityEvent;
+}
+
+/** A minimum tip for the overlay. Money (currency+minor) XOR a platform
+ *  currency (unit+units); amounts are never converted between them. */
+export interface MinAmount {
+  currency?: string;
+  minor?: number;
+  unit?: string;
+  units?: number;
+}
+
+/** db.Settings.Activity. `kinds` maps platform -> the enabled kinds (exactly
+ *  that list; [] is off); a platform ABSENT from the map uses the defaults. */
+export interface ActivitySettings {
+  enabled: boolean;
+  kinds?: Record<string, string[]>;
+  minTip?: MinAmount[];
+  overlayMessages: boolean;
+  reactions: boolean;
+}
+
+export type AlertLayout = "banner" | "card" | "minimal";
+export type AlertSound = "none" | "chime" | "pop" | "bell";
+
+/** overlay.AlertStyle. Absent on an overlay = the defaults in
+ *  DEFAULT_ALERT_STYLE (lib/overlay.ts). */
+export interface AlertStyle {
+  layout: AlertLayout;
+  kinds: string[];
+  seconds: number;
+  showMessage: boolean;
+  showAmount: boolean;
+  sound: AlertSound;
+  accent: string;
 }

@@ -158,12 +158,80 @@ type Compliance struct {
 	// only ever reports success once a read-back confirms the value actually
 	// changed. Empty leaves it alone.
 	FacebookPrivacy FacebookPrivacy `json:"facebookPrivacy,omitempty"`
+	// YouTube is the YouTube broadcast's contentDetails controls. A pointer, so
+	// a destination that never set one stores and serves exactly what it did
+	// before. They live here rather than in a column of their own because this
+	// is the per-destination JSON that already carries YouTube's privacy and
+	// COPPA declaration and that the metadata push already applies.
+	YouTube *YouTubeBroadcastControls `json:"youtube,omitempty"`
+}
+
+// YouTube latency and closed-caption values, as liveBroadcasts.contentDetails
+// spells them (https://developers.google.com/youtube/v3/live/docs/liveBroadcasts).
+const (
+	YTLatencyNormal   = "normal"
+	YTLatencyLow      = "low"
+	YTLatencyUltraLow = "ultraLow"
+
+	YTCaptionsDisabled = "closedCaptionsDisabled"
+	YTCaptionsHTTPPost = "closedCaptionsHttpPost"
+	YTCaptionsEmbedded = "closedCaptionsEmbedded"
+)
+
+// YouTubeBroadcastControls are the liveBroadcasts contentDetails toggles an
+// operator can set per destination. Every field's zero value means "do not
+// touch it". YouTube freezes them once the broadcast leaves created/ready.
+//
+// Never here: madeForKids (read-only on YouTube; the COPPA declaration is
+// Compliance.MadeForKids, which is selfDeclaredMadeForKids) and the deprecated
+// enableClosedCaptions (closedCaptionsType replaces it).
+type YouTubeBroadcastControls struct {
+	// LatencyPreference is normal, low or ultraLow.
+	LatencyPreference string `json:"latencyPreference,omitempty"`
+	EnableDvr         *bool  `json:"enableDvr,omitempty"`
+	RecordFromStart   *bool  `json:"recordFromStart,omitempty"`
+	EnableAutoStart   *bool  `json:"enableAutoStart,omitempty"`
+	EnableAutoStop    *bool  `json:"enableAutoStop,omitempty"`
+	// ClosedCaptionsType is closedCaptionsDisabled, closedCaptionsHttpPost or
+	// closedCaptionsEmbedded.
+	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+}
+
+// Empty reports whether there is nothing to push.
+func (c *YouTubeBroadcastControls) Empty() bool {
+	return c == nil || (c.LatencyPreference == "" && c.ClosedCaptionsType == "" &&
+		c.EnableDvr == nil && c.RecordFromStart == nil && c.EnableAutoStart == nil && c.EnableAutoStop == nil)
+}
+
+// Problems reports what YouTube will refuse.
+func (c *YouTubeBroadcastControls) Problems() []string {
+	if c == nil {
+		return nil
+	}
+	var probs []string
+	switch c.LatencyPreference {
+	case "", YTLatencyNormal, YTLatencyLow, YTLatencyUltraLow:
+	default:
+		probs = append(probs, fmt.Sprintf("unknown YouTube latency %q (normal, low, ultraLow)", c.LatencyPreference))
+	}
+	switch c.ClosedCaptionsType {
+	case "", YTCaptionsDisabled, YTCaptionsHTTPPost, YTCaptionsEmbedded:
+	default:
+		probs = append(probs, fmt.Sprintf(
+			"unknown YouTube closed-caption type %q (closedCaptionsDisabled, closedCaptionsHttpPost, closedCaptionsEmbedded)",
+			c.ClosedCaptionsType))
+	}
+	if c.LatencyPreference == YTLatencyUltraLow &&
+		c.ClosedCaptionsType != "" && c.ClosedCaptionsType != YTCaptionsDisabled {
+		probs = append(probs, "YouTube ultra-low latency does not support closed captions")
+	}
+	return probs
 }
 
 // Empty reports whether there is nothing to push.
 func (c Compliance) Empty() bool {
 	return c.Privacy == PrivacyUnchanged && c.MadeForKids == nil &&
-		len(c.Labels) == 0 && c.FacebookPrivacy == FBPrivacyUnchanged
+		len(c.Labels) == 0 && c.FacebookPrivacy == FBPrivacyUnchanged && c.YouTube.Empty()
 }
 
 // Problems reports what a platform will refuse, so the operator is told at save
@@ -178,6 +246,7 @@ func (c Compliance) Problems() []string {
 			"unknown Facebook privacy %q (SELF, ALL_FRIENDS, FRIENDS_OF_FRIENDS, EVERYONE)",
 			c.FacebookPrivacy))
 	}
+	probs = append(probs, c.YouTube.Problems()...)
 	ids := make([]string, 0, len(c.Labels))
 	for id := range c.Labels {
 		ids = append(ids, id)

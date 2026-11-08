@@ -42,8 +42,9 @@ accepts the `youtube` scope that polyemesis already asks for (it also accepts
 `youtube.upload` and `youtube.force-ssl`), so an account connected before this
 feature can publish without reconnecting. If an account's recorded grant
 contains none of those, the dialog shows **Reconnect to allow uploads** and sends
-you through the ordinary connect flow. An upload costs 1,600 quota units from
-the same daily allowance live chat uses, and the dialog says so. Google can hold
+you through the ordinary connect flow. An upload costs 1 quota unit, drawn from
+a bucket of its own (100 uploads a day) rather than from the allowance live chat
+uses, and the dialog says so. Google can hold
 uploads from an unaudited API project private whatever you choose; the result
 shows the privacy YouTube actually applied.
 

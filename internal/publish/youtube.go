@@ -38,10 +38,6 @@ type YouTube struct {
 	// Base is the API origin; tests aim it at a fake server.
 	Base   string
 	Client *http.Client
-	// Meter is told the quota cost of the upload, which is billed against the
-	// same daily allowance as every other YouTube Data API call. Nil means
-	// uncounted (tests).
-	Meter func(units int)
 }
 
 // AcceptedYouTubeScopes are the scopes videos.insert documents as sufficient:
@@ -50,12 +46,11 @@ type YouTube struct {
 // feature does not need reconnecting.
 var AcceptedYouTubeScopes = platform.Must(platform.YouTube).PublishAnyScope
 
-const (
-	youTubeBase = platform.YouTubeAPIHost
-	// youTubeUploadCost is videos.insert in quota units, from the same daily
-	// allowance live chat polling spends.
-	youTubeUploadCost = platform.YouTubeCostUploadVideo
-)
+// youTubeBase is the API origin. videos.insert is deliberately NOT charged to
+// the shared quota meter: the quota table gives it a bucket of its own (1 unit a
+// call, 100 calls a day), so it does not draw on the allowance chat spends. See
+// platform.YouTubeCostUploadVideo.
+const youTubeBase = platform.YouTubeAPIHost
 
 func (y *YouTube) base() string {
 	if y.Base != "" {
@@ -304,10 +299,6 @@ func (y *YouTube) open(ctx context.Context, r Run, total int64) (string, error) 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	req.Header.Set("X-Upload-Content-Length", strconv.FormatInt(total, 10))
 	req.Header.Set("X-Upload-Content-Type", "video/mp4")
-	// Charged here, because videos.insert is billed when the session opens.
-	if y.Meter != nil {
-		y.Meter(youTubeUploadCost)
-	}
 	resp, err := y.client().Do(req)
 	if err != nil {
 		return "", netFailure(err)

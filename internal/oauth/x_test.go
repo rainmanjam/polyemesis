@@ -126,7 +126,7 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 	}
 	granted := strings.Fields(q.Get("scope"))
 	sort.Strings(granted)
-	want := []string{"broadcast.read", "broadcast.write", "media.write", "offline.access", "tweet.read", "tweet.write", "users.read"}
+	want := []string{"broadcast.read", "broadcast.write", "follows.read", "media.write", "offline.access", "tweet.read", "tweet.write", "users.read"}
 	if !reflect.DeepEqual(granted, want) {
 		t.Errorf("scope = %v, want exactly %v. broadcast.read/write are the Livestream family; "+
 			"offline.access issues a refresh token; users.read and tweet.read let GET /2/users/me "+
@@ -136,12 +136,12 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 
 // TestXScopesAreTheListTheLedgerRecords keeps Scopes and ScopeVersion honest
 // against the append-only ledger. Version 2 added tweet.write and media.write so
-// clips can be posted; an account connected at version 1 reconnects once.
+// clips can be posted; follows.read joined it in the same release; an older account reconnects once.
 func TestXScopesAreTheListTheLedgerRecords(t *testing.T) {
 	x := &X{}
 	if got := x.ScopeVersion(); got != 2 {
-		t.Errorf("ScopeVersion() = %d, want 2: version 2 asks for the two publish scopes, and "+
-			"an account on version 1 has to be told to reconnect", got)
+		t.Errorf("ScopeVersion() = %d, want 2: version 2 asks for the publish scopes and follows.read "+
+			"(Premium-subscription activity), and an account on version 1 has to be told to reconnect", got)
 	}
 	if got := x.Platform(); got != db.PlatformX {
 		t.Errorf("Platform() = %q, want db.PlatformX", got)
@@ -530,8 +530,10 @@ func TestXMetadataCannotChangeALiveBroadcastAndSaysSo(t *testing.T) {
 
 // ------------------------------------------------------------ helpers / shape
 
-// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read, including the viewer counts that must stay
-// undecoded.
+// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read. total_watching used to be left undecoded
+// because the reference did not say what it counted; X's broadcasts overview now defines it as live viewers
+// (total_watched is the cumulative figure), so it is decoded as the string X sends and only ever turned into a count by
+// XLiveViewers, where absent stays nil.
 func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, xBroadcastListFixture)
@@ -544,14 +546,17 @@ func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 		t.Fatalf("decoded = %+v", bs)
 	}
 	raw, _ := json.Marshal(bs[0])
-	if strings.Contains(string(raw), "total_watching") {
-		t.Error("the viewer counts are undescribed by X and must not be decoded into a count")
+	if !strings.Contains(string(raw), `"total_watching":"`) {
+		t.Errorf("total_watching is not carried as X's string: %s", raw)
+	}
+	if strings.Contains(string(raw), "total_watched") {
+		t.Error("total_watched is the cumulative figure and is not decoded")
 	}
 }
 
 // TestXAsksForEveryFieldItDecodes pins the broadcast.fields query to the struct.
 func TestXAsksForEveryFieldItDecodes(t *testing.T) {
-	for _, f := range []string{"id", "broadcast_id", "twitter_user_id", "source_id", "title", "share_url", "media_key", "state", "start_ms", "end_ms"} {
+	for _, f := range []string{"id", "broadcast_id", "twitter_user_id", "source_id", "title", "share_url", "media_key", "state", "start_ms", "end_ms", "total_watching"} {
 		if !strings.Contains(xBroadcastFields, f) {
 			t.Errorf("broadcast.fields does not request %q", f)
 		}

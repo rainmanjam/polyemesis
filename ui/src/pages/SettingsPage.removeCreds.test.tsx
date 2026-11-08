@@ -21,6 +21,9 @@ vi.mock("@/lib/api", async () => {
       deleteAccount: vi.fn(),
       confirmDeleteAccount: vi.fn(),
       accountStats: vi.fn(async () => ({ supported: false, reason: "not in this test" })),
+      // The Twitch account row asks for its chatter count; this test is about
+      // removing credentials, so the answer is a refusal and the line hides.
+      twitchTool: { read: vi.fn(async () => { throw new Error("not in this test"); }) },
       connectUrl: (p: string) => `/api/v1/oauth/${p}/start`,
       putCreds: vi.fn(),
       checkCreds: vi.fn(),

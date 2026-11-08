@@ -313,6 +313,13 @@ type youTubePollRef struct {
 	pollID string
 }
 
+// facebookPollRef is a Facebook live poll: the adapter that created it and
+// the poll's id.
+type facebookPollRef struct {
+	poller chat.NativePoller
+	pollID string
+}
+
 type twitchPollRef struct {
 	accountID     int64
 	broadcasterID string
@@ -360,6 +367,9 @@ func (m nativePollMirror) Start(ctx context.Context, spec polls.Spec) []polls.Mi
 	if spec.MirrorYouTube {
 		out = append(out, m.startYouTube(ctx, spec)...)
 	}
+	if spec.MirrorFacebook {
+		out = append(out, m.startFacebook(ctx, spec)...)
+	}
 	return out
 }
 
@@ -392,8 +402,41 @@ func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []p
 		out = append(out, polls.Mirrored{
 			Account: p.Account(),
 			Result: polls.NativeResult{Platform: string(db.PlatformYouTube), Status: polls.NativeMirrored,
-				Reason: "YouTube reports a live poll's count only when it closes; it is added then"},
+				Reason: "YouTube's count is shown when the chat carries one, and is final when the poll closes"},
 			Ref: youTubePollRef{poller: p, pollID: id},
+		})
+	}
+	return out
+}
+
+func fbSkipped(reason string) polls.Mirrored {
+	return polls.Mirrored{Result: polls.NativeResult{Platform: string(db.PlatformFacebook), Status: polls.NativeSkipped, Reason: reason}}
+}
+
+// startFacebook creates a native poll on every connected Facebook live video.
+// Meta documents no option limit, so none is enforced here; Facebook's own
+// refusal (a stream that is not live yet, a missing permission) comes back as
+// the reason, and that account votes by number in chat instead.
+func (m nativePollMirror) startFacebook(ctx context.Context, spec polls.Spec) []polls.Mirrored {
+	if m.s.chat == nil {
+		return []polls.Mirrored{fbSkipped("Facebook chat is not connected")}
+	}
+	pollers := m.s.chat.NativePollers(db.PlatformFacebook)
+	if len(pollers) == 0 {
+		return []polls.Mirrored{fbSkipped("Facebook chat is not connected")}
+	}
+	var out []polls.Mirrored
+	for _, p := range pollers {
+		id, err := p.CreatePoll(ctx, spec.Question, spec.Options)
+		if err != nil {
+			out = append(out, polls.Mirrored{Account: p.Account(), Result: polls.NativeResult{
+				Platform: string(db.PlatformFacebook), Status: polls.NativeFailed, Reason: redact.Redact(err.Error())}})
+			continue
+		}
+		out = append(out, polls.Mirrored{
+			Account: p.Account(),
+			Result:  polls.NativeResult{Platform: string(db.PlatformFacebook), Status: polls.NativeMirrored},
+			Ref:     facebookPollRef{poller: p, pollID: id},
 		})
 	}
 	return out
@@ -437,14 +480,19 @@ func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []po
 				Reason: redact.Redact(err.Error())}})
 			continue
 		}
+		// Marked in flight BEFORE the call: Twitch can announce the poll over
+		// EventSub before the call returns its id (activityhub.MirrorLedger).
+		created := m.s.mirroredPolls.Begin()
 		p, err := tw.CreatePoll(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, spec.Question, spec.Options, spec.DurationSeconds)
 		if err != nil {
+			created("")
 			// A 403 is the ordinary answer for a channel that is not an
 			// Affiliate or Partner. Said once, on the poll.
 			out = append(out, polls.Mirrored{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
 				Reason: redact.Redact(err.Error())}})
 			continue
 		}
+		created(p.ID)
 		out = append(out, polls.Mirrored{
 			Account: acct.AccountRef,
 			Result:  polls.NativeResult{Platform: "twitch", Status: polls.NativeMirrored, Votes: p.Votes},
@@ -461,7 +509,25 @@ func (m nativePollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool)
 		return m.readTwitch(ctx, ref, end)
 	case youTubePollRef:
 		if !end {
-			// No API reads one running chat message: nothing to report yet.
+			// No API reads one running chat message by id, but the chat
+			// poll's list pages carry the poll with its tally (owner token
+			// only). Report that when one has arrived, else nothing yet.
+			if r, ok := ref.poller.(chat.PollTallyReader); ok {
+				if votes, live, seen := r.PollTally(ref.pollID); seen {
+					return votes, live, nil
+				}
+			}
+			return nil, true, nil
+		}
+		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)
+		return votes, false, err
+	case facebookPollRef:
+		if !end {
+			// Facebook reports a running poll's count, unlike YouTube.
+			if r, ok := ref.poller.(chat.PollReader); ok {
+				votes, open, err := r.PollVotes(ctx, ref.pollID)
+				return votes, err == nil && open, err
+			}
 			return nil, true, nil
 		}
 		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)

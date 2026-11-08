@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -225,5 +227,62 @@ func TestTokenForSerializesConcurrentRefreshesOfTheSameAccount(t *testing.T) {
 	if results[0].AccessToken != "refreshed-1" || results[1].AccessToken != "refreshed-1" {
 		t.Fatalf("both callers should observe the single refreshed token; got %q and %q",
 			results[0].AccessToken, results[1].AccessToken)
+	}
+}
+
+// X can refuse an access token well before its recorded expiry (revoked on X, or rotated by another install).
+// tokenForRejected refreshes exactly that token, once: a caller that was refused with a token the store has since
+// replaced gets the replacement without spending the (rotating) refresh token a second time, and a gone grant comes
+// back as ErrReconnectRequired in words, not as the token endpoint's JSON.
+func TestTokenForRejectedRefreshesTheRefusedTokenOnceAndOnlyOnce(t *testing.T) {
+	var calls int32
+	status, body := http.StatusOK, ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/2/oauth2/token" {
+			http.NotFound(w, r)
+			return
+		}
+		n := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			_, _ = fmt.Fprint(w, body)
+			return
+		}
+		fmt.Fprintf(w, `{"access_token":"refreshed-%d","refresh_token":"rt-%d","expires_in":7200}`, n, n)
+	}))
+	t.Cleanup(srv.Close)
+
+	s, _, store, _ := engineServer(t, defaultTools(), Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+	acct, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformX, AccountName: "ada", AccountRef: "1234567890",
+		AccessToken: "old-access", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	if err := store.PutPlatformCreds(s.box, db.PlatformX, "cid", "secret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	ctx := context.Background()
+
+	got, err := s.tokenFor(ctx, acct.ID)
+	if err != nil || got.AccessToken != "old-access" || atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("tokenFor on an unexpired token = %v, %v after %d refreshes, want the stored token untouched", got, err, calls)
+	}
+	got, err = s.tokenForRejected(ctx, acct.ID, "old-access")
+	if err != nil || got.AccessToken != "refreshed-1" || atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("tokenForRejected = %v, %v after %d refreshes, want one refresh to refreshed-1", got, err, calls)
+	}
+	got, err = s.tokenForRejected(ctx, acct.ID, "old-access")
+	if err != nil || got.AccessToken != "refreshed-1" || atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("a second refused-token caller = %v, %v after %d refreshes, want the stored token and no second spend", got, err, calls)
+	}
+
+	status, body = http.StatusBadRequest, `{"error":"invalid_grant","error_description":"Value passed for the token was invalid."}`
+	_, err = s.tokenForRejected(ctx, acct.ID, "refreshed-1")
+	if !errors.Is(err, oauth.ErrReconnectRequired) || strings.ContainsAny(err.Error(), "{}") ||
+		!strings.Contains(err.Error(), "reconnect the X account") {
+		t.Fatalf("dead grant: err = %v, want ErrReconnectRequired in words with no raw JSON", err)
 	}
 }

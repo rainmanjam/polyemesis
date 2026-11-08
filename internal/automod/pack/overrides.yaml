@@ -1,0 +1,28 @@
+# Maintainers' decisions over the seeded pack. Applied after the upstream lists
+# are read, keyed by the term in PACK FORM (lowercase, repeats collapsed to two,
+# tokens separated by one space), which is how en-v1.json stores it.
+#
+# A key that matches no term is an error, so an override can't go stale
+# silently when a pin moves.
+#
+# DEFAULT TIERING. With no override a hate term is `severe` when it is tagged
+# racial at severity 3 or 4, or anything at severity 4, and `contextual`
+# otherwise (lgbtq and religious at severity 3). That is a deliberately cautious
+# default: `severe` is the only tier that holds alone, and it is a maintainer's
+# call whether a given term's meaning is independent of context. Promote with
+# `tier` below once reviewed.
+tier: {}
+#   some term: severe
+
+# Remove a term from the pack entirely.
+drop: []
+
+# Extra benign whole tokens that contain a term, merged with the exceptions the
+# upstream list supplies.
+except: {}
+#   some term: [benign token, another]
+
+# Terms upstream lacks. category is hate_speech or profanity; tier is severe or
+# contextual for hate_speech, mild or strong for profanity.
+add: []
+#  - {term: some term, category: hate_speech, tier: severe, tags: [race_ethnicity_religion]}

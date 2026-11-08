@@ -27,7 +27,7 @@ import (
 // countingModerator is a Moderator that reports a known spend.
 type countingModerator struct{ stats automod.ModelStats }
 
-func (c *countingModerator) CheckFast(db.Platform, string, string) automod.Verdict {
+func (c *countingModerator) CheckFast(db.Platform, automod.Subject) automod.Verdict {
 	return automod.Verdict{}
 }
 func (c *countingModerator) CheckModel(context.Context, db.Platform, string) (automod.Verdict, error) {

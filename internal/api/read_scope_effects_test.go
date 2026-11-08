@@ -88,10 +88,26 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"iterating common words rebuilds the scrollback, as /library/search would a transcript"},
 		{http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=someone", nil,
 			"everything one viewer has said"},
+		{http.MethodGet, "/api/v1/chat/export?from=1", nil,
+			"the scrollback again, streamed for any window: every viewer's message, with their name"},
+		{http.MethodGet, "/api/v1/recordings/1/chat", nil,
+			"the chat that arrived during a recording: every viewer's message, with their name"},
 		{http.MethodGet, "/api/v1/chat/flags", nil,
 			"automod's review list carries each flagged message's text, under its author's name"},
+		{http.MethodGet, "/api/v1/chat/mutes?platform=x", nil,
+			"who the operator has muted on X, by user id and name, with when each timed mute ends"},
+		{http.MethodGet, "/api/v1/chat/moderators?platform=x", nil,
+			"the operator's X chat moderators, by user id and name"},
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
+		{http.MethodGet, "/api/v1/chat/twitch/banned", nil,
+			"the banned list, the appeals' text and the chatter names are the channel's people"},
+
+		// Viewer activity: names viewers and carries what they wrote, as chat does.
+		{http.MethodGet, "/api/v1/activity", nil,
+			"the feed names each viewer and carries their tip and sub messages"},
+		{http.MethodGet, "/api/v1/activity/sources", nil,
+			"the per-account source list carries each connected account's ref"},
 
 		// Wave 4 #4: cross-platform analytics is admin-only.
 		{http.MethodGet, "/api/v1/analytics/live", nil,
@@ -100,6 +116,9 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"the stream list carries each broadcast's title"},
 		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
 			"the report names the stream's top chatters"},
+
+		{http.MethodGet, "/api/v1/chat/moderators?platform=youtube", nil,
+			"the roster is read with the owner's token and each read spends 50 quota units"},
 
 		// Wave 4 #5: the highlight queue's excerpts are the transcript again; the
 		// template list carries the fonts listing and FFmpeg's text capability.

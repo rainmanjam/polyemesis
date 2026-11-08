@@ -9,6 +9,10 @@ platform in turn; every platform is optional and independent.
 path between them: what to put on the server, what to register at each
 platform, and how to tell it worked.
 
+> **Upgrading?** After upgrading to this release, reconnect Twitch and X once:
+> both ask for new permissions, and a granted scope never reaches a login that
+> was issued earlier.
+
 - [Server prerequisites](#server-prerequisites)
 - [The same four steps on every platform](#the-same-four-steps-on-every-platform)
 - [X](#x)
@@ -17,6 +21,7 @@ platform, and how to tell it worked.
 - [YouTube (being verified)](#youtube-being-verified)
 - [Facebook (being verified)](#facebook-being-verified)
 - [Chat actions by platform](#chat-actions-by-platform)
+- [Alerts and chat export](#alerts-and-chat-export)
 - [When something is empty or refused](#when-something-is-empty-or-refused)
 
 ---
@@ -283,21 +288,40 @@ code and against each platform's published API on 2026-11-07.
 | Action | Twitch | Kick | X | YouTube | Facebook | Rumble |
 |---|---|---|---|---|---|---|
 | Read chat | ✅ | ✅ (needs webhooks) | ✅ (webhook + app bearer) | ✅ | ✅ (comments) | ✅ |
-| Send | ✅ 500 chars | ✅ 500 chars | ✅ 140 chars ⚠️ | ✅ 200 chars | 🔧 | 🚫 |
+| Send | ✅ 500 chars | ✅ 500 chars | ✅ 140 chars ⚠️ | ✅ 200 chars | ❓ | 🚫 |
+| Reply to a message | ❓ | ✅ (as you, or as the bot) | ❓ | ❓ | ❓ | 🚫 |
 | Delete message | ✅ | ✅ | ✅ ⚠️ | ✅ | ✅ | 🚫 |
 | Hide on platform | 🚫 | 🚫 | 🚫 | 🚫 | ✅ | 🚫 |
 | Time out | ✅ | ✅ | ✅ timed mute ⚠️ | ✅ temporary ban | 🚫 | 🚫 |
-| Ban / unban | ✅ | ✅ | ✅ mute / unmute ⚠️ | ✅ | 🔧 | 🚫 |
-| Native poll | ✅ | 🚫 | 🚫 | ✅ | 🔧 | 🚫 |
+| Ban / unban | ✅ | ✅ | ✅ mute / unmute ⚠️ | ✅ | ✅ ⚠️ block / unblock the Page's | 🚫 |
+| Mute and delete a message in one step | ❓ | ❓ | ✅ ⚠️ | ❓ | ❓ | 🚫 |
+| Native poll | ✅ | 🚫 | 🚫 | ✅ | ✅ ⚠️ | 🚫 |
+| Pin a message | ✅ ⚠️ | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
+| Announcement, shoutout, warn | ✅ ⚠️ | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
+| Moderators | ✅ ⚠️ (owner only) | 🚫 | ✅ ⚠️ | ✅ ⚠️ (channel owner only) | 🚫 | 🚫 |
+| VIPs | ✅ ⚠️ (owner only) | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
+| Banned and muted lists | ✅ ⚠️ banned list | ❓ | ✅ ⚠️ muted users | ❓ | ❓ | 🚫 |
 | Chat settings | ✅ read + change (slow, follower, subscriber, emote, unique, moderator delay) | 🚫 | ❓ | 🚫 | 🚫 | 🚫 |
+| Shield Mode, blocked terms, AutoMod, unban requests, chatters | ✅ ⚠️ | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
 
 - ✅ built in polyemesis.
-- ⚠️ built, not yet exercised against a live account. As of 2026-11-07 that is
-  X send, delete and mute; Twitch and Kick moderation and all of YouTube and
-  Facebook are still to be live-tested.
+- ⚠️ built, not yet tested live. As of 2026-11-07 that is X send, delete and
+  mute (and mute-and-delete, muted users, moderators); the Twitch channel tools
+  (pin, announcement, shoutout, warn, Shield Mode, blocked terms, chatters,
+  AutoMod, moderators and VIPs, banned list, unban requests); YouTube moderators;
+  and Facebook block, unblock and native polls. Twitch and Kick moderation and
+  all of YouTube and Facebook are still to be live-tested.
 - 🔧 the platform's API offers it and polyemesis does not do it yet.
 - 🚫 the platform's API doesn't offer it.
-- ❓ the platform's docs don't say.
+- ❓ the platform's docs don't say, or polyemesis does not do it and the docs
+  leave open whether it could. Facebook send is one: the live-video comments
+  edge says "You can't perform this operation on this endpoint", and the
+  generic Video comments edge documents a POST nobody has shown works on a
+  live video, so polyemesis does not send to Facebook chat.
+
+Not every row is a button in the console. The Twitch channel tools are served
+from `/chat/twitch/{resource}` in the [API](API.md); what each needs, and the
+Twitch scopes behind them, is in [PLATFORMS.md](PLATFORMS.md#twitch).
 
 How the table plays out in practice:
 
@@ -314,6 +338,14 @@ How the table plays out in practice:
 - **An X mute belongs to the broadcaster**, so it applies to all of that
   account's broadcasts, and a timed mute ends on its own.
 - **Kick timeouts run from 1 minute to 7 days.**
+- **Facebook can block but not time out.** The Page's block list has no
+  duration, so a ban there is permanent until you lift it.
+- **A refused action says so.** A platform's refusal or outage is reported
+  with its reason rather than dropped, and a revoked login shows the account as
+  needing a reconnect.
+- **Twitch, X and YouTube moderator changes are the owner's.** Twitch refuses
+  moderators and VIPs from anyone but the channel's owner, and YouTube lets only
+  the chat's channel owner manage its moderators.
 
 Sources checked on 2026-11-07:
 
@@ -329,6 +361,17 @@ Sources checked on 2026-11-07:
   [Live Video polls](https://developers.facebook.com/docs/graph-api/reference/live-video/polls/)
   and [Page settings](https://developers.facebook.com/docs/graph-api/reference/page/settings/)
 - Rumble: [Live Stream API](https://rumblefaq.groovehq.com/help/how-to-use-rumble-s-live-stream-api)
+
+---
+
+## Alerts and chat export
+
+Once chat is connected, two more things draw on it. **Alerts** (follows,
+subscriptions, tips and the like, from all six platforms) are covered in
+[ACTIVITY.md](ACTIVITY.md), including what each platform needs for them and
+which are not yet checked against a live account. **Chat export** saves each
+recording's chat beside it as JSON and WebVTT; see
+[CHAT-EXPORT.md](CHAT-EXPORT.md).
 
 ---
 

@@ -32,7 +32,7 @@ const ROOT = new URL("../../../", import.meta.url).pathname;
  *
  *  Reads `_ Deleter = (*TwitchAdapter)(nil)` and friends out of chat.go and
  *  lowercases the adapter prefix, which is the platform id the UI uses. */
-function adaptersImplementing(iface: "Deleter" | "Banner" | "Hider"): string[] {
+function adaptersImplementing(iface: "Deleter" | "Banner" | "Hider" | "NoTimeouter"): string[] {
   const src = readFileSync(join(ROOT, "internal/chat/chat.go"), "utf8");
   const re = new RegExp(`_\\s+${iface}\\s*=\\s*\\(\\*(\\w+)Adapter\\)\\(nil\\)`, "g");
   const found = new Set<string>();
@@ -59,12 +59,14 @@ describe("the UI's per-action moderation table against internal/chat", () => {
     }
   });
 
-  it("offers timeout and ban exactly where an adapter implements Banner", () => {
+  it("offers ban where an adapter implements Banner, and timeout unless it is a NoTimeouter", () => {
     const go = adaptersImplementing("Banner");
+    const noTimeout = adaptersImplementing("NoTimeouter");
     for (const p of PLATFORMS) {
-      // Both route through Hub.Ban, so both stand or fall on the same assertion.
+      // Both route through Hub.Ban, so both need the Banner assertion; a
+      // NoTimeouter can ban and cannot time out.
       expect(chatActionSupport(p, "ban").ok, `ban on ${p}`).toBe(go.includes(p));
-      expect(chatActionSupport(p, "timeout").ok, `timeout on ${p}`).toBe(go.includes(p));
+      expect(chatActionSupport(p, "timeout").ok, `timeout on ${p}`).toBe(go.includes(p) && !noTimeout.includes(p));
     }
   });
 
@@ -85,21 +87,21 @@ describe("the UI's per-action moderation table against internal/chat", () => {
 });
 
 describe("the gap the per-action table exists to close", () => {
-  it("keeps answering no to Facebook bans while the moderation column says yes", () => {
-    // THE WHOLE DEFECT, pinned as a fixture. Facebook's capability column is a
-    // summary for the setup page and it is correct: polyemesis can moderate
-    // Facebook, by deleting and hiding comments. Gating a BAN button on that
-    // summary is what produced a control that was enabled and always failed.
+  it("answers Facebook per action: a ban works, a timeout does not", () => {
+    // Facebook blocks a person from the Page and the block has no duration.
+    // Gating a TIMEOUT button on the ban answer would be a control that is
+    // enabled and always refused.
     expect(moderationColumnSaysYes("facebook")).toBe(true);
-    expect(chatActionSupport("facebook", "ban").ok).toBe(false);
+    expect(chatActionSupport("facebook", "ban").ok).toBe(true);
+    expect(chatActionSupport("facebook", "timeout").ok).toBe(false);
     expect(chatActionSupport("facebook", "delete").ok).toBe(true);
   });
 
   it("says why, in a sentence that names the alternative", () => {
     // A disabled control with no explanation is only marginally better than a
     // broken one, so the reason is part of the contract rather than a nicety.
-    expect(chatActionSupport("facebook", "ban").reason).toMatch(/no chat ban API/);
-    expect(chatActionSupport("facebook", "ban").reason).toMatch(/Facebook page itself/);
+    expect(chatActionSupport("facebook", "timeout").reason).toMatch(/cannot time anyone out/);
+    expect(chatActionSupport("rumble", "ban").reason).toMatch(/^Rumble /);
     expect(chatActionSupport("twitch", "hideUpstream").reason).toMatch(/Only Facebook/);
   });
 
@@ -110,5 +112,12 @@ describe("the gap the per-action table exists to close", () => {
     const r = chatActionSupport("rumble", "delete");
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/^Rumble /);
+  });
+});
+
+describe("YouTube offers both kinds of ban", () => {
+  it("allows a timeout and a permanent ban, which the sanction pill tells apart", () => {
+    expect(chatActionSupport("youtube", "timeout").ok).toBe(true);
+    expect(chatActionSupport("youtube", "ban").ok).toBe(true);
   });
 });

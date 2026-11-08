@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/rainmanjam/polyemesis/internal/activityhub"
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
@@ -651,6 +652,20 @@ type Server struct {
 	obsDocMu sync.Mutex
 	// polls is the chat poll counter (#14), or nil without chat. polls.go.
 	polls *polls.Engine
+	// activity is the viewer-activity hub (internal/activityhub), or nil; the
+	// activity routes answer 503 without it. activityGate is the alerts
+	// overlay's gate, read for its counters only. activityTests limits "Send
+	// test alert". activity.go.
+	activity      *activityhub.Hub
+	activityGate  *overlay.ActivityGate
+	activityTests activityTestLimiter
+	// mirroredPolls lists the native Twitch polls polyemesis created when it
+	// mirrored a chat poll, so the EventSub source does not report them a
+	// second time (D9). Its zero value is ready. polls.go, activity_wiring.go.
+	mirroredPolls activityhub.MirrorLedger
+	// twitchEventSub aims the EventSub source at a stub. A test seam: the zero
+	// value is Twitch itself.
+	twitchEventSub twitchEventSubSeam
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -870,6 +885,10 @@ type Options struct {
 	// Polls is the chat poll counter. Optional; the poll routes answer 503
 	// without it.
 	Polls *polls.Engine
+	// Activity is the viewer-activity hub and ActivityGate the alerts overlay's
+	// gate. Both optional; the activity routes answer 503 without the hub.
+	Activity     *activityhub.Hub
+	ActivityGate *overlay.ActivityGate
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -946,6 +965,8 @@ func New(o Options) *Server {
 		overlayGate:     o.OverlayGate,
 		obs:             o.OBS,
 		polls:           o.Polls,
+		activity:        o.Activity,
+		activityGate:    o.ActivityGate,
 		version:         o.Version,
 		diag:            o.Diag,
 		diagLevel:       o.DiagLevel,
@@ -994,6 +1015,7 @@ func New(o Options) *Server {
 	if o.DB != nil {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
+		s.lifecycle.retokenFor = s.tokenForRejected
 		s.lifecycle.announce = s.announceBroadcastPhase
 		// X: the title its PUBLISH carries, and the chat adapter told the new
 		// broadcast at once rather than after its poll.
@@ -1028,6 +1050,11 @@ func New(o Options) *Server {
 	}
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
+	}
+	// A platform whose activity rides its chat connection is listed in
+	// GET /activity/sources by asking the chat hub (activity_wiring.go).
+	if s.activity != nil && s.chat != nil {
+		s.activity.AddStatusProvider(chatActivityStatuses(s.chat))
 	}
 	// Read (and, for a file from before the token was sealed, rewrite) the
 	// playout sidecar now rather than on the first request, so an install
@@ -1761,6 +1788,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Automod's review list: what it flagged, for the Chat page's
 			// Flagged chip (UX Council A48). Content, so read-scope denied.
 			api.Get(r, "/chat/flags", s.handleChatFlags, readDenied)
+			// Puts a message a rule held back on the overlays. Local and
+			// reversible, so a POST like the local hide, not a delete.
+			r.Post("/chat/flags/release", s.handleChatFlagRelease)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
 			// Hiding is POST rather than DELETE because it is reversible, and
 			// separate from delete because the two are different decisions:
@@ -1772,9 +1802,26 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// person, so they get their own route too.
 			api.Get(r, "/chat/settings", s.handleGetChatSettings, readDenied)
 			r.Patch("/chat/settings", s.handleChatSettings)
+			// X's muted viewers, and who moderates the chat: X's moderators
+			// (by user id) and YouTube's liveChatModerators (by channel id,
+			// the chat's channel owner only). One route set; the handlers
+			// dispatch on the platform. Read-denied like the scrollback.
+			api.Get(r, "/chat/mutes", s.handleChatMutes, readDenied)
+			api.Get(r, "/chat/moderators", s.handleChatModerators, readDenied)
+			r.Post("/chat/moderators", s.handleChatAddModerator)
+			r.Delete("/chat/moderators", s.handleChatRemoveModerator)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
+			// Twitch's channel tools -- announcements, shoutouts, pins, Shield
+			// Mode, warnings, blocked terms, chatters, AutoMod, roles, bans and
+			// appeals -- are one resource path and the method picks the verb.
+			// See chat_twitch_tools.go.
+			api.Get(r, "/chat/twitch/{resource}", s.handleTwitchToolGet, readDenied)
+			r.Post("/chat/twitch/{resource}", s.handleTwitchToolPost)
+			r.Put("/chat/twitch/{resource}", s.handleTwitchToolPut)
+			r.Patch("/chat/twitch/{resource}", s.handleTwitchToolPatch)
+			r.Delete("/chat/twitch/{resource}", s.handleTwitchToolDelete)
 
 			// Chat polls (#14). Results are counts with no voter in them, so
 			// the GETs follow the method rule; starting and ending one posts
@@ -1784,6 +1831,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/polls/export", s.handleExportPolls)
 			r.Get("/polls/{id}", s.handleGetPoll)
 			r.Post("/polls/{id}/end", s.handleEndPoll)
+
+			// Viewer activity -- follows, subs, tips, raids (internal/activity).
+			// Named activity, not alerts: that word is the operator's. The two
+			// GETs name viewers and carry what they wrote, so a read token is
+			// refused them as it is refused chat; the two POSTs reach the
+			// overlay and are admin by the method rule. See activity.go.
+			api.Get(r, "/activity", s.handleActivity, readDenied)
+			api.Get(r, "/activity/sources", s.handleActivitySources, readDenied)
+			r.Post("/activity/test", s.handleActivityTest)
+			r.Post("/activity/{id}/replay", s.handleActivityReplay)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -1870,6 +1927,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Use(s.requireScope)
 			api.Get(r, "/recordings/{id}/download", s.handleDownloadRecording, readDenied)
 			api.Get(r, "/recordings/stems/{name}/download", s.handleDownloadStem, readDenied)
+			// A recording's chat, and any window of it. Viewer names, so
+			// read-denied like /chat/messages. See chat_export.go.
+			api.Get(r, "/recordings/{id}/chat", s.handleRecordingChat, readDenied)
+			api.Get(r, "/chat/export", s.handleChatExport, readDenied)
 			// Addressed by the JOB rather than by a filename: the export's
 			// path was written by the server and is never handed to a client
 			// to spell back at us.
@@ -1958,6 +2019,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// it can be placed apart from the chat lines.
 	r.Get(OverlayPath+"/poll", ovPage)
 	r.Get(OverlayPath+"/poll"+OverlayKeyPath+"{key}", ovPage)
+	// The alerts overlay: the same key again, a third OBS source for follows,
+	// subs, tips and raids.
+	r.Get(OverlayPath+"/alerts", ovPage)
+	r.Get(OverlayPath+"/alerts"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)

@@ -61,6 +61,10 @@ const (
 	// enough that a genuinely quiet ten minutes is not called an error, short
 	// enough to catch a missing subscription well inside one broadcast.
 	kickSilenceAfter = 10 * time.Minute
+
+	// kickRejectedAfter is how many refused deliveries in a row it takes to
+	// say so in health: one is a stray request, three is a pattern.
+	kickRejectedAfter = 3
 	// kickHealthTick is how often the silence check runs.
 	kickHealthTick = 30 * time.Second
 	// kickProbeTimeout bounds the self-reachability probe. It is short: this
@@ -98,6 +102,13 @@ type KickConfig struct {
 	// Channel is the slug, for the tab header.
 	Channel string
 	Token   TokenFunc
+	// Reauth, when set, forces a token refresh and returns the new access token.
+	// A 401 on a call made with a token that has not expired locally means Kick
+	// revoked it or disagrees about its age; one refresh and one retry settles
+	// whether that is the access token alone or the whole grant. An error from
+	// it leaves the original 401 standing: the caller has already recorded
+	// that the account needs reconnecting.
+	Reauth TokenFunc
 
 	// PublicURL is the externally reachable base URL of this polyemesis, e.g.
 	// "https://stream.example.com". Empty is a supported state and produces a
@@ -160,6 +171,23 @@ type KickAdapter struct {
 	// GET and, at worst, one POST that Kick answers as a duplicate.
 	subID       string
 	subPostedAt time.Time
+
+	// rejected is the deliveries refused for failing signature verification
+	// since the last one was accepted, and keyDown those turned away with a 503
+	// because the signing key could not be fetched. Both reset on an accepted
+	// delivery. They exist so health can say "deliveries are arriving and being
+	// refused" instead of the misleading "none have arrived".
+	rejected int
+	keyDown  int
+
+	// terminal is set when the account can no longer use the API at all: Kick
+	// rejects its token and a refresh did not help, or the grant is gone. Run
+	// returns it, which the Hub records as a failed chat instead of asking Kick
+	// again every few minutes.
+	terminal error
+
+	// Activity (kick_activity.go). Guarded by mu like everything above.
+	act kickActivityState
 }
 
 // NewKick builds the adapter.
@@ -283,6 +311,9 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 	k.mu.Unlock()
 	k.ensureSubscription(ctx)
 	k.refreshHealth()
+	if err := k.terminalError(); err != nil {
+		return err
+	}
 
 	tick := time.NewTicker(k.cfg.Tick)
 	defer tick.Stop()
@@ -296,8 +327,18 @@ func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
 				k.ensureSubscription(ctx)
 			}
 			k.refreshHealth()
+			if err := k.terminalError(); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+// terminalError is the fatal error recorded by a subscription check, if any.
+func (k *KickAdapter) terminalError() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.terminal
 }
 
 // subscriptionDue reports whether it is time to look at the subscription again:
@@ -309,7 +350,7 @@ func (k *KickAdapter) subscriptionDue() bool {
 		return true
 	}
 	wait := kickSubRecheck
-	if k.subProblem != "" {
+	if k.subProblem != "" || k.act.retry {
 		wait = kickSubRetry
 	}
 	return k.cfg.Now().Sub(k.subCheckedAt) >= wait
@@ -366,22 +407,38 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 		} `json:"data"`
 	}
 	q := url.Values{"broadcaster_user_id": {strconv.Itoa(k.cfg.BroadcasterUserID)}}
-	if err := doJSON(ctx, k.cfg.HTTP, http.MethodGet, endpoint+"?"+q.Encode(), k.cfg.Token, nil, &existing); err != nil {
+	if err := k.api(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil, &existing); err != nil {
 		return k.subscriptionProblem("could not read its Kick event subscriptions", err)
 	}
+	have := map[string]string{}
 	for _, s := range existing.Data {
 		// The request filters by broadcaster, but the answer is checked too: a
 		// subscription for another channel is not ours.
 		if s.BroadcasterUserID != 0 && s.BroadcasterUserID != k.cfg.BroadcasterUserID {
 			continue
 		}
-		if s.Event == kickChatEventName && s.Version == kickChatEventVersion &&
-			(s.Method == "" || s.Method == "webhook") {
-			k.mu.Lock()
-			k.subID = s.ID
-			k.mu.Unlock()
-			return ""
+		if s.Version == kickChatEventVersion && (s.Method == "" || s.Method == "webhook") {
+			have[s.Event] = s.ID
 		}
+	}
+
+	// CHAT FIRST AND ALONE. The activity events below are additive: a refusal
+	// of one of them must never become a chat problem, so chat keeps its own
+	// request and its own outcome exactly as before activity existed.
+	if problem := k.syncChat(ctx, endpoint, have, len(existing.Data)); problem != "" {
+		return problem
+	}
+	k.syncActivity(ctx, endpoint, have, len(existing.Data))
+	return ""
+}
+
+// syncChat makes sure the chat.message.sent subscription exists.
+func (k *KickAdapter) syncChat(ctx context.Context, endpoint string, have map[string]string, listed int) string {
+	if id, ok := have[kickChatEventName]; ok {
+		k.mu.Lock()
+		k.subID = id
+		k.mu.Unlock()
+		return ""
 	}
 
 	// Not listed. An empty listing after polyemesis has already created the
@@ -391,7 +448,7 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	k.mu.Lock()
 	posted, postedAt := !k.subPostedAt.IsZero(), k.subPostedAt
 	k.mu.Unlock()
-	if posted && len(existing.Data) == 0 && k.cfg.Now().Sub(postedAt) < kickSubEmptyBackoff {
+	if posted && listed == 0 && k.cfg.Now().Sub(postedAt) < kickSubEmptyBackoff {
 		return ""
 	}
 
@@ -412,7 +469,7 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	k.mu.Lock()
 	k.subPostedAt = k.cfg.Now()
 	k.mu.Unlock()
-	if err := doJSON(ctx, k.cfg.HTTP, http.MethodPost, endpoint, k.cfg.Token, body, &created); err != nil {
+	if err := k.api(ctx, http.MethodPost, endpoint, body, &created); err != nil {
 		// A duplicate is the subscription we wanted, which the listing failed
 		// to show: success.
 		if ae, ok := err.(*apiError); ok && (ae.Status == http.StatusBadRequest || ae.Status == http.StatusConflict) && kickSaysDuplicate(ae.Body) {
@@ -449,9 +506,28 @@ func kickSaysDuplicate(text string) bool {
 // declining the app or the permission (webhooks off, or no events:subscribe),
 // a 400 is Kick objecting to the request and its own text is the explanation.
 func (k *KickAdapter) subscriptionProblem(what string, err error) string {
-	switch statusOf(err) {
-	case http.StatusUnauthorized:
+	switch {
+	case IsFatal(err):
+		// The token source said the grant is gone. Not retried: Run ends with
+		// this and the chat shows Failed until the account is reconnected.
+		k.mu.Lock()
+		k.terminal = err
+		k.mu.Unlock()
+		return "Kick no longer accepts this account's token; reconnect the Kick account in Settings → Platforms."
+	case statusOf(err) == http.StatusUnauthorized && k.cfg.Reauth != nil:
+		// Refreshed and still refused: asking again in two minutes will not
+		// change the answer.
+		k.mu.Lock()
+		k.terminal = Fatal(errors.New(kickRejectedToken))
+		k.mu.Unlock()
+		return kickRejectedToken + "."
+	case statusOf(err) == http.StatusUnauthorized:
 		return "Kick rejected the access token while checking the chat subscription; reconnect the Kick account in Settings → Platforms."
+	}
+	if ae, ok := err.(*apiError); ok && ae.Edge {
+		return what + ": " + kickEdgeBlocked + ". polyemesis will retry shortly."
+	}
+	switch statusOf(err) {
 	case http.StatusForbidden:
 		return "Kick webhook not enabled for your app: " + what + " (Kick said " + kickSaid(err) + "). " + kickWebhookHint
 	case http.StatusBadRequest:
@@ -461,11 +537,56 @@ func (k *KickAdapter) subscriptionProblem(what string, err error) string {
 }
 
 // kickSaid is the platform's own words for a failed call, without the URL.
+// Kick's envelope message when it sent one, so the operator reads "Unauthorized"
+// rather than {"data":{},"message":"Unauthorized"}; else the reason code; else a
+// plain-text body capped at 200 characters. A body that opens with markup (a
+// proxy's HTML error page) contributes nothing, so only the status shows.
+// Never empty: the status always leads.
 func kickSaid(err error) string {
-	if ae, ok := err.(*apiError); ok {
-		return fmt.Sprintf("%d %s", ae.Status, strings.TrimSpace(ae.Body))
+	ae, ok := err.(*apiError)
+	if !ok {
+		// A transport failure names the full URL, query string included.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return ue.Err.Error()
+		}
+		return err.Error()
 	}
-	return err.Error()
+	said := ae.Message
+	if said == "" {
+		said = ae.Reason
+	}
+	if said == "" {
+		// Kick's own envelope is short JSON; a proxy's HTML error page is not
+		// something an operator should read in a health line, so a body that
+		// opens with markup contributes nothing, and any other is capped.
+		if b := strings.TrimSpace(ae.Body); b != "" && !strings.HasPrefix(b, "<") {
+			said = plainText(b)
+			if len(said) > 200 {
+				said = said[:200] + "…"
+			}
+		}
+	}
+	return strings.TrimSpace(fmt.Sprintf("%d %s", ae.Status, said))
+}
+
+// plainText drops tags from a body and collapses whitespace, for the case where
+// what answered was a web page.
+func plainText(body string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range body {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>' && inTag:
+			inTag = false
+			b.WriteByte(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // refreshHealth recomputes the one sentence the operator sees.
@@ -478,6 +599,8 @@ func (k *KickAdapter) refreshHealth() {
 		started   = k.startedAt
 		count     = k.delivered
 		bad       = k.unparseable
+		rejected  = k.rejected
+		keyDown   = k.keyDown
 	)
 	k.mu.Unlock()
 
@@ -495,6 +618,18 @@ func (k *KickAdapter) refreshHealth() {
 		// Outranks the silence message below: while the subscription is not in
 		// place, silence is the expected result and the subscription is the cause.
 		k.setHealth(StateDegraded, subProblem+" Sending still works.")
+	case rejected >= kickRejectedAfter:
+		// Deliveries ARE reaching this server and failing the signature check,
+		// which is the opposite of "none have arrived" and is what a Kick
+		// signing-key change or a wrong webhook secret looks like.
+		k.setHealth(StateDegraded, fmt.Sprintf(
+			"Kick deliveries are failing signature verification (%d refused since the last accepted one). "+
+				"Check that the Kick app's webhook URL is the one shown under Settings → Platform credentials → Kick. "+
+				"Sending still works.", rejected))
+	case keyDown >= kickRejectedAfter:
+		k.setHealth(StateDegraded, fmt.Sprintf(
+			"polyemesis could not fetch Kick's webhook signing key, so %d chat deliveries were sent back for retry. "+
+				"Sending still works.", keyDown))
 	case count == 0 && k.cfg.Now().Sub(started) > kickSilenceAfter:
 		// Reachable, subscribed, and nothing has ever arrived. polyemesis
 		// created the subscription itself, so what is left is Kick not reaching
@@ -672,13 +807,44 @@ func (k *KickAdapter) Handler() http.Handler {
 			return
 		}
 		if err := k.cfg.Verify(r, body); err != nil {
-			// 401 and nothing else. Which part of a forgery failed is not
-			// information the sender is owed.
-			http.Error(w, "signature rejected", http.StatusUnauthorized)
+			switch {
+			case errors.Is(err, ErrKickDuplicate):
+				// Kick retried something it already has. 200 so it stops, and
+				// nothing is ingested a second time.
+				w.WriteHeader(http.StatusOK)
+			case errors.Is(err, ErrKickStale):
+				// Genuinely from Kick (the signature held) but outside the
+				// freshness window, e.g. a retry after an outage. 200 so Kick
+				// stops and does not auto-disable the subscription; not
+				// ingested and not counted as a forgery.
+				w.WriteHeader(http.StatusOK)
+			case errors.Is(err, ErrKickKeyUnavailable):
+				// Not a verdict on the delivery: the key could not be fetched.
+				// 503 asks Kick to retry. It still counts as a failed delivery
+				// toward Kick's one-day auto-disable, as a 401 does; only the
+				// retry semantics differ.
+				k.mu.Lock()
+				k.keyDown++
+				k.mu.Unlock()
+				k.cfg.Log.Warn("kick: could not fetch the webhook signing key; deliveries are being asked to retry",
+					"account", k.cfg.AccountRef, "err", err)
+				http.Error(w, "signing key unavailable, retry", http.StatusServiceUnavailable)
+			default:
+				// 401 and nothing else. Which part of a forgery failed is not
+				// information the sender is owed.
+				k.mu.Lock()
+				k.rejected++
+				k.mu.Unlock()
+				http.Error(w, "signature rejected", http.StatusUnauthorized)
+			}
 			return
 		}
+		k.mu.Lock()
+		k.rejected, k.keyDown = 0, 0
+		k.mu.Unlock()
 
-		k.ingest(r.Header.Get("Kick-Event-Type"), body)
+		k.ingestDelivery(r.Header.Get("Kick-Event-Type"), r.Header.Get(KickHeaderMessageID),
+			r.Header.Get(KickHeaderTimestamp), body)
 		// Always 200 once the body is in hand. A webhook that gets an error
 		// gets retried, and a retry storm of chat messages helps nobody: a
 		// message we could not parse is a message, not an outage.
@@ -686,8 +852,23 @@ func (k *KickAdapter) Handler() http.Handler {
 	})
 }
 
-// ingest turns one delivery into a message, or counts it as unreadable.
+// ingest is ingestDelivery for a caller with no delivery headers but the type.
 func (k *KickAdapter) ingest(eventType string, body []byte) {
+	k.ingestDelivery(eventType, "", "", body)
+}
+
+// ingestDelivery turns one delivery into a chat message or an activity, or
+// counts it as unreadable. messageID and timestamp are the signed
+// Kick-Event-Message-Id and Kick-Event-Message-Timestamp headers.
+func (k *KickAdapter) ingestDelivery(eventType, messageID, timestamp string, body []byte) {
+	// Activity events are routed BEFORE the chat decode: they are not chat, so
+	// they must neither count as unreadable chat (which would flip health to
+	// "could not read as chat messages" on the first follow) nor stamp the
+	// chat-silence clock.
+	if def, ok := kickActivityEventFor(eventType); ok {
+		k.ingestActivity(def, messageID, timestamp, body)
+		return
+	}
 	k.mu.Lock()
 	k.lastEventAt = k.cfg.Now()
 	sink := k.sink
@@ -837,6 +1018,22 @@ func kickEmotes(ev kickChatEvent) []Emote {
 
 // Send posts to Kick chat as the connected user.
 func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
+	return k.post(ctx, text, "", false)
+}
+
+// Reply posts to Kick chat as a reply to one message, optionally as the app's
+// bot identity (type "bot") rather than the connected user. Kick's chat page
+// lists reply_to_message_id without describing it, so a refusal is explained
+// in the operator's terms instead of being passed through bare.
+func (k *KickAdapter) Reply(ctx context.Context, text, replyToID string, asBot bool) (Message, error) {
+	replyToID = strings.TrimSpace(replyToID)
+	if replyToID == "" {
+		return Message{}, fmt.Errorf("no message to reply to")
+	}
+	return k.post(ctx, text, replyToID, asBot)
+}
+
+func (k *KickAdapter) post(ctx context.Context, text, replyToID string, asBot bool) (Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Message{}, fmt.Errorf("nothing to send")
@@ -858,16 +1055,49 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 		"type":                "user",
 		"broadcaster_user_id": k.cfg.BroadcasterUserID,
 	}
+	if asBot {
+		// Kick ignores broadcaster_user_id for a bot: it always posts to the
+		// channel the token belongs to, so the field is left out.
+		payload["type"] = "bot"
+		delete(payload, "broadcaster_user_id")
+	}
+	if replyToID != "" {
+		payload["reply_to_message_id"] = replyToID
+	}
 	var out struct {
 		Data struct {
 			IsSent    bool   `json:"is_sent"`
 			MessageID string `json:"message_id"`
 		} `json:"data"`
 	}
-	err := doJSON(ctx, k.cfg.HTTP, http.MethodPost, k.cfg.APIBase+"/public/v1/chat", k.cfg.Token, payload, &out)
+	err := k.api(ctx, http.MethodPost, k.cfg.APIBase+"/public/v1/chat", payload, &out)
 	if err != nil {
-		if statusOf(err) == http.StatusUnauthorized {
-			return Message{}, Fatal(fmt.Errorf("kick rejected the access token; reconnect the Kick account in Settings → Platforms"))
+		if IsFatal(err) {
+			// The token source itself said the grant is gone.
+			return Message{}, err
+		}
+		ae, _ := err.(*apiError)
+		switch statusOf(err) {
+		case http.StatusUnauthorized:
+			return Message{}, Fatal(errors.New(kickRejectedToken))
+		case http.StatusForbidden:
+			if ae.Edge {
+				return Message{}, errors.New(kickEdgeBlocked)
+			}
+			return Message{}, fmt.Errorf("Kick refused to post this. The account needs the chat:write scope"+
+				" (reconnect it in Settings → Platforms), and %s. Kick said: %s", kickWhoCanPost(asBot), kickSaid(err))
+		case http.StatusBadRequest, http.StatusNotFound:
+			if replyToID != "" {
+				return Message{}, fmt.Errorf("Kick would not take this reply; the message it answers may have been deleted or may belong to another channel. Kick said: %s", kickSaid(err))
+			}
+		case http.StatusTooManyRequests:
+			if ae.Edge {
+				return Message{}, errors.New(kickEdgeBlocked)
+			}
+			return Message{}, fmt.Errorf("Kick is rate-limiting chat posts; %s. Kick said: %s", kickWait(ae), kickSaid(err))
+		}
+		if ae != nil {
+			return Message{}, errors.New(kickSaid(err))
 		}
 		return Message{}, err
 	}
@@ -882,11 +1112,20 @@ func (k *KickAdapter) Send(ctx context.Context, text string) (Message, error) {
 		Author: Author{
 			ID:          strconv.Itoa(k.cfg.BroadcasterUserID),
 			Name:        firstNonEmpty(k.cfg.Channel, "you"),
-			Broadcaster: true,
+			Broadcaster: !asBot,
 		},
-		Text: text,
-		At:   k.cfg.Now(),
+		Text:      text,
+		ReplyToID: replyToID,
+		At:        k.cfg.Now(),
 	}, nil
+}
+
+// kickWhoCanPost completes the 403 sentence for the identity that was refused.
+func kickWhoCanPost(asBot bool) string {
+	if asBot {
+		return "a bot message goes only to the channel the token belongs to"
+	}
+	return "the channel may be in a chat mode (followers-only, subscribers-only) this account does not meet"
 }
 
 // Delete removes a message. It needs the moderation:chat_message:manage scope,
@@ -897,14 +1136,97 @@ func (k *KickAdapter) Delete(ctx context.Context, messageID string) error {
 	if messageID == "" {
 		return fmt.Errorf("no message id to delete")
 	}
-	err := doJSON(ctx, k.cfg.HTTP, http.MethodDelete,
-		k.cfg.APIBase+"/public/v1/chat/"+url.PathEscape(messageID), k.cfg.Token, nil, nil)
-	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
-		return fmt.Errorf("Kick refused the deletion. If this account was connected before unified chat existed "+
-			"it never granted moderation:chat_message:manage — disconnect and reconnect it in Settings → Platforms. "+
-			"Kick said: %s", err)
+	err := k.api(ctx, http.MethodDelete,
+		k.cfg.APIBase+"/public/v1/chat/"+url.PathEscape(messageID), nil, nil)
+	return kickRefusal("delete this message", "moderation:chat_message:manage", err)
+}
+
+// kickRefusal turns a failed Kick call into the sentence that fixes it, telling
+// apart the three things a refusal can mean. 401 is a token Kick will not
+// accept (revoked, or expired beyond what a refresh repaired). 403 is a token
+// Kick accepted that lacks the scope, or an account that is not a moderator of
+// that channel. Anything else is passed through in Kick's words.
+//
+// Kick documents one error envelope, {"data":..,"message":".."}, and no machine
+// codes, so the status is the discriminator and the message is shown verbatim.
+// Never the URL and never a raw body: kickSaid sees to both.
+func kickRefusal(what, scope string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return err
+	ae, ok := err.(*apiError)
+	if !ok {
+		return err
+	}
+	switch {
+	case ae.Status == http.StatusUnauthorized:
+		return Fatal(errors.New(kickRejectedToken))
+	case ae.Edge && (ae.Status == http.StatusForbidden || ae.Status == http.StatusTooManyRequests):
+		return errors.New(kickEdgeBlocked)
+	case ae.Status == http.StatusForbidden:
+		return fmt.Errorf("Kick would not let this account %s. It needs the %s scope (disconnect and reconnect it in "+
+			"Settings → Platforms to grant it) and must be the broadcaster or a moderator of this channel. Kick said: %s",
+			what, scope, kickSaid(err))
+	case ae.Status == http.StatusTooManyRequests:
+		return fmt.Errorf("Kick is rate-limiting this account; %s. Kick said: %s", kickWait(ae), kickSaid(err))
+	}
+	return fmt.Errorf("Kick could not %s: %s", what, kickSaid(err))
+}
+
+const (
+	kickRejectedToken = "Kick rejected the access token; reconnect the Kick account in Settings → Platforms"
+	kickEdgeBlocked   = "Kick's edge (a CDN or firewall in front of its API) refused this server rather than the API itself, " +
+		"so the account and its permissions are fine and reconnecting will not help. This usually clears on its own; " +
+		"if it does not, Kick is blocking this server's IP address"
+)
+
+// kickMaxWait caps the wait quoted for a rate limit. A Retry-After of an hour
+// is Kick's to ask for, but a prompt telling an operator mid-broadcast to wait
+// an hour is a decision to take away from them.
+const kickMaxWait = 5 * time.Minute
+
+// kickWait says how long to wait, from the Retry-After Kick sent (capped) or a
+// plain "a moment" when it sent none.
+func kickWait(ae *apiError) string {
+	if ae.RetryAfter <= 0 {
+		return "wait a moment and try again"
+	}
+	return "wait " + min(ae.RetryAfter, kickMaxWait).Round(time.Second).String() + " and try again"
+}
+
+// api performs one Kick call with the account's token. A 401 made with a token
+// polyemesis believed valid gets exactly one refresh-and-retry through Reauth
+// before it is believed.
+func (k *KickAdapter) api(ctx context.Context, method, endpoint string, payload, out any) error {
+	// Remember which token the first attempt used, so a refresh that hands the
+	// same one back (the cooldown does) is not mistaken for a retry that ran.
+	var used string
+	tf := func(c context.Context) (string, error) {
+		t, e := k.cfg.Token(c)
+		used = t
+		return t, e
+	}
+	err := doJSON(ctx, k.cfg.HTTP, method, endpoint, tf, payload, out)
+	if statusOf(err) != http.StatusUnauthorized || k.cfg.Reauth == nil {
+		return err
+	}
+	tok, rerr := k.cfg.Reauth(ctx)
+	if IsFatal(rerr) {
+		// The grant is gone, which is a stronger statement than the 401.
+		return rerr
+	}
+	if rerr != nil || tok == "" || tok == used {
+		// No new token was obtained (a 5xx or timeout from the token endpoint,
+		// or the refresh cooldown handing the old one back). That says nothing
+		// about the grant, so it must not read as "refreshed and still refused":
+		// return a retryable, non-401 error.
+		cause := rerr
+		if cause == nil {
+			cause = errors.New("no new token was issued")
+		}
+		return fmt.Errorf("Kick returned 401 and the token could not be refreshed: %w", cause)
+	}
+	return doJSON(ctx, k.cfg.HTTP, method, endpoint, StaticToken(tok), payload, out)
 }
 
 // KickMaxTimeout is Kick's documented ceiling: 10080 minutes, which is seven
@@ -965,14 +1287,8 @@ func (k *KickAdapter) Ban(ctx context.Context, userID string, d time.Duration, r
 		body["reason"] = reason
 	}
 
-	err = doJSON(ctx, k.cfg.HTTP, http.MethodPost,
-		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token, body, nil)
-	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
-		return fmt.Errorf("Kick refused the ban. If this account was connected before banning existed "+
-			"it never granted moderation:ban — disconnect and reconnect it in Settings → Platforms. "+
-			"Kick said: %w", err)
-	}
-	return err
+	err = k.api(ctx, http.MethodPost, k.cfg.APIBase+"/public/v1/moderation/bans", body, nil)
+	return kickRefusal("ban this user", "moderation:ban", err)
 }
 
 // Unban lifts a ban or an unexpired timeout.
@@ -985,17 +1301,12 @@ func (k *KickAdapter) Unban(ctx context.Context, userID string) error {
 	if cerr != nil {
 		return fmt.Errorf("kick user id %q is not numeric, so this cannot be addressed", userID)
 	}
-	err := doJSON(ctx, k.cfg.HTTP, http.MethodDelete,
-		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token,
+	err := k.api(ctx, http.MethodDelete, k.cfg.APIBase+"/public/v1/moderation/bans",
 		map[string]any{
 			"broadcaster_user_id": k.cfg.BroadcasterUserID,
 			"user_id":             uid,
 		}, nil)
-	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
-		return fmt.Errorf("Kick refused the unban; the account may lack moderation:ban. "+
-			"Reconnect it in Settings → Platforms. Kick said: %w", err)
-	}
-	return err
+	return kickRefusal("unban this user", "moderation:ban", err)
 }
 
 // randomSecret is an unguessable path segment. crypto/rand only: a predictable

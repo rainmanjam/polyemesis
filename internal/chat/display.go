@@ -27,6 +27,12 @@ const (
 	// DisplayBlocked: automod is going to remove it. It must never be shown,
 	// whether or not the removal then succeeds on the platform.
 	DisplayBlocked
+	// DisplayHeld: a finding asked that it be kept off the overlay (a rule's
+	// holdOverlay). Withheld exactly as Blocked is, but nothing is being
+	// removed anywhere, so an operator may release it from the review list. A
+	// sink that does not know the value must treat it as Blocked, which is
+	// what every sink here does with any unknown value.
+	DisplayHeld
 )
 
 // DisplaySink receives every message with automod's verdict on it, later
@@ -149,6 +155,23 @@ func (h *Hub) tapAuthor(p db.Platform, account, authorID string) {
 		return
 	}
 	t.RetractAuthor(p, account, authorID)
+}
+
+// AuthorRetractor is the optional capability of a DisplaySink that keeps lines
+// by author and not only by message id: the overlay gate's held lines. A ban
+// reaches the sink through Retract with the ids the 500-message history ring
+// still holds, and a held line older than the ring never gets one -- so this
+// names the PERSON. An empty authorID is the platform clearing the room.
+type AuthorRetractor interface {
+	RetractAuthor(p db.Platform, account, authorID string)
+}
+
+// retractDisplayAuthor tells a sink that can take it a person (or a cleared
+// room) is gone, whatever the history ring still held.
+func (h *Hub) retractDisplayAuthor(p db.Platform, account, authorID string) {
+	if s, ok := h.displaySink().(AuthorRetractor); ok {
+		s.RetractAuthor(p, account, authorID)
+	}
 }
 
 func (h *Hub) retractDisplay(p db.Platform, account string, ids []string) {

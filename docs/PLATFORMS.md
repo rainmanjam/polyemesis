@@ -33,22 +33,22 @@ For what each platform's chat allows action by action (send, delete, hide, time 
 ban, polls, chat settings), see
 [Chat actions by platform](CONNECTING-PLATFORMS.md#chat-actions-by-platform).
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
-|---|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
-| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works |
-| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
-| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible |
-| *Everything else* | — | By hand | — | — | — | — | — | — |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end | Channel tools |
+|---|---|---|---|---|---|---|---|---|---|
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works | Unverified |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible | Unverified |
+| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible | Unverified |
+| *Everything else* | — | By hand | — | — | — | — | — | — | — |
 
 | Term | Means |
 |---|---|
@@ -179,6 +179,23 @@ is off the operator sees "needs X Livestream, which is switched off
 (POLYEMESIS_X_LIVESTREAM=0)", and pasting the server URL and stream key from
 X's producer tooling works exactly as before. The paste also remains the way in
 for an account that cannot use the API.
+
+Beyond the single mute and delete, the chat side also has, all built from X's
+documentation and **none run against a live account** (the matrix cells stay
+Unverified): `GET /2/broadcasts/chat/mutes` lists who is muted with the end of
+each timed mute (`broadcast_chat_mute.fields=end_at_ms`; the owner's own mutes
+only), `POST /2/broadcasts/chat/mutes` with `broadcast_id` and `message_id`
+mutes and removes one message in a single call (the broadcast must be live), and
+`GET`/`POST /2/broadcasts/chat/moderators` plus `DELETE
+/2/broadcasts/chat/moderators/{user_id}` manage up to 20 chat moderators, who act
+on every broadcast the account hosts, not one. Viewer count is the running
+broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
+`GET /2/broadcasts`, read by the analytics sampler through its own seam rather
+than as a `LiveStatter`. All of it uses scopes the connection already holds
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), except
+`follows.read` (part of scope version 2), which the Premium-subscription alert
+needs and, per part of X's docs, the follow alert too (see ACTIVITY.md). A chat message's id is the `timestamp` X answers a send
+with (nanoseconds, as a string), which is also what delete takes as `message_id`.
 
 The calls use the routes in X's
 [migration guide](https://docs.x.com/livestream-api/migration-guide): `POST
@@ -435,7 +452,13 @@ Two things to know before relying on Rumble chat. The key goes in the
 sign-in to store it against, and it never goes into the database or onto a
 command line. And Rumble publishes no rate limit, so polyemesis polls
 conservatively (ten seconds, backing off while chat is quiet) rather than as
-fast as the pane could use.
+fast as the pane could use. The same poll carries the viewer count, follower
+count and subscriber count, which show beside the chat status and feed
+analytics; that is built but not yet checked on a live account, so Viewers
+stays *unverified*. Rumble returns only the latest 50 chat messages per poll,
+so when a busy chat outruns that the status says messages may have been
+missed, and polyemesis polls at the five-second floor while the response is
+full.
 
 **DLive** stays *unverified* rather than *unsupported*: its developer portal at
 `dev.dlive.tv` no longer resolves in DNS, which tells us nothing about what the
@@ -526,7 +549,16 @@ every poll spends from a daily allowance:
 |---|---|---|
 | `liveChatMessages.list` | 5 | every chat poll while a broadcast is live |
 | Looking for a broadcast to attach to | 1 | every 30s when nothing is live, backing off to every 5 minutes |
-| Sending, deleting or banning | 50 | per action |
+| Sending or deleting a chat message | 20 | per action |
+| Banning or timing out a viewer | 200 | per action |
+| Adding or removing a chat moderator | 200 | per action |
+| Listing the chat moderators | 50 | only when you press Load |
+| Any broadcast or stream call (create, update, bind, transition) | 1 | per call |
+
+These prices are from Google's quota table
+(<https://developers.google.com/youtube/v3/determine_quota_cost>). An upload
+(`videos.insert`) costs 1 unit from a **bucket of its own** (100 uploads a day),
+so it does not draw on this allowance at all.
 
 A Google Cloud project starts with **10,000 units a day**, resetting at midnight
 Pacific. That is roughly 1,960 chat polls — so polyemesis paces itself across
@@ -548,8 +580,8 @@ the same daily allowance, so a poller left to spend the whole of it leaves a
 moderator unable to type — and the message that could not be sent is the
 timeout, at the moment it was needed. The pacer therefore subtracts the reserve
 before dividing what is left by the 5 units a poll costs: (10,000 − 200) ÷ 5 =
-1,960. At 50 units a message, 200 units is four messages — enough to say "we
-are moving to Twitch" when it matters. Sending, deleting and banning spend
+1,960. At 20 units a message, 200 units is ten messages, or a single ban — enough
+to say "we are moving to Twitch" when it matters. Sending, deleting and banning spend
 *into* the reserve rather than being refused by it; that is the whole point of
 it.
 
@@ -656,6 +688,32 @@ The distinction matters because the API is destructive by part: a field omitted
 from a part that IS being sent reverts to its default, so polyemesis reads the
 current broadcast and carries every untouched field through on every write.
 
+**Built, not yet exercised against a live account.** These are implemented from
+YouTube's published reference and have not been run against a real channel, so
+they are *Unverified* and no cell in the matrix above claims otherwise:
+
+* **Chat moderators** (`liveChatModerators` list, insert, delete): add or remove a
+  moderator on the Chat page. Only the owner of the chat's channel may; YouTube
+  answers anyone else with a 403 and polyemesis says so in words. Needs no new
+  scope.
+* **Deleted messages** leave the chat pane when a list page carries a
+  `tombstone` for them (the message's id and publish time, nothing else). The
+  `messageDeletedEvent` and `messageRetractedEvent` types were removed from the
+  reference and are not read. The reference says a tombstone marks where
+  the message used to be and is not sent at the moment of deletion. The poll only
+  moves forward, so it is seen mainly when the chat is read from the start (the
+  first page after a reconnect); whether YouTube also reports a later deletion
+  in a forward page is not confirmed.
+* **Poll tallies** are read from the poll message in the chat pages, while the
+  poll runs, when the connected account is the channel owner's. YouTube sends no
+  tally to anyone else.
+* **Broadcast controls** per destination (*Compliance*, YouTube): latency
+  (normal, low, ultra-low), DVR, record from start, auto-start, auto-stop and
+  closed-caption type. Recording can be switched off only on channels YouTube
+  allows to. They freeze once a broadcast is testing or live. polyemesis never
+  sets `madeForKids` (read-only) or the deprecated `enableClosedCaptions`; the
+  made-for-kids setting is the self-declaration.
+
 ### Twitch
 
 1. <https://dev.twitch.tv/console/apps> → **Register Your Application**.
@@ -682,6 +740,29 @@ Twitch runs polls for Affiliates and Partners only, and on any other channel
 the mirror is skipped and the chat poll runs as usual. It was added in scope
 version 5, so a Twitch account connected before it is marked "reconnect
 needed" once.
+
+Scope version 6 adds twelve scopes for the **channel tools** (the *Channel tools*
+column above, `/chat/twitch/{resource}` in the [API](API.md)):
+`moderator:manage:announcements`, `moderator:manage:shoutouts`,
+`moderator:manage:shield_mode`, `moderator:manage:warnings`,
+`moderator:manage:blocked_terms`, `moderator:read:chatters`,
+`moderator:manage:automod`, `moderator:manage:automod_settings`,
+`moderator:manage:unban_requests`, `moderator:manage:suspicious_users`,
+`channel:manage:moderators` and `channel:manage:vips`. Pinning reuses
+`moderator:manage:chat_messages` and the banned list reuses
+`moderator:manage:banned_users`. These are built from Twitch's reference and not
+yet exercised against a live account, so the column reads *Unverified*. Adding
+or removing moderators and VIPs, and the banned list, work only for the
+channel's owner, and Twitch refuses VIPs until the channel has finished its
+Build a Community requirement; the refusal says so. Receiving a message AutoMod
+is holding needs EventSub and is not built: the approve and deny call is, by id.
+Accounts connected earlier are marked "reconnect needed" once.
+
+Scope version 6 also carries six read scopes for [viewer activity](ACTIVITY.md#twitch):
+`moderator:read:followers`, `channel:read:subscriptions`, `bits:read`,
+`channel:read:redemptions`, `channel:read:hype_train` and
+`channel:read:predictions`. They are in version 6 rather than a version 7
+because the release that introduces version 6 has not shipped.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
@@ -727,6 +808,45 @@ If you would rather paste a key that lasts, Live Producer → *Advanced settings
 polyemesis cannot fetch it — Meta's API exposes no way to read it — and a pasted
 key has no live-video id, so title, chat and *End broadcast* stay with the
 connected account. See the table under *Facebook — read this before you start*.
+
+#### Facebook chat, blocking and polls
+
+**Chat send is *Not possible*, and here is exactly why.** Meta's reference for
+the live video's `comments` edge has a *Creating* section that says only "You
+can't perform this operation on this endpoint." The generic Video node does
+document `POST /{video-id}/comments`, but no page says a live video takes it,
+and the live-video node reference that would say so could not be read when this
+was checked (2026-11-07). So polyemesis does not post, or reply, to Facebook
+comments. If a live account shows the same id accepts it, the cell moves to
+*Unverified* and the send is a small change. Until then reply on Facebook.
+
+**Ban blocks the person from the Page.** `POST /{page-id}/blocked?user=<id>`,
+and `DELETE` to lift it. A block has no duration, so **timeouts are unavailable
+on Facebook**: the console greys them with that reason and automod refuses a
+timeout rule for Facebook, while a ban is offered. It needs the account
+connected as a Page (a personal profile has no block list in this API), and a
+Page that has hit Facebook's block limit, or tries to re-block someone it just
+unblocked, is told so in those words. Meta's reference does not say which
+permission it needs (it names `pages_read_engagement`, which polyemesis already
+asks for, among several), so no scope was added; if Facebook answers with a
+permission error, reconnect the Page and accept everything on the consent
+screen.
+Ban needs the comment to carry its author's id. A Page account reads comments
+with its Page token because, as polyemesis understands Meta's rule, `from` on
+Page content is only returned to a Page token; a comment with no author id has
+Ban unavailable in the console, and that is unconfirmed against a live account.
+
+**Polls.** *Also run as a native Facebook poll* in the polls panel creates a
+poll on the live video with `POST /{live-video-id}/polls` and closes it with
+`POST /{poll-id}?action=CLOSE`. It uses the permissions the broadcast already
+has. Facebook only takes a poll while the video is live. `options` is sent as
+a JSON array, as Meta's polls guide shows, and the poll's `status` is read so a
+poll closed on Facebook returns that chat to number votes.
+
+None of these three has been run against a live Facebook account; they are built
+from Meta's documentation. polyemesis pins Graph API **v26.0**, the newest
+version in Meta's version table (2026-11-07). Nothing polyemesis calls was
+removed in v25.0 or v26.0.
 
 #### What a Facebook destination can be told to do
 

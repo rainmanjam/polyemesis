@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-three `GET`s among the thirty-five refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-eight routes are refused outright**, for three different reasons. Masking
+**Thirty-five routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last nineteen are `403` because of what
+are `403` because of what they *do*. The last twenty-six are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -153,6 +153,7 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
+| `GET /recordings/{id}/chat` | the chat that arrived during the recording: every viewer's message, under their name |
 | `GET /clips/{name}/download` | an exported clip |
 | `GET /clipper/jobs/{id}/download` | the clipper's output |
 | `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
@@ -162,14 +163,20 @@ are `403` because of what they *do*. The last nineteen are `403` because of what
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
 | `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
 | `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
+| `GET /chat/export` | the same scrollback, streamed for any window as JSON, CSV or NDJSON |
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 | `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
+| `GET /chat/mutes` | the viewers the operator has muted on X, by user id and name, with when each timed mute ends |
+| `GET /chat/moderators` | the chat's moderators: on X the operator's moderators, by user id and name; on YouTube the chat's moderator roster, read with the owner's token (each read spends 50 of the day's YouTube quota units) |
+| `GET /chat/twitch/{resource}` | Twitch's channel tools, read: the banned list, the unban appeals' text, the chatter names, the moderator and VIP lists, the blocked terms, the pinned message |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
 | `GET /clipper/recordings/{id}/highlights` | each highlight suggestion carries a transcript excerpt: the words again |
+| `GET /activity` | the viewer-activity feed names each viewer and carries what they wrote with a tip or a sub: chat content again |
+| `GET /activity/sources` | which accounts' activity is flowing, with their account refs |
 | `GET /clipper/templates` | the operator's saved short layouts, with the fonts directory's listing and whether this FFmpeg can draw text |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
@@ -1537,6 +1544,7 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` | `/recordings`, `/recordings/usage`, `/recordings/stems` |
 | `DELETE` | `/recordings/{id}` |
 | `GET` | `/recordings/{id}/download`, `/recordings/stems/{name}/download` |
+| `GET` | `/recordings/{id}/chat` — the chat saved with a recording, as `json` or `vtt` |
 | `GET` | `/library`, `/library/search` |
 | `POST` | `/library/sessions`, `/library/sessions/regroup` |
 | `GET` `PUT` `DELETE` | `/library/sessions/{id}` |
@@ -1945,13 +1953,19 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query. `/chat/moderators` answers `{moderators, appliesToAllBroadcasts}` for X, each moderator `{userId, username, name}`; for YouTube it answers `{moderators}` only, each `{id, channelId, displayName, ...}` (fields a platform does not use are left out) |
+| `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
+| `GET` | `/chat/moderators` — on YouTube, who may moderate a live chat (`liveChatModerators.list`); `platform` and `account` in the query. A read costs 50 YouTube quota units. Any other platform than X or YouTube is refused with 400 "cannot manage moderators on <platform>", before the parameters are checked |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
+| `POST` | `/chat/flags/release` — put a message a rule held off the overlay back on it |
 | `POST` `DELETE` | `/chat/bans` |
+| `POST` `DELETE` | `/chat/moderators` — on X, appoint or remove a moderator by `userId`; on YouTube, make a channel a moderator (`channelId`) or remove one (`id`, as the list returned it), 200 quota units each, and only the chat's channel owner may. X answers `{ids, appliesToAllBroadcasts}`; YouTube answers the moderator added, or `{"status":"removed"}`. Errors: 400 for a missing parameter or a platform that is not connected or cannot manage moderators, 502 when the platform itself refuses or fails |
 | `PATCH` | `/chat/settings` |
+| `GET` `POST` `PUT` `PATCH` `DELETE` | `/chat/twitch/{resource}` — Twitch's channel tools; the method picks the verb (see below) |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
 `POST /chat/send` posts to every connected chat that can take a message and
@@ -1960,6 +1974,14 @@ answers one result per chat. A chat is a send target (`canSend` on its row in
 matrix in `GET /platforms/capabilities` does not mark its `chatSend` as `no`;
 any other chat comes back `skipped` with the reason. Facebook is the case the
 matrix rules out. Polls and the MCP tools post through the same path.
+
+`POST /chat/send` also takes `replyTo` (`platform`, `account`, `id` of the
+message being answered) and `asBot`. With `replyTo` the message is not fanned
+out: it goes to that one platform account as a threaded reply and the response
+carries a single result. Only Kick implements it (`reply_to_message_id`; `asBot`
+sends as Kick's bot identity); any other platform comes back `skipped` with the
+reason rather than posting an unthreaded line. Built to Kick's documentation and
+not yet checked against a live account.
 
 `POST /platforms/credentials/{platform}/check` asks the platform whether the
 stored client credentials for it are still good, and answers with a verdict —
@@ -2020,6 +2042,8 @@ platform here publishes an API for a user's message history, Twitch included.
 Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
+The scrollback is a bounded replay buffer. For a durable copy of a recorded
+stream's chat, see [CHAT-EXPORT.md](CHAT-EXPORT.md).
 
 The card also carries `sanction`: the ban or timeout in force on that person,
 **as polyemesis recorded it**. Every successful `POST /chat/bans` — the
@@ -2095,8 +2119,16 @@ segment reliably.
 |---|---|
 | `DELETE /chat/messages` | `platform`, `id` (both required), `account` |
 | `POST /chat/messages/hide` | `platform`, `id` (both required), `account`, `scope`, `hidden` |
-| `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason` |
+| `POST /chat/flags/release` | `platform`, `id` (both required), `account` |
+| `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason`, `messageId` (X only: mute and remove that message in one call) |
+| `POST /chat/moderators` | `platform`, `userId` (both required), `account`. X only. A moderator acts on every broadcast the account hosts, not one, and X allows 20 |
+| `DELETE /chat/moderators` | `platform`, `userId` (both required), `account`. X only |
+| `GET /chat/mutes` | `platform` (required), `account`. X only; only the broadcast owner's own mutes are listed. `truncated` is `true` when X held more than the first 2,000 |
+| `GET /chat/moderators` | `platform` (required), `account`. X only |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
+| `GET /chat/moderators` | `platform` (required), `account` |
+| `POST /chat/moderators` | `platform`, `channelId` (both required), `account` |
+| `DELETE /chat/moderators` | `platform`, `id` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
 | `GET /chat/users` | `platform`, `authorId` (both required), `account`, `limit` |
 | `GET /chat/flags` | `platform`, `limit` |
@@ -2110,6 +2142,36 @@ and names which connected account on that platform to act as, for an install
 with more than one. `limit` defaults to `300` — roughly a screenful of
 scrollback and the room to scroll up through it — and is clamped to `2000`; a
 value that is zero, negative or not a number silently takes the default.
+
+**Exporting chat.** Two read-denied downloads, because the body is what viewers
+wrote under their names. Both stream, so a long window is never held in memory,
+and both set a `Content-Disposition` filename.
+
+| Route | Parameters |
+|---|---|
+| `GET /recordings/{id}/chat` | `format` = `json` (default) or `vtt` |
+| `GET /chat/export` | `from` (required), `to` (default now), `format` = `json` (default), `csv` or `ndjson`, `platform` |
+
+`from` and `to` are RFC 3339 times or Unix milliseconds, `to` must be after
+`from`, and every bad parameter is a `400` before any byte is sent. The window
+is on the **stored message time** (`at_ms`): the platform's own timestamp where
+its adapter supplies one, otherwise the moment this server received the message.
+It is the clock the highlight scanner lines chat up with a recording by. Messages polyemesis sent itself are never included,
+and neither are messages a moderator deleted or the operator hid (both remove
+the stored row).
+
+`GET /recordings/{id}/chat` serves the file saved beside the recording when
+there is one (see [CHAT-EXPORT.md](CHAT-EXPORT.md)),
+and otherwise builds the same file from the chat table if it still holds the
+recording's window. When neither does it is a `404` saying so; a recording whose
+chat was merely quiet is a valid file with no messages. `json` carries a header
+(`schema`, `generator`, `recording`, `from`, `to`, `platforms`, `messageCount`,
+`complete`, and `retainedFrom` when the purge reached into the window) then
+`messages`; `vtt` is one cue per message, `[PLATFORM] name: text`. CSV cells
+that begin with `=`, `+`, `-` or `@` are written with a leading `'` so a
+spreadsheet does not run them. `csv` and `ndjson` have no header, so ask for
+`json` when you need to know whether the window was complete.
+Each row of `GET /recordings` carries `chatSaved`, true when that file exists.
 
 `DELETE /chat/messages` removes one message on the platform. The platform is
 asked first and the local copy is only dropped once it agreed, because the
@@ -2182,6 +2244,36 @@ subscribers-only, no repeated messages. It is a `PATCH` with pointer fields all
 the way down: an omitted field means "leave it alone", which is the only way to
 express "turn slow mode on and touch nothing else" without switching
 followers-only off as a side effect.
+
+### Twitch channel tools
+
+`/chat/twitch/{resource}` is one path for everything a Twitch broadcaster or
+moderator does to a room or a role. The method is the verb, `account` in the
+query names which connected Twitch account to act as, and the body (for `POST`,
+`PUT`, `PATCH`) is JSON. A refusal is a `400` (`502` for a `GET`) carrying
+Twitch's own reason, with what to do about it: an account connected before the
+channel-tool scopes (Twitch ScopeVersion 6) is told to reconnect once. Built from
+Twitch's published reference and **not yet exercised against a live account**;
+the capability matrix reads *Unverified* for that reason.
+
+| Method | `{resource}` | What it does |
+|---|---|---|
+| `POST` | `announcements` | `message` (500 characters), `color` (`primary`, `blue`, `green`, `orange`, `purple`) |
+| `POST` | `shoutouts` | `login` or `userId`. Answers the cooldowns polyemesis has counted (one per 2 minutes, one per target per 60); `GET shoutout-cooldowns` reads them. Shoutouts sent from Twitch's own site are not seen |
+| `GET` `PUT` `PATCH` `DELETE` | `pin` | read the pinned message; pin, change or remove one. `messageId`, `durationSeconds` (30–1800, or omit to pin until the stream ends) |
+| `GET` `PUT` | `shield` | Shield Mode state; `{"active": true}` |
+| `POST` | `warnings` | `login` or `userId`, `reason` (required, 500 characters) |
+| `GET` `POST` `DELETE` | `blocked-terms` | list, add (`text`, 2–500 characters, `*` only at an end of a word), remove (`id` in the query) |
+| `POST` | `blocked-terms-sync` | adds the enabled automod rules whose pattern is a plain term (no regex metacharacter) to Twitch. Adds only, never removes; answers `added`, `present` and `skipped` with a reason each |
+| `GET` | `chatters` | Twitch's count of everyone connected to chat; `list=1` adds the names (capped at five pages) |
+| `GET` `PUT` | `automod-settings` | Twitch's AutoMod levels (0–4). The `PUT` replaces: send `settings.overallLevel` alone, or all eight categories |
+| `POST` | `held-messages` | `messageId`, `allow` (true approves, false denies) a message AutoMod is holding. Receiving the held messages needs EventSub and is not built; the console has the controls for an id supplied by hand |
+| `GET` `POST` `DELETE` | `roles` | `role=moderator` or `vip`; list, add, remove (`login` or `userId`). Broadcaster only. VIPs need Twitch's Build a Community requirement, and the refusal says so |
+| `GET` | `banned` | bans and unexpired timeouts. Broadcaster only |
+| `GET` `PATCH` | `unban-requests` | list by `status` (default `pending`); resolve with `id`, `status` (`approved` or `denied`), `resolutionText` |
+| `POST` `DELETE` | `suspicious` | flag (`status` `ACTIVE_MONITORING` or `RESTRICTED`) or clear a chatter. Twitch publishes no list of flagged users, so there is none here |
+
+Every `GET` is refused to a `read` token.
 
 One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
@@ -2276,8 +2368,12 @@ live, and polyemesis does not estimate them.
 
 ```json
 {"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
- "mirrorTwitch": true, "mirrorYouTube": false}
+ "mirrorTwitch": true, "mirrorYouTube": false, "mirrorFacebook": false}
 ```
+
+`mirrorFacebook` also runs it as a native poll on every connected Facebook live
+video. Facebook accepts a poll only while the video is live, and answers a poll
+started earlier with a refusal that is reported per account in the result.
 
 A second poll while one runs is `409`; a question, option or duration outside
 the limits is `400`. `POST /polls/{id}/end` ends it early (`409` if that poll
@@ -2289,6 +2385,38 @@ A poll is counts per option and per platform, and never names a voter, so the
 three `GET`s are open to `read` tokens. Starting and ending post into every
 chat as you and need `admin`. The rules, the poll widget and native Twitch polls
 are in [POLLS.md](POLLS.md).
+
+### Viewer activity
+
+| Method | Path |
+|---|---|
+| `GET` | `/activity`, `/activity/sources` |
+| `POST` | `/activity/test`, `/activity/{id}/replay` |
+
+Follows, subs, gifts, tips, raids and the platform's own stream reports, as one
+event ([ACTIVITY.md](ACTIVITY.md)). The word is *activity*, never *alert*: that
+stays the operator's alert. An activity names viewers and carries words they
+wrote, so both `GET`s are refused to `read` tokens, as chat is; both `POST`s need
+`admin`, because they reach the on-air overlay.
+
+`GET /activity?limit=&platform=&kind=` is `{"enabled": true, "events": […]}`,
+newest first, up to 500, from memory (a restart empties it). `GET
+/activity/sources` is `{"enabled", "kinds", "platforms", "sources", "stats",
+"overlay"?}`: per account, whether activity is flowing and which kinds are on,
+unavailable to that account, or need a reconnect.
+
+`POST /activity/test` sends a canned event through the real path with no account
+connected: `{"kind": "tip", "platform": "twitch", "overrides": {"name": "Mara",
+"amount": {"unit": "bits", "units": 500}}}`. It answers `200` with `{"accepted",
+"reason"?, "detail"?, "event"}` (`accepted: false` means your settings turned
+that kind off), `400` for an unknown kind or platform or overrides that make an
+invalid event, and `429` with `Retry-After: 1` past two a second. `POST
+/activity/{id}/replay` draws a remembered event on the alerts overlay again and
+answers `404` if it is no longer held or is not a kind an overlay shows.
+
+The same events arrive live on `GET /events?topics=activity` ([EVENTS.md](EVENTS.md#activity))
+and as the opt-in `activity` [webhook trigger](HOOKS.md#the-activity-trigger-opt-in).
+The settings are `settings.activity` on `GET`/`PUT /settings`.
 
 ## WebSocket
 

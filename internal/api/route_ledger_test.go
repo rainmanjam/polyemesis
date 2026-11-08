@@ -692,6 +692,9 @@ var excusedRoutes = map[string]coverageExcus{
 	// forms.
 	"GET /overlay/poll":         spa(),
 	"GET /overlay/poll/k/{key}": spa(),
+	// The alerts overlay: the same SPA bundle, sessionless, in both key forms.
+	"GET /overlay/alerts":         spa(),
+	"GET /overlay/alerts/k/{key}": spa(),
 	// The overlay key's two routes. Outside every auth group, and a read
 	// token is nothing to them: without the overlay's own key in its own
 	// header every principal gets the same 401. The counterparts open them
@@ -795,11 +798,26 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
 	"GET /api/v1/chat/users":    denied(),
+	// Viewer activity: the feed is viewers' names and words, and the source list
+	// carries account refs. Both are readDenied; the POSTs are denied by method.
+	"GET /api/v1/activity":         denied(),
+	"GET /api/v1/activity/sources": denied(),
+	// The same viewers' words, saved with a recording or exported for a window.
+	// Denied to a read token at the router; each proof plants a viewer's line and
+	// shows the admin receives it.
+	"GET /api/v1/chat/export":          deniedWithCounterpart("chatExport"),
+	"GET /api/v1/recordings/{id}/chat": deniedWithCounterpart("recordingChat"),
 	// UX Council A48: the flagged list carries the flagged message's text,
 	// which is the same content as the scrollback.
 	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),
 	// The room's chat rules for the rules card (poka-yoke audit 2026-11-04).
 	"GET /api/v1/chat/settings": deniedWithCounterpart("chatSettings"),
+	// X's muted viewers and chat moderators: who the operator silenced or appointed.
+	"GET /api/v1/chat/mutes":      deniedWithCounterpart("chatMutes"),
+	"GET /api/v1/chat/moderators": deniedWithCounterpart("chatModerators"),
+	// Twitch's channel tools, read: banned list, appeal text, chatter names.
+	// One pattern, so one driven denial rather than a counterpart per tool.
+	"GET /api/v1/chat/twitch/{resource}": deniedWithCounterpart("twitchTools"),
 	// Wave 4 #4: cross-platform analytics is admin-only. Each route names
 	// something a read token is not for -- the connected channels, the
 	// broadcast titles, the top chatters -- and each proof plants it.
@@ -1291,7 +1309,12 @@ var counterpartProofs = map[string]counterpartProof{
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"chatFlags":                             proveChatFlags,
+	"chatExport":                            proveChatExport,
+	"recordingChat":                         proveRecordingChat,
 	"chatSettings":                          proveChatSettings,
+	"chatMutes":                             proveChatMutes,
+	"chatModerators":                        proveChatModerators,
+	"twitchTools":                           proveTwitchTools,
 	"analyticsLive":                         proveAnalyticsLive,
 	"analyticsStreams":                      proveAnalyticsStreams,
 	"analyticsReport":                       proveAnalyticsReport,

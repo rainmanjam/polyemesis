@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/redact refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort redact.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 62,
-  "counterpartlessExcusedCeiling": 32,
+  "excusedCeiling": 64,
+  "counterpartlessExcusedCeiling": 34,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
   "nonGetDifferentialFloor": 18,
@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 310,
+    "methodPatternPairs": 328,
     "swept": 80,
-    "excused": 62,
-    "denied": 168,
+    "excused": 64,
+    "denied": 184,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -28,6 +28,30 @@
     "unstable": 4
   },
   "routes": [
+    {
+      "method": "GET",
+      "pattern": "/api/v1/activity",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/activity/sources",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/activity/test",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/activity/{id}/replay",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/meta",
@@ -174,8 +198,20 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/chat/export",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/chat/flags",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/flags/release",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -257,6 +293,30 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/moderators",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/mutes",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "GET",
       "pattern": "/api/v1/chat/search",
       "coverage": "denied",
@@ -277,6 +337,36 @@
     {
       "method": "PATCH",
       "pattern": "/api/v1/chat/settings",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/chat/twitch/{resource}",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -1242,6 +1332,12 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/recordings/{id}/chat",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/recordings/{id}/download",
       "coverage": "denied",
       "zeroSource": "unguarded"
@@ -1669,6 +1765,18 @@
     {
       "method": "GET",
       "pattern": "/overlay",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/alerts",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/alerts/k/{key}",
       "coverage": "excused",
       "zeroSource": "unguarded"
     },
@@ -2470,6 +2578,26 @@
       "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
+      "route": "GET /api/v1/activity",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/activity/sources",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
       "route": "GET /api/v1/analytics/live",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2520,6 +2648,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/chat/export",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatExport"
+    },
+    {
       "route": "GET /api/v1/chat/flags",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2540,6 +2678,26 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/chat/moderators",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatModerators"
+    },
+    {
+      "route": "GET /api/v1/chat/mutes",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "chatMutes"
+    },
+    {
       "route": "GET /api/v1/chat/search",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2558,6 +2716,16 @@
         "status": 403
       },
       "counterpart": "chatSettings"
+    },
+    {
+      "route": "GET /api/v1/chat/twitch/{resource}",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "twitchTools"
     },
     {
       "route": "GET /api/v1/chat/users",
@@ -2876,6 +3044,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/recordings/{id}/chat",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "recordingChat"
+    },
+    {
       "route": "GET /api/v1/recordings/{id}/download",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2939,6 +3117,28 @@
     },
     {
       "route": "GET /overlay",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/alerts",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/alerts/k/{key}",
       "scope": "route",
       "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
       "want": {

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -58,15 +59,40 @@ type xChatStub struct {
 	subscribeCalls  int
 	// putFailures is how many PUT /2/webhooks/{id} calls fail with a 500 before one works.
 	putFailures int
+	// putStatus, when non-zero, makes every PUT /2/webhooks/{id} fail with that status and a problem body.
+	putStatus int
 	// createRaces makes a refused create still leave the webhook behind, as another process winning the race does.
 	createRaces bool
 	// putFixes makes PUT /2/webhooks/{id} flip the webhook to valid, as a passing CRC does.
 	putFixes bool
 	// subs is what GET /2/activity/subscriptions lists, as raw JSON objects, and what POST appends to.
 	subs []map[string]any
+	// refuseEvent makes POST /2/activity/subscriptions for that event type fail with the given status and body.
+	refuseEvent map[string]xStubRefusal
 	// subscription overrides the POST /2/activity/subscriptions answer.
 	subscription string
 	nextID       int
+
+	// mutePages is what GET /2/broadcasts/chat/mutes answers, by the pagination_token it was asked with ("" first).
+	mutePages map[string]string
+	// queries records the query string of every request, aligned with calls.
+	queries []string
+	// modStatus and modBody, when set, make POST /2/broadcasts/chat/moderators answer that failure.
+	modStatus int
+	modBody   string
+	// appRevoked makes every app-bearer route answer X's probed 401, as a regenerated bearer token does.
+	appRevoked atomic.Bool
+	// sendBody overrides the POST /2/broadcasts/{id}/chat answer.
+	sendBody string
+}
+
+// xStubRefusal is one canned failure of a subscription create.
+type xStubRefusal struct {
+	status int
+	body   string
+	// times limits it to the first n creates; 0 means every one.
+	times int
+	used  int
 }
 
 func newXChatStub(t *testing.T) *xChatStub {
@@ -83,6 +109,11 @@ func newXChatStub(t *testing.T) *xChatStub {
 }
 
 func (st *xChatStub) refuse(w http.ResponseWriter, want string, r *http.Request) bool {
+	if want == xStubAppBearer && st.appRevoked.Load() {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"title":"Unauthorized","type":"about:blank","status":401,"detail":"Unauthorized"}`)
+		return true
+	}
 	if got := r.Header.Get("Authorization"); got != want {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"title":"Unauthorized","detail":"wrong credential for `+r.Method+` `+r.URL.Path+`"}`)
@@ -95,6 +126,7 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	st.mu.Lock()
 	st.calls = append(st.calls, r.Method+" "+r.URL.Path+" "+string(body))
+	st.queries = append(st.queries, r.URL.RawQuery)
 	st.mu.Unlock()
 	path := r.URL.Path
 
@@ -162,6 +194,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		id := strings.TrimPrefix(path, "/2/webhooks/")
 		st.mu.Lock()
+		if st.putStatus != 0 {
+			code := st.putStatus
+			st.mu.Unlock()
+			w.WriteHeader(code)
+			_, _ = io.WriteString(w, `{"title":"Too Many Requests","detail":"Too Many Requests","type":"about:blank","status":429}`)
+			return
+		}
 		if st.putFailures > 0 {
 			st.putFailures--
 			st.mu.Unlock()
@@ -203,6 +242,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
+		if rf, ok := st.refuseEvent[req.EventType]; ok && (rf.times == 0 || rf.used < rf.times) {
+			rf.used++
+			st.refuseEvent[req.EventType] = rf
+			w.WriteHeader(rf.status)
+			_, _ = io.WriteString(w, rf.body)
+			return
+		}
 		st.subscribeCalls++
 		if st.failSubscribeAt != 0 && st.subscribeCalls == st.failSubscribeAt {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -215,7 +261,7 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		st.nextID++
 		sub := map[string]any{"subscription_id": fmt.Sprint(st.nextID), "event_type": req.EventType,
-			"filter": map[string]any{"user_id": req.Filter["user_id"]}, "webhook_id": req.WebhookID, "tag": req.Tag}
+			"filter": xStubFilter(req.Filter), "webhook_id": req.WebhookID, "tag": req.Tag}
 		st.subs = append(st.subs, sub)
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"subscription": sub}})
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/2/activity/subscriptions/"):
@@ -235,7 +281,32 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"deleted":true}}`)
 
 	// ---- the broadcast chat calls
+	case r.Method == http.MethodGet && path == "/2/broadcasts/chat/mutes":
+		st.mu.Lock()
+		page, ok := st.mutePages[r.URL.Query().Get("pagination_token")]
+		st.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"title":"Forbidden","detail":"only the broadcast owner can list mutes"}`)
+			return
+		}
+		_, _ = io.WriteString(w, page)
+	case r.Method == http.MethodGet && path == "/2/broadcasts/chat/moderators":
+		_, _ = io.WriteString(w, `{"data":[{"id":"777","username":"helper","name":"Helper"}],"meta":{"result_count":1}}`)
+	case r.Method == http.MethodPost && path == "/2/broadcasts/chat/moderators":
+		if st.modStatus != 0 {
+			w.WriteHeader(st.modStatus)
+			_, _ = io.WriteString(w, st.modBody)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":{"moderator_user_ids":["777","888"]}}`)
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/2/broadcasts/chat/moderators/"):
+		_, _ = io.WriteString(w, `{"data":{"moderator_user_ids":["777"]}}`)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/chat"):
+		if st.sendBody != "" {
+			_, _ = io.WriteString(w, st.sendBody)
+			return
+		}
 		_, _ = io.WriteString(w, `{"data":{"success":true,"timestamp":"1761904800000000000"}}`)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/chat/mutes"):
 		_, _ = io.WriteString(w, `{"data":{"muted":true}}`)
@@ -307,4 +378,13 @@ func (st *xChatStub) adapterFor(t *testing.T, account string, now time.Time) *XA
 		t.Fatalf("NewX: %v", err)
 	}
 	return a
+}
+
+// xStubFilter is the filter X lists back: the user id, and the direction when the subscription asked for one.
+func xStubFilter(f map[string]string) map[string]any {
+	out := map[string]any{"user_id": f["user_id"]}
+	if d := f["direction"]; d != "" {
+		out["direction"] = d
+	}
+	return out
 }

@@ -14,13 +14,15 @@ func TestTheGatesMeterIsANoOpUntilSetThenCharges(t *testing.T) {
 	}
 }
 
-func TestTheYouTubeUploadIsChargedToItsMeter(t *testing.T) {
+// videos.insert has a quota bucket of its own, so opening an upload session
+// must not draw on the shared allowance the gate's meter feeds.
+func TestTheYouTubeUploadDoesNotChargeTheSharedMeter(t *testing.T) {
+	var g TokenGate
 	spent := 0
-	y := &YouTube{Base: "http://127.0.0.1:1", Meter: func(u int) { spent += u }}
-	// The session open fails to connect, which is fine: videos.insert is billed
-	// when the session opens, before the answer.
+	g.Set(nil, func(u int) { spent += u })
+	y := &YouTube{Base: "http://127.0.0.1:1"}
 	_, _ = y.open(t.Context(), Run{}, 10)
-	if spent != youTubeUploadCost {
-		t.Fatalf("spent %d, want %d", spent, youTubeUploadCost)
+	if spent != 0 {
+		t.Fatalf("the shared meter was charged %d for a videos.insert", spent)
 	}
 }

@@ -178,6 +178,33 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	return sortByConsequence(out)
 }
 
+// CheckText judges one piece of text on its own SHAPE, recording nothing: the
+// per-message detectors (mentions, shouting) and the links in this one text
+// against the link limit. It is for text that is not an author's chat -- a Super
+// Chat's message on an alert -- where there is no author to keep a window for,
+// and where counting the text would also pollute the window of whoever sent it
+// in chat. The window detectors (message count, repeats) need an author and a
+// history, and are not run.
+func (h *History) CheckText(text string) []Finding {
+	if h == nil {
+		return nil
+	}
+	reasons := h.messageReasons(text)
+	if h.limits.MaxLinks > 0 {
+		if n := countLinks(text); n > h.limits.MaxLinks {
+			reasons = append(reasons, fmt.Sprintf("%d links in one message", n))
+		}
+	}
+	var out []Finding
+	for _, reason := range reasons {
+		out = append(out, Finding{
+			Checker: CheckerHistory, Action: h.limits.Action,
+			TimeoutSeconds: h.limits.TimeoutSeconds, Category: CategoryFlood, Reason: reason,
+		})
+	}
+	return sortByConsequence(out)
+}
+
 // recordLocked appends e to the author's log, keeping at most Retain entries,
 // and returns the log.
 func (h *History) recordLocked(key string, e entry) *authorLog {

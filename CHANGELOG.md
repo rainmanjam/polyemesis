@@ -10,6 +10,43 @@ its first tagged release.
 
 ### Added
 
+- **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
+  A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
+  overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and
+  accent), the `activity` and `activity.display` event types on `GET /api/v1/events`, and an opt-in
+  `activity` webhook trigger. Every kind arrives as one shape (`docs/ACTIVITY.md`); amounts are money
+  or a platform unit and are never converted, so a minimum tip is one row per currency or unit and
+  applies to the overlay only. **Send test alert** (Activity → Settings, and beside Copy OBS URL)
+  sends a canned event of any kind through the real path with no account, tier or monetisation. This
+  release carries the core only: the per-platform sources (Twitch EventSub, Kick, X, YouTube, Rumble,
+  Facebook) are added one at a time, and until one is in your build nothing real arrives from it.
+  Viewer words reach the overlay only after automod passes them (removed or unjudged: the alert shows
+  without the message), names are checked against your blocked terms, the overlay is never sent an
+  id, and a reloaded OBS source is not replayed old alerts. Activity is held in memory (a 500-event
+  feed) and is not stored: no new table, and the settings live in the existing settings JSON
+  (`settings.activity`).
+  - New routes: `GET /api/v1/activity`, `GET /api/v1/activity/sources` (both refused to read tokens, as
+    chat is), `POST /api/v1/activity/test` (two a second) and `POST /api/v1/activity/{id}/replay`
+    (admin). The word *alert* is not reused on any wire: it stays the operator alert.
+  - **Webhooks:** the `activity` trigger is opt-in, so a hook with an empty trigger list does not
+    start receiving every follow; `GET /api/v1/hooks/meta` lists it under `optInTriggers`. The
+    envelope gains an optional `activity` field and `specVersion` stays `"1"`.
+  - **Downgrading:** an overlay saved with an `alerts` style block is refused by an older polyemesis
+    (it rejects style fields it does not know). Remove the block or restore the overlay before going
+    back.
+- **Chat is saved with each recording and can be exported.** When a recording finishes, polyemesis
+  writes `<recording>.chat.json` (every viewer message with its offset from the recording start,
+  absolute UTC time, platform, account, author, roles and badges, under a small header) and
+  `<recording>.chat.vtt` (WebVTT cues, `[PLATFORM] name: text`) beside it, so post-stream analytics
+  survives the chat purge and lines up with the video. They are deleted with their recording by the
+  delete button and by the age and size sweeps, and offload copies them along. New routes:
+  `GET /recordings/{id}/chat?format=json|vtt` (the saved file, or built from the chat history if it is
+  still kept) and `GET /chat/export?from&to&format=json|csv|ndjson&platform` (a streamed window); both
+  are refused to `read` tokens like `GET /chat/messages`, and CSV cells beginning `= + - @` are
+  neutralised. `GET /recordings` reports `chatSaved`. The Recordings page has a Chat menu per
+  recording, the Chat page an Export chat button, and Settings → Pipeline → Chat history says chat is
+  saved with each recording. Times are the stored message time (`at_ms`) the highlight scanner uses; see
+  `docs/CHAT-EXPORT.md`. No schema change.
 - **Kick chat now sets itself up, and the console shows the webhook URL Kick needs.** Staging found
   Kick chat could not work: nothing showed the operator the webhook URL to paste into their Kick app,
   and nothing created the event subscription. Settings → Platform credentials → Kick now shows

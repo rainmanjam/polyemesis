@@ -86,6 +86,16 @@ type Sender interface {
 	Send(ctx context.Context, text string) (Message, error)
 }
 
+// Replier is the optional capability for answering one specific message, rather
+// than posting to the room. It is addressed to one platform account, never
+// fanned out: a message id only means something on the platform that issued it.
+type Replier interface {
+	Adapter
+	// Reply posts text as a reply to replyToID. asBot asks for the platform's
+	// bot identity where it has one; an adapter without one ignores it.
+	Reply(ctx context.Context, text, replyToID string, asBot bool) (Message, error)
+}
+
 // Deleter is the optional capability for removing a message, which is what the
 // unified pane needs when a moderator deletes something on one platform and
 // polyemesis is displaying it on all of them.
@@ -125,6 +135,16 @@ type Banner interface {
 	Ban(ctx context.Context, userID string, d time.Duration, reason string) error
 	// Unban lifts a ban or an unexpired timeout.
 	Unban(ctx context.Context, userID string) error
+}
+
+// NoTimeouter marks a Banner that can remove a person but cannot time one out:
+// its ban has no duration, so Ban refuses a positive one. Facebook's Page block
+// list is the case. It is a marker on the adapter, read off its type by
+// ProfileOf, so the console and automod can say "timeout is unavailable here"
+// instead of offering a control that would be refused.
+type NoTimeouter interface {
+	Banner
+	NoTimeout()
 }
 
 // Hider is the optional capability for taking a message off the public feed
@@ -255,6 +275,11 @@ type Health struct {
 	// on RumbleAdapter.setLive for why a platform with no sign-in cannot report
 	// through that interface at all.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are the channel's counts where the same poll
+	// carries them (Rumble). Nil is "not reported", never zero, for the same
+	// reason as Viewers.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // Status is one platform's chat connection as reported to the UI.
@@ -281,6 +306,10 @@ type Status struct {
 	// that on the wire -- the key is absent when the platform said nothing, so a
 	// client cannot read a silence as a number.
 	Viewers *int `json:"viewers,omitempty"`
+	// Followers and Subscribers are Health's, reported to the UI with the same
+	// absent-means-not-reported rule.
+	Followers   *int `json:"followers,omitempty"`
+	Subscribers *int `json:"subscribers,omitempty"`
 }
 
 // SendResult is one platform's outcome from a fan-out send. Partial failure is
@@ -322,6 +351,14 @@ func (f fatal) Is(target error) bool {
 
 // IsFatal reports whether retrying is pointless.
 func IsFatal(err error) bool { return errors.Is(err, ErrFatal) }
+
+// ErrReconnectRequired is what a TokenFunc wraps when the account's grant is
+// gone -- revoked, disconnected on the platform's side, or never refreshable --
+// so only the operator reconnecting the account fixes it. This package does
+// not import internal/oauth, so the API layer translates oauth's sentinel into
+// this one; an adapter that sees it stops retrying instead of re-posting a dead
+// refresh token every thirty seconds.
+var ErrReconnectRequired = errors.New("the platform no longer accepts this account; reconnect it in Settings → Platforms")
 
 // Publisher is the event bus, narrowed to what this package uses so a test does
 // not need one. *events.Broker satisfies it.
@@ -454,9 +491,15 @@ var (
 	_ Deleter = (*TwitchAdapter)(nil)
 	_ Deleter = (*FacebookAdapter)(nil)
 
+	_ Replier = (*KickAdapter)(nil)
+
 	_ Banner = (*KickAdapter)(nil)
 	_ Banner = (*YouTubeAdapter)(nil)
 	_ Banner = (*TwitchAdapter)(nil)
+	// Facebook blocks a person from the Page, permanently: the block list has
+	// no duration, so it is marked as unable to time anyone out.
+	_ Banner      = (*FacebookAdapter)(nil)
+	_ NoTimeouter = (*FacebookAdapter)(nil)
 
 	// Facebook alone, because only its live chat is a comment thread.
 	_ Hider = (*FacebookAdapter)(nil)

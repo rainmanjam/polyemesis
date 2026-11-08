@@ -250,7 +250,8 @@ type flagOnly struct {
 	finding automod.Finding
 }
 
-func (f *flagOnly) CheckFast(_ db.Platform, _ string, text string) automod.Verdict {
+func (f *flagOnly) CheckFast(_ db.Platform, sub automod.Subject) automod.Verdict {
+	text := sub.Text
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if text != f.text {

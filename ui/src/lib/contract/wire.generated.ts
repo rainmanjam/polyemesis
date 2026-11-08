@@ -71,7 +71,8 @@ export const WIRE = {
     "chat",
     "chatState",
     "chatRetract",
-    "chatModeration"
+    "chatModeration",
+    "activity"
   ],
   "sourceKinds": [
     "",
@@ -143,6 +144,14 @@ export const WIRE = {
     "maxOption": 30,
     "minDurationSeconds": 15,
     "maxDurationSeconds": 3600
+  },
+  "twitchTools": {
+    "maxAnnouncement": 500,
+    "maxWarning": 500,
+    "minTerm": 2,
+    "maxTerm": 500,
+    "minPinSeconds": 30,
+    "maxPinSeconds": 1800
   },
   "overlay": {
     "fonts": [

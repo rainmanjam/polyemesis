@@ -18,8 +18,11 @@ type Profile struct {
 	SendMax int
 	Delete  bool
 	// Ban covers timeout and permanent ban, which both route through Banner.
-	Ban  bool
-	Hide bool
+	Ban bool
+	// NoTimeout is a Banner that cannot time anyone out (Facebook): Ban is true
+	// and only the permanent form works.
+	NoTimeout bool
+	Hide      bool
 }
 
 // adapterTypes is one nil-valued pointer per platform adapter, purely so the
@@ -54,7 +57,8 @@ func ProfileOf(p db.Platform) (Profile, bool) {
 	_, del := ad.(Deleter)
 	_, ban := ad.(Banner)
 	_, hide := ad.(Hider)
-	pr := Profile{Platform: p, Send: send, Delete: del, Ban: ban, Hide: hide}
+	_, noTimeout := ad.(NoTimeouter)
+	pr := Profile{Platform: p, Send: send, Delete: del, Ban: ban, NoTimeout: noTimeout, Hide: hide}
 	if send {
 		pr.SendMax = sendLimits[p]
 	}

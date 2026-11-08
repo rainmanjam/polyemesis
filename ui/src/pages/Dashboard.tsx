@@ -284,7 +284,8 @@ export function GoLiveComposer() {
     if (!c) return false;
     return Boolean(
       c.privacy || c.facebookPrivacy || c.madeForKids !== undefined ||
-        (c.labels && Object.keys(c.labels).length > 0),
+        (c.labels && Object.keys(c.labels).length > 0) ||
+        (c.youtube && Object.keys(c.youtube).length > 0),
     );
   });
   // Same signal as noDescription/categoryHint above, not the broadcast-window

@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -638,8 +639,15 @@ func TestXRemoveSubscriptionsDeletesOnlyThisInstallsForThisAccount(t *testing.T)
 		mk("2", "broadcast.chat.remove", "1234567890", "56", "polyemesis"),
 		mk("3", "broadcast.chat", "42", "56", "polyemesis"),
 		mk("4", "broadcast.chat", "1234567890", "9999", "polyemesis"),
-		mk("5", "follow.follow", "1234567890", "56", "polyemesis"),
+		// not an event this adapter ever subscribes to: left alone even when tagged.
+		mk("5", "like.create", "1234567890", "56", "polyemesis"),
 		mk("6", "broadcast.chat", "1234567890", "56", "someone-else"),
+		// the viewer-activity events are this install's too, and go with the account.
+		mk("7", "follow.follow", "1234567890", "56", "polyemesis"),
+		mk("8", "subscriptions.subscribe", "1234567890", "56", "polyemesis"),
+		mk("9", "broadcast.start", "1234567890", "56", "polyemesis"),
+		mk("10", "broadcast.end", "1234567890", "56", "polyemesis"),
+		mk("11", "follow.follow", "1234567890", "56", "someone-else"),
 	}
 	a, _ := NewX(XConfig{AccountRef: "1234567890", Token: func(context.Context) (string, error) { return "", fmt.Errorf("account gone") },
 		AppBearer: "app-bearer", APIBase: st.srv.URL, WebhookURL: xStubHookURL})
@@ -650,8 +658,8 @@ func TestXRemoveSubscriptionsDeletesOnlyThisInstallsForThisAccount(t *testing.T)
 	for _, s := range st.subList() {
 		left = append(left, fmt.Sprint(s["subscription_id"]))
 	}
-	if strings.Join(left, ",") != "3,4,5,6" {
-		t.Errorf("subscriptions left = %v, want 3,4,5,6", left)
+	if strings.Join(left, ",") != "3,4,5,6,11" {
+		t.Errorf("subscriptions left = %v, want 3,4,5,6,11", left)
 	}
 }
 
@@ -921,4 +929,51 @@ func TestXHealthReportsLiveOnceRegisteredAndDegradedWhileTheWebhookIsInvalid(t *
 	st.putFixes = true
 	st.setValid(id, true)
 	xWaitFor(t, "live again", func() bool { return a.Health().State == StateLive })
+}
+
+// A 429 on the webhook create or the re-validation keeps its type, so Run waits out the reset (the Hub's own
+// backoff is 1 to 30 seconds), does not ask X to list again, and does not blame the public address.
+func TestXRunWaitsOutARateLimitedWebhookCreateAndRevalidate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(st *xChatStub)
+		call  string
+	}{
+		{"create", func(st *xChatStub) {
+			st.createStatus = http.StatusTooManyRequests
+			st.createBody = `{"title":"Too Many Requests","detail":"Too Many Requests","type":"about:blank","status":429}`
+		}, "POST /2/webhooks"},
+		{"revalidate", func(st *xChatStub) {
+			st.webhooks = []xStubWebhook{{ID: "56", URL: xStubHookURL, Valid: false}}
+			st.putStatus = http.StatusTooManyRequests
+		}, "PUT /2/webhooks/56"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newXChatStub(t)
+			tc.setup(st)
+			var waits []time.Duration
+			a := st.adapter(t, time.Unix(1761904800, 0))
+			a.cfg.Wait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+			err := xRunErr(t, a)
+			if err == nil || IsFatal(err) {
+				t.Fatalf("Run = %v, want a retryable error", err)
+			}
+			var rl *xChatRateLimited
+			if !errors.As(err, &rl) {
+				t.Fatalf("Run = %v, want an *xChatRateLimited", err)
+			}
+			if strings.Contains(err.Error(), "CRC") || strings.Contains(err.Error(), "public HTTPS") {
+				t.Errorf("a rate limit was reported as an address problem: %v", err)
+			}
+			if len(waits) != 1 || waits[0] <= 0 {
+				t.Errorf("waits = %v, want one positive wait", waits)
+			}
+			if n := st.countCalls(tc.call); n != 1 {
+				t.Errorf("%s = %d, want 1", tc.call, n)
+			}
+			if n := st.countCalls("GET /2/webhooks"); n != 1 {
+				t.Errorf("GET /2/webhooks = %d, want 1 (no extra list after a 429)", n)
+			}
+		})
+	}
 }

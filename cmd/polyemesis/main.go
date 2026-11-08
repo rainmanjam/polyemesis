@@ -17,9 +17,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/activityhub"
 	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/chatexport"
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -343,6 +345,8 @@ func run(h *hooks) error {
 	// sources exist and not one of them came up; with none, the server comes
 	// up and serves the Sources page, which is the only screen that can get
 	// the operator out of this state.
+	// The build version, written into the header of every saved chat file.
+	chatexport.SetGenerator(version)
 	eng := engine.NewManager(log, cfg, store, tools, bus)
 	eng.SetFacebookCaptions(env.FacebookCaptions)
 	h.progress("starting the streaming engine")
@@ -380,6 +384,8 @@ func run(h *hooks) error {
 		chat.WithStore(store),
 		chat.WithPublisher(bus),
 		chat.WithLogger(log),
+		// A recording's chat is not purged before its sidecar is written.
+		chat.WithPurgeFloor(eng.Recordings().ChatHold),
 	)
 	defer hub.Close()
 	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could
@@ -427,6 +433,25 @@ func run(h *hooks) error {
 	overlayGate := overlay.New(streamHub)
 	hub.SetDisplay(overlayGate)
 	go overlayGate.Run(ctx)
+	// Viewer activity -- follows, subs, tips, raids. The hub is the one
+	// ingestion point (chat adapters reach it through the chat hub, platforms
+	// with their own transport through Attach, "Send test alert" through the
+	// API); it fans out to the bus, the opt-in `activity` webhook trigger and
+	// the alerts overlay's gate. In memory only: nothing here is stored. The
+	// gate asks the chat hub's automod about every viewer-written word before it
+	// goes on air, for the reason the chat gate does.
+	activityGate := overlay.NewActivityGate(streamHub, hub)
+	go activityGate.Run(ctx)
+	activityHub := activityhub.New(
+		activityhub.WithBus(bus), activityhub.WithHooks(hookd), activityhub.WithDisplay(activityGate),
+		activityhub.WithLogger(log.With("component", "activity")),
+		activityhub.WithSettings(func() (db.ActivitySettings, error) {
+			s, err := store.GetSettings()
+			return s.Activity, err
+		}),
+	)
+	defer activityHub.Close()
+	hub.SetActivity(activityHub)
 	// Chat polls (#14). The counter taps the same verdicts the overlay gate
 	// gets, plus why each removed message went (chat.Tap), and publishes the
 	// poll events into the same hub. A poll open when the last process
@@ -467,6 +492,8 @@ func run(h *hooks) error {
 		OverlayGate:            overlayGate,
 		OBS:                    obsBridge,
 		Polls:                  pollEngine,
+		Activity:               activityHub,
+		ActivityGate:           activityGate,
 		SetupCode:              setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on

@@ -326,6 +326,8 @@ var settingsReload = map[string]ReloadRule{
 	"automod.rules.pattern":        {ClassLive, applyAutomod, noteRecompilesPatterns},
 	"automod.rules.action":         {ClassLive, applyAutomod, noteRecompilesPatterns},
 	"automod.rules.timeoutSeconds": {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.holdOverlay":    {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.category":       {ClassLive, applyAutomod, noteRecompilesPatterns},
 
 	// ------------------------------------------------- ingest track annotations
 	// Each leaf recompiles every routing graph, so it moves compiled.FilterComplex
@@ -360,8 +362,16 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.kinds.windows.tz":           {ClassLive, "handlePutJobPolicy", noteEvaluatedPerAdmission},
 
 	// ------------------------------------------------------------- chat + alerts
-	"chat.historyMessages": {ClassLive, applyChatRetention, "resizes the in-memory ring on the running Hub via SetHistory"},
-	"alerts.retryAttempts": {ClassLive, applyAlertSettings, "pushed into every engine's Notifier, and remembered for engines created later"},
+	"activity.enabled":         {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.kinds":           {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.minTip.currency": {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.minTip.minor":    {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.minTip.unit":     {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.minTip.units":    {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.overlayMessages": {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.reactions":       {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"chat.historyMessages":     {ClassLive, applyChatRetention, "resizes the in-memory ring on the running Hub via SetHistory"},
+	"alerts.retryAttempts":     {ClassLive, applyAlertSettings, "pushed into every engine's Notifier, and remembered for engines created later"},
 
 	// ------------------------------------------------------- automod: history
 	"automod.history.maxMessages":           {ClassLive, applyAutomod, noteRebuildsHistory},

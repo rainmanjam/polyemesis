@@ -43,10 +43,15 @@ func implements(t *testing.T, p db.Platform, a automod.Action) bool {
 	case automod.ActionDelete:
 		_, ok := ad.(Deleter)
 		return ok
-	case automod.ActionBan, automod.ActionTimeout:
-		// Both route through Hub.Ban, so both need Banner.
+	case automod.ActionBan:
 		_, ok := ad.(Banner)
 		return ok
+	case automod.ActionTimeout:
+		// Routes through Hub.Ban too, so it needs Banner -- unless the Banner
+		// says it cannot time anyone out (Facebook's block has no duration).
+		_, ok := ad.(Banner)
+		_, noTimeout := ad.(NoTimeouter)
+		return ok && !noTimeout
 	case automod.ActionHide:
 		_, ok := ad.(Hider)
 		return ok
@@ -117,9 +122,9 @@ func TestRegistryAgreesWithTheChatAdapters(t *testing.T) {
 		if row.Moderation != nil {
 			m = *row.Moderation
 		}
-		if m.Delete != pr.Delete || m.TimeoutBan != pr.Ban || m.Hide != pr.Hide {
-			t.Errorf("%s: registry delete/ban/hide = %v/%v/%v, adapter = %v/%v/%v",
-				row.Key, m.Delete, m.TimeoutBan, m.Hide, pr.Delete, pr.Ban, pr.Hide)
+		if m.Delete != pr.Delete || m.TimeoutBan != pr.Ban || m.Hide != pr.Hide || m.NoTimeout != pr.NoTimeout {
+			t.Errorf("%s: registry delete/ban/hide/no-timeout = %v/%v/%v/%v, adapter = %v/%v/%v/%v",
+				row.Key, m.Delete, m.TimeoutBan, m.Hide, m.NoTimeout, pr.Delete, pr.Ban, pr.Hide, pr.NoTimeout)
 		}
 	}
 }

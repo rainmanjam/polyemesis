@@ -26,7 +26,7 @@ import (
 // single call. The interface now names everything the Hub must drive, so a
 // checker that is not wired fails to compile rather than failing silently.
 type Moderator interface {
-	CheckFast(p db.Platform, authorID, text string) automod.Verdict
+	CheckFast(p db.Platform, s automod.Subject) automod.Verdict
 	CheckModel(ctx context.Context, p db.Platform, text string) (automod.Verdict, error)
 	ModelEnabled() bool
 	ModelStats() automod.ModelStats
@@ -61,9 +61,12 @@ type automodState struct {
 	mod  Moderator
 	gen  uint64
 	jobs chan automodJob
-	stop context.CancelFunc
-	done chan struct{}
-	wg   sync.WaitGroup
+	// screenJobs is the alert-text screening queue (activity.go), with its own
+	// worker, apart from jobs.
+	screenJobs chan screenJob
+	stop       context.CancelFunc
+	done       chan struct{}
+	wg         sync.WaitGroup
 }
 
 // SetModerator attaches the deciding half, replacing any previous one.
@@ -81,14 +84,17 @@ func (h *Hub) SetModerator(m Moderator) {
 	if m != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		next = &automodState{
-			mod:  m,
-			gen:  gen,
-			jobs: make(chan automodJob, automodQueueDepth),
-			stop: cancel,
-			done: make(chan struct{}),
+			mod:        m,
+			gen:        gen,
+			jobs:       make(chan automodJob, automodQueueDepth),
+			screenJobs: make(chan screenJob, screenQueueDepth),
+			stop:       cancel,
+			done:       make(chan struct{}),
 		}
 		next.wg.Add(1)
+		next.wg.Add(1)
 		go h.runAutomodWorker(ctx, next)
+		go h.runScreenWorker(ctx, next)
 	}
 	h.automod = next
 	h.mu.Unlock()
@@ -139,7 +145,13 @@ func (h *Hub) checkAutomod(m Message) {
 		return
 	}
 
-	v := s.mod.CheckFast(m.Platform, m.Author.ID, m.Text)
+	v := s.mod.CheckFast(m.Platform, automod.Subject{
+		AuthorID:   m.Author.ID,
+		AuthorName: m.Author.Name,
+		Text:       m.Text,
+		EmoteCount: len(m.Emotes),
+		ReplyToID:  m.ReplyToID,
+	})
 	// NOT for a message the fast verdict removes. It used to be every
 	// non-empty message while the model was on, including one a rule had just
 	// deleted: a paid call -- against the hourly ceiling every other message
@@ -153,24 +165,34 @@ func (h *Hub) checkAutomod(m Message) {
 	switch {
 	case removes(v):
 		h.offerDisplay(m, DisplayBlocked)
+	case v.Hold:
+		// Flagged in the console, off every overlay, and releasable from the
+		// review list (overlay.Gate.Release). Nothing goes to a platform.
+		h.offerDisplay(m, DisplayHeld)
 	case askModel:
 		h.offerDisplay(m, DisplayPending)
 	default:
 		h.offerDisplay(m, DisplayClear)
 	}
 	h.recordAutomod(s, m, v)
+	if !removes(v) && v.Hold {
+		h.markFlagHeld(m.Platform, m.Account, m.ID)
+	}
 
 	// The model runs off the read loop, on the worker, so a slow endpoint
 	// cannot stall chat. Queued through the same bounded channel as an action,
 	// so a raid cannot spawn a goroutine per message either.
 	if askModel {
-		h.enqueueAutomod(s, automodJob{
+		h.setModelAsked(m.Key(), true)
+		if !h.enqueueAutomod(s, automodJob{
 			gen: s.gen, platform: m.Platform, account: m.Account,
 			msgID: m.ID, authorID: m.Author.ID,
 			// A zero Action marks this as "ask the model", which the worker
 			// tells apart from an action to perform.
 			finding: automod.Finding{Checker: automod.CheckerModel},
-		})
+		}) {
+			h.setModelAsked(m.Key(), false)
+		}
 	}
 }
 
@@ -199,14 +221,16 @@ func (h *Hub) recordAutomod(s *automodState, m Message, v automod.Verdict) {
 	}
 }
 
-func (h *Hub) enqueueAutomod(s *automodState, job automodJob) {
+func (h *Hub) enqueueAutomod(s *automodState, job automodJob) bool {
 	select {
 	case s.jobs <- job:
+		return true
 	default:
 		// Named, not silent. An operator whose automod quietly stopped keeping
 		// up would otherwise believe it was keeping up.
 		h.log.Warn("automod queue full, dropping work",
 			"platform", job.platform, "action", job.finding.Action)
+		return false
 	}
 }
 
@@ -241,6 +265,8 @@ func (h *Hub) runAutomodWorker(ctx context.Context, s *automodState) {
 
 // askModel runs the paid checker and queues whatever it permits.
 func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
+	// Answered or abandoned, the question is no longer outstanding.
+	defer h.setModelAsked(Message{Platform: job.platform, Account: job.account, ID: job.msgID}.Key(), false)
 	// The Hub does not keep message text on the job -- it would double the
 	// queue's memory for a raid. Re-reading it from history is cheap and, if
 	// the message has already aged out, the moment has passed anyway.
@@ -274,11 +300,16 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	// checkAutomod.
 	if removes(v) {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
+	} else if v.Hold {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
 	} else {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 	}
 	if v.Flagged() {
 		h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), v.Findings)
+		if !removes(v) && v.Hold {
+			h.markFlagHeld(job.platform, job.account, job.msgID)
+		}
 	}
 	for _, f := range v.Act {
 		h.enqueueAutomod(s, automodJob{

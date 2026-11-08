@@ -1672,6 +1672,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// basis. UpdateSettings has just serialised this same document into SQLite,
 	// so neither call can realistically fail anyway.
 	savedJSON, _ := json.Marshal(settings)
+	// The activity hub caches its filter for a couple of seconds; a save should
+	// be felt on the next event, not the one after.
+	s.activity.InvalidateSettings()
 	// failStored is the only way to answer an error from here down, because
 	// every exit from here down happens AFTER the document was stored.
 	//
@@ -3703,13 +3706,25 @@ func (s *Server) handlePlatformRegistry(w http.ResponseWriter, r *http.Request) 
 
 // ---------------------------------------------------------------- recordings
 
+// recordingView is a recording as the list serves it: the row, and whether
+// its chat was saved beside it (see recording.writeChatSidecars).
+type recordingView struct {
+	db.Recording
+	ChatSaved bool `json:"chatSaved"`
+}
+
 func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	recs, err := s.store.ListRecordings()
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, recs)
+	mgr := s.recordings()
+	out := make([]recordingView, len(recs))
+	for i, rec := range recs {
+		out[i] = recordingView{Recording: rec, ChatSaved: mgr.HasChatSidecar(rec.Filename)}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {

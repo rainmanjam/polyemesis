@@ -96,13 +96,18 @@ func xErrIs(err error, name string) bool {
 	return strings.Contains(ae.Reason, name) || strings.Contains(ae.Body, name)
 }
 
-// xWhy is X's own words for a failed call, or the status when X gave none. The raw body is never included.
+// xWhy is X's own words for a failed call, or the status when X gave none. The raw body is never included, and
+// neither is a URL: a transport failure is reported by its cause alone.
 func xWhy(err error) string {
 	if r := xProblemMessage(err); r != "" {
 		return r
 	}
 	if s := statusOf(err); s != 0 {
 		return "HTTP " + strconv.Itoa(s)
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return "the request failed: " + ue.Err.Error()
 	}
 	return err.Error()
 }
@@ -122,7 +127,7 @@ func (x *XAdapter) listWebhooks(ctx context.Context) ([]xWebhookRec, error) {
 	// webhook_config.fields is asked for outright: `valid` is what decides between reuse and re-validation.
 	path := "/2/webhooks?" + url.Values{"webhook_config.fields": {"id,url,valid,created_at"}}.Encode()
 	if err := x.xCall(ctx, http.MethodGet, path, true, nil, &out); err != nil {
-		return nil, fmt.Errorf("X would not list webhooks: %s", xWhy(err))
+		return nil, xFail("X would not list webhooks", err)
 	}
 	return out.Data, nil
 }
@@ -158,6 +163,11 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 		Data xWebhookRec `json:"data"`
 	}
 	if err := x.xCall(ctx, http.MethodPost, "/2/webhooks", true, map[string]string{"url": x.cfg.WebhookURL}, &out); err != nil {
+		var rl *xChatRateLimited
+		if errors.As(err, &rl) {
+			// Keep the typed 429 so Run waits out the reset, and skip the re-list: it would ask X again.
+			return "", err
+		}
 		// Another process may have created it between the list and this call.
 		if again, lerr := x.listWebhooks(ctx); lerr == nil {
 			if h, ok := x.findWebhook(again); ok {
@@ -166,6 +176,9 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 				}
 				return x.revalidateWebhook(ctx, h.ID)
 			}
+		}
+		if isCredentialError(err) {
+			return "", err
 		}
 		switch s := statusOf(err); {
 		case xErrIs(err, "DuplicateUrlFailed"):
@@ -195,6 +208,10 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 // data.valid only says the CRC was TRIGGERED (docs.x.com/x-api/webhooks/validate-webhook).
 func (x *XAdapter) revalidateWebhook(ctx context.Context, id string) (string, error) {
 	if err := x.xCall(ctx, http.MethodPut, "/2/webhooks/"+url.PathEscape(id), true, nil, nil); err != nil {
+		var rl *xChatRateLimited
+		if isCredentialError(err) || errors.As(err, &rl) {
+			return "", err
+		}
 		return "", xCRCError(x.cfg.WebhookURL, xWhy(err))
 	}
 	whs, err := x.listWebhooks(ctx)
@@ -215,7 +232,11 @@ type xSubRec struct {
 	ID        string `json:"subscription_id"`
 	EventType string `json:"event_type"`
 	Filter    struct {
-		UserID string `json:"user_id"`
+		UserID    string `json:"user_id"`
+		Direction string `json:"direction"`
+		// Qualifiers carries the direction too when X lists it there (docs.x.com: the qualifier "is equivalent to
+		// the top-level filter.direction field").
+		Qualifiers map[string]any `json:"qualifiers"`
 	} `json:"filter"`
 	WebhookID string `json:"webhook_id"`
 	Tag       string `json:"tag"`
@@ -230,9 +251,18 @@ func (x *XAdapter) listSubscriptions(ctx context.Context, userID string) ([]xSub
 	}
 	path := "/2/activity/subscriptions?" + url.Values{"user_id": {userID}}.Encode()
 	if err := x.xCall(ctx, http.MethodGet, path, true, nil, &out); err != nil {
-		return nil, fmt.Errorf("X would not list the activity subscriptions: %s", xWhy(err))
+		return nil, xFail("X would not list the activity subscriptions", err)
 	}
 	return out.Data, nil
+}
+
+// direction is the direction the subscription was made with, from either place X may list it, or "".
+func (s xSubRec) direction() string {
+	if d := strings.TrimSpace(s.Filter.Direction); d != "" {
+		return d
+	}
+	d, _ := s.Filter.Qualifiers["direction"].(string)
+	return strings.TrimSpace(d)
 }
 
 func (s xSubRec) expired(now time.Time) bool {
@@ -288,7 +318,7 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 			"webhook_id": webhookID,
 			"tag":        xSubTag,
 		}, &sub); err != nil {
-			return fmt.Errorf("X refused the %s subscription: %s", event, xWhy(err))
+			return xFail("X refused the "+event+" subscription", err)
 		}
 		if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
 			// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
@@ -296,6 +326,10 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 			return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
 				"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
 		}
+	}
+	// The viewer-activity events come after chat, so a refusal of one can never keep chat from registering.
+	if x.act.want() {
+		return x.ensureActivity(ctx, userID, webhookID, existing)
 	}
 	return nil
 }
@@ -349,6 +383,9 @@ func (x *XAdapter) recheckWebhook(ctx context.Context, hookID string, stuck *boo
 	defer xRegisterMu.Unlock()
 	whs, err := x.listWebhooks(ctx)
 	if err != nil {
+		if isCredentialError(err) {
+			return err // the app bearer was revoked or replaced while running: retrying cannot fix it
+		}
 		return nil // a transient X error says nothing about the webhook
 	}
 	var ours *xWebhookRec
@@ -383,6 +420,40 @@ func (x *XAdapter) recheckWebhook(ctx context.Context, hookID string, stuck *boo
 	return nil
 }
 
+// isCredentialError reports a refusal of a credential, which retrying does not fix.
+func isCredentialError(err error) bool {
+	var cred *xCredentialError
+	return errors.As(err, &cred)
+}
+
+// recheckSubscriptions asks X whether the account still has an unexpired chat subscription for each event on our
+// webhook. Subscriptions expire (expires_at) and can be removed in console.x.com, or replaced by another install
+// sharing the app, and without this a run would stay "live" while X delivered nothing. A missing one is a retryable
+// error, so Run registers again. A transient list failure says nothing and is ignored, like the webhook check's.
+func (x *XAdapter) recheckSubscriptions(ctx context.Context, userID, webhookID string) error {
+	subs, err := x.listSubscriptions(ctx, userID)
+	if err != nil {
+		if isCredentialError(err) {
+			return err
+		}
+		return nil
+	}
+	now := x.cfg.Now()
+	for _, event := range []string{xEventChat, xEventChatRemove} {
+		found := false
+		for _, s := range subs {
+			if s.EventType == event && s.Filter.UserID == userID && s.WebhookID == webhookID && !s.expired(now) && strings.TrimSpace(s.ID) != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("X no longer lists this account's %s subscription (it expired or was removed), so chat is registered again", event)
+		}
+	}
+	return nil
+}
+
 func (x *XAdapter) setInvalidNote(n string) {
 	x.liveMu.Lock()
 	x.invalidNote = n
@@ -399,6 +470,9 @@ func (x *XAdapter) Health() Health {
 	}
 	if x.replacedNote != "" {
 		parts = append(parts, x.replacedNote)
+	}
+	if n := x.activityNote(); n != "" {
+		parts = append(parts, n)
 	}
 	h := Health{Detail: strings.Join(parts, ". ")}
 	// The Hub never marks a runner live itself; an adapter that reports Health must say so. Run holds ready from the
@@ -436,12 +510,40 @@ func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
 	}
 	x.liveMu.Unlock()
 	err := x.run(ctx, sink)
+	if isCredentialError(err) && !IsFatal(err) {
+		// A refused token or bearer is not cured by trying again: stop, and say what to change.
+		err = Fatal(err)
+	}
+	var rl *xChatRateLimited
+	if errors.As(err, &rl) {
+		// X asked for a pause. The Hub's own backoff is 1 to 30 seconds, which would ask again long before the reset
+		// and deepen the limit for every account sharing the app, so wait it out here (capped, see oauth.XRateHoldFrom).
+		_ = x.wait(ctx, rl.Until.Sub(x.cfg.Now()))
+	}
 	if IsFatal(err) {
 		x.liveMu.Lock()
 		x.fatal = true
 		x.liveMu.Unlock()
 	}
 	return err
+}
+
+// wait pauses for d, or until ctx ends.
+func (x *XAdapter) wait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	if x.cfg.Wait != nil {
+		return x.cfg.Wait(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (x *XAdapter) run(ctx context.Context, sink Sink) error {
@@ -467,7 +569,7 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 		} `json:"data"`
 	}
 	if err := x.xCall(ctx, http.MethodGet, "/2/users/me", false, nil, &me); err != nil {
-		return fmt.Errorf("X would not say which account to read chat for: %s", xWhy(err))
+		return xFail("X would not say which account to read chat for", err)
 	}
 	userID := strings.TrimSpace(me.Data.ID)
 	if userID == "" {
@@ -480,6 +582,10 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 	}
 
 	inbox := make(chan xWebhookEvent, xInboxSize)
+	// Activity is subscribed only when the sink can take it: a sink that cannot would receive events nobody reads.
+	_, canActivity := sink.(ActivitySink)
+	x.act.reset()
+	x.act.setWanted(canActivity)
 	x.goLive(userID, inbox)
 	// Registered last in the defers' order of running: goDark closes the door (no further event can be accepted once
 	// it returns), and the drain then delivers everything already accepted, on every exit path. An event answered
@@ -513,6 +619,10 @@ func (x *XAdapter) run(ctx context.Context, sink Sink) error {
 			if err := x.recheckWebhook(ctx, hookID, &stuck); err != nil {
 				return err
 			}
+			if err := x.recheckSubscriptions(ctx, userID, hookID); err != nil {
+				return err
+			}
+			x.recheckActivity(ctx, userID, hookID)
 		}
 	}
 }
@@ -564,6 +674,8 @@ func (x *XAdapter) goDark(inbox chan xWebhookEvent) {
 			x.notLiveSince = x.cfg.Now()
 		}
 		x.ready, x.replacedNote, x.invalidNote = false, "", ""
+		x.act.setWanted(false)
+		x.act.reset()
 	}
 	x.liveMu.Unlock()
 }
@@ -684,7 +796,7 @@ func (x *XAdapter) IngestWebhook(body []byte) XIngest {
 	if ev.UserID != x.liveUser {
 		return XIngestWrongAccount
 	}
-	if ev.Type != xEventChat && ev.Type != xEventChatRemove {
+	if ev.Type != xEventChat && ev.Type != xEventChatRemove && !(xIsActivityEvent(ev.Type) && x.act.want()) {
 		return XIngestIgnored
 	}
 	select {
@@ -711,8 +823,8 @@ func (x *XAdapter) Unavailable(grace time.Duration) bool {
 // Logger is the logger the adapter was built with, or nil.
 func (x *XAdapter) Logger() *slog.Logger { return x.cfg.Log }
 
-// RemoveSubscriptions deletes this install's chat subscriptions for this account: the polyemesis-tagged
-// broadcast.chat and broadcast.chat.remove ones on OUR webhook. It is the explicit disconnect; a Run's exit never
+// RemoveSubscriptions deletes this install's subscriptions for this account: the polyemesis-tagged chat and
+// viewer-activity ones on OUR webhook. It is the explicit disconnect; a Run's exit never
 // does this. userToken is passed in because the account's own token is gone by the time a disconnect finishes.
 func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) error {
 	if strings.TrimSpace(x.cfg.AppBearer) == "" || strings.TrimSpace(x.cfg.WebhookURL) == "" || strings.TrimSpace(userToken) == "" {
@@ -733,12 +845,12 @@ func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) er
 	var first error
 	for _, s := range subs {
 		if s.Tag != xSubTag || s.WebhookID != ours.ID || s.Filter.UserID != x.cfg.AccountRef ||
-			(s.EventType != xEventChat && s.EventType != xEventChatRemove) || strings.TrimSpace(s.ID) == "" {
+			(s.EventType != xEventChat && s.EventType != xEventChatRemove && !xIsActivityEvent(s.EventType)) || strings.TrimSpace(s.ID) == "" {
 			continue
 		}
 		if err := doJSON(ctx, x.cfg.HTTP, http.MethodDelete, x.cfg.APIBase+"/2/activity/subscriptions/"+url.PathEscape(s.ID),
 			StaticToken(userToken), nil, nil); err != nil && first == nil {
-			first = fmt.Errorf("X would not remove the %s subscription: %s", s.EventType, xWhy(err))
+			first = xFail("X would not remove the "+s.EventType+" subscription", err)
 		}
 	}
 	return first
@@ -777,6 +889,10 @@ func (x *XAdapter) deliver(sink Sink, ev xWebhookEvent) {
 		}
 		if json.Unmarshal(ev.Payload, &p) == nil {
 			retract(sink, strings.TrimSpace(p.MessageID))
+		}
+	case xEventFollow, xEventSubscribe, xEventBroadcastStart, xEventBroadcastEnd:
+		if act, ok := x.activityEvent(ev); ok {
+			emitActivity(sink, act)
 		}
 	}
 	x.seen.add(ev.UUID)

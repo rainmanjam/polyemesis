@@ -135,6 +135,7 @@ vi.mock("@/hooks/useLiveData", () => ({
   useIngestLive: () => false,
 }));
 
+import { ActivitySettings } from "@/features/activity/ActivitySettings";
 import { PlayoutPage } from "@/pages/PlayoutPage";
 import { RecordingsPage } from "@/pages/RecordingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -454,6 +455,10 @@ const SCREENS: Screen[] = [
   },
   { name: "Recordings", at: "/recordings", element: <RecordingsPage />, atLeast: 5 },
   { name: "Playout", at: "/playout", element: <PlayoutPage />, atLeast: 15 },
+  // Chat -> Activity -> Settings. Rendered on its own rather than through
+  // ChatPage: the page needs the chat feed's sockets, and this block is
+  // self-contained (it reads GET /settings itself).
+  { name: "Activity settings", at: "/activity-settings", element: <ActivitySettings />, atLeast: 20 },
 ];
 
 /** What counts as a control an operator can put a value into. Roles rather than
@@ -872,6 +877,8 @@ const NOT_A_VALUE: Record<string, string> = {
     "a sparse map keyed by model category; the per-category selects on the model card (automod-category-<name>) write into it, and an absent key means the default action",
   "automod.secondary.categoryActions":
     "not read: the fallback checker applies the primary's category table (db.AutomodSettings.Secondary)",
+  "activity.kinds":
+    "a per-platform map of enabled kinds; the switch grid on Chat -> Activity -> Settings writes it, one switch per platform and kind, keyed by their names rather than by a field this can fingerprint",
   "playout.sourceId":
     "a branded SourceId, edited by PlayoutPage's ProgrammeCard Select whose options are the live source list plus 'default'. The walk cannot mint a SourceId that is in that domain, so it cannot fingerprint the control -- but the control exists and #774 is what added it. This is the Select-domain limit this file's header names, not a missing control",
 };
@@ -1011,6 +1018,8 @@ const NO_CONTROL_YET: Record<string, string> = {
   "automod.history.timeoutSeconds": "#788 sweep. No sequence-detector editor exists",
   "automod.history.retainPerAuthor": "#788 sweep. No sequence-detector editor exists",
   "automod.history.idleEvictionSeconds": "#788 sweep. No sequence-detector editor exists",
+  "automod.rules[].category":
+    "hold-and-subject plumbing: the closed-set reason a rule's match carries is stored and honoured, and the editor gets a picker with the protection pack, which is what gives it a category worth choosing",
 
 };
 

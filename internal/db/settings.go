@@ -1817,6 +1817,11 @@ type Settings struct {
 	// the connected accounts are asked for a viewer count while the stream is
 	// on air, and how long the per-stream reports are kept.
 	Analytics AnalyticsSettings `json:"analytics"`
+	// Activity filters viewer activity (follows, subs, tips, raids): which
+	// kinds are on per platform, the overlay's minimum tips, and whether the
+	// viewer's own words reach the overlay. Configuration only -- the events
+	// themselves are not stored. See ActivitySettings.
+	Activity ActivitySettings `json:"activity"`
 }
 
 // AnalyticsSettings controls the audience sampler.
@@ -2058,6 +2063,13 @@ type AutomodRule struct {
 	Pattern        string `json:"pattern"`
 	Action         string `json:"action"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// Category is the closed-set reason a match carries (automod.Category).
+	// Empty means filter_match. Checked where the rule is compiled, because the
+	// set lives in internal/automod, which imports this package.
+	Category string `json:"category,omitempty"`
+	// HoldOverlay keeps a matching message off every on-screen overlay, whatever
+	// Action is. The message still shows, flagged, in the console.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 }
 
 // AutomodHistory bounds the per-author sequence detectors.
@@ -2464,7 +2476,8 @@ func DefaultSettings() Settings {
 		// alerts' own defaultAttempts, for the same reason: exposing a knob is
 		// not an occasion to move it. Pinned by
 		// TestAlertDefaultsMatchTheAlertsPackage.
-		Alerts: AlertSettings{RetryAttempts: 4},
+		Alerts:   AlertSettings{RetryAttempts: 4},
+		Activity: DefaultActivitySettings(),
 		Analytics: AnalyticsSettings{
 			Enabled:         true,
 			IntervalSeconds: int(analytics.DefaultInterval / time.Second),
@@ -2575,6 +2588,7 @@ func (s Settings) Validate() error {
 	addEach(add, s.Destinations.problems())
 	addEach(add, s.Chat.problems())
 	addEach(add, s.Alerts.problems())
+	addEach(add, s.Activity.problems())
 	// The fields readSafeSettings blanks or masks beyond the primary ingest,
 	// which s.Ingest.problems() above already covered. Unconditional, unlike
 	// the MQTT checks: a placeholder saved while a feature is off is still the

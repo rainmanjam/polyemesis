@@ -2,10 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 import { settingsHref } from "@/lib/settingsSearch";
 import { toast } from "sonner";
 import { Flag, MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/AppLayout";
+import { ChatExportDialog } from "@/components/ChatExportDialog";
 import { EmptyState } from "@/components/EmptyState";
 import {
   ChatComposer,
@@ -21,12 +22,17 @@ import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatFlaggedList } from "@/components/ChatFlaggedList";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
+import { XChatModeration } from "@/components/XChatModeration";
+import { ChatModerators } from "@/components/ChatModerators";
+import { TwitchTools } from "@/components/TwitchTools";
 import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
+import { ActivityTab } from "@/features/activity/ActivityTab";
 import { useChatFlags } from "@/features/chat/useChatFlags";
 import { useConfirm } from "@/hooks/useConfirm";
+import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { mayClaim, readFailed } from "@/lib/readState";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
@@ -44,6 +50,20 @@ import type { ChatMessage, ChatPlatform } from "@/lib/types";
 export function ChatPage() {
   const t = useT();
   const navigate = useNavigate();
+  // Chat | Activity. The tab lives in the URL so a reload or a shared link
+  // lands on the same one; Chat, the default, adds nothing to it.
+  const [params, setParams] = useSearchParams();
+  const tab: "chat" | "activity" = params.get("tab") === "activity" ? "activity" : "chat";
+  const pickTab = (next: "chat" | "activity") =>
+    setParams(
+      (p) => {
+        const q = new URLSearchParams(p);
+        if (next === "chat") q.delete("tab");
+        else q.set("tab", next);
+        return q;
+      },
+      { replace: true },
+    );
   const {
     messages,
     statuses,
@@ -61,6 +81,7 @@ export function ChatPage() {
 
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
   const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const search = useChatSearch();
 
   // UX Council A48: what automod flagged, behind a chip with its count. The
@@ -71,6 +92,7 @@ export function ChatPage() {
   // results, rather than firing a search nobody can see (#945 review).
   const flagsOpen = showFlags && !search.active;
   const flagsRead = useChatFlags(flagsOpen);
+  const reloadFlags = flagsRead.reload;
   const allFlags = useMemo(
     () => (mayClaim(flagsRead.read) ? flagsRead.read.value.flags : []),
     [flagsRead.read],
@@ -149,6 +171,23 @@ export function ChatPage() {
    */
   const confirmDelete = useConfirm<ChatMessage>();
 
+  const release = useCallback(
+    async (m: ChatMessage) => {
+      try {
+        await api.releaseChatFlag({ platform: m.platform, account: m.account, id: m.id });
+        toast.success(t("chatFlags.released"));
+      } catch (err) {
+        // The server says which of the three reasons it was.
+        toast.error(err instanceof Error ? err.message : t("chatFlags.releaseFailed"));
+      } finally {
+        // Either way the list is stale: a released line is no longer held, and a
+        // refused one was not (or no longer is).
+        reloadFlags();
+      }
+    },
+    [t, reloadFlags],
+  );
+
   const del = useCallback(
     async (m: ChatMessage) => {
       try {
@@ -176,6 +215,7 @@ export function ChatPage() {
           failed={readFailed(flagsRead.read)}
           filtered={flags.length === 0 && allFlags.length > 0}
           onOpenUser={setCard}
+          onRelease={release}
         />
       );
     }
@@ -268,7 +308,36 @@ export function ChatPage() {
         }
       />
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div role="tablist" aria-label={t("activity.tabsLabel")} className="mb-2 flex shrink-0 gap-1">
+        {(["chat", "activity"] as const).map((id) => (
+          <Button
+            key={id}
+            role="tab"
+            id={`chat-tab-${id}`}
+            aria-selected={tab === id}
+            aria-controls={`chat-panel-${id}`}
+            size="sm"
+            variant={tab === id ? "secondary" : "ghost"}
+            onClick={() => pickTab(id)}
+          >
+            {t(id === "chat" ? "activity.tab.chat" : "activity.tab.activity")}
+          </Button>
+        ))}
+      </div>
+
+      {tab === "activity" && (
+        <div role="tabpanel" id="chat-panel-activity" aria-labelledby="chat-tab-activity" className="flex min-h-0 flex-1 flex-col">
+          <ActivityTab />
+        </div>
+      )}
+
+      <div
+        role="tabpanel"
+        id="chat-panel-chat"
+        aria-labelledby="chat-tab-chat"
+        hidden={tab !== "chat"}
+        className={tab === "chat" ? "grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]" : "hidden"}
+      >
         {/* ---- the merged timeline ---- */}
         <section className="flex min-h-0 flex-col rounded-md border border-border bg-card">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1.5">
@@ -294,6 +363,7 @@ export function ChatPage() {
                 {t("chatFlags.chip")}
                 {flagCount !== "" && <span className="tnum ml-1 font-mono">{flagCount}</span>}
               </Button>
+              <ChatExportDialog platforms={platforms} />
               <PlatformFilter
                 platforms={platforms}
                 hidden={hidden}
@@ -321,6 +391,7 @@ export function ChatPage() {
               onClose={() => setMenu(null)}
               onOpenCard={setCard}
               onDelete={confirmDelete.ask}
+              onReply={setReplyTo}
             />
           )}
 
@@ -348,7 +419,13 @@ export function ChatPage() {
 
           {renderTimeline()}
 
-          <ChatComposer statuses={statuses} limits={limits} configured={configured} />
+          <ChatComposer
+            statuses={statuses}
+            limits={limits}
+            configured={configured}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
+          />
         </section>
 
         {/* ---- connections ---- */}
@@ -381,6 +458,9 @@ export function ChatPage() {
               form, and before the rules. */}
           <ChatStatusList statuses={statuses} />
           <ChatRules statuses={statuses} />
+          <XChatModeration statuses={statuses} />
+          <ChatModerators statuses={statuses} />
+          <TwitchTools statuses={statuses} />
           <PollPanel twitchAvailable={statuses.some((s) => s.platform === "twitch")} />
 
           {configured && statuses.length === 0 && (

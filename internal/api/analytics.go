@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -100,6 +101,33 @@ type ytLiveVideo struct {
 type youTubeViewerReader interface {
 	ActiveBroadcast(ctx context.Context, accessToken, channelRef string) (string, string, error)
 	LiveViewers(ctx context.Context, accessToken, videoID string) (oauth.LiveVideo, error)
+}
+
+// xViewerReader is the one read oauth.X offers the sampler. X is not a LiveStatter, because that capability is tied by
+// a drift test to the viewerStats cell reading "works", and this read has not run against a live X account. Asserted
+// on the provider the Set resolves, like youTubeViewerReader.
+type xViewerReader interface {
+	// LivestreamAccess is the Livestream gate. With it closed every read answers ErrXLivestreamOff, so X must stay a
+	// chat-only target rather than a row that errors on every tick.
+	LivestreamAccess() bool
+	LiveViewers(ctx context.Context, accessToken string) (*oauth.XLiveViewers, error)
+}
+
+// hasViewerCount reports whether a connected account of this platform can be asked for viewers: a LiveStatter, or
+// X through xViewerReader.
+func (s *Server) hasViewerCount(p db.Platform) bool {
+	if _, ok := oauth.As[oauth.LiveStatter](s.providers, p); ok {
+		return true
+	}
+	if p != db.PlatformX {
+		return false
+	}
+	prov, err := s.providers.Get(p)
+	if err != nil {
+		return false
+	}
+	xr, ok := prov.(xViewerReader)
+	return ok && xr.LivestreamAccess()
 }
 
 // analyticsSource is the sampler's view of this server.
@@ -209,7 +237,7 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		}
 		// A platform with no viewer count still has chat, and the stream's
 		// chat is every running destination's account's (round 2, R2).
-		if _, ok := oauth.As[oauth.LiveStatter](s.providers, acct.Platform); !ok {
+		if !s.hasViewerCount(acct.Platform) {
 			t.ChatOnly = true
 		}
 		out = append(out, t)
@@ -227,7 +255,12 @@ func (s *Server) attachedChatTargets(platforms map[db.Platform]bool) []analytics
 	var out []analytics.Target
 	for _, st := range s.chat.Statuses() {
 		if platforms[st.Platform] && st.Account != "" {
-			out = append(out, analytics.Target{Platform: string(st.Platform), Account: st.Account, ChatOnly: true})
+			// Rumble's viewer count rides on the chat poll, so its target is
+			// read (from the adapter's health) rather than chat-only.
+			out = append(out, analytics.Target{
+				Platform: string(st.Platform), Account: st.Account,
+				ChatOnly: st.Platform != db.PlatformRumble,
+			})
 		}
 	}
 	return out
@@ -282,17 +315,57 @@ func (a analyticsSource) Interval(configured time.Duration, targets []analytics.
 // allowance), a rate limit is a RetryAfterError (#4, #5).
 func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytics.Stats, error) {
 	s := a.s
+	if t.Platform == string(db.PlatformRumble) {
+		return a.readRumble(), nil
+	}
 	acct, err := s.tokenFor(ctx, t.AccountID)
 	if err != nil {
 		return analytics.Stats{}, err
 	}
 	var st analytics.Stats
-	if t.Platform == string(db.PlatformYouTube) {
+	switch t.Platform {
+	case string(db.PlatformYouTube):
 		st, err = a.readYouTube(ctx, t, acct.AccessToken)
-	} else {
+	case string(db.PlatformX):
+		st, err = a.readX(ctx, acct.AccessToken)
+	default:
 		st, err = a.readStats(ctx, acct)
 	}
 	return st, a.platformError(t, err)
+}
+
+// readX is X's viewer read: the RUNNING broadcast's total_watching. A count X did not send stays nil, which the
+// sampler reports as hidden rather than as zero.
+func (a analyticsSource) readX(ctx context.Context, token string) (analytics.Stats, error) {
+	p, err := a.s.providers.Get(db.PlatformX)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	xr, ok := p.(xViewerReader)
+	if !ok {
+		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", db.PlatformX)
+	}
+	lv, err := xr.LiveViewers(ctx, token)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	return analytics.Stats{Live: lv.Live, Viewers: lv.Viewers, Title: lv.Title}, nil
+}
+
+// readRumble answers from the chat adapter's last poll. Rumble has no account
+// or OAuth provider to ask; watching_now arrives on the get-data response the
+// chat adapter already polls, so no extra request is made against an endpoint
+// with an unpublished rate limit. Live means that poll found a live broadcast.
+func (a analyticsSource) readRumble() analytics.Stats {
+	if a.s.chat == nil {
+		return analytics.Stats{}
+	}
+	for _, st := range a.s.chat.Statuses() {
+		if st.Platform == db.PlatformRumble && st.State == chat.StateLive {
+			return analytics.Stats{Live: true, Viewers: st.Viewers}
+		}
+	}
+	return analytics.Stats{}
 }
 
 func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {
@@ -305,7 +378,11 @@ func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount
 	if err != nil {
 		return analytics.Stats{}, err
 	}
-	ls, err := sf.Stats(ctx, creds.ClientID, acct.AccessToken)
+	var ls *oauth.LiveStats
+	err = s.kickRetry(ctx, acct, func(token string) (e error) {
+		ls, e = sf.Stats(ctx, creds.ClientID, token)
+		return e
+	})
 	if err != nil {
 		return analytics.Stats{}, err
 	}
@@ -380,6 +457,10 @@ func (s *Server) forgetYouTubeVideo(accountID int64) {
 	s.ytVideosMu.Unlock()
 }
 
+// minRateLimitWait is the shortest a rate-limited sampler waits, whatever the
+// platform's own header said.
+const minRateLimitWait = 5 * time.Second
+
 // platformError maps a platform's typed refusal onto the sampler's kinds.
 func (a analyticsSource) platformError(t analytics.Target, err error) error {
 	var se *oauth.StatusError
@@ -395,7 +476,16 @@ func (a analyticsSource) platformError(t analytics.Target, err error) error {
 		}
 		return fmt.Errorf("%w: %v", analytics.ErrQuota, err)
 	case se.Status == http.StatusTooManyRequests:
-		return &analytics.RetryAfterError{After: max(se.RetryAfter, time.Minute)}
+		// Twitch says exactly when its bucket refills (Ratelimit-Reset, parsed
+		// into RetryAfter); a platform that says nothing gets the minute floor.
+		// Every platform keeps a small floor so a "Retry-After: 1" cannot
+		// reschedule the sampler into a hot loop.
+		after := se.RetryAfter
+		if after <= 0 {
+			after = time.Minute
+		}
+		after = max(after, minRateLimitWait)
+		return &analytics.RetryAfterError{After: after + time.Duration(rand.Int64N(int64(after/10)+1))}
 	}
 	return err
 }

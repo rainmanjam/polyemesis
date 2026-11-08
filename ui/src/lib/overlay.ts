@@ -6,6 +6,7 @@
  *  next to nothing. */
 
 import { WIRE } from "./contract/wire";
+import type { ActivityDisplay, AlertStyle } from "./types";
 
 /** The overlay key travels in this header, never in a URL the server sees. */
 export const OVERLAY_KEY_HEADER = "X-Overlay-Key";
@@ -26,6 +27,46 @@ export interface OverlayStyle {
   maxLines: number;
   showPlatform: boolean;
   showBadges: boolean;
+  /** The alerts overlay's look. Absent = DEFAULT_ALERT_STYLE. The server's
+   *  ParseStyle refuses unknown fields and the PUT sends the whole style, so
+   *  an editor that rebuilds the style must carry this through untouched. */
+  alerts?: AlertStyle;
+}
+
+/** The overlay kinds an alert can be drawn for; the other five activity kinds
+ *  (poll, prediction, stream, moderation, reaction) are console-only. */
+export const OVERLAY_ALERT_KINDS = [
+  "follow",
+  "subscribe",
+  "resub",
+  "gift",
+  "tip",
+  "raid",
+  "redemption",
+  "hypetrain",
+  "shoutout",
+] as const;
+
+/** What the server applies when an overlay has no `alerts` block. */
+export const DEFAULT_ALERT_STYLE: AlertStyle = {
+  layout: "banner",
+  kinds: [...OVERLAY_ALERT_KINDS],
+  seconds: 6,
+  showMessage: true,
+  showAmount: true,
+  sound: "none",
+  accent: "#7c3aed",
+};
+
+export const ALERT_SECONDS = { min: 3, max: 15 } as const;
+
+/** The alerts look an overlay draws with: its own block over the defaults, so
+ *  a block missing a field (an older save) still draws. */
+export function alertStyleOf(style: Pick<OverlayStyle, "alerts"> | null | undefined): AlertStyle {
+  const merged = { ...DEFAULT_ALERT_STYLE, ...style?.alerts };
+  // A missing or null `kinds` means the default list, never "none" or a crash.
+  if (!Array.isArray(merged.kinds)) merged.kinds = [...OVERLAY_ALERT_KINDS];
+  return merged;
 }
 
 /** The closed font set and the bounds internal/overlay validates, from the wire
@@ -133,14 +174,26 @@ export function pollWidgetPathUrl(origin: string, key: string): string {
   return `${origin}/overlay/poll/k/${encodeURIComponent(key)}`;
 }
 
+/** The alerts overlay's OBS URL: the same key, its own page, so alerts can be
+ *  placed apart from chat. Key in the fragment, like overlayUrl. */
+export function alertsWidgetUrl(origin: string, key: string): string {
+  return `${origin}/overlay/alerts#key=${encodeURIComponent(key)}`;
+}
+
+/** The alerts overlay with the key in the path, for an OBS that drops
+ *  fragments. Same caveat as overlayPathUrl: a reverse proxy logs the path. */
+export function alertsWidgetPathUrl(origin: string, key: string): string {
+  return `${origin}/overlay/alerts/k/${encodeURIComponent(key)}`;
+}
+
 /** Reads the key back out of the fragment. */
 export function keyFromHash(hash: string): string {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
   return new URLSearchParams(h).get("key") ?? "";
 }
 
-/** /overlay, /overlay/dock or /overlay/poll, each optionally with /k/{key}. */
-const OVERLAY_PATH = /^\/overlay(?:\/(dock|poll))?(?:\/k\/([^/]+))?$/;
+/** /overlay, /overlay/dock, /overlay/poll or /overlay/alerts, each optionally with /k/{key}. */
+const OVERLAY_PATH = /^\/overlay(?:\/(dock|poll|alerts))?(?:\/k\/([^/]+))?$/;
 
 /** Whether this page is the overlay or its dock, and its key -- or null when
  *  the path is not one of the four the server serves the overlay page on.
@@ -151,14 +204,16 @@ const OVERLAY_PATH = /^\/overlay(?:\/(dock|poll))?(?:\/k\/([^/]+))?$/;
  *  key, so it would have been a login screen inside OBS, or an overlay drawn as
  *  a dock.
  *
- *  The poll widget (/overlay/poll) is a third page on the same parser.
+ *  The poll widget (/overlay/poll) and the alerts overlay (/overlay/alerts)
+ *  are further pages on the same parser. `alerts` is present only when true,
+ *  so the shape every earlier caller compares against is unchanged.
  *
  *  A key in the path wins over one in the fragment. Both appear only in a URL
  *  edited by hand, and the path is the one the page was served under. */
 export function overlayLocation(
   pathname: string,
   hash: string,
-): { key: string; dock: boolean; poll: boolean } | null {
+): { key: string; dock: boolean; poll: boolean; alerts?: boolean } | null {
   // Trailing slashes trimmed by hand: /\/+$/ backtracks on a long run of them.
   let end = pathname.length;
   while (end > 1 && pathname[end - 1] === "/") end--;
@@ -172,7 +227,12 @@ export function overlayLocation(
       key = ""; // a malformed escape is no key, and the server answers 401
     }
   }
-  return { key: key || keyFromHash(hash), dock: m[1] === "dock", poll: m[1] === "poll" };
+  return {
+    key: key || keyFromHash(hash),
+    dock: m[1] === "dock",
+    poll: m[1] === "poll",
+    ...(m[1] === "alerts" ? { alerts: true } : {}),
+  };
 }
 
 // ---------------------------------------------------------------- the rules
@@ -335,6 +395,8 @@ export interface StreamHandlers {
   /** The poll widget's projection. Only the poll page listens; the chat
    *  overlay and dock leave it unset and never draw a poll. */
   onPoll?: (p: PollDisplay) => void;
+  /** The alerts overlay's projection. Only the alerts page listens. */
+  onActivity?: (a: ActivityDisplay) => void;
   /** The key was refused (401): rotated, revoked or mistyped. Not retried. */
   onDenied: () => void;
   onState?: (connected: boolean) => void;
@@ -433,6 +495,11 @@ function dispatch(f: SSEFrame, h: StreamHandlers): void {
     if (Array.isArray(ids)) h.onRemove?.(ids.filter((x): x is string => typeof x === "string"));
   } else if (env.type === "poll.display") {
     h.onPoll?.(env.data as PollDisplay);
+  } else if (env.type === "activity.display") {
+    const a = env.data as ActivityDisplay;
+    // The id is the queue's dedupe key and the kind picks the wording, so a
+    // frame without either is dropped here rather than drawn blank on air.
+    if (typeof a.id === "string" && typeof a.kind === "string") h.onActivity?.(a);
   }
   // Anything else is ignored: the server sends nothing else to an overlay key.
 }

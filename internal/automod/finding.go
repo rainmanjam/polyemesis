@@ -50,6 +50,13 @@ type Finding struct {
 	// Provider is the preset ID of the checker that answered (jev, cerebras,
 	// ollama, ...).
 	Provider string `json:"provider,omitempty"`
+	// Hold asks that the message be kept off every on-screen overlay, whatever
+	// Action says. An ATTRIBUTE, not an action: a finding asks for exactly one
+	// action, and "ban if that is armed, and hold in any case" is two things.
+	// Holding is local and reversible like flagging -- the console still shows
+	// the message, nothing goes to a platform -- so it needs no matrix cell and
+	// no capability row. See Engine.decide for the two switches that bound it.
+	Hold bool `json:"hold,omitempty"`
 }
 
 // PlatformReason is the only text this package will let out to a third party.
@@ -88,6 +95,10 @@ type Verdict struct {
 	// when it found nothing -- "the secondary looked and it was fine" is
 	// still worth knowing when the primary is down.
 	DecidedBy Slot `json:"decidedBy,omitempty"`
+	// Hold is set when any finding asked to be held off the overlay and the
+	// global and platform switches allow it. Not part of Act: nothing is
+	// performed on a platform for it.
+	Hold bool `json:"hold,omitempty"`
 }
 
 // Flagged reports whether anything at all was found, which is what puts a

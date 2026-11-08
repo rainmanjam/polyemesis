@@ -60,23 +60,17 @@ func (PlatformCaps) Can(p db.Platform, a Action) (bool, string) {
 		return true, ""
 
 	case ActionTimeout, ActionBan:
-		// FACEBOOK HAS NO CHAT BAN API, and claiming otherwise was the exact
-		// failure the doc comment above says this gate exists to prevent: the
-		// operator ticked the box, the Summary counted it as armed, and a rule
-		// firing produced one error line in a log nobody reads. Both actions
-		// route through Hub.Ban, which type-asserts chat.Banner -- and
-		// FacebookAdapter implements Delete, Hide, Run and Health, not Ban.
-		//
-		// The pairing is now actually asserted, by
-		// TestTheCapabilityTableMatchesWhatTheAdaptersImplement in
-		// internal/chat, which is the guard this comment claimed to have and
-		// did not.
+		// Both route through Hub.Ban, which type-asserts chat.Banner, so the
+		// registry's TimeoutBan must agree with the adapters. The pairing is
+		// asserted by TestRegistryAgreesWithTheChatAdapters in internal/chat.
 		if !moderationOf(p).TimeoutBan {
-			if p == db.PlatformFacebook {
-				return false, "Facebook has no chat ban API. Delete or hide the comment " +
-					"instead, or ban the person from the Facebook page itself"
-			}
 			return false, noModeration(p, "time out or ban a person")
+		}
+		// Facebook blocks a person from the Page and has no duration to give
+		// the block, so a timeout is refused where a ban is not.
+		if a == ActionTimeout && moderationOf(p).NoTimeout {
+			return false, "Facebook cannot time anyone out: blocking a person from a Page has no duration. " +
+				"Use a ban, or delete or hide the comment instead"
 		}
 		return true, ""
 	}

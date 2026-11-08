@@ -518,6 +518,20 @@ var httpClient = &http.Client{Timeout: 20 * time.Second}
 type tokenStatusError struct {
 	code int
 	body string
+	// full is the untruncated body, for parsing (see statusError.full): body is
+	// cut at 300 characters for display, and a Graph envelope can be longer.
+	full string
+	// header is the response header, kept so a rate-limit refusal can report
+	// the wait Graph asked for (Retry-After, X-Business-Use-Case-Usage).
+	header http.Header
+}
+
+// payload is the body to parse: whole when captured, truncated otherwise.
+func (e *tokenStatusError) payload() string {
+	if e.full != "" {
+		return e.full
+	}
+	return e.body
 }
 
 // ErrReconnectRequired matches a refresh the platform refused because the
@@ -582,7 +596,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body)}
+		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body), full: string(body), header: resp.Header.Clone()}
 	}
 
 	var out struct {
@@ -659,7 +673,31 @@ func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, he
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	return json.Unmarshal(body, out)
+	if err := decodeResponse(endpoint, body, out); err != nil {
+		if isEdgeAnswer(resp.Header, body) {
+			return newStatusError(resp, body, fmt.Sprintf("%s returned an unreadable response: the platform answered with a web page instead of JSON; a proxy or its edge may be blocking this server", withoutQuery(endpoint)))
+		}
+		return err
+	}
+	return nil
+}
+
+// withoutQuery drops the query string from an endpoint, which can hold ids.
+func withoutQuery(endpoint string) string {
+	if i := strings.IndexByte(endpoint, '?'); i >= 0 {
+		return endpoint[:i]
+	}
+	return endpoint
+}
+
+// decodeResponse unmarshals a 2xx body, naming the call when it is not the JSON
+// promised (an HTML error page from a proxy, a truncated body). Without it the
+// operator sees "invalid character '<'" and nothing about which platform call.
+func decodeResponse(endpoint string, body []byte, out any) error {
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("%s returned an unreadable response: %w", withoutQuery(endpoint), err)
+	}
+	return nil
 }
 
 func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, payload any, headers map[string]string, out any) error {
@@ -689,7 +727,7 @@ func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, p
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
 }
 
 func snippet(b []byte) string {

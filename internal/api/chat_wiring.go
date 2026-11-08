@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,6 +41,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rainmanjam/polyemesis/internal/activity"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -196,6 +198,9 @@ func (s *Server) connectChat(ctx context.Context, a db.PlatformAccount, withCred
 		s.log.Warn("chat: could not attach", "platform", a.Platform, "err", err)
 		return false
 	}
+	// A platform with its own activity transport starts it beside the chat and
+	// stops it with it (detachChat). Additive: it never fails the connect.
+	s.attachActivitySource(ctx, a)
 	return true
 }
 
@@ -374,6 +379,7 @@ const chatDetachWait = 5 * time.Second
 // replacing the adapter it had: unlisted and cancelled at once, with the wait
 // bounded (see chat.Hub.DetachWithin). Caller holds chatWire.
 func (s *Server) detachChat(p db.Platform, account string) {
+	s.detachActivitySource(p, account)
 	if !s.chat.DetachWithin(p, account, chatDetachWait) {
 		s.log.Warn("chat adapter is slow to stop; it is detached and will finish in the background",
 			"platform", p, "account", account, "waited", chatDetachWait)
@@ -461,10 +467,61 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 	return func(ctx context.Context) (string, error) {
 		acct, err := s.tokenFor(ctx, id)
 		if err != nil {
+			// A grant the platform refuses to renew is not a blip: Fatal stops
+			// the retry loops that would otherwise ask again on every tick.
+			// chatTokenError also attaches chat's own sentinel, which the
+			// Twitch adapter reads.
+			err = chatTokenError(err)
+			if errors.Is(err, oauth.ErrReconnectRequired) {
+				return "", chat.Fatal(err)
+			}
 			return "", err
 		}
 		return acct.AccessToken, nil
 	}
+}
+
+// chatTokenRefresher is the forced refresh an adapter asks for when the platform
+// refuses the token it was given, which the stored expiry cannot predict.
+func (s *Server) chatTokenRefresher(id int64) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, rejected string) (string, error) {
+		acct, err := s.tokenForRejected(ctx, id, rejected)
+		if err != nil {
+			return "", chatTokenError(err)
+		}
+		return acct.AccessToken, nil
+	}
+}
+
+// chatTokenRefresh is chatToken that refreshes first, for an adapter whose
+// platform just rejected the token the store believed was good. refreshNow
+// leaves the row alone if someone else already replaced the token.
+func (s *Server) chatTokenRefresh(id int64) func(ctx context.Context, rejected string) (string, error) {
+	return func(ctx context.Context, rejected string) (string, error) {
+		acct, err := s.store.GetPlatformAccount(s.box, id)
+		if err != nil {
+			return "", err
+		}
+		// The token that was actually refused, not a fresh read of the row, so
+		// refreshNow can see that someone else already replaced it.
+		if rejected != "" {
+			acct.AccessToken = rejected
+		}
+		fresh, err := s.refreshNow(ctx, acct)
+		if err != nil {
+			return "", chatTokenError(err)
+		}
+		return fresh.AccessToken, nil
+	}
+}
+
+// chatTokenError carries a dead grant across the package boundary: chat cannot
+// import oauth, so the sentinel it understands is attached alongside the cause.
+func chatTokenError(err error) error {
+	if errors.Is(err, oauth.ErrReconnectRequired) {
+		return fmt.Errorf("%w: %w", chat.ErrReconnectRequired, err)
+	}
+	return err
 }
 
 // chatAdapter builds the adapter for one account, or explains why it cannot.
@@ -526,7 +583,10 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:      acct.AccessToken,
 			PassToken:  s.chatToken(a.ID),
 			HelixToken: s.chatToken(a.ID),
-			ClientID:   clientID,
+			// A Helix 401 gets one forced refresh and a retry before it is
+			// called a reconnect.
+			HelixRefresh: s.chatTokenRefresh(a.ID),
+			ClientID:     clientID,
 			// Channel is set from AccountName just above, so the account IS the
 			// broadcaster and the two ids are the same. They are separate fields
 			// because that stops being true the moment someone reads a channel
@@ -548,6 +608,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			BroadcasterUserID: id,
 			Channel:           a.AccountName,
 			Token:             s.chatToken(a.ID),
+			Reauth:            s.kickChatReauth(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
 			CallbackPath:      kickWebhookPath,
@@ -573,6 +634,9 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			AccountRef: a.AccountRef,
 			Channel:    a.AccountName,
 			Token:      s.chatToken(a.ID),
+			// A token X refuses before its stored expiry is refreshed once and
+			// the call retried; a grant that is gone ends the run Fatal.
+			RefreshToken: s.chatTokenRefresher(a.ID),
 			// The webhook calls need an app-only bearer token, which the
 			// operator supplies from the X developer console. Nothing here
 			// mints it. Empty makes the adapter's Run refuse with a Fatal
@@ -597,6 +661,10 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Channel:     a.AccountName,
 			Token:       s.chatToken(a.ID),
 			LiveVideoID: s.facebookLiveVideoID(a.ID),
+			PageAccess:  s.facebookPageAccess(a.ID, a.AccountRef),
+			// Off unless the operator switched the tally on; read per sample so
+			// the toggle needs no reconnect.
+			ReactionsEnabled: s.facebookReactionsOn,
 		})
 	}
 	return nil, fmt.Errorf("polyemesis has no chat adapter for %s", a.Platform)
@@ -709,6 +777,30 @@ func (s *Server) facebookLiveVideoID(accountID int64) string {
 		return ""
 	}
 	return s.adoptFacebookLiveVideo(accountID)
+}
+
+// facebookPageAccess is how the chat adapter acts as the Page this account is
+// connected as: blocking a person, running a live poll and reading comment
+// authors all take a Page token, which is minted from the user token (the
+// adapter caches it briefly) so a refreshed login is picked up. A ref with no
+// "page:" prefix is resolved like a broadcast target would be; only a ref that
+// resolves to the profile answers oauth.ErrNotAPage.
+func (s *Server) facebookPageAccess(accountID int64, ref string) func(context.Context) (string, string, error) {
+	return func(ctx context.Context) (string, string, error) {
+		p, err := s.providers.Get(db.PlatformFacebook)
+		if err != nil {
+			return "", "", err
+		}
+		fb, ok := p.(*oauth.Facebook)
+		if !ok || fb == nil {
+			return "", "", errors.New("facebook provider is not available")
+		}
+		acct, err := s.tokenFor(ctx, accountID)
+		if err != nil {
+			return "", "", err
+		}
+		return fb.PageAccess(ctx, acct.AccessToken, ref)
+	}
 }
 
 // adoptFacebookLiveVideo asks the platform which broadcast this account is
@@ -881,4 +973,13 @@ func (s *Server) kickChatHandler(r *http.Request) (http.Handler, bool) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}), true
+}
+
+// facebookReactionsOn reports whether the Facebook reaction tally is switched on
+// in the Activity settings. Without an activity hub it is off.
+func (s *Server) facebookReactionsOn() bool {
+	if s.activity == nil {
+		return false
+	}
+	return s.activity.Settings().KindEnabled(string(db.PlatformFacebook), activity.KindReaction)
 }

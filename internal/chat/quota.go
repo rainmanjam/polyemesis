@@ -37,7 +37,11 @@ import (
 //
 //   - listMessages, send, delete and ban are in Google's published quota table.
 //     They can change, but somebody wrote them down.
-//   - listBroadcasts is NOT. Google's quota calculator omits the Live Streaming
+//   - listBroadcasts: the table at
+//     https://developers.google.com/youtube/v3/determine_quota_cost (read
+//     2026-11-07) now lists liveBroadcasts.list at 1, which agrees with the
+//     guess below. The note that follows was written when Google's quota
+//     calculator omitted the Live Streaming
 //     endpoints entirely, so this number has no source at all. One is the value
 //     list operations historically carried, which is why it is the guess; it is
 //     still a guess, and no amount of reading settles it. It needs one measured
@@ -60,8 +64,8 @@ import (
 // constants cannot drift apart in silence.
 const (
 	QuotaCostListMessages = platform.YouTubeCostListMessages
-	// QuotaCostListBroadcasts is UNVERIFIED. See the note above before relying
-	// on it, and before changing the poll interval that multiplies it.
+	// QuotaCostListBroadcasts is liveBroadcasts.list: 1 in the quota table. See
+	// the note above before changing the poll interval that multiplies it.
 	QuotaCostListBroadcasts = platform.YouTubeCostListBroadcasts
 	// QuotaCostListLiveStreams is liveStreams.list. Correction 6 of the YouTube truth sheet
 	// (docs-youtube.md) says list operations cost one unit. Unlike the listBroadcasts guess
@@ -79,8 +83,9 @@ const (
 	// DefaultQuotaUnits is a Google Cloud project's default daily allowance.
 	DefaultQuotaUnits = platform.YouTubeDefaultDailyUnits
 	// DefaultQuotaReserve is held back so that sending never becomes
-	// impossible because reading spent everything. Two hundred units is four
-	// messages — enough to say "we are moving to Twitch" when it matters.
+	// impossible because reading spent everything. Two hundred units is ten
+	// messages, or exactly one ban (200) — enough to say "we are moving to
+	// Twitch" when it matters. Raising it makes the reserve deeper than one ban.
 	DefaultQuotaReserve = 200
 
 	// MinPollInterval floors the poll rate however generous the budget looks.

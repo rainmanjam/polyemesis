@@ -67,6 +67,19 @@ type chatOverview struct {
 // chatSendRequest is the send box's payload.
 type chatSendRequest struct {
 	Text string `json:"text"`
+	// ReplyTo answers one message on the platform that issued it, instead of
+	// fanning out. AsBot asks for that platform's bot identity (Kick only) and
+	// is meaningful only together with ReplyTo.
+	ReplyTo *chatReplyTarget `json:"replyTo,omitempty"`
+	AsBot   bool             `json:"asBot,omitempty"`
+}
+
+// chatReplyTarget addresses the message being answered. The id is opaque and
+// the account may be empty, as in the other message-addressed routes.
+type chatReplyTarget struct {
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+	ID       string `json:"id"`
 }
 
 // chatSendResponse reports every platform individually. Partial success is the
@@ -256,6 +269,11 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ReplyTo != nil {
+		s.sendChatReply(w, r, req)
+		return
+	}
+
 	// No length check. Each platform's limit is published in the overview so
 	// the composer can warn, but the platform itself is the authority on what
 	// it will accept, and refusing here would silently cost the operator a
@@ -281,6 +299,33 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	// per-platform verdicts are the answer. A status code cannot say "Twitch
 	// took it and YouTube did not", and collapsing it to one would throw away
 	// the half that worked.
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sendChatReply answers one message. The reply is one platform's business, so
+// the response is the same shape with a single result; a platform that cannot
+// thread a reply comes back as that result's refusal, not as an error status.
+func (s *Server) sendChatReply(w http.ResponseWriter, r *http.Request, req chatSendRequest) {
+	t := req.ReplyTo
+	platform := db.Platform(strings.TrimSpace(t.Platform))
+	if platform == "" || strings.TrimSpace(t.ID) == "" {
+		writeError(w, http.StatusBadRequest, "a reply needs the platform and id of the message it answers")
+		return
+	}
+	res, err := s.chat.Reply(r.Context(), platform, strings.TrimSpace(t.Account), req.Text, t.ID, req.AsBot)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	out := chatSendResponse{Results: []chat.SendResult{res}}
+	switch {
+	case res.OK:
+		out.Sent++
+	case res.Skipped:
+		out.Skipped++
+	default:
+		out.Failed++
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -421,7 +466,14 @@ func (s *Server) handleChatBan(w http.ResponseWriter, r *http.Request) {
 		d = time.Duration(secs) * time.Second
 	}
 
-	if err := s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason"))); err != nil {
+	// messageId asks for the ban and the removal of that message in ONE platform call (X's mute with message_id).
+	var err error
+	if mid := strings.TrimSpace(q.Get("messageId")); mid != "" {
+		err = s.chat.BanDeleting(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason")), mid)
+	} else {
+		err = s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason")))
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -666,6 +718,49 @@ type chatFlagsResult struct {
 const chatFlagsNote = "Messages automod flagged since this server started, newest first. " +
 	"The list is kept in memory and holds the most recent 500."
 
+// handleChatFlagRelease puts a held line back on the overlay: the review list's
+// "Show on overlay", for a false positive (a rule's holdOverlay).
+//
+// It changes nothing on any platform and nothing in the console -- the message
+// is already there -- so it is a POST on the same footing as a local hide, and
+// takes the same platform/account/id addressing. 404 when there is nothing held
+// under that address, which is also what an expired or already-released line
+// answers: the gate keeps the last 200 lines for ten minutes.
+func (s *Server) handleChatFlagRelease(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	id := strings.TrimSpace(q.Get("id"))
+	if platform == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "platform and id are required")
+		return
+	}
+	// Refused while the model is still being asked: releasing a line it is
+	// about to remove would put it on air first.
+	if s.chat != nil && s.chat.ModelPending(platform, account, id) {
+		writeError(w, http.StatusConflict,
+			"automod's model is still checking that message; try again in a few seconds")
+		return
+	}
+	// And when the hub no longer has the message -- it aged out of the history
+	// ring, or its author was banned -- there is nothing to bring back.
+	if s.chat != nil && !s.chat.HasMessage(platform, account, id) {
+		writeError(w, http.StatusNotFound,
+			"that message is no longer held by the chat (it scrolled out of the last 500 messages, or was removed)")
+		return
+	}
+	if s.overlayGate == nil || !s.overlayGate.Release(platform, account, id) {
+		writeError(w, http.StatusNotFound,
+			"that message is not being held off the overlay (it was never held, was released already, or the "+
+				"ten minutes it is kept for have passed)")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "released",
+		"detail": "Shown on your overlays.",
+	})
+}
+
 // handleChatFlags lists the messages automod flagged (UX Council A48).
 //
 // Automod's findings used to go to the log and nowhere else, so the Chat page
@@ -679,6 +774,16 @@ func (s *Server) handleChatFlags(w http.ResponseWriter, r *http.Request) {
 	if s.chat != nil {
 		out.Counts = s.chat.FlagCounts()
 		out.Flags = s.chat.Flagged(platform, limit)
+		// Held is true only while the gate still has the line to release: it
+		// clears on release, retraction, a model removal and the ten-minute
+		// expiry, none of which the hub tells the flag.
+		for i := range out.Flags {
+			f := &out.Flags[i]
+			if f.Held {
+				f.Held = s.overlayGate != nil &&
+					s.overlayGate.IsHeld(f.Message.Platform, f.Message.Account, f.Message.ID)
+			}
+		}
 		out.Truncated = len(out.Flags) >= limit
 	}
 	writeJSON(w, http.StatusOK, out)

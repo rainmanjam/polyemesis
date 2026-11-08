@@ -85,16 +85,23 @@ describe("#769: a platform whose moderation column says yes and whose ban says n
     expect(button(/1 day/).disabled).toBe(true);
   });
 
-  it("renders the permanent ban and the lift inert too", async () => {
+  it("keeps the permanent ban and the lift live, because a Page can block a person", async () => {
     draw("facebook");
-    await waitFor(() => expect(button(/Ban permanently/).disabled).toBe(true));
-    expect(button(/Lift ban/).disabled).toBe(true);
+    await waitFor(() => expect(button(/Ban permanently/).disabled).toBe(false));
+    expect(button(/Lift ban/).disabled).toBe(false);
   });
 
-  it("says why, naming what the moderator can do instead", async () => {
+  it("says why timeouts are unavailable, naming what the moderator can do instead", async () => {
     draw("facebook");
-    await waitFor(() => expect(screen.getByText(/no chat ban API/)).toBeTruthy());
-    expect(screen.getByText(/Facebook page itself/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/cannot time anyone out/)).toBeTruthy());
+    expect(screen.getByText(/permanent ban/)).toBeTruthy();
+  });
+
+  it("renders the ban, the lift and every timeout inert on a platform with no ban at all", async () => {
+    draw("rumble" as ChatPlatform);
+    await waitFor(() => expect(button(/Ban permanently/).disabled).toBe(true));
+    expect(button(/Lift ban/).disabled).toBe(true);
+    expect(button(/1 min/).disabled).toBe(true);
   });
 
   it("leaves the hides live, because Facebook can genuinely hide a comment", async () => {
@@ -110,7 +117,7 @@ describe("#769: a platform whose moderation column says yes and whose ban says n
     draw("twitch");
     await waitFor(() => expect(button(/1 min/).disabled).toBe(false));
     expect(button(/Ban permanently/).disabled).toBe(false);
-    expect(screen.queryByText(/no chat ban API/)).toBeNull();
+    expect(screen.queryByText(/cannot time anyone out/)).toBeNull();
   });
 });
 
