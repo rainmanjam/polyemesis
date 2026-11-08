@@ -2830,6 +2830,65 @@ export interface ChatSettings {
   nonModeratorChatDelaySeconds?: number;
 }
 
+/** Twitch channel tools (internal/chat/twitch_tools.go). Built from Twitch's
+ *  published reference and not yet exercised against a live account. */
+export interface TwitchPin {
+  messageId: string;
+  senderLogin: string;
+  senderName: string;
+  text: string;
+}
+export interface TwitchShield {
+  active: boolean;
+  moderatorLogin?: string;
+  lastActivatedAt?: string;
+}
+export interface TwitchBlockedTerm {
+  id: string;
+  text: string;
+}
+export interface TwitchTermSync {
+  added: string[];
+  present: string[];
+  skipped: { term: string; reason: string }[];
+}
+export interface TwitchChatters {
+  total: number;
+  chatters?: { userId: string; login: string; name: string }[];
+  truncated?: boolean;
+}
+/** AutoMod levels run 0 (off) to 4. The PUT REPLACES: send overallLevel alone
+ *  or every category, never a subset. */
+export interface TwitchAutoMod {
+  overallLevel: number | null;
+  aggression: number;
+  bullying: number;
+  disability: number;
+  misogyny: number;
+  raceEthnicityOrReligion: number;
+  sexBasedTerms: number;
+  sexualitySexOrGender: number;
+  swearing: number;
+}
+export interface TwitchRoleHolder {
+  userId: string;
+  login: string;
+  name: string;
+}
+export interface TwitchBanned extends TwitchRoleHolder {
+  reason?: string;
+  expiresAt?: string;
+}
+export interface TwitchUnbanRequest extends TwitchRoleHolder {
+  id: string;
+  text: string;
+  status: string;
+}
+export interface TwitchShoutouts {
+  nextAnyAt: string | null;
+  targets: Record<string, string>;
+}
+
 /** One viewer's recent messages and roles — the moderator's user card.
  *
  *  Read from polyemesis's own scrollback, because NO platform publishes an API

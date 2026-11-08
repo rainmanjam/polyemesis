@@ -75,6 +75,10 @@ type apiError struct {
 	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
 	// rather than from its API. Its status says nothing about the account.
 	Edge bool
+	// RateRemaining is Twitch's Ratelimit-Remaining as sent, empty when absent.
+	// A 429 with tokens left in the bucket is an endpoint's own cooldown, not an
+	// empty bucket.
+	RateRemaining string
 }
 
 // payload is the body to parse: whole when captured, truncated otherwise.
@@ -224,12 +228,13 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			Wait:       oauth.GraphWait(resp.Header),
 			Raw:        raw[:min(len(raw), 4096)],
 			Header:     resp.Header,
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfterOf(resp.Header, time.Now()),
 			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
-			Problem: oauth.XProblemText(raw),
-			Types:   oauth.XProblemTypes(raw),
-			Message: errorMessage(raw),
-			Edge:    isEdgeAnswer(resp.Header, raw),
+			Problem:       oauth.XProblemText(raw),
+			Types:         oauth.XProblemTypes(raw),
+			Message:       errorMessage(raw),
+			Edge:          isEdgeAnswer(resp.Header, raw),
+			RateRemaining: strings.TrimSpace(resp.Header.Get("Ratelimit-Remaining")),
 		}
 	}
 	if out == nil || len(raw) == 0 {
@@ -237,10 +242,13 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		if isEdgeAnswer(resp.Header, raw) {
-			return fmt.Errorf("%s answered %d with a web page instead of JSON; a proxy or the platform's edge may be blocking this server",
+			return fmt.Errorf("%s returned an unreadable response: it answered %d with a web page instead of JSON; a proxy or the platform's edge may be blocking this server",
 				stripQuery(endpoint), resp.StatusCode)
 		}
-		return err
+		// A 200 that is not the JSON promised (a truncated body, say) would
+		// otherwise surface as "invalid character" with nothing saying which
+		// call produced it.
+		return fmt.Errorf("%s returned an unreadable response: %w", stripQuery(endpoint), err)
 	}
 	return nil
 }
@@ -258,6 +266,25 @@ func isEdgeAnswer(h http.Header, raw []byte) bool {
 		return true
 	}
 	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
+}
+
+// maxRetryAfter caps any wait a platform asks for: a bad header must not park
+// a caller for hours.
+const maxRetryAfter = 15 * time.Minute
+
+// retryAfterOf reads how long to wait from a response: Retry-After (seconds or
+// an HTTP date), else Twitch's Ratelimit-Reset, a Unix epoch of when the bucket
+// refills (dev.twitch.tv/docs/api/guide, "Keeping track of your usage").
+func retryAfterOf(h http.Header, now time.Time) time.Duration {
+	var d time.Duration
+	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
+		d = parseRetryAfter(ra, now)
+	} else if rs := strings.TrimSpace(h.Get("Ratelimit-Reset")); rs != "" {
+		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
+			d = time.Unix(epoch, 0).Sub(now)
+		}
+	}
+	return min(max(d, 0), maxRetryAfter)
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes
@@ -295,18 +322,24 @@ func errorReason(raw []byte) string {
 // carrying a query string never reaches a health line. Empty when the body is
 // neither.
 func errorMessage(raw []byte) string {
+	// "error" is an object for Google and a plain string for Twitch
+	// ({"error":"Forbidden","status":403,"message":".."}), so it is decoded
+	// separately and a mismatch there never costs the top-level message.
 	var env struct {
-		Message string `json:"message"`
-		Error   struct {
-			Message string `json:"message"`
-		} `json:"error"`
+		Message string          `json:"message"`
+		Error   json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return ""
 	}
 	said := strings.TrimSpace(env.Message)
 	if said == "" {
-		said = env.Error.Message
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(env.Error, &nested) == nil {
+			said = nested.Message
+		}
 	}
 	return shorten([]byte(scrubURLs(said)))
 }

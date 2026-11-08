@@ -60,6 +60,32 @@
     ]
   },
   {
+    "platform": "twitch",
+    "scopeVersion": 6,
+    "scopes": [
+      "channel:manage:broadcast",
+      "channel:manage:moderators",
+      "channel:manage:polls",
+      "channel:manage:vips",
+      "channel:read:stream_key",
+      "chat:edit",
+      "chat:read",
+      "moderator:manage:announcements",
+      "moderator:manage:automod",
+      "moderator:manage:automod_settings",
+      "moderator:manage:banned_users",
+      "moderator:manage:blocked_terms",
+      "moderator:manage:chat_messages",
+      "moderator:manage:chat_settings",
+      "moderator:manage:shield_mode",
+      "moderator:manage:shoutouts",
+      "moderator:manage:suspicious_users",
+      "moderator:manage:unban_requests",
+      "moderator:manage:warnings",
+      "moderator:read:chatters"
+    ]
+  },
+  {
     "platform": "vimeo",
     "scopeVersion": 1,
     "scopes": [

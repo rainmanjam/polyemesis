@@ -673,11 +673,29 @@ func (e endpoints) getJSON(ctx context.Context, endpoint, accessToken string, he
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if err := decodeResponse(endpoint, body, out); err != nil {
 		if isEdgeAnswer(resp.Header, body) {
-			return newStatusError(resp, body, "the platform answered with a web page instead of JSON; a proxy or its edge may be blocking this server")
+			return newStatusError(resp, body, fmt.Sprintf("%s returned an unreadable response: the platform answered with a web page instead of JSON; a proxy or its edge may be blocking this server", withoutQuery(endpoint)))
 		}
 		return err
+	}
+	return nil
+}
+
+// withoutQuery drops the query string from an endpoint, which can hold ids.
+func withoutQuery(endpoint string) string {
+	if i := strings.IndexByte(endpoint, '?'); i >= 0 {
+		return endpoint[:i]
+	}
+	return endpoint
+}
+
+// decodeResponse unmarshals a 2xx body, naming the call when it is not the JSON
+// promised (an HTML error page from a proxy, a truncated body). Without it the
+// operator sees "invalid character '<'" and nothing about which platform call.
+func decodeResponse(endpoint string, body []byte, out any) error {
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("%s returned an unreadable response: %w", withoutQuery(endpoint), err)
 	}
 	return nil
 }
@@ -709,7 +727,7 @@ func (e endpoints) postJSON(ctx context.Context, endpoint, accessToken string, p
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
 }
 
 func snippet(b []byte) string {

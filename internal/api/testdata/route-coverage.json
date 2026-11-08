@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 322,
+    "methodPatternPairs": 327,
     "swept": 80,
     "excused": 64,
-    "denied": 178,
+    "denied": 183,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -331,6 +331,36 @@
     {
       "method": "PATCH",
       "pattern": "/api/v1/chat/settings",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/twitch/{resource}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/chat/twitch/{resource}",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -2680,6 +2710,16 @@
         "status": 403
       },
       "counterpart": "chatSettings"
+    },
+    {
+      "route": "GET /api/v1/chat/twitch/{resource}",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "twitchTools"
     },
     {
       "route": "GET /api/v1/chat/users",

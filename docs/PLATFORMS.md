@@ -27,22 +27,22 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
-|---|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
-| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
-| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works |
-| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
-| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible |
-| *Everything else* | — | By hand | — | — | — | — | — | — |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end | Channel tools |
+|---|---|---|---|---|---|---|---|---|---|
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works | Unverified |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible | Unverified |
+| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Unverified | Unverified | Unverified | Works | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible | Unverified |
+| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Instagram Live** | Unverified | By hand | Not possible | Unverified | Not possible | Not possible | Not possible | Not possible | Unverified |
+| *Everything else* | — | By hand | — | — | — | — | — | — | — |
 
 | Term | Means |
 |---|---|
@@ -739,6 +739,23 @@ Twitch runs polls for Affiliates and Partners only, and on any other channel
 the mirror is skipped and the chat poll runs as usual. It was added in scope
 version 5, so a Twitch account connected before it is marked "reconnect
 needed" once.
+
+Scope version 6 adds twelve scopes for the **channel tools** (the *Channel tools*
+column above, `/chat/twitch/{resource}` in the [API](API.md)):
+`moderator:manage:announcements`, `moderator:manage:shoutouts`,
+`moderator:manage:shield_mode`, `moderator:manage:warnings`,
+`moderator:manage:blocked_terms`, `moderator:read:chatters`,
+`moderator:manage:automod`, `moderator:manage:automod_settings`,
+`moderator:manage:unban_requests`, `moderator:manage:suspicious_users`,
+`channel:manage:moderators` and `channel:manage:vips`. Pinning reuses
+`moderator:manage:chat_messages` and the banned list reuses
+`moderator:manage:banned_users`. These are built from Twitch's reference and not
+yet exercised against a live account, so the column reads *Unverified*. Adding
+or removing moderators and VIPs, and the banned list, work only for the
+channel's owner, and Twitch refuses VIPs until the channel has finished its
+Build a Community requirement; the refusal says so. Receiving a message AutoMod
+is holding needs EventSub and is not built: the approve and deny call is, by id.
+Accounts connected earlier are marked "reconnect needed" once.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account

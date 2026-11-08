@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,9 +85,32 @@ func (t *Twitch) Scopes() []string {
 		// on any other channel the mirror is skipped with that reason and the
 		// chat poll runs as usual. See twitch_polls.go.
 		"channel:manage:polls",
+		// Channel tools (api-twitch branch, ScopeVersion 6). Each is the one
+		// scope its Helix call names; none of them reads more than it writes.
+		// Pins reuse moderator:manage:chat_messages and the banned list reuses
+		// moderator:manage:banned_users, both held since ScopeVersion 4.
+		// See internal/chat/twitch_tools.go for the call each one unlocks.
+		"moderator:manage:announcements",    // chat announcements
+		"moderator:manage:shoutouts",        // shoutouts
+		"moderator:manage:shield_mode",      // Shield Mode read and write
+		"moderator:manage:warnings",         // warn a chat user
+		"moderator:manage:blocked_terms",    // blocked terms read, add, remove
+		"moderator:read:chatters",           // who is connected to chat
+		"moderator:manage:automod",          // approve or deny a held message
+		"moderator:manage:automod_settings", // AutoMod levels read and write
+		"moderator:manage:unban_requests",   // unban requests read and resolve
+		"moderator:manage:suspicious_users", // suspicious-user flags
+		"channel:manage:moderators",         // add, remove and list moderators
+		"channel:manage:vips",               // add, remove and list VIPs
 	}
 }
 
+// ScopeVersion 6 adds twelve scopes for the channel tools (announcements,
+// shoutouts, Shield Mode, warnings, blocked terms, chatters, AutoMod, unban
+// requests, suspicious users, moderator and VIP management). Every connected
+// account is asked to reconnect once; until it does, only the tools it holds a
+// scope for answer, and the rest say to reconnect.
+//
 // ScopeVersion 5 adds channel:manage:polls, for mirroring a chat poll as a
 // native Twitch poll (#14). Every connected Twitch account is asked to
 // reconnect once; until it is, its polls simply are not mirrored.
@@ -102,7 +124,7 @@ func (t *Twitch) Scopes() []string {
 // mid-broadcast. This bump is the difference between the account list saying
 // "reconnect to enable moderation" and an operator finding out when the delete
 // button fails on the message they needed gone.
-func (t *Twitch) ScopeVersion() int { return 5 }
+func (t *Twitch) ScopeVersion() int { return 6 }
 
 // PKCE is on, and it is ADDITIVE: the flow stays a confidential client that
 // sends its client_secret on every token request, and the code_verifier rides
@@ -488,7 +510,7 @@ func (t *Twitch) getJSONScheme(ctx context.Context, endpoint, scheme, accessToke
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
-	return json.Unmarshal(body, out)
+	return decodeResponse(endpoint, body, out)
 }
 
 // IsTokenInvalid reports whether err is a platform's 401 on a token check: the

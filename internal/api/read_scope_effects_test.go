@@ -100,6 +100,8 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"the operator's X chat moderators, by user id and name"},
 		{http.MethodGet, "/api/v1/chat/settings?platform=twitch", nil,
 			"a platform call made with the moderator's token, for the moderator's own rules card"},
+		{http.MethodGet, "/api/v1/chat/twitch/banned", nil,
+			"the banned list, the appeals' text and the chatter names are the channel's people"},
 
 		// Viewer activity: names viewers and carries what they wrote, as chat does.
 		{http.MethodGet, "/api/v1/activity", nil,

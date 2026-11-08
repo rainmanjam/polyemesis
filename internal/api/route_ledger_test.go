@@ -815,6 +815,9 @@ var excusedRoutes = map[string]coverageExcus{
 	// X's muted viewers and chat moderators: who the operator silenced or appointed.
 	"GET /api/v1/chat/mutes":      deniedWithCounterpart("chatMutes"),
 	"GET /api/v1/chat/moderators": deniedWithCounterpart("chatModerators"),
+	// Twitch's channel tools, read: banned list, appeal text, chatter names.
+	// One pattern, so one driven denial rather than a counterpart per tool.
+	"GET /api/v1/chat/twitch/{resource}": deniedWithCounterpart("twitchTools"),
 	// Wave 4 #4: cross-platform analytics is admin-only. Each route names
 	// something a read token is not for -- the connected channels, the
 	// broadcast titles, the top chatters -- and each proof plants it.
@@ -1311,6 +1314,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"chatSettings":                          proveChatSettings,
 	"chatMutes":                             proveChatMutes,
 	"chatModerators":                        proveChatModerators,
+	"twitchTools":                           proveTwitchTools,
 	"analyticsLive":                         proveAnalyticsLive,
 	"analyticsStreams":                      proveAnalyticsStreams,
 	"analyticsReport":                       proveAnalyticsReport,
