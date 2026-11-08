@@ -659,6 +659,13 @@ type Server struct {
 	activity      *activityhub.Hub
 	activityGate  *overlay.ActivityGate
 	activityTests activityTestLimiter
+	// mirroredPolls lists the native Twitch polls polyemesis created when it
+	// mirrored a chat poll, so the EventSub source does not report them a
+	// second time (D9). Its zero value is ready. polls.go, activity_wiring.go.
+	mirroredPolls activityhub.MirrorLedger
+	// twitchEventSub aims the EventSub source at a stub. A test seam: the zero
+	// value is Twitch itself.
+	twitchEventSub twitchEventSubSeam
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is

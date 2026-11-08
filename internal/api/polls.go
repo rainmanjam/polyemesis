@@ -480,14 +480,19 @@ func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []po
 				Reason: redact.Redact(err.Error())}})
 			continue
 		}
+		// Marked in flight BEFORE the call: Twitch can announce the poll over
+		// EventSub before the call returns its id (activityhub.MirrorLedger).
+		created := m.s.mirroredPolls.Begin()
 		p, err := tw.CreatePoll(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, spec.Question, spec.Options, spec.DurationSeconds)
 		if err != nil {
+			created("")
 			// A 403 is the ordinary answer for a channel that is not an
 			// Affiliate or Partner. Said once, on the poll.
 			out = append(out, polls.Mirrored{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
 				Reason: redact.Redact(err.Error())}})
 			continue
 		}
+		created(p.ID)
 		out = append(out, polls.Mirrored{
 			Account: acct.AccountRef,
 			Result:  polls.NativeResult{Platform: "twitch", Status: polls.NativeMirrored, Votes: p.Votes},

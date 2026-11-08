@@ -57,7 +57,13 @@
       "moderator:manage:unban_requests",
       "moderator:manage:suspicious_users",
       "channel:manage:moderators",
-      "channel:manage:vips"
+      "channel:manage:vips",
+      "moderator:read:followers",
+      "channel:read:subscriptions",
+      "bits:read",
+      "channel:read:redemptions",
+      "channel:read:hype_train",
+      "channel:read:predictions"
     ]
   },
   {

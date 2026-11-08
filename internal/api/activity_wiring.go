@@ -2,16 +2,18 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/activityhub"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/redact"
+	"github.com/rainmanjam/polyemesis/internal/twitch/eventsub"
 )
 
 // WHERE A PLATFORM'S ACTIVITY IS WIRED. This file is the extension point the
-// per-platform activity PRs share; the core PR leaves both tables empty.
+// per-platform activity PRs share. Twitch EventSub is registered below.
 //
 // A platform's activity takes one of two shapes:
 //
@@ -23,7 +25,8 @@ import (
 //     below lists them in GET /api/v1/activity/sources with the chat connection's
 //     own state as the transport state.
 //
-//  2. IT NEEDS A TRANSPORT OF ITS OWN (Twitch EventSub). It implements
+//  2. IT NEEDS A TRANSPORT OF ITS OWN (Twitch EventSub,
+//     internal/activityhub/twitch.go). It implements
 //     activityhub.Source and registers a builder in activitySourceBuilders. It
 //     is started when the account's chat is connected and stopped when it is
 //     detached (connectChat, detachChat), so the two always agree about which
@@ -40,9 +43,57 @@ type activityKindReporter interface {
 // and the account simply has no activity source: it never stops chat.
 type activitySourceBuilder func(s *Server, a db.PlatformAccount) (activityhub.Source, error)
 
-// activitySourceBuilders is keyed by platform. EMPTY IN THE CORE PR: the Twitch
-// EventSub PR adds `db.PlatformTwitch` here, in this file, and nowhere else.
-var activitySourceBuilders = map[db.Platform]activitySourceBuilder{}
+// activitySourceBuilders is keyed by platform. Twitch EventSub is the first
+// own-transport source.
+var activitySourceBuilders = map[db.Platform]activitySourceBuilder{
+	db.PlatformTwitch: buildTwitchActivity,
+}
+
+// twitchEventSubSeam points the EventSub source at a stub in tests. Empty in
+// production.
+type twitchEventSubSeam struct {
+	WSURL     string
+	HelixBase string
+	// AllowReconnectHost replaces the "reconnect_url must be under twitch.tv" rule.
+	AllowReconnectHost func(rawurl string) error
+}
+
+// buildTwitchActivity builds the EventSub source for one connected Twitch
+// account. An account with no developer credentials or no token has nothing to
+// connect with: that is an error the caller logs, never a stopped chat.
+func buildTwitchActivity(s *Server, a db.PlatformAccount) (activityhub.Source, error) {
+	if s.store == nil {
+		return nil, errors.New("no store")
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, db.PlatformTwitch)
+	if err != nil || creds.ClientID == "" {
+		return nil, errors.New("Twitch developer credentials are missing")
+	}
+	if a.AccountRef == "" {
+		return nil, errors.New("the Twitch account has no user id")
+	}
+	id := a.ID
+	return activityhub.NewTwitch(activityhub.TwitchConfig{
+		AccountRef: a.AccountRef,
+		ClientID:   creds.ClientID,
+		Token:      s.chatToken(id),
+		Refresh:    s.chatTokenRefresh(id),
+		// The scopes the account holds NOW, not the ones it held when the
+		// source was built: a reconnect replaces the row.
+		Scopes: func() []string {
+			cur, err := s.store.GetPlatformAccount(s.box, id)
+			if err != nil {
+				return eventsub.ScopeList(a.Scopes)
+			}
+			return eventsub.ScopeList(cur.Scopes)
+		},
+		Mirrors:            &s.mirroredPolls,
+		Log:                s.log,
+		WSURL:              s.twitchEventSub.WSURL,
+		HelixBase:          s.twitchEventSub.HelixBase,
+		AllowReconnectHost: s.twitchEventSub.AllowReconnectHost,
+	}), nil
+}
 
 // attachActivitySource starts the account's own-transport activity source, when
 // its platform has one. Caller holds chatWire. A failure is logged, not
