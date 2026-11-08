@@ -3055,6 +3055,15 @@ func refuseIVSWithoutApp(w http.ResponseWriter, raw string) bool {
 	return true
 }
 
+// bodyEnables reports whether a PUT body asks for enabled:true. Lenient on
+// purpose: the strict decode that follows is what refuses a bad body.
+func bodyEnables(body []byte) bool {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	return json.Unmarshal(body, &req) == nil && req.Enabled != nil && *req.Enabled
+}
+
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -3067,6 +3076,29 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// THE DESTINATION'S RENEWAL LOCK COMES FIRST, FOR EVERY PUT, before the row
+	// is read. A start (or another PUT) that renewed the Facebook key and wrote
+	// it holds this lock until its reconcile is done; a save that read the row
+	// before that and wrote it afterwards would put the dead key back over the
+	// fresh one and its reconcile would replace the live process with it. The
+	// order is freshKey, then trackGainMu, and nothing takes freshKey while
+	// holding trackGainMu.
+	defer s.freshKey.lock(id)()
+
+	// A SAVE THAT SWITCHES A DESTINATION ON IS A START, and it used to publish
+	// with the stored key. Renewed here, with only the renewal lock held: the
+	// Graph call can take 30s and trackGainMu below is install-wide, so holding
+	// it across the call would stall every track gain, OBS level and routing
+	// preset request behind one Facebook round trip. The fresh key is stored by
+	// the renewal itself, so the read below sees it and the whole-row write
+	// carries it.
+	var keyWarning string
+	if peek, perr := s.store.GetDestination(id); perr == nil && !peek.Enabled && bodyEnables(body) {
+		ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+		_, keyWarning = s.renewFacebookKeyLocked(ctx, id, false)
+		cancel()
+	}
+
 	// SERIALISED WITH THE TRACK-GAIN ROUTE. Both are a read-modify-write of the
 	// whole row: this one decodes over the stored row and writes all of it back,
 	// so a mute that POST .../tracks/{n}/gain stored between this read and this
@@ -3077,9 +3109,10 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// A mutex rather than a row version with 409 on a stale write: a version only
 	// protects a writer that sends it back, and neither the console nor the
 	// Stream Deck plugin does today, so it would either leave their writes
-	// unprotected or start refusing them. The one network call this can hold the
-	// lock across, fillFacebookBackupIngest, happens only on the save that first
-	// turns on a Facebook backup ingest.
+	// unprotected or start refusing them. The one network call this can still
+	// hold the lock across, fillFacebookBackupIngest, happens only on the save
+	// that first turns on a Facebook backup ingest. The key renewal above does
+	// NOT run under it.
 	s.trackGainMu.Lock()
 	defer s.trackGainMu.Unlock()
 
@@ -3091,7 +3124,6 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The programme the destination runs on before this save, read before the
 	// decode below can move it: what it is running now is asked of that engine.
 	storedSourceID := existing.SourceID
-	wasEnabled := existing.Enabled
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
@@ -3161,29 +3193,13 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// below is read back from what the reconcile did rather than predicted.
 	runBefore := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
 
-	// A SAVE THAT SWITCHES A DESTINATION ON IS A START, and it used to publish
-	// with the stored key. The lock is held from the write to the reconcile, as
-	// a start's is.
-	if !wasEnabled && existing.Enabled {
-		defer s.freshKey.lock(id)()
-	}
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !wasEnabled && updated.Enabled {
-		rctx, rcancel := context.WithTimeout(context.Background(), freshKeyTimeout)
-		renewed, w2 := s.renewFacebookKeyLocked(rctx, id, false)
-		rcancel()
-		if w2 != "" {
-			warnings = append(warnings, w2)
-		}
-		if renewed {
-			if fresh, gerr := s.store.GetDestination(id); gerr == nil {
-				updated = fresh
-			}
-		}
+	if keyWarning != "" {
+		warnings = append(warnings, keyWarning)
 	}
 
 	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.

@@ -400,3 +400,88 @@ func TestAScheduledRenewalPastTheDeadlineIsAbandonedAndTheStartProceeds(t *testi
 		t.Fatalf("key = %q: an abandoned renewal must leave the stored key", got)
 	}
 }
+
+// A start that renewed the key and a PUT with enabled:true racing it must end on
+// the START's key, with one live video. The PUT is released only once the
+// start's create is in flight, so it reads the stored (dead) key early and would
+// write it back late.
+//
+// Mutation: in handleUpdateDestination, move `defer s.freshKey.lock(id)()` to
+// after the GetDestination read. Red: the stored key is the pre-start one.
+func TestAConcurrentStartAndSaveNeverWriteTheDeadKeyBack(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.fbKeys = []string{"key-from-the-start", "key-nobody-should-get"}
+	inFlight := make(chan struct{}, 1)
+	f.stub.setOnCall(func(c stubCall) {
+		if isFacebookCreate(c) {
+			select {
+			case inFlight <- struct{}{}:
+			default:
+			}
+		}
+	})
+	f.stub.duringFacebookCreate = func() { time.Sleep(400 * time.Millisecond) }
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/start"), nil)
+	}()
+	go func() {
+		defer wg.Done()
+		select {
+		case <-inFlight:
+		case <-time.After(5 * time.Second):
+			t.Error("the start's live video was never requested")
+		}
+		fbPost(t, f, http.MethodPut, destinationPath(f.dest.ID, ""), map[string]any{"enabled": true})
+	}()
+	wg.Wait()
+
+	if got := storedKey(t, f); got != "key-from-the-start" {
+		t.Fatalf("stored key = %q, want the key the start fetched (sk-live-old is the dead one)", got)
+	}
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created, want 1", n)
+	}
+}
+
+// While a save's renewal waits on a slow Graph, install-wide routes that share
+// trackGainMu (track gain, OBS levels, routing presets) still complete.
+//
+// Mutation: take s.trackGainMu.Lock() before the renewal in
+// handleUpdateDestination. Red: the gain request waits out the Graph call.
+func TestASavesKeyRenewalDoesNotHoldTheTrackGainLock(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	inFlight := make(chan struct{}, 1)
+	f.stub.setOnCall(func(c stubCall) {
+		if isFacebookCreate(c) {
+			select {
+			case inFlight <- struct{}{}:
+			default:
+			}
+		}
+	})
+	f.stub.duringFacebookCreate = func() { time.Sleep(1500 * time.Millisecond) }
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fbPost(t, f, http.MethodPut, destinationPath(f.dest.ID, ""), map[string]any{"enabled": true})
+	}()
+	select {
+	case <-inFlight:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the save never asked Facebook for a live video")
+	}
+
+	t0 := time.Now()
+	r := jsonRequest(t, http.MethodPost, destinationPath(f.dest.ID, "/tracks/1/gain"), map[string]any{"muted": true})
+	f.sign(r)
+	do(t, f.h, r) // any status: only that it is not held behind the Graph call
+	if elapsed := time.Since(t0); elapsed > 700*time.Millisecond {
+		t.Fatalf("the track gain route took %v: it waited behind the save's Graph call", elapsed)
+	}
+	<-done
+}
