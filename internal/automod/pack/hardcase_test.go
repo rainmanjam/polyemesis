@@ -244,3 +244,43 @@ func TestLatinConfusablesCountButAlphabetsDoNot(t *testing.T) {
 		}
 	}
 }
+
+// Dots and a slash inside a word are not a link. "k1ll.y0u/x" used to read as
+// an address and hide the obfuscation residue; real links still do.
+func TestDotsAndASlashAreNotALinkUnlessTheyAreOne(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{"k1ll.y0u/x", "y0u.5uck/k1ll", "k1ll y0u k.y/s"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+			t.Errorf("%q gave no obfuscation signal: %v (substitutions %d)", text, got, h.substitutions(text))
+		}
+	}
+	for _, link := range []string{"https://a.com/x1", "http://clips.twitch.tv/Gr8Clip4", "www.x1y2.co", "twitch.tv/h3llo", "clips.twitch.tv/Abc123Def456", "example.com/p4th5"} {
+		if !urlLike(link) {
+			t.Errorf("%q is a link and was not read as one", link)
+		}
+		if n := substitutions(link); n != 0 {
+			t.Errorf("substitutions(%q) = %d, want 0: a link is not spelling", link, n)
+		}
+	}
+	for _, notLink := range []string{"a.b/c", "k.y/s", "k1ll.y0u/x", "x.zzzz/1"} {
+		if urlLike(notLink) {
+			t.Errorf("%q has no real host and was read as a link", notLink)
+		}
+	}
+}
+
+// A digit at the edge of a word is a number attached to it ("4Head", "30fps")
+// unless the leet-folded word is a lexicon term.
+func TestEdgeStandInsCountWhenTheWordIsALexiconTerm(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{"5uicide 5uicide", "5uicide k1ll"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+			t.Errorf("%q gave no obfuscation signal: %v", text, got)
+		}
+	}
+	for _, text := range []string{"4Head 4Head", "30fps 10k", "gr8 lvl50"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); has(got, SignalObfuscation) {
+			t.Errorf("%q wrongly read as obfuscation", text)
+		}
+	}
+}

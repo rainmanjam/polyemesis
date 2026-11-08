@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"unicode"
@@ -196,7 +197,7 @@ func (h *HardCase) Signals(f Forms, in SignalInput) []Signal {
 	if addressed && h.lex["violence"].has(f, padded) {
 		out = append(out, SignalThreat)
 	}
-	if !in.TermHit && substitutions(in.Raw) >= obfuscationMin {
+	if !in.TermHit && h.substitutions(in.Raw) >= obfuscationMin {
 		out = append(out, SignalObfuscation)
 	}
 	if h.lex["self_harm"].has(f, padded) {
@@ -223,26 +224,79 @@ func (h *HardCase) Signals(f Forms, in SignalInput) []Signal {
 // ("1v1", "5v5"). Leet is a digit or symbol standing INSIDE a word ("k1ll",
 // "y0u", "g4m3"). The count is still summed over the message, since "k1ll y0u"
 // is two words with one substitution each.
-func substitutions(raw string) int {
+func substitutions(raw string) int { return (*HardCase)(nil).substitutions(raw) }
+
+// substitutions is substitutions with the lexicons in hand: a word whose
+// stand-ins sit at its edge ("5uicide") normally reads as a number attached to a
+// word, but counts when its leet-folded form is a lexicon term.
+func (h *HardCase) substitutions(raw string) int {
 	n := 0
 	for _, field := range strings.Fields(raw) {
 		if urlLike(field) {
 			continue
 		}
-		n += fieldSubstitutions(field)
+		n += h.fieldSubstitutions(field)
 	}
 	return n
 }
 
 // urlLike reports whether a whitespace-delimited field is a link, whose digits
 // and separators are an address and not spelling.
+//
+// A link is a scheme and a host that url.Parse accepts, or a "www." prefix, or a
+// host ending in a real top-level domain. Dots and a slash alone are NOT enough:
+// "k1ll.y0u/x", or a lexicon term cut up with them, would otherwise be waved
+// through as an address and hide the very residue the signal looks for.
 func urlLike(f string) bool {
-	l := strings.ToLower(f)
-	return strings.Contains(l, "://") || strings.HasPrefix(l, "www.") ||
-		(strings.Contains(l, ".") && strings.Contains(l, "/"))
+	l := strings.ToLower(strings.TrimRight(f, ".,;:!?)]}\"'"))
+	if strings.Contains(l, "://") {
+		u, err := url.Parse(l)
+		return err == nil && u.Scheme != "" && u.Hostname() != ""
+	}
+	if strings.HasPrefix(l, "www.") && len(l) > len("www.") {
+		return true
+	}
+	host := l
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndexByte(host, '.'); i > 0 && i < len(host)-1 {
+		_, ok := linkTLDs[host[i+1:]]
+		return ok
+	}
+	return false
 }
 
-func fieldSubstitutions(field string) int {
+// linkTLDs are the top-level domains that appear in chat links. A short list on
+// purpose: a made-up one ("k.y") is not an address.
+var linkTLDs = func() map[string]struct{} {
+	m := map[string]struct{}{}
+	for _, t := range strings.Fields(`com net org io tv gg me co us uk de fr nl ca au jp ly be to fm app dev xyz
+		info biz edu gov ru br es it pl se no fi dk cc ws ai gd sh link live online site store shop club
+		page tech cloud one top vip pro wtf lol gl gy ms ac eu ch at nz za in kr cn tk ml ga cf`) {
+		m[t] = struct{}{}
+	}
+	return m
+}()
+
+// isTerm reports whether a word, leet-folded, is a lexicon term.
+func (h *HardCase) isTerm(word []rune) bool {
+	if h == nil {
+		return false
+	}
+	f := Fold(string(word))
+	if f == "" {
+		return false
+	}
+	for _, l := range h.lex {
+		if _, ok := l.words[f]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *HardCase) fieldSubstitutions(field string) int {
 	n := 0
 	// Walk word by word: a word is a run of letters, digits, marks and the
 	// symbols leet uses, plus any format characters inside it.
@@ -287,7 +341,7 @@ func fieldSubstitutions(field string) int {
 				}
 			}
 		}
-		if letters >= 2 && leets.inside() {
+		if letters >= 2 && (leets.inside() || (leets.count > 0 && h.isTerm(word))) {
 			n += leets.count
 		}
 		i = j
