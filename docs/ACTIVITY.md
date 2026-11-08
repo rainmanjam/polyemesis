@@ -8,12 +8,12 @@ way for every platform.**
 Find it on the **Chat** page, under the **Activity** tab. The OBS side is the
 [alerts overlay](OVERLAY.md#alerts-overlay).
 
-> **Status of this release.** This is the shared core: the model, the
+> **Status of this release.** This is the shared core (the model, the
 > ingestion point, the fan-out, the console feed, the overlay, the settings and
-> **Send test alert**. Each platform's own events are added one platform at a
-> time (see [Platforms](#platforms)); until a platform's source is in your build,
-> nothing real arrives from it, and **Send test alert** is how you see and style
-> everything. The console says so on the empty feed rather than showing a blank.
+> **Send test alert**) plus the first platform, Twitch. The others are added one
+> platform at a time (see [Platforms](#platforms)); until a platform's source is
+> in your build, nothing real arrives from it, and **Send test alert** is how you
+> see and style everything. The console says so on the empty feed rather than showing a blank.
 
 ## What "activity" means, and what it does not
 
@@ -255,16 +255,110 @@ are separate, and automod judges each.
 ## Platforms
 
 Each platform's source is added by its own change and lists its kinds, how it
-gets them and what it needs here. **Nothing below is connected in this release.**
+gets them and what it needs here. The Status column says which are connected.
 
 | Platform | How the events arrive | Status |
 |---|---|---|
-| Twitch | EventSub over a WebSocket (its own transport) | not yet |
-| Kick | webhook events on the existing chat webhook | not yet |
-| X | Activity API events on the existing webhook | not yet |
-| YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
-| Rumble | the follower, subscriber, gift and rant blocks in the existing poll | not yet |
-| Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
+| Twitch | EventSub over a WebSocket (its own transport) | [connected](#twitch) |
+| Kick | webhook events on the existing chat webhook | yes (below) |
+| X | Activity API events on the existing chat webhook: `follow.follow` and `subscriptions.subscribe` (inbound only), `broadcast.start` and `broadcast.end` | follow, Premium subscribe, stream |
+| YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | tips (Super Chat, Sticker), new members, member milestones and gifted memberships; each shows as unknown until the first one is seen, since YouTube cannot say whether a channel is monetised. No new permission |
+| Rumble | the recent follower, subscriber, gifted-sub and rant lists in the existing get-data poll; no extra request, no new key | built, not yet checked against a live account. Rumble sends no event id, so each item is identified by its own fields, and the first poll after a start only records what is already there (nothing is replayed). A gifted sub carries no timestamp, so it is stamped when seen. A list Rumble does not send for your channel shows as unavailable |
+| Facebook | a reaction tally from the existing comments loop (off by default). Stars are not exposed by the Graph API | reactions built; needs Live Video API App Review |
+
+### Kick
+
+Kick delivers activity on the same webhook and signature check as chat; nothing
+new is configured and no reconnect is needed (`events:subscribe` already covers
+every event, and Kick documents no other scope for them). On start polyemesis
+asks Kick for the events it is missing, all version 1, and Kick's own words are
+reported if it declines one.
+
+| Kind | Kick event |
+|---|---|
+| `follow` | `channel.followed` |
+| `subscribe` | `channel.subscription.new` |
+| `resub` | `channel.subscription.renewal` (`months` is Kick's `duration`) |
+| `gift` | `channel.subscription.gifts` (`count` and `recipients` from the giftees) |
+| `tip` | `kicks.gifted`, as `{unit: "kicks"}`; never converted to money |
+| `stream` | `livestream.status.updated` (online/offline), `livestream.metadata.updated` (update) |
+| `moderation` | `moderation.banned` (`ban`, or `timeout` when Kick sends an expiry) |
+| `redemption` | `channel.reward.redemption.updated`; announced once per redemption, not again when it is accepted or rejected |
+
+A kind Kick will not send to an account shows as `unavailable` with Kick's
+reason; chat is unaffected. Deliveries are deduplicated on `Kick-Event-Message-Id`,
+and one whose own timestamp is more than 15 minutes old is acknowledged and not
+announced, so a restart never replays history. Subscriptions are left in place
+when polyemesis stops, as chat's is.
+
+**X** subscribes four Activity API events on the account's existing webhook and
+needs the `follows.read` scope for the Premium one (and, per part of X's docs,
+for follows too), so an X account connected before that scope was added
+reconnects once. Broadcasts work without it; a kind X refuses for the missing
+scope reports `reconnect`, and chat is unaffected. Follows and subscriptions are
+requested with `direction: inbound`, and each delivery is checked against its
+`target` again, so the broadcaster following someone is never an alert. A
+Premium subscription arrives only when Creator Subscriptions are on for the
+account, which polyemesis cannot read, so it shows `unknown` until one arrives; X
+sends no price, so a subscription carries no amount. If X refuses an event for
+an account the kind shows `unavailable` with X's reason and chat is unaffected.
+An event created before polyemesis started, or more than 15 minutes ago, is
+dropped: X redelivering history after a restart does not replay alerts. The
+X webhook needs the same public HTTPS address and app bearer as X chat.
+
+### Twitch
+
+One EventSub WebSocket per connected Twitch account, opened with the account's
+own token: no public address and no callback to set up. It starts with the
+account's chat and stops with it. Subscriptions live and die with the socket, so
+a restart is a new session and Twitch replays nothing; Twitch sends each
+notification at least once under one message id, and that id is what
+de-duplicates it (a notification stamped more than ten minutes before Twitch's own
+clock is not news and is dropped; this host's clock is never consulted).
+
+| Kind | EventSub type | Needs | Channel |
+|---|---|---|---|
+| `follow` | `channel.follow` v2 | `moderator:read:followers` | any |
+| `subscribe` | `channel.subscribe` | `channel:read:subscriptions` | Affiliate or Partner |
+| `resub` | `channel.subscription.message` | `channel:read:subscriptions` | Affiliate or Partner |
+| `gift` | `channel.subscription.gift` | `channel:read:subscriptions` | Affiliate or Partner |
+| `tip` (bits) | `channel.cheer` | `bits:read` | Affiliate or Partner |
+| `raid` | `channel.raid`, once for each direction | none | any |
+| `redemption` | `channel.channel_points_custom_reward_redemption.add` | `channel:read:redemptions` | Affiliate or Partner |
+| `hypetrain` | `channel.hype_train.begin`, `.progress`, `.end` v2 | `channel:read:hype_train` | what Twitch allows |
+| `poll` | `channel.poll.begin`, `.progress`, `.end` | `channel:manage:polls` | Affiliate or Partner |
+| `prediction` | `channel.prediction.begin`, `.progress`, `.lock`, `.end` | `channel:read:predictions` | Affiliate or Partner |
+| `stream` | `stream.online`, `stream.offline`, `channel.update` v2 | none | any |
+| `shoutout` | `channel.shoutout.create` (out), `.receive` (in) | `moderator:manage:shoutouts` | any |
+
+- **Not an Affiliate or Partner?** The kinds marked so are reported
+  `unavailable` ("Twitch only sends this to Affiliates and Partners") on
+  `GET /api/v1/activity/sources`. That is not a failure: the source stays
+  `live` and everything else flows. The channel's type is read again every 24
+  hours.
+- **Connected before this release?** The six new read scopes are part of scope
+  version 6, and so is `moderator:manage:shoutouts`; an account connected on an
+  earlier version needs one reconnect to grant them. Until then each kind that
+  needs one is reported `reconnect`, and the kinds that need none (raids and
+  stream status) already work, as do polls (`channel:manage:polls` has been
+  requested since scope version 5). The check is the account's granted scopes,
+  not its scope version.
+- **Bits** are reported as `{"unit": "bits", "units": 1000}` and are never turned
+  into money. **A gifted-sub bomb** is one `gift` event; the per-recipient
+  subscribes Twitch also sends are dropped. **A resub** is reported when the
+  viewer shares a resubscription message, which is when Twitch sends one.
+- **Polls polyemesis mirrored** (a chat poll also run as a Twitch poll) are not
+  reported a second time. A poll a moderator starts on Twitch is. Known edge:
+  the notification waits up to 2 s for the Twitch create call to return; if
+  Twitch is slower than that, the poll's `begin` is reported once as a native
+  poll (its progress and end are still dropped once the id is known).
+- **Never on air:** `poll`, `prediction`, `stream` and a raid you sent are in the
+  console feed and the events stream only. Viewer text (a cheer, a resub message,
+  a channel-points input) reaches the overlay only through the same gating as
+  chat.
+- **Limits.** Twitch allows 300 subscriptions and a cost of 10 per user token;
+  these need about 23 and cost nothing. A 429 on one kind marks that kind
+  `unavailable` and the rest carry on.
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is
@@ -278,7 +372,9 @@ attached, so a follow while you are offline is not reported later.
 - **No MQTT topic, no Stream Deck key** for activity yet. Both are planned
   follow-ups; neither is wired.
 - **A platform's live-status webhook for Facebook** is not built. Reactions are
-  read by polling when that source is added.
+  read by polling the live video's `reactions` edge, every third comment poll and at
+  least 30 s apart; the first sample after a start or reconnect only sets the
+  baseline, so nothing is replayed.
 - **The alerts overlay has component tests, not a browser run.** It has not yet
   been checked in headless Chromium at 1920 x 1080 as the chat overlay has, nor in
   OBS itself.

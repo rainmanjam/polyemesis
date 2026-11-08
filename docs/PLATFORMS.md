@@ -186,8 +186,9 @@ on every broadcast the account hosts, not one. Viewer count is the running
 broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
 `GET /2/broadcasts`, read by the analytics sampler through its own seam rather
 than as a `LiveStatter`. All of it uses scopes the connection already holds
-(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), so scope
-version 2 is unchanged. A chat message's id is the `timestamp` X answers a send
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), except
+`follows.read` (part of scope version 2), which the Premium-subscription alert
+needs and, per part of X's docs, the follow alert too (see ACTIVITY.md). A chat message's id is the `timestamp` X answers a send
 with (nanoseconds, as a string), which is also what delete takes as `message_id`.
 
 The calls use the routes in X's
@@ -756,6 +757,12 @@ channel's owner, and Twitch refuses VIPs until the channel has finished its
 Build a Community requirement; the refusal says so. Receiving a message AutoMod
 is holding needs EventSub and is not built: the approve and deny call is, by id.
 Accounts connected earlier are marked "reconnect needed" once.
+
+Scope version 6 also carries six read scopes for [viewer activity](ACTIVITY.md#twitch):
+`moderator:read:followers`, `channel:read:subscriptions`, `bits:read`,
+`channel:read:redemptions`, `channel:read:hype_train` and
+`channel:read:predictions`. They are in version 6 rather than a version 7
+because the release that introduces version 6 has not shipped.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, connect it again once. Connecting over an account
