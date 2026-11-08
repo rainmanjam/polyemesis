@@ -112,6 +112,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "pipeline", key: "set.chatSendOnConnect", card: "set.chatHistory", anchor: "chat-history" },
   { tab: "pipeline", key: "set.chatYouTubeQuota", card: "set.chatHistory", anchor: "chat-yt-quota" },
   { tab: "pipeline", key: "set.chatYouTubeReserve", card: "set.chatHistory", anchor: "chat-yt-reserve" },
+  { tab: "pipeline", key: "automod.protTitle" },
   { tab: "pipeline", key: "automod.rulesTitle" },
   { tab: "pipeline", key: "automod.modelTitle" },
   { tab: "pipeline", key: "set.alertDelivery" },

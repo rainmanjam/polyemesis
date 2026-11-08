@@ -193,8 +193,39 @@ Answering writes `on` or `off`, a recorded answer rather than a dismissed
 notice. A matrix cell for the `protection` checker is refused on save
 ("recommended protection is not on") unless the pack is on in the same save.
 
-The console does not show the pack's controls yet; the settings below are
-reachable through the API. What you change is stored as a **difference over the
+### In the console
+
+Settings, Pipeline, **Recommended protection** is the first automod card. An
+install that has not answered yet sees a banner there (and above the flagged list
+on the Chat page) with **Turn on** and **Not now**; both record an answer, and
+**Not now** is final. Once the pack is on the card shows:
+
+- **One row per category** (hate and slurs, doxxing, scams, spam shapes,
+  impersonation, raids, and profanity, which is off). Each has a switch, a chip
+  saying whether its hits are held off the overlays or only shown in the console,
+  how often it is wrong, and the highest ladder rung it may reach. **Details**
+  opens a switch and a "hold off overlays" checkbox for each detector, the box to
+  add a word or allow a pack word (hate and profanity), the domain allow-list
+  (scams and doxxing) and the extra names to protect (impersonation). The
+  street-address detector is off until you switch it on.
+- **The action ladder**, a row per platform with **Delete, Time out, Ban** as
+  three pills. Nothing is armed until you click a pill, and delete and ban ask
+  first because polyemesis cannot take either back. A pill the platform cannot
+  perform is inert and gives the reason. Turning the pack off disarms its pills in
+  the same save. The Twitch row repeats a note worth knowing: Twitch's own AutoMod
+  and blocked terms only see Twitch chat, so a YouTube or Kick message shown on
+  your Twitch stream is kept off it by an overlay hold, not by Twitch.
+- **A test box** that calls `POST /automod/explain`. It shows which detectors
+  fire, whether the line would be held, and what each would ask a platform to do.
+  It uses the settings you have **saved**, and it never stores, logs or sends the
+  text.
+- **Advanced**: the ladder's timeout length, the strike window and each
+  category's highest rung. Self-harm has no control: it is hold only.
+
+The protection column is not in the switch matrix below the cards, because the
+pack is armed one rung at a time on its own card.
+
+The settings are also reachable through the API. What you change is stored as a **difference over the
 pack**, never as a copy of it, so a release that updates the pack reaches every
 install that is on and nothing you chose is overwritten:
 

@@ -63,6 +63,55 @@ describe("AutomodMatrix: the protection column", () => {
   });
 });
 
+describe("a rung armed on the protection card is still counted here", () => {
+  beforeEach(() => matrix.mockReset());
+  afterEach(cleanup);
+
+  /* The table leaves the protection column out, but the count above it and the
+   * irreversible-action banner are about everything armed on the platform. A
+   * ban armed on the pack's own card must not read "nothing automatic". */
+  const armedSettings = (on: Record<string, boolean>, state: "on" | "off" = "on") =>
+    ({
+      automod: {
+        enabled: true,
+        history: {},
+        model: {},
+        on,
+        protection: { state, pack: "en", packVersion: 1, impersonation: {} },
+      } as unknown as AutomodSettings,
+    }) as Settings;
+
+  it("counts the rung and warns about an irreversible one", async () => {
+    matrix.mockResolvedValue(view() as never);
+    render(<AutomodMatrix settings={armedSettings({ "twitch/ban/protection": true })} onChange={vi.fn()} />);
+    expect(await screen.findByText("1 automatic action")).toBeTruthy();
+    expect(screen.getByText(/irreversible action is armed/i)).toBeTruthy();
+    expect(screen.queryByText("nothing automatic")).toBeNull();
+  });
+
+  it("does not count a rung left behind while the pack is off", async () => {
+    matrix.mockResolvedValue(view() as never);
+    render(<AutomodMatrix settings={armedSettings({ "twitch/ban/protection": true }, "off")} onChange={vi.fn()} />);
+    expect(await screen.findByText("nothing automatic")).toBeTruthy();
+    expect(screen.queryByText(/irreversible action is armed/i)).toBeNull();
+  });
+
+  it("clear row leaves the pack's rungs alone", async () => {
+    matrix.mockResolvedValue(view() as never);
+    const onChange = vi.fn();
+    render(
+      <AutomodMatrix
+        settings={armedSettings({ "twitch/ban/protection": true, "twitch/ban/history": true })}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /twitch/ }));
+    fireEvent.click(screen.getByRole("button", { name: "clear row" }));
+    const next = onChange.mock.calls[0][0] as Settings;
+    expect(next.automod!.on).toEqual({ "twitch/ban/protection": true });
+  });
+});
+
 describe("the protection checker's label and readiness", () => {
   it("has a label and reads as ready only while the pack is on", () => {
     expect(CHECKER_KEYS.protection).toBe("automod.checkerProtection");

@@ -29,6 +29,8 @@ import type {
   McpLevel,
   ObsConfig,
   ObsResponse,
+  AutomodExplainRequest,
+  AutomodExplanation,
   AutomodMatrixView,
   AutomodModelStats,
   AutomodSlot,
@@ -570,6 +572,10 @@ export const api = {
   // --- automod ---
   automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
   automodStats: () => get<AutomodModelStats>("/automod/stats"),
+  /** The protection test box: what the pack and the rules say about a pretend
+   *  message. Offline and session-only; nothing is stored or sent anywhere. */
+  automodExplain: (req: AutomodExplainRequest) =>
+    post<AutomodExplanation>("/automod/explain", req),
   /** Sets or clears the model API key. Empty clears it. The key is never
    *  returned by any endpoint, so the UI can only ever report that one is set. */
   setAutomodKey: (key: string, checker?: AutomodSlot) =>

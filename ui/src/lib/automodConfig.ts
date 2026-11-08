@@ -291,6 +291,14 @@ export const CATEGORY_KEYS: Record<string, TranslationKey> = {
   sexual_content: "automod.catSexualContent",
   spam: "automod.catSpam",
   other: "automod.catOther",
+  // The protection pack's categories, which a finding carries and the review
+  // list and the test box name.
+  doxxing: "automod.protCatDoxxing",
+  scam: "automod.protCatScam",
+  flood: "automod.protCatFlood",
+  impersonation: "automod.protCatImpersonation",
+  raid: "automod.protCatRaid",
+  self_harm: "automod.protCatSelfHarm",
 };
 
 /** The suggested per-category actions -- shown beside each row and applied

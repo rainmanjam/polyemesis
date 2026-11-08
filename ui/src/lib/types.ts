@@ -3966,6 +3966,49 @@ export interface AutomodProtectionImpersonation {
   allowIds?: string[] | null;
 }
 
+/** One detector's result in the test box. A detection names its detector and
+ *  never the matched value. */
+export interface AutomodDetection {
+  checker: AutomodChecker;
+  category: string;
+  /** The pack group ("doxxing/phone") or the history detector. */
+  detector: string;
+  /** The term tier, for hate hits. */
+  tier?: string;
+  /** The form of the message the evidence was found on. */
+  form?: string;
+  reason: string;
+  /** The hit keeps the message off every overlay. */
+  hold: boolean;
+  action: AutomodAction;
+  /** The current matrix would let `action` happen on the platform asked. */
+  act: boolean;
+  /** The live engine would produce this finding: false for a pack detection
+   *  while the pack is off. */
+  live: boolean;
+}
+
+/** What POST /automod/explain answers. Session-only, offline and unlogged. */
+export interface AutomodExplanation {
+  /** The pack is on in the live engine. */
+  protection: boolean;
+  detections: AutomodDetection[];
+  /** The live engine would hold the message off the overlays. */
+  held: boolean;
+  /** The same with the pack counted: differs from `held` only while it is off. */
+  wouldHoldIfOn: boolean;
+  /** Detectors that depend on what the author sent recently, so are not
+   *  answered for one pretend message. */
+  windowed: string[];
+}
+
+/** The pretend message a test box sends. */
+export interface AutomodExplainRequest {
+  text: string;
+  authorName?: string;
+  platform?: string;
+}
+
 /** What the operator sees about model spend and health. */
 export interface AutomodModelStats {
   callsThisHour: number;
