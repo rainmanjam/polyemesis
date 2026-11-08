@@ -43,8 +43,8 @@ func TestSignalsCostGate(t *testing.T) {
 	if testing.CoverMode() != "" {
 		mult = 10
 	}
-	edge := testing.Benchmark(BenchmarkSignalsEdgeDigits)
-	cut := testing.Benchmark(BenchmarkSignalsCutFields)
+	edge := fastestOf(BenchmarkSignalsEdgeDigits)
+	cut := fastestOf(BenchmarkSignalsCutFields)
 	t.Logf("edge digits: %d ns/op %d allocs/op; cut fields: %d ns/op %d allocs/op",
 		edge.NsPerOp(), edge.AllocsPerOp(), cut.NsPerOp(), cut.AllocsPerOp())
 	if edge.NsPerOp() > signalsEdgeLineGateNs*mult {

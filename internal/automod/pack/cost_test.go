@@ -18,10 +18,25 @@ func TestPackFormCostGate(t *testing.T) {
 	if testing.CoverMode() != "" {
 		gate *= 10
 	}
-	r := testing.Benchmark(BenchmarkPackForm)
+	r := fastestOf(BenchmarkPackForm)
 	ns := r.NsPerOp()
 	t.Logf("pack form + lookup: %d ns/op, %d allocs/op", ns, r.AllocsPerOp())
 	if ns > gate {
 		t.Fatalf("pack form costs %d ns/op, over the %d ns gate", ns, gate)
 	}
+}
+
+// fastestOf runs a benchmark three times and keeps the fastest run. The gates
+// are about what the code costs, and a shared CI runner that is busy with the
+// other packages' tests only ever adds time: one slow run measured 15.9 µs for a
+// line that costs 8 µs alone. The fastest of three keeps that noise out without
+// widening the gate, so a real quadratic, slow on every run, still trips it.
+func fastestOf(fn func(*testing.B)) testing.BenchmarkResult {
+	best := testing.Benchmark(fn)
+	for i := 0; i < 2; i++ {
+		if r := testing.Benchmark(fn); r.NsPerOp() < best.NsPerOp() {
+			best = r
+		}
+	}
+	return best
 }
