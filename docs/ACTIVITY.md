@@ -261,7 +261,7 @@ gets them and what it needs here. The Status column says which are connected.
 |---|---|---|
 | Twitch | EventSub over a WebSocket (its own transport) | not yet |
 | Kick | webhook events on the existing chat webhook | yes (below) |
-| X | Activity API events on the existing webhook | not yet |
+| X | Activity API events on the existing chat webhook: `follow.follow` and `subscriptions.subscribe` (inbound only), `broadcast.start` and `broadcast.end` | follow, Premium subscribe, stream |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | tips (Super Chat, Sticker), new members, member milestones and gifted memberships; each shows as unknown until the first one is seen, since YouTube cannot say whether a channel is monetised. No new permission |
 | Rumble | the recent follower, subscriber, gifted-sub and rant lists in the existing get-data poll; no extra request, no new key | built, not yet checked against a live account. Rumble sends no event id, so each item is identified by its own fields, and the first poll after a start only records what is already there (nothing is replayed). A gifted sub carries no timestamp, so it is stamped when seen. A list Rumble does not send for your channel shows as unavailable |
 | Facebook | a reaction tally from the existing comments loop (off by default). Stars are not exposed by the Graph API | reactions built; needs Live Video API App Review |
@@ -290,6 +290,21 @@ reason; chat is unaffected. Deliveries are deduplicated on `Kick-Event-Message-I
 and one whose own timestamp is more than 15 minutes old is acknowledged and not
 announced, so a restart never replays history. Subscriptions are left in place
 when polyemesis stops, as chat's is.
+
+**X** subscribes four Activity API events on the account's existing webhook and
+needs the `follows.read` scope for the Premium one (and, per part of X's docs,
+for follows too), so an X account connected before that scope was added
+reconnects once. Broadcasts work without it; a kind X refuses for the missing
+scope reports `reconnect`, and chat is unaffected. Follows and subscriptions are
+requested with `direction: inbound`, and each delivery is checked against its
+`target` again, so the broadcaster following someone is never an alert. A
+Premium subscription arrives only when Creator Subscriptions are on for the
+account, which polyemesis cannot read, so it shows `unknown` until one arrives; X
+sends no price, so a subscription carries no amount. If X refuses an event for
+an account the kind shows `unavailable` with X's reason and chat is unaffected.
+An event created before polyemesis started, or more than 15 minutes ago, is
+dropped: X redelivering history after a restart does not replay alerts. The
+X webhook needs the same public HTTPS address and app bearer as X chat.
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is

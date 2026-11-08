@@ -78,6 +78,7 @@
       "offline.access",
       "users.read",
       "tweet.read",
+      "follows.read",
       "tweet.write",
       "media.write"
     ],

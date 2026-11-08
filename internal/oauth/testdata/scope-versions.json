@@ -110,6 +110,7 @@
     "scopes": [
       "broadcast.read",
       "broadcast.write",
+      "follows.read",
       "media.write",
       "offline.access",
       "tweet.read",
