@@ -326,6 +326,8 @@ var settingsReload = map[string]ReloadRule{
 	"automod.rules.pattern":        {ClassLive, applyAutomod, noteRecompilesPatterns},
 	"automod.rules.action":         {ClassLive, applyAutomod, noteRecompilesPatterns},
 	"automod.rules.timeoutSeconds": {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.holdOverlay":    {ClassLive, applyAutomod, noteRecompilesPatterns},
+	"automod.rules.category":       {ClassLive, applyAutomod, noteRecompilesPatterns},
 
 	// ------------------------------------------------- ingest track annotations
 	// Each leaf recompiles every routing graph, so it moves compiled.FilterComplex
