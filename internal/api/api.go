@@ -1029,6 +1029,10 @@ func New(o Options) *Server {
 		// broadcast at once rather than after its poll.
 		s.lifecycle.goLiveTitle = s.xGoLiveTitle
 		s.lifecycle.pointChat = s.setXBroadcast
+		// YouTube: the liveChatId of the broadcast polyemesis opens, and the install's allowance for the open.
+		s.lifecycle.pointYouTubeChat = s.setYouTubeLiveChat
+		s.lifecycle.quotaAfford = func(cost int) bool { return s.ytQuota().Afford(cost) }
+		s.lifecycle.quotaPause = func() { s.ytQuota().Pause() }
 		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.

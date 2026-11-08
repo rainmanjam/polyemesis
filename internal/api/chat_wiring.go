@@ -875,6 +875,26 @@ func (s *Server) setXBroadcast(accountID int64, broadcastID string) {
 	}
 }
 
+// setYouTubeLiveChat is the lifecycle coordinator's pointYouTubeChat: it points the running YouTube chat adapter of
+// one account at the live chat of the broadcast polyemesis just opened, or clears it with "" after an end. Every
+// miss is a quiet no-op, because it runs on the coordinator's sweep.
+func (s *Server) setYouTubeLiveChat(accountID int64, liveChatID string) {
+	if s.chat == nil || s.store == nil {
+		return
+	}
+	acct, err := s.store.GetPlatformAccount(s.box, accountID)
+	if err != nil || acct.Platform != db.PlatformYouTube {
+		return
+	}
+	a, ok := s.chat.Adapter(db.PlatformYouTube, acct.AccountRef)
+	if !ok {
+		return
+	}
+	if ya, ok := a.(*chat.YouTubeAdapter); ok {
+		ya.SetLiveChatID(liveChatID)
+	}
+}
+
 // handleKickChatWebhook receives Kick's event deliveries.
 //
 // It is mounted outside the session middleware because Kick posts here

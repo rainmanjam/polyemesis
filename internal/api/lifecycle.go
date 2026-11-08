@@ -67,11 +67,16 @@ package api
 //
 // ------------------------------------------------- WHAT IT DELIBERATELY IS NOT
 //
-// It does not create broadcasts. A destination with no recorded broadcast id is
-// simply out of scope -- creating one is the announce path's job (preannounce.go
-// and the ingest path), and a coordinator that could create would be a
-// coordinator that could put an unannounced public event page on somebody's
-// channel because a sweep read a row wrong.
+// It does not create broadcasts, EXCEPT THE TWO PLATFORMS THAT OPEN THEIR OWN. A
+// destination with no recorded broadcast id is out of scope for every other
+// platform -- creating one is the announce path's job (preannounce.go and the
+// ingest path) -- and X and YouTube are the two that implement
+// oauth.BroadcastCreator. X's open creates nothing on X. YouTube's creates a
+// broadcast for a destination linked to a connected account that is on and has
+// none (lifecycle_youtube.go), unless the operator chose Studio's Stream now.
+// What bounds that: only a linked account, never a pasted key; a stream that
+// already has a live broadcast is left alone; the stream and its key are never
+// created or rotated; and a failed open is a fault that cannot stop a stream.
 //
 // It does not drive Facebook. oauth.Facebook.EndBroadcast exists and is already
 // wired to a route and a button, but Facebook ends a live video when the BYTES
@@ -411,6 +416,18 @@ type lifecycleCoordinator struct {
 	// find out. Nil means nobody is listening. Must not block: it runs on the
 	// sweep.
 	pointChat func(accountID int64, broadcastID string)
+
+	// pointYouTubeChat tells the YouTube chat adapter of one account which live chat to read: the liveChatId of
+	// the broadcast polyemesis just created, or "" when it is over so the adapter discovers again. Nil means
+	// nobody is listening. Must not block: it runs on the sweep. One adapter serves a channel, so two live-now
+	// destinations on one channel share it and the one opened last is the chat it reads.
+	pointYouTubeChat func(accountID int64, liveChatID string)
+	// quotaAfford reports whether the install's YouTube allowance can pay for cost more units, and quotaPause
+	// marks it spent after YouTube said so. Nil means unmetered (tests). Opening a broadcast is the only thing the
+	// coordinator spends beyond a state read, and it is held rather than tried when the allowance is gone: ending
+	// is never gated on it.
+	quotaAfford func(cost int) bool
+	quotaPause  func()
 }
 
 // xPublisher is the X provider's PUBLISH with its title and chat option. The
@@ -431,10 +448,21 @@ func (c *lifecycleCoordinator) titleFor(d *db.Destination) string {
 // tellChat points d's X chat adapter at broadcastID ("" for none). Only X has a
 // chat adapter that needs it.
 func (c *lifecycleCoordinator) tellChat(platform db.Platform, accountID *int64, broadcastID string) {
-	if c.pointChat == nil || platform != db.PlatformX || accountID == nil {
+	if accountID == nil {
 		return
 	}
-	c.pointChat(*accountID, broadcastID)
+	switch platform {
+	case db.PlatformX:
+		if c.pointChat != nil {
+			c.pointChat(*accountID, broadcastID)
+		}
+	case db.PlatformYouTube:
+		// Only the END is told from here (broadcastID ""): YouTube's chat needs the liveChatId, which only the
+		// open has, and it points the adapter itself. A broadcast id passed for a go-live is not a chat id.
+		if broadcastID == "" && c.pointYouTubeChat != nil {
+			c.pointYouTubeChat(*accountID, "")
+		}
+	}
 }
 
 // transition sends one start transition. An X go-live goes through
@@ -826,6 +854,10 @@ func (c *lifecycleCoordinator) considerUnopened(ctx context.Context, d *db.Desti
 	cleared := c.takeClearFault(d.ID)
 	c.untrack(d.ID)
 	if creator, ok := prov.(oauth.BroadcastCreator); ok && mode != sweepEndsOnly {
+		if d.Platform == db.PlatformYouTube && !d.YouTubeLiveNow() {
+			// No account, a pasted key, or switched to Studio's Stream now: polyemesis makes no broadcast.
+			return
+		}
 		c.openOrHold(ctx, d, creator, cleared)
 	}
 	// Every other platform: no broadcast object, so nothing to command.
@@ -1237,6 +1269,14 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	}
 
 	plan := planLifecycle(d.Enabled, st)
+	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.Lifecycle.Opened &&
+		d.Lifecycle.BroadcastID == broadcastID && strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
+		d.YouTubeLiveNow() {
+		// The broadcast polyemesis opened is finished and the destination is still on air (Studio's End, an
+		// operator's end, or YouTube's own timeout): open the next. A broadcast that was ANNOUNCED ahead keeps the
+		// fault, and so does a revoked one.
+		plan.Fault, plan.Renew = "", true
+	}
 	if !d.Enabled && d.Platform == db.PlatformX && plan.Send == "" {
 		c.noteQuietX(d.ID, broadcastID)
 	}
@@ -1323,8 +1363,9 @@ func (c *lifecycleCoordinator) sendPlan(cctx context.Context, prov oauth.Broadca
 // 30 s or 60 s delay (oauth.BroadcastLifecycleState.CaptionPOSTProblem). Every
 // other destination answers "".
 //
-// A live-now show with no broadcast recorded never reaches this check: there is
-// no broadcast for polyemesis to read, and docs/CAPTIONS.md says so.
+// A live-now show polyemesis opened a broadcast for DOES reach this check: the open sends the caption settings an
+// HTTP POST destination needs (monitor stream and delay) with the insert, so it passes. A destination that uses
+// Studio's Stream now, or has no connected account, has no broadcast for polyemesis to read and never reaches it.
 func captionGoLiveProblem(d *db.Destination, st *oauth.BroadcastLifecycleState) string {
 	if !sendsCaptionPOST(d) {
 		return ""
@@ -1378,6 +1419,10 @@ func (c *lifecycleCoordinator) openOrHold(ctx context.Context, d *db.Destination
 // phase all describe the broadcast that just ended, and must not be carried
 // into the new show.
 func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.BroadcastCreator, d *db.Destination) {
+	if d.Platform == db.PlatformYouTube {
+		c.renewYouTube(ctx, creator, d)
+		return
+	}
 	// The next broadcast is the same show going on, and its PUBLISH reads Renewed
 	// (xShouldNotTweet), so it survives the reset -- but only once the show has
 	// posted: the finished broadcast went past created (it was published), or it
@@ -1407,6 +1452,10 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	}
 	if d.AccountID == nil {
 		// No account means no token. Not a fault: the remedy is the operator's.
+		return
+	}
+	if op, ok := creator.(oauth.LiveNowOpener); ok && d.Platform == db.PlatformYouTube {
+		c.openYouTube(ctx, d, op)
 		return
 	}
 	if strings.TrimSpace(d.StreamKey) == "" {
