@@ -2704,12 +2704,25 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 				"when an X broadcast is published, and %s has no such step.", row.Platform))
 	}
 
-	// The X go-live title, one platform wide too: only an X PUBLISH carries it.
-	if row.Platform != db.PlatformX && row.GoLiveTitle != "" {
+	// The go-live title, one platform wide too: an X PUBLISH and a YouTube live-now broadcast carry it. This is
+	// the REPAIR for a value a platform switch carried over. A save that SETS a title on a platform that cannot
+	// use it never gets here: refuseUnsendableGoLiveTitle answers 400 first, so a title is never dropped silently.
+	if !db.TakesGoLiveTitle(row.Platform) && row.GoLiveTitle != "" {
 		row.GoLiveTitle = ""
 		warnings = append(warnings, fmt.Sprintf(
-			"The go-live title was removed: it is sent only when an X broadcast is "+
-				"published, and %s takes its title from the go-live composer.", row.Platform))
+			"The go-live title was removed: it is sent only when an X or YouTube broadcast is "+
+				"created, and %s takes its title from the go-live composer.", row.Platform))
+	}
+
+	// The pinned YouTube stream and the Studio Stream now switch mean nothing off YouTube.
+	if y := row.Compliance.YouTube; row.Platform != db.PlatformYouTube && y != nil && (y.StreamID != "" || y.StudioStreamNow) {
+		y.StreamID, y.StudioStreamNow = "", false
+		if y.Empty() {
+			row.Compliance.YouTube = nil
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"The pinned YouTube stream and the Stream now switch were removed: only a YouTube destination reads them, "+
+				"and %s does not.", row.Platform))
 	}
 
 	// The X go-live announcement setting, the same: only an X PUBLISH reads it.
@@ -2909,6 +2922,19 @@ func (p destinationWrite) silenceInputsChanged(next *db.Destination) bool {
 	return p.sourceID != nil && *p.sourceID != *next.SourceID
 }
 
+// refuseUnsendableGoLiveTitle answers 400 when a save SETS a go-live title on a platform that never sends one, and
+// reports that it did. Before this the write was repaired away by dropUnsendableSettings before Validate saw it,
+// so PUT answered 200 and the title was silently gone. A title merely carried over by a platform switch is not
+// "set by this save" (it equals the stored one) and is still cleared with a warning, so such a row stays saveable.
+func refuseUnsendableGoLiveTitle(w http.ResponseWriter, next *db.Destination, stored string) bool {
+	if next.GoLiveTitle == "" || next.GoLiveTitle == stored || db.TakesGoLiveTitle(next.Platform) {
+		return false
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf(
+		"a go-live title is sent only to X and YouTube; %s takes its title from the go-live composer", next.Platform))
+	return true
+}
+
 // destinationWriteWarnings repairs what the platform cannot send
 // (dropUnsendableSettings) and adds what its registry knows the destination
 // contradicts -- most often an RTMP URL with no application path, which the far
@@ -3001,7 +3027,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if s.mintXSourceOnCreate(w, r, &row) {
 		return
 	}
-	if s.refuseBadDestinationWrite(w, &row, nil) {
+	if refuseUnsendableGoLiveTitle(w, &row, "") || s.refuseBadDestinationWrite(w, &row, nil) {
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
@@ -3120,6 +3146,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, p)
 			return
 		}
+	}
+	if refuseUnsendableGoLiveTitle(w, existing, storedGoLiveTitle) {
+		return
 	}
 	if s.refuseBadDestinationWrite(w, existing, &before) {
 		return

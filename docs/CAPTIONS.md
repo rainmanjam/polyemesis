@@ -169,9 +169,14 @@ What polyemesis refuses, and why:
   to ultra-low latency, and the go-live check above holds it back with that
   reason. Choose normal or low latency in Studio.
 
-What polyemesis does not check: a show started without a scheduled broadcast
-(YouTube's default *Stream now* event, or a broadcast made in YouTube Studio)
-has no broadcast id for polyemesis to read. Captions are still posted, but they
+A destination polyemesis opens a broadcast for at go-live (the default for a
+YouTube destination with a connected account) is created with the HTTP POST
+caption settings, the monitor stream and the 30 s or 60 s delay, so it passes
+the check above.
+
+What polyemesis does not check: a show started without a broadcast of its own
+(a destination switched to YouTube's *Stream now*, or a broadcast made in
+YouTube Studio) has no broadcast id for polyemesis to read. Captions are still posted, but they
 appear only if that broadcast is set for HTTP POST captions in YouTube Studio.
 
 The caption URL is a credential: anyone holding it can post captions to the

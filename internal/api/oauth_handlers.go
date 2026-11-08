@@ -56,6 +56,11 @@ type livestreamGated interface {
 // It reads the provider this server resolves through, so a test's set and
 // production agree.
 func (s *Server) livestreamGate(platform db.Platform) string {
+	// X only. YouTube's provider answers LivestreamAccess too (oauth.BroadcastCreator requires it), always true,
+	// and it has no gate for the setup guide to report.
+	if platform != db.PlatformX {
+		return ""
+	}
 	p, err := s.providers.Get(platform)
 	if err != nil {
 		return ""

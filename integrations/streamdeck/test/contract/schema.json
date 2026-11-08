@@ -416,6 +416,16 @@
                         "boolean",
                         "null"
                       ]
+                    },
+                    "streamId": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "studioStreamNow": {
+                      "types": [
+                        "boolean"
+                      ]
                     }
                   }
                 }
@@ -582,6 +592,11 @@
                 "goLiveSentMs": {
                   "types": [
                     "number"
+                  ]
+                },
+                "opened": {
+                  "types": [
+                    "boolean"
                   ]
                 },
                 "pendingSource": {

@@ -8,7 +8,25 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **YouTube go-live broadcasts.** A YouTube destination linked to a connected account now gets its own
+  broadcast when it goes live (auto-start on, auto-stop off, Public unless the destination says otherwise,
+  titled from the go-live title), bound to the stream that holds its stored key. polyemesis ends it when the
+  destination is switched off, makes the next one if it finishes while the destination is still on, and reads
+  chat from it. It never creates a stream or changes a key, and leaves a stream that already has a live
+  broadcast alone. Turn it off per destination with "Use YouTube Studio's Stream now instead". Stored in
+  `compliance.youtube` (`streamId`, `studioStreamNow`) and `lifecycle.opened`; no schema change.
+- **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
+  reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
+  ingest address; the destination dialog stores an optional pinned stream.
+- **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
+
+### Fixed
+
+- `PUT /api/v1/destinations/{id}` with a `goLiveTitle` on a platform that never sends one answered 200 and
+  stored nothing; it now answers 400. (A title carried over by a platform switch is still cleared with a
+  warning.)
 
 ## [0.16.0] — 2026-11-08
 
