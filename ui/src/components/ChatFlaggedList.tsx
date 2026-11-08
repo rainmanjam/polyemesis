@@ -1,5 +1,6 @@
 import { Flag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { useT } from "@/lib/i18n";
 import { accentFor } from "@/lib/chat";
@@ -35,6 +36,7 @@ export function ChatFlaggedList({
   failed,
   filtered,
   onOpenUser,
+  onRelease,
 }: Readonly<{
   /** Already narrowed to the platforms the timeline is showing. */
   flags: ChatFlaggedMessage[];
@@ -43,6 +45,8 @@ export function ChatFlaggedList({
   /** Some flags exist but the platform filter hides all of them. */
   filtered: boolean;
   onOpenUser: (m: ChatMessage) => void;
+  /** Put a held message back on the overlays. */
+  onRelease: (m: ChatMessage) => void;
 }>) {
   const t = useT();
 
@@ -73,6 +77,7 @@ export function ChatFlaggedList({
           const m = f.message;
           const accent = accentFor(m.platform);
           const name = m.author.name || m.author.id || t("chatFlags.unknownAuthor");
+          const held = f.held === true;
           return (
             <li key={`${m.platform}-${m.account ?? ""}-${m.id}`} className="flex flex-col gap-1 px-2 py-1.5">
               <div className="flex flex-wrap items-center gap-1.5 text-sm">
@@ -95,6 +100,18 @@ export function ChatFlaggedList({
                 <Badge variant={f.acted ? "warn" : "outline"}>
                   {f.acted ? t("chatFlags.acted") : t("chatFlags.loggedOnly")}
                 </Badge>
+                {held && <Badge variant="outline">{t("chatFlags.held")}</Badge>}
+                {held && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t("chatFlags.releaseAria", { name })}
+                    onClick={() => onRelease(m)}
+                  >
+                    {t("chatFlags.release")}
+                  </Button>
+                )}
               </div>
               <p className="break-words text-[13px] leading-snug">
                 {m.text || <span className="text-muted-foreground">{t("chatFlags.messageGone")}</span>}

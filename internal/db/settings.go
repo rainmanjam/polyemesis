@@ -2063,6 +2063,13 @@ type AutomodRule struct {
 	Pattern        string `json:"pattern"`
 	Action         string `json:"action"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// Category is the closed-set reason a match carries (automod.Category).
+	// Empty means filter_match. Checked where the rule is compiled, because the
+	// set lives in internal/automod, which imports this package.
+	Category string `json:"category,omitempty"`
+	// HoldOverlay keeps a matching message off every on-screen overlay, whatever
+	// Action is. The message still shows, flagged, in the console.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 }
 
 // AutomodHistory bounds the per-author sequence detectors.

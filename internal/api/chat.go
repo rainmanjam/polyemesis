@@ -711,6 +711,35 @@ type chatFlagsResult struct {
 const chatFlagsNote = "Messages automod flagged since this server started, newest first. " +
 	"The list is kept in memory and holds the most recent 500."
 
+// handleChatFlagRelease puts a held line back on the overlay: the review list's
+// "Show on overlay", for a false positive (a rule's holdOverlay).
+//
+// It changes nothing on any platform and nothing in the console -- the message
+// is already there -- so it is a POST on the same footing as a local hide, and
+// takes the same platform/account/id addressing. 404 when there is nothing held
+// under that address, which is also what an expired or already-released line
+// answers: the gate keeps the last 200 lines for ten minutes.
+func (s *Server) handleChatFlagRelease(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	id := strings.TrimSpace(q.Get("id"))
+	if platform == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "platform and id are required")
+		return
+	}
+	if s.overlayGate == nil || !s.overlayGate.Release(platform, account, id) {
+		writeError(w, http.StatusNotFound,
+			"that message is not being held off the overlay (it was never held, was released already, or the "+
+				"ten minutes it is kept for have passed)")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "released",
+		"detail": "Shown on your overlays.",
+	})
+}
+
 // handleChatFlags lists the messages automod flagged (UX Council A48).
 //
 // Automod's findings used to go to the log and nowhere else, so the Chat page

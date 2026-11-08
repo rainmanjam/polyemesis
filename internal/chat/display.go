@@ -27,6 +27,12 @@ const (
 	// DisplayBlocked: automod is going to remove it. It must never be shown,
 	// whether or not the removal then succeeds on the platform.
 	DisplayBlocked
+	// DisplayHeld: a finding asked that it be kept off the overlay (a rule's
+	// holdOverlay). Withheld exactly as Blocked is, but nothing is being
+	// removed anywhere, so an operator may release it from the review list. A
+	// sink that does not know the value must treat it as Blocked, which is
+	// what every sink here does with any unknown value.
+	DisplayHeld
 )
 
 // DisplaySink receives every message with automod's verdict on it, later

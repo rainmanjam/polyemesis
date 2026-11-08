@@ -31,6 +31,13 @@ type FlaggedMessage struct {
 	// dropped by a full queue or refused by the platform. Set by
 	// markFlagActed once performAutomod succeeds.
 	Acted bool `json:"acted"`
+	// Held says the message was actually kept off the overlays by a hold, which
+	// is what makes "Show on overlay" real. NOT the same as a finding's Hold:
+	// a removal outranks a hold (the line is Blocked, and is not offered back),
+	// and a switched-off automod or platform sets no hold at all, so the
+	// finding can say hold while the line went out. Set only where the hub
+	// offers or judges DisplayHeld.
+	Held bool `json:"held,omitempty"`
 	// At is when the latest finding on this message was recorded.
 	At time.Time `json:"at"`
 }
@@ -109,6 +116,20 @@ func (h *Hub) markFlagActed(p db.Platform, account, msgID string) {
 	for i := len(h.flags) - 1; i >= 0; i-- {
 		if h.flags[i].Message.Key() == key {
 			h.flags[i].Acted = true
+			return
+		}
+	}
+}
+
+// markFlagHeld records that the message was withheld from the overlays by a
+// hold. A message no longer held in the list is simply missed.
+func (h *Hub) markFlagHeld(p db.Platform, account, msgID string) {
+	key := Message{Platform: p, Account: account, ID: msgID}.Key()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.flags) - 1; i >= 0; i-- {
+		if h.flags[i].Message.Key() == key {
+			h.flags[i].Held = true
 			return
 		}
 	}

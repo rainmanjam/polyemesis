@@ -34,6 +34,12 @@ type Rule struct {
 	// counts minutes and the adapters convert at the last moment, so anything
 	// upstream of them speaks one unit.
 	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// Category is the closed-set reason a match carries. Empty means
+	// CategoryFilterMatch, which is what every rule was before this field.
+	Category Category `json:"category,omitempty"`
+	// HoldOverlay keeps a matching message off every on-screen overlay, in
+	// addition to whatever Action asks for. Off by default.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 
 	re *regexp.Regexp
 }
@@ -65,6 +71,9 @@ func (r *Rule) Compile() error {
 			"a timeout of zero seconds is a permanent ban on every platform, so "+
 			"set timeoutSeconds, or use the ban action if that is what you meant",
 			r.Name)
+	}
+	if r.Category != "" && !KnownCategory(r.Category) {
+		return fmt.Errorf("rule %q has unknown category %q", r.Name, r.Category)
 	}
 	// (?i) rather than lowercasing the subject: an operator writing a pattern
 	// with a character class should not have to think about case folding, and
@@ -126,6 +135,10 @@ func (s *RuleSet) Check(text string) []Finding {
 		// Despaced, but ONLY when the spacing looks deliberate -- see
 		// deliberatelySpaced.
 		if r.Match(norm) || r.Match(text) || (despaced != "" && r.Match(despaced)) {
+			cat := r.Category
+			if cat == "" {
+				cat = CategoryFilterMatch
+			}
 			out = append(out, Finding{
 				Checker:        CheckerRules,
 				Action:         r.Action,
@@ -133,9 +146,10 @@ func (s *RuleSet) Check(text string) []Finding {
 				// The rule's NAME stays server-side. It is the operator's own
 				// free text, and PlatformReason deliberately has no path to any
 				// free-text field -- see finding.go and #495.
-				Category: CategoryFilterMatch,
+				Category: cat,
 				Reason:   fmt.Sprintf("matched rule %q", r.Name),
 				RuleID:   r.ID,
+				Hold:     r.HoldOverlay,
 			})
 		}
 	}

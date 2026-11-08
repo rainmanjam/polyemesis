@@ -428,7 +428,7 @@ func TestEngineFindsButDoesNotActWhenTheCellIsOff(t *testing.T) {
 	}
 	e := New(Matrix{Enabled: true}, PlatformCaps{}, rules, nil, nil)
 
-	v := e.CheckFast(db.PlatformTwitch, "u1", "this is forbidden")
+	v := e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", Text: "this is forbidden"})
 	if !v.Flagged() {
 		t.Fatal("nothing was found at all")
 	}
@@ -440,7 +440,7 @@ func TestEngineFindsButDoesNotActWhenTheCellIsOff(t *testing.T) {
 	m := Matrix{Enabled: true}
 	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionDelete, Checker: CheckerRules}, true)
 	e.SetMatrix(m)
-	v = e.CheckFast(db.PlatformTwitch, "u2", "this is forbidden")
+	v = e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u2", Text: "this is forbidden"})
 	if len(v.Act) != 1 {
 		t.Fatalf("did not act with the cell on: %+v", v)
 	}
@@ -462,8 +462,8 @@ func TestCheckersAreGatedIndependently(t *testing.T) {
 	m.Set(Key{Platform: db.PlatformTwitch, Action: ActionDelete, Checker: CheckerRules}, true)
 	e := New(m, PlatformCaps{}, rules, h, nil)
 
-	e.CheckFast(db.PlatformTwitch, "u1", "hello")
-	v := e.CheckFast(db.PlatformTwitch, "u1", "forbidden and also flooding")
+	e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", Text: "hello"})
+	v := e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", Text: "forbidden and also flooding"})
 
 	if len(v.Findings) < 2 {
 		t.Fatalf("expected findings from both checkers: %+v", v.Findings)
@@ -482,7 +482,7 @@ func TestCheckersAreGatedIndependently(t *testing.T) {
 // rules and the model off still gets the history detectors.
 func TestNilCheckersAreSafe(t *testing.T) {
 	e := New(DefaultMatrix(), PlatformCaps{}, nil, nil, nil)
-	v := e.CheckFast(db.PlatformTwitch, "u1", "hello")
+	v := e.CheckFast(db.PlatformTwitch, Subject{AuthorID: "u1", Text: "hello"})
 	if len(v.Findings) != 0 || len(v.Act) != 0 {
 		t.Fatalf("nil checkers produced %+v", v)
 	}

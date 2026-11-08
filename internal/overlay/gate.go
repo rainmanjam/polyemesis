@@ -50,6 +50,14 @@ const sweepEvery = 250 * time.Millisecond
 // is for a line that has long since scrolled or faded off every overlay.
 const shownCap = 4096
 
+// heldCap and heldTTL bound the lines kept for release: the last 200, for up to
+// ten minutes. A false positive worth rescuing is rescued while the moment is
+// still live; a line older than this has scrolled off any overlay anyway.
+const (
+	heldCap = 200
+	heldTTL = 10 * time.Minute
+)
+
 // Publisher is where display events go: the events hub.
 type Publisher interface {
 	Publish(eventstream.Envelope)
@@ -66,6 +74,16 @@ type Stats struct {
 	Shown   int64 `json:"shown"`
 	Blocked int64 `json:"blocked"`
 	Expired int64 `json:"expired"`
+	// Held counts the lines kept off overlays by a finding's hold (also in
+	// Blocked), and Released how many of those an operator then put back.
+	Held     int64 `json:"held"`
+	Released int64 `json:"released"`
+}
+
+// heldLine is a withheld line kept for Release.
+type heldLine struct {
+	line eventstream.DisplayLine
+	at   time.Time
 }
 
 type held struct {
@@ -88,6 +106,11 @@ type Gate struct {
 	shownRing []string
 	shownAt   int
 	stats     Stats
+
+	// heldLines are lines a finding's hold kept off the overlay, newest last,
+	// bounded by heldCap and heldTTL. See Release.
+	heldLines map[string]heldLine
+	heldOrder []string
 }
 
 var _ chat.DisplaySink = (*Gate)(nil)
@@ -103,6 +126,7 @@ func New(pub Publisher, opts ...Option) *Gate {
 		pending:   map[string]held{},
 		shown:     map[string]string{},
 		shownRing: make([]string, shownCap),
+		heldLines: map[string]heldLine{},
 	}
 	for _, o := range opts {
 		o(g)
@@ -149,13 +173,72 @@ func (g *Gate) Offer(m chat.Message, d chat.Display) {
 	defer g.mu.Unlock()
 	switch d {
 	case chat.DisplayClear:
-		g.releaseLocked(key(m.Platform, m.Account, m.ID), g.project(m))
+		line := g.project(m)
+		g.releaseLocked(key(m.Platform, m.Account, m.ID), line, line.At)
 	case chat.DisplayPending:
 		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), deadline: g.now().Add(MaxHold)}
+	case chat.DisplayHeld:
+		g.stats.Blocked++
+		g.holdLocked(key(m.Platform, m.Account, m.ID), g.project(m))
 	default:
 		// Blocked, and anything this build does not know: fail closed.
 		g.stats.Blocked++
 	}
+}
+
+// holdLocked keeps a withheld line for Release, shedding the oldest past the
+// cap. A key offered twice is kept once, at its latest position.
+func (g *Gate) holdLocked(k string, line eventstream.DisplayLine) {
+	g.stats.Held++
+	g.dropHeldLocked(k)
+	g.heldLines[k] = heldLine{line: line, at: g.now()}
+	g.heldOrder = append(g.heldOrder, k)
+	for len(g.heldOrder) > heldCap {
+		delete(g.heldLines, g.heldOrder[0])
+		g.heldOrder = g.heldOrder[1:]
+	}
+}
+
+// dropHeldLocked forgets a held line, if there is one.
+func (g *Gate) dropHeldLocked(k string) {
+	if _, ok := g.heldLines[k]; !ok {
+		return
+	}
+	delete(g.heldLines, k)
+	for i, o := range g.heldOrder {
+		if o == k {
+			g.heldOrder = append(g.heldOrder[:i], g.heldOrder[i+1:]...)
+			break
+		}
+	}
+}
+
+// Release puts a held line on the overlay: the "Show on overlay" for a
+// misfire. It reports whether there was one to release -- false for a line that
+// was never held, was removed rather than held, has aged past heldTTL, or was
+// already released.
+//
+// The line is published as a new chat.display, so it joins what a reconnecting
+// overlay is replayed like any other line, and a later retraction (the operator
+// then deletes it) takes it off again.
+func (g *Gate) Release(p db.Platform, account, id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	k := key(p, account, id)
+	h, ok := g.heldLines[k]
+	if !ok {
+		return false
+	}
+	g.dropHeldLocked(k)
+	if g.now().Sub(h.at) > heldTTL {
+		return false
+	}
+	g.stats.Released++
+	// The ENVELOPE is stamped now: the event hub's replay window is measured
+	// from it, and the line's own time may be minutes old. The line keeps its
+	// own time -- when it was said.
+	g.releaseLocked(k, h.line, g.now())
+	return true
 }
 
 // Judge implements chat.DisplaySink.
@@ -165,19 +248,27 @@ func (g *Gate) Judge(p db.Platform, account, id string, d chat.Display) {
 	k := key(p, account, id)
 	h, ok := g.pending[k]
 	if !ok {
-		// Already dropped (expired or retracted), or never held.
+		// Already dropped (expired or retracted), or never pending. A line the
+		// fast pass held that the model then REMOVES is no longer a maybe: take
+		// it out of the release buffer.
+		if d == chat.DisplayBlocked {
+			g.dropHeldLocked(k)
+		}
 		return
 	}
 	delete(g.pending, k)
 	if d != chat.DisplayClear {
 		g.stats.Blocked++
+		if d == chat.DisplayHeld {
+			g.holdLocked(k, h.line)
+		}
 		return
 	}
 	if g.now().After(h.deadline) {
 		g.stats.Expired++
 		return
 	}
-	g.releaseLocked(k, h.line)
+	g.releaseLocked(k, h.line, h.line.At)
 }
 
 // Retract implements chat.DisplaySink.
@@ -187,6 +278,9 @@ func (g *Gate) Retract(p db.Platform, account string, ids []string) {
 	var gone []string
 	for _, id := range ids {
 		k := key(p, account, id)
+		// A line deleted, hidden or banned after being held must not be
+		// releasable: the operator's removal outranks their earlier "maybe".
+		g.dropHeldLocked(k)
 		if _, ok := g.pending[k]; ok {
 			delete(g.pending, k)
 			g.stats.Blocked++
@@ -205,7 +299,7 @@ func (g *Gate) Retract(p db.Platform, account string, ids []string) {
 	}
 }
 
-func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine) {
+func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine, at time.Time) {
 	if old := g.shownRing[g.shownAt]; old != "" {
 		delete(g.shown, old)
 	}
@@ -213,7 +307,7 @@ func (g *Gate) releaseLocked(k string, line eventstream.DisplayLine) {
 	g.shownAt = (g.shownAt + 1) % len(g.shownRing)
 	g.shown[k] = line.ID
 	g.stats.Shown++
-	g.pub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, At: line.At, Data: line})
+	g.pub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, At: at, Data: line})
 }
 
 // Sweep drops every hold past its deadline.
@@ -226,6 +320,11 @@ func (g *Gate) Sweep() {
 			delete(g.pending, k)
 			g.stats.Expired++
 		}
+	}
+	// heldOrder is oldest first, so the expired are a prefix.
+	for len(g.heldOrder) > 0 && now.Sub(g.heldLines[g.heldOrder[0]].at) > heldTTL {
+		delete(g.heldLines, g.heldOrder[0])
+		g.heldOrder = g.heldOrder[1:]
 	}
 }
 

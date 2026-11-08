@@ -1956,6 +1956,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
+| `POST` | `/chat/flags/release` — put a message a rule held off the overlay back on it |
 | `POST` `DELETE` | `/chat/bans` |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
@@ -2111,6 +2112,7 @@ segment reliably.
 |---|---|
 | `DELETE /chat/messages` | `platform`, `id` (both required), `account` |
 | `POST /chat/messages/hide` | `platform`, `id` (both required), `account`, `scope`, `hidden` |
+| `POST /chat/flags/release` | `platform`, `id` (both required), `account` |
 | `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason` |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |

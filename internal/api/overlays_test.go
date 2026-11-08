@@ -480,7 +480,8 @@ func TestTheOverlayPagesSendNoReferrer(t *testing.T) {
 // engine.
 type wordModerator struct{}
 
-func (wordModerator) CheckFast(p db.Platform, authorID, text string) automod.Verdict {
+func (wordModerator) CheckFast(p db.Platform, sub automod.Subject) automod.Verdict {
+	text := sub.Text
 	if !strings.Contains(text, "BLOCKME") {
 		return automod.Verdict{}
 	}

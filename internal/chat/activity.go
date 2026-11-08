@@ -85,7 +85,7 @@ func checkText(m Moderator, p db.Platform, text string) automod.Verdict {
 	if tc, ok := m.(TextChecker); ok {
 		return tc.CheckText(p, text)
 	}
-	return m.CheckFast(p, "", text)
+	return m.CheckFast(p, automod.Subject{Text: text})
 }
 
 // screenQueueDepth bounds the screening queue. SEPARATE from the moderation
@@ -146,7 +146,9 @@ func (h *Hub) ScreenText(p db.Platform, text string, done func(Display)) Display
 	if s == nil || text == "" {
 		return DisplayClear
 	}
-	if removes(checkText(s.mod, p, text)) {
+	// A held verdict keeps alert text off the overlay exactly as a removal
+	// does: the alert shows without its words (see overlay.ActivityGate).
+	if v := checkText(s.mod, p, text); removes(v) || v.Hold {
 		return DisplayBlocked
 	}
 	if !s.mod.ModelEnabled() || done == nil {
@@ -177,7 +179,7 @@ func (h *Hub) ScreenName(p db.Platform, name string) Display {
 	if s == nil || name == "" {
 		return DisplayClear
 	}
-	if s.mod.CheckFast(p, "", name).Flagged() {
+	if s.mod.CheckFast(p, automod.Subject{Text: name}).Flagged() {
 		return DisplayBlocked
 	}
 	return DisplayClear
@@ -198,7 +200,7 @@ func (h *Hub) screenModel(ctx context.Context, s *automodState, job screenJob) {
 		h.log.Warn("automod model check failed; the alert's text is not shown",
 			"platform", job.platform, "err", err)
 		req.done(DisplayBlocked)
-	case removes(v):
+	case removes(v) || v.Hold:
 		req.done(DisplayBlocked)
 	default:
 		req.done(DisplayClear)

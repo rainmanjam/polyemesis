@@ -26,7 +26,7 @@ import (
 // single call. The interface now names everything the Hub must drive, so a
 // checker that is not wired fails to compile rather than failing silently.
 type Moderator interface {
-	CheckFast(p db.Platform, authorID, text string) automod.Verdict
+	CheckFast(p db.Platform, s automod.Subject) automod.Verdict
 	CheckModel(ctx context.Context, p db.Platform, text string) (automod.Verdict, error)
 	ModelEnabled() bool
 	ModelStats() automod.ModelStats
@@ -145,7 +145,13 @@ func (h *Hub) checkAutomod(m Message) {
 		return
 	}
 
-	v := s.mod.CheckFast(m.Platform, m.Author.ID, m.Text)
+	v := s.mod.CheckFast(m.Platform, automod.Subject{
+		AuthorID:   m.Author.ID,
+		AuthorName: m.Author.Name,
+		Text:       m.Text,
+		EmoteCount: len(m.Emotes),
+		ReplyToID:  m.ReplyToID,
+	})
 	// NOT for a message the fast verdict removes. It used to be every
 	// non-empty message while the model was on, including one a rule had just
 	// deleted: a paid call -- against the hourly ceiling every other message
@@ -159,12 +165,19 @@ func (h *Hub) checkAutomod(m Message) {
 	switch {
 	case removes(v):
 		h.offerDisplay(m, DisplayBlocked)
+	case v.Hold:
+		// Flagged in the console, off every overlay, and releasable from the
+		// review list (overlay.Gate.Release). Nothing goes to a platform.
+		h.offerDisplay(m, DisplayHeld)
 	case askModel:
 		h.offerDisplay(m, DisplayPending)
 	default:
 		h.offerDisplay(m, DisplayClear)
 	}
 	h.recordAutomod(s, m, v)
+	if !removes(v) && v.Hold {
+		h.markFlagHeld(m.Platform, m.Account, m.ID)
+	}
 
 	// The model runs off the read loop, on the worker, so a slow endpoint
 	// cannot stall chat. Queued through the same bounded channel as an action,
@@ -280,11 +293,16 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	// checkAutomod.
 	if removes(v) {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
+	} else if v.Hold {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
 	} else {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 	}
 	if v.Flagged() {
 		h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), v.Findings)
+		if !removes(v) && v.Hold {
+			h.markFlagHeld(job.platform, job.account, job.msgID)
+		}
 	}
 	for _, f := range v.Act {
 		h.enqueueAutomod(s, automodJob{

@@ -71,6 +71,38 @@ caught.
 | `\b(?:buy\|cheap)\s+followers\b` | "buy cheap followers here" |
 | `^\s*!(?:so\|shoutout)\b` | "!so @someone" — anchored, so only at the start |
 
+### Hold a match off the overlay
+
+Each rule has a **Hold off the overlay** switch, off by default. A message that
+matches a rule with it on is **flagged in the console and kept off every
+on-screen chat overlay**, whatever the rule's action is, and nothing else
+changes: the console still shows the message, nothing is sent to any platform,
+and no moderation event is published. It needs no matrix cell, so it works with
+every cell off. Only the two kill switches apply: the global switch, and the
+platform's own switch if you have turned it off.
+
+It is a way to be careful about a broadcast without punishing a viewer. A rule
+that is right nine times in ten can hold its matches, and the tenth is a click
+away: the **Flagged** list on the Chat page shows a **Show on overlay** button
+on each held message. The server keeps the last 200 held lines for ten minutes
+for this, so a line older than that, or one you have since deleted, hidden or
+banned its author over, can't be shown again. A line removed by the rule's own
+action (a delete, a timeout, a ban) isn't held, it is removed, and is not
+offered back.
+
+The same applies to the message on a viewer-activity alert (a Super Chat's
+words, a tip's note): a held message is left off the alert, which still shows
+without it. See [OVERLAY.md](OVERLAY.md#alerts-overlay).
+
+A rule can also carry a **category** (`category` in the API), one of the closed
+set of reasons the model uses, such as `hate_speech` or `spam`. It is what is
+recorded against a match instead of the generic "matched a chat filter", and it
+is the only text that can reach a platform. Leave it empty and nothing changes.
+There is no control for it in the rule editor yet.
+
+Existing rules are unaffected: a rule stored without these two fields behaves
+exactly as before.
+
 ### What RE2 refuses
 
 RE2 has no backtracking, so three habits from PCRE, Perl and JavaScript do not

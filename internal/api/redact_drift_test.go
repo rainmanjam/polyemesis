@@ -253,6 +253,8 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.automod.on":                        sPublic,
 	"settings.automod.platformEnabled":           sPublic,
 	"settings.automod.rules.action":              sPublic,
+	"settings.automod.rules.category":            sPublic,
+	"settings.automod.rules.holdOverlay":         sPublic,
 	"settings.automod.rules.enabled":             sPublic,
 	"settings.automod.rules.id":                  sPublic,
 	"settings.automod.rules.name":                sPublic,

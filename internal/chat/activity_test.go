@@ -262,7 +262,7 @@ func TestAlertTextThatChatWouldHideStaysOffAir(t *testing.T) {
 	}
 	for name, text := range cases {
 		// What chat does with it: the message from a real author is removed.
-		if v := engine.CheckFast(db.PlatformTwitch, "u1", text); !removes(v) {
+		if v := engine.CheckFast(db.PlatformTwitch, automod.Subject{AuthorID: "u1", Text: text}); !removes(v) {
 			t.Fatalf("%s: chat would not hide %q, so this test proves nothing", name, text)
 		}
 		h := screenHub(t, engine)

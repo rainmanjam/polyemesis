@@ -97,6 +97,29 @@ describe("AutomodConfig: the rule list", () => {
     expect(screen.queryByLabelText("Timeout (seconds)")).toBeNull();
   });
 
+  it("holds a rule's matches off the overlay with its own switch, off by default", async () => {
+    // A stored rule that predates the field decodes with no holdOverlay: the
+    // switch must read off, and turning it on writes only that leaf.
+    const onChange = show(automod({ rules: [rule()] }));
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+
+    const hold = screen.getByRole("switch", { name: "Hold off the overlay" });
+    expect(hold.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(hold);
+    const next = (onChange.mock.calls[0][0] as Settings).automod?.rules?.[0];
+    expect(next?.holdOverlay).toBe(true);
+    expect(next?.action).toBe("flag");
+    expect(next?.enabled).toBe(true);
+  });
+
+  it("shows a stored hold as on", async () => {
+    show(automod({ rules: [rule({ holdOverlay: true })] }));
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    expect(
+      screen.getByRole("switch", { name: "Hold off the overlay" }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("writes a typed pattern back to the draft", async () => {
     const onChange = show(automod({ rules: [rule()] }));
     await waitFor(() => expect(stats).toHaveBeenCalled());
