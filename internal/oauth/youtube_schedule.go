@@ -469,7 +469,11 @@ func (y *YouTube) RescheduleBroadcast(ctx context.Context, accessToken, broadcas
 
 // errBroadcastNotListed is what broadcastByID returns when the list has no match. Its text is the start of
 // that refusal, so a caller that tests for it reads the same words an operator would.
-var errBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
+var errBroadcastNotListed = ErrBroadcastNotListed
+
+// ErrBroadcastNotListed is the typed "this broadcast is gone" answer: YouTube lists no broadcast with the id (deleted
+// in Studio or by polyemesis, or it belongs to another channel). A caller that is cleaning up treats it as done.
+var ErrBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
 
 // broadcastByID reads one broadcast, with every part a write has to carry back.
 func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID string) (*ytBroadcast, error) {

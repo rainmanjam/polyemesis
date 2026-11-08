@@ -510,3 +510,21 @@ func TestARefusedSaveCreatesNoLiveVideo(t *testing.T) {
 		})
 	}
 }
+
+// A save refused for a go-live title on a platform that never sends one (Facebook) is refused BEFORE the key renewal
+// a save that switches the destination on makes: no live video, and the row is untouched.
+//
+// Mutation: in refuseUnsendableGoLiveTitle make the condition `true ||` first so it never refuses. Red: the save
+// succeeds, the title is silently dropped and a live video is created.
+func TestAGoLiveTitleRefusalCreatesNoFacebookLiveVideo(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	send(t, f.h, f.sign, http.MethodPut, destinationPath(f.dest.ID, ""),
+		map[string]any{"enabled": true, "goLiveTitle": "not for Facebook"}, http.StatusBadRequest)
+	if n := facebookCreates(f.stub); n != 0 {
+		t.Fatalf("%d live videos created for a save refused over its go-live title, want 0", n)
+	}
+	d, _ := f.store.GetDestination(f.dest.ID)
+	if d.Enabled || d.StreamKey != "sk-live-old" || d.GoLiveTitle != "" {
+		t.Fatalf("a refused save changed the row: %+v", d)
+	}
+}

@@ -1040,6 +1040,7 @@ func New(o Options) *Server {
 		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.
+		s.lifecycle.delivering = s.destinationDelivering
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
 	cs := db.DefaultSettings().Chat

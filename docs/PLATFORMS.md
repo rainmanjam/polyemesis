@@ -573,8 +573,9 @@ What happens, in order, when the destination is switched on:
    says so on the card, quietly, with no alert. Switching the destination off
    and on checks again. This is also what a destination that was already on air
    when you upgraded looks like.
-3. When an earlier attempt began and left a marker (the answer was lost, or the
-   daemon stopped mid-open) it looks for the broadcast that attempt made (one
+3. When an earlier attempt stamped a marker just before its create (the answer was
+   lost, or the daemon stopped mid-open; markers are believed for twelve minutes)
+   it looks for the broadcast that attempt made (one
    unit) and reuses it rather than making another; nothing is ever adopted
    without that marker, so an event you made yourself is never taken. Otherwise
    it creates the broadcast (one unit) and bind it to the
@@ -601,8 +602,9 @@ the destination off or switch it to Studio's *Stream now* (one unit): left
 alone it would be a Public event, auto-start on, bound to your stream, that
 could air on any later video sent to that key. A broadcast that went live is
 never deleted, and **an event you picked is never deleted**. A broadcast waiting
-for video is checked every ten minutes or so rather than every fifteen seconds,
-and at once when video starts.
+for video, whether polyemesis created it or you picked it, is checked every ten
+minutes or so rather than every fifteen seconds while no video is flowing, and
+every sweep from the moment video starts until it is live.
 
 A failure never stops the stream: a refused create, a spent quota (retried when
 the allowance resets, without using up the retry budget) and an already-live

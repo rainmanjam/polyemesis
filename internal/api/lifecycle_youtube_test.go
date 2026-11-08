@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
@@ -28,6 +29,7 @@ type ynBroadcast struct {
 	kids, dvr           any
 	latency, projection any
 	desc                any
+	start               time.Time // scheduledStartTime; zero reads as two minutes from now
 }
 
 // ynFake is YouTube as a destination sees it: one reusable stream holding ynKey, and the broadcasts made on it.
@@ -94,7 +96,7 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 				}
 				items = append(items, fmt.Sprintf(`{"id":%q,"snippet":{"title":%q,"liveChatId":%q,"scheduledStartTime":%q},"status":{"lifeCycleStatus":%q},`+
 					`"contentDetails":{"boundStreamId":%q,"enableAutoStart":%v,"enableAutoStop":%v,"monitorStream":{"enableMonitorStream":false}}}`,
-					id, b.title, b.chat, time.Now().Add(2*time.Minute).UTC().Format(time.RFC3339), b.status, b.bound, b.autoStart == true, b.autoStop == true))
+					id, b.title, b.chat, startOf(b).UTC().Format(time.RFC3339), b.status, b.bound, b.autoStart == true, b.autoStop == true))
 			}
 			fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts":
@@ -108,7 +110,7 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 				autoStart: body["contentDetails"]["enableAutoStart"], autoStop: body["contentDetails"]["enableAutoStop"],
 				kids: body["status"]["selfDeclaredMadeForKids"], dvr: body["contentDetails"]["enableDvr"],
 				latency: body["contentDetails"]["latencyPreference"], projection: body["contentDetails"]["projection"],
-				desc: body["snippet"]["description"]}
+				desc: body["snippet"]["description"], start: time.Now().Add(2 * time.Minute)}
 			if f.onInsert != nil {
 				f.onInsert()
 			}
@@ -752,9 +754,20 @@ func TestABroadcastWaitingForVideoIsReadOnTheSlowCadence(t *testing.T) {
 // ---------------------------------------------------------------- second review
 
 func upEdge(c *lifecycleCoordinator) {
-	c.mu.Lock()
-	c.clearFaults[3] = true
-	c.mu.Unlock()
+	c.Observe(hooks.Event{Trigger: hooks.TriggerDestinationUp,
+		Destination: &hooks.DestinationRef{ID: 3, Name: "yt main", Platform: string(db.PlatformYouTube)}})
+}
+
+func downEdge(c *lifecycleCoordinator, reason string) {
+	c.Observe(hooks.Event{Trigger: hooks.TriggerDestinationDown, Reason: reason,
+		Destination: &hooks.DestinationRef{ID: 3, Name: "yt main", Platform: string(db.PlatformYouTube)}})
+}
+
+func startOf(b *ynBroadcast) time.Time {
+	if !b.start.IsZero() {
+		return b.start
+	}
+	return time.Now().Add(2 * time.Minute)
 }
 
 // R1. The operator ends an ANNOUNCED show in Studio while the destination is still on. The completed-broadcast fault
@@ -853,11 +866,12 @@ func TestAPickedAutoStartOffEventIsReadEverySweepAndACreatedOneIsReadAtOnceOnAnU
 	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
 	c, _, _, _ := ynFixture(t, f, row)
 	sweep(c, 1)
+	upEdge(c) // video is flowing
 	start, _, _ := f.snapshot()
 	sweep(c, 10)
 	end, _, _ := f.snapshot()
 	if n := len(end) - len(start); n < 10 {
-		t.Errorf("a picked event was read %d times in 10 sweeps, want every sweep", n)
+		t.Errorf("a picked event was read %d times in 10 sweeps while video flowed, want every sweep", n)
 	}
 
 	f2 := newYnFake()
@@ -894,5 +908,112 @@ func TestDeletingADestinationDeletesItsNeverAiredCreatedBroadcastButNeverAnAdopt
 	sweep(c2, 2)
 	if d := f2.deleted(); len(d) != 0 {
 		t.Errorf("deleted %v: an adopted event must never be deleted", d)
+	}
+}
+
+// ---------------------------------------------------------------- final review
+
+// F1a. A destination deleted after its never-aired broadcast was already deleted (the DELETE route did it) is not read
+// again every sweep for ever: "not listed" means gone.
+func TestADeletedDestinationWhoseBroadcastIsAlreadyGoneIsNotReadForEver(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { delete(f.bcasts, "bcast-1") }) // deleted in Studio, or by the DELETE route
+	store.remove(3)
+	sweep(c, 2)
+	before, _, _ := f.snapshot()
+	sweep(c, 40)
+	after, _, _ := f.snapshot()
+	if n := len(after) - len(before); n > 0 {
+		t.Errorf("%d YouTube calls over 40 sweeps for a deleted destination whose broadcast is gone, want none", n)
+	}
+}
+
+// F1b. The same loop in the Stream-now release: a created broadcast deleted in Studio is forgotten, not read for ever.
+func TestAStreamNowReleaseOfABroadcastDeletedInStudioForgetsItInsteadOfReadingForEver(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { delete(f.bcasts, "bcast-1") })
+	store.mu.Lock()
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	sweep(c, 2)
+	if got := store.get(3); got.Lifecycle.BroadcastID != "" {
+		t.Errorf("lifecycle = %+v, want the vanished broadcast forgotten", got.Lifecycle)
+	}
+	before, _, _ := f.snapshot()
+	sweep(c, 20)
+	if after, _, _ := f.snapshot(); len(after) != len(before) {
+		t.Errorf("%d more calls after the release", len(after)-len(before))
+	}
+}
+
+// F2. The attempt marker is stamped immediately before EACH insert, expires, and gates reuse by start time.
+func TestTheAttemptMarkerIsStampedOnlyBeforeAnInsertAndExpires(t *testing.T) {
+	f := newYnFake()
+	f.listedKey = "" // the key is not listed: nothing is ever inserted
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 3)
+	if got := store.get(3); got.Lifecycle.OpenAttemptMS != 0 {
+		t.Errorf("marker = %d after attempts that never reached an insert, want none", got.Lifecycle.OpenAttemptMS)
+	}
+
+	// A stale marker (days old) never lets an operator's own Studio event be taken.
+	f2 := newYnFake()
+	f2.bcasts["studio-ev"] = &ynBroadcast{status: "created", title: "yt main", autoStart: true, autoStop: false}
+	row := ynRow(true)
+	row.Lifecycle.OpenAttemptMS = time.Now().Add(-72 * time.Hour).UnixMilli()
+	c2, store2, _, _ := ynFixture(t, f2, row)
+	sweep(c2, 1)
+	if got := store2.get(3); got.Lifecycle.BroadcastID == "studio-ev" {
+		t.Fatalf("lifecycle = %+v: an operator's event was adopted on a days-old marker", got.Lifecycle)
+	}
+	if _, inserts, _ := f2.snapshot(); inserts != 1 {
+		t.Errorf("inserts = %d, want a fresh broadcast", inserts)
+	}
+
+	// A fresh marker still does not match a lookalike whose start is nowhere near marker + the lead.
+	f3 := newYnFake()
+	f3.bcasts["studio-ev"] = &ynBroadcast{status: "created", title: "yt main", autoStart: true, autoStop: false,
+		start: time.Now().Add(8 * time.Minute)}
+	row3 := ynRow(true)
+	row3.Lifecycle.OpenAttemptMS = time.Now().Add(-1 * time.Minute).UnixMilli()
+	c3, store3, _, _ := ynFixture(t, f3, row3)
+	sweep(c3, 1)
+	if got := store3.get(3); got.Lifecycle.BroadcastID == "studio-ev" {
+		t.Errorf("lifecycle = %+v: a lookalike with the wrong start time was adopted", got.Lifecycle)
+	}
+}
+
+func hasFlowingCalls(f *ynFake, c *lifecycleCoordinator, sweeps int) int {
+	start, _, _ := f.snapshot()
+	sweep(c, sweeps)
+	end, _, _ := f.snapshot()
+	return len(end) - len(start)
+}
+
+// F3. A picked event with auto-start off is read slowly while video is NOT flowing, every sweep while it is (even if
+// YouTube still reports the stream inactive just after the edge), and slowly again after the stream goes down.
+func TestAWaitingPickedEventIsReadSlowlyUntilVideoFlowsThenEverySweep(t *testing.T) {
+	f := newYnFake()
+	f.streamState = "inactive"
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, _ := ynFixture(t, f, row)
+	sweep(c, 2)
+	if n := hasFlowingCalls(f, c, 240); n > 40 {
+		t.Errorf("%d calls in an hour of waiting for video, want the slow cadence", n)
+	}
+	upEdge(c)
+	if n := hasFlowingCalls(f, c, 10); n < 20 {
+		t.Errorf("%d calls in 10 sweeps while video flows (stream still reported inactive), want every sweep", n)
+	}
+	downEdge(c, lifecycleReasonStopped)
+	sweep(c, 2)
+	if n := hasFlowingCalls(f, c, 80); n > 14 {
+		t.Errorf("%d calls in 80 sweeps after the stream went down, want the slow cadence again", n)
 	}
 }

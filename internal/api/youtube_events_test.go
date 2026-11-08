@@ -208,6 +208,9 @@ func TestDeletingADestinationOverHTTPDeletesItsNeverAiredCreatedBroadcastOnly(t 
 	}
 	own := mk("own", "bcast-own", true)
 	picked := mk("picked", "ev-picked", false)
+	// The coordinator is tracking the created broadcast, as it does once it has opened one.
+	ownRow, _ := store.GetDestination(own)
+	s.lifecycle.trackAs(ownRow, "bcast-own", "created")
 	for _, id := range []int64{own, picked} {
 		r := jsonRequest(t, http.MethodDelete, "/api/v1/destinations/"+itoa(id), nil)
 		sign(r)
@@ -217,5 +220,11 @@ func TestDeletingADestinationOverHTTPDeletesItsNeverAiredCreatedBroadcastOnly(t 
 	}
 	if len(deletes) != 1 || deletes[0] != "bcast-own" {
 		t.Errorf("YouTube deletes = %v, want only the broadcast polyemesis created", deletes)
+	}
+	s.lifecycle.mu.Lock()
+	_, stillTracked := s.lifecycle.tracked[own]
+	s.lifecycle.mu.Unlock()
+	if stillTracked {
+		t.Error("the coordinator still tracks the broadcast the DELETE removed, and would read it for ever")
 	}
 }

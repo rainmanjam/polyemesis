@@ -327,7 +327,7 @@ func TestOpenLiveNowReusesItsOwnEarlierUnrecordedBroadcastInsteadOfMakingAnother
 			io.WriteString(w, `{"items":[]}`)
 		},
 	})
-	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true})
+	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", AttemptAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestOpenLiveNowDoesNotReuseABroadcastThatIsNotItsOwn(t *testing.T) {
 				io.WriteString(w, `{"items":[]}`)
 			},
 		})
-		r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true})
+		r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", AttemptAt: time.Now()})
 		if err != nil || r.BroadcastID != "bcast-9" {
 			t.Errorf("%s: result %+v err %v, want a new broadcast", name, r, err)
 		}
@@ -420,10 +420,60 @@ func TestAnUpcomingLookalikeIsAdoptedOnlyWithProofAndNeverDeletedOnABindRefusal(
 
 	log = nil
 	y = lnStub(t, &log, handlers(http.StatusForbidden))
-	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", MayReuse: true}); err == nil {
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", AttemptAt: time.Now()}); err == nil {
 		t.Fatal("a refused bind was not an error")
 	}
 	if find(log, http.MethodDelete, ytBroadcastsPath) != nil {
 		t.Error("a reused broadcast was deleted after a refused bind")
+	}
+}
+
+// The marker's time is what ties a lookalike to the attempt: the right start is taken, a start from another moment is
+// not, and BeforeInsert runs once per insert and can stop it.
+func TestReuseIsTiedToTheMarkersTimeAndBeforeInsertGatesTheInsert(t *testing.T) {
+	at := time.Now().Add(-3 * time.Minute)
+	lookalike := func(start time.Time) map[string]http.HandlerFunc {
+		return map[string]http.HandlerFunc{"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("broadcastStatus") == "upcoming" {
+				io.WriteString(w, `{"items":[{"id":"x-1","snippet":{"title":"Friday","scheduledStartTime":"`+start.UTC().Format(time.RFC3339)+`"},`+
+					`"status":{"lifeCycleStatus":"created"},"contentDetails":{"enableAutoStart":true,"enableAutoStop":false}}]}`)
+				return
+			}
+			io.WriteString(w, `{"items":[]}`)
+		}}
+	}
+	var log []capture
+	y := lnStub(t, &log, lookalike(at.Add(2*time.Minute+20*time.Second)))
+	if r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", AttemptAt: at}); err != nil || r.BroadcastID != "x-1" {
+		t.Errorf("the lookalike at marker+lead was not reused: %+v %v", r, err)
+	}
+	log = nil
+	y = lnStub(t, &log, lookalike(at.Add(9*time.Minute)))
+	r, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, Title: "Friday", AttemptAt: at})
+	if err != nil || r.BroadcastID != "bcast-9" {
+		t.Errorf("a lookalike nine minutes after the marker was reused: %+v %v", r, err)
+	}
+
+	log = nil
+	y = lnStub(t, &log, nil)
+	stamps := 0
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey,
+		BeforeInsert: func() error { stamps++; return nil }}); err != nil || stamps != 1 {
+		t.Errorf("BeforeInsert ran %d times (err %v), want once before the insert", stamps, err)
+	}
+	log = nil
+	y = lnStub(t, &log, nil)
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey,
+		BeforeInsert: func() error { return errors.New("store down") }}); err == nil {
+		t.Error("an insert went ahead although its marker could not be written")
+	}
+	noPost(t, log, ytBroadcastsPath)
+}
+
+func TestBroadcastStateSaysNotListedWithATypedError(t *testing.T) {
+	var log []capture
+	y := lnStub(t, &log, map[string]http.HandlerFunc{"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"items":[]}`) }})
+	if _, err := y.BroadcastState(context.Background(), "tok", "gone-1"); !errors.Is(err, ErrBroadcastNotListed) {
+		t.Errorf("err = %v, want ErrBroadcastNotListed", err)
 	}
 }

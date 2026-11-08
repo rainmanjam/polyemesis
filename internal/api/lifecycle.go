@@ -390,6 +390,14 @@ type lifecycleCoordinator struct {
 	// true, and holding a stale give-up against it would keep a working show off
 	// the air out of bookkeeping.
 	clearFaults map[int64]bool
+	// flowing is the destinations the engine last reported delivering (UP, until a DOWN of any reason). It decides the
+	// cadence of reading a YouTube broadcast that is created or ready: slowly while video is NOT flowing, every sweep
+	// while it is, so an event with auto-start off is moved on promptly and YouTube's lag in reporting the stream
+	// active does not drop it back to slow.
+	flowing map[int64]bool
+	// delivering is a read-only predicate for the same question, for the first sweeps after a restart, before any
+	// edge has been seen. Nil means edges only.
+	delivering func(id int64) bool
 	// liveSkips is how many more sweeps each confirmed-live destination may be
 	// skipped before its state is read again. See lifecycleLiveRecheckEvery;
 	// absent means due now, which is the safe direction and the one a restart
@@ -586,6 +594,7 @@ func newLifecycleCoordinator(log *slog.Logger, store lifecycleStore, providers o
 		tracked:        map[int64]lifecycleTarget{},
 		orphanAttempts: map[int64]int{},
 		clearFaults:    map[int64]bool{},
+		flowing:        map[int64]bool{},
 		liveSkips:      map[int64]int{},
 		quietX:         map[int64]string{},
 		rearm:          map[int64]time.Time{},
@@ -647,8 +656,13 @@ func (c *lifecycleCoordinator) Observe(ev hooks.Event) {
 		// once more -- see clearFaults.
 		c.mu.Lock()
 		c.clearFaults[id] = true
+		c.flowing[id] = true
 		c.mu.Unlock()
 	case hooks.TriggerDestinationDown:
+		// Cleared for EVERY reason, before the early return for "stopped": a crashed encoder is not flowing.
+		c.mu.Lock()
+		delete(c.flowing, id)
+		c.mu.Unlock()
 		switch ev.Reason {
 		case lifecycleReasonDisabled, lifecycleReasonRemoved:
 			// Explicit intent, in both cases. Wake the sweep so the end does
@@ -1215,7 +1229,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// for the full arithmetic, and forgetLiveRecheck for why the case that
 		// actually happens is noticed in one sweep rather than forty.
 		return true
-	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && d.Lifecycle.Created && d.Lifecycle.Fault == "" &&
+	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" && !c.isFlowing(d.ID) &&
 		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
 		!c.dueForLiveRecheck(d.ID):
 		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
@@ -1298,6 +1312,12 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 		return
 	}
 	if err != nil {
+		if !d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && d.Lifecycle.Created &&
+			errors.Is(err, oauth.ErrBroadcastNotListed) {
+			// A broadcast polyemesis created that no longer exists, on a switched-off destination: nothing left to end.
+			c.forgetBroadcast(d)
+			return
+		}
 		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
 			"%s would not say what state %s is in: %v", d.Platform, describeBroadcast(broadcastID), err), err)
 		return
@@ -1339,7 +1359,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	// cadence as a live one: every sweep would spend 480 units an hour, 11,500 a day, for as long as the encoder is
 	// away. The UP edge that video arriving produces spends the budget at once (forgetLiveRecheck), and with
 	// auto-start on YouTube moves the broadcast itself in the meantime.
-	waiting := d.Platform == db.PlatformYouTube && d.Enabled && d.Lifecycle.Opened && d.Lifecycle.Created && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
+	waiting := d.Platform == db.PlatformYouTube && d.Enabled && !c.isFlowing(d.ID) && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
 		(strings.EqualFold(plan.Phase, phaseCreated) || strings.EqualFold(plan.Phase, phaseReady))
 	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive) || waiting)
 	switch {
@@ -2402,8 +2422,17 @@ func (c *lifecycleCoordinator) untrack(id int64) {
 	delete(c.tracked, id)
 	delete(c.orphanAttempts, id)
 	delete(c.clearFaults, id)
+	delete(c.flowing, id)
 	delete(c.liveSkips, id)
 	c.mu.Unlock()
+}
+
+// isFlowing reports whether video is reaching the destination, from the last edge or the read-only predicate.
+func (c *lifecycleCoordinator) isFlowing(id int64) bool {
+	c.mu.Lock()
+	f := c.flowing[id]
+	c.mu.Unlock()
+	return f || (c.delivering != nil && c.delivering(id))
 }
 
 // dueForLiveRecheck reports whether a settled-live destination's skip budget has

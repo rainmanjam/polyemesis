@@ -28,6 +28,14 @@ import (
 // the broadcast goes live when video arrives (auto-start), not at this time.
 const ytLiveNowLead = 2 * time.Minute
 
+// ytReuseWindow is how far a candidate's start may be from the marker's time plus the lead and still be taken as the
+// broadcast that attempt made (the start is set to the minute, so this is generous by a margin).
+const ytReuseWindow = time.Minute
+
+// LiveNowAttemptMaxAge is how long an attempt marker is believed: much longer than an insert takes, short enough
+// that days later nothing of the operator's can be mistaken for the broadcast the marker stands for.
+const LiveNowAttemptMaxAge = 12 * time.Minute
+
 // ytDefaultPrivacy is the visibility of a broadcast made here when the destination names none: public, the
 // owner's decision. A destination's compliance.privacy overrides it.
 const ytDefaultPrivacy = "public"
@@ -74,10 +82,14 @@ type LiveNowRequest struct {
 	// confirmation to move it off a different, idle stream.
 	EventID     string
 	RebindEvent bool
-	// MayReuse allows reusing an upcoming broadcast that looks like one an earlier attempt of ours made. The caller
-	// sets it only when it persisted a marker before that earlier attempt's insert, which is the proof the broadcast
-	// is ours; without it nothing is adopted, because a Studio event of the operator's can match the same shape.
-	MayReuse bool
+	// AttemptAt is the moment an earlier attempt of ours stamped its marker, immediately before its insert; zero
+	// when there is no live marker. An upcoming broadcast that looks like ours is reused ONLY when it starts within
+	// about a minute of AttemptAt plus the lead, which is what proves it is the one that attempt made; without a
+	// marker nothing is adopted, because an operator's own Studio event can match the same shape.
+	AttemptAt time.Time
+	// BeforeInsert, when set, runs immediately before each insert and must succeed for the insert to be sent. The
+	// coordinator uses it to persist the marker, so a marker exists only for a broadcast that may have been made.
+	BeforeInsert func() error
 	// Category is a YouTube category name applied to the created broadcast's video; a failure is a warning.
 	Category string
 	// StreamKey is the key the destination publishes with. It selects the stream and is never sent anywhere.
@@ -195,13 +207,18 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 	// died, the record write failed) is reused instead of making another, but only when the caller can prove an
 	// earlier attempt happened (MayReuse). One more unit when it looks.
 	var created *ytBroadcast
-	if req.MayReuse {
+	if !req.AttemptAt.IsZero() {
 		if created, err = y.ownUpcoming(ctx, accessToken, req, stream.ID); err != nil {
 			return nil, err
 		}
 	}
 	reused := created != nil
 	if created == nil {
+		if req.BeforeInsert != nil {
+			if err := req.BeforeInsert(); err != nil {
+				return nil, fmt.Errorf("polyemesis could not record that it was about to create a broadcast, so it did not: %w", err)
+			}
+		}
 		if created, err = y.insertLiveNow(ctx, accessToken, req); err != nil {
 			return nil, err
 		}
@@ -259,7 +276,8 @@ func (y *YouTube) ownUpcoming(ctx context.Context, accessToken string, req LiveN
 			continue
 		}
 		start, err := time.Parse(time.RFC3339, b.Snippet.ScheduledStartTime)
-		if err != nil || start.Sub(time.Now()) > ytLiveNowLead+time.Minute || time.Now().Sub(start) > 10*time.Minute {
+		want := req.AttemptAt.Add(ytLiveNowLead)
+		if err != nil || start.Sub(want) > ytReuseWindow || want.Sub(start) > ytReuseWindow {
 			continue
 		}
 		return b, nil

@@ -107,14 +107,23 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 	if sendsCaptionPOST(d) {
 		req.CaptionPOST, req.CaptionDelay = true, time.Duration(d.DelaySeconds)*time.Second
 	}
-	// THE ATTEMPT MARKER IS PERSISTED BEFORE THE INSERT. If it cannot be, nothing is inserted: a broadcast made with
-	// no marker could never be recognised as ours later. A marker already on the row (an earlier attempt) is what
-	// allows the open to reuse an unrecorded broadcast of ours.
-	req.MayReuse = d.Lifecycle.OpenAttemptMS != 0
-	if !req.MayReuse {
-		if c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = c.clock().UnixMilli() }) == nil {
-			return
+	// THE ATTEMPT MARKER proves a broadcast is ours, so it is stamped immediately before EACH insert (never by an
+	// attempt that stops earlier), is believed for twelve minutes only, and lets the open reuse only a broadcast whose
+	// start time is where that insert would have put it. See oauth.LiveNowRequest.AttemptAt.
+	if ms := d.Lifecycle.OpenAttemptMS; ms != 0 {
+		if at := time.UnixMilli(ms); c.clock().Sub(at) > oauth.LiveNowAttemptMaxAge {
+			if d = c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = 0 }); d == nil {
+				return
+			}
+		} else {
+			req.AttemptAt = at
 		}
+	}
+	req.BeforeInsert = func() error {
+		if c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = c.clock().UnixMilli() }) == nil {
+			return errors.New("the lifecycle record could not be written")
+		}
+		return nil
 	}
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
@@ -236,6 +245,11 @@ func (c *lifecycleCoordinator) releaseYouTube(ctx context.Context, prov oauth.Br
 		cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 		st, serr := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
 		cancel()
+		if errors.Is(serr, oauth.ErrBroadcastNotListed) {
+			// Deleted in Studio (or already by polyemesis): nothing left to release, so stop asking.
+			c.forgetBroadcast(d)
+			return
+		}
 		if serr != nil {
 			c.log.Warn("broadcast lifecycle: could not read the broadcast polyemesis created to release it; will retry",
 				"destination", d.Name, bcAttr(broadcastID), "err", scrubSourceKey(serr.Error(), d.StreamKey))
@@ -260,6 +274,9 @@ func deleteNeverAiredByID(ctx context.Context, prov oauth.BroadcastLifecycler, a
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 	st, err := prov.BroadcastState(cctx, accessToken, broadcastID)
+	if errors.Is(err, oauth.ErrBroadcastNotListed) {
+		return false, nil // already gone: nothing to delete, and nothing left to retry
+	}
 	if err != nil {
 		return false, err
 	}
@@ -276,6 +293,13 @@ func (c *lifecycleCoordinator) deleteOrphanedNeverAired(ctx context.Context, pro
 	if t.Platform != db.PlatformYouTube || !t.created ||
 		!(strings.EqualFold(t.Phase, phaseCreated) || strings.EqualFold(t.Phase, phaseReady)) {
 		return false
+	}
+	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {
+		// The give-up budget applies to this cleanup too (it used to sit below this step and never ran).
+		c.untrack(t.destinationID)
+		c.log.Warn("broadcast lifecycle: giving up on deleting a deleted destination's never-aired broadcast; delete it "+
+			"in YouTube Studio", "destination", t.Name, bcAttr(t.BroadcastID))
+		return true
 	}
 	if _, err := c.store.GetDestination(t.destinationID); !errors.Is(err, db.ErrNotFound) {
 		return true // the row is there, or the store cannot say: do nothing now, the next sweep asks again
@@ -317,6 +341,11 @@ func (s *Server) deleteNeverAiredOnDestinationDelete(ctx context.Context, d *db.
 	acct, err := s.tokenFor(cctx, *d.AccountID)
 	if err == nil {
 		_, err = deleteNeverAiredByID(cctx, prov, acct.AccessToken, d.Lifecycle.BroadcastID)
+	}
+	if err == nil && s.lifecycle != nil {
+		// Done: the coordinator must not keep reading a broadcast that no longer exists.
+		s.lifecycle.untrack(d.ID)
+		s.lifecycle.forgetTarget(d.ID)
 	}
 	if err != nil {
 		return "the broadcast polyemesis created for " + d.Name + " (" + d.Lifecycle.BroadcastID +
