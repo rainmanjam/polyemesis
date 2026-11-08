@@ -54,10 +54,7 @@ func BenchmarkCheckerDigits(b *testing.B) {
 // TestCheckerCostGate holds the whole stateless checker to the same 15 µs
 // ceiling as the form alone: CheckFast runs on the adapter goroutine.
 func TestCheckerCostGate(t *testing.T) {
-	gate := int64(costGateNs)
-	if testing.CoverMode() != "" {
-		gate *= 10
-	}
+	gate := gateNs(t, costGateNs)
 	for name, fn := range map[string]func(*testing.B){
 		"plain": BenchmarkCheckerPlain, "busy": BenchmarkCheckerBusy, "digits": BenchmarkCheckerDigits,
 		"500-names": BenchmarkCheckerManyNames,
@@ -137,10 +134,7 @@ func BenchmarkNearDupCapEvict(b *testing.B) {
 }
 
 func TestWindowedCostGate(t *testing.T) {
-	gate := int64(costGateNs)
-	if testing.CoverMode() != "" {
-		gate *= 10
-	}
+	gate := gateNs(t, costGateNs)
 	for name, fn := range map[string]func(*testing.B){"near-dup": BenchmarkNearDupWorst, "raid": BenchmarkRaidWorst, "near-dup-at-cap": BenchmarkNearDupCapEvict} {
 		r := fastestOf(fn)
 		t.Logf("%s worst case: %d ns/op, %d allocs/op", name, r.NsPerOp(), r.AllocsPerOp())
