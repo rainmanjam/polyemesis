@@ -267,9 +267,10 @@ gets them and what it needs here. A platform marked *not yet* is not connected.
 | Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
 
 **X** subscribes four Activity API events on the account's existing webhook and
-needs the `follows.read` scope for the Premium one, so an X account connected
-before that scope was added reconnects once (follows and broadcasts work without
-it, and the subscribe kind reports `reconnect`). Follows and subscriptions are
+needs the `follows.read` scope for the Premium one (and, per part of X's docs,
+for follows too), so an X account connected before that scope was added
+reconnects once. Broadcasts work without it; a kind X refuses for the missing
+scope reports `reconnect`, and chat is unaffected. Follows and subscriptions are
 requested with `direction: inbound`, and each delivery is checked against its
 `target` again, so the broadcaster following someone is never an alert. A
 Premium subscription arrives only when Creator Subscriptions are on for the

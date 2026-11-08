@@ -304,14 +304,18 @@ func TestXActivityNeverReplaysHistory(t *testing.T) {
 	clock.Store(restart.Add(time.Hour).UnixNano())
 	a.IngestWebhook(followEnvelope("late-1", restart.Add(40*time.Minute).Format(time.RFC3339Nano), xActMe, xActViewer, xActMe))
 	settle(t, a, sink, "m2")
+	// No usable created_at: the floor and age limit cannot be checked, so it is stale, not stamped now.
+	a.IngestWebhook(followEnvelope("nodate-1", "", xActMe, xActViewer, xActMe))
+	a.IngestWebhook(followEnvelope("baddate-1", "not-a-time", xActMe, xActViewer, xActMe))
+	settle(t, a, sink, "m3")
 	if n := len(sink.got()); n != 1 {
 		t.Errorf("events = %d, want only the live one", n)
 	}
 	a.act.mu.Lock()
 	stale := a.act.stale
 	a.act.mu.Unlock()
-	if stale != 3 {
-		t.Errorf("stale = %d, want 3", stale)
+	if stale != 5 {
+		t.Errorf("stale = %d, want 5", stale)
 	}
 }
 

@@ -71,7 +71,7 @@
   },
   {
     "platform": "x",
-    "scopeVersion": 3,
+    "scopeVersion": 2,
     "scopes": [
       "broadcast.read",
       "broadcast.write",

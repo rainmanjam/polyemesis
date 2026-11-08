@@ -136,12 +136,12 @@ func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T)
 
 // TestXScopesAreTheListTheLedgerRecords keeps Scopes and ScopeVersion honest
 // against the append-only ledger. Version 2 added tweet.write and media.write so
-// clips can be posted; version 3 added follows.read; an older account reconnects once.
+// clips can be posted; follows.read joined it in the same release; an older account reconnects once.
 func TestXScopesAreTheListTheLedgerRecords(t *testing.T) {
 	x := &X{}
-	if got := x.ScopeVersion(); got != 3 {
-		t.Errorf("ScopeVersion() = %d, want 3: version 2 asks for the two publish scopes, version 3 adds "+
-			"follows.read for Premium-subscription activity, and an older account has to be told to reconnect", got)
+	if got := x.ScopeVersion(); got != 2 {
+		t.Errorf("ScopeVersion() = %d, want 2: version 2 asks for the publish scopes and follows.read "+
+			"(Premium-subscription activity), and an account on version 1 has to be told to reconnect", got)
 	}
 	if got := x.Platform(); got != db.PlatformX {
 		t.Errorf("Platform() = %q, want db.PlatformX", got)

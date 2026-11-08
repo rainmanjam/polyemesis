@@ -110,19 +110,6 @@
     "scopes": [
       "broadcast.read",
       "broadcast.write",
-      "media.write",
-      "offline.access",
-      "tweet.read",
-      "tweet.write",
-      "users.read"
-    ]
-  },
-  {
-    "platform": "x",
-    "scopeVersion": 3,
-    "scopes": [
-      "broadcast.read",
-      "broadcast.write",
       "follows.read",
       "media.write",
       "offline.access",

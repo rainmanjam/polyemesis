@@ -24,9 +24,9 @@ package oauth
 // offline.access (a refresh token), users.read (GET /2/users/me, the only endpoint
 // that returns a handle), and tweet.read (the broadcast.chat activity
 // subscription, which the activity API gates on tweet.read for every event that is
-// not a DM, like or mute), and follows.read (the subscriptions.subscribe activity
-// event, a private event the Activity API gates on follows.read; follow.follow and
-// broadcast.start/end need only tweet.read).
+// not a DM, like or mute), and follows.read (Premium subscriptions: the
+// subscriptions.subscribe activity event is gated on follows.read, and part of X's
+// docs say follow.follow is too; broadcast.start/end need only tweet.read).
 
 import (
 	"bytes"
@@ -121,9 +121,8 @@ func (x *X) Platform() db.Platform { return db.PlatformX }
 // Scopes is the list the consent screen shows. See the file header for why each
 // one is here.
 //
-// follows.read is what the viewer-activity source needs: X sends a private
-// subscriptions.subscribe event (a Premium subscription to the broadcaster) only to an
-// app the user granted it.
+// follows.read is what the viewer-activity source needs for Premium subscriptions
+// (subscriptions.subscribe), and per part of X's docs for follow.follow too.
 //
 // The last two are what clip publishing needs (tweet.write, media.write), read
 // from the platform registry so publish and sign-in cannot disagree.
@@ -138,14 +137,13 @@ func (x *X) Scopes() []string {
 	}, platform.Must(platform.X).PublishScopes...)
 }
 
-// ScopeVersion is 3. Version 1 was the five Livestream scopes; version 2 adds
-// tweet.write and media.write so clips can be posted, which an account connected
-// at version 1 does not hold and has to reconnect once to get; version 3 adds
-// follows.read for Premium-subscription activity, and an account connected earlier
-// reconnects once to get it (its other activity kinds work without). Bump it by hand
+// ScopeVersion is 2. Version 1 was the five Livestream scopes; version 2 adds
+// tweet.write and media.write so clips can be posted, and follows.read for
+// Premium-subscription activity, which an account connected at version 1 does not
+// hold and has to reconnect once to get. Bump it by hand
 // when Scopes changes; the scope ledger in testdata/scope-versions.json must
 // match.
-func (x *X) ScopeVersion() int { return 3 }
+func (x *X) ScopeVersion() int { return 2 }
 
 // PKCE is ON. X's Livestream authentication guide recommends the PKCE flow for
 // every new integration; the challenge is sent at authorize and the verifier at

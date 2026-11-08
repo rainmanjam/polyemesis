@@ -362,7 +362,16 @@ func (x *XAdapter) activityEvent(ev xWebhookEvent) (activity.Event, bool) {
 	a := &x.act
 	now := x.cfg.Now()
 	at := now
-	if t, err := time.Parse(time.RFC3339Nano, ev.CreatedAt); err == nil {
+	t, err := time.Parse(time.RFC3339Nano, ev.CreatedAt)
+	if err != nil {
+		// Without a creation time the replay floor and age limit cannot be applied, and a
+		// restart clears the in-memory dedupe, so an activity delivery is treated as stale.
+		switch ev.Type {
+		case xEventFollow, xEventSubscribe, xEventBroadcastStart, xEventBroadcastEnd:
+			a.bump(&a.stale)
+			return activity.Event{}, false
+		}
+	} else {
 		if t.Before(a.floor) || now.Sub(t) > xActivityMaxAge {
 			a.bump(&a.stale)
 			return activity.Event{}, false

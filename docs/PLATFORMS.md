@@ -186,9 +186,9 @@ on every broadcast the account hosts, not one. Viewer count is the running
 broadcast's `total_watching` (live viewers; `total_watched` is cumulative) from
 `GET /2/broadcasts`, read by the analytics sampler through its own seam rather
 than as a `LiveStatter`. All of it uses scopes the connection already holds
-(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`). Scope
-version 3 adds `follows.read`, which only the Premium-subscription alert needs
-(see ACTIVITY.md). A chat message's id is the `timestamp` X answers a send
+(`broadcast.read`, `broadcast.write`, `users.read`, `tweet.read`), except
+`follows.read` (part of scope version 2), which the Premium-subscription alert
+needs and, per part of X's docs, the follow alert too (see ACTIVITY.md). A chat message's id is the `timestamp` X answers a send
 with (nanoseconds, as a string), which is also what delete takes as `message_id`.
 
 The calls use the routes in X's
