@@ -264,7 +264,7 @@ gets them and what it needs here. **Nothing below is connected in this release.*
 | X | Activity API events on the existing webhook | not yet |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
 | Rumble | the recent follower, subscriber, gifted-sub and rant lists in the existing get-data poll; no extra request, no new key | built, not yet checked against a live account. Rumble sends no event id, so each item is identified by its own fields, and the first poll after a start only records what is already there (nothing is replayed). A gifted sub carries no timestamp, so it is stamped when seen. A list Rumble does not send for your channel shows as unavailable |
-| Facebook | a reaction tally from the existing comments loop (off by default) | not yet |
+| Facebook | a reaction tally from the existing comments loop (off by default). Stars are not exposed by the Graph API | reactions built; needs Live Video API App Review |
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is
@@ -278,7 +278,9 @@ attached, so a follow while you are offline is not reported later.
 - **No MQTT topic, no Stream Deck key** for activity yet. Both are planned
   follow-ups; neither is wired.
 - **A platform's live-status webhook for Facebook** is not built. Reactions are
-  read by polling when that source is added.
+  read by polling the live video's `reactions` edge, every third comment poll and at
+  least 30 s apart; the first sample after a start or reconnect only sets the
+  baseline, so nothing is replayed.
 - **The alerts overlay has component tests, not a browser run.** It has not yet
   been checked in headless Chromium at 1920 x 1080 as the chat overlay has, nor in
   OBS itself.

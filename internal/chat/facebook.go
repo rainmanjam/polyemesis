@@ -71,6 +71,9 @@ type FacebookConfig struct {
 	// (or the Page is no longer managed), and the actions that need a Page say
 	// so instead of trying the user token.
 	PageAccess func(ctx context.Context) (pageID, token string, err error)
+	// ReactionsEnabled says whether the reaction tally is switched on in the
+	// Activity settings. Nil is off, and an off tally makes no request.
+	ReactionsEnabled func() bool
 
 	APIBase string
 	HTTP    *http.Client
@@ -96,6 +99,8 @@ type FacebookAdapter struct {
 	pageID, pageTok string
 	pageExpiry      time.Time
 	notPageUntil    time.Time
+	// react is the reaction tally's state; see facebook_activity.go.
+	react fbReactions
 }
 
 // NewFacebook builds the adapter.
@@ -231,6 +236,7 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 	f.mu.Lock()
 	f.lastSeen = f.cfg.Now().Add(-fbDefaultBackfill)
 	f.mu.Unlock()
+	f.resetReactions()
 
 	interval := f.cfg.Interval
 	for ctx.Err() == nil {
@@ -278,6 +284,7 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 			interval = f.cfg.Interval
 			pause = interval
 			f.setHealth(StateLive, "")
+			f.pollReactions(ctx, id, sink)
 		}
 
 		if !f.cfg.Sleep(ctx, pause) {
