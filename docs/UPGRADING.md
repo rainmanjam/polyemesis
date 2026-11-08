@@ -243,6 +243,97 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.16.0
+
+**X Livestream is on by default.** `POLYEMESIS_X_LIVESTREAM` unset or empty now
+switches the X Livestream family on (stream key, go-live, chat read and send,
+moderation); 0.15.0 left it off. If you relied on it being off, set
+`POLYEMESIS_X_LIVESTREAM=0` (`false`, `off` and `no` also work) before you
+start 0.16.0. Any other value is read as before: `1` or `true` is on, anything
+else is off. `POLYEMESIS_X_PUBLISH` and `POLYEMESIS_CAPTIONS_FACEBOOK` stay off
+by default.
+
+**Reconnect Twitch and X once.** Twitch's scope version moves from 5 to 6 and
+X's from 1 to 2. The console shows a **Reconnect** banner naming what
+the reconnect unlocks: for Twitch, moderation tools, Shield Mode, moderators and
+VIPs, AutoMod and live alerts; for X, follow and subscription alerts and clip
+posting. Connecting X now asks for `tweet.write` and `media.write`, which only
+posting clips needs; livestreaming and chat do not. The banner can be dismissed
+per account and version; the newer features stay off for that account until you
+reconnect.
+
+**Recommended automod protection is offered, and on for a fresh install.** A
+fresh install starts with the pack on. An existing install is never switched on
+silently: its settings carry no answer (`automod.protection.state` is empty),
+nothing new runs, and the console offers the pack with **Turn on** and **Not
+now** (Settings, Pipeline, Recommended protection, and a banner above the
+Flagged list on the Chat page). With the pack on, a hit for hate and slurs,
+doxxing, scams, floods, impersonation of your moderators or a raid is **flagged
+in the Flagged list and held off every overlay** (release it with **Show on
+overlay**); shouting, emote walls, near-duplicate repeats and contextual hate
+terms flag only. **Nothing is sent to a platform until you arm a ladder rung**
+(delete, time out or ban, per platform, off by default). A matrix cell for the
+pack is refused on save unless the pack is on in the same save. On a fresh
+install the Jev model is asked only about the hard cases
+(`automod.protection.modelScope` is `hard`); an existing install keeps `all`, as
+before. `docs/AUTOMOD.md` has the exact behaviour.
+
+**New Twitch destinations connected through an account default to RTMPS.**
+Fetching the stream key hands back `rtmps://live.twitch.tv:443/app` for a
+destination with no URL yet, which also passes networks that block port 1935.
+A destination that already has a URL keeps its scheme across a key refresh, so
+plain RTMP on a network that refuses TLS survives.
+
+**Archive compression is refused.** It never had a setting, so every archive
+job failed. `POST /api/v1/library/recordings/{id}/jobs/media.archive` now
+answers `400` ("archive compression is not available yet"), and the Jobs page
+no longer lists the kind. A job of that kind stored by an earlier version still
+lists, as "Archive compression", and fails with a message that says so. A script
+that queued archive jobs must stop.
+
+**Platform bitrate warnings follow the platforms' own pages.** Twitch's audio
+warning is now at 160 kbps (it was 320), so a destination sending more than that
+to Twitch shows the audio-bitrate warning. Kick's 160 kbps audio warning is
+gone, and Twitch's 6000 kbps video figure is advice and no longer a ceiling.
+`GET /api/v1/services` reflects these.
+
+**Other input that is now refused or counted differently.**
+
+- Saving a destination (`PUT /api/v1/destinations/{id}`) refuses a routing
+  profile that would stream silence, as creating one already did. A save that
+  changes neither the profile nor the programme is still accepted.
+- The default programme is the running source, not the first row, in Settings,
+  `/system`, transcripts and the OBS bridge; the first row only when none is
+  running.
+- With `trustProxyHeaders` on, all four forwarded headers are believed only from
+  loopback and `trustedProxies`. A proxy on another host or container, including
+  one on the Docker host (`172.17.0.1`), must be listed in `trustedProxies`, or
+  the session cookie loses its `Secure` flag and OAuth redirect URIs fall back to
+  the internal `http://` address. The startup log says so.
+
+**Rolling back to 0.15.0.** The schema version stays 1. The new objects are
+additive and idempotent (`CREATE TABLE IF NOT EXISTS viewer_notes`, and a
+nullable `destinations.preset_id` column), and the 0.15.0 binary was checked to
+open a 0.16.0 database and load its settings: `db.Open`, `GetSettings` and
+`Validate` all succeed on the empty 0.16.0 fixture and on a 0.16.0 database
+with protection turned on and saved (with Twitch native-term records),
+activity enabled, a viewer note and a destination with a preset. Three things
+to know, because 0.15.0 does not understand what 0.16.0 wrote:
+
+- 0.15.0 ignores the `automod.protection` and `activity` settings blocks, and
+  the first settings save under 0.15.0 drops them. Rolling forward again, an
+  existing install is offered the pack afresh, and the Twitch records of which
+  blocked terms polyemesis added are gone (**Remove the terms polyemesis
+  added** can then no longer find them; remove those terms in Twitch).
+- A chat overlay saved with an `alerts` style block is refused by 0.15.0 (it
+  rejects style fields it does not know): that overlay's style fails to parse
+  until you remove the block or restore the overlay.
+- `viewer_notes` stays in the file and is never read, and `preset_id` is not
+  used. Nothing needs cleaning up.
+
+Back up `<dataDir>` first all the same, with `secret.key`: the checks above
+cover a clean downgrade, not a database a 0.16.0 run has since changed.
+
 ### Upgrading to 0.15.0
 
 **Check your Kick and Twitch destinations before you upgrade.** An Amazon IVS
