@@ -1,3 +1,4 @@
+import { invalidateRoles } from "@/lib/viewerRoles";
 import { chatExportUrl, type ChatExportFormat } from "@/lib/chatExport";
 import { WIRE } from "@/lib/contract/wire";
 import { setDisplayTimeZone } from "@/lib/format";
@@ -1478,12 +1479,12 @@ export const api = {
   addChatModerator: (account: string | undefined, userId: string) => {
     const q = new URLSearchParams({ platform: "x", userId });
     if (account) q.set("account", account);
-    return post<{ ids: string[] }>(`/chat/moderators?${q.toString()}`, {});
+    return post<{ ids: string[] }>(`/chat/moderators?${q.toString()}`, {}).finally(() => invalidateRoles("x", account));
   },
   removeChatModerator: (account: string | undefined, userId: string) => {
     const q = new URLSearchParams({ platform: "x", userId });
     if (account) q.set("account", account);
-    return del<{ ids: string[] }>(`/chat/moderators?${q.toString()}`);
+    return del<{ ids: string[] }>(`/chat/moderators?${q.toString()}`).finally(() => invalidateRoles("x", account));
   },
 
   unbanChatUser: (m: { platform: ChatPlatform; account?: string; userId: string }) => {
@@ -1598,13 +1599,17 @@ export const api = {
     read: <T,>(resource: string, account: string | undefined, params: Record<string, string> = {}) =>
       get<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
     post: <T,>(resource: string, account: string | undefined, body: unknown) =>
-      post<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body ?? {}),
+      post<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body ?? {}).finally(() => {
+        if (resource === "roles") invalidateRoles("twitch", account);
+      }),
     put: <T,>(resource: string, account: string | undefined, body: unknown) =>
       put<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
     patch: <T,>(resource: string, account: string | undefined, body: unknown) =>
       patch<T>(`/chat/twitch/${resource}${twitchToolQuery(account)}`, body),
     remove: <T,>(resource: string, account: string | undefined, params: Record<string, string>) =>
-      del<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`),
+      del<T>(`/chat/twitch/${resource}${twitchToolQuery(account, params)}`).finally(() => {
+        if (resource === "roles") invalidateRoles("twitch", account);
+      }),
   },
 
   // --- platforms ---

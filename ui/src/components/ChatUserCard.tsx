@@ -533,14 +533,19 @@ export function ChatUserCard({
           </div>
         </div>
 
-        {/* ---- the platform's own tools, where it has them ---- */}
-        <ChatUserTools
-          platform={platform}
-          account={account}
-          authorId={authorId}
-          authorName={card?.name || authorName}
-          channel={channel ?? messages.find((m) => m.channel)?.channel}
-        />
+        {/* ---- the platform's own tools, where it has them ----
+            Not for the broadcaster or the connected account itself: a line this
+            server echoed carries the account ref as its author id, and there is
+            no one to warn, make a VIP or make a moderator in either case. */}
+        {!card?.broadcaster && !(account && authorId === account) && (
+          <ChatUserTools
+            platform={platform}
+            account={account}
+            authorId={authorId}
+            authorName={card?.name || authorName}
+            channel={channel ?? messages.find((m) => m.channel)?.channel}
+          />
+        )}
 
         {/* ---- the operator's private notes ---- */}
         <ChatUserNotes platform={platform} account={account} authorId={authorId} />

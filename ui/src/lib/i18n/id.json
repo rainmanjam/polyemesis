@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Catatan penonton ini tidak dapat dimuat.",
   "viewerCard.deleteNote": "Hapus catatan",
   "viewerCard.deleteConfirm": "Hapus catatan — konfirmasi",
-  "viewerCard.tagBadgeTitle": "Tag: {tags}"
+  "viewerCard.tagBadgeTitle": "Tag: {tags}",
+  "viewerCard.notInFirstPage": "YouTube hanya mencantumkan {count} moderator pertama dan penonton ini tidak termasuk di dalamnya. Jika dia moderator, hapus melalui YouTube Studio."
 }

@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Bu izleyicinin notu yüklenemedi.",
   "viewerCard.deleteNote": "Notu sil",
   "viewerCard.deleteConfirm": "Notu sil — onayla",
-  "viewerCard.tagBadgeTitle": "Etiketler: {tags}"
+  "viewerCard.tagBadgeTitle": "Etiketler: {tags}",
+  "viewerCard.notInFirstPage": "YouTube yalnızca ilk {count} moderatörü listeler ve bu izleyici onların arasında değil. Moderatörse YouTube Studio'dan kaldırın."
 }

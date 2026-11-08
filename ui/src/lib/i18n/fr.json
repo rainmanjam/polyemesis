@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Impossible de charger la note de ce spectateur.",
   "viewerCard.deleteNote": "Supprimer la note",
   "viewerCard.deleteConfirm": "Supprimer la note — confirmer",
-  "viewerCard.tagBadgeTitle": "Étiquettes : {tags}"
+  "viewerCard.tagBadgeTitle": "Étiquettes : {tags}",
+  "viewerCard.notInFirstPage": "YouTube ne liste que les {count} premiers modérateurs et ce spectateur n'en fait pas partie. S'il est modérateur, retirez-le dans YouTube Studio."
 }

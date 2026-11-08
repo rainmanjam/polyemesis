@@ -11,11 +11,13 @@ package api
 // note text.
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
 // viewerNoteBody is a viewer note on the wire. Note and Tags are what the
@@ -51,12 +53,27 @@ func viewerNoteKey(r *http.Request) (db.Platform, string, string) {
 		strings.TrimSpace(q.Get("authorId"))
 }
 
+// viewerNoteTarget reads the addressing and refuses a platform that is not in
+// the registry, so an arbitrary string cannot become a row key. Spelling is
+// exact, as it is for the other /chat routes. It writes the 400 itself.
+func viewerNoteTarget(w http.ResponseWriter, r *http.Request) (db.Platform, string, string, bool) {
+	p, account, authorID := viewerNoteKey(r)
+	if p == "" || authorID == "" {
+		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+		return "", "", "", false
+	}
+	if _, ok := platform.ByEnum(string(p)); !ok {
+		writeError(w, http.StatusBadRequest, "unknown platform: "+string(p))
+		return "", "", "", false
+	}
+	return p, account, authorID, true
+}
+
 // handleViewerNoteGet answers one viewer's note (an empty one when there is
 // none, so the card always has something to edit), or, with no authorId, the
 // list of tagged viewers.
 func (s *Server) handleViewerNoteGet(w http.ResponseWriter, r *http.Request) {
-	platform, account, authorID := viewerNoteKey(r)
-	if authorID == "" {
+	if _, _, authorID := viewerNoteKey(r); authorID == "" {
 		list, err := s.store.ListViewerTags()
 		if err != nil {
 			writeStoreError(w, err)
@@ -69,8 +86,8 @@ func (s *Server) handleViewerNoteGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"viewers": out, "presetTags": db.ViewerPresetTags})
 		return
 	}
-	if platform == "" {
-		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+	platform, account, authorID, ok := viewerNoteTarget(w, r)
+	if !ok {
 		return
 	}
 	n, ok, err := s.store.GetViewerNote(platform, account, authorID)
@@ -94,9 +111,8 @@ func viewerNoteToBody(n db.ViewerNote) viewerNoteBody {
 // handleViewerNotePut replaces a viewer's note and tags. Saving it empty
 // removes it, so there is no stored note that says nothing.
 func (s *Server) handleViewerNotePut(w http.ResponseWriter, r *http.Request) {
-	platform, account, authorID := viewerNoteKey(r)
-	if platform == "" || authorID == "" {
-		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+	platform, account, authorID, ok := viewerNoteTarget(w, r)
+	if !ok {
 		return
 	}
 	var req viewerNoteRequest
@@ -105,8 +121,9 @@ func (s *Server) handleViewerNotePut(w http.ResponseWriter, r *http.Request) {
 	}
 	note, tags, err := db.NormalizeViewerNote(req.Note, req.Tags)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "the note or its tags are over the limit: at most "+
-			"1000 characters, 10 tags of up to 32 characters each")
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"the note or its tags are over the limit: at most %d characters, %d tags of up to %d characters each",
+			db.MaxViewerNoteLen, db.MaxViewerTags, db.MaxViewerTagLen))
 		return
 	}
 	by := "token"
@@ -128,9 +145,8 @@ func (s *Server) handleViewerNotePut(w http.ResponseWriter, r *http.Request) {
 
 // handleViewerNoteDelete removes a viewer's note. Missing is success.
 func (s *Server) handleViewerNoteDelete(w http.ResponseWriter, r *http.Request) {
-	platform, account, authorID := viewerNoteKey(r)
-	if platform == "" || authorID == "" {
-		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+	platform, account, authorID, ok := viewerNoteTarget(w, r)
+	if !ok {
 		return
 	}
 	if err := s.store.DeleteViewerNote(platform, account, authorID); err != nil {

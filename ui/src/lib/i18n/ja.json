@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "この視聴者のメモを読み込めませんでした。",
   "viewerCard.deleteNote": "メモを削除",
   "viewerCard.deleteConfirm": "メモを削除 — 確認",
-  "viewerCard.tagBadgeTitle": "タグ: {tags}"
+  "viewerCard.tagBadgeTitle": "タグ: {tags}",
+  "viewerCard.notInFirstPage": "YouTube が一覧に表示するのは最初の{count}人のモデレーターだけで、この視聴者はその中にいません。モデレーターの場合は YouTube Studio で解除してください。"
 }

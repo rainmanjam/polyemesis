@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "De notitie van deze kijker kon niet worden geladen.",
   "viewerCard.deleteNote": "Notitie verwijderen",
   "viewerCard.deleteConfirm": "Notitie verwijderen — bevestigen",
-  "viewerCard.tagBadgeTitle": "Labels: {tags}"
+  "viewerCard.tagBadgeTitle": "Labels: {tags}",
+  "viewerCard.notInFirstPage": "YouTube toont alleen de eerste {count} moderators en deze kijker staat er niet bij. Als die een moderator is, verwijder die dan in YouTube Studio."
 }

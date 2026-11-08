@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Die Notiz dieses Zuschauers konnte nicht geladen werden.",
   "viewerCard.deleteNote": "Notiz löschen",
   "viewerCard.deleteConfirm": "Notiz löschen — bestätigen",
-  "viewerCard.tagBadgeTitle": "Tags: {tags}"
+  "viewerCard.tagBadgeTitle": "Tags: {tags}",
+  "viewerCard.notInFirstPage": "YouTube listet nur die ersten {count} Moderatoren, und dieser Zuschauer ist nicht darunter. Falls er Moderator ist, entferne ihn in YouTube Studio."
 }

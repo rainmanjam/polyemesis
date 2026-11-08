@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Не удалось загрузить заметку об этом зрителе.",
   "viewerCard.deleteNote": "Удалить заметку",
   "viewerCard.deleteConfirm": "Удалить заметку — подтвердить",
-  "viewerCard.tagBadgeTitle": "Теги: {tags}"
+  "viewerCard.tagBadgeTitle": "Теги: {tags}",
+  "viewerCard.notInFirstPage": "YouTube показывает только первых {count} модераторов, и этого зрителя среди них нет. Если он модератор, снимите его в YouTube Studio."
 }

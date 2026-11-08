@@ -73,7 +73,13 @@ describe("viewer notes on the card", () => {
     noteGet.mockResolvedValue({ ...empty, tags: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] } as never);
     draw();
     const box = (await screen.findByLabelText("Notes")) as HTMLTextAreaElement;
-    expect(box.maxLength).toBe(1000);
+    // Counted and cut by code point, to match the server: an emoji is one.
+    fireEvent.change(box, { target: { value: "😀".repeat(1000) } });
+    expect(screen.getByText("1000 / 1000")).toBeTruthy();
+    expect([...box.value].length).toBe(1000);
+    fireEvent.change(box, { target: { value: "😀".repeat(1001) } });
+    expect([...box.value].length).toBe(1000);
+    expect(box.value.endsWith("\ud83d")).toBe(false); // no lone surrogate
     fireEvent.change(screen.getByLabelText("New tag"), { target: { value: "eleventh" } });
     fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
     expect(screen.queryByText("eleventh")).toBeNull();

@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "无法加载该观众的备注。",
   "viewerCard.deleteNote": "删除备注",
   "viewerCard.deleteConfirm": "删除备注 — 确认",
-  "viewerCard.tagBadgeTitle": "标签:{tags}"
+  "viewerCard.tagBadgeTitle": "标签:{tags}",
+  "viewerCard.notInFirstPage": "YouTube 只列出前 {count} 位版主,而该观众不在其中。如果对方是版主,请在 YouTube Studio 中取消。"
 }

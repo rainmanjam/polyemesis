@@ -16,6 +16,9 @@ const EMPTY: TagMap = new Map();
 let current: TagMap = EMPTY;
 let started = false;
 let inflight = false;
+// A refresh asked for while a read is in flight (a note saved a moment after the
+// read began) would otherwise be dropped, leaving the badge stale.
+let pending = false;
 const listeners = new Set<() => void>();
 
 export const viewerTagKey = (platform: ChatPlatform | string, account: string | undefined, authorId: string) =>
@@ -27,7 +30,10 @@ function emit() {
 
 /** Re-reads the lookup. Called after a note is saved or deleted. */
 export function refreshViewerTags(): void {
-  if (inflight) return;
+  if (inflight) {
+    pending = true;
+    return;
+  }
   inflight = true;
   Promise.resolve()
     .then(() => api.viewerTags())
@@ -44,6 +50,10 @@ export function refreshViewerTags(): void {
     })
     .finally(() => {
       inflight = false;
+      if (pending) {
+        pending = false;
+        refreshViewerTags();
+      }
     });
 }
 
@@ -70,4 +80,5 @@ export function resetViewerTags(): void {
   current = EMPTY;
   started = false;
   inflight = false;
+  pending = false;
 }

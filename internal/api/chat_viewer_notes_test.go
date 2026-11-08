@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -79,5 +80,29 @@ func TestViewerNotesAreRefusedToAReadToken(t *testing.T) {
 			body = map[string]any{"note": "x"}
 		}
 		send(t, h, bearer(read), m, path, body, http.StatusForbidden)
+	}
+}
+
+func TestViewerNotesRefuseAnUnknownPlatformAndNameTheLimitsFromTheConstants(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	const bad = "/api/v1/chat/users/notes?platform=myspace&authorId=u1"
+	send(t, h, sign, http.MethodGet, bad, nil, http.StatusBadRequest)
+	send(t, h, sign, http.MethodPut, bad, map[string]any{"note": "x"}, http.StatusBadRequest)
+	send(t, h, sign, http.MethodDelete, bad, nil, http.StatusBadRequest)
+	// Nothing was stored under the made-up platform.
+	var list struct {
+		Viewers []viewerTagsBody `json:"viewers"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/chat/users/notes", nil, http.StatusOK), &list)
+	if len(list.Viewers) != 0 {
+		t.Fatalf("a row was stored for an unknown platform: %+v", list)
+	}
+
+	raw := send(t, h, sign, http.MethodPut, "/api/v1/chat/users/notes?platform=twitch&authorId=u1",
+		map[string]any{"note": strings.Repeat("x", db.MaxViewerNoteLen+1)}, http.StatusBadRequest)
+	want := fmt.Sprintf("at most %d characters, %d tags of up to %d characters", db.MaxViewerNoteLen, db.MaxViewerTags, db.MaxViewerTagLen)
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("the 400 must be built from the db limits (%q): %s", want, raw)
 	}
 }

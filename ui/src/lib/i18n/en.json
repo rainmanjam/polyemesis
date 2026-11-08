@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Could not load this viewer's note.",
   "viewerCard.deleteNote": "Delete note",
   "viewerCard.deleteConfirm": "Delete note — confirm",
-  "viewerCard.tagBadgeTitle": "Tags: {tags}"
+  "viewerCard.tagBadgeTitle": "Tags: {tags}",
+  "viewerCard.notInFirstPage": "YouTube lists only the first {count} moderators and this viewer is not among them. If they are a moderator, remove them in YouTube Studio."
 }

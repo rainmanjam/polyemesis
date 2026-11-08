@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { ChatUserCard } from "./ChatUserCard";
-import { resetRoleCache } from "./ChatUserTools";
+import { ChatUserTools } from "./ChatUserTools";
+import { cachedHolders, resetRoleCache, storeHolders } from "@/lib/viewerRoles";
 import { api } from "@/lib/api";
 import type { ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
 
@@ -89,6 +90,8 @@ describe("viewer card platform tools", () => {
     expect(btn("Warn").disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(/Reason for the warning/), { target: { value: "  spoilers  " } });
     fireEvent.click(btn("Warn"));
+    expect(twPost).not.toHaveBeenCalled();
+    fireEvent.click(btn(/Warn — confirm/));
     await waitFor(() => expect(twPost).toHaveBeenCalledWith("warnings", "acct", { userId: "u1", reason: "spoilers" }));
   });
 
@@ -150,6 +153,83 @@ describe("viewer card platform tools", () => {
   it("Other platforms show no tools row", async () => {
     draw("facebook");
     await waitFor(() => expect(chatUser).toHaveBeenCalled());
+    expect(screen.queryByTestId("chat-user-tools")).toBeNull();
+  });
+
+  it("YouTube: a full first page says the viewer may be further down, not that they are not a moderator", async () => {
+    ytList.mockResolvedValue({
+      moderators: Array.from({ length: 50 }, (_, i) => ({ id: `m${i}`, channelId: `c${i}` })),
+    });
+    draw("youtube");
+    await waitFor(() => expect(screen.getByText(/50 YouTube quota units/)).toBeTruthy());
+    fireEvent.click(btn("Remove moderator"));
+    fireEvent.click(btn(/Remove moderator — confirm/));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("only the first 50 moderators"));
+    expect(screen.getByRole("alert").textContent).not.toContain("not on this channel's moderator list");
+    expect(ytRemove).not.toHaveBeenCalled();
+  });
+
+  it("shows the status again after a change, even when the change was refused", async () => {
+    // Remembered as 'not a VIP'; the change is refused, but meanwhile Twitch made them one.
+    twRead.mockResolvedValue({ holders: [] } as never);
+    twPost.mockRejectedValue(new Error("refused"));
+    draw("twitch");
+    await waitFor(() => expect(screen.getByText("VIP: no")).toBeTruthy());
+    twRead.mockImplementation(async (_r: string, _a: unknown, p?: Record<string, string>) =>
+      ({ holders: p?.role === "vip" ? [{ userId: "u1", login: "s", name: "someone" }] : [] }) as never,
+    );
+    fireEvent.click(btn("Make VIP"));
+    fireEvent.click(btn(/Make VIP — confirm/));
+    await waitFor(() => expect(screen.getByText("VIP: yes")).toBeTruthy());
+  });
+
+  it("a role change made through the api layer drops what the card remembered", async () => {
+    storeHolders("twitch", "acct", "vip", new Set(["x"]));
+    storeHolders("x", "acct", "moderator", new Set(["x"]));
+    storeHolders("twitch", "other", "vip", new Set(["x"]));
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+    try {
+      const real = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+      await real.api.twitchTool.post("roles", "acct", { role: "vip", userId: "u" });
+      expect(cachedHolders("twitch", "acct", "vip")).toBeNull();
+      expect(cachedHolders("twitch", "other", "vip")).not.toBeNull();
+      await real.api.addChatModerator("acct", "u");
+      expect(cachedHolders("x", "acct", "moderator")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a slow status read for the previous viewer does not overwrite the next viewer's", async () => {
+    let releaseFirst: (v: never) => void = () => {};
+    twRead.mockImplementation((_r: string, _a: unknown, p?: Record<string, string>) =>
+      p?.role === "vip"
+        ? (new Promise((res) => (releaseFirst = res as never)) as never)
+        : (Promise.resolve({ holders: [] }) as never),
+    );
+    const { rerender } = render(<ChatUserTools platform="twitch" account="acct" authorId="u1" authorName="one" />);
+    // u1's VIP read is parked. Move to u2, whose reads answer straight away.
+    twRead.mockImplementation(async (_r: string, _a: unknown, p?: Record<string, string>) =>
+      ({ holders: p?.role === "vip" ? [{ userId: "u2", login: "b", name: "two" }] : [] }) as never,
+    );
+    rerender(<ChatUserTools platform="twitch" account="acct" authorId="u2" authorName="two" />);
+    await waitFor(() => expect(screen.getByText("VIP: yes")).toBeTruthy());
+    await act(async () => {
+      releaseFirst({ holders: [] } as never);
+      await Promise.resolve();
+    });
+    expect(screen.getByText("VIP: yes")).toBeTruthy();
+  });
+
+  it("is not offered on the broadcaster's own card or the connected account's own echoed lines", async () => {
+    chatUser.mockResolvedValue({ ...card("twitch"), broadcaster: true } as CardData);
+    render(<ChatUserCard platform="twitch" account="acct" authorId="u1" authorName="me" open onOpenChange={() => {}} />);
+    await waitFor(() => expect(chatUser).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("chat-user-tools")).toBeNull());
+    cleanup();
+    chatUser.mockResolvedValue(card("twitch"));
+    render(<ChatUserCard platform="twitch" account="acct" authorId="acct" authorName="me" open onOpenChange={() => {}} />);
+    await waitFor(() => expect(chatUser).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("chat-user-tools")).toBeNull();
   });
 });

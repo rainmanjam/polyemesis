@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ExternalLink, Loader2, ShieldCheck, ShieldOff, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { clampCp } from "@/lib/codePoints";
 import { WIRE } from "@/lib/contract/wire";
 import { useT } from "@/lib/i18n";
 import { openPlatformLink, platformLinkFor } from "@/lib/platformLinks";
+import { cachedHolders, invalidateRoles, storeHolders } from "@/lib/viewerRoles";
 import type { ChatPlatform } from "@/lib/types";
 
 /* The platform-specific tools on the viewer card.
@@ -23,23 +25,12 @@ import type { ChatPlatform } from "@/lib/types";
 type Role = "vip" | "moderator";
 type Status = boolean | null;
 
-/* Who holds a role is a list call per role, so it is remembered for a minute
-   per channel rather than re-read on every card. A change made from here
-   drops the entry. */
-const ROLE_TTL_MS = 60_000;
-const roleCache = new Map<string, { at: number; ids: Set<string> }>();
-
-const roleKey = (platform: string, account: string | undefined, role: string) => `${platform}|${account ?? ""}|${role}`;
-
-/** Test seam. */
-export function resetRoleCache(): void {
-  roleCache.clear();
-}
+/* YouTube lists at most the first 50 moderators (internal/chat/moderators.go). */
+const YOUTUBE_LIST_PAGE = 50;
 
 async function holders(platform: ChatPlatform, account: string | undefined, role: Role): Promise<Set<string>> {
-  const key = roleKey(platform, account, role);
-  const hit = roleCache.get(key);
-  if (hit && Date.now() - hit.at < ROLE_TTL_MS) return hit.ids;
+  const hit = cachedHolders(platform, account, role);
+  if (hit) return hit;
   let ids: Set<string>;
   if (platform === "twitch") {
     const res = await api.twitchTool.read<{ holders: { userId: string }[] }>("roles", account, { role });
@@ -48,7 +39,7 @@ async function holders(platform: ChatPlatform, account: string | undefined, role
     const res = await api.getChatModerators(account);
     ids = new Set(res.moderators.map((m) => m.userId ?? ""));
   }
-  roleCache.set(key, { at: Date.now(), ids });
+  storeHolders(platform, account, role, ids);
   return ids;
 }
 
@@ -77,7 +68,11 @@ export function ChatUserTools({
 
   // Status where a read is free: Twitch's role lists, X's moderator list.
   // YouTube's list costs 50 quota units, so it is read only when removing.
+  // A generation counter, not a flag: a read that was started for the viewer
+  // before this one must not write its answer over this viewer's card.
+  const generation = useRef(0);
   const readStatus = useCallback(async () => {
+    const mine = ++generation.current;
     if (!authorId) return;
     const next: Record<Role, Status> = { vip: null, moderator: null };
     const roles: Role[] = platform === "twitch" ? ["moderator", "vip"] : platform === "x" ? ["moderator"] : [];
@@ -90,35 +85,42 @@ export function ChatUserTools({
         }
       }),
     );
-    setStatus(next);
+    if (generation.current === mine) setStatus(next);
   }, [platform, account, authorId]);
 
   useEffect(() => {
     setConfirm(null);
     setProblem("");
     setReason("");
+    setStatus({ vip: null, moderator: null });
     void readStatus();
+    return () => {
+      // Switching viewer (or closing) retires any read still in flight.
+      generation.current++;
+    };
   }, [readStatus]);
 
   if (!supported) return null;
 
-  const run = async (label: string, fn: () => Promise<unknown>, forget?: Role) => {
+  const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
     setProblem("");
     try {
       await fn();
-      if (forget) roleCache.delete(roleKey(platform, account, forget));
       toast.success(t("viewerCard.done", { action: label }));
-      await readStatus();
     } catch (err) {
       // The server's sentence, unparaphrased: it names the tier or owner rule.
       const msg = err instanceof Error && err.message ? err.message : t("viewerCard.failed", { action: label });
       setProblem(msg);
       toast.error(msg);
     } finally {
-      // Success or refusal, the question has been answered: the next press asks again.
+      // Success or refusal, the question has been answered: the next press asks
+      // again, and what was remembered about this channel's roles is dropped (a
+      // refused call may still have changed something) before status is re-read.
+      invalidateRoles(platform, account);
       setConfirm(null);
       setBusy("");
+      void readStatus();
     }
   };
 
@@ -126,8 +128,15 @@ export function ChatUserTools({
   const statusWord = (s: Status) =>
     s === null ? t("viewerCard.statusUnknown") : s ? t("viewerCard.statusYes") : t("viewerCard.statusNo");
 
-  /* One role change: a button that, pressed, becomes a confirm/cancel pair. */
-  const roleControl = (id: string, label: string, destructive: boolean, fn: () => Promise<unknown>, role: Role) => {
+  /* One change that asks again: a button that, pressed, becomes a confirm/cancel
+     pair. Role changes and the warning share it. */
+  const roleControl = (
+    id: string,
+    label: string,
+    destructive: boolean,
+    fn: () => Promise<unknown>,
+    opts: { disabled?: boolean } = {},
+  ) => {
     if (confirm === id) {
       return (
         <span className="inline-flex items-center gap-1" key={id}>
@@ -135,7 +144,7 @@ export function ChatUserTools({
             size="sm"
             variant={destructive ? "destructive" : "default"}
             disabled={busy !== ""}
-            onClick={() => void run(label, fn, role)}
+            onClick={() => void run(label, fn)}
           >
             {busy === label && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
             {t("viewerCard.confirm", { action: label })}
@@ -146,16 +155,19 @@ export function ChatUserTools({
         </span>
       );
     }
+    let icon = <ShieldOff className="mr-1 h-3 w-3" />;
+    if (id === "warn") icon = <TriangleAlert className="mr-1 h-3 w-3" />;
+    else if (id.startsWith("add")) icon = <ShieldCheck className="mr-1 h-3 w-3" />;
     return (
       <Button
         key={id}
         size="sm"
         variant="secondary"
-        disabled={busy !== "" || !authorId}
+        disabled={busy !== "" || !authorId || opts.disabled}
         title={t("viewerCard.asksAgain")}
         onClick={() => setConfirm(id)}
       >
-        {id.startsWith("add") ? <ShieldCheck className="mr-1 h-3 w-3" /> : <ShieldOff className="mr-1 h-3 w-3" />}
+        {icon}
         {label}
       </Button>
     );
@@ -175,8 +187,8 @@ export function ChatUserTools({
           : t("viewerCard.removeModerator");
     return (
       <>
-        {s !== true && roleControl(`add-${role}`, label(true), false, add, role)}
-        {s !== false && roleControl(`remove-${role}`, label(false), true, remove, role)}
+        {s !== true && roleControl(`add-${role}`, label(true), false, add)}
+        {s !== false && roleControl(`remove-${role}`, label(false), true, remove)}
       </>
     );
   };
@@ -204,29 +216,20 @@ export function ChatUserTools({
             <input
               className="h-8 min-w-0 flex-1 rounded border border-border bg-card-raised px-2 text-[12px]"
               value={reason}
-              maxLength={warnLimit}
               placeholder={t("viewerCard.warnPlaceholder")}
               aria-label={t("viewerCard.warnPlaceholder")}
-              onChange={(e) => setReason(e.target.value)}
+              onChange={(e) => setReason(clampCp(e.target.value, warnLimit))}
             />
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy !== "" || !authorId || reason.trim() === ""}
-              onClick={() =>
-                void run(t("viewerCard.warn"), async () => {
-                  await api.twitchTool.post("warnings", account, { userId: authorId, reason: reason.trim() });
-                  setReason("");
-                })
-              }
-            >
-              {busy === t("viewerCard.warn") ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <TriangleAlert className="mr-1 h-3 w-3" />
-              )}
-              {t("viewerCard.warn")}
-            </Button>
+            {roleControl(
+              "warn",
+              t("viewerCard.warn"),
+              false,
+              async () => {
+                await api.twitchTool.post("warnings", account, { userId: authorId, reason: reason.trim() });
+                setReason("");
+              },
+              { disabled: reason.trim() === "" },
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -268,7 +271,6 @@ export function ChatUserTools({
             t("viewerCard.makeModerator"),
             false,
             () => api.addYouTubeChatModerator({ platform, account, channelId: authorId }),
-            "moderator",
           )}
           {roleControl(
             "remove-moderator",
@@ -279,10 +281,17 @@ export function ChatUserTools({
               // channel id. The read is made here, once, on a confirmed press.
               const list = await api.youTubeChatModerators({ platform, account });
               const mine = list.moderators.find((m) => m.channelId === authorId);
-              if (!mine?.id) throw new Error(t("viewerCard.notAModerator"));
+              if (!mine?.id) {
+                // The list is only YouTube's first page. A full page means the
+                // viewer may be further down, which is not the same as "not one".
+                throw new Error(
+                  list.moderators.length >= YOUTUBE_LIST_PAGE
+                    ? t("viewerCard.notInFirstPage", { count: YOUTUBE_LIST_PAGE })
+                    : t("viewerCard.notAModerator"),
+                );
+              }
               await api.removeYouTubeChatModerator({ platform, account, id: mine.id });
             },
-            "moderator",
           )}
         </div>
       )}

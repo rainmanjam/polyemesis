@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Не вдалося завантажити нотатку про цього глядача.",
   "viewerCard.deleteNote": "Видалити нотатку",
   "viewerCard.deleteConfirm": "Видалити нотатку — підтвердити",
-  "viewerCard.tagBadgeTitle": "Теги: {tags}"
+  "viewerCard.tagBadgeTitle": "Теги: {tags}",
+  "viewerCard.notInFirstPage": "YouTube показує лише перших {count} модераторів, і цього глядача серед них немає. Якщо він модератор, зніміть його в YouTube Studio."
 }

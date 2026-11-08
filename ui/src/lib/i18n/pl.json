@@ -4355,5 +4355,6 @@
   "viewerCard.noteLoadFailed": "Nie udało się wczytać notatki tego widza.",
   "viewerCard.deleteNote": "Usuń notatkę",
   "viewerCard.deleteConfirm": "Usuń notatkę — potwierdź",
-  "viewerCard.tagBadgeTitle": "Tagi: {tags}"
+  "viewerCard.tagBadgeTitle": "Tagi: {tags}",
+  "viewerCard.notInFirstPage": "YouTube pokazuje tylko pierwszych {count} moderatorów, a tego widza wśród nich nie ma. Jeśli jest moderatorem, odbierz mu rolę w YouTube Studio."
 }

@@ -4,6 +4,7 @@ import { Loader2, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { clampCp, cpLength } from "@/lib/codePoints";
 import { WIRE } from "@/lib/contract/wire";
 import { useT } from "@/lib/i18n";
 import { refreshViewerTags } from "@/hooks/useViewerTags";
@@ -67,7 +68,7 @@ export function ChatUserNotes({
       toast.error(t("viewerCard.tagLimit", { max: LIMITS.maxTags }));
       return;
     }
-    setTags([...tags, tag.slice(0, LIMITS.maxTagLen)]);
+    setTags([...tags, clampCp(tag, LIMITS.maxTagLen)]);
     setDraftTag("");
   };
 
@@ -125,15 +126,14 @@ export function ChatUserNotes({
       <textarea
         className="min-h-16 w-full rounded border border-border bg-card-raised p-2 text-[12px]"
         value={note}
-        maxLength={LIMITS.maxNote}
         disabled={load === "loading" || busy}
         placeholder={t("viewerCard.notePlaceholder")}
         aria-label={t("viewerCard.notesTitle")}
-        onChange={(e) => setNote(e.target.value)}
+        onChange={(e) => setNote(clampCp(e.target.value, LIMITS.maxNote))}
       />
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>{t("viewerCard.noteHelp")}</span>
-        <span className="tnum">{t("viewerCard.noteCount", { count: note.length, max: LIMITS.maxNote })}</span>
+        <span className="tnum">{t("viewerCard.noteCount", { count: cpLength(note), max: LIMITS.maxNote })}</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -169,11 +169,10 @@ export function ChatUserNotes({
         <input
           className="h-8 w-36 rounded border border-border bg-card-raised px-2 text-[12px]"
           value={draftTag}
-          maxLength={LIMITS.maxTagLen}
           placeholder={t("viewerCard.tagPlaceholder")}
           aria-label={t("viewerCard.tagPlaceholder")}
           disabled={busy || load === "loading"}
-          onChange={(e) => setDraftTag(e.target.value)}
+          onChange={(e) => setDraftTag(clampCp(e.target.value, LIMITS.maxTagLen))}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
