@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -361,5 +363,56 @@ func TestRumbleActivityWrongTypedBlockCostsOneEntryNeverTheChat(t *testing.T) {
 	}
 	if len(sink.chat) == 0 {
 		t.Fatal("chat must still be delivered")
+	}
+}
+
+// A container block of the wrong JSON type (PHP writes an empty associative
+// array as []) must not fail the decode: chat still flows and health stays Live.
+func TestRumbleActivityWrongTypedContainerNeverCostsTheChat(t *testing.T) {
+	body := `{"now":1695059500,"type":"user","max_num_results":50,"followers":[],"subscribers":[],"gifted_subs":[],` +
+		`"livestreams":[{"id":"x","title":"T","is_live":true,"stream_key":"SECRET","watching_now":19,` +
+		`"chat":{"recent_messages":[{"id":"m1","username":"u","text":"hello","created_on":"2023-09-18T17:51:37+00:00"}],"recent_rants":[]}}]}`
+	s := rumbleSeq(t, body, body)
+	a := rumbleAdapter(t, s.URL, nil)
+	polls, sink := runPolls(t, a, 2)
+	if h := a.Health(); h.State != StateLive {
+		t.Fatalf("wrong-typed containers must leave health Live: %+v", h)
+	}
+	if len(sink.chat) == 0 {
+		t.Fatal("chat must still be delivered")
+	}
+	if len(polls[0])+len(polls[1]) != 0 {
+		t.Fatalf("no activity expected: %+v", polls)
+	}
+}
+
+// A follower that stays on the list must never replay, however many other
+// distinct keys pass through the seen-set meanwhile.
+func TestRumbleActivitySeenSetKeepsKeysStillOnTheList(t *testing.T) {
+	a := rumbleAdapter(t, "http://unused.invalid", nil)
+	st := newRumbleActivityState()
+	mk := func(names ...string) json.RawMessage {
+		var items []string
+		for _, n := range names {
+			items = append(items, `{"username":"`+n+`","followed_on":"2023-09-17T20:43:56-04:00"}`)
+		}
+		return json.RawMessage(arr(items...))
+	}
+	if evs := a.observeActivity(st, rumbleActivityLists{followers: mk("keeper")}, nil); len(evs) != 0 {
+		t.Fatalf("baseline must be silent: %+v", evs)
+	}
+	for i := 0; i < 5000; i++ {
+		evs := a.observeActivity(st, rumbleActivityLists{followers: mk("keeper", "n"+strconv.Itoa(i))}, nil)
+		if i > 0 && len(evs) != 1 {
+			t.Fatalf("poll %d: exactly the new follower, got %+v", i, evs)
+		}
+		for _, ev := range evs {
+			if ev.Actor.Name == "keeper" {
+				t.Fatalf("poll %d replayed the follower that never left the list", i)
+			}
+		}
+	}
+	if len(st.seen) > rumbleActivitySeenCap {
+		t.Fatalf("seen-set must stay bounded, has %d", len(st.seen))
 	}
 }

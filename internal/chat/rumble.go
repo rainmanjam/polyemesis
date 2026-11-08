@@ -395,18 +395,40 @@ type rumbleResponse struct {
 	// windowed figure, in which case it understates the channel. Only
 	// num_followers is decoded; confirm against the channel page on the first
 	// live-account check, and switch (or decode both) if it is the smaller.
-	Followers struct {
-		Count  *int            `json:"num_followers"`
-		Recent json.RawMessage `json:"recent_followers"`
-	} `json:"followers"`
-	Subscribers struct {
-		Count  *int            `json:"num_subscribers"`
-		Recent json.RawMessage `json:"recent_subscribers"`
-	} `json:"subscribers"`
-	GiftedSubs struct {
-		Recent json.RawMessage `json:"recent_gifted_subs"`
-	} `json:"gifted_subs"`
+	Followers   rumbleBlock        `json:"followers"`
+	Subscribers rumbleBlock        `json:"subscribers"`
+	GiftedSubs  rumbleBlock        `json:"gifted_subs"`
 	Livestreams []rumbleLivestream `json:"livestreams"`
+}
+
+// rumbleBlock is one of the followers / subscribers / gifted_subs containers.
+// It decodes leniently: a container of the wrong JSON type (PHP's json_encode
+// writes an empty associative array as []) or a wrong-typed field inside it
+// leaves the affected part zero and never fails the response, so activity
+// data can never cost the chat decode. Which fields apply depends on the block.
+type rumbleBlock struct {
+	Count  *int
+	Recent json.RawMessage
+}
+
+func (b *rumbleBlock) UnmarshalJSON(data []byte) error {
+	*b = rumbleBlock{}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	for _, k := range []string{"num_followers", "num_subscribers"} {
+		var n int
+		if raw, ok := m[k]; ok && json.Unmarshal(raw, &n) == nil {
+			b.Count = &n
+		}
+	}
+	for _, k := range []string{"recent_followers", "recent_subscribers", "recent_gifted_subs"} {
+		if raw, ok := m[k]; ok {
+			b.Recent = raw
+		}
+	}
+	return nil
 }
 
 // chatCap is the per-response chat cap in force for this response.

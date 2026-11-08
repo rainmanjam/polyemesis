@@ -41,6 +41,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +51,8 @@ import (
 )
 
 // rumbleActivitySeenCap bounds the seen-set. The lists are at most
-// max_num_results (50) each, so this is far above anything that can reappear.
+// max_num_results (50) each. Eviction is least-recently-SEEN, so a key that is
+// still on a list is refreshed every poll and can never be evicted.
 const rumbleActivitySeenCap = 4096
 
 type rumbleFollower struct {
@@ -107,35 +109,51 @@ func decodeRumbleList[T any](raw json.RawMessage) (items []T, present bool, bad 
 
 // rumbleActivityState is one Run's memory. Not shared and not persisted.
 type rumbleActivityState struct {
-	seeded      map[string]bool // which lists have a baseline; per list, so one that appears later is baselined too
-	rantsSeeded bool            // the current broadcast's rants have a baseline
-	seen        map[string]int
-	order       []string
+	seeded      map[string]bool  // which lists have a baseline; per list, so one that appears later is baselined too
+	rantsSeeded bool             // the current broadcast's rants have a baseline
+	seen        map[string]int   // highest copy count ever seen per key
+	lastSeen    map[string]int64 // poll-order tick of the last sighting, for eviction
+	tick        int64
 }
 
 func newRumbleActivityState() *rumbleActivityState {
-	return &rumbleActivityState{seen: map[string]int{}, seeded: map[string]bool{}}
+	return &rumbleActivityState{seen: map[string]int{}, lastSeen: map[string]int64{}, seeded: map[string]bool{}}
 }
 
 // resetRants is called when no broadcast is live: the next one's rants are
 // baselined again, so a second stream never replays its first poll.
 func (s *rumbleActivityState) resetRants() { s.rantsSeeded = false }
 
-// fresh reports whether the n-th copy of key is new, and records it.
+// fresh reports whether the n-th copy of key is new, and records it. Every
+// sighting refreshes the key's recency.
 func (s *rumbleActivityState) fresh(key string, n int) bool {
-	prev, known := s.seen[key]
+	s.tick++
+	s.lastSeen[key] = s.tick
+	prev := s.seen[key]
 	if n <= prev {
 		return false
 	}
-	if !known {
-		s.order = append(s.order, key)
-		if len(s.order) > rumbleActivitySeenCap {
-			delete(s.seen, s.order[0])
-			s.order = s.order[1:]
+	s.seen[key] = n
+	if len(s.seen) > rumbleActivitySeenCap {
+		s.evict()
+	}
+	return true
+}
+
+// evict drops the least recently seen quarter of the keys.
+func (s *rumbleActivityState) evict() {
+	ticks := make([]int64, 0, len(s.lastSeen))
+	for _, t := range s.lastSeen {
+		ticks = append(ticks, t)
+	}
+	sort.Slice(ticks, func(i, j int) bool { return ticks[i] < ticks[j] })
+	cut := ticks[len(ticks)/4]
+	for k, t := range s.lastSeen {
+		if t < cut {
+			delete(s.lastSeen, k)
+			delete(s.seen, k)
 		}
 	}
-	s.seen[key] = n
-	return true
 }
 
 func rumbleActivityID(parts ...string) string {
