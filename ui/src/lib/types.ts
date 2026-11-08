@@ -2773,6 +2773,17 @@ export interface ChatStats {
   adapters: number;
 }
 
+/** One person who can moderate a live chat (YouTube liveChatModerators). `id`
+ *  is the moderator-in-this-chat id that removing one addresses; `channelId`
+ *  is what adding one takes. */
+export interface ChatModerator {
+  id?: string;
+  channelId?: string;
+  displayName?: string;
+  channelUrl?: string;
+  profileImageUrl?: string;
+}
+
 /** What a moderation call did, in the server's own words.
  *
  *  `detail` is not decoration and must be shown. It carries the difference
@@ -2783,6 +2794,23 @@ export interface ChatModerationResult {
   status: string;
   scope?: string;
   detail?: string;
+}
+
+/** One viewer an X account has muted. `endsAt` is absent for an indefinite
+ *  mute; X leaves expired timed mutes out of its list. */
+export interface ChatMute {
+  userId: string;
+  username?: string;
+  name?: string;
+  endsAt?: string;
+}
+
+/** One of an X account's chat moderators. They act on every broadcast the
+ *  account hosts, so `appliesToAllBroadcasts` is true on the list answer. */
+export interface XChatModerator {
+  userId?: string;
+  username?: string;
+  name?: string;
 }
 
 /** Channel-wide chat rules. Only Twitch publishes an API for these.
@@ -2800,6 +2828,65 @@ export interface ChatSettings {
   uniqueChatMode?: boolean;
   nonModeratorChatDelay?: boolean;
   nonModeratorChatDelaySeconds?: number;
+}
+
+/** Twitch channel tools (internal/chat/twitch_tools.go). Built from Twitch's
+ *  published reference and not yet exercised against a live account. */
+export interface TwitchPin {
+  messageId: string;
+  senderLogin: string;
+  senderName: string;
+  text: string;
+}
+export interface TwitchShield {
+  active: boolean;
+  moderatorLogin?: string;
+  lastActivatedAt?: string;
+}
+export interface TwitchBlockedTerm {
+  id: string;
+  text: string;
+}
+export interface TwitchTermSync {
+  added: string[];
+  present: string[];
+  skipped: { term: string; reason: string }[];
+}
+export interface TwitchChatters {
+  total: number;
+  chatters?: { userId: string; login: string; name: string }[];
+  truncated?: boolean;
+}
+/** AutoMod levels run 0 (off) to 4. The PUT REPLACES: send overallLevel alone
+ *  or every category, never a subset. */
+export interface TwitchAutoMod {
+  overallLevel: number | null;
+  aggression: number;
+  bullying: number;
+  disability: number;
+  misogyny: number;
+  raceEthnicityOrReligion: number;
+  sexBasedTerms: number;
+  sexualitySexOrGender: number;
+  swearing: number;
+}
+export interface TwitchRoleHolder {
+  userId: string;
+  login: string;
+  name: string;
+}
+export interface TwitchBanned extends TwitchRoleHolder {
+  reason?: string;
+  expiresAt?: string;
+}
+export interface TwitchUnbanRequest extends TwitchRoleHolder {
+  id: string;
+  text: string;
+  status: string;
+}
+export interface TwitchShoutouts {
+  nextAnyAt: string | null;
+  targets: Record<string, string>;
 }
 
 /** One viewer's recent messages and roles — the moderator's user card.
@@ -3043,6 +3130,21 @@ export interface Compliance {
   labels?: Record<string, boolean>;
   /** Facebook's audience for a live video. undefined leaves it alone. */
   facebookPrivacy?: string;
+  /** YouTube broadcast contentDetails controls. null clears the block (an
+   *  update is decoded over the stored row, so undefined would keep it). */
+  youtube?: YouTubeBroadcastControls | null;
+}
+
+/** YouTube's liveBroadcasts contentDetails toggles, per destination. Every
+ *  field omitted means "leave it as YouTube has it". YouTube freezes them once
+ *  a broadcast is testing or live. Mirrors db.YouTubeBroadcastControls. */
+export interface YouTubeBroadcastControls {
+  latencyPreference?: "normal" | "low" | "ultraLow";
+  enableDvr?: boolean;
+  recordFromStart?: boolean;
+  enableAutoStart?: boolean;
+  enableAutoStop?: boolean;
+  closedCaptionsType?: "closedCaptionsDisabled" | "closedCaptionsHttpPost" | "closedCaptionsEmbedded";
 }
 
 /** One Page a Facebook broadcast crossposts to at create time, and whether it

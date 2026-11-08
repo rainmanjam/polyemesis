@@ -331,8 +331,8 @@ func TestYouTubeDeleteAddressesTheRightMessage(t *testing.T) {
 	if gotMethod != http.MethodDelete {
 		t.Fatalf("method = %s, want DELETE", gotMethod)
 	}
-	if !strings.HasSuffix(gotPath, "/liveChatMessages") {
-		t.Fatalf("path = %q, want the liveChatMessages resource", gotPath)
+	if !strings.HasSuffix(gotPath, "/liveChat/messages") {
+		t.Fatalf("path = %q, want the liveChat/messages resource", gotPath)
 	}
 	// The id travels as a query parameter. Sending it as a path segment would
 	// 404 against a resource that does not exist.

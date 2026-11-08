@@ -8,12 +8,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // defaultHTTPTimeout bounds one API call. Chat polling runs on a schedule
@@ -45,52 +48,86 @@ type apiError struct {
 	// Reason is the platform's machine-readable code where it publishes one
 	// (Google's errors[].reason, Facebook's error.code).
 	Reason string
+	// full is the untouched body, for parsing: Body is cut at 300 characters
+	// for display, and a Graph envelope can be longer than that.
+	full string
+	// Wait is how long the platform asked callers to hold off (Retry-After, or
+	// Graph's estimated_time_to_regain_access); zero when it said nothing.
+	Wait time.Duration
 	// Raw is the start of the response body, untruncated by shorten, for
 	// adapters that must tell the platform's own JSON envelope from an edge
 	// (WAF/CDN) HTML page. It is never part of Error().
 	Raw []byte
 	// Header is the response header, for edge signals such as cf-mitigated.
 	Header http.Header
-	// RetryAfter is the parsed Retry-After header, zero when absent or invalid.
+	// RetryAfter is the wait the response asked for: Retry-After, else Twitch's
+	// Ratelimit-Reset epoch, capped at 15 minutes (oauth.RetryAfterFromHeaders).
+	// Zero when absent or invalid. Wait above is the separate Graph signal
+	// (estimated_time_to_regain_access); Rumble, Kick, YouTube and Twitch read
+	// RetryAfter, Facebook reads Wait.
 	RetryAfter time.Duration
+	// Problem is the platform's own words from an RFC 7807 or {errors:[...]} body, with no URLs and nothing else
+	// from the body (see oauth.XProblemText). Types is the problem type URIs, for matching, never for display.
+	// None of Problem, Types or Header is part of Error().
+	Problem string
+	Types   string
+	// Message is the platform's own sentence from the error envelope: the
+	// top-level "message" (Kick, Twitch), else "error.message" (Google); see
+	// errorMessage. A string-valued "error" is tolerated but not read. Empty
+	// when the body is neither.
+	Message string
+	// Edge is set when the answer came from a proxy or CDN in front of the
+	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
+	// rather than from its API. Its status says nothing about the account.
+	Edge bool
+	// RateRemaining is Twitch's Ratelimit-Remaining as sent, empty when absent.
+	// A 429 with tokens left in the bucket is an endpoint's own cooldown, not an
+	// empty bucket.
+	RateRemaining string
 }
 
+// payload is the body to parse: whole when captured, truncated otherwise.
+func (e *apiError) payload() string {
+	if e.full != "" {
+		return e.full
+	}
+	return e.Body
+}
+
+// Error never carries the raw body. Body stays on the struct for the callers
+// that match on it (Kick's duplicate detection) and for debugging; what an
+// operator reads is the status, the reason code and the envelope's message.
 func (e *apiError) Error() string {
-	if e.Reason != "" {
-		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Body)
+	switch {
+	case e.Reason != "" && e.Message != "":
+		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Message)
+	case e.Reason != "":
+		return fmt.Sprintf("%s returned %d (%s)", e.URL, e.Status, e.Reason)
+	case e.Message != "":
+		return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Message)
 	}
-	return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Body)
+	return fmt.Sprintf("%s returned %d", e.URL, e.Status)
 }
 
-// parseRetryAfter reads RFC 9110 Retry-After: delay-seconds or an HTTP-date.
-func parseRetryAfter(v string, now time.Time) time.Duration {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0
-	}
-	if n, err := strconv.Atoi(v); err == nil {
-		if n < 0 {
-			return 0
-		}
-		return time.Duration(n) * time.Second
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		if d := t.Sub(now); d > 0 {
-			return d
-		}
+func retryAfterFrom(err error) time.Duration {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.RetryAfter
 	}
 	return 0
 }
 
 func statusOf(err error) int {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Status
 	}
 	return 0
 }
 
 func reasonOf(err error) string {
-	if ae, ok := err.(*apiError); ok {
+	var ae *apiError
+	if errors.As(err, &ae) {
 		return ae.Reason
 	}
 	return ""
@@ -132,6 +169,13 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	if token != nil {
 		tok, err := token(ctx)
 		if err != nil {
+			// A refresh the platform refused because the grant is gone
+			// (revoked, expired for good) cannot be fixed by trying again.
+			// Left as a plain error, the Hub would redial the token endpoint
+			// every few seconds for ever, showing raw token-endpoint JSON.
+			if errors.Is(err, oauth.ErrReconnectRequired) {
+				return Fatal(fmt.Errorf("the account's authorization was revoked or has expired; reconnect it in Settings → Platforms: %w", oauth.ErrReconnectRequired))
+			}
 			return fmt.Errorf("no usable access token: %w", err)
 		}
 		if tok == "" {
@@ -165,15 +209,58 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 			URL:        stripQuery(endpoint),
 			Body:       shorten(raw),
 			Reason:     errorReason(raw),
+			full:       string(raw),
+			Wait:       oauth.GraphWait(resp.Header),
 			Raw:        raw[:min(len(raw), 4096)],
 			Header:     resp.Header,
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfterOf(resp.Header, time.Now()),
+			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
+			Problem:       oauth.XProblemText(raw),
+			Types:         oauth.XProblemTypes(raw),
+			Message:       errorMessage(raw),
+			Edge:          isEdgeAnswer(resp.Header, raw),
+			RateRemaining: strings.TrimSpace(resp.Header.Get("Ratelimit-Remaining")),
 		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	if err := json.Unmarshal(raw, out); err != nil {
+		if isEdgeAnswer(resp.Header, raw) {
+			return fmt.Errorf("%s returned an unreadable response: it answered %d with a web page instead of JSON; a proxy or the platform's edge may be blocking this server",
+				stripQuery(endpoint), resp.StatusCode)
+		}
+		// A 200 that is not the JSON promised (a truncated body, say) would
+		// otherwise surface as "invalid character" with nothing saying which
+		// call produced it.
+		return fmt.Errorf("%s returned an unreadable response: %w", stripQuery(endpoint), err)
+	}
+	return nil
+}
+
+// isEdgeAnswer reports whether a response is a proxy's page rather than the
+// API's JSON: the body is not JSON and either looks like HTML or carries a
+// CDN's headers. A real API error, including Kick's, is JSON even when it
+// travelled through Cloudflare, so the JSON check comes first.
+func isEdgeAnswer(h http.Header, raw []byte) bool {
+	if len(bytes.TrimSpace(raw)) == 0 || json.Valid(raw) {
+		return false
+	}
+	lead := strings.ToLower(strings.TrimSpace(string(raw[:min(len(raw), 64)])))
+	if strings.HasPrefix(lead, "<") {
+		return true
+	}
+	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
+}
+
+// maxRetryAfter caps any wait a platform asks for.
+const maxRetryAfter = oauth.MaxRetryAfter
+
+// retryAfterOf reads how long to wait from a response: Retry-After (seconds or
+// an HTTP date), else Twitch's Ratelimit-Reset, capped at maxRetryAfter. The
+// parsing lives in oauth so the two packages cannot drift.
+func retryAfterOf(h http.Header, now time.Time) time.Duration {
+	return oauth.RetryAfterFromHeaders(h, now)
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes
@@ -205,6 +292,46 @@ func errorReason(raw []byte) string {
 	return ""
 }
 
+// errorMessage is the human sentence inside an error envelope, tried in this
+// order: the top-level "message" (Kick's {"data":..,"message":".."}, Twitch's
+// {"error":"Forbidden","status":403,"message":".."}), then "error.message"
+// (Google's nested object). A string-valued "error" is tolerated but not read.
+// Shortened, with any URL scrubbed so a link carrying a query string never
+// reaches a health line. Empty when the body is none of these.
+func errorMessage(raw []byte) string {
+	// "error" is an object for Google and a plain string for Twitch
+	// ({"error":"Forbidden","status":403,"message":".."}), so it is decoded
+	// separately and a mismatch there never costs the top-level message.
+	var env struct {
+		Message string          `json:"message"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	said := strings.TrimSpace(env.Message)
+	if said == "" {
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(env.Error, &nested) == nil {
+			said = nested.Message
+		}
+	}
+	return shorten([]byte(scrubURLs(said)))
+}
+
+// scrubURLs drops the query string from any http(s) URL in s.
+func scrubURLs(s string) string {
+	fields := strings.Fields(s)
+	for i, f := range fields {
+		if strings.HasPrefix(f, "http://") || strings.HasPrefix(f, "https://") {
+			fields[i] = stripQuery(f)
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
 // stripQuery keeps a query string out of an error message. Nothing here puts a
 // secret in one, and this is the belt to that braces: an endpoint that grows a
 // parameter later cannot make an old error message leak it.
@@ -218,7 +345,13 @@ func stripQuery(endpoint string) string {
 func shorten(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 300 {
-		return s[:300] + "..."
+		// On a rune boundary: a cut through a multi-byte character is invalid
+		// UTF-8 in a message the UI renders.
+		cut := 300
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "..."
 	}
 	return s
 }

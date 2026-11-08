@@ -482,3 +482,28 @@ func TestAnOutgoingShoutoutIsNeverOverlayVisible(t *testing.T) {
 		t.Error("a shoutout the streamer gave was announced as one received")
 	}
 }
+
+// Normalise builds the display before Validate refuses a bad exponent, so a
+// hostile or broken source must not be able to make that step loop or pad for
+// as long as it likes. A billion-digit exponent has to come back at once, with
+// no display, and still be refused by Validate.
+func TestAnOutOfRangeExponentNeitherHangsNorBuildsADisplay(t *testing.T) {
+	for _, exp := range []int{-1, MaxExponent + 1, 1_000_000_000} {
+		done := make(chan Event, 1)
+		go func() {
+			done <- Event{Kind: KindTip, Platform: "twitch",
+				Amount: &Amount{Currency: "USD", Minor: 500, Exponent: exp}}.Normalise(time.Now)
+		}()
+		select {
+		case e := <-done:
+			if e.Amount.Display != "" {
+				t.Errorf("exponent %d built a display %q", exp, e.Amount.Display)
+			}
+			if err := e.Validate(); err == nil {
+				t.Errorf("exponent %d was not refused", exp)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Normalise hung on exponent %d", exp)
+		}
+	}
+}

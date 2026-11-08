@@ -30,7 +30,7 @@ import (
    return; a literal ` *` does not. The header pattern was written with ` *$`
    and so matched nothing at all in a CRLF checkout -- see the test below. */
 // Columns in the order the table renders them.
-// EIGHT NOW, AND THE COUNT IS LOAD-BEARING TWICE OVER. This slice says which
+// NINE NOW, AND THE COUNT IS LOAD-BEARING TWICE OVER. This slice says which
 // columns are compared, and len(cells) == len(docCols) below is also how the
 // capability table is TOLD APART from every other table on the page -- so a
 // column added to the document without being added here does not merely go
@@ -38,7 +38,7 @@ import (
 var docCols = []Capability{
 	CapSSO, CapStreamKey, CapMetadata,
 	CapChatRead, CapChatSend, CapModeration, CapViewerStats,
-	CapBroadcastLifecycle,
+	CapBroadcastLifecycle, CapChannelTools,
 }
 
 var (

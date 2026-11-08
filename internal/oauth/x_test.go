@@ -530,8 +530,10 @@ func TestXMetadataCannotChangeALiveBroadcastAndSaysSo(t *testing.T) {
 
 // ------------------------------------------------------------ helpers / shape
 
-// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read, including the viewer counts that must stay
-// undecoded.
+// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read. total_watching used to be left undecoded
+// because the reference did not say what it counted; X's broadcasts overview now defines it as live viewers
+// (total_watched is the cumulative figure), so it is decoded as the string X sends and only ever turned into a count by
+// XLiveViewers, where absent stays nil.
 func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, xBroadcastListFixture)
@@ -544,14 +546,17 @@ func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
 		t.Fatalf("decoded = %+v", bs)
 	}
 	raw, _ := json.Marshal(bs[0])
-	if strings.Contains(string(raw), "total_watching") {
-		t.Error("the viewer counts are undescribed by X and must not be decoded into a count")
+	if !strings.Contains(string(raw), `"total_watching":"`) {
+		t.Errorf("total_watching is not carried as X's string: %s", raw)
+	}
+	if strings.Contains(string(raw), "total_watched") {
+		t.Error("total_watched is the cumulative figure and is not decoded")
 	}
 }
 
 // TestXAsksForEveryFieldItDecodes pins the broadcast.fields query to the struct.
 func TestXAsksForEveryFieldItDecodes(t *testing.T) {
-	for _, f := range []string{"id", "broadcast_id", "twitter_user_id", "source_id", "title", "share_url", "media_key", "state", "start_ms", "end_ms"} {
+	for _, f := range []string{"id", "broadcast_id", "twitter_user_id", "source_id", "title", "share_url", "media_key", "state", "start_ms", "end_ms", "total_watching"} {
 		if !strings.Contains(xBroadcastFields, f) {
 			t.Errorf("broadcast.fields does not request %q", f)
 		}

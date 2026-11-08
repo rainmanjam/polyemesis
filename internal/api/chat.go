@@ -466,7 +466,14 @@ func (s *Server) handleChatBan(w http.ResponseWriter, r *http.Request) {
 		d = time.Duration(secs) * time.Second
 	}
 
-	if err := s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason"))); err != nil {
+	// messageId asks for the ban and the removal of that message in ONE platform call (X's mute with message_id).
+	var err error
+	if mid := strings.TrimSpace(q.Get("messageId")); mid != "" {
+		err = s.chat.BanDeleting(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason")), mid)
+	} else {
+		err = s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason")))
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

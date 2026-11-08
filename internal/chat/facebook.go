@@ -17,7 +17,9 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/platform"
 )
 
@@ -40,6 +43,12 @@ const (
 	// YouTube's does: the thread already has history and replaying it as if it
 	// were live is disorienting.
 	fbDefaultBackfill = 5 * time.Minute
+	// fbMaxRateWait bounds how long a rate-limit signal is honoured in one
+	// sleep; Graph can ask for an hour, and the chat re-checks after this.
+	fbMaxRateWait = 30 * time.Minute
+	// fbJitter is the largest fraction subtracted from a backoff sleep, so
+	// several accounts failing together do not retry in lockstep.
+	fbJitter = 0.2
 	// fbPageSize is how many comments one poll asks for.
 	fbPageSize = 50
 )
@@ -67,6 +76,8 @@ type FacebookConfig struct {
 	HTTP    *http.Client
 	Now     func() time.Time
 	Sleep   func(context.Context, time.Duration) bool
+	// Rand returns a number in [0,1) for backoff jitter; nil uses math/rand.
+	Rand func() float64
 }
 
 // FacebookAdapter reads the comments on one live video.
@@ -100,6 +111,9 @@ func NewFacebook(cfg FacebookConfig) (*FacebookAdapter, error) {
 	}
 	if cfg.Sleep == nil {
 		cfg.Sleep = backoff.SleepCtx
+	}
+	if cfg.Rand == nil {
+		cfg.Rand = rand.Float64
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = fbPollInterval
@@ -168,15 +182,19 @@ func (f *FacebookAdapter) Hide(ctx context.Context, commentID string, hidden boo
 // failure.
 func (f *FacebookAdapter) moderationError(err error, verb string) error {
 	f.dropPageToken(err)
+	if fbTokenDead(err) {
+		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
+	}
+	if fbNotFound(err) {
+		return fmt.Errorf("Facebook no longer has that comment; it may already be gone: %w", err)
+	}
+	if wait, limited := fbRateLimited(err); limited {
+		return fmt.Errorf("Facebook is rate-limiting polyemesis, so it could not %s that comment. %s", verb, fbWaitAdvice(wait))
+	}
 	switch statusOf(err) {
 	case http.StatusForbidden:
 		return fmt.Errorf("Facebook refused to %s that comment. Acting on a Page's comments needs the "+
 			"MODERATE task permission on that Page, which is separate from being able to read them: %w", verb, err)
-	case http.StatusNotFound:
-		return fmt.Errorf("Facebook no longer has that comment; it may already be gone: %w", err)
-	}
-	if statusOf(err) == http.StatusUnauthorized {
-		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
 	}
 	return err
 }
@@ -230,6 +248,7 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 			continue
 		}
 
+		var pause time.Duration
 		_, err := f.poll(ctx, id, sink)
 		if err != nil {
 			done, fatal := f.classify(err)
@@ -241,16 +260,27 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 			}
 			// Back off on error, but never past the point where a recovered
 			// API takes two minutes to be noticed.
-			if interval < fbMaxPollInterval {
-				interval *= 2
+			interval = min(interval*2, fbMaxPollInterval)
+			pause = interval - time.Duration(f.cfg.Rand()*fbJitter*float64(interval))
+			if wait, limited := fbRateLimited(err); limited {
+				// A real rate-limit signal is a floor under the backoff.
+				pause = max(pause, min(wait, fbMaxRateWait))
+				f.setHealth(StateDegraded, fmt.Sprintf("Facebook is rate-limiting polyemesis; retrying in %s",
+					pause.Round(time.Second)))
+			} else if statusOf(err) == http.StatusForbidden {
+				f.setHealth(StateDegraded, fbForbiddenDetail)
+			} else if fbNotFound(err) {
+				f.setHealth(StateDegraded, fbGoneOrNoAccessDetail)
+			} else {
+				f.setHealth(StateDegraded, "Facebook comments are not being read right now: "+fbSummary(err))
 			}
-			f.setHealth(StateDegraded, "Facebook comments are not being read right now: "+err.Error())
 		} else {
 			interval = f.cfg.Interval
+			pause = interval
 			f.setHealth(StateLive, "")
 		}
 
-		if !f.cfg.Sleep(ctx, interval) {
+		if !f.cfg.Sleep(ctx, pause) {
 			return nil
 		}
 	}
@@ -283,7 +313,19 @@ func (f *FacebookAdapter) poll(ctx context.Context, videoID string, sink Sink) (
 	var out struct {
 		Data []fbComment `json:"data"`
 	}
-	if err := doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, f.commentToken(ctx), nil, &out); err != nil {
+	tok, usedPage := f.commentTokenSource(ctx)
+	err := doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, tok, nil, &out)
+	if err != nil && usedPage && fbTokenDead(err) {
+		// The cached Page token alone may be the dead one (a Page role change,
+		// a short-lived Page token) while the user token is fine. Forget it and
+		// retry once with a freshly minted Page token, or the user token if one
+		// cannot be minted. Only if that also fails is the account's login gone.
+		f.dropPageToken(err)
+		tok, _ = f.commentTokenSource(ctx)
+		out.Data = nil
+		err = doJSON(ctx, f.cfg.HTTP, http.MethodGet, endpoint, tok, nil, &out)
+	}
+	if err != nil {
 		f.dropPageToken(err)
 		return 0, err
 	}
@@ -349,21 +391,48 @@ func (f *FacebookAdapter) messageFrom(c fbComment) (Message, bool) {
 // unfamiliar code as terminal would end a working chat over something that
 // would have cleared on the next poll.
 func (f *FacebookAdapter) classify(err error) (done bool, fatal error) {
-	switch statusOf(err) {
-	case http.StatusUnauthorized:
+	switch {
+	case fbTokenDead(err), errors.Is(err, oauth.ErrReconnectRequired):
+		// Graph sends an expired or revoked token as HTTP 400 with code 190
+		// (subcodes 458/459/460/463/464/467) as often as 401, so the status
+		// alone is not enough. A refresh the platform refused for good
+		// (ErrReconnectRequired from the token source) is the same state.
 		f.setHealth(StateFailed, "Facebook rejected the access token; reconnect the Facebook account in Settings → Platforms")
 		return false, Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
-	case http.StatusNotFound:
+	case statusOf(err) == http.StatusNotFound || statusOf(err) == http.StatusGone:
 		// The live video is gone: the broadcast ended and Facebook has
 		// finalised or removed the object.
 		f.setHealth(StateStopped, "this Facebook live video has ended")
 		return true, nil
-	case http.StatusForbidden:
-		f.setHealth(StateDegraded,
-			"Facebook refused to return comments for this live video. Reading comments needs the same "+
-				"permissions the broadcast was created with; if this is a Page, the connection needs "+
-				"pages_read_engagement.")
+	case fbNotFound(err):
+		// 400 code 100 subcode 33. Graph's own text for it is "does not exist,
+		// cannot be loaded due to missing permissions, or does not support this
+		// operation", so it is NOT proof the broadcast ended: a lost permission
+		// or the wrong token reads the same. Keep polling and say both.
+		f.setHealth(StateDegraded, fbGoneOrNoAccessDetail)
+		return false, nil
+	case statusOf(err) == http.StatusForbidden:
+		f.setHealth(StateDegraded, fbForbiddenDetail)
 		return false, nil
 	}
 	return false, nil
+}
+
+// fbGoneOrNoAccessDetail is the health text for 400 code 100 subcode 33 on the
+// comment thread, which Graph uses for a deleted object and a missing
+// permission alike.
+const fbGoneOrNoAccessDetail = "Facebook says this live video no longer exists, or this account lost access to it. " +
+	"If the broadcast is still running, reconnect the Facebook account in Settings → Platforms."
+
+// fbForbiddenDetail is the health text for a 403 on the comment thread.
+const fbForbiddenDetail = "Facebook refused to return comments for this live video. Reading comments needs the same " +
+	"permissions the broadcast was created with; if this is a Page, the connection needs " +
+	"pages_read_engagement."
+
+// fbWaitAdvice is the sentence appended to a rate-limit refusal.
+func fbWaitAdvice(wait time.Duration) string {
+	if wait > 0 {
+		return fmt.Sprintf("Facebook asked for about %s before the next try.", wait.Round(time.Second))
+	}
+	return "Wait a few minutes and try again."
 }

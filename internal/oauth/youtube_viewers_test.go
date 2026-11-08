@@ -118,7 +118,8 @@ func TestAPlatformRefusalCarriesItsKind(t *testing.T) {
 
 // TestTheMeterChargesYouTubeDataAPICallsOnly (item 2): every YouTube Data
 // API request this package sends is charged to the shared allowance -- a list
-// one unit, a write fifty -- unless the caller already charged it.
+// one unit, a write fifty, a liveBroadcasts write one -- unless the caller
+// already charged it.
 func TestTheMeterChargesYouTubeDataAPICallsOnly(t *testing.T) {
 	prev := httpClient
 	httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -132,18 +133,20 @@ func TestTheMeterChargesYouTubeDataAPICallsOnly(t *testing.T) {
 	ctx := context.Background()
 	var out any
 	_ = y.getJSON(ctx, "https://www.googleapis.com/youtube/v3/videos?part=snippet", "tok", nil, &out)
+	_ = y.postJSON(ctx, "https://www.googleapis.com/youtube/v3/playlistItems", "tok", map[string]any{}, nil, nil)
 	_ = y.postJSON(ctx, "https://www.googleapis.com/youtube/v3/liveBroadcasts/transition", "tok", map[string]any{}, nil, nil)
 	_ = y.getJSON(ctx, "https://api.twitch.tv/helix/streams", "tok", nil, &out)
 	_ = y.getJSON(WithQuotaCharged(ctx), "https://www.googleapis.com/youtube/v3/videos", "tok", nil, &out)
 	mu.Lock()
 	defer mu.Unlock()
-	if spent != 51 {
-		t.Fatalf("metered %d units, want 51 (a list and a write; not Twitch, not a pre-charged read)", spent)
+	if spent != 52 {
+		t.Fatalf("metered %d units, want 52 (a list, a write and a live write; not Twitch, not a pre-charged read)", spent)
 	}
 }
 
 // TestTheMeterChargesTheUploadHostToo (R4): thumbnails.set lives under
-// /upload/youtube/v3/ and is a 50-unit write.
+// /upload/youtube/v3/ and is a 50-unit write. videos.insert has a bucket of its
+// own and is not counted; liveBroadcasts and liveStreams writes are 1.
 func TestTheMeterChargesTheUploadHostToo(t *testing.T) {
 	cases := []struct {
 		method, url string
@@ -151,7 +154,10 @@ func TestTheMeterChargesTheUploadHostToo(t *testing.T) {
 		ok          bool
 	}{
 		{http.MethodPost, "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=v", 50, true},
-		{http.MethodPost, "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet", 1600, true},
+		{http.MethodPost, "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet", 0, false},
+		{http.MethodPost, "https://www.googleapis.com/youtube/v3/liveBroadcasts/transition?id=b", 1, true},
+		{http.MethodPut, "https://www.googleapis.com/youtube/v3/liveStreams?part=snippet", 1, true},
+		{http.MethodPut, "https://www.googleapis.com/youtube/v3/videos?part=snippet", 50, true},
 		{http.MethodGet, "https://www.googleapis.com/youtube/v3/videos", 1, true},
 		{http.MethodGet, "https://www.googleapis.com/drive/v3/files", 0, false},
 	}

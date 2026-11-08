@@ -858,7 +858,11 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := st.Stats(ctx, creds.ClientID, acct.AccessToken)
+	var stats *oauth.LiveStats
+	err = s.kickRetry(ctx, acct, func(token string) (e error) {
+		stats, e = st.Stats(ctx, creds.ClientID, token)
+		return e
+	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -1454,7 +1458,11 @@ func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientI
 	if tp, ok := oauth.As[oauth.TargetedProvider](s.providers, acct.Platform); ok {
 		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
-	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
+	var ing *oauth.Ingest
+	err := s.kickRetry(ctx, acct, func(token string) (e error) {
+		ing, e = provider.Ingest(ctx, clientID, token)
+		return e
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1557,11 +1565,24 @@ func (k *keyedMutex) Lock(key int64) func() {
 // close to it. Refresh-on-use plus the background loop in RefreshLoop means a
 // long broadcast never hits an expired token mid-stream.
 func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAccount, error) {
+	return s.tokenForRejected(ctx, accountID, "")
+}
+
+// tokenForRejected is tokenFor for a caller whose platform refused the stored access token before its recorded
+// expiry (revoked, or rotated elsewhere). A non-empty rejected is that token: it is refreshed even though the clock
+// says it is good. If the stored token is no longer the rejected one, somebody has already refreshed or reconnected,
+// and the stored token is returned without spending the refresh token again (X rotates them, so a second spend of the
+// same one would fail for a healthy account).
+func (s *Server) tokenForRejected(ctx context.Context, accountID int64, rejected string) (*db.PlatformAccount, error) {
 	acct, err := s.store.GetPlatformAccount(s.box, accountID)
 	if err != nil {
 		return nil, err
 	}
-	if !acct.Expired() {
+	// usable: not expired by the clock, and not the very token the platform just refused.
+	usable := func(a *db.PlatformAccount) bool {
+		return !a.Expired() && (rejected == "" || a.AccessToken != rejected)
+	}
+	if usable(acct) {
 		return acct, nil
 	}
 
@@ -1575,7 +1596,7 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	if err != nil {
 		return nil, err
 	}
-	if !acct.Expired() {
+	if usable(acct) {
 		return acct, nil
 	}
 	// The row version this refresh is entitled to overwrite, taken HERE --
@@ -1583,9 +1604,23 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	// span a reconnect can slip into. Taking it any later would witness a row
 	// this function never actually reasoned about.
 	seen := acct.Revision()
+	// A Kick grant already found gone is not asked about again: every call that
+	// needs the token would otherwise send the dead refresh token to id.kick.com
+	// (the 10-minute RefreshLoop, every chat send, every sampler tick) and fail
+	// the same way. A reconnect replaces the row and clears the mark.
+	if s.kickRevoked(acct) {
+		return nil, errKickReconnect()
+	}
 	if acct.RefreshToken == "" {
-		return nil, fmt.Errorf("the %s token has expired and there is no refresh token: %w",
-			acct.Platform, oauth.ErrReconnectRequired)
+		if acct.Platform == db.PlatformKick {
+			s.markKickRevoked(acct, seen)
+		}
+		why := "has expired"
+		if rejected != "" {
+			why = "was refused"
+		}
+		return nil, fmt.Errorf("the %s token %s and there is no refresh token: %w",
+			acct.Platform, why, oauth.ErrReconnectRequired)
 	}
 
 	provider, err := s.providers.Get(acct.Platform)
@@ -1603,6 +1638,14 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 		// "failing to refresh" with the platform's words, before a broadcast
 		// that needs the token finds out.
 		s.acctHealth.fail(acct.ID, err, time.Now())
+		if errors.Is(err, oauth.ErrReconnectRequired) {
+			s.acctHealth.markDead(acct.ID, acct.ExpiresAt)
+			if acct.Platform == db.PlatformKick {
+				// invalid_grant: the refresh token is dead. Terminal until the
+				// operator reconnects, not retried.
+				s.markKickRevoked(acct, seen)
+			}
+		}
 		return nil, fmt.Errorf("could not refresh the %s token: %w", acct.Platform, err)
 	}
 
@@ -1674,23 +1717,36 @@ func (s *Server) RefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			accts, err := s.store.ListPlatformAccounts()
-			if err != nil {
-				continue
-			}
-			for _, a := range accts {
-				if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
-					continue
-				}
-				rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				if _, err := s.tokenFor(rctx, a.ID); err != nil {
-					s.log.Warn("token refresh failed", "platform", a.Platform, "account", a.AccountName, "err", err)
-				} else {
-					s.log.Info("token refreshed", "platform", a.Platform, "account", a.AccountName)
-				}
-				cancel()
-			}
+			s.refreshDue(ctx)
 		}
+	}
+}
+
+// refreshDue is one RefreshLoop tick: refresh every account whose token is
+// within 30 minutes of expiring, skipping those whose grant the platform has
+// already refused for good.
+func (s *Server) refreshDue(ctx context.Context) {
+	accts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		return
+	}
+	for _, a := range accts {
+		if a.ExpiresAt.IsZero() || time.Until(a.ExpiresAt) > 30*time.Minute {
+			continue
+		}
+		if s.acctHealth.isDead(a.ID, a.ExpiresAt) || s.kickRevoked(&a) {
+			// The platform refused the grant itself (or Kick's is gone);
+			// retrying every ten minutes forever cannot help. A reconnect
+			// stores a new expiry and replaces the row, which lifts this.
+			continue
+		}
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if _, err := s.tokenFor(rctx, a.ID); err != nil {
+			s.log.Warn("token refresh failed", "platform", a.Platform, "account", a.AccountName, "err", err)
+		} else {
+			s.log.Info("token refreshed", "platform", a.Platform, "account", a.AccountName)
+		}
+		cancel()
 	}
 }
 
@@ -1749,7 +1805,7 @@ func (s *Server) fillFacebookBackupIngest(ctx context.Context, dest *db.Destinat
 	if err != nil {
 		s.log.Warn("could not add a backup ingest to an existing Facebook broadcast",
 			"destination", dest.ID, "liveVideo", liveVideoID, "err", err)
-		return "Facebook would not add a redundant ingest to this broadcast: " + err.Error() +
+		return "Facebook would not add a redundant ingest to this broadcast: " + oauth.FacebookErrorText(err) +
 			". The destination is otherwise saved and will go live on its primary feed."
 	}
 	dest.BackupURL, dest.BackupStreamKey = ing.URL, ing.Key

@@ -396,10 +396,15 @@ func normaliseActor(a *Actor) *Actor {
 	return &c
 }
 
-// build is the Display a platform did not supply.
+// build is the Display a platform did not supply. It runs inside Normalise,
+// before Validate refuses an out-of-range exponent, so it must not trust one:
+// the loop and the %0*d padding below are both as long as the exponent.
 func (a Amount) build() string {
 	if a.Money() {
-		if a.Exponent <= 0 {
+		if a.Exponent < 0 || a.Exponent > MaxExponent {
+			return ""
+		}
+		if a.Exponent == 0 {
 			return fmt.Sprintf("%d %s", a.Minor, a.Currency)
 		}
 		div := int64(1)

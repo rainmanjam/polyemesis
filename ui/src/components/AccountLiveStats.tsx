@@ -110,6 +110,40 @@ export function ViewerReadoutLine({ readout }: Readonly<{ readout: ViewerReadout
   }
 }
 
+/** Twitch's chatter count, beside the viewer count it is not the same thing as:
+ *  the count of everyone connected to chat, viewers who never type included.
+ *
+ *  ASKED ONCE AND ON DEMAND, never on the viewer poll's tick, and apart from it
+ *  on purpose: an account still on the old scope version gets a 401 here, and
+ *  that must never take the viewer count down with it. Any failure hides the
+ *  line instead of showing an error beside a number that is fine. */
+export function TwitchChattersLine({ accountRef }: Readonly<{ accountRef: string }>) {
+  const t = useT();
+  const [total, setTotal] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
+  const ask = useCallback(() => {
+    api.twitchTool
+      .read<{ total: number }>("chatters", accountRef)
+      .then((c) => {
+        setTotal(c.total);
+        setFailed(false);
+      })
+      .catch(() => setFailed(true));
+  }, [accountRef]);
+  useEffect(() => {
+    ask();
+  }, [ask]);
+  if (failed || total === null) return null;
+  return (
+    <div className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+      <span>{t("twitchTools.chattersCount", { count: total })}</span>
+      <button type="button" className="underline-offset-2 hover:underline" onClick={ask}>
+        {t("common.refresh")}
+      </button>
+    </div>
+  );
+}
+
 /** Asks, on an interval, while anyone is looking. */
 export function AccountLiveStats({ accountId }: Readonly<{ accountId: number }>) {
   const t = useT();

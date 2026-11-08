@@ -3,6 +3,7 @@ package oauth
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -54,14 +55,15 @@ func WithQuotaCharged(ctx context.Context) context.Context {
 	return context.WithValue(ctx, quotaChargedKey{}, true)
 }
 
-// Unit costs from the YouTube Data API quota table: every list is 1, and
-// every write this package makes -- insert, update, delete, bind,
-// transition, thumbnails.set, playlistItems.insert -- is 50.
+// Unit costs from the YouTube Data API quota table
+// (https://developers.google.com/youtube/v3/determine_quota_cost): every list
+// is 1, a liveBroadcasts or liveStreams write is 1, and every other write this
+// package makes -- thumbnails.set, playlistItems.insert, videos.update -- is 50.
+// videos.insert has its own bucket and is not counted here at all.
 const (
-	ytCostList  = platform.YouTubeCostList
-	ytCostWrite = platform.YouTubeCostWrite
-	// ytCostUploadVideo is videos.insert.
-	ytCostUploadVideo = platform.YouTubeCostUploadVideo
+	ytCostList      = platform.YouTubeCostList
+	ytCostWrite     = platform.YouTubeCostWrite
+	ytCostLiveWrite = platform.YouTubeCostLiveWrite
 )
 
 // youTubeCost is the unit cost of a request, and whether it is a YouTube
@@ -69,21 +71,31 @@ const (
 // at a test stub is not spending anybody's quota.
 //
 // /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
-// 50, and videos.insert is 1,600. The clip publisher (internal/publish) makes
-// that call itself and charges it through its own Meter field.
+// 50. videos.insert is 1 unit in a bucket of its own (100 calls a day), so it
+// does not spend the shared allowance and is not metered.
 func youTubeCost(r *http.Request) (int, bool) {
 	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
 	}
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/videos"):
-		return ytCostUploadVideo, true
+		return 0, false
 	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/"):
 		return ytCostWrite, true
 	case !strings.HasPrefix(r.URL.Path, "/youtube/v3/"):
 		return 0, false
 	}
+	if r.Method != http.MethodGet && ytLiveResource(r.URL.Path) {
+		return ytCostLiveWrite, true
+	}
 	return costByMethod(r.Method), true
+}
+
+// ytLiveResource reports whether a /youtube/v3/ path is liveBroadcasts or
+// liveStreams, whose every method the table prices at 1.
+func ytLiveResource(path string) bool {
+	rest := strings.TrimPrefix(path, "/youtube/v3/")
+	return strings.HasPrefix(rest, "liveBroadcasts") || strings.HasPrefix(rest, "liveStreams")
 }
 
 func costByMethod(method string) int {
@@ -108,6 +120,12 @@ func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
 	return httpClient.Do(r)
 }
 
+// MaxRetryAfter caps any wait a platform asks for: a bad header must not park a
+// caller for hours.
+const MaxRetryAfter = 15 * time.Minute
+
+const maxRetryAfter = MaxRetryAfter
+
 // StatusError is a non-2xx answer from a platform API, typed so a caller can
 // tell a spent quota and a rate limit from any other refusal (item 5).
 // Error() is the wording the untyped error used to carry, unchanged.
@@ -118,20 +136,22 @@ type StatusError struct {
 	// QuotaExceeded is any of the reasons IsSpentQuotaReason names: the
 	// project's allowance is spent until the reset.
 	QuotaExceeded bool
-	msg           string
+	// Edge is set when what answered was a proxy or CDN in front of the
+	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
+	// rather than its API, so the status says nothing about the account.
+	Edge bool
+	// body is the response body, bounded, kept for a provider that wants the
+	// platform's own message back out of it.
+	body string
+	msg  string
 }
 
 func (e *StatusError) Error() string { return e.msg }
 
 func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
-	e := &StatusError{Status: resp.StatusCode, msg: msg}
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
-		if secs, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && secs > 0 {
-			e.RetryAfter = time.Duration(secs) * time.Second
-		} else if at, err := http.ParseTime(ra); err == nil {
-			e.RetryAfter = max(0, time.Until(at))
-		}
-	}
+	e := &StatusError{Status: resp.StatusCode, msg: msg, body: string(body[:min(len(body), 4<<10)])}
+	e.Edge = isEdgeAnswer(resp.Header, body)
+	e.RetryAfter = RetryAfterFromHeaders(resp.Header, time.Now())
 	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
 }
@@ -155,4 +175,54 @@ func bodyNamesSpentQuota(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// ParseRetryAfter reads a Retry-After value in either form, delta-seconds or an
+// HTTP date, relative to now. Zero when absent, unreadable or already past.
+func ParseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		return time.Duration(max(secs, 0)) * time.Second
+	}
+	if at, err := http.ParseTime(v); err == nil {
+		return max(0, at.Sub(now))
+	}
+	return 0
+}
+
+// RetryAfterFromHeaders is how long a response asked the caller to wait:
+// Retry-After, else Twitch's Ratelimit-Reset (a Unix epoch of when the bucket
+// refills; dev.twitch.tv/docs/api/guide, "Keeping track of your usage"),
+// capped at MaxRetryAfter. It is the one reader for the oauth requestJSON and
+// newStatusError paths and for chat's apiError.RetryAfter. Graph's
+// estimated_time_to_regain_access is a different signal, read by GraphWait into
+// apiError.Wait and statusError.wait.
+func RetryAfterFromHeaders(h http.Header, now time.Time) time.Duration {
+	var d time.Duration
+	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
+		d = ParseRetryAfter(ra, now)
+	} else if rs := strings.TrimSpace(h.Get("Ratelimit-Reset")); rs != "" {
+		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
+			d = time.Unix(epoch, 0).Sub(now)
+		}
+	}
+	return min(max(d, 0), MaxRetryAfter)
+}
+
+// isEdgeAnswer reports whether a response is a proxy's page rather than the
+// API's JSON: the body is not JSON and either looks like HTML or carries a
+// CDN's headers. A real API error is JSON even when it travelled through
+// Cloudflare, so the JSON check comes first.
+func isEdgeAnswer(h http.Header, body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 || json.Valid(body) {
+		return false
+	}
+	lead := strings.ToLower(strings.TrimSpace(string(body[:min(len(body), 64)])))
+	if strings.HasPrefix(lead, "<") {
+		return true
+	}
+	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
 }

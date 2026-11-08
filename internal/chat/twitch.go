@@ -94,6 +94,13 @@ type TwitchConfig struct {
 	// writes its token once at connect and reconnects to refresh, while a Helix
 	// call an hour later needs the current one.
 	HelixToken TokenFunc
+	// HelixRefresh, when set, forces a token refresh and returns the new token.
+	// A Helix 401 that is not about a missing scope is retried ONCE with it: the
+	// stored expiry is only a guess, and a token Twitch invalidated early is
+	// otherwise reported as a scope problem. It wraps ErrReconnectRequired when
+	// the grant itself is gone. It receives the token that was rejected, so a
+	// caller whose token someone else already replaced does not refresh again.
+	HelixRefresh func(ctx context.Context, rejected string) (string, error)
 	// ClientID is required on every Helix request alongside the bearer token.
 	// A request with a valid token and no Client-Id is rejected.
 	ClientID string
@@ -123,6 +130,13 @@ type TwitchAdapter struct {
 	// writeMu serialises writes: the keepalive ticker and the read loop's
 	// PONG both write to the same socket.
 	writeMu sync.Mutex
+	// tools holds the shoutout cooldown count; see twitch_tools.go.
+	tools toolState
+	// sendWaiters are the Sends currently waiting to learn whether Twitch
+	// accepted their PRIVMSG; guarded by mu. See Send and notifySends.
+	sendWaiters map[chan error]struct{}
+	// limit is Helix's rate-limit state; see twitch_ratelimit.go.
+	limit helixLimit
 }
 
 // NewTwitch builds the adapter. A missing nick, channel or token is a
@@ -268,6 +282,15 @@ func (t *TwitchAdapter) passToken(ctx context.Context) (string, error) {
 	}
 	tok, err := t.cfg.PassToken(ctx)
 	if err != nil {
+		// A revoked grant is the one refresh failure that retrying cannot fix.
+		// Left retryable, the runner re-posts the dead refresh token to
+		// id.twitch.tv about every thirty seconds until the hourly validation
+		// happens to detach chat.
+		if errors.Is(err, ErrReconnectRequired) {
+			t.setHealth(StateFailed, "Twitch no longer accepts this account; reconnect the Twitch account in Settings → Platforms")
+			return "", Fatal(fmt.Errorf("twitch no longer accepts this account's token and it cannot be refreshed; " +
+				"reconnect the Twitch account in Settings → Platforms"))
+		}
 		return "", fmt.Errorf("could not get a fresh Twitch chat token: %w", err)
 	}
 	if tok == "" {
@@ -312,7 +335,15 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 		t.setHealth(StateDegraded, "Twitch asked us to reconnect")
 		return true, nil
 
+	case "USERSTATE":
+		// Twitch sends this after every PRIVMSG it accepted, so it is the
+		// acknowledgement Send is waiting for.
+		t.notifySends(nil)
+
 	case "NOTICE":
+		if ok, refusal := sendRefusal(l); ok && !fatalNotice(l) {
+			t.notifySends(refusal)
+		}
 		if fatalNotice(l) {
 			// A rejected token cannot be fixed by trying again, and retrying a
 			// bad password every thirty seconds is how an IP gets banned.
@@ -387,9 +418,7 @@ func (t *TwitchAdapter) Delete(ctx context.Context, messageID string) error {
 		"moderator_id":   {t.cfg.ModeratorID},
 		"message_id":     {messageID},
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
-		t.helixBase()+"/moderation/chat?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, nil)
+	err := t.helix(ctx, http.MethodDelete, "/moderation/chat", q, nil, nil)
 	if err != nil {
 		return t.moderationError(err, "deletion")
 	}
@@ -428,10 +457,7 @@ func (t *TwitchAdapter) Ban(ctx context.Context, userID string, d time.Duration,
 		"broadcaster_id": {t.cfg.BroadcasterID},
 		"moderator_id":   {t.cfg.ModeratorID},
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodPost,
-		t.helixBase()+"/moderation/bans?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID},
-		map[string]any{"data": data}, nil)
+	err := t.helix(ctx, http.MethodPost, "/moderation/bans", q, map[string]any{"data": data}, nil)
 	if err != nil {
 		return t.moderationError(err, "ban")
 	}
@@ -452,9 +478,7 @@ func (t *TwitchAdapter) Unban(ctx context.Context, userID string) error {
 		"moderator_id":   {t.cfg.ModeratorID},
 		"user_id":        {userID},
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
-		t.helixBase()+"/moderation/bans?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, nil)
+	err := t.helix(ctx, http.MethodDelete, "/moderation/bans", q, nil, nil)
 	if err != nil {
 		return t.moderationError(err, "unban")
 	}
@@ -530,9 +554,7 @@ func (t *TwitchAdapter) ReadChatSettings(ctx context.Context) (ChatSettings, err
 			NonModeratorChatDelayDuration *int `json:"non_moderator_chat_delay_duration"`
 		} `json:"data"`
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodGet,
-		t.helixBase()+"/chat/settings?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, &out)
+	err := t.helix(ctx, http.MethodGet, "/chat/settings", q, nil, &out)
 	if err != nil {
 		return ChatSettings{}, t.moderationError(err, "chat settings read")
 	}
@@ -597,9 +619,7 @@ func (t *TwitchAdapter) UpdateChatSettings(ctx context.Context, s ChatSettings) 
 		"broadcaster_id": {t.cfg.BroadcasterID},
 		"moderator_id":   {t.cfg.ModeratorID},
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodPatch,
-		t.helixBase()+"/chat/settings?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, body, nil)
+	err := t.helix(ctx, http.MethodPatch, "/chat/settings", q, body, nil)
 	if err != nil {
 		return t.moderationError(err, "chat settings change")
 	}
@@ -631,9 +651,9 @@ func (t *TwitchAdapter) helixReady() error {
 func (t *TwitchAdapter) moderationError(err error, verb string) error {
 	switch statusOf(err) {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("Twitch refused the %s. An account connected before moderation existed never "+
-			"granted the scope for it — disconnect and reconnect it in Settings → Platforms. "+
-			"Twitch said: %w", verb, err)
+		return fmt.Errorf("Twitch refused the %s. %s Twitch said: %w", verb, unauthorizedAdvice(err), err)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("Twitch is rate-limiting this action.%s %w", waitAdvice(err), err)
 	case http.StatusForbidden:
 		return fmt.Errorf("Twitch says this account does not moderate %s. The connected account has "+
 			"to be the broadcaster or a moderator of that channel: %w",
@@ -714,8 +734,25 @@ func (t *TwitchAdapter) Send(ctx context.Context, text string) (Message, error) 
 	if conn == nil {
 		return Message{}, fmt.Errorf("Twitch chat is not connected")
 	}
+	// Registered BEFORE the write: the answer can arrive before writeLine returns.
+	ack := t.addSendWaiter()
+	defer t.removeSendWaiter(ack)
 	if err := t.writeLine(conn, "PRIVMSG #"+t.cfg.Channel+" :"+text); err != nil {
 		return Message{}, err
+	}
+	// Twitch accepts or refuses asynchronously: a refusal (banned, followers-only,
+	// slow mode, duplicate, rate limited...) is a NOTICE, an acceptance a USERSTATE.
+	// Without waiting, a dropped message was echoed as sent and the operator
+	// believed the viewers had read it. No answer in the window is treated as
+	// accepted -- Twitch is not guaranteed to say anything.
+	select {
+	case err := <-ack:
+		if err != nil {
+			return Message{}, err
+		}
+	case <-time.After(twitchSendAckWait):
+	case <-ctx.Done():
+		return Message{}, ctx.Err()
 	}
 
 	return Message{
@@ -726,6 +763,80 @@ func (t *TwitchAdapter) Send(ctx context.Context, text string) (Message, error) 
 		Text:     text,
 		At:       time.Now(),
 	}, nil
+}
+
+// twitchSendAckWait is how long Send waits for Twitch to accept or refuse a
+// message before assuming it was accepted.
+var twitchSendAckWait = 1500 * time.Millisecond
+
+func (t *TwitchAdapter) addSendWaiter() chan error {
+	ch := make(chan error, 1)
+	t.mu.Lock()
+	if t.sendWaiters == nil {
+		t.sendWaiters = map[chan error]struct{}{}
+	}
+	t.sendWaiters[ch] = struct{}{}
+	t.mu.Unlock()
+	return ch
+}
+
+func (t *TwitchAdapter) removeSendWaiter(ch chan error) {
+	t.mu.Lock()
+	delete(t.sendWaiters, ch)
+	t.mu.Unlock()
+}
+
+// notifySends tells every waiting Send what Twitch said. A NOTICE carries no
+// reference to the message it answers, so with two Sends in flight both hear it;
+// the window is short and an operator typing twice in 1.5 seconds is rare.
+func (t *TwitchAdapter) notifySends(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for ch := range t.sendWaiters {
+		select {
+		case ch <- err:
+		default:
+		}
+	}
+}
+
+// sendRefusals words the NOTICE msg-ids that answer a PRIVMSG with a refusal
+// (dev.twitch.tv/docs/chat/irc, NOTICE message IDs). Any other msg_* id is
+// still a refusal and is worded from Twitch's own text.
+var sendRefusals = map[string]string{
+	"msg_banned":                         "this account is banned from the channel",
+	"msg_timedout":                       "this account is timed out in the channel",
+	"msg_ratelimit":                      "Twitch is rate-limiting this account's messages",
+	"msg_followersonly":                  "the channel is in followers-only mode",
+	"msg_followersonly_zero":             "the channel is in followers-only mode",
+	"msg_followersonly_followed":         "the channel is in followers-only mode",
+	"msg_subsonly":                       "the channel is in subscribers-only mode",
+	"msg_slowmode":                       "the channel is in slow mode",
+	"msg_emoteonly":                      "the channel is in emote-only mode",
+	"msg_duplicate":                      "Twitch refuses a repeat of the previous message",
+	"msg_suspended":                      "this Twitch account is suspended",
+	"msg_channel_suspended":              "the channel is suspended",
+	"msg_channel_blocked":                "the channel blocked this message",
+	"msg_verified_email":                 "the channel requires a verified email on this account",
+	"msg_requires_verified_phone_number": "the channel requires a verified phone number on this account",
+	"msg_r9k":                            "the channel is in unique-chat mode and this message is not unique",
+}
+
+// sendRefusal reports whether a NOTICE is Twitch refusing a message, and why.
+func sendRefusal(l ircLine) (bool, error) {
+	id := l.Tags["msg-id"]
+	if !strings.HasPrefix(id, "msg_") {
+		return false, nil
+	}
+	why, ok := sendRefusals[id]
+	if !ok {
+		if len(l.Params) == 0 {
+			why = "Twitch refused it (" + id + ")"
+		} else {
+			why = l.Params[len(l.Params)-1]
+		}
+	}
+	return true, fmt.Errorf("Twitch did not post that message: %s", why)
 }
 
 // messageFrom converts a PRIVMSG into the unified model.

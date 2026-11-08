@@ -650,6 +650,8 @@ func complianceFields(c db.Compliance) []oauth.MetadataField {
 	if len(c.Labels) > 0 {
 		out = append(out, oauth.FieldLabels)
 	}
+	// c.YouTube is not listed: those controls travel with the broadcast half
+	// (BroadcastSettings.Defaults), which reports its own result.
 	return out
 }
 
@@ -872,7 +874,10 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	res := &oauth.MetadataResult{}
 	if !meta.Empty() {
 		var err error
-		res, err = pusher.PushMetadata(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
+		err = s.kickRetry(ctx, acct, func(token string) (e error) {
+			res, e = pusher.PushMetadata(ctx, creds.ClientID, token, acct.AccountRef, meta)
+			return e
+		})
 		if err != nil {
 			out.State = metaError
 			out.Message = err.Error()
@@ -881,7 +886,13 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		}
 	}
 
-	if !bc.Empty() {
+	// The destination's stored YouTube controls ride along as defaults under
+	// the composer's values, so one liveBroadcasts.update carries both and a
+	// stored value cannot overwrite what the operator just chose.
+	if _, ok := pusher.(broadcastPusher); ok && bc.Defaults == nil {
+		bc.Defaults = oauth.BroadcastSettingsFromControls(t.Compliance.YouTube)
+	}
+	if !bc.Empty() || bc.Defaults != nil {
 		pushBroadcastHalf(ctx, pusher, creds.ClientID, acct.AccessToken, bc, &out, res)
 	}
 

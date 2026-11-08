@@ -26,6 +26,9 @@ type accountHealthBook struct {
 	// refresh book for the same reason it is in memory: it is a reading, and
 	// the next validation pass or a reconnect replaces it.
 	revoked map[string]revocation
+	// reauthAt is when each account last had a forced refresh, so a token the
+	// platform keeps rejecting is not refreshed once per failing request.
+	reauthAt map[int64]time.Time
 }
 
 type revocation struct {
@@ -50,6 +53,21 @@ func (b *accountHealthBook) markRevoked(key string, reason string) bool {
 	_, had := b.revoked[key]
 	b.revoked[key] = revocation{reason: reason, at: time.Now()}
 	return !had
+}
+
+// reauthDue reports whether a forced refresh may run for the account now, and
+// if so records that one is starting.
+func (b *accountHealthBook) reauthDue(id int64, now time.Time, cooldown time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.reauthAt == nil {
+		b.reauthAt = make(map[int64]time.Time)
+	}
+	if last, ok := b.reauthAt[id]; ok && now.Sub(last) < cooldown {
+		return false
+	}
+	b.reauthAt[id] = now
+	return true
 }
 
 // clearRevoked removes the mark and reports whether there was one.
@@ -80,6 +98,30 @@ type refreshOutcome struct {
 	failures  int
 	lastError string
 	at        time.Time
+	// dead is set when the refresh was refused for good (reconnect required),
+	// deadExpiry the stored expiry it was refused at. A reconnect stores a new
+	// expiry, so a different value means the account is worth trying again.
+	dead       bool
+	deadExpiry time.Time
+}
+
+// markDead records that this account's grant is gone. fail must have run first.
+func (b *accountHealthBook) markDead(id int64, expiry time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if o, ok := b.m[id]; ok {
+		o.dead, o.deadExpiry = true, expiry
+		b.m[id] = o
+	}
+}
+
+// isDead reports whether the background refresh should skip the account: its
+// last refresh was refused for good and nothing has been reconnected since.
+func (b *accountHealthBook) isDead(id int64, expiry time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o, ok := b.m[id]
+	return ok && o.dead && o.deadExpiry.Equal(expiry)
 }
 
 func (b *accountHealthBook) fail(id int64, err error, now time.Time) {

@@ -1008,6 +1008,7 @@ func New(o Options) *Server {
 	if o.DB != nil {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
+		s.lifecycle.retokenFor = s.tokenForRejected
 		s.lifecycle.announce = s.announceBroadcastPhase
 		// X: the title its PUBLISH carries, and the chat adapter told the new
 		// broadcast at once rather than after its poll.
@@ -1794,9 +1795,26 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// person, so they get their own route too.
 			api.Get(r, "/chat/settings", s.handleGetChatSettings, readDenied)
 			r.Patch("/chat/settings", s.handleChatSettings)
+			// X's muted viewers, and who moderates the chat: X's moderators
+			// (by user id) and YouTube's liveChatModerators (by channel id,
+			// the chat's channel owner only). One route set; the handlers
+			// dispatch on the platform. Read-denied like the scrollback.
+			api.Get(r, "/chat/mutes", s.handleChatMutes, readDenied)
+			api.Get(r, "/chat/moderators", s.handleChatModerators, readDenied)
+			r.Post("/chat/moderators", s.handleChatAddModerator)
+			r.Delete("/chat/moderators", s.handleChatRemoveModerator)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
+			// Twitch's channel tools -- announcements, shoutouts, pins, Shield
+			// Mode, warnings, blocked terms, chatters, AutoMod, roles, bans and
+			// appeals -- are one resource path and the method picks the verb.
+			// See chat_twitch_tools.go.
+			api.Get(r, "/chat/twitch/{resource}", s.handleTwitchToolGet, readDenied)
+			r.Post("/chat/twitch/{resource}", s.handleTwitchToolPost)
+			r.Put("/chat/twitch/{resource}", s.handleTwitchToolPut)
+			r.Patch("/chat/twitch/{resource}", s.handleTwitchToolPatch)
+			r.Delete("/chat/twitch/{resource}", s.handleTwitchToolDelete)
 
 			// Chat polls (#14). Results are counts with no voter in them, so
 			// the GETs follow the method rule; starting and ending one posts
