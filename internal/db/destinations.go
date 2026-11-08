@@ -853,6 +853,16 @@ func (d Destination) xGoLiveProblems(add problemAdder) {
 	}
 }
 
+// YouTubeLiveNow reports whether polyemesis creates and drives the YouTube broadcast for this destination at
+// go-live: a YouTube RTMP destination linked to a connected account that has not been switched to Studio's
+// Stream now. A manual-key destination with no account is never touched.
+func (d *Destination) YouTubeLiveNow() bool {
+	if d == nil || d.Platform != PlatformYouTube || d.AccountID == nil || d.Kind != DestRTMP {
+		return false
+	}
+	return d.Compliance.YouTube == nil || !d.Compliance.YouTube.StudioStreamNow
+}
+
 // youtubeStreamProblems refuses a pinned YouTube stream on a destination that is not YouTube.
 func (d Destination) youtubeStreamProblems(add problemAdder) {
 	if y := d.Compliance.YouTube; y != nil && y.StreamID != "" && d.Platform != PlatformYouTube {

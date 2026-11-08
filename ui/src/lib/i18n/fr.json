@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Chargement des flux de votre chaîne…",
   "yt.live.streamError": "Impossible de charger vos flux YouTube : {message}",
   "yt.live.streamUsedBy": "Également utilisé par {names}. YouTube limite le nombre de diffusions pouvant être en direct sur une même clé de flux.",
-  "yt.live.streamHelp": "Le flux réutilisable de votre chaîne auquel la diffusion de cette destination est liée. polyemesis ne modifie jamais votre clé de flux."
+  "yt.live.streamHelp": "Le flux réutilisable de votre chaîne auquel la diffusion de cette destination est liée. polyemesis ne modifie jamais votre clé de flux.",
+  "yt.live.studioSwitch": "Utiliser plutôt « Stream now » de YouTube Studio",
+  "yt.live.studioHelp": "Désactivé (par défaut) : quand vous passez en direct, polyemesis crée une diffusion sur votre chaîne, la termine lorsque vous désactivez cette destination et en lit le chat. Activé : polyemesis envoie uniquement la vidéo à votre clé de stream et YouTube Studio crée la diffusion.",
+  "yt.live.privacyNote": "Une diffusion créée par polyemesis est publique, sauf si vous définissez la visibilité ci-dessous."
 }

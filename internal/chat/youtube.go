@@ -95,6 +95,8 @@ type YouTubeAdapter struct {
 	mu     sync.Mutex
 	health Health
 	chatID string
+	// wake ends a wait for a broadcast early; SetLiveChatID sends on it. Buffered one and sent without blocking.
+	wake chan struct{}
 	// act is the activity decoder's state: what it has seen, when it began.
 	act ytActivity
 	// tallies is the last count each poll message was seen with in a list page;
@@ -131,6 +133,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 		cfg:    cfg,
 		budget: adapterBudget(cfg),
 		chatID: cfg.LiveChatID,
+		wake:   make(chan struct{}, 1),
 		health: Health{State: StateConnecting},
 	}, nil
 }
@@ -178,7 +181,7 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 		}
 		if chatID == "" {
 			y.setHealth(StateDegraded, "waiting for a YouTube broadcast to go live; chat starts when it does")
-			if !y.cfg.Sleep(ctx, idleFor) {
+			if !y.sleepOrWake(ctx, idleFor) {
 				return nil
 			}
 			// CLAMPED AFTER DOUBLING, not merely gated before it. Testing
@@ -226,6 +229,37 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 		idleFor = min(idleFor*2, ytBroadcastPollMax)
 	}
 	return nil
+}
+
+// SetLiveChatID points the adapter at a chat, and "" lets it find one again. The go-live path calls it with the
+// liveChatId from the insert response of the broadcast polyemesis created, so chat reads from that broadcast
+// rather than from whichever active one discovery lists first, and an adapter that is waiting starts at once
+// instead of after its backoff (up to five minutes).
+func (y *YouTubeAdapter) SetLiveChatID(id string) {
+	y.mu.Lock()
+	y.chatID = strings.TrimSpace(id)
+	y.mu.Unlock()
+	select {
+	case y.wake <- struct{}{}:
+	default:
+	}
+}
+
+// sleepOrWake is cfg.Sleep that SetLiveChatID can cut short. It reports false only when ctx ended.
+func (y *YouTubeAdapter) sleepOrWake(ctx context.Context, d time.Duration) bool {
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-y.wake:
+			cancel()
+		case <-sctx.Done():
+		}
+	}()
+	if y.cfg.Sleep(sctx, d) {
+		return true
+	}
+	return ctx.Err() == nil
 }
 
 // liveChatID returns the cached id, or finds the active broadcast's.

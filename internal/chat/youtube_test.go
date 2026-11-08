@@ -491,3 +491,53 @@ func TestYouTubeDeleteAndBanReadEverySpellingOfASpentQuota(t *testing.T) {
 		}
 	}
 }
+
+// SetLiveChatID is how the broadcast polyemesis creates reaches chat: an adapter waiting for a broadcast to
+// discover starts reading the named chat at once, and does not list broadcasts to find it.
+func TestYouTubeAdapterReadsTheChatItIsPointedAtWithoutWaitingOutItsBackoff(t *testing.T) {
+	chats := make(chan string, 4)
+	var listed atomic.Int64
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/liveBroadcasts"):
+			listed.Add(1)
+			fmt.Fprint(w, `{"items":[]}`)
+		case strings.Contains(r.URL.Path, "liveChat/messages"):
+			select {
+			case chats <- r.URL.Query().Get("liveChatId"):
+			default:
+			}
+			fmt.Fprint(w, `{"items":[],"pollingIntervalMillis":5000,"nextPageToken":"n"}`)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	})
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) {
+		// A wait only SetLiveChatID (or the end of the test) can cut short.
+		c.Sleep = func(ctx context.Context, d time.Duration) bool { <-ctx.Done(); return false }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = a.Run(ctx, SinkFunc(func(Message) {})) }()
+
+	// Let it reach the waiting state, then point it.
+	deadline := time.Now().Add(2 * time.Second)
+	for listed.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if listed.Load() == 0 {
+		t.Fatal("the adapter never went looking for a broadcast")
+	}
+	a.SetLiveChatID("chat-9")
+	select {
+	case got := <-chats:
+		if got != "chat-9" {
+			t.Errorf("read chat %q, want the one it was pointed at", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the adapter did not start on the chat it was pointed at")
+	}
+	cancel()
+	<-done
+}

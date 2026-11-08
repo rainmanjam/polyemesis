@@ -374,9 +374,12 @@ type ytBroadcast struct {
 		// liveness read, for the same reason.
 		ChannelID          string `json:"channelId"`
 		ScheduledStartTime string `json:"scheduledStartTime"`
+		// LiveChatID is the broadcast's chat, present on an insert response and on a read of the snippet part.
+		LiveChatID string `json:"liveChatId"`
 	} `json:"snippet"`
 	Status struct {
 		LifeCycleStatus string `json:"lifeCycleStatus"`
+		PrivacyStatus   string `json:"privacyStatus"`
 	} `json:"status"`
 	// ContentDetails is read so that a write can carry every field of the part
 	// back unchanged. liveBroadcasts.update is destructive BY PART: omitting a
@@ -397,8 +400,10 @@ type ytBroadcast struct {
 		// reference says every contentDetails update must carry. Pointers,
 		// because a broadcast that did not report one must not be sent a
 		// made-up false: that would switch recording or embedding off.
-		RecordFromStart *bool `json:"recordFromStart"`
-		EnableEmbed     *bool `json:"enableEmbed"`
+		// BoundStreamID is the liveStream the broadcast is bound to, empty when none.
+		BoundStreamID   string `json:"boundStreamId"`
+		RecordFromStart *bool  `json:"recordFromStart"`
+		EnableEmbed     *bool  `json:"enableEmbed"`
 		MonitorStream   struct {
 			EnableMonitorStream    bool `json:"enableMonitorStream"`
 			BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`

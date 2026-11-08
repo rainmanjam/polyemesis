@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Caricamento degli stream del tuo canale…",
   "yt.live.streamError": "Impossibile caricare i tuoi stream YouTube: {message}",
   "yt.live.streamUsedBy": "Usato anche da {names}. YouTube limita quante dirette possono essere attive con una stessa chiave stream.",
-  "yt.live.streamHelp": "A quale degli stream riutilizzabili del tuo canale è collegata la diretta di questa destinazione. polyemesis non modifica mai la tua chiave stream."
+  "yt.live.streamHelp": "A quale degli stream riutilizzabili del tuo canale è collegata la diretta di questa destinazione. polyemesis non modifica mai la tua chiave stream.",
+  "yt.live.studioSwitch": "Usa invece «Stream now» di YouTube Studio",
+  "yt.live.studioHelp": "Disattivato (predefinito): quando vai in diretta, polyemesis crea una trasmissione sul tuo canale, la termina quando disattivi questa destinazione e ne legge la chat. Attivato: polyemesis invia solo il video alla tua chiave di stream e la trasmissione la crea YouTube Studio.",
+  "yt.live.privacyNote": "Una trasmissione creata da polyemesis è pubblica, a meno che tu non imposti la visibilità qui sotto."
 }

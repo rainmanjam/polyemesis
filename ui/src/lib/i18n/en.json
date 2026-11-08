@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Loading your channel's streams…",
   "yt.live.streamError": "Could not load your YouTube streams: {message}",
   "yt.live.streamUsedBy": "Also used by {names}. YouTube limits how many broadcasts can be live on one stream key.",
-  "yt.live.streamHelp": "Which of your channel's reusable streams this destination's broadcast is bound to. polyemesis never changes your stream key."
+  "yt.live.streamHelp": "Which of your channel's reusable streams this destination's broadcast is bound to. polyemesis never changes your stream key.",
+  "yt.live.studioSwitch": "Use YouTube Studio's Stream now instead",
+  "yt.live.studioHelp": "Off (the default): when you go live polyemesis creates a broadcast on your channel, ends it when you switch this destination off, and reads chat from it. On: polyemesis only sends video to your stream key and YouTube Studio makes the broadcast.",
+  "yt.live.privacyNote": "A broadcast polyemesis creates is Public unless you set the visibility below."
 }

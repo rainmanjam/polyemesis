@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Die Streams deines Kanals werden geladen …",
   "yt.live.streamError": "Deine YouTube-Streams konnten nicht geladen werden: {message}",
   "yt.live.streamUsedBy": "Wird auch von {names} verwendet. YouTube begrenzt, wie viele Übertragungen pro Stream-Schlüssel gleichzeitig live sein können.",
-  "yt.live.streamHelp": "An welchen der wiederverwendbaren Streams deines Kanals die Übertragung dieses Ziels gebunden ist. polyemesis ändert niemals deinen Stream-Schlüssel."
+  "yt.live.streamHelp": "An welchen der wiederverwendbaren Streams deines Kanals die Übertragung dieses Ziels gebunden ist. polyemesis ändert niemals deinen Stream-Schlüssel.",
+  "yt.live.studioSwitch": "Stattdessen „Stream now“ in YouTube Studio verwenden",
+  "yt.live.studioHelp": "Aus (Standard): Wenn du live gehst, erstellt polyemesis eine Übertragung auf deinem Kanal, beendet sie, wenn du dieses Ziel ausschaltest, und liest den Chat daraus. An: polyemesis sendet nur Video an deinen Stream-Schlüssel, und YouTube Studio erstellt die Übertragung.",
+  "yt.live.privacyNote": "Eine von polyemesis erstellte Übertragung ist öffentlich, sofern du unten keine andere Sichtbarkeit festlegst."
 }

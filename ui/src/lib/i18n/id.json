@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Memuat stream di kanal Anda…",
   "yt.live.streamError": "Tidak dapat memuat stream YouTube Anda: {message}",
   "yt.live.streamUsedBy": "Juga digunakan oleh {names}. YouTube membatasi jumlah siaran yang dapat tayang langsung pada satu kunci stream.",
-  "yt.live.streamHelp": "Stream kanal Anda yang dapat dipakai ulang tempat siaran tujuan ini terikat. polyemesis tidak pernah mengubah kunci stream Anda."
+  "yt.live.streamHelp": "Stream kanal Anda yang dapat dipakai ulang tempat siaran tujuan ini terikat. polyemesis tidak pernah mengubah kunci stream Anda.",
+  "yt.live.studioSwitch": "Gunakan \"Stream now\" di YouTube Studio sebagai gantinya",
+  "yt.live.studioHelp": "Nonaktif (default): saat Anda mulai siaran langsung, polyemesis membuat siaran di kanal Anda, mengakhirinya saat Anda mematikan tujuan ini, dan membaca obrolan darinya. Aktif: polyemesis hanya mengirim video ke kunci streaming Anda dan YouTube Studio yang membuat siarannya.",
+  "yt.live.privacyNote": "Siaran yang dibuat polyemesis bersifat Publik kecuali Anda mengatur visibilitas di bawah."
 }

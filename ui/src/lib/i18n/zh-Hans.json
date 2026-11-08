@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "正在加载你频道的直播流…",
   "yt.live.streamError": "无法加载你的 YouTube 直播流：{message}",
   "yt.live.streamUsedBy": "{names} 也在使用。YouTube 限制同一个直播流密钥上可同时进行的直播数量。",
-  "yt.live.streamHelp": "此目标的直播绑定到你频道中哪一个可重复使用的直播流。polyemesis 绝不会更改你的直播流密钥。"
+  "yt.live.streamHelp": "此目标的直播绑定到你频道中哪一个可重复使用的直播流。polyemesis 绝不会更改你的直播流密钥。",
+  "yt.live.studioSwitch": "改用 YouTube Studio 的“Stream now”",
+  "yt.live.studioHelp": "关闭（默认）：开始直播时，polyemesis 会在你的频道上创建一场直播，在你关闭此目标时结束该直播，并从中读取聊天。开启：polyemesis 只会把视频发送到你的直播密钥，直播由 YouTube Studio 创建。",
+  "yt.live.privacyNote": "除非你在下方设置了公开范围，否则 polyemesis 创建的直播为“公开”。"
 }

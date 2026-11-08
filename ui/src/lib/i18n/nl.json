@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "De streams van je kanaal worden geladen…",
   "yt.live.streamError": "Je YouTube-streams konden niet worden geladen: {message}",
   "yt.live.streamUsedBy": "Wordt ook gebruikt door {names}. YouTube beperkt hoeveel uitzendingen tegelijk live kunnen zijn op één streamsleutel.",
-  "yt.live.streamHelp": "Aan welke van de herbruikbare streams van je kanaal de uitzending van deze bestemming is gekoppeld. polyemesis wijzigt nooit je streamsleutel."
+  "yt.live.streamHelp": "Aan welke van de herbruikbare streams van je kanaal de uitzending van deze bestemming is gekoppeld. polyemesis wijzigt nooit je streamsleutel.",
+  "yt.live.studioSwitch": "Gebruik in plaats daarvan \"Stream now\" van YouTube Studio",
+  "yt.live.studioHelp": "Uit (standaard): wanneer je live gaat, maakt polyemesis een uitzending op je kanaal, beëindigt die zodra je deze bestemming uitzet en leest de chat ervan. Aan: polyemesis stuurt alleen video naar je streamsleutel en YouTube Studio maakt de uitzending.",
+  "yt.live.privacyNote": "Een uitzending die polyemesis maakt is openbaar, tenzij je hieronder de zichtbaarheid instelt."
 }

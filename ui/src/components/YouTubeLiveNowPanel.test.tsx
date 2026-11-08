@@ -51,3 +51,20 @@ describe("the YouTube stream picker", () => {
     expect(onChange).toHaveBeenCalledWith({ streamId: undefined });
   });
 });
+
+describe("the Studio Stream now switch", () => {
+  it("is off by default, and turning it on stores the flag and hides the stream picker", async () => {
+    api.youtubeStreams.mockResolvedValue({ supported: true, streams: rows });
+    const onChange = vi.fn();
+    const { rerender } = render(<YouTubeLiveNowPanel accountId={3} controls={null} onChange={onChange} />);
+    const sw = screen.getByRole("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("combobox")).toBeTruthy();
+    fireEvent.click(sw);
+    expect(onChange).toHaveBeenCalledWith({ studioStreamNow: true });
+    rerender(<YouTubeLiveNowPanel accountId={3} controls={{ studioStreamNow: true }} onChange={onChange} />);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onChange).toHaveBeenLastCalledWith({ studioStreamNow: undefined });
+  });
+});

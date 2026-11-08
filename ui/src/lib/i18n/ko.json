@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "채널의 스트림을 불러오는 중…",
   "yt.live.streamError": "YouTube 스트림을 불러오지 못했습니다: {message}",
   "yt.live.streamUsedBy": "{names}에서도 사용 중입니다. YouTube는 하나의 스트림 키로 동시에 라이브할 수 있는 방송 수를 제한합니다.",
-  "yt.live.streamHelp": "이 대상의 방송을 채널의 재사용 가능한 스트림 중 어느 것에 연결할지 정합니다. polyemesis는 스트림 키를 절대 변경하지 않습니다."
+  "yt.live.streamHelp": "이 대상의 방송을 채널의 재사용 가능한 스트림 중 어느 것에 연결할지 정합니다. polyemesis는 스트림 키를 절대 변경하지 않습니다.",
+  "yt.live.studioSwitch": "대신 YouTube Studio의 \"Stream now\" 사용",
+  "yt.live.studioHelp": "꺼짐(기본값): 라이브를 시작하면 polyemesis가 채널에 방송을 만들고, 이 대상을 끄면 방송을 종료하며, 그 방송에서 채팅을 읽습니다. 켜짐: polyemesis는 스트림 키로 영상만 보내고 방송은 YouTube Studio가 만듭니다.",
+  "yt.live.privacyNote": "polyemesis가 만든 방송은 아래에서 공개 범위를 설정하지 않으면 공개로 설정됩니다."
 }

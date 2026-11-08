@@ -248,6 +248,10 @@ type YouTubeBroadcastControls struct {
 	// StreamID pins the YouTube liveStream a live-now broadcast is bound to. Empty means the stream whose key
 	// this destination already publishes with. It is NOT a toggle and is never pushed: it is excluded from Empty.
 	StreamID string `json:"streamId,omitempty"`
+	// StudioStreamNow turns off the broadcast polyemesis creates at go-live ("Use YouTube Studio's Stream now
+	// instead"): the destination then publishes to its key and YouTube's own Stream now makes the broadcast. The
+	// zero value is the default, polyemesis's own broadcast. Not a toggle and never pushed: excluded from Empty.
+	StudioStreamNow bool `json:"studioStreamNow,omitempty"`
 }
 
 // ytStreamIDPattern is the shape of a liveStream id: URL-safe characters, with dots, dashes and underscores.

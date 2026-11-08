@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Kanalınızın akışları yükleniyor…",
   "yt.live.streamError": "YouTube akışlarınız yüklenemedi: {message}",
   "yt.live.streamUsedBy": "Ayrıca {names} tarafından kullanılıyor. YouTube, tek bir akış anahtarında aynı anda canlı olabilecek yayın sayısını sınırlar.",
-  "yt.live.streamHelp": "Bu hedefin yayınının, kanalınızın yeniden kullanılabilir akışlarından hangisine bağlı olduğunu belirler. polyemesis akış anahtarınızı asla değiştirmez."
+  "yt.live.streamHelp": "Bu hedefin yayınının, kanalınızın yeniden kullanılabilir akışlarından hangisine bağlı olduğunu belirler. polyemesis akış anahtarınızı asla değiştirmez.",
+  "yt.live.studioSwitch": "Bunun yerine YouTube Studio'nun \"Stream now\" özelliğini kullan",
+  "yt.live.studioHelp": "Kapalı (varsayılan): canlı yayına geçtiğinizde polyemesis kanalınızda bir yayın oluşturur, bu hedefi kapattığınızda yayını sonlandırır ve sohbeti ondan okur. Açık: polyemesis yalnızca yayın anahtarınıza video gönderir ve yayını YouTube Studio oluşturur.",
+  "yt.live.privacyNote": "polyemesis'in oluşturduğu yayın, aşağıda görünürlüğü ayarlamadığınız sürece Herkese açık olur."
 }

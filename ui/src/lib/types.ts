@@ -3194,6 +3194,9 @@ export interface YouTubeBroadcastControls {
   /** Pins the reusable YouTube stream a go-live broadcast is bound to. Absent means the
    *  stream whose key this destination already publishes with. Never a key. */
   streamId?: string;
+  /** True turns off the broadcast polyemesis creates at go-live ("use YouTube Studio's Stream now
+   *  instead"). Absent is the default: polyemesis creates and drives its own. */
+  studioStreamNow?: boolean;
 }
 
 /** One reusable stream of the connected channel, as GET /platforms/accounts/{id}/youtube/streams

@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Carregando as transmissões do seu canal…",
   "yt.live.streamError": "Não foi possível carregar suas transmissões do YouTube: {message}",
   "yt.live.streamUsedBy": "Também usada por {names}. O YouTube limita quantas transmissões podem estar ao vivo com a mesma chave de transmissão.",
-  "yt.live.streamHelp": "A qual das transmissões reutilizáveis do seu canal a transmissão deste destino está vinculada. O polyemesis nunca altera sua chave de transmissão."
+  "yt.live.streamHelp": "A qual das transmissões reutilizáveis do seu canal a transmissão deste destino está vinculada. O polyemesis nunca altera sua chave de transmissão.",
+  "yt.live.studioSwitch": "Usar o \"Stream now\" do YouTube Studio em vez disso",
+  "yt.live.studioHelp": "Desativado (padrão): quando você entra ao vivo, o polyemesis cria uma transmissão no seu canal, a encerra quando você desativa este destino e lê o chat dela. Ativado: o polyemesis só envia vídeo para a sua chave de transmissão e o YouTube Studio cria a transmissão.",
+  "yt.live.privacyNote": "Uma transmissão criada pelo polyemesis é pública, a menos que você defina a visibilidade abaixo."
 }

@@ -128,6 +128,11 @@ type BroadcastControl struct {
 	// ends the show. Never set for any other platform. Not part of Empty: alone
 	// it says nothing about a broadcast.
 	Renewed bool `json:"renewed,omitempty"`
+	// Opened is true when BroadcastID is a broadcast polyemesis itself created for this destination at go-live
+	// (YouTube's live-now broadcast), as opposed to one announced ahead of a scheduled show or made in
+	// YouTube Studio. Only an opened one is renewed when it completes while the destination is still on: a
+	// completed announced broadcast stays a fault. Meaningful only beside a BroadcastID; not part of Empty.
+	Opened bool `json:"opened,omitempty"`
 }
 
 // Empty reports whether this block says anything at all.

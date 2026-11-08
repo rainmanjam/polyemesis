@@ -4510,5 +4510,8 @@
   "yt.live.streamLoading": "Wczytywanie strumieni Twojego kanału…",
   "yt.live.streamError": "Nie udało się wczytać Twoich strumieni YouTube: {message}",
   "yt.live.streamUsedBy": "Używany także przez: {names}. YouTube ogranicza liczbę transmisji, które mogą być na żywo na jednym kluczu strumienia.",
-  "yt.live.streamHelp": "Z którym z wielokrotnego użytku strumieni Twojego kanału powiązana jest transmisja tego celu. polyemesis nigdy nie zmienia Twojego klucza strumienia."
+  "yt.live.streamHelp": "Z którym z wielokrotnego użytku strumieni Twojego kanału powiązana jest transmisja tego celu. polyemesis nigdy nie zmienia Twojego klucza strumienia.",
+  "yt.live.studioSwitch": "Użyj zamiast tego „Stream now” w YouTube Studio",
+  "yt.live.studioHelp": "Wyłączone (domyślnie): gdy zaczynasz transmisję na żywo, polyemesis tworzy transmisję na Twoim kanale, kończy ją po wyłączeniu tego miejsca docelowego i odczytuje z niej czat. Włączone: polyemesis wysyła tylko obraz na Twój klucz transmisji, a transmisję tworzy YouTube Studio.",
+  "yt.live.privacyNote": "Transmisja utworzona przez polyemesis jest publiczna, chyba że ustawisz widoczność poniżej."
 }
