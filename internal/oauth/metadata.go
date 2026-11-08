@@ -391,7 +391,13 @@ type ytBroadcast struct {
 		// (#8). Empty when YouTube did not report them, and then not sent.
 		ClosedCaptionsType string `json:"closedCaptionsType"`
 		LatencyPreference  string `json:"latencyPreference"`
-		MonitorStream      struct {
+		// RecordFromStart and EnableEmbed are two of the properties the
+		// reference says every contentDetails update must carry. Pointers,
+		// because a broadcast that did not report one must not be sent a
+		// made-up false: that would switch recording or embedding off.
+		RecordFromStart *bool `json:"recordFromStart"`
+		EnableEmbed     *bool `json:"enableEmbed"`
+		MonitorStream   struct {
 			EnableMonitorStream    bool `json:"enableMonitorStream"`
 			BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
 		} `json:"monitorStream"`

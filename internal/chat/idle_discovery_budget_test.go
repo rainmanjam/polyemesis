@@ -14,11 +14,12 @@ import (
 // live, backing off from ytBroadcastPoll to ytBroadcastPollMax. The comment on
 // those constants says "a machine left connected overnight must not spend the
 // morning's quota discovering that nobody is live" -- which is a claim about
-// arithmetic, made in prose, over a cost constant that IS NOT VERIFIED.
+// arithmetic, made in prose, over a cost constant.
 //
-// Google's quota calculator omits the Live Streaming endpoints, so
-// QuotaCostListBroadcasts = 1 has no published source. If the real cost is 50 --
-// what every WRITE in this file costs -- an idle overnight spends 144% of a
+// Google's quota table now lists liveBroadcasts.list at 1
+// (https://developers.google.com/youtube/v3/determine_quota_cost), which is the
+// value of QuotaCostListBroadcasts; it was once unpublished. Were the cost 50 --
+// what a write on the ordinary resources costs -- an idle overnight spends 144% of a
 // default allowance, and the operator's first chat poll of the morning is
 // refused by a quota they never knowingly used.
 //

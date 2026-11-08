@@ -1792,8 +1792,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// person, so they get their own route too.
 			api.Get(r, "/chat/settings", s.handleGetChatSettings, readDenied)
 			r.Patch("/chat/settings", s.handleChatSettings)
-			// X's muted viewers and chat moderators: who the account has
-			// muted and appointed, so read-denied like the scrollback.
+			// X's muted viewers, and who moderates the chat: X's moderators
+			// (by user id) and YouTube's liveChatModerators (by channel id,
+			// the chat's channel owner only). One route set; the handlers
+			// dispatch on the platform. Read-denied like the scrollback.
 			api.Get(r, "/chat/mutes", s.handleChatMutes, readDenied)
 			api.Get(r, "/chat/moderators", s.handleChatModerators, readDenied)
 			r.Post("/chat/moderators", s.handleChatAddModerator)

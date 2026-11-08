@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import type { ChatModerator, ChatMute, ChatPlatform, ChatStatus } from "@/lib/types";
+import type { ChatMute, ChatPlatform, ChatStatus, XChatModerator } from "@/lib/types";
 
 /* ===========================================================================
    X's muted viewers and chat moderators.
@@ -55,7 +55,7 @@ function XChatModerationForAccount({ account, label }: Readonly<{ account: strin
   const t = useT();
   const [mutes, setMutes] = useState<ChatMute[] | null>(null);
   const [mutesTruncated, setMutesTruncated] = useState(false);
-  const [mods, setMods] = useState<ChatModerator[] | null>(null);
+  const [mods, setMods] = useState<XChatModerator[] | null>(null);
   const [mutesError, setMutesError] = useState("");
   const [modsError, setModsError] = useState("");
   const [loading, setLoading] = useState(true);

@@ -236,7 +236,10 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration: "Delete a message, over the same auth/youtube scope everything else here uses — so an account " +
 				"connected before this existed can already do it, with no reconnect. The connected account still has to " +
 				"own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. " +
-				"Banning and timing out work too, over the same scope — permanent, or a timeout in seconds.",
+				"Banning and timing out work too, over the same scope — permanent, or a timeout in seconds." +
+				" Managing the chat's moderators (list, add, remove) and the per-destination " +
+				"broadcast controls (latency, DVR, recording, captions) are built but not yet exercised against " +
+				"a live account, so treat them as unverified.",
 		},
 	},
 	{

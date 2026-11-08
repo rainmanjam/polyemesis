@@ -72,6 +72,10 @@ func (s *Server) handleChatModerators(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if platform != db.PlatformX {
+		s.handleYouTubeListChatModerators(w, r)
+		return
+	}
 	mods, err := s.chat.ListModerators(r.Context(), platform, account)
 	if err != nil {
 		writeChatXError(w, err)
@@ -87,6 +91,10 @@ func (s *Server) handleChatModerators(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChatAddModerator(w http.ResponseWriter, r *http.Request) {
 	platform, account, ok := s.chatTarget(w, r)
 	if !ok {
+		return
+	}
+	if platform != db.PlatformX {
+		s.handleYouTubeAddChatModerator(w, r)
 		return
 	}
 	userID := strings.TrimSpace(r.URL.Query().Get("userId"))
@@ -109,6 +117,10 @@ func (s *Server) handleChatAddModerator(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleChatRemoveModerator(w http.ResponseWriter, r *http.Request) {
 	platform, account, ok := s.chatTarget(w, r)
 	if !ok {
+		return
+	}
+	if platform != db.PlatformX {
+		s.handleYouTubeRemoveChatModerator(w, r)
 		return
 	}
 	userID := strings.TrimSpace(r.URL.Query().Get("userId"))

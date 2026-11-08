@@ -35,13 +35,6 @@ type ChatMute struct {
 	EndsAt   *time.Time `json:"endsAt,omitempty"`
 }
 
-// ChatModerator is one of the broadcaster's chat moderators.
-type ChatModerator struct {
-	UserID   string `json:"userId"`
-	Username string `json:"username,omitempty"`
-	Name     string `json:"name,omitempty"`
-}
-
 // MuteLister is the optional capability to read who is muted and until when.
 type MuteLister interface {
 	Adapter

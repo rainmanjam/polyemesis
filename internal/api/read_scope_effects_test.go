@@ -115,6 +115,9 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
 			"the report names the stream's top chatters"},
 
+		{http.MethodGet, "/api/v1/chat/moderators?platform=youtube", nil,
+			"the roster is read with the owner's token and each read spends 50 quota units"},
+
 		// Wave 4 #5: the highlight queue's excerpts are the transcript again; the
 		// template list carries the fonts listing and FFmpeg's text capability.
 		{http.MethodGet, "/api/v1/clipper/recordings/1/highlights", nil,

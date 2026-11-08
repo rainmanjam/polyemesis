@@ -169,7 +169,7 @@ are `403` because of what they *do*. The last twenty-five are `403` because of w
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 | `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
 | `GET /chat/mutes` | the viewers the operator has muted on X, by user id and name, with when each timed mute ends |
-| `GET /chat/moderators` | the operator's X chat moderators, by user id and name |
+| `GET /chat/moderators` | the chat's moderators: on X the operator's moderators, by user id and name; on YouTube the chat's moderator roster, read with the owner's token (each read spends 50 of the day's YouTube quota units) |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
@@ -1955,12 +1955,13 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query |
 | `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
+| `GET` | `/chat/moderators` — who may moderate a YouTube live chat (`liveChatModerators.list`); `platform` (YouTube only) and `account` in the query. A read costs 50 YouTube quota units |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
 | `POST` `DELETE` | `/chat/bans` |
-| `POST` `DELETE` | `/chat/moderators` |
+| `POST` `DELETE` | `/chat/moderators` — on X, appoint or remove a moderator by `userId`; on YouTube, make a channel a moderator (`channelId`) or remove one (`id`, as the list returned it), 200 quota units each, and only the chat's channel owner may |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
@@ -2121,6 +2122,9 @@ segment reliably.
 | `GET /chat/mutes` | `platform` (required), `account`. X only; only the broadcast owner's own mutes are listed. `truncated` is `true` when X held more than the first 2,000 |
 | `GET /chat/moderators` | `platform` (required), `account`. X only |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
+| `GET /chat/moderators` | `platform` (required), `account` |
+| `POST /chat/moderators` | `platform`, `channelId` (both required), `account` |
+| `DELETE /chat/moderators` | `platform`, `id` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
 | `GET /chat/users` | `platform`, `authorId` (both required), `account`, `limit` |
 | `GET /chat/flags` | `platform`, `limit` |

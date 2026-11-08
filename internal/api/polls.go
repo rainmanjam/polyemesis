@@ -402,7 +402,7 @@ func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []p
 		out = append(out, polls.Mirrored{
 			Account: p.Account(),
 			Result: polls.NativeResult{Platform: string(db.PlatformYouTube), Status: polls.NativeMirrored,
-				Reason: "YouTube reports a live poll's count only when it closes; it is added then"},
+				Reason: "YouTube's count is shown when the chat carries one, and is final when the poll closes"},
 			Ref: youTubePollRef{poller: p, pollID: id},
 		})
 	}
@@ -504,7 +504,14 @@ func (m nativePollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool)
 		return m.readTwitch(ctx, ref, end)
 	case youTubePollRef:
 		if !end {
-			// No API reads one running chat message: nothing to report yet.
+			// No API reads one running chat message by id, but the chat
+			// poll's list pages carry the poll with its tally (owner token
+			// only). Report that when one has arrived, else nothing yet.
+			if r, ok := ref.poller.(chat.PollTallyReader); ok {
+				if votes, live, seen := r.PollTally(ref.pollID); seen {
+					return votes, live, nil
+				}
+			}
 			return nil, true, nil
 		}
 		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)

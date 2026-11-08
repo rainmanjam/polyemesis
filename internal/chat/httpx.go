@@ -85,11 +85,27 @@ func (e *apiError) payload() string {
 	return e.Body
 }
 
+// Error never carries the raw body. Body stays on the struct for the callers
+// that match on it (Kick's duplicate detection) and for debugging; what an
+// operator reads is the status, the reason code and the envelope's message.
 func (e *apiError) Error() string {
-	if e.Reason != "" {
-		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Body)
+	switch {
+	case e.Reason != "" && e.Message != "":
+		return fmt.Sprintf("%s returned %d (%s): %s", e.URL, e.Status, e.Reason, e.Message)
+	case e.Reason != "":
+		return fmt.Sprintf("%s returned %d (%s)", e.URL, e.Status, e.Reason)
+	case e.Message != "":
+		return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Message)
 	}
-	return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Body)
+	return fmt.Sprintf("%s returned %d", e.URL, e.Status)
+}
+
+func retryAfterFrom(err error) time.Duration {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.RetryAfter
+	}
+	return 0
 }
 
 // parseRetryAfter reads RFC 9110 Retry-After: delay-seconds or an HTTP-date.
@@ -164,6 +180,13 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	if token != nil {
 		tok, err := token(ctx)
 		if err != nil {
+			// A refresh the platform refused because the grant is gone
+			// (revoked, expired for good) cannot be fixed by trying again.
+			// Left as a plain error, the Hub would redial the token endpoint
+			// every few seconds for ever, showing raw token-endpoint JSON.
+			if errors.Is(err, oauth.ErrReconnectRequired) {
+				return Fatal(fmt.Errorf("the account's authorization was revoked or has expired; reconnect it in Settings → Platforms: %w", oauth.ErrReconnectRequired))
+			}
 			return fmt.Errorf("no usable access token: %w", err)
 		}
 		if tok == "" {
@@ -222,18 +245,6 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	return nil
 }
 
-// errorMessage reads the "message" string of a {"data":..,"message":".."}
-// error envelope. Anything else yields empty.
-func errorMessage(raw []byte) string {
-	var env struct {
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(raw, &env) != nil {
-		return ""
-	}
-	return strings.TrimSpace(env.Message)
-}
-
 // isEdgeAnswer reports whether a response is a proxy's page rather than the
 // API's JSON: the body is not JSON and either looks like HTML or carries a
 // CDN's headers. A real API error, including Kick's, is JSON even when it
@@ -276,6 +287,39 @@ func errorReason(raw []byte) string {
 		return env.Error.Type
 	}
 	return ""
+}
+
+// errorMessage is the human sentence inside an error envelope: the top-level
+// "message" of Kick's {"data":..,"message":".."}, else the "error.message" of
+// a Google/Twitch-style envelope. Shortened, with any URL scrubbed so a link
+// carrying a query string never reaches a health line. Empty when the body is
+// neither.
+func errorMessage(raw []byte) string {
+	var env struct {
+		Message string `json:"message"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	said := strings.TrimSpace(env.Message)
+	if said == "" {
+		said = env.Error.Message
+	}
+	return shorten([]byte(scrubURLs(said)))
+}
+
+// scrubURLs drops the query string from any http(s) URL in s.
+func scrubURLs(s string) string {
+	fields := strings.Fields(s)
+	for i, f := range fields {
+		if strings.HasPrefix(f, "http://") || strings.HasPrefix(f, "https://") {
+			fields[i] = stripQuery(f)
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 // stripQuery keeps a query string out of an error message. Nothing here puts a

@@ -357,6 +357,48 @@
                   "types": [
                     "string"
                   ]
+                },
+                "youtube": {
+                  "types": [
+                    "null",
+                    "object"
+                  ],
+                  "fields": {
+                    "closedCaptionsType": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "enableAutoStart": {
+                      "types": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "enableAutoStop": {
+                      "types": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "enableDvr": {
+                      "types": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "latencyPreference": {
+                      "types": [
+                        "string"
+                      ]
+                    },
+                    "recordFromStart": {
+                      "types": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
                 }
               }
             },

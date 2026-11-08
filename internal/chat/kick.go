@@ -534,12 +534,20 @@ func kickSaid(err error) string {
 	}
 	said := ae.Message
 	if said == "" {
-		said = plainText(ae.Body)
+		said = ae.Reason
 	}
 	if said == "" {
-		return strconv.Itoa(ae.Status)
+		// Kick's own envelope is short JSON; a proxy's HTML error page is not
+		// something an operator should read in a health line, so a body that
+		// opens with markup contributes nothing, and any other is capped.
+		if b := strings.TrimSpace(ae.Body); b != "" && !strings.HasPrefix(b, "<") {
+			said = plainText(b)
+			if len(said) > 200 {
+				said = said[:200] + "…"
+			}
+		}
 	}
-	return fmt.Sprintf("%d %s", ae.Status, said)
+	return strings.TrimSpace(fmt.Sprintf("%d %s", ae.Status, said))
 }
 
 // plainText drops tags from a body and collapses whitespace, for the case where
