@@ -83,7 +83,7 @@ measured in days. Start it before you need it.
 **Two ways to get a Facebook key, and they are not the same key.** Connecting
 the account is what creates the broadcast: the key polyemesis fetches belongs to
 one live video. polyemesis starts a new one itself each time you start the
-destination (or restart one that is held or stopped), so a stop and start never
+destination, by hand or from a schedule (or restart one that is held or stopped), so a stop and start never
 reuses a finished video's key; a network drop during a show reuses the same
 video, and pressing *Refresh key* starts a new one on demand. Facebook also
 offers a **persistent stream key** — Live Producer → *Advanced settings* — which

@@ -36,6 +36,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -43,11 +44,6 @@ const (
 	// freshKeyTimeout bounds the Graph round trip a start waits for, the same
 	// thirty seconds Refresh stream key allows.
 	freshKeyTimeout = 30 * time.Second
-	// announcedShowGrace is how long past its scheduled time an announced
-	// Facebook event is still the show a manual start belongs to. Within it,
-	// the destination's stored key IS that event's key, and replacing it would
-	// orphan the public event page the pre-announce sweep created.
-	announcedShowGrace = 2 * time.Hour
 )
 
 // needsFreshFacebookKey reports whether starting d now must first obtain a new
@@ -56,12 +52,21 @@ const (
 // It is true for an account-linked Facebook destination that is not currently
 // publishing and is not waiting on an announced show. A manual-key Facebook
 // destination (no account) is false: there is nothing to renew it with.
-func needsFreshFacebookKey(d *db.Destination, statuses []engine.DestStatus, now time.Time) bool {
+//
+// An announced event's key is kept while that event's show can still be started:
+// until its scheduled time plus the grace of the schedule that announced it
+// (graceFor). That is the scheduler's own rule for how late an occurrence may
+// still be acted on (scheduler.Schedule.Grace), so the key is tied to the show
+// it belongs to rather than to a number of hours. Nothing in the codebase says
+// how long a Facebook event's key stays valid, and past the grace the scheduler
+// no longer starts that show, so a start then is not the announced one.
+func needsFreshFacebookKey(d *db.Destination, statuses []engine.DestStatus, now time.Time,
+	graceFor func(scheduleID int64) time.Duration) bool {
 	if d == nil || d.Platform != db.PlatformFacebook || d.AccountID == nil {
 		return false
 	}
 	for _, a := range d.Facebook.Broadcasts() {
-		if a.Occurrence.After(now.Add(-announcedShowGrace)) {
+		if now.Before(a.Occurrence.Add(graceFor(a.ScheduleID))) {
 			return false
 		}
 	}
@@ -78,6 +83,25 @@ func needsFreshFacebookKey(d *db.Destination, statuses []engine.DestStatus, now 
 	return true
 }
 
+// scheduleGrace is the lateness allowance of the schedule that made an
+// announcement; a marker with no schedule, or one whose schedule is gone, gets
+// the default.
+func (s *Server) scheduleGrace(scheduleID int64) time.Duration {
+	if scheduleID != 0 {
+		if sc, err := s.store.GetSchedule(scheduleID); err == nil && sc != nil {
+			return sc.Grace()
+		}
+	}
+	return time.Duration(scheduler.DefaultGraceSeconds) * time.Second
+}
+
+// prepareDestinationStart is the engine's pre-start hook (Manager.SetStartPrep),
+// which the SCHEDULER's actuator calls before it writes a destination's enable
+// flag, so a scheduled show gets the same fresh key a clicked Start does. The
+// warning has no operator to read it there; renewFacebookKeyForStart has
+// already logged it.
+func (s *Server) prepareDestinationStart(id int64) { s.renewFacebookKeyForStart(id) }
+
 // renewFacebookKeyForStart is called before a destination is switched on. It
 // reports whether a fresh key was stored, and returns a sentence for the
 // operator when the renewal was needed and failed. A failure never blocks the start: the stored key may still
@@ -93,7 +117,7 @@ func (s *Server) renewFacebookKeyForStart(id int64) (renewed bool, warning strin
 	if s.mgr != nil {
 		statuses = s.mgr.DestinationStatuses()
 	}
-	if !needsFreshFacebookKey(row, statuses, time.Now()) {
+	if !needsFreshFacebookKey(row, statuses, time.Now(), s.scheduleGrace) {
 		return false, ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)

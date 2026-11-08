@@ -5685,6 +5685,13 @@ func (e *Engine) lifecycleObserver() LifecycleObserver {
 type scheduleActuator struct{ m *Manager }
 
 func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
+	// A scheduled start is a new start, so it gets what a clicked one gets
+	// before the intent is written. See Manager.SetStartPrep.
+	if enabled {
+		if prep := a.m.startPrep.Load(); prep != nil {
+			(*prep)(id)
+		}
+	}
 	return a.m.store.SetDestinationEnabled(id, enabled)
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -115,6 +116,7 @@ func TestOnlyANewStartRenewsAFacebookKey(t *testing.T) {
 		d.Facebook.Announce(1, at, "777", now)
 		return d
 	}
+	grace := func(int64) time.Duration { return 5 * time.Minute }
 	manual := fb()
 	manual.AccountID = nil
 	other := fb()
@@ -135,12 +137,65 @@ func TestOnlyANewStartRenewsAFacebookKey(t *testing.T) {
 		{"manual key, no account", manual, nil, false},
 		{"another platform", other, nil, false},
 		{"announced show still ahead", announced(now.Add(30 * time.Minute)), nil, false},
-		{"announced show just started", announced(now.Add(-time.Hour)), nil, false},
-		{"announced show long past", announced(now.Add(-5 * time.Hour)), nil, true},
+		{"announced show inside its grace", announced(now.Add(-4 * time.Minute)), nil, false},
+		{"announced show past its grace", announced(now.Add(-6 * time.Minute)), nil, true},
 	}
 	for _, c := range cases {
-		if got := needsFreshFacebookKey(c.d, c.stats, now); got != c.want {
+		if got := needsFreshFacebookKey(c.d, c.stats, now, grace); got != c.want {
 			t.Errorf("%s: needsFreshFacebookKey = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// A scheduled show is the common start. The scheduler writes the enable flag
+// itself rather than through the start route, so it must renew the key too.
+//
+// Mutation: delete the `a.m.startPrep` call in scheduleActuator
+// .SetDestinationEnabled (internal/engine/engine.go). Red: the show starts on
+// the used key and no live video is created.
+func TestAScheduledShowStartsAnAccountLinkedFacebookDestinationOnAFreshKey(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.fbKeys = []string{"key-for-tonight"}
+	now := time.Now()
+	seedStartSchedule(t, f.store, scheduler.KindOnce, now.Add(-30*time.Second), f.dest.ID)
+
+	f.s.mgr.Scheduler().Tick(now)
+
+	if got := storedKey(t, f); got != "key-for-tonight" {
+		t.Fatalf("the scheduled start published with key %q, want the fresh one (the stored sk-live-old belonged to an ended video)", got)
+	}
+	if d, _ := f.store.GetDestination(f.dest.ID); !d.Enabled {
+		t.Fatal("the schedule did not enable the destination")
+	}
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created, want 1", n)
+	}
+}
+
+// The event page the pre-announce sweep made for THIS show owns the stored key;
+// a scheduled start of that show must keep it.
+func TestAScheduledShowKeepsTheKeyOfItsAnnouncedEvent(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	now := time.Now()
+	at := now.Add(-30 * time.Second)
+	schedID := seedStartSchedule(t, f.store, scheduler.KindOnce, at, f.dest.ID)
+	if _, err := f.store.UpdateAnnouncement(f.dest.ID, func(d *db.Destination) bool {
+		d.StreamKey = "key-of-the-announced-event"
+		d.Facebook.Announce(schedID, at, "777", now)
+		return true
+	}); err != nil {
+		t.Fatalf("seed announcement: %v", err)
+	}
+
+	f.s.mgr.Scheduler().Tick(now)
+
+	if got := storedKey(t, f); got != "key-of-the-announced-event" {
+		t.Fatalf("stored key = %q: the announced event's key was replaced", got)
+	}
+	if d, _ := f.store.GetDestination(f.dest.ID); !d.Enabled {
+		t.Fatal("the schedule did not enable the destination")
+	}
+	if n := facebookCreates(f.stub); n != 0 {
+		t.Fatalf("%d live videos created for an announced show, want 0", n)
 	}
 }

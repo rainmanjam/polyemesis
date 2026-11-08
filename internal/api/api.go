@@ -1070,6 +1070,11 @@ func New(o Options) *Server {
 	if s.cfg.DataDir != "" {
 		s.playoutStore().load()
 	}
+	// A scheduled start gets a fresh Facebook key like a clicked one. See
+	// facebook_fresh_key.go.
+	if s.mgr != nil {
+		s.mgr.SetStartPrep(s.prepareDestinationStart)
+	}
 	return s
 }
 
