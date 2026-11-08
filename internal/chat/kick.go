@@ -185,6 +185,9 @@ type KickAdapter struct {
 	// returns it, which the Hub records as a failed chat instead of asking Kick
 	// again every few minutes.
 	terminal error
+
+	// Activity (kick_activity.go). Guarded by mu like everything above.
+	act kickActivityState
 }
 
 // NewKick builds the adapter.
@@ -347,7 +350,7 @@ func (k *KickAdapter) subscriptionDue() bool {
 		return true
 	}
 	wait := kickSubRecheck
-	if k.subProblem != "" {
+	if k.subProblem != "" || k.act.retry {
 		wait = kickSubRetry
 	}
 	return k.cfg.Now().Sub(k.subCheckedAt) >= wait
@@ -407,19 +410,35 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	if err := k.api(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil, &existing); err != nil {
 		return k.subscriptionProblem("could not read its Kick event subscriptions", err)
 	}
+	have := map[string]string{}
 	for _, s := range existing.Data {
 		// The request filters by broadcaster, but the answer is checked too: a
 		// subscription for another channel is not ours.
 		if s.BroadcasterUserID != 0 && s.BroadcasterUserID != k.cfg.BroadcasterUserID {
 			continue
 		}
-		if s.Event == kickChatEventName && s.Version == kickChatEventVersion &&
-			(s.Method == "" || s.Method == "webhook") {
-			k.mu.Lock()
-			k.subID = s.ID
-			k.mu.Unlock()
-			return ""
+		if s.Version == kickChatEventVersion && (s.Method == "" || s.Method == "webhook") {
+			have[s.Event] = s.ID
 		}
+	}
+
+	// CHAT FIRST AND ALONE. The activity events below are additive: a refusal
+	// of one of them must never become a chat problem, so chat keeps its own
+	// request and its own outcome exactly as before activity existed.
+	if problem := k.syncChat(ctx, endpoint, have, len(existing.Data)); problem != "" {
+		return problem
+	}
+	k.syncActivity(ctx, endpoint, have, len(existing.Data))
+	return ""
+}
+
+// syncChat makes sure the chat.message.sent subscription exists.
+func (k *KickAdapter) syncChat(ctx context.Context, endpoint string, have map[string]string, listed int) string {
+	if id, ok := have[kickChatEventName]; ok {
+		k.mu.Lock()
+		k.subID = id
+		k.mu.Unlock()
+		return ""
 	}
 
 	// Not listed. An empty listing after polyemesis has already created the
@@ -429,7 +448,7 @@ func (k *KickAdapter) syncSubscription(ctx context.Context) string {
 	k.mu.Lock()
 	posted, postedAt := !k.subPostedAt.IsZero(), k.subPostedAt
 	k.mu.Unlock()
-	if posted && len(existing.Data) == 0 && k.cfg.Now().Sub(postedAt) < kickSubEmptyBackoff {
+	if posted && listed == 0 && k.cfg.Now().Sub(postedAt) < kickSubEmptyBackoff {
 		return ""
 	}
 
@@ -824,7 +843,8 @@ func (k *KickAdapter) Handler() http.Handler {
 		k.rejected, k.keyDown = 0, 0
 		k.mu.Unlock()
 
-		k.ingest(r.Header.Get("Kick-Event-Type"), body)
+		k.ingestDelivery(r.Header.Get("Kick-Event-Type"), r.Header.Get(KickHeaderMessageID),
+			r.Header.Get(KickHeaderTimestamp), body)
 		// Always 200 once the body is in hand. A webhook that gets an error
 		// gets retried, and a retry storm of chat messages helps nobody: a
 		// message we could not parse is a message, not an outage.
@@ -832,8 +852,23 @@ func (k *KickAdapter) Handler() http.Handler {
 	})
 }
 
-// ingest turns one delivery into a message, or counts it as unreadable.
+// ingest is ingestDelivery for a caller with no delivery headers but the type.
 func (k *KickAdapter) ingest(eventType string, body []byte) {
+	k.ingestDelivery(eventType, "", "", body)
+}
+
+// ingestDelivery turns one delivery into a chat message or an activity, or
+// counts it as unreadable. messageID and timestamp are the signed
+// Kick-Event-Message-Id and Kick-Event-Message-Timestamp headers.
+func (k *KickAdapter) ingestDelivery(eventType, messageID, timestamp string, body []byte) {
+	// Activity events are routed BEFORE the chat decode: they are not chat, so
+	// they must neither count as unreadable chat (which would flip health to
+	// "could not read as chat messages" on the first follow) nor stamp the
+	// chat-silence clock.
+	if def, ok := kickActivityEventFor(eventType); ok {
+		k.ingestActivity(def, messageID, timestamp, body)
+		return
+	}
 	k.mu.Lock()
 	k.lastEventAt = k.cfg.Now()
 	sink := k.sink
