@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -61,15 +60,21 @@ type apiError struct {
 	Raw []byte
 	// Header is the response header, for edge signals such as cf-mitigated.
 	Header http.Header
-	// RetryAfter is the parsed Retry-After header, zero when absent or invalid.
+	// RetryAfter is the wait the response asked for: Retry-After, else Twitch's
+	// Ratelimit-Reset epoch, capped at 15 minutes (oauth.RetryAfterFromHeaders).
+	// Zero when absent or invalid. Wait above is the separate Graph signal
+	// (estimated_time_to_regain_access); Rumble, Kick, YouTube and Twitch read
+	// RetryAfter, Facebook reads Wait.
 	RetryAfter time.Duration
 	// Problem is the platform's own words from an RFC 7807 or {errors:[...]} body, with no URLs and nothing else
 	// from the body (see oauth.XProblemText). Types is the problem type URIs, for matching, never for display.
 	// None of Problem, Types or Header is part of Error().
 	Problem string
 	Types   string
-	// Message is the top-level "message" of the {"data":..,"message":".."}
-	// envelope Kick and a few others use, empty when the body is not one.
+	// Message is the platform's own sentence from the error envelope: the
+	// top-level "message" (Kick, Twitch), else "error.message" (Google); see
+	// errorMessage. A string-valued "error" is tolerated but not read. Empty
+	// when the body is neither.
 	Message string
 	// Edge is set when the answer came from a proxy or CDN in front of the
 	// platform (an HTML page, or a non-JSON body with Cloudflare's headers)
@@ -108,26 +113,6 @@ func retryAfterFrom(err error) time.Duration {
 	var ae *apiError
 	if errors.As(err, &ae) {
 		return ae.RetryAfter
-	}
-	return 0
-}
-
-// parseRetryAfter reads RFC 9110 Retry-After: delay-seconds or an HTTP-date.
-func parseRetryAfter(v string, now time.Time) time.Duration {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0
-	}
-	if n, err := strconv.Atoi(v); err == nil {
-		if n < 0 {
-			return 0
-		}
-		return time.Duration(n) * time.Second
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		if d := t.Sub(now); d > 0 {
-			return d
-		}
 	}
 	return 0
 }
@@ -268,23 +253,14 @@ func isEdgeAnswer(h http.Header, raw []byte) bool {
 	return h.Get("Cf-Ray") != "" || strings.EqualFold(h.Get("Server"), "cloudflare")
 }
 
-// maxRetryAfter caps any wait a platform asks for: a bad header must not park
-// a caller for hours.
-const maxRetryAfter = 15 * time.Minute
+// maxRetryAfter caps any wait a platform asks for.
+const maxRetryAfter = oauth.MaxRetryAfter
 
 // retryAfterOf reads how long to wait from a response: Retry-After (seconds or
-// an HTTP date), else Twitch's Ratelimit-Reset, a Unix epoch of when the bucket
-// refills (dev.twitch.tv/docs/api/guide, "Keeping track of your usage").
+// an HTTP date), else Twitch's Ratelimit-Reset, capped at maxRetryAfter. The
+// parsing lives in oauth so the two packages cannot drift.
 func retryAfterOf(h http.Header, now time.Time) time.Duration {
-	var d time.Duration
-	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
-		d = parseRetryAfter(ra, now)
-	} else if rs := strings.TrimSpace(h.Get("Ratelimit-Reset")); rs != "" {
-		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
-			d = time.Unix(epoch, 0).Sub(now)
-		}
-	}
-	return min(max(d, 0), maxRetryAfter)
+	return oauth.RetryAfterFromHeaders(h, now)
 }
 
 // errorReason digs the machine-readable code out of the two error envelopes
@@ -316,11 +292,12 @@ func errorReason(raw []byte) string {
 	return ""
 }
 
-// errorMessage is the human sentence inside an error envelope: the top-level
-// "message" of Kick's {"data":..,"message":".."}, else the "error.message" of
-// a Google/Twitch-style envelope. Shortened, with any URL scrubbed so a link
-// carrying a query string never reaches a health line. Empty when the body is
-// neither.
+// errorMessage is the human sentence inside an error envelope, tried in this
+// order: the top-level "message" (Kick's {"data":..,"message":".."}, Twitch's
+// {"error":"Forbidden","status":403,"message":".."}), then "error.message"
+// (Google's nested object). A string-valued "error" is tolerated but not read.
+// Shortened, with any URL scrubbed so a link carrying a query string never
+// reaches a health line. Empty when the body is none of these.
 func errorMessage(raw []byte) string {
 	// "error" is an object for Google and a plain string for Twitch
 	// ({"error":"Forbidden","status":403,"message":".."}), so it is decoded

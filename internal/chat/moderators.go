@@ -170,13 +170,22 @@ func (h *Hub) channelModeratorManager(p db.Platform, account string) (ChannelMod
 	r := h.runners[runnerKey(p, account)]
 	h.mu.Unlock()
 	if r == nil {
-		return nil, fmt.Errorf("chat: %s is not connected", p)
+		return nil, refusedf("chat: %s is not connected", p)
 	}
 	m, ok := r.adapter.(ChannelModeratorManager)
 	if !ok {
-		return nil, fmt.Errorf("chat: polyemesis cannot manage moderators on %s; use the %s dashboard", p, p)
+		return nil, refusedf("chat: polyemesis cannot manage moderators on %s; use the %s dashboard", p, p)
 	}
 	return m, nil
+}
+
+// CanManageChannelModerators says whether the connected chat of one platform
+// account manages moderators by channel id (YouTube). The error is a
+// *RefusedLocally: not connected, or the platform has no such API. The API
+// checks this before it looks at a request's parameters.
+func (h *Hub) CanManageChannelModerators(p db.Platform, account string) error {
+	_, err := h.channelModeratorManager(p, account)
+	return err
 }
 
 // Moderators lists one platform account's chat moderators.

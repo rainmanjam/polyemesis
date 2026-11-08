@@ -207,12 +207,14 @@ type statusError struct {
 	//
 	// Truncation is therefore a property of the presentation, not of the error.
 	full string
-	// wait is how long the platform asked callers to hold off (Retry-After, or
-	// Graph's estimated_time_to_regain_access); zero when it said nothing.
+	// wait is Graph's hold-off (Retry-After, or estimated_time_to_regain_access),
+	// read by Facebook's advice through GraphWait. RetryAfter below is the
+	// generic one (Retry-After, else Twitch's Ratelimit-Reset, capped); Twitch
+	// and the sampler read that. A response can set both.
 	wait time.Duration
 	// RetryAfter and Edge are what StatusError carries for the getJSON path:
-	// the platform's Retry-After, and whether a proxy rather than the API
-	// answered. Set by requestJSON from the response.
+	// the wait the platform asked for (RetryAfterFromHeaders), and whether a
+	// proxy rather than the API answered. Set by requestJSON from the response.
 	RetryAfter time.Duration
 	Edge       bool
 }
@@ -287,7 +289,7 @@ func (e endpoints) requestJSON(ctx context.Context, method, endpoint, accessToke
 		return &statusError{
 			Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw),
 			wait:       GraphWait(resp.Header),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			RetryAfter: RetryAfterFromHeaders(resp.Header, time.Now()),
 			Edge:       isEdgeAnswer(resp.Header, raw),
 		}
 	}

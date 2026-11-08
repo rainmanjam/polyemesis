@@ -1953,16 +1953,16 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
-| `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query |
+| `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query. `/chat/moderators` answers `{moderators, appliesToAllBroadcasts}` for X, each moderator `{userId, username, name}`; for YouTube it answers `{moderators}` only, each `{id, channelId, displayName, ...}` (fields a platform does not use are left out) |
 | `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
-| `GET` | `/chat/moderators` — who may moderate a YouTube live chat (`liveChatModerators.list`); `platform` (YouTube only) and `account` in the query. A read costs 50 YouTube quota units |
+| `GET` | `/chat/moderators` — on YouTube, who may moderate a live chat (`liveChatModerators.list`); `platform` and `account` in the query. A read costs 50 YouTube quota units. Any other platform than X or YouTube is refused with 400 "cannot manage moderators on <platform>", before the parameters are checked |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
 | `POST` `DELETE` | `/chat/bans` |
-| `POST` `DELETE` | `/chat/moderators` — on X, appoint or remove a moderator by `userId`; on YouTube, make a channel a moderator (`channelId`) or remove one (`id`, as the list returned it), 200 quota units each, and only the chat's channel owner may |
+| `POST` `DELETE` | `/chat/moderators` — on X, appoint or remove a moderator by `userId`; on YouTube, make a channel a moderator (`channelId`) or remove one (`id`, as the list returned it), 200 quota units each, and only the chat's channel owner may. X answers `{ids, appliesToAllBroadcasts}`; YouTube answers the moderator added, or `{"status":"removed"}`. Errors: 400 for a missing parameter or a platform that is not connected or cannot manage moderators, 502 when the platform itself refuses or fails |
 | `PATCH` | `/chat/settings` |
 | `GET` `POST` `PUT` `PATCH` `DELETE` | `/chat/twitch/{resource}` — Twitch's channel tools; the method picks the verb (see below) |
 | `GET` | `/loudness`, `PUT` `/loudness` |

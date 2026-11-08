@@ -73,14 +73,14 @@ function ChatModeratorsForAccount({
       const m = await api.addYouTubeChatModerator({ platform, account, channelId: channelId.trim() });
       setMods((cur) => [...(cur ?? []).filter((x) => x.id !== m.id), m]);
       setChannelId("");
-      toast.success(t("chatMods.added", { name: m.displayName || m.channelId }));
+      toast.success(t("chatMods.added", { name: m.displayName || m.channelId || "" }));
     });
 
   const remove = (m: ChatModerator) =>
-    run(`rm-${m.id}`, async () => {
-      await api.removeYouTubeChatModerator({ platform, account, id: m.id });
+    run(`rm-${m.id ?? ""}`, async () => {
+      await api.removeYouTubeChatModerator({ platform, account, id: m.id ?? "" });
       setMods((cur) => (cur ?? []).filter((x) => x.id !== m.id));
-      toast.success(t("chatMods.removed", { name: m.displayName || m.channelId }));
+      toast.success(t("chatMods.removed", { name: m.displayName || m.channelId || "" }));
     });
 
   return (
@@ -111,7 +111,7 @@ function ChatModeratorsForAccount({
                 size="sm"
                 variant="ghost"
                 disabled={busy !== ""}
-                aria-label={t("chatMods.removeAria", { name: m.displayName || m.channelId })}
+                aria-label={t("chatMods.removeAria", { name: m.displayName || m.channelId || "" })}
                 onClick={() => void remove(m)}
               >
                 <UserMinus className="h-3 w-3" />

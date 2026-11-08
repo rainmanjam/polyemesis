@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,9 +19,13 @@ const chatModeratorsPlanted = "planted-moderator-4099"
 type moderatorsAdapter struct {
 	moderatableAdapter
 	added, removed string
+	failWith       error
 }
 
 func (a *moderatorsAdapter) Moderators(context.Context) ([]chat.ChatModerator, error) {
+	if a.failWith != nil {
+		return nil, a.failWith
+	}
 	return []chat.ChatModerator{{ID: "m1", ChannelID: "UC-m", DisplayName: chatModeratorsPlanted}}, nil
 }
 
@@ -127,5 +132,45 @@ func TestComplianceFieldsNamesTheYouTubeControls(t *testing.T) {
 	}
 	if got := complianceFields(db.Compliance{YouTube: &db.YouTubeBroadcastControls{}}); len(got) != 0 {
 		t.Errorf("empty controls named %v", got)
+	}
+}
+
+// The shared route checks the platform's capability BEFORE its parameters: a
+// connected Twitch or Kick chat is told polyemesis cannot manage its moderators
+// (400, a local refusal), even when the request is also missing channelId or
+// id. A platform that is not connected at all gets "not connected", also 400.
+// A failure of the platform itself is 502, as X's is; bad input and local
+// refusals stay 400.
+func TestChatModeratorRoutesAnswer502WhenYouTubeFails(t *testing.T) {
+	h, ad := moderatorsFixture(t)
+	sign := login(t, h)
+	ad.failWith = errors.New("YouTube said no")
+	send(t, h, sign, http.MethodGet, "/api/v1/chat/moderators?platform=youtube&account=acct", nil, http.StatusBadGateway)
+}
+
+func TestChatModeratorRoutesRefuseAPlatformThatCannotManageThem(t *testing.T) {
+	s2, h2, _ := testServer(t, config.Config{})
+	hub := chat.New()
+	t.Cleanup(hub.Close)
+	s2.chat = hub
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformKick} {
+		if err := hub.Attach(ctx, &moderatableAdapter{platform: p, account: "acct"}); err != nil {
+			t.Fatalf("Attach %s: %v", p, err)
+		}
+	}
+	sign2 := login(t, h2)
+	for _, p := range []string{"twitch", "kick"} {
+		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			body := send(t, h2, sign2, m, "/api/v1/chat/moderators?platform="+p+"&account=acct", nil, http.StatusBadRequest)
+			if want := "cannot manage moderators on " + p; !strings.Contains(string(body), want) {
+				t.Errorf("%s %s answered %s, want it to say %q", m, p, body, want)
+			}
+		}
+	}
+	body := send(t, h2, sign2, http.MethodGet, "/api/v1/chat/moderators?platform=youtube&account=acct", nil, http.StatusBadRequest)
+	if !strings.Contains(string(body), "not connected") {
+		t.Errorf("an unconnected YouTube answered %s", body)
 	}
 }

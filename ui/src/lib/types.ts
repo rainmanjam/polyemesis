@@ -2777,9 +2777,9 @@ export interface ChatStats {
  *  is the moderator-in-this-chat id that removing one addresses; `channelId`
  *  is what adding one takes. */
 export interface ChatModerator {
-  id: string;
-  channelId: string;
-  displayName: string;
+  id?: string;
+  channelId?: string;
+  displayName?: string;
   channelUrl?: string;
   profileImageUrl?: string;
 }
@@ -2808,7 +2808,7 @@ export interface ChatMute {
 /** One of an X account's chat moderators. They act on every broadcast the
  *  account hosts, so `appliesToAllBroadcasts` is true on the list answer. */
 export interface XChatModerator {
-  userId: string;
+  userId?: string;
   username?: string;
   name?: string;
 }

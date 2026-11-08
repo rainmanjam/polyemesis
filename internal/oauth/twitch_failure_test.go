@@ -67,3 +67,34 @@ func TestTwitchUnreadableSuccessBodyNamesTheCall(t *testing.T) {
 		})
 	}
 }
+
+// The PATCH path (requestJSON, which PushCompliance uses) reads the wait the
+// same way the GET path does: one helper, so a Twitch 429 carries a RetryAfter
+// from Ratelimit-Reset on both, capped.
+func TestTwitchPatchRateLimitCarriesRetryAfter(t *testing.T) {
+	for name, tc := range map[string]struct {
+		header, value string
+		lo, hi        time.Duration
+	}{
+		"ratelimit-reset": {"Ratelimit-Reset", strconv.FormatInt(time.Now().Add(30*time.Second).Unix(), 10), 25 * time.Second, 31 * time.Second},
+		"retry-after":     {"Retry-After", "12", 12 * time.Second, 12 * time.Second},
+		"capped":          {"Ratelimit-Reset", strconv.FormatInt(time.Now().Add(48*time.Hour).Unix(), 10), maxRetryAfter, maxRetryAfter},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set(tc.header, tc.value)
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer srv.Close()
+			tw := NewTwitch(WithBaseURL(srv.URL))
+			err := tw.requestJSON(context.Background(), http.MethodPatch, srv.URL+"/channels?broadcaster_id=1", "tok", map[string]any{}, nil, nil)
+			var se *statusError
+			if !errors.As(err, &se) || se.Status != http.StatusTooManyRequests {
+				t.Fatalf("err = %v, want a 429 statusError", err)
+			}
+			if se.RetryAfter == 0 || se.RetryAfter < tc.lo || se.RetryAfter > tc.hi {
+				t.Errorf("RetryAfter = %v, want within [%v, %v]", se.RetryAfter, tc.lo, tc.hi)
+			}
+		})
+	}
+}

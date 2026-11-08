@@ -28,10 +28,10 @@ import type { ChatMute, ChatPlatform, ChatStatus, XChatModerator } from "@/lib/t
    claim nobody is muted.
    =========================================================================== */
 
-function who(m: { userId: string; username?: string; name?: string }): string {
+function who(m: { userId?: string; username?: string; name?: string }): string {
   if (m.name && m.username) return `${m.name} (@${m.username})`;
   if (m.username) return `@${m.username}`;
-  return m.name || m.userId;
+  return m.name || m.userId || "";
 }
 
 export function XChatModeration({ statuses }: Readonly<{ statuses: ChatStatus[] }>) {
@@ -179,7 +179,7 @@ function XChatModerationForAccount({ account, label }: Readonly<{ account: strin
                   size="sm"
                   variant="outline"
                   disabled={busy}
-                  onClick={() => void act(t("xmod.removed"), () => api.removeChatModerator(account, m.userId))}
+                  onClick={() => void act(t("xmod.removed"), () => api.removeChatModerator(account, m.userId ?? ""))}
                 >
                   {t("xmod.remove")}
                 </Button>

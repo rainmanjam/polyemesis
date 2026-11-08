@@ -519,9 +519,10 @@ func (k *KickAdapter) subscriptionProblem(what string, err error) string {
 
 // kickSaid is the platform's own words for a failed call, without the URL.
 // Kick's envelope message when it sent one, so the operator reads "Unauthorized"
-// rather than {"data":{},"message":"Unauthorized"}; otherwise the body with any
-// markup removed, so an HTML error page from a proxy is a sentence and not a
-// screenful of tags. Never empty: the status always leads.
+// rather than {"data":{},"message":"Unauthorized"}; else the reason code; else a
+// plain-text body capped at 200 characters. A body that opens with markup (a
+// proxy's HTML error page) contributes nothing, so only the status shows.
+// Never empty: the status always leads.
 func kickSaid(err error) string {
 	ae, ok := err.(*apiError)
 	if !ok {

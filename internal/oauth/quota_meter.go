@@ -120,8 +120,11 @@ func (e endpoints) doRequest(r *http.Request) (*http.Response, error) {
 	return httpClient.Do(r)
 }
 
-// maxRetryAfter caps any wait a platform asks for.
-const maxRetryAfter = 15 * time.Minute
+// MaxRetryAfter caps any wait a platform asks for: a bad header must not park a
+// caller for hours.
+const MaxRetryAfter = 15 * time.Minute
+
+const maxRetryAfter = MaxRetryAfter
 
 // StatusError is a non-2xx answer from a platform API, typed so a caller can
 // tell a spent quota and a rate limit from any other refusal (item 5).
@@ -148,17 +151,7 @@ func (e *StatusError) Error() string { return e.msg }
 func newStatusError(resp *http.Response, body []byte, msg string) *StatusError {
 	e := &StatusError{Status: resp.StatusCode, msg: msg, body: string(body[:min(len(body), 4<<10)])}
 	e.Edge = isEdgeAnswer(resp.Header, body)
-	if resp.Header.Get("Retry-After") != "" {
-		e.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
-	} else if rs := strings.TrimSpace(resp.Header.Get("Ratelimit-Reset")); rs != "" {
-		// Twitch's 429 carries no Retry-After: Ratelimit-Reset is a Unix epoch
-		// of when the bucket refills (dev.twitch.tv/docs/api/guide).
-		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
-			e.RetryAfter = max(0, time.Until(time.Unix(epoch, 0)))
-		}
-	}
-	// A bad header must not park the caller for hours.
-	e.RetryAfter = min(e.RetryAfter, maxRetryAfter)
+	e.RetryAfter = RetryAfterFromHeaders(resp.Header, time.Now())
 	e.QuotaExceeded = resp.StatusCode == http.StatusForbidden && bodyNamesSpentQuota(body)
 	return e
 }
@@ -184,20 +177,39 @@ func bodyNamesSpentQuota(body []byte) bool {
 	return false
 }
 
-// parseRetryAfter reads a Retry-After header in either form, delta-seconds or an
-// HTTP date. Zero when absent or unreadable.
-func parseRetryAfter(ra string) time.Duration {
-	ra = strings.TrimSpace(ra)
-	if ra == "" {
+// ParseRetryAfter reads a Retry-After value in either form, delta-seconds or an
+// HTTP date, relative to now. Zero when absent, unreadable or already past.
+func ParseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
 		return 0
 	}
-	if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second
+	if secs, err := strconv.Atoi(v); err == nil {
+		return time.Duration(max(secs, 0)) * time.Second
 	}
-	if at, err := http.ParseTime(ra); err == nil {
-		return max(0, time.Until(at))
+	if at, err := http.ParseTime(v); err == nil {
+		return max(0, at.Sub(now))
 	}
 	return 0
+}
+
+// RetryAfterFromHeaders is how long a response asked the caller to wait:
+// Retry-After, else Twitch's Ratelimit-Reset (a Unix epoch of when the bucket
+// refills; dev.twitch.tv/docs/api/guide, "Keeping track of your usage"),
+// capped at MaxRetryAfter. It is the one reader for the oauth requestJSON and
+// newStatusError paths and for chat's apiError.RetryAfter. Graph's
+// estimated_time_to_regain_access is a different signal, read by GraphWait into
+// apiError.Wait and statusError.wait.
+func RetryAfterFromHeaders(h http.Header, now time.Time) time.Duration {
+	var d time.Duration
+	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
+		d = ParseRetryAfter(ra, now)
+	} else if rs := strings.TrimSpace(h.Get("Ratelimit-Reset")); rs != "" {
+		if epoch, err := strconv.ParseInt(rs, 10, 64); err == nil {
+			d = time.Unix(epoch, 0).Sub(now)
+		}
+	}
+	return min(max(d, 0), MaxRetryAfter)
 }
 
 // isEdgeAnswer reports whether a response is a proxy's page rather than the
