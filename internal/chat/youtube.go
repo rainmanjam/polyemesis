@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/backoff"
@@ -245,13 +246,16 @@ func (y *YouTubeAdapter) SetLiveChatID(id string) {
 	}
 }
 
-// sleepOrWake is cfg.Sleep that SetLiveChatID can cut short. It reports false only when ctx ended.
+// sleepOrWake is cfg.Sleep that SetLiveChatID can cut short. It reports false only when the sleep itself says to
+// stop (its context ended) and nobody woke it.
 func (y *YouTubeAdapter) sleepOrWake(ctx context.Context, d time.Duration) bool {
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var woke atomic.Bool
 	go func() {
 		select {
 		case <-y.wake:
+			woke.Store(true)
 			cancel()
 		case <-sctx.Done():
 		}
@@ -259,7 +263,7 @@ func (y *YouTubeAdapter) sleepOrWake(ctx context.Context, d time.Duration) bool 
 	if y.cfg.Sleep(sctx, d) {
 		return true
 	}
-	return ctx.Err() == nil
+	return woke.Load() && ctx.Err() == nil
 }
 
 // liveChatID returns the cached id, or finds the active broadcast's.
