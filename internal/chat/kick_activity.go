@@ -211,6 +211,7 @@ func (k *KickAdapter) postActivity(ctx context.Context, endpoint string, names [
 
 	if err := k.api(ctx, http.MethodPost, endpoint, body, &created); err != nil {
 		if ctx.Err() != nil {
+			k.unstampPosted(names)
 			return err
 		}
 		if ae, ok := err.(*apiError); ok && (ae.Status == http.StatusBadRequest || ae.Status == http.StatusConflict) && kickSaysDuplicate(ae.Body) {
@@ -222,6 +223,9 @@ func (k *KickAdapter) postActivity(ctx context.Context, endpoint string, names [
 				detail: "Kick declined the " + names[0] + " subscription for this account: " + kickSaid(err)})
 			return nil
 		}
+		// Transient failure: we tried and failed, we did not create it, so the
+		// issue #419 "we just created it" backoff must not apply.
+		k.unstampPosted(names)
 		if len(names) == 1 {
 			k.mu.Lock()
 			k.act.retry = true
@@ -249,6 +253,16 @@ func (k *KickAdapter) postActivity(ctx context.Context, endpoint string, names [
 		}
 	}
 	return nil
+}
+
+// unstampPosted forgets the posted stamp for events whose request failed
+// transiently, so an empty listing is not read as "we created it".
+func (k *KickAdapter) unstampPosted(names []string) {
+	k.mu.Lock()
+	for _, n := range names {
+		delete(k.act.posted, n)
+	}
+	k.mu.Unlock()
 }
 
 func (k *KickAdapter) setEvents(names []string, st kickEventState) {

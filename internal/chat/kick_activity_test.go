@@ -554,3 +554,62 @@ func TestKickUpgradeFromChatOnlyAddsActivityWithoutRePostingChat(t *testing.T) {
 // internal/api's chatActivityStatuses finds an adapter's kinds through this
 // method set; losing it would silently drop Kick from GET /api/v1/activity/sources.
 var _ interface{ ActivityKinds() []activity.KindStatus } = (*KickAdapter)(nil)
+
+// A 5xx on the activity POST means we tried and failed, not that we created
+// anything. Kick's empty listing (issue #419) two minutes later must therefore
+// not be excused as "just created": the next check posts again.
+func TestKickTransientActivityFailureIsRetriedDespiteEmptyListing(t *testing.T) {
+	{
+		f := &fakeKickEvents{postStatus: http.StatusInternalServerError, postBody: `{"message":"boom"}`}
+		api := httptest.NewServer(f)
+		defer api.Close()
+		a := kickAdapter(t, func(c *KickConfig) { c.APIBase = api.URL })
+		endpoint := api.URL + "/public/v1/events/subscriptions"
+		ctx := context.Background()
+
+		a.syncActivity(ctx, endpoint, map[string]string{}, 0)
+		a.mu.Lock()
+		retry := a.act.retry
+		a.mu.Unlock()
+		if !retry {
+			t.Fatal("a 500 must schedule a retry")
+		}
+		first := f.count("POST-ACT ")
+		if first == 0 {
+			t.Fatal("no activity POST was made")
+		}
+
+		// Kick recovers; the listing is the empty one of issue #419.
+		f.mu.Lock()
+		f.postStatus, f.postBody = 0, ""
+		f.mu.Unlock()
+		a.syncActivity(ctx, endpoint, map[string]string{}, 0)
+		if f.count("POST-ACT ") <= first {
+			t.Fatal("the retry after a transient failure was skipped by the #419 guard")
+		}
+		if got := kindState(t, a, activity.KindFollow).State; got != activity.KindOn {
+			t.Errorf("follow = %s, want on", got)
+		}
+	}
+}
+
+// Same for a single-event request (the per-event fallback path).
+func TestKickTransientSingleEventFailureIsRetriedDespiteEmptyListing(t *testing.T) {
+	f := &fakeKickEvents{postStatus: http.StatusBadGateway, postBody: `{}`}
+	api := httptest.NewServer(f)
+	defer api.Close()
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = api.URL })
+	endpoint := api.URL + "/public/v1/events/subscriptions"
+	ctx := context.Background()
+	a.act.posted = map[string]time.Time{}
+	if err := a.postActivity(ctx, endpoint, []string{"channel.followed"}); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	_, stamped := a.act.posted["channel.followed"]
+	retry := a.act.retry
+	a.mu.Unlock()
+	if stamped || !retry {
+		t.Fatalf("stamped=%v retry=%v, want unstamped and retry", stamped, retry)
+	}
+}
