@@ -58,6 +58,15 @@ const (
 	heldTTL = 10 * time.Minute
 )
 
+// banCap and banTTL bound the memory of recent bans (RetractAuthor). A ban is
+// remembered long enough to refuse a verdict or a release that arrives after
+// it for a line offered before it -- the model's answer takes seconds, the
+// release button minutes -- and no longer.
+const (
+	banCap = 1024
+	banTTL = 5 * time.Minute
+)
+
 // Publisher is where display events go: the events hub.
 type Publisher interface {
 	Publish(eventstream.Envelope)
@@ -94,6 +103,7 @@ type heldLine struct {
 type held struct {
 	line     eventstream.DisplayLine
 	msg      chat.Message
+	offered  time.Time
 	deadline time.Time
 }
 
@@ -117,6 +127,10 @@ type Gate struct {
 	// bounded by heldCap and heldTTL. See Release.
 	heldLines map[string]heldLine
 	heldOrder []string
+
+	// bans remembers recent RetractAuthor calls: channel + author ("" for a
+	// cleared room) -> when. See bannedSinceLocked.
+	bans map[string]time.Time
 }
 
 var _ chat.DisplaySink = (*Gate)(nil)
@@ -133,6 +147,7 @@ func New(pub Publisher, opts ...Option) *Gate {
 		shown:     map[string]string{},
 		shownRing: make([]string, shownCap),
 		heldLines: map[string]heldLine{},
+		bans:      map[string]time.Time{},
 	}
 	for _, o := range opts {
 		o(g)
@@ -182,7 +197,7 @@ func (g *Gate) Offer(m chat.Message, d chat.Display) {
 		line := g.project(m)
 		g.releaseLocked(key(m.Platform, m.Account, m.ID), line, line.At)
 	case chat.DisplayPending:
-		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), msg: m, deadline: g.now().Add(MaxHold)}
+		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), msg: m, offered: g.now(), deadline: g.now().Add(MaxHold)}
 	case chat.DisplayHeld:
 		g.stats.Blocked++
 		g.holdLocked(key(m.Platform, m.Account, m.ID), g.project(m), m)
@@ -236,6 +251,7 @@ func platformOf(k string) string {
 func (g *Gate) RetractAuthor(p db.Platform, account, authorID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.rememberBanLocked(p, account, authorID)
 	for k, h := range g.heldLines {
 		if h.platform != p || h.account != account {
 			continue
@@ -245,6 +261,56 @@ func (g *Gate) RetractAuthor(p db.Platform, account, authorID string) {
 		}
 		g.dropHeldLocked(k)
 	}
+	// Lines still awaiting the model. One that has fallen out of the hub's
+	// ring has no id for Retract, and a Clear verdict would show it.
+	for k, h := range g.pending {
+		if h.msg.Platform != p || h.msg.Account != account {
+			continue
+		}
+		if authorID != "" && h.msg.Author.ID != authorID {
+			continue
+		}
+		delete(g.pending, k)
+		g.stats.Blocked++
+	}
+}
+
+func banKey(p db.Platform, account, authorID string) string {
+	return string(p) + "\x00" + account + "\x00" + authorID
+}
+
+// rememberBanLocked records a ban, bounded: expired entries go on every
+// insert, and past banCap the oldest does.
+func (g *Gate) rememberBanLocked(p db.Platform, account, authorID string) {
+	now := g.now()
+	for k, at := range g.bans {
+		if now.Sub(at) > banTTL {
+			delete(g.bans, k)
+		}
+	}
+	for len(g.bans) >= banCap {
+		var oldest string
+		var oldestAt time.Time
+		for k, at := range g.bans {
+			if oldest == "" || at.Before(oldestAt) {
+				oldest, oldestAt = k, at
+			}
+		}
+		delete(g.bans, oldest)
+	}
+	g.bans[banKey(p, account, authorID)] = now
+}
+
+// bannedSinceLocked reports whether the author (or the whole room) was banned
+// at or after a line was offered, within banTTL.
+func (g *Gate) bannedSinceLocked(p db.Platform, account, authorID string, offered time.Time) bool {
+	now := g.now()
+	for _, id := range []string{authorID, ""} {
+		if at, ok := g.bans[banKey(p, account, id)]; ok && now.Sub(at) <= banTTL && !at.Before(offered) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsHeld reports whether a line is in the release buffer right now: held, not
@@ -275,6 +341,9 @@ func (g *Gate) Release(p db.Platform, account, id string) bool {
 	}
 	g.dropHeldLocked(k)
 	if g.now().Sub(h.at) > heldTTL {
+		return false
+	}
+	if g.bannedSinceLocked(h.platform, h.account, h.author, h.at) {
 		return false
 	}
 	g.stats.Released++
@@ -309,6 +378,12 @@ func (g *Gate) Judge(p db.Platform, account, id string, d chat.Display) {
 		return
 	}
 	delete(g.pending, k)
+	// The author was banned (or the room cleared) after this line was offered:
+	// whatever the verdict, it does not go on air, nor is it kept to release.
+	if g.bannedSinceLocked(h.msg.Platform, h.msg.Account, h.msg.Author.ID, h.offered) {
+		g.stats.Blocked++
+		return
+	}
 	if d != chat.DisplayClear {
 		g.stats.Blocked++
 		if d == chat.DisplayHeld {

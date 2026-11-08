@@ -252,3 +252,75 @@ func TestIsHeldFollowsTheBuffer(t *testing.T) {
 		t.Error("IsHeld true past the ttl")
 	}
 }
+
+// A line awaiting the model has no entry in the hub's ring if the chat flooded
+// past it, so the ban reaches the gate by author only. A Clear verdict that
+// arrives afterwards must not show the banned author's line.
+func TestAPendingLineFromABannedAuthorIsNeverShown(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "from the banned"), chat.DisplayPending)
+	other := m("m2", "from someone else")
+	other.Author.ID = "author-other"
+	g.Offer(other, chat.DisplayPending)
+
+	g.RetractAuthor(db.PlatformTwitch, "acct", "author-1234")
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayClear)
+	expectNothing(t, sub, "a banned author's pending line was shown by a Clear verdict")
+	if st := g.Stats(); st.Blocked != 1 || st.Shown != 0 {
+		t.Fatalf("stats = %+v, want the pending line counted Blocked", st)
+	}
+
+	// The other author's line is untouched.
+	g.Judge(db.PlatformTwitch, "acct", "m2", chat.DisplayClear)
+	if _, ok := next(t, sub); !ok {
+		t.Error("a ban took another author's pending line with it")
+	}
+}
+
+func TestARoomClearEmptiesThePendingLines(t *testing.T) {
+	g, _, sub, _ := newGate(t)
+	g.Offer(m("m1", "a"), chat.DisplayPending)
+	elsewhere := m("m2", "b")
+	elsewhere.Account = "acct-2"
+	g.Offer(elsewhere, chat.DisplayPending)
+
+	g.RetractAuthor(db.PlatformTwitch, "acct", "")
+	g.Judge(db.PlatformTwitch, "acct", "m1", chat.DisplayClear)
+	expectNothing(t, sub, "a pending line survived a room clear")
+	g.Judge(db.PlatformTwitch, "acct-2", "m2", chat.DisplayClear)
+	if _, ok := next(t, sub); !ok {
+		t.Error("clearing one room cleared another's pending line")
+	}
+}
+
+// The ban is remembered, so a verdict or a release for a line that reached the
+// gate's books only afterwards (a Held judgement of a pending line racing the
+// ban) is still refused, and the memory expires and stays bounded.
+func TestABanIsRememberedBrieflyAndBounded(t *testing.T) {
+	g, _, sub, c := newGate(t)
+	g.Offer(m("m1", "x"), chat.DisplayHeld)
+	g.RetractAuthor(db.PlatformTwitch, "acct", "author-1234")
+	// Re-held by a late path (same offer instant): still refused on release.
+	g.Offer(m("m1", "x"), chat.DisplayHeld)
+	if g.Release(db.PlatformTwitch, "acct", "m1") {
+		t.Fatal("released a line from a just-banned author")
+	}
+	expectNothing(t, sub, "published")
+
+	// After the ttl a returning author's new line is a new line.
+	c.add(banTTL + time.Second)
+	g.Offer(m("m2", "back"), chat.DisplayHeld)
+	if !g.Release(db.PlatformTwitch, "acct", "m2") {
+		t.Fatal("an expired ban still blocks a later line")
+	}
+
+	for i := 0; i < banCap+50; i++ {
+		g.RetractAuthor(db.PlatformTwitch, "acct", string(rune(0x4e00+i)))
+	}
+	g.mu.Lock()
+	n := len(g.bans)
+	g.mu.Unlock()
+	if n > banCap {
+		t.Fatalf("ban memory grew to %d, cap %d", n, banCap)
+	}
+}
