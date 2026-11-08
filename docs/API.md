@@ -135,7 +135,7 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirty-five routes are refused outright**, for three different reasons. Masking
+**Thirty-six routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last twenty-seven are `403` because of what
