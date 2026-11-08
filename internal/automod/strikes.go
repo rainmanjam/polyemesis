@@ -203,7 +203,7 @@ func (e *Engine) syncArming() {
 // delete) adds nothing but a second action. It stays a flag. A rung MORE severe
 // than theirs does win, and then both reach the Hub, worst first: the ban, then
 // the history timeout, the same shape that rules and history already had.
-func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
+func (e *Engine) climb(p db.Platform, fs []Finding, strike int) []Finding {
 	if strike > int(maxRung) {
 		strike = int(maxRung)
 	}
@@ -235,13 +235,59 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) {
 			}
 		}
 	}
-	if best < 0 {
-		return
+	if best >= 0 {
+		fs[best].Action = bestRung.Action()
+		if bestRung == RungTimeout {
+			fs[best].TimeoutSeconds = e.ladder.timeoutSeconds()
+		}
 	}
-	fs[best].Action = bestRung.Action()
-	if bestRung == RungTimeout {
-		fs[best].TimeoutSeconds = e.ladder.timeoutSeconds()
+	return e.keepDelete(p, fs)
+}
+
+// keepDelete restores the message removal a sanction would otherwise cost.
+//
+// The ladder gives the USER the highest rung; a timeout or ban is a sanction on
+// the author and does not remove the message on every platform. A finding that
+// is entitled to a delete (its ceiling reaches the delete rung, and the
+// operator armed delete for the pack on this platform) must therefore still
+// delete the line when what is about to be performed is a timeout or a ban and
+// nothing already deletes it. The delete is a separate finding, not a rung
+// swap, so the user-level sanction is unchanged. Worst first, as every verdict
+// is ordered: the sanction, then the delete.
+func (e *Engine) keepDelete(p db.Platform, fs []Finding) []Finding {
+	if !e.matrix.Allows(e.caps, Key{Platform: p, Action: ActionDelete, Checker: CheckerProtection}) {
+		return fs
 	}
+	var src *Finding
+	sanction := false
+	for i := range fs {
+		f := &fs[i]
+		if !e.matrix.Allows(e.caps, Key{Platform: p, Action: f.Action, Checker: f.Checker}) {
+			continue
+		}
+		switch f.Action {
+		case ActionDelete:
+			return fs // already removed
+		case ActionTimeout, ActionBan:
+			sanction = true
+		}
+	}
+	if !sanction {
+		return fs
+	}
+	for i := range fs {
+		f := &fs[i]
+		if f.Checker == CheckerProtection && f.Hold && e.ladder.ceilingOf(*f) >= RungDelete {
+			src = f
+			break
+		}
+	}
+	if src == nil {
+		return fs
+	}
+	d := *src
+	d.Action, d.TimeoutSeconds = ActionDelete, 0
+	return append(fs, d)
 }
 
 type strikeHit struct {

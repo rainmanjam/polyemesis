@@ -134,7 +134,7 @@ func (e *Engine) CheckFast(p db.Platform, s Subject) Verdict {
 	// record nothing, and the model has its own category table (D3).
 	if e.ladder != nil && len(pf) > 0 && s.AuthorID != "" {
 		strike := e.ladder.Strikes.Record(p, s.AuthorID, e.clock(), e.ladder.window())
-		e.climb(p, findings, strike)
+		findings = e.climb(p, findings, strike)
 	}
 	return e.decide(p, sortByConsequence(findings))
 }

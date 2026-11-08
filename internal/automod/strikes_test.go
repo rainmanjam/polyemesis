@@ -339,13 +339,15 @@ func TestOneMessageNeverYieldsTwoPlatformActions(t *testing.T) {
 	acting := 0
 	var got Action
 	for _, f := range v.Act {
-		if f.Checker == CheckerProtection && f.Action != ActionFlag {
+		// One USER sanction; the message removal that rides with it (a
+		// separate delete, see keepDelete) is not a second sanction.
+		if f.Checker == CheckerProtection && (f.Action == ActionTimeout || f.Action == ActionBan) {
 			acting++
 			got = f.Action
 		}
 	}
 	if acting != 1 || got != ActionBan {
-		t.Fatalf("strike 3 of a two-finding message: %d platform actions (%q), want exactly one ban", acting, got)
+		t.Fatalf("strike 3 of a two-finding message: %d user sanctions (%q), want exactly one ban", acting, got)
 	}
 	var doxx, hate Finding
 	for _, f := range v.Findings {
@@ -353,7 +355,9 @@ func TestOneMessageNeverYieldsTwoPlatformActions(t *testing.T) {
 		case CategoryDoxxing:
 			doxx = f
 		case CategoryHateSpeech:
-			hate = f
+			if hate.Action != ActionBan { // the kept delete (keepDelete) is a copy that follows the ban
+				hate = f
+			}
 		}
 	}
 	if doxx.Action != ActionFlag || hate.Action != ActionBan {
@@ -445,10 +449,17 @@ func TestTheLadderAddsNoSecondActionBesideAHistoryOne(t *testing.T) {
 	if a := actions(v); len(a) == 0 || a[0] != ActionTimeout {
 		t.Fatalf("the history timeout never fired, so this proves nothing: %v", a)
 	}
+	// The ladder adds no second USER sanction, but the slur's own delete is
+	// kept (the history timeout does not remove the line): exactly one
+	// protection action, and it is the delete.
+	var pa []Action
 	for _, f := range v.Act {
 		if f.Checker == CheckerProtection && f.Action != ActionFlag {
-			t.Fatalf("a ladder delete rode along with a history timeout: %v", actions(v))
+			pa = append(pa, f.Action)
 		}
+	}
+	if len(pa) != 1 || pa[0] != ActionDelete {
+		t.Fatalf("expected the entitled delete to ride along with the history timeout: %v", actions(v))
 	}
 	// Timeout (equal) adds nothing either.
 	v = send(mk(ActionTimeout))
@@ -463,5 +474,48 @@ func TestTheLadderAddsNoSecondActionBesideAHistoryOne(t *testing.T) {
 	got := actions(v)
 	if len(got) < 2 || got[0] != ActionBan {
 		t.Fatalf("with ban armed the Hub should see the ban first, got %v", got)
+	}
+}
+
+// A timeout or ban rung is a sanction on the author; it must not cost the
+// message the delete it was entitled to, on every platform that can do both.
+func TestASanctionRungStillDeletesTheMessage(t *testing.T) {
+	tested := 0
+	for _, plat := range Platforms {
+		m := DefaultMatrix()
+		for _, a := range []Action{ActionDelete, ActionTimeout, ActionBan} {
+			m.Set(Key{Platform: plat, Action: a, Checker: CheckerProtection}, true)
+		}
+		hl := DefaultHistoryLimits()
+		e := New(m, PlatformCaps{}, nil, NewHistory(hl), nil).WithProtection(newProtection(t, ProtectionConfig{History: &hl}))
+		clk := &fakeClock{t: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
+		e.now = clk.now
+		e = e.WithLadder(&Ladder{Strikes: NewStrikes()})
+		// A platform that cannot time out or delete (Facebook has no timeout,
+		// Rumble nothing upstream) has no such rung to keep.
+		if !m.Allows(e.caps, Key{Platform: plat, Action: ActionTimeout, Checker: CheckerProtection}) ||
+			!m.Allows(e.caps, Key{Platform: plat, Action: ActionDelete, Checker: CheckerProtection}) {
+			continue
+		}
+		tested++
+		var v Verdict
+		for i := 0; i < 2; i++ { // strike 2 asks for a timeout
+			v = e.CheckFast(plat, Subject{AuthorID: "u1", AuthorName: "viewer", Text: slur(t) + " someone@gmail.com"})
+			clk.advance(time.Second)
+		}
+		var sanction, del bool
+		for _, f := range v.Act {
+			if f.Checker != CheckerProtection {
+				continue
+			}
+			sanction = sanction || f.Action == ActionTimeout || f.Action == ActionBan
+			del = del || f.Action == ActionDelete
+		}
+		if !sanction || !del {
+			t.Errorf("on %s a sanction rung must come with the delete: %+v", plat, v.Act)
+		}
+	}
+	if tested < 3 {
+		t.Fatalf("only %d platforms exercised", tested)
 	}
 }
