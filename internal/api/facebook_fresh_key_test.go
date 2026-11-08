@@ -1,15 +1,15 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // facebookCreates counts the live videos the stub was asked to create.
@@ -100,50 +100,178 @@ func TestAFailedKeyRenewalStillStartsAndWarns(t *testing.T) {
 }
 
 // The gate that decides whether a start is a NEW start. A supervisor respawn
-// inside one live session, and Start pressed on a process that is already up,
-// must not create a second live video, which would split the broadcast.
+// inside one live session, a delay buffer still filling, a drain, and Start
+// pressed on a process that is already up must not create a second live video,
+// which would split the broadcast.
 func TestOnlyANewStartRenewsAFacebookKey(t *testing.T) {
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	acct := int64(1)
 	fb := func() *db.Destination {
 		return &db.Destination{ID: 7, Platform: db.PlatformFacebook, AccountID: &acct}
 	}
-	withProc := func(st supervisor.State) []engine.DestStatus {
-		return []engine.DestStatus{{ID: 7, Enabled: true, Process: &supervisor.Status{State: st}}}
-	}
 	announced := func(at time.Time) *db.Destination {
 		d := fb()
 		d.Facebook.Announce(1, at, "777", now)
 		return d
 	}
-	grace := func(int64) time.Duration { return 5 * time.Minute }
 	manual := fb()
 	manual.AccountID = nil
 	other := fb()
 	other.Platform = db.PlatformYouTube
+	grace := func(g time.Duration) func(int64) time.Duration {
+		return func(int64) time.Duration { return g }
+	}
 
 	cases := []struct {
 		name  string
 		d     *db.Destination
-		stats []engine.DestStatus
+		inUse bool
+		grace time.Duration
 		want  bool
 	}{
-		{"never started", fb(), nil, true},
-		{"stopped process", fb(), withProc(supervisor.StateStopped), true},
-		{"held after quick refusals", fb(), withProc(supervisor.StateFailed), true},
-		{"running: same live video", fb(), withProc(supervisor.StateRunning), false},
-		{"supervisor respawning mid-session", fb(), withProc(supervisor.StateReconnecting), false},
-		{"starting", fb(), withProc(supervisor.StateStarting), false},
-		{"manual key, no account", manual, nil, false},
-		{"another platform", other, nil, false},
-		{"announced show still ahead", announced(now.Add(30 * time.Minute)), nil, false},
-		{"announced show inside its grace", announced(now.Add(-4 * time.Minute)), nil, false},
-		{"announced show past its grace", announced(now.Add(-6 * time.Minute)), nil, true},
+		{"never started, or held, failed or stopped", fb(), false, 5 * time.Minute, true},
+		{"running, respawning, filling a delay or draining", fb(), true, 5 * time.Minute, false},
+		{"manual key, no account", manual, false, 5 * time.Minute, false},
+		{"another platform", other, false, 5 * time.Minute, false},
+		{"announced show still ahead", announced(now.Add(30 * time.Minute)), false, 5 * time.Minute, false},
+		{"announced show inside its grace", announced(now.Add(-4 * time.Minute)), false, 5 * time.Minute, false},
+		{"announced show past its grace", announced(now.Add(-6 * time.Minute)), false, 5 * time.Minute, true},
+		{"a 24h grace is capped: aired and stopped, reused", announced(now.Add(-announcedKeepCap - time.Minute)), false, 24 * time.Hour, true},
+		{"a 24h grace, inside the cap", announced(now.Add(-announcedKeepCap + time.Minute)), false, 24 * time.Hour, false},
 	}
 	for _, c := range cases {
-		if got := needsFreshFacebookKey(c.d, c.stats, now, grace); got != c.want {
+		if got := needsFreshFacebookKey(c.d, c.inUse, now, grace(c.grace)); got != c.want {
 			t.Errorf("%s: needsFreshFacebookKey = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// post runs a route and returns the decoded body.
+func fbPost(t *testing.T, f refreshFixture, method, path string, body any) map[string]any {
+	t.Helper()
+	raw := send(t, f.h, f.sign, method, path, body, http.StatusOK)
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// Item 1: a destination the engine is carrying (a delay buffer still filling
+// has no process, a drain reports Enabled=false) is NOT a new start, whichever
+// route presses Start or Restart.
+//
+// Mutation: make destinationInUse return false. Red on every sub-case.
+func TestNoRenewalWhileTheEngineIsCarryingTheDestination(t *testing.T) {
+	for _, route := range []struct{ name, path string }{
+		{"start", "/start"}, {"restart", "/restart"},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			f := newRefreshFixture(t, route.name == "restart")
+			f.s.destInUse = func(int64) bool { return true }
+			fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, route.path), nil)
+			if n := facebookCreates(f.stub); n != 0 {
+				t.Fatalf("%d live videos created while the engine was carrying the destination, want 0", n)
+			}
+			if got := storedKey(t, f); got != "sk-live-old" {
+				t.Fatalf("key = %q, want it untouched", got)
+			}
+		})
+	}
+}
+
+// Item 4: Restart on a destination that is switched off must not create a live
+// video nothing will use. Mutation: pass requireEnabled=false in
+// handleRestartDestination.
+func TestRestartOfAStoppedDestinationCreatesNothing(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/restart"), nil)
+	if n := facebookCreates(f.stub); n != 0 {
+		t.Fatalf("%d live videos created for a restart of a stopped destination, want 0", n)
+	}
+}
+
+// Restart's renewed-key branch: a switched-on destination whose process is
+// held gets a fresh key and the reconcile that applies it.
+func TestRestartOfAHeldDestinationRenewsItsKey(t *testing.T) {
+	f := newRefreshFixture(t, true)
+	f.stub.fbKeys = []string{"key-after-restart"}
+	fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/restart"), nil)
+	if got := storedKey(t, f); got != "key-after-restart" {
+		t.Fatalf("key = %q, want the fresh one", got)
+	}
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created, want 1", n)
+	}
+}
+
+// Start all maps a failed renewal to a warned result that names the problem and
+// still starts the destination. Mutation: drop the KeyWarning branch in bulkOne.
+func TestStartAllReportsAFailedKeyRenewalAsWarned(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.setCreateErr("(#4) Application request limit reached")
+	out := fbPost(t, f, http.MethodPost, "/api/v1/destinations/start-all", nil)
+	results, _ := out["results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("results = %v", out)
+	}
+	r := results[0].(map[string]any)
+	if r["outcome"] != "warned" || !strings.Contains(r["message"].(string), "fresh Facebook stream key") {
+		t.Fatalf("result = %v, want a warned outcome naming the missing renewal", r)
+	}
+	if d, _ := f.store.GetDestination(f.dest.ID); !d.Enabled {
+		t.Fatal("a failed renewal must not stop the destination starting")
+	}
+}
+
+// Item 2: two presses of Start at once create ONE live video. The create is
+// slowed so both requests are inside the gate together.
+//
+// Mutation: delete the `defer s.freshKey.lock(id)()` in applyDestinationEnabled.
+// Red: two live videos.
+func TestTwoConcurrentStartsCreateOneLiveVideo(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.duringFacebookCreate = func() { time.Sleep(300 * time.Millisecond) }
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/start"), nil)
+		}()
+	}
+	wg.Wait()
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created by two simultaneous starts, want 1", n)
+	}
+}
+
+// A second start in the gap between the enable flag and the process (the
+// scheduler writes the flag and reconciles after) does not mint a second video.
+// Mutation: delete the renewedWithin check in renewFacebookKeyLocked.
+func TestAStartInTheGapBeforeTheProcessSpawnsCreatesNothingMore(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/start"), nil)
+	fbPost(t, f, http.MethodPost, destinationPath(f.dest.ID, "/start"), nil)
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created, want 1", n)
+	}
+}
+
+// Item 5: saving a destination with enabled=true is a start.
+// Mutation: delete the `!wasEnabled && updated.Enabled` block in the PUT handler.
+func TestSavingADestinationOnRenewsItsKey(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.fbKeys = []string{"key-from-the-save"}
+	fbPost(t, f, http.MethodPut, destinationPath(f.dest.ID, ""), map[string]any{"enabled": true})
+	if got := storedKey(t, f); got != "key-from-the-save" {
+		t.Fatalf("key = %q, want the fresh one", got)
+	}
+	if d, _ := f.store.GetDestination(f.dest.ID); !d.Enabled {
+		t.Fatal("the save did not enable the destination")
+	}
+	// A save that leaves it on is not a start.
+	fbPost(t, f, http.MethodPut, destinationPath(f.dest.ID, ""), map[string]any{"name": "renamed"})
+	if n := facebookCreates(f.stub); n != 1 {
+		t.Fatalf("%d live videos created, want 1", n)
 	}
 }
 
@@ -173,19 +301,18 @@ func TestAScheduledShowStartsAnAccountLinkedFacebookDestinationOnAFreshKey(t *te
 }
 
 // The event page the pre-announce sweep made for THIS show owns the stored key;
-// a scheduled start of that show must keep it.
+// a scheduled start of that show keeps it. Paired with the stale case below, so
+// the two together fail if the hook is removed (the stale one never renews) AND
+// if the announcement rule is removed (this one renews).
+//
+// Mutation: drop the Broadcasts() loop in needsFreshFacebookKey. Red here.
 func TestAScheduledShowKeepsTheKeyOfItsAnnouncedEvent(t *testing.T) {
 	f := newRefreshFixture(t, false)
+	f.stub.fbKeys = []string{"a-key-nobody-should-be-given"}
 	now := time.Now()
 	at := now.Add(-30 * time.Second)
 	schedID := seedStartSchedule(t, f.store, scheduler.KindOnce, at, f.dest.ID)
-	if _, err := f.store.UpdateAnnouncement(f.dest.ID, func(d *db.Destination) bool {
-		d.StreamKey = "key-of-the-announced-event"
-		d.Facebook.Announce(schedID, at, "777", now)
-		return true
-	}); err != nil {
-		t.Fatalf("seed announcement: %v", err)
-	}
+	seedAnnouncement(t, f, schedID, at, now)
 
 	f.s.mgr.Scheduler().Tick(now)
 
@@ -197,5 +324,79 @@ func TestAScheduledShowKeepsTheKeyOfItsAnnouncedEvent(t *testing.T) {
 	}
 	if n := facebookCreates(f.stub); n != 0 {
 		t.Fatalf("%d live videos created for an announced show, want 0", n)
+	}
+}
+
+func seedAnnouncement(t *testing.T, f refreshFixture, schedID int64, at, now time.Time) {
+	t.Helper()
+	if _, err := f.store.UpdateAnnouncement(f.dest.ID, func(d *db.Destination) bool {
+		d.StreamKey = "key-of-the-announced-event"
+		d.Facebook.Announce(schedID, at, "777", now)
+		return true
+	}); err != nil {
+		t.Fatalf("seed announcement: %v", err)
+	}
+}
+
+// An announcement for a show that has long since aired does not hold the key: a
+// scheduled start for a LATER show renews.
+func TestAScheduledShowRenewsPastAStaleAnnouncement(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	f.stub.fbKeys = []string{"key-for-the-next-show"}
+	now := time.Now()
+	seedAnnouncement(t, f, 0, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+	seedStartSchedule(t, f.store, scheduler.KindOnce, now.Add(-30*time.Second), f.dest.ID)
+
+	f.s.mgr.Scheduler().Tick(now)
+
+	if got := storedKey(t, f); got != "key-for-the-next-show" {
+		t.Fatalf("stored key = %q, want the fresh one", got)
+	}
+}
+
+// Item 3: a sweep with several Facebook targets renews them concurrently, and a
+// slow Graph is cut off at the shared deadline.
+//
+// Mutation (concurrency): run the goroutine body inline in
+// prepareDestinationStarts. Red: the sweep takes the sum of the creates.
+func TestScheduledRenewalsRunConcurrentlyUnderOneDeadline(t *testing.T) {
+	f := newRefreshFixture(t, false)
+	second, err := f.store.CreateDestination(&db.Destination{
+		Name: "Facebook two", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://ingest.example/app", StreamKey: "sk-live-old-2", AccountID: &f.acctID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.stub.duringFacebookCreate = func() { time.Sleep(500 * time.Millisecond) }
+
+	t0 := time.Now()
+	release := f.s.prepareDestinationStarts([]int64{f.dest.ID, second.ID})
+	elapsed := time.Since(t0)
+	release()
+	if n := facebookCreates(f.stub); n != 2 {
+		t.Fatalf("%d live videos created, want 2", n)
+	}
+	if elapsed > 900*time.Millisecond {
+		t.Fatalf("two renewals took %v: they ran one after the other", elapsed)
+	}
+}
+
+func TestAScheduledRenewalPastTheDeadlineIsAbandonedAndTheStartProceeds(t *testing.T) {
+	old := scheduledRenewTimeout
+	scheduledRenewTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { scheduledRenewTimeout = old })
+	f := newRefreshFixture(t, false)
+	f.stub.duringFacebookCreate = func() { time.Sleep(1500 * time.Millisecond) }
+
+	t0 := time.Now()
+	release := f.s.prepareDestinationStarts([]int64{f.dest.ID})
+	elapsed := time.Since(t0)
+	release()
+	if elapsed > 1300*time.Millisecond {
+		t.Fatalf("the sweep waited %v for a renewal with a %v deadline", elapsed, scheduledRenewTimeout)
+	}
+	if got := storedKey(t, f); got != "sk-live-old" {
+		t.Fatalf("key = %q: an abandoned renewal must leave the stored key", got)
 	}
 }

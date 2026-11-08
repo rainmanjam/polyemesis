@@ -3091,6 +3091,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The programme the destination runs on before this save, read before the
 	// decode below can move it: what it is running now is asked of that engine.
 	storedSourceID := existing.SourceID
+	wasEnabled := existing.Enabled
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
@@ -3160,10 +3161,29 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// below is read back from what the reconcile did rather than predicted.
 	runBefore := s.destinationRunBefore(id, storedSourceID, existing.SourceID)
 
+	// A SAVE THAT SWITCHES A DESTINATION ON IS A START, and it used to publish
+	// with the stored key. The lock is held from the write to the reconcile, as
+	// a start's is.
+	if !wasEnabled && existing.Enabled {
+		defer s.freshKey.lock(id)()
+	}
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if !wasEnabled && updated.Enabled {
+		rctx, rcancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+		renewed, w2 := s.renewFacebookKeyLocked(rctx, id, false)
+		rcancel()
+		if w2 != "" {
+			warnings = append(warnings, w2)
+		}
+		if renewed {
+			if fresh, gerr := s.store.GetDestination(id); gerr == nil {
+				updated = fresh
+			}
+		}
 	}
 
 	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.
@@ -3404,10 +3424,15 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 	// A NEW START OF AN ACCOUNT-LINKED FACEBOOK DESTINATION GETS A NEW LIVE
 	// VIDEO FIRST: its stored key belonged to one that has ended. Before the
 	// enable is written, so the reconcile below spawns FFmpeg with the fresh key
-	// rather than the dead one. See facebook_fresh_key.go.
+	// rather than the dead one. The destination's lock is held through that
+	// reconcile, so a second start waits and finds the process up instead of
+	// minting a second live video. See facebook_fresh_key.go.
 	var keyWarning string
 	if enabled {
-		_, keyWarning = s.renewFacebookKeyForStart(id)
+		defer s.freshKey.lock(id)()
+		ctx, cancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+		_, keyWarning = s.renewFacebookKeyLocked(ctx, id, false)
+		cancel()
 	}
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
@@ -3554,10 +3579,13 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// A restart of a destination that is NOT publishing (held, failed or
-	// stopped) is a new start: the live video its key belonged to has ended.
-	// A restart of one whose process is up keeps its key, as a respawn does.
-	// See facebook_fresh_key.go.
-	renewed, keyWarning := s.renewFacebookKeyForStart(id)
+	// stopped) while switched on is a new start: the live video its key
+	// belonged to has ended. One whose process is up, filling or draining a
+	// delay, or that is switched off, keeps its key. See facebook_fresh_key.go.
+	defer s.freshKey.lock(id)()
+	rctx, rcancel := context.WithTimeout(context.Background(), freshKeyTimeout)
+	renewed, keyWarning := s.renewFacebookKeyLocked(rctx, id, true)
+	rcancel()
 	if renewed {
 		// The process cycled by RestartDestination re-runs the spec it was
 		// built with, so the new key would not reach it. A reconcile sees the

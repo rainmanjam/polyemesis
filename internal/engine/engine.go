@@ -5684,14 +5684,17 @@ func (e *Engine) lifecycleObserver() LifecycleObserver {
 // same code and cannot drift apart.
 type scheduleActuator struct{ m *Manager }
 
-func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
-	// A scheduled start is a new start, so it gets what a clicked one gets
-	// before the intent is written. See Manager.SetStartPrep.
-	if enabled {
-		if prep := a.m.startPrep.Load(); prep != nil {
-			(*prep)(id)
-		}
+// PrepareStarts implements scheduler.StartPreparer: the runner calls it once
+// with every destination a start schedule is about to enable, before the first
+// flag is written. See Manager.SetStartPrep.
+func (a scheduleActuator) PrepareStarts(ids []int64) (release func()) {
+	if prep := a.m.startPrep.Load(); prep != nil {
+		return (*prep)(ids)
 	}
+	return func() {}
+}
+
+func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 	return a.m.store.SetDestinationEnabled(id, enabled)
 }
 
@@ -6048,6 +6051,32 @@ func (e *Engine) RestartRendition(id int64) error {
 	r.proc.Restart(ctx)
 	e.publishStatus()
 	return nil
+}
+
+// DestinationInUse reports whether this engine is carrying id RIGHT NOW in a way
+// a new start must not disturb: it is in the running set with a process that is
+// starting, running or respawning, or with NO process because its broadcast
+// delay is still filling (#11), or it is draining its tail or retiring. It is
+// false for a destination that is absent, and for one whose process is held,
+// failed or stopped: those are exactly the ones a fresh start is for.
+func (e *Engine) DestinationInUse(id int64) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.draining[id] != nil || e.retiring[id] != nil {
+		return true
+	}
+	d := e.dests[id]
+	if d == nil {
+		return false
+	}
+	if d.proc == nil {
+		return true
+	}
+	switch d.proc.Status().State {
+	case supervisor.StateRunning, supervisor.StateStarting, supervisor.StateReconnecting:
+		return true
+	}
+	return false
 }
 
 // RestartDestination cycles one destination without touching anything else.

@@ -415,6 +415,10 @@ func (s *Server) storageVerdict() recording.StorageState {
 
 // Server wires the HTTP layer to everything else.
 type Server struct {
+	// freshKey serialises Facebook key renewals per destination, and destInUse
+	// is a test seam for Manager.DestinationInUse. See facebook_fresh_key.go.
+	freshKey  freshKeyGuard
+	destInUse func(id int64) bool
 	// uploadFreeBytes is Options.UploadFreeBytes; nil means the real volume.
 	uploadFreeBytes func(path string) (uint64, error)
 	// liveLevels and probeRunner are test seams; nil means the real thing. See
@@ -1073,7 +1077,7 @@ func New(o Options) *Server {
 	// A scheduled start gets a fresh Facebook key like a clicked one. See
 	// facebook_fresh_key.go.
 	if s.mgr != nil {
-		s.mgr.SetStartPrep(s.prepareDestinationStart)
+		s.mgr.SetStartPrep(s.prepareDestinationStarts)
 	}
 	return s
 }
