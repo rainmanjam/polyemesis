@@ -15,7 +15,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/activity"
 	"github.com/rainmanjam/polyemesis/internal/chat"
-	"github.com/rainmanjam/polyemesis/internal/redact"
 	"github.com/rainmanjam/polyemesis/internal/twitch/eventsub"
 )
 
@@ -903,7 +902,7 @@ func (t *Twitch) revocation(m eventsub.Message) {
 			st.State, st.Detail = activity.KindUnavailable, detailGone
 		}
 		t.setKind(s.Kind, st)
-		t.log.Info("twitch eventsub: a subscription was revoked", "type", redact.Redact(sub.Type), "status", sub.Status)
+		t.log.Info("twitch eventsub: a subscription was revoked", "type", sub.Type, "status", sub.Status)
 		return
 	}
 }
