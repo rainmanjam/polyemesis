@@ -255,16 +255,41 @@ are separate, and automod judges each.
 ## Platforms
 
 Each platform's source is added by its own change and lists its kinds, how it
-gets them and what it needs here. **Nothing below is connected in this release.**
+gets them and what it needs here. The Status column says which are connected.
 
 | Platform | How the events arrive | Status |
 |---|---|---|
 | Twitch | EventSub over a WebSocket (its own transport) | not yet |
-| Kick | webhook events on the existing chat webhook | not yet |
+| Kick | webhook events on the existing chat webhook | yes (below) |
 | X | Activity API events on the existing webhook | not yet |
 | YouTube | Super Chat, Sticker, membership and milestone items in the chat poll | not yet |
 | Rumble | the recent follower, subscriber, gifted-sub and rant lists in the existing get-data poll; no extra request, no new key | built, not yet checked against a live account. Rumble sends no event id, so each item is identified by its own fields, and the first poll after a start only records what is already there (nothing is replayed). A gifted sub carries no timestamp, so it is stamped when seen. A list Rumble does not send for your channel shows as unavailable |
 | Facebook | a reaction tally from the existing comments loop (off by default). Stars are not exposed by the Graph API | reactions built; needs Live Video API App Review |
+
+### Kick
+
+Kick delivers activity on the same webhook and signature check as chat; nothing
+new is configured and no reconnect is needed (`events:subscribe` already covers
+every event, and Kick documents no other scope for them). On start polyemesis
+asks Kick for the events it is missing, all version 1, and Kick's own words are
+reported if it declines one.
+
+| Kind | Kick event |
+|---|---|
+| `follow` | `channel.followed` |
+| `subscribe` | `channel.subscription.new` |
+| `resub` | `channel.subscription.renewal` (`months` is Kick's `duration`) |
+| `gift` | `channel.subscription.gifts` (`count` and `recipients` from the giftees) |
+| `tip` | `kicks.gifted`, as `{unit: "kicks"}`; never converted to money |
+| `stream` | `livestream.status.updated` (online/offline), `livestream.metadata.updated` (update) |
+| `moderation` | `moderation.banned` (`ban`, or `timeout` when Kick sends an expiry) |
+| `redemption` | `channel.reward.redemption.updated`; announced once per redemption, not again when it is accepted or rejected |
+
+A kind Kick will not send to an account shows as `unavailable` with Kick's
+reason; chat is unaffected. Deliveries are deduplicated on `Kick-Event-Message-Id`,
+and one whose own timestamp is more than 15 minutes old is acknowledged and not
+announced, so a restart never replays history. Subscriptions are left in place
+when polyemesis stops, as chat's is.
 
 Off-stream events are accepted as missed: a platform whose events arrive on the
 chat connection (Kick and X webhooks) delivers activity only while that chat is
