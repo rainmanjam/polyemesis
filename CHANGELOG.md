@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Added
 
+- **Viewer card: platform tools and private notes.** The viewer card now has a row of tools where the
+  platform supports them: on Twitch warn, VIP and moderator (with current status) and a link to
+  Twitch's own moderator card; on X and YouTube make or remove a chat moderator. Role changes ask
+  again inline and show the platform's own refusal (Build a Community for VIPs, owner-only roles). It also
+  keeps a private note and tags per viewer (`GET`/`PUT`/`DELETE /api/v1/chat/users/notes`, admin-only,
+  refused to a read token, stored in the new `viewer_notes` table with no schema-version change and
+  never sent to overlays, events or hooks). A tagged viewer shows a tag badge in the chat list.
+
 - **"Reconnect to enable" banner.** When a connected Twitch (version 5 to 6) or X (1 to 2) account was
   granted under an older scope version, the console names the platform and what a reconnect unlocks,
   with a one-click Reconnect; dismissible per account and version. `GET /api/v1/platforms/accounts`

@@ -1042,6 +1042,34 @@ does not go out.
 
 ---
 
+## The viewer card: platform tools and notes
+
+The viewer card (Chat page, a message's menu, *View history & all actions*) shows
+the same history and moderation controls on every platform, plus a row of tools
+for the platforms that have them. It reuses the routes the other panels use; there
+is no separate API behind it.
+
+- **Twitch:** warn (with a reason), make or remove VIP, make or remove moderator,
+  and open Twitch's own moderator card. VIPs need the channel to have finished
+  Twitch's Build a Community requirement, and moderator and VIP changes work only for the channel's owner; the card
+  shows Twitch's refusal as it is worded.
+- **X:** make or remove a chat moderator. A moderator acts on every broadcast the
+  account hosts, not one, and the card says so.
+- **YouTube:** make or remove a chat moderator, which only the owner of the chat's
+  channel may do. Removing one reads the moderator list first (50 quota units).
+- Other platforms show nothing extra; the open-profile link stays.
+
+Role changes ask a second time on the card before they are sent.
+
+**Notes.** The card also keeps a private note (up to 1,000 characters) and up to 10
+tags (such as *regular*, *known troll*, *VIP*, *watch*) about the viewer, saved with
+an explicit Save. A viewer who has tags shows a small tag badge beside their name in
+the chat list. Notes are personal data about the people in your chat: they are stored
+only in this server's database (the `viewer_notes` table, so they travel in a backup
+of the data directory), are readable by admins only and never by a `read` API token,
+and are never sent to a platform, an overlay, the event stream or a webhook. They are
+not removed when chat retention prunes the scrollback; delete the note to remove it.
+
 ## See also
 
 - [RENDITIONS.md](RENDITIONS.md) — matching your video to what a platform accepts
