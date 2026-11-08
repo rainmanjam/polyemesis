@@ -424,6 +424,18 @@ its first tagged release.
 - **A destination's `presetId` appears in destination responses** when it has one, and
   `GET /renditions/{id}/concerns` accepts an optional `preset` query parameter.
 
+### Documentation
+
+- **A guide for connecting your platforms end to end.** `docs/CONNECTING-PLATFORMS.md` walks an operator
+  from an installed server to streaming and reading chat on X, Twitch, Kick, YouTube and Facebook:
+  the server prerequisites (a real hostname with a trusted certificate, ports 80 and 443 reachable from
+  outside, opening the dashboard by hostname so OAuth callbacks match), each platform's app setup and
+  scopes, the X bearer token and webhook, the Kick **Enable webhooks** step, and a short troubleshooting
+  table. YouTube and Facebook are marked as being verified. It is linked from the README, the Quickstart
+  and `docs/PLATFORMS.md`. `docs/PLATFORMS.md` and `docs/CONFIGURATION.md` now name the settings tab
+  "Platform credentials" (they said "Platforms"), say where the X go-live title and announcement settings
+  live (**Video and advanced**), and no longer carry a duplicated edge-case paragraph.
+
 ## [0.15.0] — 2026-11-06
 
 ### Changed
