@@ -297,14 +297,25 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 		"status": map[string]any{"privacyStatus": ytScheduledPrivacy},
 	}
 	parts := "snippet,status"
+	// The destination's create-time fields, sent only when set: a show created without any is created exactly
+	// as it always was. (A recurring show's template then sets its own title and description over these.)
+	ev := opts.YouTubeEvent
+	if d := strings.TrimSpace(ev.Description); d != "" {
+		payload["snippet"].(map[string]any)["description"] = d
+	}
+	if ev.MadeForKids != nil {
+		payload["status"].(map[string]any)["selfDeclaredMadeForKids"] = *ev.MadeForKids
+	}
+	details := ev.contentDetails()
 	if opts.CaptionPOST {
-		payload["contentDetails"] = map[string]any{
-			"closedCaptionsType": ytClosedCaptionsHTTPPost,
-			"monitorStream": map[string]any{
-				"enableMonitorStream":    true,
-				"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
-			},
+		details["closedCaptionsType"] = ytClosedCaptionsHTTPPost
+		details["monitorStream"] = map[string]any{
+			"enableMonitorStream":    true,
+			"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
 		}
+	}
+	if len(details) > 0 {
+		payload["contentDetails"] = details
 		parts += ",contentDetails"
 	}
 	// requestJSON, NOT postJSON, AND THE ADVICE BELOW DEPENDS ON IT. postJSON

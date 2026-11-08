@@ -1759,6 +1759,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The account's reusable YouTube streams, for the destination dialog's stream picker. It calls
 			// YouTube, so a read token is denied; it never carries a stream key or ingest address.
 			api.Get(r, "/platforms/accounts/{id}/youtube/streams", s.handleYouTubeStreams, readDenied)
+			// The account's upcoming and active YouTube events, and the one click that turns an event's
+			// auto-start on. Both call YouTube; neither carries a key.
+			api.Get(r, "/platforms/accounts/{id}/youtube/events", s.handleYouTubeEvents, readDenied)
+			api.Post(r, "/platforms/accounts/{id}/youtube/events/{eventId}/auto-start", s.handleYouTubeEventAutoStart, readDenied)
 			// Cross-platform analytics (Wave 4 #4): the live audience picture
 			// and the per-stream reports. Reads of what the sampler stored --
 			// none calls a platform -- and every one is denied to a read

@@ -877,8 +877,8 @@ func TakesGoLiveTitle(p Platform) bool { return p == PlatformX || p == PlatformY
 
 // youtubeStreamProblems refuses a pinned YouTube stream on a destination that is not YouTube.
 func (d Destination) youtubeStreamProblems(add problemAdder) {
-	if y := d.Compliance.YouTube; y != nil && y.StreamID != "" && d.Platform != PlatformYouTube {
-		add("a pinned YouTube stream is read only by YouTube; %s has no such setting", d.Platform)
+	if d.Compliance.YouTube.OnlyForYouTube() && d.Platform != PlatformYouTube {
+		add("a pinned YouTube stream, event and broadcast fields are read only by YouTube; %s has no such settings", d.Platform)
 	}
 }
 

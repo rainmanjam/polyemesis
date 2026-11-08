@@ -34,7 +34,12 @@ import (
 )
 
 // ytOpenUnits is what one open costs: the stream list, the active read, the insert and the bind, a unit each.
-const ytOpenUnits = 4
+// Using a picked event swaps the insert for a read of it (and sends a bind only when it is not already on the
+// stream), so it never costs more. A category adds the category list, the video read and the video update.
+const (
+	ytOpenUnits     = 4
+	ytCategoryUnits = 52
+)
 
 // ytTitleFor is the broadcast title: the destination's go-live title (or the recurring show's rendered one),
 // else the destination's name.
@@ -72,7 +77,11 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 	// Failures are recorded against the id the row already holds (the finished broadcast, on a renewal), never
 	// against "": recordControl would store "" and the announcement mirror would come back.
 	failID := lifecycleBroadcastID(d)
-	if c.quotaAfford != nil && !c.quotaAfford(ytOpenUnits) {
+	units := ytOpenUnits
+	if y := d.Compliance.YouTube; y != nil && strings.TrimSpace(y.Category) != "" && strings.TrimSpace(y.EventID) == "" {
+		units += ytCategoryUnits
+	}
+	if c.quotaAfford != nil && !c.quotaAfford(units) {
 		c.holdQuiet(d, failID, "YouTube's daily quota for this install is spent, so polyemesis has not opened a "+
 			"broadcast; it tries again when the allowance resets. The stream is unaffected.", false)
 		return
@@ -88,8 +97,11 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 		Title:     c.ytTitleFor(d),
 		Privacy:   string(d.Compliance.Privacy),
 	}
+	req.MadeForKids = d.Compliance.MadeForKids
 	if y := d.Compliance.YouTube; y != nil {
-		req.StreamID = y.StreamID
+		req.StreamID, req.EventID, req.RebindEvent = y.StreamID, y.EventID, y.RebindEvent
+		req.Description, req.Category, req.Projection360 = y.Description, y.Category, y.Projection360
+		req.Latency, req.EnableDvr = y.LatencyPreference, y.EnableDvr
 	}
 	if sendsCaptionPOST(d) {
 		req.CaptionPOST, req.CaptionDelay = true, time.Duration(d.DelaySeconds)*time.Second
@@ -108,7 +120,15 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 	if res.LiveChatID != "" && c.pointYouTubeChat != nil {
 		c.pointYouTubeChat(*d.AccountID, res.LiveChatID)
 	}
-	c.log.Info("broadcast lifecycle: opened a YouTube broadcast for this destination; it goes live when video arrives",
+	for _, w := range res.Warnings {
+		c.log.Warn("broadcast lifecycle: a part of the YouTube broadcast did not apply",
+			"destination", d.Name, bcAttr(res.BroadcastID), "detail", scrubSourceKey(w, d.StreamKey))
+	}
+	what := "opened a YouTube broadcast for this destination"
+	if res.Existing {
+		what = "took over the YouTube event picked for this destination"
+	}
+	c.log.Info("broadcast lifecycle: "+what+"; it goes live when video arrives",
 		"destination", d.Name, "platform", d.Platform, bcAttr(res.BroadcastID))
 }
 

@@ -35,8 +35,47 @@ const ytDefaultPrivacy = "public"
 // ytBroadcastTitleMax is YouTube's limit on a broadcast title, in characters.
 const ytBroadcastTitleMax = 100
 
+// EventFields are the create-time fields beyond the title and privacy that OBS offers: the description, whether the
+// broadcast is for kids, latency, DVR and 360 projection. Zero values send nothing, except that a go-live
+// broadcast always states made-for-kids explicitly (false when the destination set none).
+type EventFields struct {
+	Description string
+	// MadeForKids is status.selfDeclaredMadeForKids. nil on a go-live broadcast sends false: YouTube requires an
+	// explicit answer, and "not for kids" is the default the owner chose. nil on a scheduled show sends nothing,
+	// so an existing setup is unchanged.
+	MadeForKids *bool
+	// Latency is normal, low or ultraLow; empty leaves YouTube's default.
+	Latency string
+	// EnableDvr nil leaves YouTube's default (on).
+	EnableDvr *bool
+	// Projection360 makes the broadcast 360-degree. Off sends nothing (rectangular).
+	Projection360 bool
+}
+
+// contentDetails is the create-time contentDetails these fields add, empty when none is set.
+func (e EventFields) contentDetails() map[string]any {
+	cd := map[string]any{}
+	if e.Latency != "" {
+		cd["latencyPreference"] = e.Latency
+	}
+	if e.EnableDvr != nil {
+		cd["enableDvr"] = *e.EnableDvr
+	}
+	if e.Projection360 {
+		cd["projection"] = "360"
+	}
+	return cd
+}
+
 // LiveNowRequest is what the coordinator knows about the destination.
 type LiveNowRequest struct {
+	EventFields
+	// EventID is a picked existing broadcast to use instead of creating one. RebindEvent is the operator's
+	// confirmation to move it off a different, idle stream.
+	EventID     string
+	RebindEvent bool
+	// Category is a YouTube category name applied to the created broadcast's video; a failure is a warning.
+	Category string
 	// StreamKey is the key the destination publishes with. It selects the stream and is never sent anywhere.
 	StreamKey string
 	// StreamID pins the stream; empty means the one StreamKey belongs to.
@@ -50,13 +89,27 @@ type LiveNowRequest struct {
 	CaptionDelay time.Duration
 }
 
-// LiveNowResult is the broadcast that was made.
+// LiveNowResult is the broadcast that was made, or the picked event that was taken over.
 type LiveNowResult struct {
+	// Existing is true when a picked event was used and nothing was created.
+	Existing bool
+	// Warnings are parts that did not apply (the category) without failing the open.
+	Warnings    []string
 	BroadcastID string
 	// LiveChatID is the insert response's snippet.liveChatId, for the chat adapter. Empty when YouTube sent none.
 	LiveChatID string
 	StreamID   string
 }
+
+// ErrEventRebindNeeded marks a picked event bound to another stream, which polyemesis moves only on the
+// operator's confirmation. ErrEventStreamActive marks one whose bound stream is receiving video, which is never
+// moved.
+var (
+	ErrEventRebindNeeded = errors.New("the picked YouTube event is bound to a different stream")
+	ErrEventStreamActive = errors.New("the picked YouTube event's stream is active")
+	// errEventFinished is internal: the picked event is complete, revoked or gone, so the open falls back to creating.
+	errEventFinished = errors.New("the picked YouTube event has finished")
+)
 
 // ErrStreamNotListed marks a stored key (or pinned stream) the channel does not list.
 var ErrStreamNotListed = errors.New("YouTube does not list a stream for this destination")
@@ -90,7 +143,7 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 	if strings.TrimSpace(req.StreamKey) == "" {
 		return nil, errors.New("this destination has no stream key, so there is no stream to bind a broadcast to")
 	}
-	streams, err := y.listStreams(ctx, accessToken)
+	streams, err := y.listStreamsParts(ctx, accessToken, "id,snippet,cdn,status")
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +151,18 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 	if err != nil {
 		return nil, err
 	}
-	if active, err := y.activeOnStream(ctx, accessToken, stream.ID); err != nil {
+	active, err := y.activeOnStream(ctx, accessToken, stream.ID)
+	if err != nil {
 		return nil, err
-	} else if active != "" {
+	}
+	if strings.TrimSpace(req.EventID) != "" {
+		r, err := y.adoptEvent(ctx, accessToken, req, stream, streams, active)
+		if !errors.Is(err, errEventFinished) {
+			return r, err
+		}
+		// A finished event is never reused: fall through to creating one.
+	}
+	if active != "" {
 		return nil, &ErrActiveBroadcastOnStream{BroadcastID: active}
 	}
 	created, err := y.insertLiveNow(ctx, accessToken, req)
@@ -116,7 +178,56 @@ func (y *YouTube) OpenLiveNow(ctx context.Context, accessToken string, req LiveN
 		return nil, fmt.Errorf("YouTube created broadcast %s, would not bind it to the stream, and would not delete "+
 			"it either; delete broadcast %s in YouTube Studio: %w", created.ID, created.ID, err)
 	}
-	return &LiveNowResult{BroadcastID: created.ID, LiveChatID: created.Snippet.LiveChatID, StreamID: stream.ID}, nil
+	res := &LiveNowResult{BroadcastID: created.ID, LiveChatID: created.Snippet.LiveChatID, StreamID: stream.ID}
+	if strings.TrimSpace(req.Category) != "" {
+		// The category lives on the video, a second round trip (about 52 units). The broadcast is already made and
+		// bound, so a refusal here is a warning and never fails the open.
+		if _, err := y.setCategory(ctx, accessToken, created.ID, req.Category); err != nil {
+			res.Warnings = append(res.Warnings, "the category was not applied: "+err.Error())
+		}
+	}
+	return res, nil
+}
+
+// adoptEvent takes over the picked event: bound to this destination's stream (moved only when confirmed and the
+// other stream is idle), recorded, and its own chat used. It changes none of the event's own settings. A finished
+// or vanished event returns errEventFinished so the caller creates a broadcast instead; a live event on this stream
+// that is not the picked one is left alone (ErrActiveBroadcastOnStream).
+func (y *YouTube) adoptEvent(ctx context.Context, accessToken string, req LiveNowRequest, stream *ytLiveStream,
+	streams []ytLiveStream, activeOnStream string) (*LiveNowResult, error) {
+	id := strings.TrimSpace(req.EventID)
+	b, err := y.broadcastByID(ctx, accessToken, id)
+	if errors.Is(err, errBroadcastNotListed) {
+		return nil, errEventFinished
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch strings.ToLower(b.Status.LifeCycleStatus) {
+	case "complete", "revoked":
+		return nil, errEventFinished
+	}
+	if activeOnStream != "" && activeOnStream != id {
+		return nil, &ErrActiveBroadcastOnStream{BroadcastID: activeOnStream}
+	}
+	if bound := b.ContentDetails.BoundStreamID; bound != stream.ID {
+		if bound != "" {
+			for i := range streams {
+				if streams[i].ID == bound && strings.EqualFold(streams[i].Status.StreamStatus, "active") {
+					return nil, fmt.Errorf("the picked event is bound to a stream that is receiving video right now, "+
+						"so polyemesis will not move it (stream %s): %w", bound, ErrEventStreamActive)
+				}
+			}
+			if !req.RebindEvent {
+				return nil, fmt.Errorf("the picked event is bound to another stream (%s); confirm moving it to this "+
+					"destination's stream in the destination dialog, or pick another event: %w", bound, ErrEventRebindNeeded)
+			}
+		}
+		if err := y.bindBroadcast(ctx, accessToken, id, stream.ID); err != nil {
+			return nil, fmt.Errorf("YouTube would not bind the picked event %s to this destination's stream: %w", id, err)
+		}
+	}
+	return &LiveNowResult{Existing: true, BroadcastID: id, LiveChatID: b.Snippet.LiveChatID, StreamID: stream.ID}, nil
 }
 
 // chooseLiveNowStream picks the destination's stream and never creates one.
@@ -180,7 +291,8 @@ func (y *YouTube) insertLiveNow(ctx context.Context, accessToken string, req Liv
 	if privacy == "" {
 		privacy = ytDefaultPrivacy
 	}
-	details := map[string]any{"enableAutoStart": true, "enableAutoStop": false}
+	details := req.EventFields.contentDetails()
+	details["enableAutoStart"], details["enableAutoStop"] = true, false
 	if req.CaptionPOST {
 		details["closedCaptionsType"] = ytClosedCaptionsHTTPPost
 		details["monitorStream"] = map[string]any{
@@ -188,12 +300,21 @@ func (y *YouTube) insertLiveNow(ctx context.Context, accessToken string, req Liv
 			"broadcastStreamDelayMs": int(req.CaptionDelay / time.Millisecond),
 		}
 	}
+	snippet := map[string]any{
+		"title":              string(title),
+		"scheduledStartTime": time.Now().Add(ytLiveNowLead).UTC().Format(time.RFC3339),
+	}
+	if d := strings.TrimSpace(req.Description); d != "" {
+		snippet["description"] = d
+	}
+	// Explicit, and false unless the destination declared otherwise.
+	kids := false
+	if req.MadeForKids != nil {
+		kids = *req.MadeForKids
+	}
 	payload := map[string]any{
-		"snippet": map[string]any{
-			"title":              string(title),
-			"scheduledStartTime": time.Now().Add(ytLiveNowLead).UTC().Format(time.RFC3339),
-		},
-		"status":         map[string]any{"privacyStatus": privacy},
+		"snippet":        snippet,
+		"status":         map[string]any{"privacyStatus": privacy, "selfDeclaredMadeForKids": kids},
 		"contentDetails": details,
 	}
 	var created ytBroadcast

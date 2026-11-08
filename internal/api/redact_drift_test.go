@@ -73,6 +73,11 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.compliance.youtube.latencyPreference":  sPublic,
 	"destination.compliance.youtube.recordFromStart":    sPublic,
 	"destination.compliance.youtube.streamId":           sPublic, // a YouTube liveStream id, not its key
+	"destination.compliance.youtube.eventId":            sPublic, // a YouTube broadcast id, not a key
+	"destination.compliance.youtube.rebindEvent":        sPublic, // the operator's confirmation to rebind the picked event
+	"destination.compliance.youtube.description":        sPublic, // the broadcast description, public by design
+	"destination.compliance.youtube.category":           sPublic, // a YouTube category name
+	"destination.compliance.youtube.projection360":      sPublic, // whether the broadcast is 360-degree
 	"destination.compliance.youtube.studioStreamNow":    sPublic, // use Studio's Stream now instead of polyemesis's own broadcast
 	"destination.createdAt":                             sPublic,
 	"destination.enabled":                               sPublic,

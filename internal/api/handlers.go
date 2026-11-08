@@ -2715,8 +2715,9 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	}
 
 	// The pinned YouTube stream and the Studio Stream now switch mean nothing off YouTube.
-	if y := row.Compliance.YouTube; row.Platform != db.PlatformYouTube && y != nil && (y.StreamID != "" || y.StudioStreamNow) {
-		y.StreamID, y.StudioStreamNow = "", false
+	if y := row.Compliance.YouTube; row.Platform != db.PlatformYouTube && y != nil && y.OnlyForYouTube() {
+		y.StreamID, y.StudioStreamNow, y.EventID, y.RebindEvent = "", false, "", false
+		y.Description, y.Category, y.Projection360 = "", "", false
 		if y.Empty() {
 			row.Compliance.YouTube = nil
 		}

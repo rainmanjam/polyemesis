@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -24,6 +25,9 @@ type ynBroadcast struct {
 	status, bound, chat string
 	privacy, title      string
 	autoStart, autoStop any
+	kids, dvr           any
+	latency, projection any
+	desc                any
 }
 
 // ynFake is YouTube as a destination sees it: one reusable stream holding ynKey, and the broadcasts made on it.
@@ -95,7 +99,10 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 			id := fmt.Sprintf("bcast-%d", f.seq)
 			f.bcasts[id] = &ynBroadcast{status: "created", chat: fmt.Sprintf("chat-%d", f.seq),
 				privacy: fmt.Sprint(body["status"]["privacyStatus"]), title: fmt.Sprint(body["snippet"]["title"]),
-				autoStart: body["contentDetails"]["enableAutoStart"], autoStop: body["contentDetails"]["enableAutoStop"]}
+				autoStart: body["contentDetails"]["enableAutoStart"], autoStop: body["contentDetails"]["enableAutoStop"],
+				kids: body["status"]["selfDeclaredMadeForKids"], dvr: body["contentDetails"]["enableDvr"],
+				latency: body["contentDetails"]["latencyPreference"], projection: body["contentDetails"]["projection"],
+				desc: body["snippet"]["description"]}
 			fmt.Fprintf(w, `{"id":%q,"snippet":{"liveChatId":%q},"status":{"lifeCycleStatus":"created"}}`, id, f.bcasts[id].chat)
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts/bind":
 			if b := f.bcasts[q.Get("id")]; b != nil {
@@ -416,5 +423,91 @@ func TestAnInvalidTransitionAutoStartCausedClearsOnTheNextRead(t *testing.T) {
 	sweep(c, 1)
 	if got := store.get(3); got.Lifecycle.Attempts != 0 || got.Lifecycle.Fault != "" || got.Lifecycle.Phase != "live" {
 		t.Errorf("lifecycle = %+v, want a clean live row", got.Lifecycle)
+	}
+}
+
+// A picked event with auto-start OFF still goes live: polyemesis does the testing/live transition itself once video
+// flows, and records the event as its own so a switch-off ends it. The event's own flags are not changed.
+func TestAPickedEventWithAutoStartOffIsTakenLiveByPolyemesisAndNothingIsCreated(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev", title: "Friday", autoStart: false}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, store, _, chat := ynFixture(t, f, row)
+	sweep(c, 1)
+	if _, inserts, _ := f.snapshot(); inserts != 0 {
+		t.Fatal("a broadcast was created although an event was picked")
+	}
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID != "ev-1" || !got.Lifecycle.Opened {
+		t.Fatalf("lifecycle = %+v, want the picked event recorded as polyemesis's own", got.Lifecycle)
+	}
+	if f.bcasts["ev-1"].bound != "stream-77" {
+		t.Errorf("the event was not bound to the destination's stream: %+v", *f.bcasts["ev-1"])
+	}
+	if ids := chat.all(); len(ids) != 1 || ids[0] != "chat-ev" {
+		t.Errorf("chat pointers = %v, want the event's own chat", ids)
+	}
+	sweep(c, 1) // video is flowing (stream active): the coordinator moves it
+	if _, _, trans := f.snapshot(); len(trans) == 0 || trans[len(trans)-1] != "live" {
+		t.Errorf("transitions = %v, want polyemesis to take the auto-start-off event live", trans)
+	}
+	if f.bcasts["ev-1"].autoStart != false {
+		t.Error("the event's own auto-start flag was changed")
+	}
+}
+
+// After a picked event completes, the destination falls back to creating broadcasts and never reuses it.
+func TestAfterThePickedEventCompletesTheDestinationFallsBackToCreating(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, store, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	f.set(func(f *ynFake) { f.bcasts["ev-1"].status = "complete" })
+	c.forgetLiveRecheck(3)
+	sweep(c, 1)
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID == "ev-1" || got.Lifecycle.BroadcastID == "" {
+		t.Fatalf("lifecycle = %+v, want a new broadcast and the finished event left behind", got.Lifecycle)
+	}
+	if _, inserts, _ := f.snapshot(); inserts != 1 {
+		t.Errorf("inserts = %d, want one new broadcast", inserts)
+	}
+}
+
+// The create fields come from the destination: made-for-kids from compliance, latency and DVR from the controls.
+func TestTheDestinationsCreateFieldsReachTheInsert(t *testing.T) {
+	f := newYnFake()
+	kids := true
+	dvr := false
+	row := ynRow(true)
+	row.Compliance.MadeForKids = &kids
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{
+		LatencyPreference: "low", EnableDvr: &dvr, Description: "About", Projection360: true}
+	// the fake records the insert body's status and details via ynBroadcast; reuse its title/privacy plus a probe
+	c, _, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	b := f.bcasts["bcast-1"]
+	if b == nil || b.kids != true || b.latency != "low" || b.dvr != false || b.projection != "360" || b.desc != "About" {
+		t.Errorf("broadcast = %+v, want the destination's fields on the insert", b)
+	}
+}
+
+// A scheduled show's options come from the same stored settings, and only for YouTube.
+func TestAScheduledShowGetsTheDestinationsCreateFieldsOnlyOnYouTube(t *testing.T) {
+	kids := false
+	dvr := true
+	row := ynRow(true)
+	row.Compliance.MadeForKids = &kids
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{Description: "D", LatencyPreference: "low", EnableDvr: &dvr, Projection360: true}
+	got := ingestOptionsFor(row, time.Time{}).YouTubeEvent
+	if got.Description != "D" || got.Latency != "low" || got.EnableDvr == nil || !got.Projection360 || got.MadeForKids == nil {
+		t.Errorf("event fields = %+v", got)
+	}
+	row.Platform = db.PlatformTwitch
+	if f := ingestOptionsFor(row, time.Time{}).YouTubeEvent; f != (oauth.EventFields{}) {
+		t.Errorf("a non-YouTube destination produced event fields: %+v", f)
 	}
 }
