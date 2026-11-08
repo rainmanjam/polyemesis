@@ -42,7 +42,7 @@ its first tagged release.
     are separate switches (matrix cell `platform/rung/protection`). Each pack hit is a strike; strike
     1 asks for delete, 2 a timeout (600 s by default, `ladderTimeoutSeconds`), 3 a ban, capped by
     the category's highest rung and lowered to the highest rung you armed, otherwise it stays a flag.
-    Self-harm, impersonation and contextual hate are hold-only. One platform action per message.
+    Self-harm, impersonation and contextual hate never climb the ladder, so they cause no platform action. One platform action per message.
     Strikes survive a settings save.
   - **Jev only for the hard cases.** `automod.protection.modelScope` is `hard` on a fresh install
     (the model is asked only about lines the free checkers could not settle and that show a sign of

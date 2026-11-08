@@ -420,7 +420,10 @@ Jev against real chat needs your explicit OK for each test.
    category: the canary word; an email address you made up; a phone number
    in `+44 20 7946 0958` form; a giveaway-scam line (`free nitro for everyone`);
    a link-shortener URL; forty `#`; and, from a second account whose name
-   imitates one of your moderators, any line. Each must appear in **Flagged** on
+   imitates one of your moderators, any line. (The impersonation check knows
+   your moderators' names only once they have posted since the server started,
+   so have a moderator post one line first, or add the name under
+   Impersonation, extra names.) Each must appear in **Flagged** on
    the Chat page with a hold. **Settings, Chat overlays** shows *held back by
    moderation* rising by the number held, the line is absent from the overlay in
    OBS, and the platform's own chat is unchanged (nothing deleted, nobody

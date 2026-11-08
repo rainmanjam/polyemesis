@@ -472,6 +472,21 @@ fi
 #   7a both calls made    POLY_AUTOMOD_API_KEY=<not a real key>; both 401
 #   7b the pair separates the same; both came back empty
 #
+# The protection tier (PROTECTION=1) was proven the same way, with the change
+# made in the driver's protection():
+#
+#   Pa on, none armed     set.On = {"twitch/delete/protection": true}
+#   Pb held as policy     drop the canary term from AddTerms (the hold check
+#                         names it); or add a benign word as a term (it names
+#                         the benign line)
+#   Pc no benign flagged  add "nightmare" as a severe term
+#   Pd raid held          the same arming change (raid held=0 once a delete is
+#                         armed, because the ladder removes instead of holds)
+#   Pe gate counters      the canary change (held 9, expected 10), and a benign
+#                         term (held 11)
+#   Pf no platform call   the arming change: 9 deletes reached the adapter
+#   Pg no acted lines     the arming change: 9 "automod acted" lines
+#
 # 7a and 7b have been proven able to FAIL and never proven able to PASS: no key
 # was available when this was written. They are the honest state of the
 # credentialed tier, not a claim about it.
