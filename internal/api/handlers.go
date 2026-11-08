@@ -3378,6 +3378,9 @@ type destControl struct {
 	Effect       destEffect
 	StoreErr     error
 	ReconcileErr error
+	// KeyWarning is set when a start needed a fresh Facebook stream key and
+	// could not get one. The start went ahead. See facebook_fresh_key.go.
+	KeyWarning string
 }
 
 // applyDestinationEnabled is the whole of what POST /destinations/{id}/start and
@@ -3398,11 +3401,19 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 	if cut {
 		s.mgr.CutOnStop(id)
 	}
+	// A NEW START OF AN ACCOUNT-LINKED FACEBOOK DESTINATION GETS A NEW LIVE
+	// VIDEO FIRST: its stored key belonged to one that has ended. Before the
+	// enable is written, so the reconcile below spawns FFmpeg with the fresh key
+	// rather than the dead one. See facebook_fresh_key.go.
+	var keyWarning string
+	if enabled {
+		_, keyWarning = s.renewFacebookKeyForStart(id)
+	}
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
 	if rw := s.reconcileNow(reconcileDestination); rw != "" {
-		return destControl{ReconcileErr: errors.New(rw)}
+		return destControl{ReconcileErr: errors.New(rw), KeyWarning: keyWarning}
 	}
 	var wasCut bool
 	if cut {
@@ -3449,7 +3460,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destContro
 		break
 	}
 	eff.Cut = wasCut
-	return destControl{Effect: eff}
+	return destControl{Effect: eff, KeyWarning: keyWarning}
 }
 
 func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
@@ -3481,6 +3492,9 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		return
 	}
 	resp := map[string]any{"enabled": enabled}
+	if ctl.KeyWarning != "" {
+		resp["warnings"] = []string{ctl.KeyWarning}
+	}
 	if ctl.Effect.Found {
 		if ctl.Effect.HasProcess {
 			resp["state"] = ctl.Effect.State
@@ -3539,11 +3553,28 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "the source this destination carries is not running")
 		return
 	}
-	if err := eng.RestartDestination(id); err != nil {
+	// A restart of a destination that is NOT publishing (held, failed or
+	// stopped) is a new start: the live video its key belonged to has ended.
+	// A restart of one whose process is up keeps its key, as a respawn does.
+	// See facebook_fresh_key.go.
+	renewed, keyWarning := s.renewFacebookKeyForStart(id)
+	if renewed {
+		// The process cycled by RestartDestination re-runs the spec it was
+		// built with, so the new key would not reach it. A reconcile sees the
+		// changed key and replaces the process, as Refresh stream key does.
+		if rw := s.reconcileNow(reconcileDestination); rw != "" {
+			writeError(w, http.StatusInternalServerError, rw)
+			return
+		}
+	} else if err := eng.RestartDestination(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
+	resp := map[string]any{"status": "restarting"}
+	if keyWarning != "" {
+		resp["warnings"] = []string{keyWarning}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // -------------------------------------------------------------- routing API
