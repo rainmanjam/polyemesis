@@ -67,6 +67,19 @@ type chatOverview struct {
 // chatSendRequest is the send box's payload.
 type chatSendRequest struct {
 	Text string `json:"text"`
+	// ReplyTo answers one message on the platform that issued it, instead of
+	// fanning out. AsBot asks for that platform's bot identity (Kick only) and
+	// is meaningful only together with ReplyTo.
+	ReplyTo *chatReplyTarget `json:"replyTo,omitempty"`
+	AsBot   bool             `json:"asBot,omitempty"`
+}
+
+// chatReplyTarget addresses the message being answered. The id is opaque and
+// the account may be empty, as in the other message-addressed routes.
+type chatReplyTarget struct {
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
+	ID       string `json:"id"`
 }
 
 // chatSendResponse reports every platform individually. Partial success is the
@@ -256,6 +269,11 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ReplyTo != nil {
+		s.sendChatReply(w, r, req)
+		return
+	}
+
 	// No length check. Each platform's limit is published in the overview so
 	// the composer can warn, but the platform itself is the authority on what
 	// it will accept, and refusing here would silently cost the operator a
@@ -281,6 +299,33 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	// per-platform verdicts are the answer. A status code cannot say "Twitch
 	// took it and YouTube did not", and collapsing it to one would throw away
 	// the half that worked.
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sendChatReply answers one message. The reply is one platform's business, so
+// the response is the same shape with a single result; a platform that cannot
+// thread a reply comes back as that result's refusal, not as an error status.
+func (s *Server) sendChatReply(w http.ResponseWriter, r *http.Request, req chatSendRequest) {
+	t := req.ReplyTo
+	platform := db.Platform(strings.TrimSpace(t.Platform))
+	if platform == "" || strings.TrimSpace(t.ID) == "" {
+		writeError(w, http.StatusBadRequest, "a reply needs the platform and id of the message it answers")
+		return
+	}
+	res, err := s.chat.Reply(r.Context(), platform, strings.TrimSpace(t.Account), req.Text, t.ID, req.AsBot)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	out := chatSendResponse{Results: []chat.SendResult{res}}
+	switch {
+	case res.OK:
+		out.Sent++
+	case res.Skipped:
+		out.Skipped++
+	default:
+		out.Failed++
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

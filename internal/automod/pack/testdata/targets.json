@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "spec": "automod-defaults-design.md section 8.2",
+  "files": [
+    "corpus-en.jsonl",
+    "corpus-en.positive.jsonl"
+  ],
+  "protectedNames": "protected-names.json",
+  "benignHoldCeiling": 0.002,
+  "benignSlices": [
+    "benign",
+    "scunthorpe",
+    "non_english",
+    "number_trap",
+    "hype_trap",
+    "protected_name_trap"
+  ],
+  "zeroHoldSlices": [
+    "scunthorpe",
+    "non_english",
+    "number_trap",
+    "hype_trap",
+    "protected_name_trap"
+  ],
+  "minLines": 3000,
+  "minSlice": {
+    "benign": 1500,
+    "scunthorpe": 200,
+    "non_english": 200,
+    "number_trap": 200,
+    "hype_trap": 150,
+    "positive": 600,
+    "hardcase": 150,
+    "protected_name_trap": 40
+  },
+  "minCategoryPositives": {
+    "hate_speech": 250,
+    "doxxing": 120,
+    "scam": 100,
+    "flood": 70,
+    "impersonation": 40
+  },
+  "groups": {
+    "hate_speech/severe": {
+      "category": "hate_speech",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.9,
+      "recallScope": "obfuscated",
+      "minPositives": 150,
+      "minScopePositives": 100,
+      "source": "spec 8.2"
+    },
+    "hate_speech/contextual": {
+      "category": "hate_speech",
+      "positiveExpect": "flag",
+      "precision": 0.8,
+      "recall": 0.8,
+      "minPositives": 100,
+      "source": "spec 8.2"
+    },
+    "doxxing/email": {
+      "category": "doxxing",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.95,
+      "minPositives": 30,
+      "source": "spec 8.2"
+    },
+    "doxxing/ipv6": {
+      "category": "doxxing",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.95,
+      "minPositives": 15,
+      "source": "spec 8.2"
+    },
+    "doxxing/phone": {
+      "category": "doxxing",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.9,
+      "minPositives": 45,
+      "source": "spec 8.2"
+    },
+    "doxxing/ipv4": {
+      "category": "doxxing",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.9,
+      "minPositives": 25,
+      "source": "spec 8.2"
+    },
+    "scam/giveaway": {
+      "category": "scam",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.85,
+      "minPositives": 20,
+      "source": "spec 8.2"
+    },
+    "scam/bio": {
+      "category": "scam",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.85,
+      "minPositives": 20,
+      "source": "spec 8.2"
+    },
+    "scam/support": {
+      "category": "scam",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.85,
+      "minPositives": 15,
+      "source": "spec 8.2"
+    },
+    "scam/shortener": {
+      "category": "scam",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.85,
+      "minPositives": 20,
+      "source": "spec 8.2"
+    },
+    "scam/lookalike": {
+      "category": "scam",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.85,
+      "minPositives": 15,
+      "source": "spec 8.2"
+    },
+    "flood/zalgo": {
+      "category": "flood",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.95,
+      "minPositives": 20,
+      "source": "spec 8.2"
+    },
+    "flood/char": {
+      "category": "flood",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.95,
+      "minPositives": 20,
+      "source": "spec 8.2"
+    },
+    "flood/mentions": {
+      "category": "flood",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.9,
+      "minPositives": 10,
+      "source": "proposed: the spec sets no number, and the PR 4 author should confirm"
+    },
+    "flood/links": {
+      "category": "flood",
+      "positiveExpect": "hold",
+      "precision": 0.95,
+      "recall": 0.9,
+      "minPositives": 10,
+      "source": "proposed: the spec sets no number, and the PR 4 author should confirm"
+    },
+    "flood/emote": {
+      "category": "flood",
+      "positiveExpect": "flag",
+      "precision": 0.9,
+      "recall": 0.85,
+      "minPositives": 10,
+      "source": "proposed: flag only, never held"
+    },
+    "flood/caps": {
+      "category": "flood",
+      "positiveExpect": "flag",
+      "precision": 0.9,
+      "recall": 0.85,
+      "minPositives": 10,
+      "source": "proposed: flag only, never held"
+    },
+    "impersonation": {
+      "category": "impersonation",
+      "positiveExpect": "hold",
+      "precision": 0.9,
+      "recall": 0.8,
+      "minPositives": 40,
+      "source": "spec 8.2"
+    },
+    "raid": {
+      "category": "raid",
+      "kind": "sequence",
+      "positiveExpect": "hold",
+      "precision": 0.99,
+      "recall": 0.95,
+      "minPositives": 40,
+      "source": "spec 11"
+    },
+    "spam_near_duplicate": {
+      "category": "spam_near_duplicate",
+      "kind": "sequence",
+      "positiveExpect": "flag",
+      "precision": 0.95,
+      "recall": 0.9,
+      "minPositives": 30,
+      "source": "proposed: spec 11 sets no number for near-duplicates"
+    }
+  },
+  "semantics": {
+    "line": "Each corpus line is one chat message. author and platform are set for impersonation lines; protects names the protected account from protected-names.json that the line is meant to look like.",
+    "expect": {
+      "hold": "the pack checker must flag the line in the line's group AND hold it off the overlay",
+      "flag": "the pack checker must flag the line in the line's group and must NOT hold it (contextual hate, caps, emote walls): the line stays visible",
+      "pass": "the pack checker must produce no hold; for every slice except hardcase and the explicit flood groups it must also produce no flag"
+    },
+    "group": "the detector group the line is positive for, or the group a trap guards against. Empty for plain chat. Precision of group G counts every line the checker flags in G that is not a positive of G.",
+    "recallScope": "obfuscated: recall is measured only on lines with an obf label, as the spec asks for severe hate",
+    "hardcase": "expect is the PACK-ALONE outcome. jev is the category Jev should answer; signal is the section 6.2 signal that sends the line to the gate.",
+    "sequence": "sequences.jsonl: one record per multi-message case, messages in time order with offsetMs from the first. expect hold or flag means the checker must fire the sequence's group on or before message fireAt (and not earlier than the threshold); pass means no finding in the sequence's group on any message. role (moderator, broadcaster) marks exempt senders."
+  },
+  "notes": [
+    "IPv4 and IPv6 doxxing positives use the RFC 5737 and RFC 3849 documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32). Spec section 3.2 lists the documentation ranges among the IPv4 rejects. PR 4 must exempt them when it runs this corpus (a test-only option, or a narrower reject list) or these positives score zero recall.",
+    "Repeats and message-rate are history detectors that need a sequence of messages. They are not in this single-line corpus; PR 4 adds a sequence fixture for them.",
+    "Every phone positive ends in the fiction range 555-01xx; the harness asserts it."
+  ],
+  "sequences": {
+    "file": "sequences.jsonl",
+    "minSequences": 150,
+    "minPassSequences": 50
+  }
+}

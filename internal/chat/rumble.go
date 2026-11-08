@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -104,7 +105,23 @@ const (
 	// as if it had all just arrived. Five minutes is context; the rest is a
 	// flood. This mirrors ytDefaultBackfill, and for the same reason.
 	rumbleDefaultBackfill = 5 * time.Minute
+	// rumbleChatCap is how many recent messages and rants Rumble returns in one
+	// response, combined. Its article states 50 and the example payload carries
+	// max_num_results: 50; the response's own figure wins when it sends one.
+	// Taken from the docs, not observed on a live account.
+	rumbleChatCap = 50
+	// rumbleDropNoteFor is how long the "may have dropped messages" note stays
+	// on the health line after the last poll that triggered it, so a busy chat
+	// does not flicker it on and off between polls.
+	rumbleDropNoteFor = 2 * time.Minute
+	// rumbleDropNote is the operator-facing text. Our own words, no key.
+	rumbleDropNote = "Rumble returns only the latest 50 chat messages per poll and this chat is busier than that, " +
+		"so some messages may have been missed"
 )
+
+// rumbleKeyParam finds a key in a URL-shaped string -- the third scrub layer,
+// for a spelling of the key neither the raw nor the escaped literal matches.
+var rumbleKeyParam = regexp.MustCompile(`([?&]key=)[^&\s"'<>)]+`)
 
 // rumbleKeyPlaceholder is what a scrubbed key is replaced with. It is visibly
 // not a key, so a log line containing it reads as "a secret was removed here"
@@ -147,16 +164,33 @@ type RumbleAdapter struct {
 
 	mu     sync.Mutex
 	health Health
+	// noteUntil is when the dropped-messages note stops being shown.
+	noteUntil time.Time
 }
 
 // NewRumble builds the adapter. A missing key is a named "not configured"
 // state rather than a crash, as everywhere else in this package.
+// RumbleKey reduces what an operator put in the key variable to the key that
+// goes over the wire. Rumble's article calls the whole get-data URL the
+// credential, so the variable may hold that URL; only its key parameter is
+// sent. Anything that redacts the credential must cover this value as well as
+// the raw one.
+func RumbleKey(raw string) string {
+	k := strings.TrimSpace(raw)
+	if strings.Contains(k, "://") {
+		if u, err := url.Parse(k); err == nil && u.Query().Get("key") != "" {
+			return u.Query().Get("key")
+		}
+	}
+	return k
+}
+
 func NewRumble(cfg RumbleConfig) (*RumbleAdapter, error) {
 	if strings.TrimSpace(cfg.Key) == "" {
 		return nil, fmt.Errorf("rumble chat is not configured: no live-stream API key, so set %s "+
 			"to the key from rumble.com/account/livestream-api", RumbleChatKeyEnv)
 	}
-	cfg.Key = strings.TrimSpace(cfg.Key)
+	cfg.Key = RumbleKey(cfg.Key)
 	if cfg.APIBase == "" {
 		cfg.APIBase = RumbleAPIBase
 	}
@@ -214,9 +248,20 @@ func (r *RumbleAdapter) setHealth(state State, detail string) {
 // response this adapter already polls -- so routing it through a second
 // subsystem would mean a second call to an endpoint whose rate limit Rumble
 // does not publish, which is the one thing this file is most careful about.
-func (r *RumbleAdapter) setLive(viewers *int) {
+func (r *RumbleAdapter) setLive(viewers, followers, subscribers *int) {
 	r.mu.Lock()
-	r.health = Health{State: StateLive, Viewers: viewers}
+	h := Health{State: StateLive, Viewers: viewers, Followers: followers, Subscribers: subscribers}
+	if r.cfg.Now().Before(r.noteUntil) {
+		h.Detail = rumbleDropNote
+	}
+	r.health = h
+	r.mu.Unlock()
+}
+
+// noteDrop arms the dropped-messages note for rumbleDropNoteFor.
+func (r *RumbleAdapter) noteDrop() {
+	r.mu.Lock()
+	r.noteUntil = r.cfg.Now().Add(rumbleDropNoteFor)
 	r.mu.Unlock()
 }
 
@@ -296,7 +341,68 @@ type rumbleLivestream struct {
 // alert-overlay material rather than chat, and decoding them would mean
 // modelling five more shapes for data nothing here renders.
 type rumbleResponse struct {
+	// MaxNumResults is the cap Rumble applies to recent chat, echoed back.
+	MaxNumResults int `json:"max_num_results"`
+	// Followers and Subscribers are the channel counts, pointers so that "not
+	// sent" stays distinct from zero. The recent lists are not decoded.
+	//
+	// AMBIGUITY: the payload also carries num_followers_total, and Rumble's
+	// article does not say how the two differ. num_followers may be a recent or
+	// windowed figure, in which case it understates the channel. Only
+	// num_followers is decoded; confirm against the channel page on the first
+	// live-account check, and switch (or decode both) if it is the smaller.
+	Followers struct {
+		Count *int `json:"num_followers"`
+	} `json:"followers"`
+	Subscribers struct {
+		Count *int `json:"num_subscribers"`
+	} `json:"subscribers"`
 	Livestreams []rumbleLivestream `json:"livestreams"`
+}
+
+// chatCap is the per-response chat cap in force for this response.
+func (resp rumbleResponse) chatCap() int {
+	if resp.MaxNumResults > 0 {
+		return resp.MaxNumResults
+	}
+	return rumbleChatCap
+}
+
+// entryKey identifies a chat entry across polls. Rumble sends no id, so this
+// is the same content identity Message.Normalise hashes.
+func (e rumbleChatEntry) entryKey() string {
+	return e.Username + "\x00" + e.CreatedOn + "\x00" + e.Text
+}
+
+// droppedSince reports whether this poll's chat cannot be continuous with the
+// previous one: the response is at the cap (so older entries were cut) and
+// shares no entry with the previous batch (so what lay between is gone). It
+// returns the new batch's keys for the next comparison. A first poll has no
+// previous batch and so can never report a drop.
+//
+// The second result is how many entries are new since the previous batch. That
+// is the measure of how fast chat is moving: the snapshot always holds up to
+// the cap once a chat is busy enough, and consecutive polls overlap almost
+// completely, so len(snapshot) says nothing about the arrival rate.
+func droppedSince(prev map[string]struct{}, ls rumbleLivestream, limit int) (dropped bool, fresh int, cur map[string]struct{}) {
+	n := len(ls.Chat.RecentMessages) + len(ls.Chat.RecentRants)
+	cur = make(map[string]struct{}, n)
+	overlap := false
+	for _, list := range [][]rumbleChatEntry{ls.Chat.RecentMessages, ls.Chat.RecentRants} {
+		for _, e := range list {
+			k := e.entryKey()
+			if _, dup := cur[k]; dup {
+				continue
+			}
+			cur[k] = struct{}{}
+			if _, ok := prev[k]; ok {
+				overlap = true
+			} else {
+				fresh++
+			}
+		}
+	}
+	return len(prev) > 0 && n >= limit && !overlap, fresh, cur
 }
 
 // ------------------------------------------------------------- the loop
@@ -312,6 +418,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 	var (
 		first = true
 		wait  = r.pollInterval()
+		prev  map[string]struct{}
 	)
 
 	for ctx.Err() == nil {
@@ -338,6 +445,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 			// 8am -- does not need this line, because a poll that finds nothing
 			// live never consumed the window in the first place.
 			first = true
+			prev = nil
 			continue
 		}
 
@@ -348,19 +456,37 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		}
 
 		delivered := r.deliver(live, cutoff, sink)
+		dropped, fresh, cur := droppedSince(prev, live, resp.chatCap())
+		hadPrev := len(prev) > 0
+		prev = cur
+		if dropped {
+			r.noteDrop()
+		}
+		// Saturated means chat is arriving about as fast as the snapshot can
+		// hold it, judged by entries NEW since the last poll. The snapshot's
+		// own size cannot be the test: once a chat has 50 lines every poll
+		// returns 50, so a quiet chat would be polled at the floor for the
+		// rest of the broadcast.
+		saturated := dropped || (hadPrev && fresh >= resp.chatCap()*3/4)
 		// The viewer count is read from the poll that just succeeded rather
 		// than fetched, which is the entire cost of this feature: one field off
 		// a response already in hand, no second request, no second credential.
-		r.setLive(live.WatchingNow)
+		r.setLive(live.WatchingNow, resp.Followers.Count, resp.Subscribers.Count)
 
 		// Back off while nobody is talking and snap back the moment they are.
 		// A silent chat polled every ten seconds for eight hours is 2,880
 		// requests that told us nothing.
-		if delivered == 0 {
+		switch {
+		case saturated:
+			// Most of a full response is new, so older messages are being cut
+			// (or about to be): read as fast as the floor allows. The floor is the same
+			// conservative one no configuration can go under.
+			wait = rumbleMinPoll
+		case delivered == 0:
 			if wait *= 2; wait > rumbleMaxPoll {
 				wait = rumbleMaxPoll
 			}
-		} else {
+		default:
 			wait = r.pollInterval()
 		}
 		if !r.cfg.Sleep(ctx, wait) {
@@ -597,5 +723,5 @@ func (r *RumbleAdapter) scrub(s string) string {
 	if enc := url.QueryEscape(r.cfg.Key); enc != r.cfg.Key {
 		s = strings.ReplaceAll(s, enc, rumbleKeyPlaceholder)
 	}
-	return s
+	return rumbleKeyParam.ReplaceAllString(s, "${1}"+rumbleKeyPlaceholder)
 }

@@ -1969,6 +1969,14 @@ matrix in `GET /platforms/capabilities` does not mark its `chatSend` as `no`;
 any other chat comes back `skipped` with the reason. Facebook is the case the
 matrix rules out. Polls and the MCP tools post through the same path.
 
+`POST /chat/send` also takes `replyTo` (`platform`, `account`, `id` of the
+message being answered) and `asBot`. With `replyTo` the message is not fanned
+out: it goes to that one platform account as a threaded reply and the response
+carries a single result. Only Kick implements it (`reply_to_message_id`; `asBot`
+sends as Kick's bot identity); any other platform comes back `skipped` with the
+reason rather than posting an unthreaded line. Built to Kick's documentation and
+not yet checked against a live account.
+
 `POST /platforms/credentials/{platform}/check` asks the platform whether the
 stored client credentials for it are still good, and answers with a verdict —
 never with the credential. It is a `POST` because it makes an outbound call, and
@@ -2320,8 +2328,12 @@ live, and polyemesis does not estimate them.
 
 ```json
 {"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
- "mirrorTwitch": true, "mirrorYouTube": false}
+ "mirrorTwitch": true, "mirrorYouTube": false, "mirrorFacebook": false}
 ```
+
+`mirrorFacebook` also runs it as a native poll on every connected Facebook live
+video. Facebook accepts a poll only while the video is live, and answers a poll
+started earlier with a refusal that is reported per account in the result.
 
 A second poll while one runs is `409`; a question, option or duration outside
 the limits is `400`. `POST /polls/{id}/end` ends it early (`409` if that poll

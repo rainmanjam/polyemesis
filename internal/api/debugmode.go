@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -232,6 +233,14 @@ func (s *Server) diagSecretLiterals() ([]string, error) {
 	lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
 	lits = append(lits, engine.AccountSecrets(accts)...)
 	lits = append(lits, engine.SettingsSecrets(set)...)
+	// THE RUMBLE LIVE-STREAM API KEY. It is the whole credential of a URL that
+	// also exposes the stream key, comes from the environment rather than a
+	// row, and so was in none of the stores above.
+	if k := s.env.RumbleChatKey; k != "" {
+		// Both forms: the variable may hold the whole get-data URL, while the
+		// bare key inside it is what actually goes over the wire.
+		lits = append(lits, k, chat.RumbleKey(k))
+	}
 	// AND THE AUTOMOD MODEL KEYS. No code path logs them -- the connectors
 	// return status codes, never bodies or headers -- but this set is the
 	// backstop for the path nobody wrote down, and a bring-your-own key in a

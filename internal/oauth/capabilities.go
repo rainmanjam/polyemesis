@@ -291,6 +291,11 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			// comment POST. The generic /{object-id}/comments page lists Live
 			// Video among its nodes, but it never writes that path and a
 			// page-level implication does not outrank a per-endpoint refusal.
+			// Re-read 2026-11-07: the Video node's /{video-id}/comments edge
+			// does document a POST (message, attachment_url...), but no page
+			// says it works on a live video, and the LiveVideo node reference
+			// that would say so could not be read. Kept No, and not built,
+			// until a live account shows whether the same id takes it.
 			CapChatSend:           SupportNo,
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportUnknown,
@@ -315,7 +320,8 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
 				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
-				"so an app that shows you the thread can still be refused when you act on it.",
+				"so an app that shows you the thread can still be refused when you act on it." +
+				" Banning a viewer BLOCKS them from the Page (POST /{page-id}/blocked), permanently: Facebook has no timeout, so only the ban is offered. Blocking needs a Page connection and has not been exercised against a live account.",
 			CapMetadata: "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
 			CapChatRead: "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was FETCHED carries the live-video id inside the key. " +
 				"One whose key was PASTED does not, so polyemesis asks the connected account which broadcast it is running — which works because Facebook allows a persistent key one live video at a time. " +
@@ -355,6 +361,7 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 				"among its required scopes. An account connected before that scope was requested must be " +
 				"reconnected once.",
 			CapMetadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+			CapChatSend: "POST /public/v1/chat over chat:write, as the connected user. A message can also be sent as a reply to one chat line (reply_to_message_id) or as the app's bot (type bot). Replies and bot posts are built to Kick's docs but not yet checked against a live Kick account.",
 			CapChatRead: "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
 			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out work over " +
 				"moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, " +
@@ -502,11 +509,11 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 			CapSSO:        SupportNo,
 			CapChatSend:   SupportNo,
 			CapModeration: SupportNo,
-			// Documented but unread, and it stays unverified for exactly that
-			// reason: watching_now sits in the same get-data response the chat
-			// poller already fetches, so this is a field read away rather than
-			// an integration away. The stats drift test is a biconditional --
-			// a SupportYes here with no Stats method would fail it, correctly.
+			// Read from the chat poll (watching_now, followers, subscribers)
+			// and fed to analytics, but never checked against a live account,
+			// so it stays unverified. The stats drift test is a biconditional
+			// on the oauth Stats route, which Rumble cannot have -- a
+			// SupportYes here with no Stats method would fail it, correctly.
 			CapViewerStats:        SupportUnknown,
 			CapBroadcastLifecycle: SupportNo,
 		},
@@ -517,11 +524,12 @@ var platformCapabilities = withRegistry([]PlatformCapability{
 				"no message id, so polyemesis derives one from the content, and two identical messages from one " +
 				"person inside the same second are indistinguishable and show as one. And Rumble publishes no rate " +
 				"limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
-			CapStreamKey:  "Rumble Studio issues both fields; copy them across by hand. There is a Static Stream Key that does not change between broadcasts, which makes this a one-time paste rather than a per-stream chore -- but it is obtainable only through Rumble's own settings UI, never over the API.",
-			CapSSO:        "Rumble publishes no OAuth and no developer sign-in. Its one API article says authentication is not required for that API, and rumble.com/oauth/authorize is a genuine 404 -- only an unpublished partner agreement could change this.",
-			CapMetadata:   "No write API exists. Rumble's own mechanism is a live-stream template chosen in your account settings, which it applies automatically each time the static key goes live -- so set the title and category there, before the broadcast, rather than expecting polyemesis to push them.",
-			CapChatSend:   "The entire published API is one read-only snapshot request; no send path, method or request body is documented anywhere. Chat bots that appear to work drive Rumble's private frontend with a stored account password, which polyemesis will not do.",
-			CapModeration: "Rumble documents moderation as a UI action -- three dots next to a message in live chat -- and its moderation article does not mention an API at all.",
+			CapViewerStats: "Built but not yet checked against a live account. The viewer count (watching_now), follower count and subscriber count arrive on the same get-data poll as chat and show beside the Rumble chat status and in analytics. Rumble has no sign-in, so this is not the per-account stats route, and the cell stays Unverified until a live broadcast confirms it. Chat is capped at the latest 50 messages per poll; when a busy chat outruns that, the status says some messages may have been missed. Rumble's payload carries two follower figures, num_followers and num_followers_total, and its article does not say how they differ; the count shown is num_followers and may understate the channel until it is compared with the channel page on a live account.",
+			CapStreamKey:   "Rumble Studio issues both fields; copy them across by hand. There is a Static Stream Key that does not change between broadcasts, which makes this a one-time paste rather than a per-stream chore -- but it is obtainable only through Rumble's own settings UI, never over the API.",
+			CapSSO:         "Rumble publishes no OAuth and no developer sign-in. Its one API article says authentication is not required for that API, and rumble.com/oauth/authorize is a genuine 404 -- only an unpublished partner agreement could change this.",
+			CapMetadata:    "No write API exists. Rumble's own mechanism is a live-stream template chosen in your account settings, which it applies automatically each time the static key goes live -- so set the title and category there, before the broadcast, rather than expecting polyemesis to push them.",
+			CapChatSend:    "The entire published API is one read-only snapshot request; no send path, method or request body is documented anywhere. Chat bots that appear to work drive Rumble's private frontend with a stored account password, which polyemesis will not do.",
+			CapModeration:  "Rumble documents moderation as a UI action -- three dots next to a message in live chat -- and its moderation article does not mention an API at all.",
 		},
 	},
 	manualUnverified(

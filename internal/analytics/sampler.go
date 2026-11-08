@@ -65,7 +65,7 @@ type Target struct {
 	// connected account: shown as a row, never read.
 	Unlinked bool
 	// ChatOnly is a connected account whose platform has no viewer count to
-	// read (Facebook, Rumble): its chat is the stream's, but it is never
+	// read (Facebook): its chat is the stream's, but it is never
 	// asked for viewers and has no row (round 2, R2).
 	ChatOnly bool
 }

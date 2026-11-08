@@ -777,6 +777,26 @@ func (h *Hub) Send(ctx context.Context, text string) ([]SendResult, error) {
 	return results, nil
 }
 
+// Reply answers one message on the platform that issued it. Unlike Send it is
+// not a fan-out: the id only means something there. An unknown or receive-only
+// target is an error, since nothing was attempted.
+func (h *Hub) Reply(ctx context.Context, p db.Platform, account, text, replyToID string, asBot bool) (SendResult, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return SendResult{}, fmt.Errorf("chat: nothing to send")
+	}
+	if strings.TrimSpace(replyToID) == "" {
+		return SendResult{}, fmt.Errorf("chat: no message to reply to")
+	}
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+	if r == nil {
+		return SendResult{}, fmt.Errorf("chat: %s is not connected", p)
+	}
+	return r.reply(ctx, text, strings.TrimSpace(replyToID), asBot), nil
+}
+
 // Delete removes a message on the platform it came from, where that platform
 // supports it. It is per-platform rather than a fan-out because a message id
 // only means anything on the platform that issued it.
@@ -1267,14 +1287,39 @@ func (s runnerSink) Retract(messageID string)    { s.r.hub.retract(s.r, messageI
 func (s runnerSink) RetractUser(authorID string) { s.r.hub.retractUser(s.r, authorID) }
 
 func (r *runner) send(ctx context.Context, text string) SendResult {
-	res := SendResult{Platform: r.platform, Account: r.account}
-
 	s, ok := r.adapter.(Sender)
 	if !ok || !r.canSend {
-		res.Skipped = true
-		res.Detail = fmt.Sprintf("polyemesis reads %s chat but cannot post to it", r.platform)
+		return r.cannotPost()
+	}
+	return r.post(ctx, func(ctx context.Context) (Message, error) { return s.Send(ctx, text) })
+}
+
+// reply is send addressed to one message. A platform with no Replier is
+// refused with a sentence rather than posted to the room as a plain message:
+// the operator asked for a threaded answer, and a stray top-level line is not it.
+func (r *runner) reply(ctx context.Context, text, replyToID string, asBot bool) SendResult {
+	rp, ok := r.adapter.(Replier)
+	if !ok || !r.canSend {
+		res := r.cannotPost()
+		if r.canSend {
+			res.Detail = fmt.Sprintf("polyemesis cannot reply to a specific %s message; send it as a normal message instead", r.platform)
+		}
 		return res
 	}
+	return r.post(ctx, func(ctx context.Context) (Message, error) {
+		return rp.Reply(ctx, text, replyToID, asBot)
+	})
+}
+
+func (r *runner) cannotPost() SendResult {
+	return SendResult{
+		Platform: r.platform, Account: r.account, Skipped: true,
+		Detail: fmt.Sprintf("polyemesis reads %s chat but cannot post to it", r.platform),
+	}
+}
+
+func (r *runner) post(ctx context.Context, do func(context.Context) (Message, error)) SendResult {
+	res := SendResult{Platform: r.platform, Account: r.account}
 
 	ctx, cancel := context.WithTimeout(ctx, r.hub.sendTimeout)
 	defer cancel()
@@ -1287,7 +1332,7 @@ func (r *runner) send(ctx context.Context, text string) SendResult {
 				err = fmt.Errorf("the %s chat adapter hit an internal error while sending", r.platform)
 			}
 		}()
-		return s.Send(ctx, text)
+		return do(ctx)
 	}()
 	if err != nil {
 		res.Detail = err.Error()
@@ -1375,6 +1420,8 @@ func (r *runner) status() Status {
 		// stopped or failed adapter would put a number beside a pane that is
 		// not receiving anything.
 		st.Viewers = hl.Viewers
+		st.Followers = hl.Followers
+		st.Subscribers = hl.Subscribers
 	}
 	return st
 }

@@ -452,7 +452,13 @@ Two things to know before relying on Rumble chat. The key goes in the
 sign-in to store it against, and it never goes into the database or onto a
 command line. And Rumble publishes no rate limit, so polyemesis polls
 conservatively (ten seconds, backing off while chat is quiet) rather than as
-fast as the pane could use.
+fast as the pane could use. The same poll carries the viewer count, follower
+count and subscriber count, which show beside the chat status and feed
+analytics; that is built but not yet checked on a live account, so Viewers
+stays *unverified*. Rumble returns only the latest 50 chat messages per poll,
+so when a busy chat outruns that the status says messages may have been
+missed, and polyemesis polls at the five-second floor while the response is
+full.
 
 **DLive** stays *unverified* rather than *unsupported*: its developer portal at
 `dev.dlive.tv` no longer resolves in DNS, which tells us nothing about what the
@@ -740,6 +746,45 @@ If you would rather paste a key that lasts, Live Producer → *Advanced settings
 polyemesis cannot fetch it — Meta's API exposes no way to read it — and a pasted
 key has no live-video id, so title, chat and *End broadcast* stay with the
 connected account. See the table under *Facebook — read this before you start*.
+
+#### Facebook chat, blocking and polls
+
+**Chat send is *Not possible*, and here is exactly why.** Meta's reference for
+the live video's `comments` edge has a *Creating* section that says only "You
+can't perform this operation on this endpoint." The generic Video node does
+document `POST /{video-id}/comments`, but no page says a live video takes it,
+and the live-video node reference that would say so could not be read when this
+was checked (2026-11-07). So polyemesis does not post, or reply, to Facebook
+comments. If a live account shows the same id accepts it, the cell moves to
+*Unverified* and the send is a small change. Until then reply on Facebook.
+
+**Ban blocks the person from the Page.** `POST /{page-id}/blocked?user=<id>`,
+and `DELETE` to lift it. A block has no duration, so **timeouts are unavailable
+on Facebook**: the console greys them with that reason and automod refuses a
+timeout rule for Facebook, while a ban is offered. It needs the account
+connected as a Page (a personal profile has no block list in this API), and a
+Page that has hit Facebook's block limit, or tries to re-block someone it just
+unblocked, is told so in those words. Meta's reference does not say which
+permission it needs (it names `pages_read_engagement`, which polyemesis already
+asks for, among several), so no scope was added; if Facebook answers with a
+permission error, reconnect the Page and accept everything on the consent
+screen.
+Ban needs the comment to carry its author's id. A Page account reads comments
+with its Page token because, as polyemesis understands Meta's rule, `from` on
+Page content is only returned to a Page token; a comment with no author id has
+Ban unavailable in the console, and that is unconfirmed against a live account.
+
+**Polls.** *Also run as a native Facebook poll* in the polls panel creates a
+poll on the live video with `POST /{live-video-id}/polls` and closes it with
+`POST /{poll-id}?action=CLOSE`. It uses the permissions the broadcast already
+has. Facebook only takes a poll while the video is live. `options` is sent as
+a JSON array, as Meta's polls guide shows, and the poll's `status` is read so a
+poll closed on Facebook returns that chat to number votes.
+
+None of these three has been run against a live Facebook account; they are built
+from Meta's documentation. polyemesis pins Graph API **v26.0**, the newest
+version in Meta's version table (2026-11-07). Nothing polyemesis calls was
+removed in v25.0 or v26.0.
 
 #### What a Facebook destination can be told to do
 
