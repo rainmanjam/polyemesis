@@ -722,6 +722,12 @@ func (t *Twitch) createOne(ctx context.Context, sessionID string, s eventsub.Spe
 			o.state = activity.KindOn
 			return o
 		}
+		// A dead grant surfaces from Token/Refresh as a plain error, not an
+		// APIError, so it is judged before the status switch.
+		if deadGrant(err) {
+			o.fatal = err
+			return o
+		}
 		var ae *eventsub.APIError
 		if !errors.As(err, &ae) {
 			// A transport failure: try again briefly, then give up on this one.
@@ -731,9 +737,6 @@ func (t *Twitch) createOne(ctx context.Context, sessionID string, s eventsub.Spe
 			continue
 		}
 		switch {
-		case ae.Status == http.StatusUnauthorized, errors.Is(err, chat.ErrReconnectRequired), chat.IsFatal(err):
-			o.fatal = err
-			return o
 		case ae.Status == http.StatusForbidden:
 			// The scope is held (checked above), so this is the tier or the
 			// account: not a failure.

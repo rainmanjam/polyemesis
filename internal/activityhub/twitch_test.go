@@ -806,3 +806,39 @@ func TestNothingSentOnTheOldSocketDuringTheSwapIsLost(t *testing.T) {
 		r.hub.Close()
 	}
 }
+
+func TestAGrantThatDiesBetweenTheTierReadAndTheSubscribesParksTheSource(t *testing.T) {
+	f := newFakeTwitch(t)
+	r := startTwitch(t, f, func(c *TwitchConfig) {
+		// Good for the account-type read, rejected from then on; the refresh
+		// then reports the grant dead (a plain error, not an APIError).
+		c.Token = func(context.Context) (string, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for _, p := range f.paths {
+				if strings.HasSuffix(p, "/helix/users") {
+					return "dead", nil
+				}
+			}
+			return "tok", nil
+		}
+		c.Refresh = func(context.Context, string) (string, error) { return "", chat.Fatal(chat.ErrReconnectRequired) }
+	})
+	waitFor(t, "failed", func() bool { return r.src.Health().State == chat.StateFailed })
+	if !strings.Contains(r.src.Health().Detail, "reconnect the Twitch account") {
+		t.Errorf("detail = %q", r.src.Health().Detail)
+	}
+	time.Sleep(150 * time.Millisecond)
+	f.mu.Lock()
+	users := 0
+	for _, p := range f.paths {
+		if strings.HasSuffix(p, "/helix/users") {
+			users++
+		}
+	}
+	f.mu.Unlock()
+	if users != 1 {
+		t.Errorf("Twitch was asked %d times; the source must park instead of retrying", users)
+	}
+	r.hub.Detach("twitch", fakeBroadcaster)
+}

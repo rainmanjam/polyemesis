@@ -309,7 +309,10 @@ clock is not news and is dropped; this host's clock is never consulted).
   subscribes Twitch also sends are dropped. **A resub** is reported when the
   viewer shares a resubscription message, which is when Twitch sends one.
 - **Polls polyemesis mirrored** (a chat poll also run as a Twitch poll) are not
-  reported a second time. A poll a moderator starts on Twitch is.
+  reported a second time. A poll a moderator starts on Twitch is. Known edge:
+  the notification waits up to 2 s for the Twitch create call to return; if
+  Twitch is slower than that, the poll's `begin` is reported once as a native
+  poll (its progress and end are still dropped once the id is known).
 - **Never on air:** `poll`, `prediction`, `stream` and a raid you sent are in the
   console feed and the events stream only. Viewer text (a cheer, a resub message,
   a channel-points input) reaches the overlay only through the same gating as
