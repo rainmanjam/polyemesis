@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} panggilan pada jam ini, tanpa batas apa pun",
   "automod.spendNoCeilingOne": "{used} panggilan pada jam ini, tanpa batas apa pun",
   "automod.ceilingSpent": "Batas per jam tercapai: moderasi menurun. Baris yang sulit tidak diperiksa dan dicantumkan di Ditandai.",
+  "automod.checkerCeilingSpent": "Batas per jam pemeriksa ini tercapai.",
   "automod.spendUnread": "Belanja tidak terbaca, jadi ini bukan angka nol.",
   "automod.timeoutZero": "Bisu nol detik berarti cekal permanen di setiap platform. Tetapkan durasinya.",
   "automod.unnamedRule": "Aturan tanpa nama",

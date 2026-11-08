@@ -243,8 +243,8 @@ func (h *HardCase) substitutions(raw string) int {
 // urlLike reports whether a whitespace-delimited field is a link, whose digits
 // and separators are an address and not spelling.
 //
-// A link is a scheme and a host that url.Parse accepts, or a "www." prefix, or a
-// host ending in a real top-level domain. Dots and a slash alone are NOT enough:
+// A link is a scheme and a host that url.Parse accepts, or a host (with or
+// without "www.") ending in a real top-level domain. Dots and a slash alone are NOT enough:
 // "k1ll.y0u/x", or a lexicon term cut up with them, would otherwise be waved
 // through as an address and hide the very residue the signal looks for.
 func urlLike(f string) bool {
@@ -253,10 +253,7 @@ func urlLike(f string) bool {
 		u, err := url.Parse(l)
 		return err == nil && u.Scheme != "" && u.Hostname() != ""
 	}
-	if strings.HasPrefix(l, "www.") && len(l) > len("www.") {
-		return true
-	}
-	host := l
+	host := strings.TrimPrefix(l, "www.")
 	if i := strings.IndexAny(host, "/?#"); i >= 0 {
 		host = host[:i]
 	}

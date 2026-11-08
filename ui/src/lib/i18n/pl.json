@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "Wywołania w tej godzinie: {used}, bez żadnego limitu",
   "automod.spendNoCeilingOne": "Wywołania w tej godzinie: {used}, bez żadnego limitu",
   "automod.ceilingSpent": "Osiągnięto limit godzinowy: moderacja jest ograniczona. Trudne wiersze nie są sprawdzane i trafiają na listę Oznaczone.",
+  "automod.checkerCeilingSpent": "Osiągnięto godzinowy limit tego sprawdzania.",
   "automod.spendUnread": "Nie udało się odczytać wydatków, więc to nie jest zero.",
   "automod.timeoutZero": "Wyciszenie na zero sekund jest trwałą blokadą na każdej platformie. Ustaw czas trwania.",
   "automod.unnamedRule": "Reguła bez nazwy",

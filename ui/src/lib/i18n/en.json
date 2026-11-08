@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} calls this hour, against no ceiling",
   "automod.spendNoCeilingOne": "{used} call this hour, against no ceiling",
   "automod.ceilingSpent": "Hourly ceiling reached: moderation is degraded. Hard-looking lines are not checked and are listed under Flagged.",
+  "automod.checkerCeilingSpent": "This checker's hourly ceiling is reached.",
   "automod.spendUnread": "Spend could not be read, so this is not a zero.",
   "automod.timeoutZero": "A timeout of zero seconds is a permanent ban on every platform. Set a duration.",
   "automod.unnamedRule": "Unnamed rule",

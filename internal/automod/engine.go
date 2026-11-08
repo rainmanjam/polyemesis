@@ -239,7 +239,7 @@ func (e *Engine) ModelStats() ModelStats {
 	}
 	st := e.model.Stats()
 	st.Gate = e.gateStats()
-	st.CeilingSpent = st.Ceiling > 0 && st.CallsThisHour >= st.Ceiling
+	st.CeilingSpent = ceilingsSpent(st)
 	return st
 }
 
@@ -250,4 +250,20 @@ func (e *Engine) ModelStats() ModelStats {
 // connector that there is nothing to ask.
 func (e *Engine) ModelEnabled() bool {
 	return e != nil && e.model.Enabled()
+}
+
+// ceilingsSpent is true only when EVERY configured checker is at its hourly
+// ceiling, the rule IsBudgetSpent applies to an error: with one checker spent
+// and the other answering, moderation is not degraded.
+func ceilingsSpent(st ModelStats) bool {
+	spent := func(s ModelStats) bool { return s.Ceiling > 0 && s.CallsThisHour >= s.Ceiling }
+	if st.Primary == nil && st.Secondary == nil {
+		return spent(st)
+	}
+	for _, c := range []*ModelStats{st.Primary, st.Secondary} {
+		if c != nil && !spent(*c) {
+			return false
+		}
+	}
+	return true
 }

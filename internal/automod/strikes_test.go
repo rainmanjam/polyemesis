@@ -491,15 +491,18 @@ func TestASanctionRungStillDeletesTheMessage(t *testing.T) {
 		clk := &fakeClock{t: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
 		e.now = clk.now
 		e = e.WithLadder(&Ladder{Strikes: NewStrikes()})
-		// A platform that cannot time out or delete (Facebook has no timeout,
-		// Rumble nothing upstream) has no such rung to keep.
-		if !m.Allows(e.caps, Key{Platform: plat, Action: ActionTimeout, Checker: CheckerProtection}) ||
-			!m.Allows(e.caps, Key{Platform: plat, Action: ActionDelete, Checker: CheckerProtection}) {
+		// A platform with no delete, or with neither timeout nor ban (Rumble
+		// has nothing upstream), has no such rung to keep. Facebook has no
+		// timeout but can ban, so it is exercised at strike 3.
+		can := func(a Action) bool {
+			return m.Allows(e.caps, Key{Platform: plat, Action: a, Checker: CheckerProtection})
+		}
+		if !can(ActionDelete) || !(can(ActionTimeout) || can(ActionBan)) {
 			continue
 		}
 		tested++
 		var v Verdict
-		for i := 0; i < 2; i++ { // strike 2 asks for a timeout
+		for i := 0; i < 3; i++ { // strike 2 asks for a timeout, strike 3 for a ban
 			v = e.CheckFast(plat, Subject{AuthorID: "u1", AuthorName: "viewer", Text: slur(t) + " someone@gmail.com"})
 			clk.advance(time.Second)
 		}
@@ -515,7 +518,7 @@ func TestASanctionRungStillDeletesTheMessage(t *testing.T) {
 			t.Errorf("on %s a sanction rung must come with the delete: %+v", plat, v.Act)
 		}
 	}
-	if tested < 3 {
+	if tested < 5 {
 		t.Fatalf("only %d platforms exercised", tested)
 	}
 }

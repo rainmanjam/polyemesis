@@ -353,8 +353,12 @@ export function AutomodModelChecker({
               {spendText(stats)}
             </span>
           )}
-          {stats && stats.ceiling > 0 && stats.callsThisHour >= stats.ceiling && (
+          {stats?.ceilingSpent ? (
             <Problem>{t("automod.ceilingSpent")}</Problem>
+          ) : (
+            stats && stats.ceiling > 0 && stats.callsThisHour >= stats.ceiling && (
+              <span className="text-sm text-muted-foreground">{t("automod.checkerCeilingSpent")}</span>
+            )
           )}
           {stats && (stats.decisions ?? 0) > 0 && (
             <span className="text-sm text-muted-foreground">

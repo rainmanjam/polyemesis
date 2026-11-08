@@ -249,7 +249,7 @@ func TestLatinConfusablesCountButAlphabetsDoNot(t *testing.T) {
 // an address and hide the obfuscation residue; real links still do.
 func TestDotsAndASlashAreNotALinkUnlessTheyAreOne(t *testing.T) {
 	h := hc(t)
-	for _, text := range []string{"k1ll.y0u/x", "y0u.5uck/k1ll", "k1ll y0u k.y/s"} {
+	for _, text := range []string{"k1ll.y0u/x", "y0u.5uck/k1ll", "k1ll y0u k.y/s", "www.k1ll.y0u"} {
 		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
 			t.Errorf("%q gave no obfuscation signal: %v (substitutions %d)", text, got, h.substitutions(text))
 		}
@@ -262,7 +262,7 @@ func TestDotsAndASlashAreNotALinkUnlessTheyAreOne(t *testing.T) {
 			t.Errorf("substitutions(%q) = %d, want 0: a link is not spelling", link, n)
 		}
 	}
-	for _, notLink := range []string{"a.b/c", "k.y/s", "k1ll.y0u/x", "x.zzzz/1"} {
+	for _, notLink := range []string{"a.b/c", "k.y/s", "k1ll.y0u/x", "x.zzzz/1", "www.k1ll.y0u"} {
 		if urlLike(notLink) {
 			t.Errorf("%q has no real host and was read as a link", notLink)
 		}

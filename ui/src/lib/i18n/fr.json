@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} appels cette heure, sans aucun plafond",
   "automod.spendNoCeilingOne": "{used} appel cette heure, sans aucun plafond",
   "automod.ceilingSpent": "Plafond horaire atteint : la modération est dégradée. Les lignes difficiles ne sont pas vérifiées et figurent dans Signalés.",
+  "automod.checkerCeilingSpent": "Le plafond horaire de ce vérificateur est atteint.",
   "automod.spendUnread": "La dépense n'a pas pu être lue, ce n'est donc pas un zéro.",
   "automod.timeoutZero": "Une exclusion de zéro seconde est un bannissement définitif sur toutes les plateformes. Indiquez une durée.",
   "automod.unnamedRule": "Règle sans nom",

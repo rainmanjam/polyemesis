@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} Aufrufe in dieser Stunde, ohne Obergrenze",
   "automod.spendNoCeilingOne": "{used} Aufruf in dieser Stunde, ohne Obergrenze",
   "automod.ceilingSpent": "Stundenlimit erreicht: Die Moderation ist eingeschränkt. Schwierig wirkende Zeilen werden nicht geprüft und unter Markiert aufgeführt.",
+  "automod.checkerCeilingSpent": "Das Stundenlimit dieser Prüfung ist erreicht.",
   "automod.spendUnread": "Der Verbrauch konnte nicht gelesen werden, dies ist also keine Null.",
   "automod.timeoutZero": "Eine Auszeit von null Sekunden ist auf jeder Plattform eine dauerhafte Sperre. Legen Sie eine Dauer fest.",
   "automod.unnamedRule": "Unbenannte Regel",

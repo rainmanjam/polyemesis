@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} chamadas nesta hora, sem teto algum",
   "automod.spendNoCeilingOne": "{used} chamada nesta hora, sem teto algum",
   "automod.ceilingSpent": "Limite por hora atingido: a moderação está degradada. Linhas difíceis não são verificadas e aparecem em Sinalizadas.",
+  "automod.checkerCeilingSpent": "O limite por hora deste verificador foi atingido.",
   "automod.spendUnread": "O gasto não pôde ser lido, então isto não é um zero.",
   "automod.timeoutZero": "Um silêncio de zero segundos é um banimento permanente em todas as plataformas. Defina uma duração.",
   "automod.unnamedRule": "Regra sem nome",

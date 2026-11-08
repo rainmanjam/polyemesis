@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "この 1 時間で {used} 回、上限なし",
   "automod.spendNoCeilingOne": "この 1 時間で {used} 回、上限なし",
   "automod.ceilingSpent": "1 時間あたりの上限に達したため、モデレーションが低下しています。判断が難しい行は確認されず、フラグ付きに表示されます。",
+  "automod.checkerCeilingSpent": "このチェッカーの 1 時間あたりの上限に達しました。",
   "automod.spendUnread": "使用量を読み取れませんでした。ゼロという意味ではありません。",
   "automod.timeoutZero": "0 秒の発言停止は、どの配信先でも永久追放になります。長さを指定してください。",
   "automod.unnamedRule": "名前のないルール",

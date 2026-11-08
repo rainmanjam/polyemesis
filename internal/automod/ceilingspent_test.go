@@ -45,3 +45,22 @@ func TestModelOutcomeSeparatesDeclinedFromNothingToAsk(t *testing.T) {
 		t.Fatalf("a line with nothing to ask about = %+v", o)
 	}
 }
+
+// With two checkers the chain falls back to the secondary, so a spent primary
+// alone is not degraded moderation; both spent is.
+func TestCeilingSpentNeedsEveryConfiguredChecker(t *testing.T) {
+	b1, b2 := NewBudget(), NewBudget()
+	p := NewModel(ModelConfig{Enabled: true, MaxCallsPerHour: 1}, b1)
+	s := NewModel(ModelConfig{Enabled: true, MaxCallsPerHour: 5}, b2)
+	e := New(DefaultMatrix(), PlatformCaps{}, nil, nil, NewChain(p, s))
+	_, _ = p.Check(context.Background(), "x") // the primary's one call
+	if e.ModelStats().CeilingSpent {
+		t.Fatal("reported degraded while the secondary still has budget")
+	}
+	for i := 0; i < 5; i++ {
+		_, _ = s.Check(context.Background(), "x")
+	}
+	if !e.ModelStats().CeilingSpent {
+		t.Fatal("both checkers at their ceiling and not reported")
+	}
+}

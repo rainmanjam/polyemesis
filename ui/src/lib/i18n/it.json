@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "{used} chiamate in quest'ora, senza alcun tetto",
   "automod.spendNoCeilingOne": "{used} chiamata in quest'ora, senza alcun tetto",
   "automod.ceilingSpent": "Limite orario raggiunto: la moderazione è degradata. Le righe difficili non vengono controllate e compaiono in Segnalati.",
+  "automod.checkerCeilingSpent": "Il limite orario di questo controllo è raggiunto.",
   "automod.spendUnread": "La spesa non è stata letta, quindi questo non è uno zero.",
   "automod.timeoutZero": "Un silenzio di zero secondi è un bando permanente su ogni piattaforma. Imposta una durata.",
   "automod.unnamedRule": "Regola senza nome",

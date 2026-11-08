@@ -222,6 +222,7 @@
   "automod.spendNoCeiling": "Bu saatte {used} çağrı, hiçbir tavan olmadan",
   "automod.spendNoCeilingOne": "Bu saatte {used} çağrı, hiçbir tavan olmadan",
   "automod.ceilingSpent": "Saatlik sınıra ulaşıldı: moderasyon zayıfladı. Zor görünen satırlar denetlenmez ve İşaretlenenler listesinde yer alır.",
+  "automod.checkerCeilingSpent": "Bu denetleyicinin saatlik sınırına ulaşıldı.",
   "automod.spendUnread": "Harcama okunamadı, yani bu bir sıfır değil.",
   "automod.timeoutZero": "Sıfır saniyelik susturma her platformda kalıcı yasaktır. Bir süre belirleyin.",
   "automod.unnamedRule": "Adsız kural",

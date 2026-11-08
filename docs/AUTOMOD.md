@@ -538,12 +538,17 @@ checker's own switch are all still yours.
 Within `hard` the model is also limited by:
 
 - **One call per author per 20 seconds.** A further hard message from the same
-  person keeps its free verdict: a contextual hate term stays a flag with no
-  hold.
+  person keeps its free verdict (a contextual hate term stays a flag with no
+  hold), but it was not judged, so it is never shown as clear: see **When the
+  model cannot answer** below.
 - **One call per distinct text per 10 minutes.** Verdicts are remembered by the
-  message's pack form, so a copypasta raid costs one call, not one per account.
+  message's NFKC text with case and spacing folded (not the lossier pack form,
+  which would let a benign line and an abusive look-alike such as `k1ll` share
+  one verdict), so a verbatim copypasta raid costs one call, not one per account.
+  A variant with different punctuation or leet spelling is a different question.
 - **A raid brake.** If the gate passes more than 30 messages in 10 seconds it
   stops asking for 60 seconds; `GET /automod/stats` reports `gate.brakeUntil`.
+  Hard lines that arrive while it is on are treated as unjudged, not as clear.
   The history checker and the pack's raid detector are already watching.
 - Your hourly ceiling, as always. 300 an hour is a sound ceiling for an install
   on `hard`.
