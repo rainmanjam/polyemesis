@@ -157,6 +157,23 @@ func (h *Hub) tapAuthor(p db.Platform, account, authorID string) {
 	t.RetractAuthor(p, account, authorID)
 }
 
+// AuthorRetractor is the optional capability of a DisplaySink that keeps lines
+// by author and not only by message id: the overlay gate's held lines. A ban
+// reaches the sink through Retract with the ids the 500-message history ring
+// still holds, and a held line older than the ring never gets one -- so this
+// names the PERSON. An empty authorID is the platform clearing the room.
+type AuthorRetractor interface {
+	RetractAuthor(p db.Platform, account, authorID string)
+}
+
+// retractDisplayAuthor tells a sink that can take it a person (or a cleared
+// room) is gone, whatever the history ring still held.
+func (h *Hub) retractDisplayAuthor(p db.Platform, account, authorID string) {
+	if s, ok := h.displaySink().(AuthorRetractor); ok {
+		s.RetractAuthor(p, account, authorID)
+	}
+}
+
 func (h *Hub) retractDisplay(p db.Platform, account string, ids []string) {
 	if len(ids) == 0 {
 		return

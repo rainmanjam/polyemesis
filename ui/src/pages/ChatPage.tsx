@@ -89,6 +89,7 @@ export function ChatPage() {
   // results, rather than firing a search nobody can see (#945 review).
   const flagsOpen = showFlags && !search.active;
   const flagsRead = useChatFlags(flagsOpen);
+  const reloadFlags = flagsRead.reload;
   const allFlags = useMemo(
     () => (mayClaim(flagsRead.read) ? flagsRead.read.value.flags : []),
     [flagsRead.read],
@@ -175,9 +176,13 @@ export function ChatPage() {
       } catch (err) {
         // The server says which of the three reasons it was.
         toast.error(err instanceof Error ? err.message : t("chatFlags.releaseFailed"));
+      } finally {
+        // Either way the list is stale: a released line is no longer held, and a
+        // refused one was not (or no longer is).
+        reloadFlags();
       }
     },
-    [t],
+    [t, reloadFlags],
   );
 
   const del = useCallback(

@@ -90,6 +90,18 @@ banned its author over, can't be shown again. A line removed by the rule's own
 action (a delete, a timeout, a ban) isn't held, it is removed, and is not
 offered back.
 
+Showing a held line is refused while automod's model is still checking that
+message (the button answers that it is checking, and works a few seconds later),
+and for a message the chat no longer holds: one that has scrolled out of the
+last 500 messages, or whose author has been banned or timed out. If the model
+removes a line you released before it answered, the line comes straight back
+off the overlay. After a release, a retraction, a model removal or the ten
+minutes, the Flagged list stops offering the button.
+
+**A held message is never a poll vote**, even after you show it on the overlay.
+A viewer's "2" held by a rule is not counted, and releasing it does not count it
+afterwards. See [POLLS.md](POLLS.md).
+
 The same applies to the message on a viewer-activity alert (a Super Chat's
 words, a tip's note): a held message is left off the alert, which still shows
 without it. See [OVERLAY.md](OVERLAY.md#alerts-overlay).

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -173,5 +174,84 @@ func TestTheTextFallbackSendsOnlyText(t *testing.T) {
 	got := mod.got()
 	if len(got) != 2 || got[0] != (automod.Subject{Text: "alert words"}) || got[1] != (automod.Subject{Text: "Ana"}) {
 		t.Fatalf("subjects = %+v", got)
+	}
+}
+
+// authorSink records AuthorRetractor calls.
+type authorSink struct {
+	displayRecorder
+}
+
+func (s *authorSink) RetractAuthor(p db.Platform, account, authorID string) {
+	s.add(fmt.Sprintf("retractAuthor %s %s %q", p, account, authorID))
+}
+
+// FINDING 1. A ban reaches the sink BY AUTHOR even when the history ring holds
+// none of that author's lines (so Retract has no ids), and a cleared room does
+// with an empty author.
+func TestARetractedUserReachesTheSinkByAuthor(t *testing.T) {
+	h := testHub(t)
+	sink := &authorSink{}
+	h.SetDisplay(sink)
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "acct"}
+	attach(t, h, a)
+	h.mu.Lock()
+	r := h.runners[runnerKey(db.PlatformTwitch, "acct")]
+	h.mu.Unlock()
+
+	h.retractUser(r, "u9") // nothing of theirs is in the ring
+	h.retractUser(r, "")   // the room is cleared
+	got := sink.got()
+	want := []string{`retractAuthor twitch acct "u9"`, `retractAuthor twitch acct ""`}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("sink calls %v, want %v", got, want)
+	}
+}
+
+// FINDING 2. ModelPending is true while the model is queued and has not
+// answered, false before and after, and false for a message never asked about.
+func TestModelPendingSpansTheQuestion(t *testing.T) {
+	block := make(chan struct{})
+	mod := &stubModerator{modelOn: true, modelBlock: block, verdict: automod.Verdict{Findings: []automod.Finding{heldFinding}, Hold: true}}
+	h, sink, _ := displayHub(t, mod, msg("m1", "u1", "hello"))
+	waitFor(t, "model asked", func() bool { return h.ModelPending(db.PlatformTwitch, "acct", "m1") })
+	if h.ModelPending(db.PlatformTwitch, "acct", "other") {
+		t.Error("pending for a message never asked about")
+	}
+	close(block)
+	sink.waitFor(t, fmt.Sprintf("judge m1 %d", DisplayClear))
+	waitFor(t, "pending cleared", func() bool { return !h.ModelPending(db.PlatformTwitch, "acct", "m1") })
+}
+
+func TestModelPendingExpiresIfTheQuestionWasLost(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	h := testHub(t, WithClock(func() time.Time { return now }))
+	k := Message{Platform: db.PlatformTwitch, Account: "a", ID: "b"}.Key()
+	h.setModelAsked(k, true)
+	if !h.ModelPending(db.PlatformTwitch, "a", "b") {
+		t.Fatal("not pending right after asking")
+	}
+	now = now.Add(modelAskedTTL + time.Second)
+	if h.ModelPending(db.PlatformTwitch, "a", "b") {
+		t.Fatal("a lost question kept the line unreleasable for ever")
+	}
+	// And the expired entry is swept when another is added.
+	h.setModelAsked("fresh", true)
+	h.mu.Lock()
+	_, stale := h.modelAsked[k]
+	h.mu.Unlock()
+	if stale {
+		t.Error("expired entry not swept")
+	}
+}
+
+func TestHasMessageSeesTheRing(t *testing.T) {
+	h, sink, _ := displayHub(t, nil, msg("m1", "u1", "hello"), msg("m2", "u1", "again"))
+	sink.waitFor(t, fmt.Sprintf("offer m2 %d", DisplayClear))
+	if !h.HasMessage(db.PlatformTwitch, "acct", "m1") || !h.HasMessage(db.PlatformTwitch, "acct", "m2") {
+		t.Error("a stored message was not found")
+	}
+	if h.HasMessage(db.PlatformTwitch, "acct", "gone") || h.HasMessage(db.PlatformKick, "acct", "m1") {
+		t.Error("found a message that is not there")
 	}
 }

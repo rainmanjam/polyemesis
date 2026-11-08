@@ -281,6 +281,24 @@ func TestAMessageAutomodBlocksIsNotAVote(t *testing.T) {
 	}
 }
 
+// FINDING 5: a vote a rule HELD off the overlay is not counted, now or after the
+// message is shown on the overlay (the release never reaches the poll). Fail
+// closed; documented in docs/POLLS.md.
+func TestAHeldVoteIsNotCountedEvenAfterItIsReleased(t *testing.T) {
+	f := newFixture(t)
+	f.start(t)
+	f.vote(db.PlatformTwitch, "m1", "u1", "1", chat.DisplayHeld)
+	// Releasing to the overlay is the gate's business; the only thing that could
+	// make it a vote is a later Judge, and a release sends none.
+	if r := f.result(t); r.Total != 0 {
+		t.Errorf("a held vote counted: total %d", r.Total)
+	}
+	f.e.Judge(db.PlatformTwitch, "acct-twitch", "m1", chat.DisplayHeld)
+	if r := f.result(t); r.Total != 0 {
+		t.Errorf("a held vote counted after a Held judgement: total %d", r.Total)
+	}
+}
+
 // TestAVoteTheModelIsJudgingCountsOnlyOnceCleared: the same bar as the
 // overlay -- a vote counts once automod has let the message stand.
 func TestAVoteTheModelIsJudgingCountsOnlyOnceCleared(t *testing.T) {

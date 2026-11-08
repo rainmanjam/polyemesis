@@ -151,8 +151,15 @@ describe("the Flagged chip (A48)", () => {
     expect(within(list).getAllByText("Held off overlays")).toHaveLength(1);
     expect(within(list).getAllByRole("button", { name: /Show .* message on the overlay/ })).toHaveLength(1);
 
+    const before = chatFlags.mock.calls.length;
+    // The server stops marking the line held once it is released.
+    const after = flag("twitch", "t1", "ana");
+    chatFlags.mockResolvedValue(result([after, flag("youtube", "y1", "bo")]));
     fireEvent.click(within(list).getByRole("button", { name: "Show ana's message on the overlay" }));
     await waitFor(() => expect(release).toHaveBeenCalledWith({ platform: "twitch", account: "acct", id: "t1" }));
+    // The list is read again, and the button goes with the hold.
+    await waitFor(() => expect(chatFlags.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /on the overlay/ })).toBeNull());
     release.mockRestore();
   });
 

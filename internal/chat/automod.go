@@ -183,13 +183,16 @@ func (h *Hub) checkAutomod(m Message) {
 	// cannot stall chat. Queued through the same bounded channel as an action,
 	// so a raid cannot spawn a goroutine per message either.
 	if askModel {
-		h.enqueueAutomod(s, automodJob{
+		h.setModelAsked(m.Key(), true)
+		if !h.enqueueAutomod(s, automodJob{
 			gen: s.gen, platform: m.Platform, account: m.Account,
 			msgID: m.ID, authorID: m.Author.ID,
 			// A zero Action marks this as "ask the model", which the worker
 			// tells apart from an action to perform.
 			finding: automod.Finding{Checker: automod.CheckerModel},
-		})
+		}) {
+			h.setModelAsked(m.Key(), false)
+		}
 	}
 }
 
@@ -218,14 +221,16 @@ func (h *Hub) recordAutomod(s *automodState, m Message, v automod.Verdict) {
 	}
 }
 
-func (h *Hub) enqueueAutomod(s *automodState, job automodJob) {
+func (h *Hub) enqueueAutomod(s *automodState, job automodJob) bool {
 	select {
 	case s.jobs <- job:
+		return true
 	default:
 		// Named, not silent. An operator whose automod quietly stopped keeping
 		// up would otherwise believe it was keeping up.
 		h.log.Warn("automod queue full, dropping work",
 			"platform", job.platform, "action", job.finding.Action)
+		return false
 	}
 }
 
@@ -260,6 +265,8 @@ func (h *Hub) runAutomodWorker(ctx context.Context, s *automodState) {
 
 // askModel runs the paid checker and queues whatever it permits.
 func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
+	// Answered or abandoned, the question is no longer outstanding.
+	defer h.setModelAsked(Message{Platform: job.platform, Account: job.account, ID: job.msgID}.Key(), false)
 	// The Hub does not keep message text on the job -- it would double the
 	// queue's memory for a raid. Re-reading it from history is cheap and, if
 	// the message has already aged out, the moment has passed anyway.

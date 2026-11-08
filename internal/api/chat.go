@@ -728,6 +728,20 @@ func (s *Server) handleChatFlagRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "platform and id are required")
 		return
 	}
+	// Refused while the model is still being asked: releasing a line it is
+	// about to remove would put it on air first.
+	if s.chat != nil && s.chat.ModelPending(platform, account, id) {
+		writeError(w, http.StatusConflict,
+			"automod's model is still checking that message; try again in a few seconds")
+		return
+	}
+	// And when the hub no longer has the message -- it aged out of the history
+	// ring, or its author was banned -- there is nothing to bring back.
+	if s.chat != nil && !s.chat.HasMessage(platform, account, id) {
+		writeError(w, http.StatusNotFound,
+			"that message is no longer held by the chat (it scrolled out of the last 500 messages, or was removed)")
+		return
+	}
 	if s.overlayGate == nil || !s.overlayGate.Release(platform, account, id) {
 		writeError(w, http.StatusNotFound,
 			"that message is not being held off the overlay (it was never held, was released already, or the "+
@@ -753,6 +767,16 @@ func (s *Server) handleChatFlags(w http.ResponseWriter, r *http.Request) {
 	if s.chat != nil {
 		out.Counts = s.chat.FlagCounts()
 		out.Flags = s.chat.Flagged(platform, limit)
+		// Held is true only while the gate still has the line to release: it
+		// clears on release, retraction, a model removal and the ten-minute
+		// expiry, none of which the hub tells the flag.
+		for i := range out.Flags {
+			f := &out.Flags[i]
+			if f.Held {
+				f.Held = s.overlayGate != nil &&
+					s.overlayGate.IsHeld(f.Message.Platform, f.Message.Account, f.Message.ID)
+			}
+		}
 		out.Truncated = len(out.Flags) >= limit
 	}
 	writeJSON(w, http.StatusOK, out)

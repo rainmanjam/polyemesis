@@ -84,10 +84,16 @@ type Stats struct {
 type heldLine struct {
 	line eventstream.DisplayLine
 	at   time.Time
+	// platform, account and author say whose line it is, so a ban or a cleared
+	// room can take it out of the buffer when the hub no longer has its id.
+	platform db.Platform
+	account  string
+	author   string
 }
 
 type held struct {
 	line     eventstream.DisplayLine
+	msg      chat.Message
 	deadline time.Time
 }
 
@@ -176,10 +182,10 @@ func (g *Gate) Offer(m chat.Message, d chat.Display) {
 		line := g.project(m)
 		g.releaseLocked(key(m.Platform, m.Account, m.ID), line, line.At)
 	case chat.DisplayPending:
-		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), deadline: g.now().Add(MaxHold)}
+		g.pending[key(m.Platform, m.Account, m.ID)] = held{line: g.project(m), msg: m, deadline: g.now().Add(MaxHold)}
 	case chat.DisplayHeld:
 		g.stats.Blocked++
-		g.holdLocked(key(m.Platform, m.Account, m.ID), g.project(m))
+		g.holdLocked(key(m.Platform, m.Account, m.ID), g.project(m), m)
 	default:
 		// Blocked, and anything this build does not know: fail closed.
 		g.stats.Blocked++
@@ -188,10 +194,10 @@ func (g *Gate) Offer(m chat.Message, d chat.Display) {
 
 // holdLocked keeps a withheld line for Release, shedding the oldest past the
 // cap. A key offered twice is kept once, at its latest position.
-func (g *Gate) holdLocked(k string, line eventstream.DisplayLine) {
+func (g *Gate) holdLocked(k string, line eventstream.DisplayLine, m chat.Message) {
 	g.stats.Held++
 	g.dropHeldLocked(k)
-	g.heldLines[k] = heldLine{line: line, at: g.now()}
+	g.heldLines[k] = heldLine{line: line, at: g.now(), platform: m.Platform, account: m.Account, author: m.Author.ID}
 	g.heldOrder = append(g.heldOrder, k)
 	for len(g.heldOrder) > heldCap {
 		delete(g.heldLines, g.heldOrder[0])
@@ -211,6 +217,44 @@ func (g *Gate) dropHeldLocked(k string) {
 			break
 		}
 	}
+}
+
+// platformOf is the platform half of a key.
+func platformOf(k string) string {
+	for i := 0; i < len(k); i++ {
+		if k[i] == 0 {
+			return k[:i]
+		}
+	}
+	return k
+}
+
+// RetractAuthor implements chat.AuthorRetractor: a person was banned or timed
+// out (or, with an empty authorID, the room was cleared), so none of their held
+// lines on that channel may be shown afterwards. Retract takes ids the hub's
+// 500-message ring still holds; a held line older than that has none.
+func (g *Gate) RetractAuthor(p db.Platform, account, authorID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for k, h := range g.heldLines {
+		if h.platform != p || h.account != account {
+			continue
+		}
+		if authorID != "" && h.author != authorID {
+			continue
+		}
+		g.dropHeldLocked(k)
+	}
+}
+
+// IsHeld reports whether a line is in the release buffer right now: held, not
+// yet released, retracted or removed, and inside heldTTL. The review list asks
+// it, so its "Show on overlay" is true to the gate and not to a flag set once.
+func (g *Gate) IsHeld(p db.Platform, account, id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	h, ok := g.heldLines[key(p, account, id)]
+	return ok && g.now().Sub(h.at) <= heldTTL
 }
 
 // Release puts a held line on the overlay: the "Show on overlay" for a
@@ -250,9 +294,17 @@ func (g *Gate) Judge(p db.Platform, account, id string, d chat.Display) {
 	if !ok {
 		// Already dropped (expired or retracted), or never pending. A line the
 		// fast pass held that the model then REMOVES is no longer a maybe: take
-		// it out of the release buffer.
+		// it out of the release buffer -- and off the screen if it was
+		// released before the model answered.
 		if d == chat.DisplayBlocked {
 			g.dropHeldLocked(k)
+			if did, shown := g.shown[k]; shown {
+				delete(g.shown, k)
+				g.pub.Publish(eventstream.Envelope{
+					Type: eventstream.TypeChatUndisplay,
+					Data: eventstream.DisplayRemoval{Platform: platformOf(k), IDs: []string{did}},
+				})
+			}
 		}
 		return
 	}
@@ -260,7 +312,7 @@ func (g *Gate) Judge(p db.Platform, account, id string, d chat.Display) {
 	if d != chat.DisplayClear {
 		g.stats.Blocked++
 		if d == chat.DisplayHeld {
-			g.holdLocked(k, h.line)
+			g.holdLocked(k, h.line, h.msg)
 		}
 		return
 	}
