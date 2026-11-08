@@ -364,6 +364,108 @@ action if that is what you meant
 Worth knowing when writing rules through the API, where it is easier to omit a
 field than it is in the console.
 
+### Known limits of the pack
+
+- **Not across platforms, for one person.** Strikes, near-duplicate repeats and
+  impersonation are counted per platform and per account. There is no reliable
+  link between one person's Twitch and YouTube accounts, so a viewer who spams
+  both is two viewers. (A raid is the exception: it counts different accounts on
+  any platform posting the same text.)
+- **English first.** The term list is English. Non-English chat is covered by the
+  shape detectors (floods, doxxing, scams) and by the model tier, not by a
+  translated term list, and the detectors are tuned not to fire on other scripts.
+- **Display-only until you arm something.** A hit hides one line from the
+  broadcast and nothing else. That is the safety claim the staging runbook below
+  checks.
+
+### Staging runbook: prove it before you arm it
+
+Two parts, run in order, on a **staging** server with your own channels and
+accounts. Part 1 never changes anything on a platform. Part 2 does, so every step
+in it needs your own go-ahead, and you use a viewer **test account** that you
+own, never a real viewer.
+
+Use a test-only canary rather than real abuse. In **Recommended protection**,
+open **Details** on *Hate and slurs* and add the word `polyemesis-canary-hate`
+as a severe term. It stands in for a slur: the card, the log and the review list
+never print the word anyone matched, and nothing real is ever typed.
+
+#### Before either part
+
+```bash
+PROTECTION=1 ./scripts/acceptance-automod.sh
+```
+
+`PROTECTION=1` runs only the **protection tier**: local, no network, no
+credentials and no platform. It applies a fresh install's settings, injects
+synthetic lines (the canary, an email, a phone number, an IP address, a giveaway
+scam, a link shortener, a character flood, an impersonator, a shouted line, a
+raid burst, and benign lines such as scores, times, version strings and place
+names) through a real chat hub and overlay gate, and checks that the right lines
+were held, no benign line was flagged, the overlay's *held* counter rose by
+exactly the lines held, no delete, ban or timeout reached a platform, and no
+`automod acted` line was logged. It takes a few seconds and must pass before
+part 1. Without `PROTECTION=1` the script runs the model-endpoint steps as
+before.
+
+#### Part 1: display-only against real chat
+
+The pack on, **nothing armed**, and the model **off or a local model**. Hosted
+Jev against real chat needs your explicit OK for each test.
+
+1. **Nothing is armed.** `GET /api/v1/automod/matrix`: no `protection` cell is
+   on, on any platform. `grep 'automod acted'` in the server log finds nothing,
+   and keeps finding nothing through the whole of part 1.
+2. **One line per category, from a test account.** Post a line for each
+   category: the canary word; an email address you made up; a phone number
+   in `+44 20 7946 0958` form; a giveaway-scam line (`free nitro for everyone`);
+   a link-shortener URL; forty `#`; and, from a second account whose name
+   imitates one of your moderators, any line. Each must appear in **Flagged** on
+   the Chat page with a hold. **Settings, Chat overlays** shows *held back by
+   moderation* rising by the number held, the line is absent from the overlay in
+   OBS, and the platform's own chat is unchanged (nothing deleted, nobody
+   timed out). Use the card's test box (`POST /automod/explain`) for anything
+   you would rather not post.
+3. **Real streams.** Leave it running through one or more real streams. Afterwards
+   open **Flagged**, label each entry a true or a false positive, and divide: the
+   false positives over the lines the audience sent should be **0.2% or less**.
+   Release a wrongly held line with **Show on overlay**. Each false positive is a
+   line to add to the corpus (`internal/automod/pack/testdata/corpus-en.jsonl`,
+   with a synthetic stand-in, never the viewer's words) before the pack ships.
+4. **With the model on and scope `hard`**, fewer than 5% of lines should wait for
+   a verdict: `GET /api/v1/automod/stats`, `gate`, and the overlay card's
+   *dropped while waiting* figure.
+
+Part 1 passes when steps 1 and 2 are exactly as described and step 3 is within
+the figure. Do not arm anything to "see if it works": that is part 2.
+
+#### Part 2: armed actions with a test account
+
+One viewer test account per platform. For each step, tell yourself "go" first.
+
+1. **Delete.** Arm **Delete** on one platform's ladder row. The canary from the
+   test account is deleted on the platform; the **Flagged** entry shows it acted,
+   and a `chat.moderation` event with `by: automod` is on `GET /api/v1/events`.
+2. **Time out.** Arm **Time out**. Post a second canary inside the strike window:
+   the account is timed out for `ladderTimeoutSeconds`. On Kick the length rounds
+   **up** to whole minutes.
+3. **Ban.** Arm **Ban** for a category whose ceiling allows it (hate terms do).
+   A third canary bans the test account. Unban it by hand on the platform, and
+   check polyemesis's record of the ban clears.
+4. **Negatives.** An **unarmed** platform does nothing with the same canary. Turn
+   the global automod switch off while actions are queued: the queued actions are
+   dropped, not performed.
+5. **Twitch's own filters.** Add a term by hand in Twitch first, then **Copy the
+   severe hate terms to Twitch blocked terms**, which sends the pack (including
+   your canary). Turn hate and slurs off: only the terms polyemesis added are
+   removed and your hand-added term stays. **Set Twitch AutoMod to level 1 or 2**,
+   read it back, and restore the level you had.
+6. **Repeat per platform.** For a platform still marked unverified in
+   [Connecting your platforms](CONNECTING-PLATFORMS.md#chat-actions-by-platform),
+   this is also its first live moderation test: record what happens there.
+
+Disarm everything you armed when you are done, and unban the test account.
+
 ## The model tier
 
 **Off by default, and while it is off no message leaves this server.**

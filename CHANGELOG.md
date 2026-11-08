@@ -24,6 +24,52 @@ its first tagged release.
   gains `currentScopeVersion` and `scopeUnlocks` (additive).
 - **X: choose who can chat and the broadcast language per destination.** The X card in the destination dialog (step 4) has a **Who can chat** setting (off, everyone, verified accounts, accounts you follow, your subscribers, or accounts you follow and theirs) and a **Language** setting. They are sent with the go-live as `chat_option` and `locale`, and left unset they send nothing, so X decides. They are stored in `compliance.x` with no schema change.
 
+- **Automod: a recommended-protection pack, on for new installs, that flags and holds and does nothing else.**
+  A fresh install now starts with a compiled English term list and a set of detectors for hate and
+  slurs, doxxing (email, phone, IP), scams (giveaways, fake support, link shorteners, lookalike
+  domains), floods (zalgo, character walls, mention and link spam), impersonation of your
+  moderators and raids (five or more accounts posting the same text within 20 seconds). A hit is
+  **flagged in the Chat page's Flagged list and held off every overlay** (releasable with **Show on
+  overlay**); it sends nothing to a platform. Shouting, emote walls, near-duplicate repeats and
+  contextual hate terms flag only. Profanity ships off, and the street-address detector ships off.
+  An **existing install is never switched on silently**: its settings carry no answer, nothing new
+  runs, and the console offers the pack with a banner (**Turn on** or **Not now**, both recorded).
+  - **Settings → Pipeline → Recommended protection** is the new card: a row per category, the
+    action ladder (below), Twitch's own filters, a test box and Advanced. What you change is stored
+    as a difference over the pack, so a later pack update reaches you without overwriting an edit.
+    Fifteen locales.
+  - **The action ladder is off until you arm it.** Per platform, **Delete**, **Time out** and **Ban**
+    are separate switches (matrix cell `platform/rung/protection`). Each pack hit is a strike; strike
+    1 asks for delete, 2 a timeout (600 s by default, `ladderTimeoutSeconds`), 3 a ban, capped by
+    the category's highest rung and lowered to the highest rung you armed, otherwise it stays a flag.
+    Self-harm, impersonation and contextual hate are hold-only. One platform action per message.
+    Strikes survive a settings save.
+  - **Jev only for the hard cases.** `automod.protection.modelScope` is `hard` on a fresh install
+    (the model is asked only about lines the free checkers could not settle and that show a sign of
+    a hard case, with a per-author cap, de-duplication and a raid brake) and `all`, as before, on an
+    existing one. A new `self_harm` category is asked only when protection is on, and is hold-only.
+    **Hold the overlay when the model cannot answer** is a new option. Friendlier Jev error messages.
+  - **Twitch's own filters.** From the card: copy the pack's severe hate terms to Twitch's blocked
+    terms (a batch at a time, resumable, recording a hash of each term it really added so **Remove
+    the terms polyemesis added** and turning a category off undo only those), set Twitch AutoMod to
+    level 1 or 2 without lowering a stricter setting, and refresh protected names from Twitch roles.
+    No term is ever in a response or in `GET /settings`.
+  - **New route:** `POST /api/v1/automod/explain` (the test box; offline, stateless and unlogged, so
+    no API token can call it). The Twitch tools route (`/api/v1/chat/twitch/{resource}`) gains the
+    `pack-terms`, `pack-terms-sync`, `pack-automod-level` and `pack-protected-names` resources.
+    Both are additive.
+  - **Settings:** a new `automod.protection` block (replace-not-merge, strict fields); the wire is
+    additive and DB schema v1 is unchanged. Hot reloads on save.
+  - **Verify it yourself.** `PROTECTION=1 ./scripts/acceptance-automod.sh` runs a credential-free
+    local tier that checks the default pack holds what it should, flags no benign line, and makes no
+    platform call. [docs/AUTOMOD.md](docs/AUTOMOD.md#staging-runbook-prove-it-before-you-arm-it) has
+    the two-part staging runbook (display-only against real chat, then armed actions with a test
+    account). [docs/OVERLAY.md](docs/OVERLAY.md) and
+    [docs/CONNECTING-PLATFORMS.md](docs/CONNECTING-PLATFORMS.md) say what the pack does on an overlay
+    and per platform.
+  - **Known limits:** English-only term list; strikes, repeats and impersonation are per platform
+    and account, so one person on two platforms is two viewers.
+
 - **Viewer activity: one event for follows, subs, gifts, tips, raids and the rest (the shared core).**
   A new Activity tab on the Chat page, an **alerts overlay** for OBS (`/overlay/alerts`, the same
   overlay key and platform filter as the chat overlay, with layout, kinds, duration, sound and

@@ -171,6 +171,16 @@ An overlay shows a message only after automatic moderation has judged it:
   held lines for ten minutes for this. A held line counts in the "held back by
   moderation" figure below, and again as shown if you release it.
 
+- **The recommended-protection pack:** on a fresh install the pack is on, and a
+  hit it marks as held (hate terms, doxxing, scams, floods, impersonation and
+  raid copies; shouting and emote walls are only flagged) is kept off every
+  overlay the same way, with nothing sent to the platform. It lands in the same
+  **Flagged** list with **Show on overlay**, and counts in the same "held back by
+  moderation" figure. A line the pack holds is still in the console, flagged. A
+  held message is not counted as a chat poll vote. See
+  [AUTOMOD.md](AUTOMOD.md#the-recommended-protection-pack), and its staging
+  runbook for how to check this on your own channels before you arm anything.
+
 If you hide or delete a message, or ban its author, after it's on screen, it
 leaves every overlay straight away. An overlay that reconnects, for example
 after OBS reloads the source, is never sent a removed message again.

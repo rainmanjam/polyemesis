@@ -40,11 +40,22 @@
 # anybody sent. A suite that fed real chat to a third party to prove it could
 # would be doing the thing it exists to hold to account.
 #
+# THE PROTECTION TIER (PROTECTION=1). The recommended-protection pack is the
+# part of automod that is on by default, so its safety claim gets its own tier:
+# credential-free, no network, no platform. It applies a fresh install's
+# settings through the production ApplyAutomod, injects synthetic lines through
+# a real Hub and overlay Gate, and asserts what part 1 of the staging runbook
+# (docs/AUTOMOD.md, "Staging runbook") asserts by hand: positives are held off
+# the overlay, benign lines are not, and nothing reaches a platform. It runs
+# INSTEAD of steps 1-7, which are about a model endpoint this tier never calls.
+#
 #   ./scripts/acceptance-automod.sh
+#   PROTECTION=1 ./scripts/acceptance-automod.sh
 #
 # Environment:
 #   POLY_AUTOMOD_ENDPOINT  the endpoint under test (default: api.openai.com)
 #   POLY_AUTOMOD_API_KEY   enables step 7; OPENAI_API_KEY is also accepted
+#   PROTECTION=1           run only the protection tier (step P)
 set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -83,6 +94,68 @@ drive() { go run "$DRIVER" "$@" 2>&1; }
 val() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
 ENDPOINT="${POLY_AUTOMOD_ENDPOINT:-https://api.openai.com/v1/chat/completions}"
+
+# ---------------------------------------------------------------------------
+# The protection tier. Exits when done: steps 1-7 below are about a model
+# endpoint, which this tier never touches.
+if [ "${PROTECTION:-}" = 1 ]; then
+  printf "\033[1mautomod protection, local and credential-free\033[0m\n"
+  step "P. The default pack holds the lines it should, and does nothing else"
+
+  OUT="$(drive protection)"
+
+  # The gate. Without it every check below could be vacuous: a pack that was
+  # never on holds nothing and "no platform call" is then trivially true.
+  if [ "$(val "$OUT" protectionState)" = on ] && [ "$(val "$OUT" armedProtectionCells)" = 0 ]; then
+    ok "a fresh install has the pack on and no protection cell armed"
+  else
+    bad "state=$(val "$OUT" protectionState) armed=$(val "$OUT" armedProtectionCells); the tier proves nothing"
+  fi
+
+  if [ "$(val "$OUT" mismatches)" = 0 ] && [ -n "$(val "$OUT" expectedHeld)" ]; then
+    ok "every synthetic positive was flagged and held, and the flag-only one was not held"
+  else
+    bad "held/not-held disagreed with the pack's policy for: $(printf '%s\n' "$OUT" | sed -n 's/^wrong=//p' | tr '\n' ',')"
+  fi
+
+  [ "$(val "$OUT" benignFlagged)" = 0 ] \
+    && ok "no benign line (scores, times, versions, place names, hype) was flagged" \
+    || bad "$(val "$OUT" benignFlagged) benign lines were flagged"
+
+  # 5 distinct authors inside the window is a raid; the fifth and sixth hold.
+  [ "$(val "$OUT" raidHeld)" = 2 ] \
+    && ok "a six-author raid burst was held from the fifth author on" \
+    || bad "raid held=$(val "$OUT" raidHeld), expected 2"
+
+  # The overlay counter rises by exactly the lines held (docs/OVERLAY.md).
+  EXPECT=$(( $(val "$OUT" expectedHeld) + 2 ))
+  if [ "$(val "$OUT" gateHeld)" = "$EXPECT" ] && [ "$(val "$OUT" gateBlocked)" = "$EXPECT" ]; then
+    ok "the overlay gate's Held and Blocked counters rose by $EXPECT"
+  else
+    bad "gate held=$(val "$OUT" gateHeld) blocked=$(val "$OUT" gateBlocked), expected $EXPECT"
+  fi
+
+  if [ "$(val "$OUT" deletes)" = 0 ] && [ "$(val "$OUT" bans)" = 0 ]; then
+    ok "no Delete, Ban or timeout call reached the platform"
+  else
+    bad "a hold made a platform call: $(val "$OUT" deletes) deletes, $(val "$OUT" bans) bans"
+  fi
+
+  if [ "$(val "$OUT" actedLines)" = 0 ] && [ "$(val "$OUT" canaryInLog)" = false ]; then
+    ok "no 'automod acted' log line, and the log never carries the canary text"
+  else
+    bad "acted lines=$(val "$OUT" actedLines) canaryInLog=$(val "$OUT" canaryInLog)"
+  fi
+
+  printf "\n  \033[1m%d passed, %d failed, %d skipped\033[0m\n\n" "$pass" "$fail" "$skip"
+  # FIXED floor, as below: the tier's checks never move with the environment.
+  if [ $((pass + fail + skip)) -ne 7 ]; then
+    printf "  \033[31mINCOMPLETE\033[0m  %d of 7 protection checks ran\n\n" "$((pass + fail + skip))"
+    exit 1
+  fi
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
 
 printf "\033[1mautomod, against a real endpoint\033[0m\n"
 note "endpoint: $ENDPOINT"
