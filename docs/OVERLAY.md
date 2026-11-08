@@ -153,11 +153,15 @@ An overlay shows a message only after automatic moderation has judged it:
 - **Automod off, or only the free checkers:** a message is judged as it
   arrives, so it appears immediately. A message the rules or history checkers
   will hide, delete, time out or ban never appears at all.
-- **The model checker on:** each message waits for the model's verdict for up
-  to **4 seconds**. A message the model removes never appears. If the verdict
-  hasn't arrived after 4 seconds, the overlay leaves that message out. The
-  console still shows it. If the model endpoint fails, messages pass, just as
-  they do in the console.
+- **The model checker on:** a message the model is asked about waits for its
+  verdict for up to **4 seconds**. A message the model removes never appears. If
+  the verdict hasn't arrived after 4 seconds, the overlay leaves that message
+  out. The console still shows it. If the model endpoint fails, messages pass,
+  just as they do in the console, unless you turned on **Hold the overlay when
+  the model cannot answer**: then they wait off the overlay and are listed to
+  release. With the model scope on `hard` (a fresh install's default; see
+  [AUTOMOD.md](AUTOMOD.md#only-the-hard-cases-the-model-scope)) the model is
+  asked only about hard cases, so every other line reaches the overlay at once.
 
 - **A rule that holds its matches:** a rule with **Hold off the overlay** on
   (see [AUTOMOD.md](AUTOMOD.md#hold-a-match-off-the-overlay)) keeps its matches

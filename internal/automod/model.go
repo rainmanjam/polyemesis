@@ -106,6 +106,9 @@ type ModelConfig struct {
 	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 	// FlagOnly forces every finding to ActionFlag. Set for local presets.
 	FlagOnly bool `json:"flagOnly,omitempty"`
+	// HoldOverlay keeps a finding in any category but "other" off every overlay
+	// (spec 6.4). Set only for an install with the protection pack on.
+	HoldOverlay bool `json:"holdOverlay,omitempty"`
 	// CategoryActions is the operator's per-category table. A category it
 	// does not name gets Action. See categoryAction.
 	CategoryActions map[Category]Action `json:"categoryActions,omitempty"`
@@ -156,6 +159,9 @@ type ModelStats struct {
 	FailedOpen int `json:"failedOpen"`
 	// LastDecidedBy is the checker that answered the most recent message.
 	LastDecidedBy Slot `json:"lastDecidedBy,omitempty"`
+	// Gate is the hard-case gate's counters. Set on the engine's aggregate,
+	// and only while the scope is "hard".
+	Gate *GateStats `json:"gate,omitempty"`
 }
 
 // Model is the connector.
@@ -300,6 +306,7 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	return []Finding{{
 		Checker:        CheckerModel,
 		Action:         categoryAction(m.cfg.Action, m.cfg.CategoryActions, m.cfg.FlagOnly, cat),
+		Hold:           m.cfg.HoldOverlay && cat != CategoryOther,
 		Provider:       m.cfg.Preset,
 		TimeoutSeconds: m.cfg.TimeoutSeconds,
 		Confidence:     v.Confidence,

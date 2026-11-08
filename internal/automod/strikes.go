@@ -386,6 +386,9 @@ type Persistent struct {
 	Raid    *pack.Raid
 	NearDup *pack.NearDup
 	Names   *pack.NameSet
+	// Gate is the hard-case gate's per-author table, verdict cache and raid
+	// brake (gate.go): a save in the middle of a raid must not refill them.
+	Gate *ModelGate
 }
 
 // NewPersistent returns the long-lived state with its default bounds.
@@ -395,5 +398,6 @@ func NewPersistent() *Persistent {
 		Raid:    pack.NewRaid(pack.DefaultRaidConfig()),
 		NearDup: pack.NewNearDup(pack.DefaultNearDupConfig()),
 		Names:   pack.NewNameSet(nil),
+		Gate:    NewModelGate(GateConfig{}),
 	}
 }

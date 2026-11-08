@@ -227,14 +227,15 @@ var leafSensitivity = map[string]sensitivity{
 	// protects the key entered THERE, not one pasted into this field, and this
 	// row said sPublic because the block's derived hasApiKey boolean was taken
 	// as settling the whole block.
-	"settings.automod.model.endpoint":        sMasked,
-	"settings.automod.model.hasApiKey":       sPublic,
-	"settings.automod.model.instruction":     sPublic,
-	"settings.automod.model.maxCallsPerHour": sPublic,
-	"settings.automod.model.minConfidence":   sPublic,
-	"settings.automod.model.model":           sPublic,
-	"settings.automod.model.timeoutForBan":   sPublic,
-	"settings.automod.model.timeoutSeconds":  sPublic,
+	"settings.automod.model.endpoint":            sMasked,
+	"settings.automod.model.hasApiKey":           sPublic,
+	"settings.automod.model.instruction":         sPublic,
+	"settings.automod.model.maxCallsPerHour":     sPublic,
+	"settings.automod.model.minConfidence":       sPublic,
+	"settings.automod.model.model":               sPublic,
+	"settings.automod.model.timeoutForBan":       sPublic,
+	"settings.automod.model.holdWhenUnavailable": sPublic,
+	"settings.automod.model.timeoutSeconds":      sPublic,
 	// #21. The protocol, preset and category table are configuration; tested
 	// is a derived boolean like hasApiKey. The secondary mirrors the primary:
 	// its ENDPOINT is masked for the same api_key-in-the-query reason, and its
@@ -252,6 +253,7 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.automod.secondary.minConfidence":         sPublic,
 	"settings.automod.secondary.model":                 sPublic,
 	"settings.automod.secondary.timeoutForBan":         sPublic,
+	"settings.automod.secondary.holdWhenUnavailable":   sPublic,
 	"settings.automod.secondary.timeoutSeconds":        sPublic,
 	"settings.automod.secondary.protocol":              sPublic,
 	"settings.automod.secondary.preset":                sPublic,
@@ -280,6 +282,7 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.automod.protection.impersonation.protect":  sPublic,
 	"settings.automod.protection.ladderTimeoutSeconds":   sPublic,
 	"settings.automod.protection.offer":                  sPublic,
+	"settings.automod.protection.modelScope":             sPublic,
 	"settings.automod.protection.pack":                   sPublic,
 	"settings.automod.protection.packVersion":            sPublic,
 	"settings.automod.protection.state":                  sPublic,

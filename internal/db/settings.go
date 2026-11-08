@@ -1970,11 +1970,24 @@ type AutomodProtection struct {
 	// timeout is a permanent ban.
 	StrikeWindowSeconds  int `json:"strikeWindowSeconds"`
 	LadderTimeoutSeconds int `json:"ladderTimeoutSeconds"`
+	// ModelScope is which messages reach the Jev model once it is on: "hard"
+	// (only the cases the free checkers cannot settle, within a budget) or
+	// "all" (every message the fast pass did not remove, which is what every
+	// install did before the pack). A fresh install is "hard"; an install whose
+	// stored blob predates the field is "all" (mergeBaseSettings), so an upgrade
+	// never quietly stops checking messages it used to check.
+	ModelScope string `json:"modelScope"`
 	// Offer is DERIVED: true while State is undecided, so the console can show
 	// the banner. Filled on the way out of GET /settings and ignored when sent,
 	// like AutomodModel.Tested.
 	Offer bool `json:"offer,omitempty"`
 }
+
+// The Jev scopes.
+const (
+	ModelScopeAll  = "all"
+	ModelScopeHard = "hard"
+)
 
 // ProtectionCategory is one category's diff. A nil Enabled is the pack default.
 type ProtectionCategory struct {
@@ -2291,6 +2304,11 @@ type AutomodModel struct {
 	// A category not named here gets Action, which is flag by default. Read
 	// from the primary only.
 	CategoryActions map[string]string `json:"categoryActions,omitempty"`
+	// HoldWhenUnavailable keeps a message off every overlay when the model was
+	// asked about it and neither checker could answer (an outage, a rejected
+	// key, a spent hourly ceiling). Off by default: failing open is the safe
+	// side for an overlay nobody asked to be strict. Read from the primary only.
+	HoldWhenUnavailable bool `json:"holdWhenUnavailable,omitempty"`
 	// Tested reports that this checker's current connection -- protocol,
 	// preset, endpoint, model and key -- has passed the Test button. DERIVED,
 	// like HasAPIKey: filled on the way out to the settings page, and a value
@@ -2712,6 +2730,7 @@ func DefaultSettings() Settings {
 				PackVersion:          DefaultProtectionPackVersion,
 				StrikeWindowSeconds:  DefaultLadderSeconds,
 				LadderTimeoutSeconds: DefaultLadderSeconds,
+				ModelScope:           ModelScopeHard,
 			},
 			// The optional fallback: OpenAI-compatible, on the preset the
 			// spike measured best among them (Cerebras qwen-3.8, 0/165 false
@@ -2868,6 +2887,11 @@ func (p AutomodProtection) problems(add problemAdder) {
 	default:
 		add("automod protection state %q is not on, off or empty", p.State)
 	}
+	switch p.ModelScope {
+	case "", ModelScopeAll, ModelScopeHard:
+	default:
+		add("automod protection modelScope %q is not all or hard", p.ModelScope)
+	}
 	// Zero is refused once the pack is on: a zero timeout is a PERMANENT ban
 	// on some platforms, and a zero window never counts a strike. A blob that
 	// predates the block decodes over non-zero defaults, so this only catches a
@@ -2959,6 +2983,9 @@ func mergeBaseSettings() Settings {
 	// install (the ErrNoRows branch of GetSettings) keeps the default "on".
 	s.Automod.Protection.State = ""
 	s.Automod.Protection.PackVersion = 0
+	// And an install that predates the scope keeps asking the model about every
+	// message, which is what it has always done (spec D11).
+	s.Automod.Protection.ModelScope = ModelScopeAll
 	return s
 }
 

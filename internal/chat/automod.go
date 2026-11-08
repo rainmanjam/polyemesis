@@ -39,6 +39,20 @@ type nameLearner interface {
 	LearnProtectedName(name string)
 }
 
+// modelGate is the optional half of a Moderator that decides WHICH messages are
+// worth a paid model call (the hard-case scope). A separate interface, found by
+// type assertion, so a Moderator without it asks about every message as it
+// always did and no fake of Moderator changes.
+type modelGate interface {
+	WantsModel(p db.Platform, s automod.Subject, v automod.Verdict) bool
+}
+
+// modelFailureHolder is the optional half that says whether a message the model
+// could not answer should wait off the overlay instead of passing.
+type modelFailureHolder interface {
+	HoldOnModelError() bool
+}
+
 // automodQueueDepth bounds the pending action queue.
 //
 // Bounded, and it DROPS when full rather than blocking. Blocking would put a
@@ -161,19 +175,27 @@ func (h *Hub) checkAutomod(m Message) {
 		return
 	}
 
-	v := s.mod.CheckFast(m.Platform, automod.Subject{
+	subj := automod.Subject{
 		AuthorID:   m.Author.ID,
 		AuthorName: m.Author.Name,
 		Text:       m.Text,
 		EmoteCount: len(m.Emotes),
 		ReplyToID:  m.ReplyToID,
-	})
+	}
+	v := s.mod.CheckFast(m.Platform, subj)
 	// NOT for a message the fast verdict removes. It used to be every
 	// non-empty message while the model was on, including one a rule had just
 	// deleted: a paid call -- against the hourly ceiling every other message
 	// shares -- whose answer could change nothing. A fast verdict that only
 	// FLAGS removes nothing, so that message is still asked about.
 	askModel := s.mod.ModelEnabled() && m.Text != "" && !removes(v)
+	// Under the hard-case scope only a message the free checkers could not
+	// settle, with a sign of a hard case, is worth the call. Asked LAST, after
+	// the cheap tests: the gate spends a per-author allowance when it says yes.
+	// A message it declines is not Pending, so it reaches the overlay at once.
+	if g, ok := s.mod.(modelGate); ok && askModel {
+		askModel = g.WantsModel(m.Platform, subj, v)
+	}
 
 	// The overlay is told BEFORE anything is queued, so neither an action the
 	// fast verdict permits nor the model's answer can reach the sink ahead of
@@ -302,6 +324,12 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		// It passes on the overlay too: the console is showing it, and an
 		// overlay that went silent whenever the model endpoint did would be a
 		// second, invisible outage.
+		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
+			// The operator asked for it: a message nobody could judge waits off
+			// the overlay, and is listed for review so it can be released.
+			h.holdUnjudged(job)
+			return
+		}
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 		return
 	}
@@ -344,6 +372,21 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 			"decidedBy", f.DecidedBy, "provider", f.Provider,
 			"reason", f.Reason, "modelNote", f.Note)
 	}
+}
+
+// holdUnjudged keeps a message the model could not judge off every overlay and
+// puts it on the review list. The finding is a flag, with no category beyond
+// "other" and no platform action: nothing was found, only not looked at.
+func (h *Hub) holdUnjudged(job automodJob) {
+	h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
+	h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), []automod.Finding{{
+		Checker:  automod.CheckerModel,
+		Action:   automod.ActionFlag,
+		Category: automod.CategoryOther,
+		Reason:   "the model could not answer, so the line is held",
+		Hold:     true,
+	}})
+	h.markFlagHeld(job.platform, job.account, job.msgID)
 }
 
 // textFor returns a stored message's text, or "" if it is no longer held.

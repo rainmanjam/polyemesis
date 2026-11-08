@@ -579,7 +579,7 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 		// be read means this checker cannot run, not that chat stops.
 		log.Warn("automod model key unreadable; this checker will fail open", "checker", slot, "err", err)
 	}
-	return newChecker(conn, a.Model, key, binding, budget, func(err error) {
+	return newChecker(conn, a.Model, key, binding, budget, protectionOn(a), func(err error) {
 		// Named loudly rather than swallowed, for the same reason a rule that
 		// does not compile is: a confidence floor an operator set and this
 		// server ignored is a moderation posture they believe they have. The
@@ -594,13 +594,19 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 // to that endpoint, so a settings document and a key read a moment apart --
 // with a save moving the endpoint in between -- cannot pair the old key with
 // the new address: the call is refused instead.
-func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
+//
+// protected is whether the protection pack is on: it adds the self_harm
+// category to a Jev request (spec D14) and lets a finding hold the line off the
+// overlay (spec 6.4). Off, the request and the findings are exactly what they
+// were before the pack existed.
+func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, protected bool, onFloorErr func(error)) automod.ModelChecker {
 	if automod.ProtocolOf(conn) == automod.ProtocolJev {
 		cfg, err := automod.JevConfigFor(conn, shared)
 		if err != nil && onFloorErr != nil {
 			onFloorErr(err)
 		}
 		cfg.APIKey, cfg.KeyBinding = key, binding
+		cfg.SelfHarm, cfg.HoldOverlay = protected, protected
 		return automod.NewJev(cfg, budget)
 	}
 	cfg, err := automod.ModelConfigFor(conn, shared)
@@ -608,6 +614,7 @@ func newChecker(conn, shared db.AutomodModel, key, binding string, budget *autom
 		onFloorErr(err)
 	}
 	cfg.APIKey, cfg.KeyBinding = key, binding
+	cfg.HoldOverlay = protected
 	return automod.NewModel(cfg, budget)
 }
 
@@ -666,5 +673,9 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 	if prot != nil {
 		engine.WithProtection(prot).WithLadder(ladderFromSettings(a.Protection, persist.Strikes))
 	}
+	// Which messages reach the model, and what happens to one it cannot answer.
+	// Both are no-ops with the model off.
+	engine.WithModelGate(automod.ParseModelScope(a.Protection.ModelScope), persist.Gate).
+		WithHoldOnModelError(a.Model.HoldWhenUnavailable)
 	hub.SetModerator(engine)
 }

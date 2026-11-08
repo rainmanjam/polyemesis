@@ -908,6 +908,8 @@ const NOT_A_CONTROL: Record<string, string> = {
     "not read: the fallback checker applies the primary's viewer-silence duration",
   "automod.secondary.instruction":
     "not read: both checkers are asked with the primary's instruction",
+  "automod.secondary.holdWhenUnavailable":
+    "not read: the primary's hold-when-unavailable switch applies to both checkers",
   "automod.rules[].id":
     "server-assigned. A rule's identity is not something an operator types",
   "ingest.degraded.enabled":

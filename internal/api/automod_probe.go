@@ -116,7 +116,7 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	// No budget: a spent hourly allowance must not make a working endpoint
 	// look broken, and the per-checker lock above bounds what a test costs.
 	// The binding goes in too, so the connector itself refuses a mismatch.
-	checker := newChecker(conn, shared, key, binding, nil, nil)
+	checker := newChecker(conn, shared, key, binding, nil, protectionOn(settings.Automod), nil)
 
 	ctx, cancel := context.WithTimeout(r.Context(),
 		time.Duration(len(automod.ProbeCases)*(automodTestMaxTimeout+1))*time.Second)

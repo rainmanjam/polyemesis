@@ -3816,6 +3816,10 @@ export interface AutomodModel {
   timeoutForBan?: number;
   minConfidence: number;
   instruction: string;
+  /** A message the model was asked about and neither checker could answer
+   *  waits off every overlay instead of passing. Off by default. Read from the
+   *  primary only. */
+  holdWhenUnavailable?: boolean;
   /** "jev" or "openai". A block stored before there was a choice reads back
    *  as "openai", which is the only protocol there was. */
   protocol?: AutomodProtocol;
@@ -3943,6 +3947,10 @@ export interface AutomodProtection {
   impersonation: AutomodProtectionImpersonation;
   strikeWindowSeconds: number;
   ladderTimeoutSeconds: number;
+  /** Which messages reach the model once it is on: "hard" asks only about the
+   *  cases the free checkers cannot settle; "all" asks about every message.
+   *  A fresh install is "hard"; an upgraded one stays "all". */
+  modelScope?: "all" | "hard";
   /** Derived: true while `state` is "". A value sent back is ignored. */
   offer?: boolean;
 }
@@ -4030,6 +4038,20 @@ export interface AutomodModelStats {
   fallbacks?: number;
   failedOpen?: number;
   lastDecidedBy?: AutomodSlot;
+  /** The hard-case gate's counters; present only under the "hard" scope. */
+  gate?: AutomodGateStats;
+}
+
+export interface AutomodGateStats {
+  scope?: "all" | "hard";
+  asked: number;
+  settled: number;
+  noSignal: number;
+  capped: number;
+  cached: number;
+  braked: number;
+  /** When the raid brake lifts; absent while it is off. */
+  brakeUntil?: string;
 }
 
 /** The server-rendered matrix. Rows, columns and availability all come from the

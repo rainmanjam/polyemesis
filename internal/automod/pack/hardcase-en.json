@@ -1,0 +1,38 @@
+{
+  "id": "en",
+  "version": 1,
+  "address": ["you", "u", "ur", "your", "youre", "yours", "yourself", "urself", "ya", "thou"],
+  "lexicons": {
+    "violence": [
+      "kill", "kills", "killed", "killing", "die", "dies", "dead", "death", "shoot", "shot", "shooting",
+      "hurt", "hurts", "stab", "stabbed", "murder", "strangle", "choke", "drown", "burn", "poison",
+      "behead", "lynch", "execute", "assault", "beat", "punch", "bomb", "gun", "knife", "bullet",
+      "swat", "swatted", "swatting", "dox", "doxx", "doxxed", "doxxing",
+      "find you", "find where you live", "know where you live", "come for you", "coming for you",
+      "end you", "hunt you", "hunt you down", "blow up", "run you over", "beat you up", "put a bullet",
+      "slit your", "break your", "smash your", "you will pay", "you will regret", "youll regret", "you'll regret", "youll pay", "you'll pay", "watch your back",
+      "see you dead", "wish you were dead", "hope you die", "hope you get hurt", "hope you get shot"
+    ],
+    "self_harm": [
+      "kms", "kys", "suicide", "suicidal", "unalive", "selfharm", "overdose",
+      "kill myself", "kill yourself", "want to die", "wanna die", "wish i was dead", "wish i were dead",
+      "end it all", "end it", "end my life", "take my life", "cut myself", "cutting myself",
+      "hang myself", "hurt myself", "self harm", "slit my wrists", "better off dead",
+      "dont want to live", "don't want to live", "dont wanna live", "don't wanna live", "no reason to live", "cant go on", "can't go on", "go kill yourself", "go die"
+    ],
+    "sexual": [
+      "sex", "sexy", "sexual", "nude", "nudes", "naked", "boob", "boobs", "tit", "tits", "dick", "cock",
+      "pussy", "horny", "onlyfans", "blowjob", "bj", "nsfw", "milf", "fap", "cum", "porn", "slut", "whore",
+      "bang", "rape", "raped", "rapist", "thicc", "titties", "naughty", "strip",
+      "send nudes", "show me", "take it off", "sit on my", "suck my", "lick my", "sleep with me",
+      "sleep with you", "bend over", "show your body"
+    ],
+    "insult": [
+      "idiot", "stupid", "dumb", "moron", "loser", "trash", "garbage", "ugly", "fat", "worthless",
+      "pathetic", "clown", "braindead", "scum", "freak", "creep", "disgusting", "useless", "cringe",
+      "shut up", "stfu", "brain dead", "waste of space", "nobody likes you", "get a life", "go away",
+      "hate you", "bad at", "no talent", "talentless", "embarrassing", "joke of a", "mental",
+      "delusional", "snowflake", "simp", "incel", "bot", "fraud", "fake", "liar", "coward"
+    ]
+  }
+}

@@ -399,3 +399,77 @@ describe("AutomodConfig: AI highlight scoring", () => {
     expect(next.automod?.model.enabled).toBe(false);
   });
 });
+
+describe("AutomodConfig: the model scope and the unavailable hold", () => {
+  beforeEach(() => {
+    stats.mockReset();
+    stats.mockResolvedValue(zeroStats() as never);
+  });
+  afterEach(cleanup);
+
+  const protection = (modelScope?: "all" | "hard") =>
+    ({
+      state: "on",
+      pack: "en",
+      packVersion: 1,
+      impersonation: { protect: [], allowIds: [] },
+      strikeWindowSeconds: 600,
+      ladderTimeoutSeconds: 600,
+      modelScope,
+    }) as AutomodSettings["protection"];
+
+  it("holds the overlay when the model cannot answer: off by default, one leaf", async () => {
+    const onChange = show(automod());
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    const sw = screen.getByRole("switch", { name: "Hold the overlay when the model cannot answer" });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(sw);
+    const next = onChange.mock.calls.at(-1)?.[0] as Settings;
+    expect(next.automod?.model.holdWhenUnavailable).toBe(true);
+    expect(next.automod?.model.enabled).toBe(false);
+  });
+
+  it("reads an existing install as 'all' and writes hard then all", async () => {
+    // An install whose blob has no modelScope reads off: it keeps asking about
+    // every message until its operator chooses otherwise.
+    const onChange = show(automod({ protection: protection(undefined) }));
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    const sw = screen.getByRole("switch", { name: "Ask the model only about hard cases" });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(sw);
+    expect((onChange.mock.calls.at(-1)?.[0] as Settings).automod?.protection?.modelScope).toBe("hard");
+  });
+
+  it("shows a fresh install on hard, and turning it off writes all", async () => {
+    const onChange = show(automod({ protection: protection("hard") }));
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    const sw = screen.getByRole("switch", { name: "Ask the model only about hard cases" });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sw);
+    expect((onChange.mock.calls.at(-1)?.[0] as Settings).automod?.protection?.modelScope).toBe("all");
+  });
+
+  it("offers no scope control on a server with no protection block", async () => {
+    show(automod());
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    expect(screen.queryByRole("switch", { name: "Ask the model only about hard cases" })).toBeNull();
+  });
+
+  it("says so while the raid brake is on, and not once it has lifted", async () => {
+    stats.mockResolvedValue({
+      ...zeroStats(),
+      gate: { asked: 1, settled: 0, noSignal: 0, capped: 0, cached: 0, braked: 3, brakeUntil: new Date(Date.now() + 30_000).toISOString() },
+    } as never);
+    show(automod({ protection: protection("hard") }));
+    expect(await screen.findByText(/Paused: too many hard cases/)).toBeTruthy();
+    cleanup();
+
+    stats.mockResolvedValue({
+      ...zeroStats(),
+      gate: { asked: 1, settled: 0, noSignal: 0, capped: 0, cached: 0, braked: 3, brakeUntil: new Date(Date.now() - 30_000).toISOString() },
+    } as never);
+    show(automod({ protection: protection("hard") }));
+    await waitFor(() => expect(stats).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Paused: too many hard cases/)).toBeNull();
+  });
+});

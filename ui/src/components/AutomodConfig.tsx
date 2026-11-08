@@ -250,6 +250,9 @@ export function AutomodConfig({
   }
 
   const rejectedRule = serverRejection(saveError);
+  // The raid brake: the gate stopped asking and says when it will start again.
+  const brakeUntil = stats?.gate?.brakeUntil;
+  const brakeOn = brakeUntil !== undefined && Date.parse(brakeUntil) > Date.now();
 
   return (
     <>
@@ -503,6 +506,53 @@ export function AutomodConfig({
                 <p className="text-xs text-muted-foreground">{t("automod.highlightScoringNote")}</p>
               </div>
             </div>
+            {/* Off by default: a model outage lets messages through, on the
+                overlay too. On, an unjudged message waits off the overlay. */}
+            <div className="flex items-start gap-2 pt-1">
+              <Switch
+                id="automod-hold-unavailable"
+                checked={model.holdWhenUnavailable === true}
+                onCheckedChange={(v) => patchModel({ holdWhenUnavailable: v })}
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="automod-hold-unavailable" className="text-xs">
+                  {t("automod.holdUnavailable")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{t("automod.holdUnavailableNote")}</p>
+              </div>
+            </div>
+            {/* The scope lives in the protection block (it is the pack that
+                knows what a hard case is), but it is about the model, so the
+                control sits here. Hidden on a server that has no protection
+                block. */}
+            {automod.protection && (
+              <div className="flex items-start gap-2 pt-1">
+                <Switch
+                  id="automod-model-scope"
+                  checked={automod.protection.modelScope === "hard"}
+                  onCheckedChange={(v) =>
+                    onChange({
+                      ...settings,
+                      automod: {
+                        ...automod,
+                        protection: { ...automod.protection!, modelScope: v ? "hard" : "all" },
+                      },
+                    })
+                  }
+                />
+                <div className="grid gap-0.5">
+                  <Label htmlFor="automod-model-scope" className="text-xs">
+                    {t("automod.modelScopeHard")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("automod.modelScopeHardNote")}</p>
+                  {brakeOn && (
+                    <p role="status" className="text-xs text-warn">
+                      {t("automod.modelBrake")}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           {secondary && (

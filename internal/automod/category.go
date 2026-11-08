@@ -101,6 +101,29 @@ func ModelCategories() []Category {
 	}
 }
 
+// ModelCategoriesFor is ModelCategories, plus self_harm for an install with the
+// protection pack on (spec D14). The Jev request and its parse take the list as
+// a parameter so an existing model user's request does not change on upgrade.
+func ModelCategoriesFor(selfHarm bool) []Category {
+	cs := ModelCategories()
+	if selfHarm {
+		cs = append(cs, CategorySelfHarm)
+	}
+	return cs
+}
+
+// ParseCategoryIn is ParseModelCategory against an explicit offered list. The
+// same rejecting half: no closest match and no default.
+func ParseCategoryIn(s string, offered []Category) (Category, bool) {
+	c := Category(strings.ToLower(strings.TrimSpace(s)))
+	for _, x := range offered {
+		if x == c {
+			return c, true
+		}
+	}
+	return "", false
+}
+
 // categoryReasons is the whole vocabulary that may reach a third party.
 //
 // Short by necessity: Kick caps a ban reason at 100 characters and truncates
@@ -160,11 +183,5 @@ func KnownCategory(c Category) bool {
 // deliberately no "closest match" and no default -- a fuzzy match is how an
 // invented label becomes an accepted one.
 func ParseModelCategory(s string) (Category, bool) {
-	c := Category(strings.ToLower(strings.TrimSpace(s)))
-	for _, x := range ModelCategories() {
-		if x == c {
-			return c, true
-		}
-	}
-	return "", false
+	return ParseCategoryIn(s, ModelCategories())
 }

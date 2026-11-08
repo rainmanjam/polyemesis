@@ -363,6 +363,75 @@ The model is asked only about messages the free checkers did not already
 **remove**. A message a rule deleted is not sent anywhere; a message a rule
 only flagged still is.
 
+### Only the hard cases: the model scope
+
+`automod.protection.modelScope` decides **which messages** reach the model once
+it is on. It cannot switch the model on; the key, the Test button and the
+checker's own switch are all still yours.
+
+- **`all`** asks about every message the free checkers did not remove. This is
+  what every install did before the pack existed, so an **existing install
+  keeps `all`**. The card offers `hard` for you to choose; nothing moves you.
+- **`hard`**, the setting on a **fresh install**, asks only about a message the
+  free checkers could not settle. A severe hate term, a doxxing hit or a scam
+  hit is already decided and is never sent. Of the rest, the model sees a
+  message only when it shows at least one sign a list cannot judge:
+  - a contextual-tier hate term (a word that is a slur in some uses and not in
+    others);
+  - a violence word aimed at someone (`you`, `u`, `@name` or a reply);
+  - letters swapped for look-alikes, digits or zero-width characters, in two or
+    more places, with no list hit;
+  - a self-harm phrase;
+  - a sexual remark aimed at someone;
+  - an insult in a reply or at an `@name`.
+
+  The word lists behind these (`internal/automod/pack/hardcase-en.json`, about
+  a hundred and fifty entries or fewer each) are small, written by polyemesis,
+  and versioned with the pack. They are signals worth one question, not
+  verdicts.
+
+Within `hard` the model is also limited by:
+
+- **One call per author per 20 seconds.** A further hard message from the same
+  person keeps its free verdict: a contextual hate term stays a flag with no
+  hold.
+- **One call per distinct text per 10 minutes.** Verdicts are remembered by the
+  message's pack form, so a copypasta raid costs one call, not one per account.
+- **A raid brake.** If the gate passes more than 30 messages in 10 seconds it
+  stops asking for 60 seconds; `GET /automod/stats` reports `gate.brakeUntil`.
+  The history checker and the pack's raid detector are already watching.
+- Your hourly ceiling, as always. 300 an hour is a sound ceiling for an install
+  on `hard`.
+
+A message the gate does not send is not waiting on anything, so it reaches the
+overlay at once instead of after up to 4 seconds.
+
+If both checkers fail, the message keeps its free verdict (fail open), as ever.
+A contextual hate term the model could not answer stays a flag only.
+
+**With the pack on**, a model finding at or above the floor also **holds the
+line off the overlay**, in every category except `other`. It asks for no
+platform action: those still come from the category table and the *Model* cells.
+The request also gains a seventh category, **self-harm** ("expresses intent or
+wish to self-harm, or encourages someone else to"). A self-harm finding is a
+flag and a hold and never anything stronger, at any probability and whatever
+your default action is, and `categoryActions` refuses a `self_harm` entry. With
+the pack off the request is exactly what it was.
+
+### When the model cannot answer
+
+By default a message the model was asked about and could not judge (an outage,
+a rejected key, a spent hourly ceiling) passes, on the overlay too. Turn on
+`automod.model.holdWhenUnavailable` (**Hold the overlay when the model cannot
+answer**, off by default) and such a message waits off every overlay instead,
+and appears in the **Flagged** list so you can release it. It is read from the
+primary and covers both checkers.
+
+The Test button and the moderation log say what went wrong in plain words
+instead of a bare status: `Jev rejected the API key -- paste a new one` for a
+401, and `Jev does not recognise model "..." -- check the model name` for a 400
+that names the model. The reply body is never shown.
+
 ### Setting up a checker
 
 Each checker has its own protocol, provider, endpoint, model, key, budget,
@@ -540,7 +609,7 @@ on their own:
 | Method | Path | Why |
 |---|---|---|
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
-| `GET` | `/automod/stats` | what the checkers have done |
+| `GET` | `/automod/stats` | what the checkers have done, and under the `hard` model scope the gate's counters (`gate`) |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
 | `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine, `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |

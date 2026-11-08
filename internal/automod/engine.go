@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/automod/pack"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -24,7 +25,15 @@ type Engine struct {
 	protection *Protection
 	// ladder is the strike policy, nil unless the pack is on. See strikes.go.
 	ladder *Ladder
-	now    func() time.Time
+	// scope, gate and hardcase decide which messages reach the model (gate.go).
+	// The zero value asks about every message, as before the pack.
+	scope    ModelScope
+	gate     *ModelGate
+	hardcase *pack.HardCase
+	// holdOnModelError holds a message off the overlay when the model was asked
+	// and could not answer. Off by default.
+	holdOnModelError bool
+	now              func() time.Time
 }
 
 // New returns an engine. Any checker may be nil, and a nil one simply
@@ -153,12 +162,28 @@ func (e *Engine) CheckModel(ctx context.Context, p db.Platform, text string) (Ve
 	if e == nil {
 		return Verdict{}, nil
 	}
+	// Under the hard-case scope an answer is remembered for ten minutes by the
+	// pack form of the text, so a copypasta raid costs one call. Only there:
+	// scope "all" asks every time, as it always has.
+	var key uint64
+	cached := e.scope == ScopeHard && e.gate != nil
+	if cached {
+		key = formKey(gateText(pack.NewForms(text)))
+		if f, by, ok := e.gate.lookup(key); ok {
+			v := e.decide(p, f)
+			v.DecidedBy = by
+			return v, nil
+		}
+	}
 	// The secondary is asked inside Decide, and only when the primary failed.
 	findings, by, err := e.model.Decide(ctx, text)
 	if err != nil {
 		// Fail open. Both checkers failed (or the only one did), the verdict
 		// is empty, so nothing is acted on, and the caller says so out loud.
 		return Verdict{}, err
+	}
+	if cached && by != "" {
+		e.gate.store(key, findings, by)
 	}
 	v := e.decide(p, findings)
 	v.DecidedBy = by
@@ -210,7 +235,9 @@ func (e *Engine) ModelStats() ModelStats {
 	if e == nil {
 		return ModelStats{}
 	}
-	return e.model.Stats()
+	st := e.model.Stats()
+	st.Gate = e.gateStats()
+	return st
 }
 
 // ModelEnabled reports whether the paid checker is configured and on.
