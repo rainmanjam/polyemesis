@@ -130,3 +130,61 @@ describe("picking an existing event", () => {
     expect(onChange).toHaveBeenCalledWith({ eventId: undefined, rebindEvent: undefined });
   });
 });
+
+describe("the panel's error, empty and refusal states", () => {
+  it("shows the streams error and keeps the picker disabled", async () => {
+    api.youtubeStreams.mockRejectedValue(new Error("quota spent"));
+    render(<YouTubeLiveNowPanel accountId={3} controls={null} onChange={vi.fn()} />);
+    expect(await screen.findByText(/Could not load your YouTube streams: quota spent/)).toBeTruthy();
+    expect((screen.getByLabelText(/YouTube stream/) as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("shows the events error, and an empty list says so", async () => {
+    api.youtubeStreams.mockResolvedValue({ supported: true, streams: [] });
+    api.youtubeEvents.mockRejectedValueOnce(new Error("channel not enabled"));
+    const { unmount } = render(<YouTubeLiveNowPanel accountId={3} controls={{ eventId: "x" }} onChange={vi.fn()} />);
+    expect(await screen.findByText(/Could not load your YouTube events: channel not enabled/)).toBeTruthy();
+    unmount();
+    api.youtubeEvents.mockResolvedValue({ supported: true, events: [] });
+    render(<YouTubeLiveNowPanel accountId={3} controls={{ eventId: "x" }} onChange={vi.fn()} />);
+    expect(await screen.findByText(/no upcoming or active events/)).toBeTruthy();
+  });
+
+  it("shows YouTube's refusal when turning auto-start on fails, and does not claim it is on", async () => {
+    api.youtubeStreams.mockResolvedValue({ supported: true, streams: [] });
+    api.youtubeEvents.mockResolvedValue({ supported: true, events: [ev({ enableAutoStart: false })] });
+    api.youtubeEventAutoStart.mockRejectedValue(new Error("YouTube accepts no change to auto-start"));
+    render(<YouTubeLiveNowPanel accountId={3} controls={{ eventId: "ev-1" }} onChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Turn auto-start on/ }));
+    expect(await screen.findByText(/accepts no change/)).toBeTruthy();
+    expect(screen.queryByText(/Auto-start is on for this event/)).toBeNull();
+  });
+
+  it("offers no auto-start button for an event that is already live", async () => {
+    api.youtubeStreams.mockResolvedValue({ supported: true, streams: [] });
+    api.youtubeEvents.mockResolvedValue({ supported: true, events: [ev({ enableAutoStart: false, status: "live" })] });
+    render(<YouTubeLiveNowPanel accountId={3} controls={{ eventId: "ev-1" }} onChange={vi.fn()} />);
+    await screen.findByText(/won't go live by itself/);
+    expect(screen.queryByRole("button", { name: /Turn auto-start on/ })).toBeNull();
+  });
+});
+
+describe("the create fields", () => {
+  it("stores the title, description, category and 360 switch, and clears them when emptied", async () => {
+    api.youtubeStreams.mockResolvedValue({ supported: true, streams: [] });
+    const onChange = vi.fn();
+    const onTitle = vi.fn();
+    render(
+      <YouTubeLiveNowPanel accountId={3} controls={{ description: "d", category: "c", projection360: true }}
+        onChange={onChange} title="" onTitleChange={onTitle} />,
+    );
+    fireEvent.change(screen.getByLabelText(/Broadcast title/), { target: { value: "Friday" } });
+    expect(onTitle).toHaveBeenCalledWith("Friday");
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: "" } });
+    expect(onChange).toHaveBeenCalledWith({ description: undefined });
+    fireEvent.change(screen.getByLabelText(/Category/), { target: { value: "Gaming" } });
+    expect(onChange).toHaveBeenCalledWith({ category: "Gaming" });
+    fireEvent.click(screen.getByLabelText(/360/));
+    expect(onChange).toHaveBeenCalledWith({ projection360: undefined });
+  });
+});

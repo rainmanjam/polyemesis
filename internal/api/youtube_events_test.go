@@ -228,3 +228,40 @@ func TestDeletingADestinationOverHTTPDeletesItsNeverAiredCreatedBroadcastOnly(t 
 		t.Error("the coordinator still tracks the broadcast the DELETE removed, and would read it for ever")
 	}
 }
+
+// A delete YouTube refuses is reported to the operator in the response, with the broadcast id, and the destination is
+// still deleted.
+func TestDeletingADestinationSaysWhenItsNeverAiredBroadcastCouldNotBeDeleted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/liveBroadcasts":
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/liveBroadcasts":
+			_, _ = io.WriteString(w, `{"items":[`+ypeEvent(r.URL.Query().Get("id"), "created", "stream-A", true)+`]}`)
+		default:
+			_, _ = io.WriteString(w, `{"items":[]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	s, h, store, sign := engineServer(t, defaultTools(), Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+	addSource(t, h, sign, "main")
+	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	d := ytpDest(t, store, acct, "own", ytpKeyA, "")
+	if _, err := store.UpdateLifecycle(d.ID, func(x *db.Destination) bool {
+		x.Lifecycle = db.BroadcastControl{BroadcastID: "bcast-own", Phase: "created", Opened: true, Created: true}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := jsonRequest(t, http.MethodDelete, "/api/v1/destinations/"+itoa(d.ID), nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "could not be deleted") ||
+		!strings.Contains(w.Body.String(), "bcast-own") || strings.Contains(w.Body.String(), ytpKeyA) {
+		t.Errorf("delete = %d %s, want 200 naming the broadcast that is left, and no key", w.Code, w.Body.String())
+	}
+	if _, err := store.GetDestination(d.ID); err == nil {
+		t.Error("the destination was not deleted")
+	}
+}

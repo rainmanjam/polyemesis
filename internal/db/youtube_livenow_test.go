@@ -65,3 +65,42 @@ func TestAPinnedStreamIsValidatedAndYouTubeOnly(t *testing.T) {
 		t.Error("a pinned YouTube stream was accepted on a Twitch destination")
 	}
 }
+
+func TestTheYouTubeCreateFieldsAreValidated(t *testing.T) {
+	cases := []struct {
+		name string
+		c    YouTubeBroadcastControls
+		want string
+	}{
+		{"a malformed event id", YouTubeBroadcastControls{EventID: "not an id!"}, "event id"},
+		{"an over-long description", YouTubeBroadcastControls{Description: strings.Repeat("d", YouTubeDescriptionMax+1)}, "description"},
+		{"an over-long category", YouTubeBroadcastControls{Category: strings.Repeat("é", YouTubeCategoryMax+1)}, "category"},
+		{"a malformed stream id", YouTubeBroadcastControls{StreamID: "a b"}, "stream id"},
+	}
+	for _, tc := range cases {
+		probs := tc.c.Problems()
+		if len(probs) != 1 || !strings.Contains(probs[0], tc.want) {
+			t.Errorf("%s: problems = %v, want one naming %q", tc.name, probs, tc.want)
+		}
+	}
+	ok := YouTubeBroadcastControls{EventID: "abc-DEF_1.2", Description: strings.Repeat("d", YouTubeDescriptionMax),
+		Category: strings.Repeat("é", YouTubeCategoryMax), StreamID: "s-1"}
+	if probs := ok.Problems(); len(probs) != 0 {
+		t.Errorf("values at the limits were refused: %v", probs)
+	}
+	var nilControls *YouTubeBroadcastControls
+	if nilControls.Problems() != nil || nilControls.OnlyForYouTube() {
+		t.Error("a nil block has no problems and sets nothing")
+	}
+	for name, c := range map[string]YouTubeBroadcastControls{
+		"event": {EventID: "e"}, "rebind": {RebindEvent: true}, "description": {Description: "d"},
+		"category": {Category: "c"}, "360": {Projection360: true}, "stream": {StreamID: "s"}, "studio": {StudioStreamNow: true},
+	} {
+		if !c.OnlyForYouTube() {
+			t.Errorf("%s: not reported as a YouTube-only setting, so a switch to another platform would keep it", name)
+		}
+	}
+	if (&YouTubeBroadcastControls{LatencyPreference: "low"}).OnlyForYouTube() {
+		t.Error("a latency preference is an ordinary control, not a YouTube-only create field")
+	}
+}

@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,6 +47,7 @@ type ynFake struct {
 	deletes     []string // ids deleted
 	dropInsert  bool     // the insert creates the broadcast and then the answer never arrives
 	onInsert    func()   // runs when an insert lands, before the answer
+	deleteCode  int      // when set, every DELETE answers this status and deletes nothing
 	quotaSpent  bool     // every call answers 403 quotaExceeded
 }
 
@@ -119,9 +121,15 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 			}
 			fmt.Fprintf(w, `{"id":%q,"snippet":{"liveChatId":%q},"status":{"lifeCycleStatus":"created"}}`, id, f.bcasts[id].chat)
 		case r.Method == http.MethodDelete && r.URL.Path == "/liveBroadcasts":
+			if f.deleteCode != 0 {
+				w.WriteHeader(f.deleteCode)
+				return
+			}
 			f.deletes = append(f.deletes, q.Get("id"))
 			delete(f.bcasts, q.Get("id"))
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/videoCategories":
+			_, _ = io.WriteString(w, `{"items":[]}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts/bind":
 			if b := f.bcasts[q.Get("id")]; b != nil {
 				b.bound = q.Get("streamId")
@@ -1015,5 +1023,224 @@ func TestAWaitingPickedEventIsReadSlowlyUntilVideoFlowsThenEverySweep(t *testing
 	sweep(c, 2)
 	if n := hasFlowingCalls(f, c, 80); n > 14 {
 		t.Errorf("%d calls in 80 sweeps after the stream went down, want the slow cadence again", n)
+	}
+}
+
+// ------------------------------------------------------- coverage of the real error and edge paths
+
+func ynErrToken(c *lifecycleCoordinator) {
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return nil, errors.New("token refresh refused")
+	}
+}
+
+// An open whose token cannot be used is a counted fault that names no key and sends nothing.
+func TestAnOpenWhoseTokenCannotBeUsedIsACountedFaultWithNoKey(t *testing.T) {
+	f := newYnFake()
+	c, store, faults, _ := ynFixture(t, f, ynRow(true))
+	ynErrToken(c)
+	sweep(c, 2)
+	if calls, _, _ := f.snapshot(); len(calls) != 0 {
+		t.Errorf("calls = %v, want none without a token", calls)
+	}
+	got := store.get(3)
+	if got.Lifecycle.Attempts != 2 || !strings.Contains(got.Lifecycle.Fault, "could not be used") || strings.Contains(got.Lifecycle.Fault, ynKey) {
+		t.Errorf("lifecycle = %+v", got.Lifecycle)
+	}
+	if len(*faults) != 1 {
+		t.Errorf("faults = %d, want one alert", len(*faults))
+	}
+}
+
+// A category adds its three calls to the price the open is checked against.
+func TestACategoryRaisesThePriceTheOpenIsCheckedAgainst(t *testing.T) {
+	f := newYnFake()
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{Category: "Gaming"}
+	c, store, _, _ := ynFixture(t, f, row)
+	var asked []int
+	c.quotaAfford = func(cost int) bool { asked = append(asked, cost); return false }
+	sweep(c, 1)
+	if len(asked) != 1 || asked[0] != ytOpenUnits+ytCategoryUnits {
+		t.Errorf("priced at %v, want %d", asked, ytOpenUnits+ytCategoryUnits)
+	}
+	if !strings.Contains(store.get(3).Lifecycle.Fault, "quota") {
+		t.Errorf("fault = %q", store.get(3).Lifecycle.Fault)
+	}
+	// A picked event is not given a category, so it is not charged for one.
+	f2 := newYnFake()
+	f2.bcasts["ev-1"] = &ynBroadcast{status: "ready"}
+	row2 := ynRow(true)
+	row2.Compliance.YouTube = &db.YouTubeBroadcastControls{Category: "Gaming", EventID: "ev-1"}
+	c2, _, _, _ := ynFixture(t, f2, row2)
+	asked = nil
+	c2.quotaAfford = func(cost int) bool { asked = append(asked, cost); return false }
+	sweep(c2, 1)
+	if len(asked) != 1 || asked[0] != ytOpenUnits {
+		t.Errorf("a picked event was priced at %v, want %d", asked, ytOpenUnits)
+	}
+}
+
+// A category YouTube does not know is a warning: the broadcast is still opened and recorded.
+func TestACategoryYouTubeRefusesStillOpensTheBroadcast(t *testing.T) {
+	f := newYnFake()
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{Category: "No Such Category"}
+	c, store, faults, chat := ynFixture(t, f, row)
+	sweep(c, 1)
+	if got := store.get(3); got.Lifecycle.BroadcastID != "bcast-1" || got.Lifecycle.Fault != "" {
+		t.Errorf("lifecycle = %+v, want the broadcast recorded without a fault", got.Lifecycle)
+	}
+	if len(*faults) != 0 || len(chat.all()) != 1 {
+		t.Errorf("faults %v chat %v", *faults, chat.all())
+	}
+}
+
+// When the marker cannot be written nothing is inserted at all.
+func TestNothingIsInsertedWhenTheAttemptMarkerCannotBeWritten(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	store.mu.Lock()
+	store.failUpdates = true
+	store.mu.Unlock()
+	sweep(c, 2)
+	if _, inserts, _ := f.snapshot(); inserts != 0 {
+		t.Errorf("inserts = %d: a broadcast was made that could never be recognised as ours", inserts)
+	}
+}
+
+// A marker older than twelve minutes is cleared, and a failed clear stops the open.
+func TestAnExpiredAttemptMarkerIsClearedBeforeTheOpen(t *testing.T) {
+	f := newYnFake()
+	row := ynRow(true)
+	row.Lifecycle.OpenAttemptMS = time.Now().Add(-time.Hour).UnixMilli()
+	c, store, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	if got := store.get(3); got.Lifecycle.OpenAttemptMS != 0 || got.Lifecycle.BroadcastID == "" {
+		t.Errorf("lifecycle = %+v, want the expired marker gone and the broadcast opened", got.Lifecycle)
+	}
+	f2 := newYnFake()
+	c2, store2, _, _ := ynFixture(t, f2, func() *db.Destination {
+		r := ynRow(true)
+		r.Lifecycle.OpenAttemptMS = time.Now().Add(-time.Hour).UnixMilli()
+		return r
+	}())
+	store2.mu.Lock()
+	store2.failUpdates = true
+	store2.mu.Unlock()
+	sweep(c2, 1)
+	if calls, _, _ := f2.snapshot(); len(calls) != 0 {
+		t.Errorf("calls = %v, want the open to stop when the marker cannot be cleared", calls)
+	}
+}
+
+// If the record cannot be written and the delete is refused too, the broadcast is named in the log, nothing is
+// alerted as a stream fault and the sweep goes on.
+func TestARecordFailureWhoseCleanupIsRefusedDoesNotBreakTheSweep(t *testing.T) {
+	f := newYnFake()
+	c, store, faults, _ := ynFixture(t, f, ynRow(true))
+	f.set(func(f *ynFake) {
+		f.deleteCode = http.StatusInternalServerError
+		f.onInsert = func() { store.mu.Lock(); store.failUpdates = true; store.mu.Unlock() }
+	})
+	sweep(c, 1)
+	if calls, _, _ := f.snapshot(); !strings.Contains(strings.Join(calls, ","), "DELETE /liveBroadcasts") {
+		t.Errorf("calls = %v, want a delete attempt for the unrecorded broadcast", calls)
+	}
+	if len(*faults) != 0 {
+		t.Errorf("faults = %v", *faults)
+	}
+}
+
+// A refused delete of a never-aired created broadcast on switch-off is a counted fault, and the record is kept so the
+// next sweep tries again.
+func TestARefusedDeleteOfANeverAiredBroadcastIsACountedFaultThatKeepsTheRecord(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.mu.Unlock()
+	f.set(func(f *ynFake) { f.deleteCode = http.StatusInternalServerError })
+	sweep(c, 2)
+	got := store.get(3)
+	if got.Lifecycle.BroadcastID != "bcast-1" || got.Lifecycle.Attempts == 0 || !strings.Contains(got.Lifecycle.Fault, "could not delete") {
+		t.Errorf("lifecycle = %+v", got.Lifecycle)
+	}
+	f.set(func(f *ynFake) { f.deleteCode = 0 })
+	sweep(c, 1)
+	if d := f.deleted(); len(d) != 1 {
+		t.Errorf("deleted = %v, want the delete to succeed on the retry", d)
+	}
+}
+
+// A created broadcast deleted in Studio, on a switched-off destination, is forgotten instead of read for ever.
+func TestADisabledDestinationsCreatedBroadcastDeletedInStudioIsForgotten(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	f.set(func(f *ynFake) { delete(f.bcasts, "bcast-1") })
+	store.mu.Lock()
+	store.rows[3].Enabled = false
+	store.mu.Unlock()
+	sweep(c, 2)
+	if got := store.get(3); got.Lifecycle.BroadcastID != "" {
+		t.Errorf("lifecycle = %+v, want the vanished broadcast forgotten", got.Lifecycle)
+	}
+}
+
+// The Stream-now release keeps the record when the token cannot be used.
+func TestTheStreamNowReleaseKeepsTheRecordWhenTheTokenCannotBeUsed(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.mu.Lock()
+	store.rows[3].Compliance.YouTube = &db.YouTubeBroadcastControls{StudioStreamNow: true}
+	store.mu.Unlock()
+	ynErrToken(c)
+	sweep(c, 2)
+	if got := store.get(3); got.Lifecycle.BroadcastID != "bcast-1" {
+		t.Errorf("lifecycle = %+v, want the record kept", got.Lifecycle)
+	}
+}
+
+// A deleted destination's cleanup: a read that keeps failing is given up on after the budget; a token that cannot be
+// used is counted; a row that is still there is left alone.
+func TestADeletedDestinationsCleanupIsBoundedAndNeverActsOnARowThatStillExists(t *testing.T) {
+	f := newYnFake()
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	store.remove(3)
+	f.set(func(f *ynFake) { f.quotaSpent = true })
+	sweep(c, lifecycleGiveUpAfter+3)
+	before, _, _ := f.snapshot()
+	sweep(c, 10)
+	if after, _, _ := f.snapshot(); len(after) != len(before) {
+		t.Errorf("%d calls after the give-up budget", len(after)-len(before))
+	}
+	if d := f.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v while reads failed", d)
+	}
+
+	f2 := newYnFake()
+	c2, store2, _, _ := ynFixture(t, f2, ynRow(true))
+	sweep(c2, 1)
+	ynErrToken(c2)
+	store2.remove(3)
+	sweep(c2, 3)
+	if d := f2.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v without a token", d)
+	}
+
+	// The row is missing from the listing but still exists: the broadcast is NOT touched.
+	f3 := newYnFake()
+	c3, store3, _, _ := ynFixture(t, f3, ynRow(true))
+	sweep(c3, 1)
+	store3.mu.Lock()
+	store3.hideFromList = map[int64]bool{3: true}
+	store3.mu.Unlock()
+	sweep(c3, 3)
+	if d := f3.deleted(); len(d) != 0 {
+		t.Errorf("deleted %v for a row that still exists", d)
 	}
 }
