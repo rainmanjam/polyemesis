@@ -443,8 +443,10 @@ func (c *lifecycleCoordinator) tellChat(platform db.Platform, accountID *int64, 
 func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.BroadcastLifecycler,
 	acct *db.PlatformAccount, d *db.Destination, broadcastID string, to oauth.BroadcastPhase) (*oauth.TransitionResult, error) {
 	if pub, ok := prov.(xPublisher); ok && d.Platform == db.PlatformX && to == oauth.PhaseLive {
-		r, err := pub.PublishBroadcast(ctx, acct.AccessToken, broadcastID,
-			oauth.XPublish{Title: c.titleFor(d), ShouldNotTweet: xShouldNotTweet(d)})
+		pubReq := oauth.XPublish{Title: c.titleFor(d), ShouldNotTweet: xShouldNotTweet(d)}
+		r, _, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.XPublishResult, error) {
+			return pub.PublishBroadcast(ctx, a.AccessToken, broadcastID, pubReq)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -461,7 +463,28 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 		// earlier version recorded), and the caller must record and point chat at the one that exists on X.
 		return &oauth.TransitionResult{BroadcastID: r.ID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
 	}
-	return prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, to)
+	r, _, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.TransitionResult, error) {
+		return prov.TransitionBroadcast(ctx, a.AccessToken, broadcastID, to)
+	})
+	return r, err
+}
+
+// withRetoken runs call with acct, and when X refused the token it carried (a token the clock says is good, but
+// revoked or rotated by another install) forces one refresh and runs call once more with the fresh account. A refused
+// call did nothing on X's side, so the second try cannot double an action. A refresh that fails replaces the error,
+// so a gone grant reads as "reconnect". It returns the account the last call used, so a caller can keep it.
+func withRetoken[T any](ctx context.Context, c *lifecycleCoordinator, accountID int64, acct *db.PlatformAccount,
+	call func(*db.PlatformAccount) (T, error)) (T, *db.PlatformAccount, error) {
+	v, err := call(acct)
+	if err != nil && oauth.XCredentialRejected(err) && c.retokenFor != nil {
+		fresh, rerr := c.retokenFor(ctx, accountID, acct.AccessToken)
+		if rerr != nil {
+			return v, acct, rerr
+		}
+		acct = fresh
+		v, err = call(acct)
+	}
+	return v, acct, err
 }
 
 // xShouldNotTweet is whether d's X PUBLISH suppresses X's announcement post, from
@@ -1161,17 +1184,9 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 
-	st, err := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
-	if err != nil && oauth.XCredentialRejected(err) && c.retokenFor != nil {
-		// X refused a token the clock says is good (revoked, or rotated by another install). One forced refresh and
-		// one more read; a refresh that fails replaces the error, so a gone grant reads as "reconnect".
-		if fresh, rerr := c.retokenFor(ctx, *d.AccountID, acct.AccessToken); rerr != nil {
-			err = rerr
-		} else {
-			acct = fresh
-			st, err = prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
-		}
-	}
+	st, acct, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.BroadcastLifecycleState, error) {
+		return prov.BroadcastState(cctx, a.AccessToken, broadcastID)
+	})
 	if err != nil && errors.Is(err, oauth.ErrXSourceGone) {
 		// THE SOURCE IS GONE FROM X, SO NOTHING CAN EVER GO LIVE ON IT. Forget it, and its go-live markers, so the next
 		// sweep opens the destination again instead of asking about a dead id for ever; keep the fault visible and
@@ -1399,14 +1414,9 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	}
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
-	id, err := creator.OpenBroadcast(cctx, acct.AccessToken, d.StreamKey)
-	if err != nil && oauth.XCredentialRejected(err) && c.retokenFor != nil {
-		if fresh, rerr := c.retokenFor(ctx, *d.AccountID, acct.AccessToken); rerr != nil {
-			err = rerr
-		} else {
-			id, err = creator.OpenBroadcast(cctx, fresh.AccessToken, d.StreamKey)
-		}
-	}
+	id, _, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (string, error) {
+		return creator.OpenBroadcast(cctx, a.AccessToken, d.StreamKey)
+	})
 	if err != nil {
 		c.noteFailureUnlessPaused(d, "", scrubSourceKey(fmt.Sprintf(
 			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey), err)
@@ -1583,7 +1593,9 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 		return
 	}
 
-	res, err := prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, oauth.PhaseComplete)
+	res, _, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.TransitionResult, error) {
+		return prov.TransitionBroadcast(ctx, a.AccessToken, broadcastID, oauth.PhaseComplete)
+	})
 	if err != nil {
 		c.handleRefusal(d, broadcastID, oauth.PhaseComplete, err)
 		return
@@ -1690,7 +1702,9 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 
-	st, err := prov.BroadcastState(cctx, acct.AccessToken, t.BroadcastID)
+	st, acct, err := withRetoken(ctx, c, t.AccountID, acct, func(a *db.PlatformAccount) (*oauth.BroadcastLifecycleState, error) {
+		return prov.BroadcastState(cctx, a.AccessToken, t.BroadcastID)
+	})
 	if err != nil {
 		c.noteOrphanFailure(t, err)
 		return
@@ -1727,7 +1741,10 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	if st.BroadcastID != "" && st.BroadcastID != t.BroadcastID {
 		t.BroadcastID = st.BroadcastID
 	}
-	if _, err := prov.TransitionBroadcast(cctx, acct.AccessToken, t.BroadcastID, oauth.PhaseComplete); err != nil {
+	endID := t.BroadcastID
+	if _, _, err := withRetoken(ctx, c, t.AccountID, acct, func(a *db.PlatformAccount) (*oauth.TransitionResult, error) {
+		return prov.TransitionBroadcast(cctx, a.AccessToken, endID, oauth.PhaseComplete)
+	}); err != nil {
 		c.noteOrphanFailure(t, err)
 		return
 	}

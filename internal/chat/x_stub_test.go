@@ -59,6 +59,8 @@ type xChatStub struct {
 	subscribeCalls  int
 	// putFailures is how many PUT /2/webhooks/{id} calls fail with a 500 before one works.
 	putFailures int
+	// putStatus, when non-zero, makes every PUT /2/webhooks/{id} fail with that status and a problem body.
+	putStatus int
 	// createRaces makes a refused create still leave the webhook behind, as another process winning the race does.
 	createRaces bool
 	// putFixes makes PUT /2/webhooks/{id} flip the webhook to valid, as a passing CRC does.
@@ -181,6 +183,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		id := strings.TrimPrefix(path, "/2/webhooks/")
 		st.mu.Lock()
+		if st.putStatus != 0 {
+			code := st.putStatus
+			st.mu.Unlock()
+			w.WriteHeader(code)
+			_, _ = io.WriteString(w, `{"title":"Too Many Requests","detail":"Too Many Requests","type":"about:blank","status":429}`)
+			return
+		}
 		if st.putFailures > 0 {
 			st.putFailures--
 			st.mu.Unlock()

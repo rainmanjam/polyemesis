@@ -1834,3 +1834,78 @@ func TestAnXRefusedTokenWithNoRefresherStillSaysReconnect(t *testing.T) {
 		t.Fatalf("fault = %q, want the reconnect instruction and no URL", row.Lifecycle.Fault)
 	}
 }
+
+// staleThenFresh wires a token source that hands out a token X refuses, and a forced refresh that returns the good one.
+func staleThenFresh(c *lifecycleCoordinator) *[]string {
+	c.tokenFor = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}, nil
+	}
+	var rejected []string
+	c.retokenFor = func(_ context.Context, _ int64, bad string) (*db.PlatformAccount, error) {
+		rejected = append(rejected, bad)
+		return &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "fresh"}, nil
+	}
+	return &rejected
+}
+
+// A DELETED DESTINATION WHOSE TOKEN X REVOKED, BUT WHOSE REFRESH TOKEN STILL WORKS, IS STILL ENDED. The orphan pass
+// refreshes once on a refused token instead of counting the refusal against its give-up budget.
+//
+// MUTATION, internal/api/lifecycle.go, endOrphan: call prov.BroadcastState / TransitionBroadcast directly with
+// acct.AccessToken instead of through withRetoken. Observed: FAIL -- ended 0, orphan attempts counted.
+func TestADeletedXDestinationWithARefusedTokenIsRefreshedAndItsBroadcastEnded(t *testing.T) {
+	fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateRunning, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	c.sweepOnce(context.Background(), sweepEverything) // tracks it with a good-enough token
+	rejected := staleThenFresh(c)
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+		t.Fatalf("ended %d (state %s), want the deleted destination's broadcast ended after a refresh; refreshes %v", ended, state, *rejected)
+	}
+	if n := c.orphanAttemptCount(5); n != 0 {
+		t.Errorf("orphan attempts = %d, want 0: a recovered refusal is not a failure", n)
+	}
+}
+
+// The END and the go-live transition each refresh once on a refused token. The state read passed with a good token and
+// the token was revoked after it, so the account handed to end/transition is the stale one.
+func TestAnXEndAndGoLiveWithARefusedTokenAreRefreshedAndRetried(t *testing.T) {
+	stale := &db.PlatformAccount{ID: 9, Platform: db.PlatformX, AccessToken: "stale"}
+
+	t.Run("end", func(t *testing.T) {
+		fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateRunning, id: "bc-1", seq: 1}
+		c, store, faults := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+		rejected := staleThenFresh(c)
+		prov, _ := oauth.As[oauth.BroadcastLifecycler](c.providers, db.PlatformX)
+		store.mu.Lock()
+		d := *store.rows[5]
+		store.mu.Unlock()
+		c.end(context.Background(), prov, stale, &d, "bc-1", lifecyclePlan{Send: oauth.PhaseComplete, Phase: phaseLive})
+		if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+			t.Fatalf("ended %d (state %s), want one END after a refresh; refreshes %v", ended, state, *rejected)
+		}
+		if len(*faults) != 0 || store.rows[5].Lifecycle.Attempts != 0 {
+			t.Fatalf("escalations %d attempts %d after a recovered END, want none", len(*faults), store.rows[5].Lifecycle.Attempts)
+		}
+	})
+
+	t.Run("go-live", func(t *testing.T) {
+		fake := &xcFake{goodToken: "fresh", active: true, state: oauth.XStateNotStarted, id: "bc-1", seq: 1}
+		c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+		rejected := staleThenFresh(c)
+		prov, _ := oauth.As[oauth.BroadcastLifecycler](c.providers, db.PlatformX)
+		store.mu.Lock()
+		d := *store.rows[5]
+		store.mu.Unlock()
+		if _, err := c.transition(context.Background(), prov, stale, &d, "bc-1", oauth.PhaseLive); err != nil {
+			t.Fatalf("go-live = %v, want it to succeed after one refresh", err)
+		}
+		if len(*rejected) != 1 || (*rejected)[0] != "stale" {
+			t.Fatalf("forced refreshes = %v, want exactly one, of the refused token", *rejected)
+		}
+	})
+}

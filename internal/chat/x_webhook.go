@@ -163,6 +163,11 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 		Data xWebhookRec `json:"data"`
 	}
 	if err := x.xCall(ctx, http.MethodPost, "/2/webhooks", true, map[string]string{"url": x.cfg.WebhookURL}, &out); err != nil {
+		var rl *xChatRateLimited
+		if errors.As(err, &rl) {
+			// Keep the typed 429 so Run waits out the reset, and skip the re-list: it would ask X again.
+			return "", err
+		}
 		// Another process may have created it between the list and this call.
 		if again, lerr := x.listWebhooks(ctx); lerr == nil {
 			if h, ok := x.findWebhook(again); ok {
@@ -203,7 +208,8 @@ func (x *XAdapter) ensureWebhook(ctx context.Context) (string, error) {
 // data.valid only says the CRC was TRIGGERED (docs.x.com/x-api/webhooks/validate-webhook).
 func (x *XAdapter) revalidateWebhook(ctx context.Context, id string) (string, error) {
 	if err := x.xCall(ctx, http.MethodPut, "/2/webhooks/"+url.PathEscape(id), true, nil, nil); err != nil {
-		if isCredentialError(err) {
+		var rl *xChatRateLimited
+		if isCredentialError(err) || errors.As(err, &rl) {
 			return "", err
 		}
 		return "", xCRCError(x.cfg.WebhookURL, xWhy(err))
