@@ -23,18 +23,16 @@ export function ReconnectBanner() {
 
   useEffect(() => {
     let live = true;
-    try {
-      api
-        .listAccounts()
-        .then((a) => {
-          if (live) setAccounts(a);
-        })
-        .catch(() => {
-          // Silent: a non-admin session is refused, and this is an offer.
-        });
-    } catch {
-      // Same: never let a banner break the shell.
-    }
+    // Started inside the chain so a synchronous throw lands in .catch too: a
+    // banner must never break the shell, and a refused list is just "nothing".
+    Promise.resolve()
+      .then(() => api.listAccounts())
+      .then((a) => {
+        if (live) setAccounts(a);
+      })
+      .catch(() => {
+        // Silent: a non-admin session is refused, and this is an offer.
+      });
     return () => {
       live = false;
     };
