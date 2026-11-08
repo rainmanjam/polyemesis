@@ -312,3 +312,153 @@ func TestOneAuthorSpammingCannotTripTheRaidBrake(t *testing.T) {
 		t.Fatal("another author was declined after one author spammed")
 	}
 }
+
+// A save rebuilds the engine and its checkers; a cached finding carries the
+// action the OLD config gave it, so it must not outlive the save. The author
+// table and the brake do (TestGateSurvivesAnEngineRebuild).
+func TestSavingSettingsDropsCachedVerdicts(t *testing.T) {
+	g := NewModelGate(GateConfig{RaidMax: 1000})
+	p := db.PlatformTwitch
+	ctx := context.Background()
+	text := "i will find you and kill you"
+
+	armed := &fakeChecker{out: []Finding{{Checker: CheckerModel, Action: ActionTimeout, TimeoutSeconds: 600, Category: CategoryHarassment, Hold: true}}}
+	m := DefaultMatrix()
+	m.Enabled = true
+	e1 := New(m, PlatformCaps{}, nil, nil, NewChain(armed, nil)).WithModelGate(ScopeHard, g)
+	v, err := e1.CheckModel(ctx, p, text)
+	if err != nil || len(v.Findings) != 1 || v.Findings[0].Action != ActionTimeout || !v.Hold {
+		t.Fatalf("first answer: %+v %v", v, err)
+	}
+	// A repeat on the same engine is a hit.
+	if _, _ = e1.CheckModel(ctx, p, text); armed.calls.Load() != 1 {
+		t.Fatalf("setup: the cache did not serve a repeat (%d calls)", armed.calls.Load())
+	}
+
+	// The operator sets harassment back to flag and turns protection off; the
+	// rebuilt checker now answers with a flag and no hold.
+	relaxed := &fakeChecker{out: []Finding{{Checker: CheckerModel, Action: ActionFlag, Category: CategoryHarassment}}}
+	e2 := New(m, PlatformCaps{}, nil, nil, NewChain(relaxed, nil)).WithModelGate(ScopeHard, g)
+	v, err = e2.CheckModel(ctx, p, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relaxed.calls.Load() != 1 {
+		t.Fatalf("the new config was not asked: a stale verdict was served (%d calls)", relaxed.calls.Load())
+	}
+	if len(v.Findings) != 1 || v.Findings[0].Action != ActionFlag || v.Hold {
+		t.Fatalf("stale verdict after a save: %+v", v)
+	}
+}
+
+func TestClearVerdictsKeepsTheAuthorTableAndBrake(t *testing.T) {
+	g := NewModelGate(GateConfig{})
+	if !g.admit("twitch:a") {
+		t.Fatal("first admit declined")
+	}
+	g.store(1, nil, SlotPrimary)
+	g.ClearVerdicts()
+	if _, _, ok := g.lookup(1); ok {
+		t.Fatal("a verdict survived ClearVerdicts")
+	}
+	if g.admit("twitch:a") {
+		t.Fatal("ClearVerdicts refilled the author allowance")
+	}
+	(*ModelGate)(nil).ClearVerdicts() // a nil gate is a no-op
+}
+
+// Under scope "all" every message is still asked about, and the gate counts
+// what "hard" would have skipped: the saving the card offers it with (D11).
+func TestScopeAllCountsWhatHardWouldHaveSkipped(t *testing.T) {
+	g := NewModelGate(GateConfig{})
+	e := New(DefaultMatrix(), PlatformCaps{}, nil, nil, &fakeChecker{}).WithModelGate(ScopeAll, g)
+	if e.gateStats() != nil {
+		t.Fatal("an engine that has seen nothing reports a dry run")
+	}
+	for _, text := range []string{"hello chat", "gg", "nice play", hardLine} {
+		if !e.WantsModel(db.PlatformTwitch, Subject{AuthorID: "a", Text: text}, Verdict{}) {
+			t.Fatalf("scope all declined %q", text)
+		}
+	}
+	st := e.gateStats()
+	if st == nil || st.Scope != ScopeAll || st.Considered != 4 || st.WouldSkip != 3 {
+		t.Fatalf("dry run = %+v, want 4 considered and 3 skipped", st)
+	}
+	// Counting is not limiting: no author allowance was spent, no brake tripped.
+	if st.Asked != 0 || st.Capped != 0 || st.Braked != 0 {
+		t.Fatalf("the dry run limited something: %+v", st)
+	}
+	for i := 0; i < 100; i++ {
+		if !e.WantsModel(db.PlatformTwitch, Subject{AuthorID: "a", Text: hardLine}, Verdict{}) {
+			t.Fatal("scope all declined a repeat from one author")
+		}
+	}
+	// A settled message is a skip too.
+	settled := Verdict{Findings: []Finding{{Checker: CheckerProtection, Category: CategoryDoxxing}}}
+	e.WantsModel(db.PlatformTwitch, Subject{AuthorID: "b", Text: hardLine}, settled)
+	if st := e.gateStats(); st.WouldSkip != 4 {
+		t.Fatalf("a settled message was not counted: %+v", st)
+	}
+	// And under "hard" the real counters take over, with no dry run in them.
+	h := hardEngine(t, &fakeChecker{}, g)
+	h.WantsModel(db.PlatformTwitch, Subject{AuthorID: "c", Text: "hello"}, Verdict{})
+	if st := h.gateStats(); st.Considered != 0 || st.WouldSkip != 0 || st.NoSignal != 1 {
+		t.Fatalf("hard stats = %+v", st)
+	}
+}
+
+// A question still in flight when the settings were saved comes back after the
+// cache was cleared. It belongs to the OLD config and must not be remembered.
+func TestAnInFlightAnswerFromBeforeASaveIsNotCached(t *testing.T) {
+	g := NewModelGate(GateConfig{RaidMax: 1000})
+	p := db.PlatformTwitch
+	ctx := context.Background()
+	text := "i will find you and kill you"
+
+	gate := make(chan struct{})
+	entered := make(chan struct{})
+	slow := &blockingChecker{gate: gate, entered: entered,
+		out: []Finding{{Checker: CheckerModel, Action: ActionTimeout, TimeoutSeconds: 600, Category: CategoryHarassment, Hold: true}}}
+	m := DefaultMatrix()
+	m.Enabled = true
+	e1 := New(m, PlatformCaps{}, nil, nil, NewChain(slow, nil)).WithModelGate(ScopeHard, g)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = e1.CheckModel(ctx, p, text)
+	}()
+	<-entered // e1 is mid-call
+
+	// The save: a new engine on the same gate, with the relaxed config.
+	relaxed := &fakeChecker{out: []Finding{{Checker: CheckerModel, Action: ActionFlag, Category: CategoryHarassment}}}
+	e2 := New(m, PlatformCaps{}, nil, nil, NewChain(relaxed, nil)).WithModelGate(ScopeHard, g)
+
+	close(gate) // the old answer lands now
+	<-done
+
+	v, err := e2.CheckModel(ctx, p, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relaxed.calls.Load() != 1 {
+		t.Fatalf("the new config was not asked: the old engine's answer was cached (%d calls)", relaxed.calls.Load())
+	}
+	if len(v.Findings) != 1 || v.Findings[0].Action != ActionFlag || v.Hold {
+		t.Fatalf("stale verdict: %+v", v)
+	}
+}
+
+// blockingChecker answers only once gate is closed, and says when it was asked.
+type blockingChecker struct {
+	gate    chan struct{}
+	entered chan struct{}
+	out     []Finding
+}
+
+func (b *blockingChecker) Check(context.Context, string) ([]Finding, error) {
+	close(b.entered)
+	<-b.gate
+	return append([]Finding(nil), b.out...), nil
+}
+func (b *blockingChecker) Stats() ModelStats { return ModelStats{} }
+func (b *blockingChecker) Enabled() bool     { return true }

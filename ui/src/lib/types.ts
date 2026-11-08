@@ -4038,7 +4038,8 @@ export interface AutomodModelStats {
   fallbacks?: number;
   failedOpen?: number;
   lastDecidedBy?: AutomodSlot;
-  /** The hard-case gate's counters; present only under the "hard" scope. */
+  /** The hard-case gate's counters: the real ones under the "hard" scope, the
+   *  dry run (`considered`, `wouldSkip`) under "all" once it has seen a message. */
   gate?: AutomodGateStats;
 }
 
@@ -4050,6 +4051,10 @@ export interface AutomodGateStats {
   capped: number;
   cached: number;
   braked: number;
+  /** The dry run under the "all" scope: of the `considered` messages the model
+   *  was asked about, how many "hard" would have skipped. Absent under "hard". */
+  considered?: number;
+  wouldSkip?: number;
   /** When the raid brake lifts; absent while it is off. */
   brakeUntil?: string;
 }

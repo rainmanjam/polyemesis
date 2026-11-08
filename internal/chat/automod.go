@@ -324,7 +324,12 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		// It passes on the overlay too: the console is showing it, and an
 		// overlay that went silent whenever the model endpoint did would be a
 		// second, invisible outage.
-		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
+		//
+		// Not for a spent hourly ceiling, though: the model was not down, the
+		// spend limit did its job, and every line after call N holding off the
+		// overlay would turn a cost control into an outage (and bury real
+		// findings on the review list). Those pass, like any decline.
+		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() && !automod.IsBudgetSpent(err) {
 			// The operator asked for it: a message nobody could judge waits off
 			// the overlay, and is listed for review so it can be released.
 			h.holdUnjudged(job)
@@ -374,16 +379,33 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	}
 }
 
+// unjudgedReason marks the review-list entry for a line held because the model
+// could not answer.
+const unjudgedReason = "the model could not answer, so the line is held"
+
+// unjudgedHoldCap is how many such lines may sit on the review list at once.
+const unjudgedHoldCap = 50
+
 // holdUnjudged keeps a message the model could not judge off every overlay and
 // puts it on the review list. The finding is a flag, with no category beyond
 // "other" and no platform action: nothing was found, only not looked at.
 func (h *Hub) holdUnjudged(job automodJob) {
+	// An outage can last as long as it likes and every line asked in it lands
+	// here. The review list is bounded and shared with real findings, so only
+	// a few are listed: past unjudgedHoldCap the line passes, which is what the
+	// setting being off would have done.
+	if h.unjudgedHeld() >= unjudgedHoldCap {
+		h.log.Warn("automod: too many lines held for an unavailable model; this one passes",
+			"platform", job.platform, "cap", unjudgedHoldCap)
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+		return
+	}
 	h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
 	h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), []automod.Finding{{
 		Checker:  automod.CheckerModel,
 		Action:   automod.ActionFlag,
 		Category: automod.CategoryOther,
-		Reason:   "the model could not answer, so the line is held",
+		Reason:   unjudgedReason,
 		Hold:     true,
 	}})
 	h.markFlagHeld(job.platform, job.account, job.msgID)

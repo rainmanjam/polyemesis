@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -103,5 +104,78 @@ func TestHoldWhenUnavailableHoldsAndListsTheLine(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if got := sink.got(); len(got) != 2 {
 		t.Fatalf("display calls %v, want offer and judge only", got)
+	}
+}
+
+// The hourly ceiling is a spend limit, not an outage: with hold-when-unavailable
+// on, a line the model was not asked about because the budget is spent passes
+// and is not listed.
+func TestHoldWhenUnavailableDoesNotHoldASpentBudget(t *testing.T) {
+	for name, err := range map[string]error{
+		"direct":  fmt.Errorf("primary checker: %w", automod.ErrBudgetSpent),
+		"chained": automodCeilingErr(t),
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := &stubModerator{modelOn: true, modelErr: err}
+			mod := &gatedModerator{stubModerator: stub, want: func(automod.Subject) bool { return true }, holds: true}
+			h, sink, _ := displayHub(t, mod, msg("m1", "u1", "hello"))
+			sink.waitFor(t, fmt.Sprintf("judge m1 %d", DisplayClear))
+			if got := h.Flagged(db.PlatformTwitch, 10); len(got) != 0 {
+				t.Fatalf("a spent budget flagged %d messages", len(got))
+			}
+		})
+	}
+}
+
+// automodCeilingErr is what a real chain returns when its only checker is
+// refused by its ceiling.
+func automodCeilingErr(t *testing.T) error {
+	t.Helper()
+	b := automod.NewBudget()
+	m := automod.NewModel(automod.ModelConfig{Enabled: true, MaxCallsPerHour: 1}, b)
+	// Spend the one call allowed, against an endpoint that is not there.
+	_, _ = m.Check(context.Background(), "x")
+	_, err := automod.NewChain(m, nil).Check(context.Background(), "y")
+	if !errors.Is(err, automod.ErrBudgetSpent) {
+		t.Fatalf("setup: %v is not a spent-budget error", err)
+	}
+	return err
+}
+
+// A long outage cannot bury real findings: only unjudgedHoldCap lines are held
+// and listed, the rest pass.
+func TestHoldWhenUnavailableIsCappedOnTheReviewList(t *testing.T) {
+	stub := &stubModerator{modelOn: true, modelErr: errors.New("503")}
+	mod := &gatedModerator{stubModerator: stub, want: func(automod.Subject) bool { return true }, holds: true}
+	var msgs []Message
+	for i := 0; i < unjudgedHoldCap+10; i++ {
+		msgs = append(msgs, msg(fmt.Sprintf("m%d", i), fmt.Sprintf("u%d", i), "hello"))
+	}
+	h, sink, _ := displayHub(t, mod, msgs...)
+	last := fmt.Sprintf("m%d", unjudgedHoldCap+9)
+	sink.waitFor(t, fmt.Sprintf("judge %s %d", last, DisplayClear))
+	if got := len(h.Flagged(db.PlatformTwitch, 0)); got != unjudgedHoldCap {
+		t.Fatalf("%d lines listed, want the cap of %d", got, unjudgedHoldCap)
+	}
+}
+
+// The cap counts lines that can still be holding something. Once an outage is
+// over and the overlay gate's ten minutes have passed, the old entries no longer
+// count, or one bad hour would switch the setting off for good.
+func TestTheUnjudgedHoldCapForgetsFinishedOutages(t *testing.T) {
+	h := testHub(t)
+	now := time.Now()
+	h.now = func() time.Time { return now }
+	for i := 0; i < unjudgedHoldCap; i++ {
+		h.noteFlag(Message{Platform: db.PlatformTwitch, Account: "acct", ID: fmt.Sprintf("old%d", i)}, []automod.Finding{{
+			Checker: automod.CheckerModel, Action: automod.ActionFlag, Category: automod.CategoryOther, Reason: unjudgedReason, Hold: true,
+		}})
+	}
+	if got := h.unjudgedHeld(); got != unjudgedHoldCap {
+		t.Fatalf("unjudgedHeld = %d, want %d", got, unjudgedHoldCap)
+	}
+	now = now.Add(unjudgedHeldFor + time.Second)
+	if got := h.unjudgedHeld(); got != 0 {
+		t.Fatalf("unjudgedHeld = %d after the outage's lines could no longer be released, want 0", got)
 	}
 }

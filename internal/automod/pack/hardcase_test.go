@@ -83,6 +83,9 @@ func TestHardCaseOrdinaryChatShowsNoSignal(t *testing.T) {
 	for _, text := range []string{
 		"gg everyone", "what game is next?", "LUL", "that was close", "hello chat",
 		"how long have you been streaming", "love the stream", "POG",
+		// Everyday phrasings next to the self-harm lexicon.
+		"did you miss me chat", "ending it here tonight, gn", "i want out of this queue",
+		"i can't do this anymore lol this boss",
 	} {
 		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); len(got) != 0 {
 			t.Errorf("%q gave %v", text, got)
@@ -171,4 +174,73 @@ func TestParseHardCaseRejectsABadFile(t *testing.T) {
 
 func validWith(extra string) string {
 	return `{"id":"en","version":1,"address":["you"],"lexicons":{"violence":["kill"],"self_harm":["kms"],"sexual":["sex"],"insult":["idiot"]` + extra + `}}`
+}
+
+// Ordinary chat that happens to hold digits is not leet: a link, a frame rate,
+// a level, a numbered emote and a name with a number on the end.
+func TestObfuscationIgnoresLinksNumbersAndEmotes(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{
+		"https://www.youtube.com/watch?v=demo123",
+		"watch this www.example.com/a1b2c3",
+		"what's your setting, 30fps?",
+		"lvl50 boss now", "wave10 incoming", "season2024 rocks", "player123 gg",
+		"4Head 4Head 4Head 4Head 4Head 4Head", "5Head 3Head 4Head",
+		"nasılsınız hepiniz", "cześć wszystkim", "yeni bölüm çok zor",
+	} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); has(got, SignalObfuscation) {
+			t.Errorf("%q read as obfuscation: %v", text, got)
+		}
+	}
+}
+
+// Real leet still reads, including words of only two letters.
+func TestObfuscationStillReadsRealLeet(t *testing.T) {
+	h := hc(t)
+	for _, text := range []string{"y0u 5uck at th15 g4m3", "k1ll y0u", "h3ll0 th3r3 fr13nd", "g4m3"} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, SignalObfuscation) {
+			t.Errorf("%q gave no obfuscation signal: %v", text, got)
+		}
+	}
+	for text, want := range map[string]int{"k1ll": 1, "30fps": 0, "gr8": 0, "1v1": 0, "x86": 0} {
+		if n := substitutions(text); n != want {
+			t.Errorf("substitutions(%q) = %d, want %d", text, n, want)
+		}
+	}
+}
+
+// The lines D14 names, which the lexicons used to miss.
+func TestHardCaseNamedLinesAreCaught(t *testing.T) {
+	h := hc(t)
+	for text, want := range map[string]Signal{
+		"i don't want to be alive anymore":               SignalSelfHarm,
+		"i feel like ending it all":                      SignalSelfHarm,
+		"i can't do this anymore, i want out for good":   SignalSelfHarm,
+		"you won't be alive next week":                   SignalThreat,
+		"you look hot today":                             SignalSexualAddressed,
+		"ur voice is hot":                                SignalSexualAddressed,
+		"dm me a pic u":                                  SignalSexualAddressed,
+		"@marble_owl you are the worst mod ever":         SignalInsultReply,
+		"@oak_signal everyone here thinks you're a joke": SignalInsultReply,
+	} {
+		if got := h.Signals(NewForms(text), SignalInput{Raw: text}); !has(got, want) {
+			t.Errorf("%q gave %v, want %s", text, got, want)
+		}
+	}
+}
+
+// A non-decomposing Latin confusable inside an ASCII word is the disguise;
+// letters of a real alphabet (Turkish, Polish, Nordic) are spelling.
+func TestLatinConfusablesCountButAlphabetsDoNot(t *testing.T) {
+	if n := substitutions("p\u0251ss w\u0251rd"); n < 2 {
+		t.Errorf("IPA alpha look-alikes = %d, want at least 2", n)
+	}
+	if n := substitutions("\u0261ood \u0261ame"); n < 2 {
+		t.Errorf("script g look-alikes = %d, want at least 2", n)
+	}
+	for _, text := range []string{"nas\u0131ls\u0131n\u0131z hepiniz", "mały łódź", "København Ærø", "größe Straße", "cześć wszystkim"} {
+		if n := substitutions(text); n != 0 {
+			t.Errorf("%q counts %d substitutions", text, n)
+		}
+	}
 }

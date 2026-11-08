@@ -87,6 +87,9 @@ export interface AutomodConfigProps {
   saveError?: string | null;
 }
 
+/** Fewest messages before the saving estimate is shown. */
+const MIN_SAVING_SAMPLE = 50;
+
 /** The default a NEW rule gets: on, and flagging.
  *
  *  Flagging for the reason DefaultMatrix starts there — it changes nothing an
@@ -253,6 +256,15 @@ export function AutomodConfig({
   // The raid brake: the gate stopped asking and says when it will start again.
   const brakeUntil = stats?.gate?.brakeUntil;
   const brakeOn = brakeUntil !== undefined && Date.parse(brakeUntil) > Date.now();
+  // The offer's evidence (D11): under "all", the share of the messages asked
+  // about that "hard" would have skipped. Not shown on a handful of messages,
+  // which would read as a precise number it is not.
+  const considered = stats?.gate?.considered ?? 0;
+  const wouldSkip = stats?.gate?.wouldSkip ?? 0;
+  const savingPct =
+    automod.protection?.modelScope !== "hard" && considered >= MIN_SAVING_SAMPLE
+      ? Math.round((wouldSkip / considered) * 100)
+      : null;
 
   return (
     <>
@@ -545,6 +557,11 @@ export function AutomodConfig({
                     {t("automod.modelScopeHard")}
                   </Label>
                   <p className="text-xs text-muted-foreground">{t("automod.modelScopeHardNote")}</p>
+                  {savingPct !== null && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("automod.modelScopeSaving", { pct: savingPct, count: considered })}
+                    </p>
+                  )}
                   {brakeOn && (
                     <p role="status" className="text-xs text-warn">
                       {t("automod.modelBrake")}

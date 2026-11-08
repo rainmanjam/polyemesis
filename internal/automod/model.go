@@ -265,7 +265,7 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 		return nil, nil
 	}
 	if !m.reserve() {
-		return nil, fmt.Errorf("hourly ceiling of %d calls reached", m.cfg.MaxCallsPerHour)
+		return nil, &ceilingError{calls: m.cfg.MaxCallsPerHour}
 	}
 
 	v, err := m.ask(ctx, text)

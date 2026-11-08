@@ -22,6 +22,14 @@
     "hype_trap",
     "protected_name_trap"
   ],
+  "hardcaseRecall": {
+    "address_violence": 0.9,
+    "obfuscation_residue": 0.9,
+    "self_harm": 0.9,
+    "sexual_address": 0.9,
+    "insult_reply": 0.9
+  },
+  "hardcaseBenignCeiling": 0.002,
   "minLines": 3000,
   "minSlice": {
     "benign": 1500,

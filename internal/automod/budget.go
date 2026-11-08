@@ -1,6 +1,8 @@
 package automod
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -78,3 +80,39 @@ func (b *Budget) Spent() int {
 	defer b.mu.Unlock()
 	return b.calls
 }
+
+// ceilingError is a check refused because the hourly ceiling was reached. It
+// reads as it always did ("hourly ceiling of N calls reached") and matches
+// ErrBudgetSpent, so a caller can tell "the model was not asked" from "the
+// model was asked and could not answer".
+type ceilingError struct{ calls int }
+
+func (e *ceilingError) Error() string {
+	return fmt.Sprintf("hourly ceiling of %d calls reached", e.calls)
+}
+func (e *ceilingError) Is(target error) bool { return target == ErrBudgetSpent }
+
+// IsBudgetSpent reports whether a check failed ONLY because the hourly ceiling
+// was reached: every checker asked was refused by its ceiling, and none was
+// down. errors.Is(err, ErrBudgetSpent) is not enough on a chain, since a joined
+// error matches if any one leaf does, and "primary at its ceiling, secondary
+// down" is an outage.
+func IsBudgetSpent(err error) bool {
+	var only *onlyBudgetSpent
+	if errors.As(err, &only) {
+		return true
+	}
+	if _, joined := err.(interface{ Unwrap() []error }); joined {
+		return false
+	}
+	return errors.Is(err, ErrBudgetSpent)
+}
+
+// onlyBudgetSpent is an error from a chain in which every checker that was
+// asked was refused by its own ceiling: nothing was down, the spend limit
+// worked. Wraps the joined error and matches ErrBudgetSpent.
+type onlyBudgetSpent struct{ err error }
+
+func (e *onlyBudgetSpent) Error() string        { return e.err.Error() }
+func (e *onlyBudgetSpent) Unwrap() error        { return e.err }
+func (e *onlyBudgetSpent) Is(target error) bool { return target == ErrBudgetSpent }

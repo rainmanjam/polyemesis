@@ -65,7 +65,7 @@ func (c *Chain) Decide(ctx context.Context, text string) ([]Finding, Slot, error
 		return nil, "", nil
 	}
 	var errs []error
-	asked := 0
+	asked, spent := 0, 0
 	for _, s := range []struct {
 		slot Slot
 		mc   ModelChecker
@@ -77,6 +77,9 @@ func (c *Chain) Decide(ctx context.Context, text string) ([]Finding, Slot, error
 		findings, err := s.mc.Check(ctx, text)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s checker: %w", s.slot, err))
+			if errors.Is(err, ErrBudgetSpent) {
+				spent++
+			}
 			continue
 		}
 		for i := range findings {
@@ -100,6 +103,11 @@ func (c *Chain) Decide(ctx context.Context, text string) ([]Finding, Slot, error
 	c.mu.Lock()
 	c.failedOpen++
 	c.mu.Unlock()
+	if spent == asked {
+		// Every checker asked was refused by its own hourly ceiling. Nothing
+		// is down: say so, so the caller can tell a spend limit from an outage.
+		return nil, "", &onlyBudgetSpent{err: errors.Join(errs...)}
+	}
 	return nil, "", errors.Join(errs...)
 }
 

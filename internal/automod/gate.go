@@ -115,7 +115,12 @@ type ModelGate struct {
 	order      *list.List // front = most recently used
 	passes     []time.Time
 	brakeUntil time.Time
-	stats      GateStats
+	// epoch counts ClearVerdicts. A store carries the epoch its engine was built
+	// in and is dropped if the cache has been cleared since, so a call still in
+	// flight when the settings were saved cannot write its old-config answer
+	// back after the clear.
+	epoch uint64
+	stats GateStats
 }
 
 // GateStats is the gate's counters, for the card. Counts only: nothing here
@@ -135,6 +140,14 @@ type GateStats struct {
 	Capped int `json:"capped"`
 	Cached int `json:"cached"`
 	Braked int `json:"braked"`
+	// Considered and WouldSkip are the dry run under scope "all": of the
+	// messages the model was asked about, how many the "hard" scope would have
+	// skipped (settled by the pack, or showing no hard-case signal). Counted
+	// only under "all", where they are the evidence the card offers "hard" with
+	// (spec D11). Zero under "hard", whose Settled and NoSignal are the real
+	// thing.
+	Considered int `json:"considered,omitempty"`
+	WouldSkip  int `json:"wouldSkip,omitempty"`
 	// BrakeUntil is when the raid brake lifts; zero while it is off.
 	BrakeUntil time.Time `json:"brakeUntil,omitzero"`
 }
@@ -194,6 +207,15 @@ func gateText(f pack.Forms) string {
 
 func (g *ModelGate) countSettled()  { g.bump(func(s *GateStats) { s.Settled++ }) }
 func (g *ModelGate) countNoSignal() { g.bump(func(s *GateStats) { s.NoSignal++ }) }
+
+func (g *ModelGate) countDryRun(skip bool) {
+	g.bump(func(s *GateStats) {
+		s.Considered++
+		if skip {
+			s.WouldSkip++
+		}
+	})
+}
 
 func (g *ModelGate) bump(f func(*GateStats)) {
 	g.mu.Lock()
@@ -295,11 +317,42 @@ func (g *ModelGate) lookup(key uint64) ([]Finding, Slot, bool) {
 	return append([]Finding(nil), e.findings...), e.by, true
 }
 
+// ClearVerdicts forgets every cached answer. The author table and the raid
+// brake are untouched: they limit spend and a save mid-raid must not refill
+// them, but a cached finding carries the Action and Hold the checker's config
+// gave it, so it is only as current as that config.
+func (g *ModelGate) ClearVerdicts() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.cache = map[uint64]*list.Element{}
+	g.order.Init()
+	g.epoch++
+}
+
+// currentEpoch is the epoch an engine built now belongs to.
+func (g *ModelGate) currentEpoch() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.epoch
+}
+
 // store records an answer. Only a real answer is stored: an error never is, so
 // an outage is not remembered for ten minutes.
 func (g *ModelGate) store(key uint64, findings []Finding, by Slot) {
+	g.storeAt(g.currentEpoch(), key, findings, by)
+}
+
+// storeAt is store for an engine built in the given epoch; an answer from an
+// epoch the cache has been cleared since is not remembered.
+func (g *ModelGate) storeAt(epoch, key uint64, findings []Finding, by Slot) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if epoch != g.epoch {
+		return
+	}
 	e := &gateEntry{key: key, at: g.now(), findings: append([]Finding(nil), findings...), by: by}
 	if el, ok := g.cache[key]; ok {
 		el.Value = e
@@ -322,6 +375,23 @@ func (e *Engine) WithModelGate(scope ModelScope, g *ModelGate) *Engine {
 		return e
 	}
 	e.scope, e.gate = scope, g
+	// Every call here is a settings save (ApplyAutomod rebuilds the engine and
+	// its checkers), and a cached finding holds the action and hold the OLD
+	// config gave it: a category set back from timeout to flag, protection
+	// switched off, or a changed model, key or floor would otherwise keep being
+	// served for up to ten minutes. Drop the answers; keep the spend limits.
+	g.ClearVerdicts()
+	if g != nil {
+		e.epoch = g.currentEpoch()
+	}
+	if scope != ScopeHard && g != nil {
+		// Scope "all" still asks about everything. The lexicon is loaded only
+		// to count what "hard" would have skipped; a lexicon that did not load
+		// just means no estimate.
+		if hc, err := pack.DefaultHardCase(); err == nil {
+			e.hardcase = hc
+		}
+	}
 	if scope == ScopeHard {
 		// A lexicon that did not load leaves the scope at all: asking about
 		// too much is the safe side of the error.
@@ -396,7 +466,12 @@ func (e *Engine) WantsModel(p db.Platform, s Subject, v Verdict) bool {
 	if e == nil {
 		return false
 	}
-	if e.scope != ScopeHard || e.gate == nil || e.hardcase == nil {
+	if e.gate == nil || e.hardcase == nil {
+		return true
+	}
+	if e.scope != ScopeHard {
+		// Scope "all": ask, as always, but note what "hard" would have done.
+		e.gate.countDryRun(e.wouldSkip(s, v))
 		return true
 	}
 	if settledByPack(v.Findings) {
@@ -415,12 +490,31 @@ func (e *Engine) WantsModel(p db.Platform, s Subject, v Verdict) bool {
 	return e.gate.admit(author)
 }
 
+// wouldSkip is whether the hard scope would decline a message before its own
+// limits (author cap, brake) are applied: the part of the saving that is a
+// property of the message, not of the room.
+func (e *Engine) wouldSkip(s Subject, v Verdict) bool {
+	if settledByPack(v.Findings) {
+		return true
+	}
+	return len(e.hardcase.Signals(pack.NewForms(s.Text), hardCaseInput(s, v.Findings))) == 0
+}
+
 // gateStats merges the gate's counters with the scope.
 func (e *Engine) gateStats() *GateStats {
-	if e == nil || e.scope != ScopeHard || e.gate == nil {
+	if e == nil || e.gate == nil {
 		return nil
 	}
 	s := e.gate.Stats()
+	if e.scope != ScopeHard {
+		// Under "all" the only news is the dry run, and only once it has seen
+		// something: an install that has never asked reports nothing.
+		if s.Considered == 0 {
+			return nil
+		}
+		return &GateStats{Scope: ScopeAll, Considered: s.Considered, WouldSkip: s.WouldSkip}
+	}
+	s.Considered, s.WouldSkip = 0, 0
 	s.Scope = e.scope
 	return &s
 }

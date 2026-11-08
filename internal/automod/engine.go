@@ -27,8 +27,10 @@ type Engine struct {
 	ladder *Ladder
 	// scope, gate and hardcase decide which messages reach the model (gate.go).
 	// The zero value asks about every message, as before the pack.
-	scope    ModelScope
-	gate     *ModelGate
+	scope ModelScope
+	gate  *ModelGate
+	// epoch is the gate's verdict-cache epoch this engine was built in.
+	epoch    uint64
 	hardcase *pack.HardCase
 	// holdOnModelError holds a message off the overlay when the model was asked
 	// and could not answer. Off by default.
@@ -183,7 +185,7 @@ func (e *Engine) CheckModel(ctx context.Context, p db.Platform, text string) (Ve
 		return Verdict{}, err
 	}
 	if cached && by != "" {
-		e.gate.store(key, findings, by)
+		e.gate.storeAt(e.epoch, key, findings, by)
 	}
 	v := e.decide(p, findings)
 	v.DecidedBy = by

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -169,7 +170,7 @@ func (j *Jev) Check(ctx context.Context, text string) ([]Finding, error) {
 		return nil, errJevPaused
 	}
 	if j.budget != nil && !j.budget.reserve(j.cfg.MaxCallsPerHour) {
-		return nil, fmt.Errorf("hourly ceiling of %d calls reached", j.cfg.MaxCallsPerHour)
+		return nil, &ceilingError{calls: j.cfg.MaxCallsPerHour}
 	}
 
 	v, err := j.ask(ctx, text)
@@ -448,11 +449,25 @@ func (j *Jev) statusError(code int, body []byte) error {
 	case http.StatusUnauthorized:
 		return errJevKeyRejected
 	case http.StatusBadRequest:
-		if bytes.Contains(bytes.ToLower(body), []byte("model")) {
+		if unknownModelBody(body) {
 			return fmt.Errorf("Jev does not recognise model %s -- check the model name", shownModel(j.cfg.Model))
 		}
 	}
 	return fmt.Errorf("Jev API returned %d", code)
+}
+
+// unknownModelRe is a 400 body that says the model is the problem: the word
+// "model" beside "not found", "unknown", "invalid", "no such", "does not exist"
+// or "unsupported", in either order and within a short span. A 400 that merely
+// MENTIONS the model ("input exceeds the model's context") is about something
+// else, and sending the operator to retype a correct model id is worse than
+// the plain status.
+var unknownModelRe = regexp.MustCompile(
+	`(?s)(model[\W_].{0,40}(not[ _]found|unknown|invalid|does not exist|doesn't exist|not[ _]supported|unsupported|no such))` +
+		`|((unknown|invalid|unsupported|no such|unrecognized|unrecognised)[\W_].{0,20}model)`)
+
+func unknownModelBody(body []byte) bool {
+	return unknownModelRe.Match(bytes.ToLower(body))
 }
 
 // errJevKeyRejected is the 401 sentence. The Test button shows it as is.

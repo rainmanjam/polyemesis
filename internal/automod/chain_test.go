@@ -257,3 +257,28 @@ func TestAConnectorRefusesToSendAKeyBoundToAnotherEndpoint(t *testing.T) {
 		t.Fatal("a keyless call was refused over a binding")
 	}
 }
+
+// A chain refused by its own ceilings is a spend limit working, and says so; a
+// chain with one checker down is an outage, whatever else happened.
+func TestChainTellsASpentBudgetFromAnOutage(t *testing.T) {
+	spent := &fakeChecker{err: &ceilingError{calls: 5}}
+	down := &fakeChecker{err: errors.New("503")}
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		chain *Chain
+		want  bool
+	}{
+		"one checker at its ceiling":   {NewChain(spent, nil), true},
+		"both at their ceilings":       {NewChain(spent, &fakeChecker{err: &ceilingError{calls: 9}}), true},
+		"one at its ceiling, one down": {NewChain(spent, down), false},
+		"down":                         {NewChain(down, nil), false},
+	} {
+		_, err := c.chain.Check(ctx, "x")
+		if err == nil {
+			t.Fatalf("%s: no error", name)
+		}
+		if got := IsBudgetSpent(err); got != c.want {
+			t.Errorf("%s: IsBudgetSpent = %v, want %v (%v)", name, got, c.want, err)
+		}
+	}
+}

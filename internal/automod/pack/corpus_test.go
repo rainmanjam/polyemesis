@@ -84,18 +84,23 @@ type groupTarget struct {
 }
 
 type corpusTargets struct {
-	Version           int                    `json:"version"`
-	Spec              string                 `json:"spec"`
-	Files             []string               `json:"files"`
-	ProtectedNames    string                 `json:"protectedNames"`
-	BenignHoldCeiling float64                `json:"benignHoldCeiling"`
-	BenignSlices      []string               `json:"benignSlices"`
-	ZeroHoldSlices    []string               `json:"zeroHoldSlices"`
-	MinLines          int                    `json:"minLines"`
-	MinSlice          map[string]int         `json:"minSlice"`
-	MinCategory       map[string]int         `json:"minCategoryPositives"`
-	Groups            map[string]groupTarget `json:"groups"`
-	Sequences         struct {
+	Version           int            `json:"version"`
+	Spec              string         `json:"spec"`
+	Files             []string       `json:"files"`
+	ProtectedNames    string         `json:"protectedNames"`
+	BenignHoldCeiling float64        `json:"benignHoldCeiling"`
+	BenignSlices      []string       `json:"benignSlices"`
+	ZeroHoldSlices    []string       `json:"zeroHoldSlices"`
+	MinLines          int            `json:"minLines"`
+	MinSlice          map[string]int `json:"minSlice"`
+	MinCategory       map[string]int `json:"minCategoryPositives"`
+	// HardCaseRecall is the least share of the lines Jev should flag that each
+	// hard-case signal must catch; HardCaseBenignCeiling the most benign lines
+	// that may show any signal.
+	HardCaseRecall        map[string]float64     `json:"hardcaseRecall"`
+	HardCaseBenignCeiling float64                `json:"hardcaseBenignCeiling"`
+	Groups                map[string]groupTarget `json:"groups"`
+	Sequences             struct {
 		File            string `json:"file"`
 		MinSequences    int    `json:"minSequences"`
 		MinPassSequence int    `json:"minPassSequences"`

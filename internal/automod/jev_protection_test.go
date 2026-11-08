@@ -156,6 +156,27 @@ func TestJevOperatorErrorsAreFriendlyAndNeverEchoTheBody(t *testing.T) {
 	if err.Error() != "Jev API returned 400" {
 		t.Fatalf("400 other = %q", err)
 	}
+	// A 400 that mentions the model for another reason is NOT a wrong model name.
+	for _, body := range []string{
+		`{"error":{"message":"input exceeds the model's context window ` + marker + `"}}`,
+		`{"error":"text is too long for model jev-1"}`,
+		`{"error":"the model is busy, try again"}`,
+	} {
+		err = statusJev(t, http.StatusBadRequest, body, func(c *JevConfig) { c.Model = "jev-1" })
+		if err.Error() != "Jev API returned 400" {
+			t.Fatalf("400 about something else = %q", err)
+		}
+	}
+	// And the real wordings still are.
+	for _, body := range []string{
+		`{"error":"model not found"}`, `{"detail":"Model 'x' does not exist"}`,
+		`{"error":"invalid model"}`, `{"error":{"code":"model_not_found"}}`, `{"error":"Unknown model: x"}`,
+	} {
+		err = statusJev(t, http.StatusBadRequest, body, func(c *JevConfig) { c.Model = "jev-1" })
+		if !strings.HasPrefix(err.Error(), "Jev does not recognise model") {
+			t.Fatalf("%s = %q", body, err)
+		}
+	}
 	if err := statusJev(t, http.StatusInternalServerError, marker, nil); err.Error() != "Jev API returned 500" {
 		t.Fatalf("500 = %q", err)
 	}

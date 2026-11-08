@@ -371,7 +371,11 @@ checker's own switch are all still yours.
 
 - **`all`** asks about every message the free checkers did not remove. This is
   what every install did before the pack existed, so an **existing install
-  keeps `all`**. The card offers `hard` for you to choose; nothing moves you.
+  keeps `all`**. The card offers `hard` for you to choose, with an estimate of
+  the saving (the share of the messages the model was asked about that `hard`
+  would have skipped, counted while you run `all` and shown once there are 50;
+  `gate.considered` and `gate.wouldSkip` in `GET /automod/stats`). Nothing
+  moves you.
 - **`hard`**, the setting on a **fresh install**, asks only about a message the
   free checkers could not settle. A severe hate term, a doxxing hit or a scam
   hit is already decided and is never sent. Of the rest, the model sees a
@@ -388,7 +392,12 @@ checker's own switch are all still yours.
   The word lists behind these (`internal/automod/pack/hardcase-en.json`, about
   a hundred and fifty entries or fewer each) are small, written by polyemesis,
   and versioned with the pack. They are signals worth one question, not
-  verdicts.
+  verdicts. The corpus gates each signal's recall on the lines Jev should flag
+  (`hardcaseRecall` in `testdata/targets.json`) and the rate at which ordinary
+  chat shows a signal (`hardcaseBenignCeiling`). A link, a frame rate (`30fps`),
+  a level (`lvl50`), a numbered emote (`4Head`) and a name with a number on the
+  end are not obfuscation; a digit or symbol standing inside a word (`k1ll`,
+  `y0u`, `g4m3`) is.
 
 Within `hard` the model is also limited by:
 
@@ -427,10 +436,24 @@ answer**, off by default) and such a message waits off every overlay instead,
 and appears in the **Flagged** list so you can release it. It is read from the
 primary and covers both checkers.
 
+Two limits keep the hold from becoming its own outage. A **spent hourly
+ceiling is not an outage**: the model was not down, your spend limit worked, so
+those messages pass and are not held (a chain with one checker at its ceiling
+and the other down still counts as an outage). And at most **50** such messages
+are listed as held at once; past that they pass, so a long outage cannot push
+real findings off the 500-entry review list.
+
 The Test button and the moderation log say what went wrong in plain words
 instead of a bare status: `Jev rejected the API key -- paste a new one` for a
 401, and `Jev does not recognise model "..." -- check the model name` for a 400
-that names the model. The reply body is never shown.
+that names the model as unknown or invalid (a 400 that only mentions the model,
+such as an input over its context length, stays `Jev API returned 400`). The
+reply body is never shown.
+
+The model's verdict cache (10 minutes, `hard` scope) is emptied on every
+settings save, so a changed category action, hold setting, model, key or floor
+takes effect on the next message; the per-author limit and the raid brake are
+kept.
 
 ### Setting up a checker
 
@@ -609,7 +632,7 @@ on their own:
 | Method | Path | Why |
 |---|---|---|
 | `GET` | `/automod/matrix` | every cell with an `available` flag and a `reason`, plus the provider `presets` and `modelCategories` |
-| `GET` | `/automod/stats` | what the checkers have done, and under the `hard` model scope the gate's counters (`gate`) |
+| `GET` | `/automod/stats` | what the checkers have done, and the gate's counters (`gate`): the real ones under the `hard` model scope, and under `all` the dry run (`considered`, `wouldSkip`), absent until it has seen a message |
 | `PUT` | `/settings/automod-key` | a model key, sealed and never returned. `{"key": "…"}` is the primary; add `"checker": "secondary"` for the fallback |
 | `POST` | `/automod/explain` | the pack's test box: `{text, authorName?, platform?, protect?, emoteCount?}` returns which detectors fire, whether each holds the message, and whether the current matrix would let each act. Session only. `protection` says whether the pack is on in the live engine, `held` is what chat would do and `wouldHoldIfOn` what it would do with the pack on; a detection with `live: false` is the pack's. Offline, stateless and unlogged: it never records the message in any window and never calls a provider |
 | `POST` | `/automod/test` | the Test button: `{checker, protocol, preset, endpoint, model, timeoutSeconds, minConfidence, instruction, key?}`. Session only |

@@ -455,6 +455,33 @@ describe("AutomodConfig: the model scope and the unavailable hold", () => {
     expect(screen.queryByRole("switch", { name: "Ask the model only about hard cases" })).toBeNull();
   });
 
+  it("offers hard with the estimated saving once there is a sample, and only under all", async () => {
+    const dry = (considered: number, wouldSkip: number) =>
+      ({
+        ...zeroStats(),
+        gate: { scope: "all", asked: 0, settled: 0, noSignal: 0, capped: 0, cached: 0, braked: 0, considered, wouldSkip },
+      }) as never;
+    stats.mockResolvedValue(dry(200, 170));
+    show(automod({ protection: protection("all") }));
+    expect(
+      await screen.findByText("Since the app started, of 200 messages the model was asked about, about 85% would have been skipped."),
+    ).toBeTruthy();
+    cleanup();
+
+    // Too few messages for a number worth showing.
+    stats.mockResolvedValue(dry(10, 9));
+    show(automod({ protection: protection("all") }));
+    await waitFor(() => expect(stats).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/would have been skipped/)).toBeNull();
+    cleanup();
+
+    // Already on hard: the real counters are the evidence, so no estimate.
+    stats.mockResolvedValue(dry(200, 170));
+    show(automod({ protection: protection("hard") }));
+    await waitFor(() => expect(stats).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText(/would have been skipped/)).toBeNull();
+  });
+
   it("says so while the raid brake is on, and not once it has lifted", async () => {
     stats.mockResolvedValue({
       ...zeroStats(),

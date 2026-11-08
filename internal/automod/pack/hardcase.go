@@ -9,6 +9,8 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // The hard-case signals (spec section 6.2).
@@ -213,11 +215,38 @@ func (h *HardCase) Signals(f Forms, in SignalInput) []Signal {
 // text: format characters removed, look-alike letters folded to ASCII, and
 // digits or symbols standing in for letters inside a word. Plain text, however
 // loud, scores zero.
+//
+// What is NOT a substitution, because chat is full of it: a URL; a word whose
+// digits are all one run at its start or end ("30fps", "4Head", "10k", "gr8",
+// "lvl50", "wave10", "season2024", "player123"), which is a number attached to
+// a word and not a letter replaced; and a word with fewer than two letters
+// ("1v1", "5v5"). Leet is a digit or symbol standing INSIDE a word ("k1ll",
+// "y0u", "g4m3"). The count is still summed over the message, since "k1ll y0u"
+// is two words with one substitution each.
 func substitutions(raw string) int {
+	n := 0
+	for _, field := range strings.Fields(raw) {
+		if urlLike(field) {
+			continue
+		}
+		n += fieldSubstitutions(field)
+	}
+	return n
+}
+
+// urlLike reports whether a whitespace-delimited field is a link, whose digits
+// and separators are an address and not spelling.
+func urlLike(f string) bool {
+	l := strings.ToLower(f)
+	return strings.Contains(l, "://") || strings.HasPrefix(l, "www.") ||
+		(strings.Contains(l, ".") && strings.Contains(l, "/"))
+}
+
+func fieldSubstitutions(field string) int {
 	n := 0
 	// Walk word by word: a word is a run of letters, digits, marks and the
 	// symbols leet uses, plus any format characters inside it.
-	rs := []rune(raw)
+	rs := []rune(field)
 	isCf := func(r rune) bool { return r >= utf8.RuneSelf && unicode.Is(unicode.Cf, r) }
 	for i := 0; i < len(rs); {
 		if !isWordRune(rs, i) {
@@ -228,11 +257,9 @@ func substitutions(raw string) int {
 		for j < len(rs) && (isWordRune(rs, j) || isCf(rs[j])) {
 			j++
 		}
-		// Letters, not just "has a letter": "10k", "4k", "1v1" and "5v5" are
-		// ordinary chat, and a word that is mostly digits is a score or a
-		// count. Leet needs at least three letters to read as spelling.
+		word := rs[i:j]
 		letters, ascii := 0, false
-		for _, c := range rs[i:j] {
+		for _, c := range word {
 			if unicode.IsLetter(c) {
 				letters++
 				if c < utf8.RuneSelf {
@@ -240,7 +267,8 @@ func substitutions(raw string) int {
 				}
 			}
 		}
-		for _, c := range rs[i:j] {
+		leets := leetRuns(word)
+		for _, c := range word {
 			switch {
 			case isCf(c):
 				// Inside a word only: a zero-width joiner between emoji is not
@@ -250,15 +278,79 @@ func substitutions(raw string) int {
 				// A look-alike counts only in a word that ALSO has an ASCII
 				// letter: mixed script is the tell. A plain Russian, Ukrainian
 				// or Greek sentence maps nearly every letter to a Latin one and
-				// is ordinary chat.
-				if _, ok := skeletonOf(c); ok && ascii {
+				// is ordinary chat. A Latin letter with a mark (Turkish dotless
+				// i, Polish s with an acute, or l with a stroke) is spelling, not
+				// a disguise; a Latin-script CONFUSABLE (U+0251 for a, U+0261
+				// for g) is exactly the disguise.
+				if _, ok := skeletonOf(c); ok && ascii && !alphabetLetter(c) {
 					n++
 				}
-			case letters >= 3 && !unicode.IsLetter(c) && leet(c) != c:
-				n++
 			}
+		}
+		if letters >= 2 && leets.inside() {
+			n += leets.count
 		}
 		i = j
 	}
 	return n
+}
+
+// alphabetLetter reports whether a non-ASCII letter is part of a real Latin
+// alphabet: an ASCII letter carrying marks (s with an acute, o with a
+// diaeresis), or one of the few letters that do not decompose (Turkish dotless
+// i, the Polish and Nordic strokes and the eth).
+func alphabetLetter(r rune) bool {
+	switch r {
+	case 'æ', 'Æ', 'œ', 'Œ', 'ı', 'ł', 'Ł', 'ø', 'Ø', 'đ', 'Đ', 'ð', 'Ð', 'ß':
+		return true
+	}
+	d := norm.NFD.String(string(r))
+	rs := []rune(d)
+	if len(rs) < 2 || rs[0] >= utf8.RuneSelf || !unicode.IsLetter(rs[0]) {
+		return false
+	}
+	for _, m := range rs[1:] {
+		if !unicode.IsMark(m) {
+			return false
+		}
+	}
+	return true
+}
+
+// leetShape describes where a word's digit and symbol stand-ins are.
+type leetShape struct {
+	count int
+	runs  int
+	// atEdge is true when the stand-ins are one run touching the start or end.
+	atEdge bool
+}
+
+// inside reports whether the stand-ins read as spelling: some run is not a
+// plain number attached to the front or back of the word.
+func (s leetShape) inside() bool { return s.count > 0 && !(s.runs == 1 && s.atEdge) }
+
+func leetRuns(word []rune) leetShape {
+	var s leetShape
+	prev := false
+	for k, c := range word {
+		// A run is every non-letter in a row, so "2024" is one run; only the
+		// characters leet actually uses are counted.
+		is := !unicode.IsLetter(c) && !unicode.IsMark(c)
+		if is {
+			if leet(c) != c {
+				s.count++
+			}
+			if !prev {
+				s.runs++
+				if k == 0 {
+					s.atEdge = true
+				}
+			}
+			if k == len(word)-1 {
+				s.atEdge = true
+			}
+		}
+		prev = is
+	}
+	return s
 }
