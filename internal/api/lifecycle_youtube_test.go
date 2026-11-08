@@ -187,6 +187,14 @@ func ynFixture(t *testing.T, f *ynFake, rows ...*db.Destination) (*lifecycleCoor
 	return c, store, &faults, chat
 }
 
+// readNow makes the next sweep read the broadcast whatever the slow cadence says, as the UP edge video arriving
+// produces does in production.
+func readNow(c *lifecycleCoordinator) {
+	c.mu.Lock()
+	delete(c.liveSkips, 3)
+	c.mu.Unlock()
+}
+
 func sweep(c *lifecycleCoordinator, n int) {
 	for i := 0; i < n; i++ {
 		c.sweepOnce(context.Background(), sweepEverything)
@@ -349,7 +357,7 @@ func TestSwitchingTheDestinationOffEndsItsOwnBroadcastAndClearsChat(t *testing.T
 	sweep(c, 1) // opens bcast-1
 	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
 	// Still enabled: a sweep must not complete it, however long the encoder was away.
-	c.forgetLiveRecheck(3)
+	readNow(c)
 	sweep(c, 2)
 	if _, _, trans := f.snapshot(); len(trans) != 0 {
 		t.Fatalf("transitions %v sent while the destination was on", trans)
@@ -372,7 +380,7 @@ func TestAFinishedOwnBroadcastIsRenewedWhileTheDestinationIsStillOn(t *testing.T
 	c, store, _, chat := ynFixture(t, f, ynRow(true))
 	sweep(c, 1)
 	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "complete" })
-	c.forgetLiveRecheck(3)
+	readNow(c)
 	sweep(c, 1)
 	got := store.get(3)
 	if got.Lifecycle.BroadcastID != "bcast-2" || !got.Lifecycle.Opened {
@@ -410,7 +418,7 @@ func TestAFailedRenewalKeepsTheFinishedIdAndNeverAdoptsTheAnnouncementMirror(t *
 	store.rows[3].Facebook.BroadcastID = "stale-announced" // a schedule's announcement mirror appears later
 	store.mu.Unlock()
 	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "complete"; f.listedKey = "" })
-	c.forgetLiveRecheck(3)
+	readNow(c)
 	sweep(c, 3)
 	got := store.get(3)
 	if got.Lifecycle.BroadcastID != "bcast-1" || !got.Lifecycle.Opened {
@@ -482,7 +490,7 @@ func TestAfterThePickedEventCompletesTheDestinationFallsBackToCreating(t *testin
 	c, store, _, _ := ynFixture(t, f, row)
 	sweep(c, 1)
 	f.set(func(f *ynFake) { f.bcasts["ev-1"].status = "complete" })
-	c.forgetLiveRecheck(3)
+	readNow(c)
 	sweep(c, 1)
 	got := store.get(3)
 	if got.Lifecycle.BroadcastID == "ev-1" || got.Lifecycle.BroadcastID == "" {
@@ -548,16 +556,14 @@ func TestAnOpenedBroadcastThatNeverAiredIsNotReadForEverAfterTheSwitchOff(t *tes
 	if len(trans) != 0 {
 		t.Errorf("transitions = %v: a never-aired broadcast has nothing to end", trans)
 	}
-	// Switching it on again reuses the broadcast: no second insert.
+	// The never-aired broadcast polyemesis created was deleted at the switch-off (see the deletion test below), so
+	// switching on again opens a fresh one rather than reusing a Public event that could have aired meanwhile.
 	store.mu.Lock()
 	store.rows[3].Enabled = true
 	store.mu.Unlock()
 	sweep(c, 1)
-	if _, inserts, _ := f.snapshot(); inserts != 1 {
-		t.Errorf("inserts = %d after re-enabling, want the same broadcast reused", inserts)
-	}
-	if store.get(3).Lifecycle.BroadcastID != "bcast-1" {
-		t.Errorf("lifecycle = %+v", store.get(3).Lifecycle)
+	if _, inserts, _ := f.snapshot(); inserts != 2 || store.get(3).Lifecycle.BroadcastID != "bcast-2" {
+		t.Errorf("inserts = %d lifecycle=%+v, want a fresh broadcast after re-enabling", inserts, store.get(3).Lifecycle)
 	}
 }
 
@@ -588,7 +594,7 @@ func TestAnEndedOwnBroadcastIsForgottenSoTheAnnouncementMirrorDrivesTheNextShow(
 	c, store, _, _ := ynFixture(t, f, ynRow(true))
 	sweep(c, 1)
 	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
-	c.forgetLiveRecheck(3)
+	readNow(c)
 	sweep(c, 1)
 	store.mu.Lock()
 	store.rows[3].Enabled = false
