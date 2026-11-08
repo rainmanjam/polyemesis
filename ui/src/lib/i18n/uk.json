@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Видалити нотатку",
   "viewerCard.deleteConfirm": "Видалити нотатку — підтвердити",
   "viewerCard.tagBadgeTitle": "Теги: {tags}",
-  "viewerCard.notInFirstPage": "YouTube показує лише перших {count} модераторів, і цього глядача серед них немає. Якщо він модератор, зніміть його в YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube показує лише перших {count} модераторів, і цього глядача серед них немає. Якщо він модератор, зніміть його в YouTube Studio.",
+  "yt.live.streamLabel": "Потік YouTube",
+  "yt.live.streamDefault": "Потік, що відповідає моєму поточному ключу",
+  "yt.live.streamOption": "{title} ({status}, стан {health})",
+  "yt.live.streamLoading": "Завантаження потоків вашого каналу…",
+  "yt.live.streamError": "Не вдалося завантажити ваші потоки YouTube: {message}",
+  "yt.live.streamUsedBy": "Також використовується: {names}. YouTube обмежує кількість трансляцій, які можуть бути наживо на одному ключі потоку.",
+  "yt.live.streamHelp": "До якого з багаторазових потоків вашого каналу прив'язана трансляція цього призначення. polyemesis ніколи не змінює ваш ключ потоку."
 }

@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Excluir nota",
   "viewerCard.deleteConfirm": "Excluir nota — confirmar",
   "viewerCard.tagBadgeTitle": "Tags: {tags}",
-  "viewerCard.notInFirstPage": "O YouTube lista apenas os primeiros {count} moderadores e este espectador não está entre eles. Se ele for moderador, remova-o no YouTube Studio."
+  "viewerCard.notInFirstPage": "O YouTube lista apenas os primeiros {count} moderadores e este espectador não está entre eles. Se ele for moderador, remova-o no YouTube Studio.",
+  "yt.live.streamLabel": "Transmissão do YouTube",
+  "yt.live.streamDefault": "A transmissão que corresponde à minha chave atual",
+  "yt.live.streamOption": "{title} ({status}, integridade {health})",
+  "yt.live.streamLoading": "Carregando as transmissões do seu canal…",
+  "yt.live.streamError": "Não foi possível carregar suas transmissões do YouTube: {message}",
+  "yt.live.streamUsedBy": "Também usada por {names}. O YouTube limita quantas transmissões podem estar ao vivo com a mesma chave de transmissão.",
+  "yt.live.streamHelp": "A qual das transmissões reutilizáveis do seu canal a transmissão deste destino está vinculada. O polyemesis nunca altera sua chave de transmissão."
 }

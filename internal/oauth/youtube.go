@@ -161,7 +161,16 @@ type ytLiveStream struct {
 	// list call never asks for it, so a listed stream decodes with this empty.
 	ContentDetails struct {
 		ClosedCaptionsIngestionURL string `json:"closedCaptionsIngestionUrl"`
+		// IsReusable is a pointer so a response that omits it reads as unknown, not as false.
+		IsReusable *bool `json:"isReusable"`
 	} `json:"contentDetails"`
+	// Status is present only when the list asked for the status part (the stream picker does).
+	Status struct {
+		StreamStatus string `json:"streamStatus"`
+		HealthStatus struct {
+			Status string `json:"status"`
+		} `json:"healthStatus"`
+	} `json:"status"`
 }
 
 // Ingest returns the channel's reusable RTMP ingest, creating one if the
@@ -377,6 +386,11 @@ const ytStreamsMaxPages = 20
 // listStreams reads every page of the channel's liveStreams. One request returns at
 // most 50 streams, and a destination's held stream can sit past the first page.
 func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLiveStream, error) {
+	return y.listStreamsParts(ctx, accessToken, "id,snippet,cdn")
+}
+
+// listStreamsParts is listStreams with the parts named by the caller.
+func (y *YouTube) listStreamsParts(ctx context.Context, accessToken, parts string) ([]ytLiveStream, error) {
 	var all []ytLiveStream
 	pageToken := ""
 	for page := 0; page < ytStreamsMaxPages; page++ {
@@ -393,7 +407,7 @@ func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLive
 		// additive -- it cannot remove snippet or cdn, which is what this call
 		// already depended on. Resolve by: one live liveStreams.list without
 		// part=id, recording whether id is present.
-		target := y.apiEndpoint() + ytStreamsPath + "?part=id,snippet,cdn&mine=true&maxResults=50"
+		target := y.apiEndpoint() + ytStreamsPath + "?part=" + parts + "&mine=true&maxResults=50"
 		if pageToken != "" {
 			target += "&pageToken=" + url.QueryEscape(pageToken)
 		}

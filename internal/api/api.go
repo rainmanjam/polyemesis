@@ -1752,6 +1752,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			api.Get(r, "/platforms/accounts/{id}/stats", s.handleAccountStats, readDenied)
+			// The account's reusable YouTube streams, for the destination dialog's stream picker. It calls
+			// YouTube, so a read token is denied; it never carries a stream key or ingest address.
+			api.Get(r, "/platforms/accounts/{id}/youtube/streams", s.handleYouTubeStreams, readDenied)
 			// Cross-platform analytics (Wave 4 #4): the live audience picture
 			// and the per-stream reports. Reads of what the sampler stored --
 			// none calls a platform -- and every one is denied to a read

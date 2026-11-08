@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Hapus catatan",
   "viewerCard.deleteConfirm": "Hapus catatan — konfirmasi",
   "viewerCard.tagBadgeTitle": "Tag: {tags}",
-  "viewerCard.notInFirstPage": "YouTube hanya mencantumkan {count} moderator pertama dan penonton ini tidak termasuk di dalamnya. Jika dia moderator, hapus melalui YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube hanya mencantumkan {count} moderator pertama dan penonton ini tidak termasuk di dalamnya. Jika dia moderator, hapus melalui YouTube Studio.",
+  "yt.live.streamLabel": "Stream YouTube",
+  "yt.live.streamDefault": "Stream yang cocok dengan kunci saya saat ini",
+  "yt.live.streamOption": "{title} ({status}, kondisi {health})",
+  "yt.live.streamLoading": "Memuat stream di kanal Anda…",
+  "yt.live.streamError": "Tidak dapat memuat stream YouTube Anda: {message}",
+  "yt.live.streamUsedBy": "Juga digunakan oleh {names}. YouTube membatasi jumlah siaran yang dapat tayang langsung pada satu kunci stream.",
+  "yt.live.streamHelp": "Stream kanal Anda yang dapat dipakai ulang tempat siaran tujuan ini terikat. polyemesis tidak pernah mengubah kunci stream Anda."
 }

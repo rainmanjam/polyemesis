@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Delete note",
   "viewerCard.deleteConfirm": "Delete note — confirm",
   "viewerCard.tagBadgeTitle": "Tags: {tags}",
-  "viewerCard.notInFirstPage": "YouTube lists only the first {count} moderators and this viewer is not among them. If they are a moderator, remove them in YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube lists only the first {count} moderators and this viewer is not among them. If they are a moderator, remove them in YouTube Studio.",
+  "yt.live.streamLabel": "YouTube stream",
+  "yt.live.streamDefault": "The stream matching my current key",
+  "yt.live.streamOption": "{title} ({status}, health {health})",
+  "yt.live.streamLoading": "Loading your channel's streams…",
+  "yt.live.streamError": "Could not load your YouTube streams: {message}",
+  "yt.live.streamUsedBy": "Also used by {names}. YouTube limits how many broadcasts can be live on one stream key.",
+  "yt.live.streamHelp": "Which of your channel's reusable streams this destination's broadcast is bound to. polyemesis never changes your stream key."
 }

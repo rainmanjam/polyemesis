@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "删除备注",
   "viewerCard.deleteConfirm": "删除备注 — 确认",
   "viewerCard.tagBadgeTitle": "标签:{tags}",
-  "viewerCard.notInFirstPage": "YouTube 只列出前 {count} 位版主,而该观众不在其中。如果对方是版主,请在 YouTube Studio 中取消。"
+  "viewerCard.notInFirstPage": "YouTube 只列出前 {count} 位版主,而该观众不在其中。如果对方是版主,请在 YouTube Studio 中取消。",
+  "yt.live.streamLabel": "YouTube 直播流",
+  "yt.live.streamDefault": "与我当前密钥匹配的直播流",
+  "yt.live.streamOption": "{title}（{status}，健康状况 {health}）",
+  "yt.live.streamLoading": "正在加载你频道的直播流…",
+  "yt.live.streamError": "无法加载你的 YouTube 直播流：{message}",
+  "yt.live.streamUsedBy": "{names} 也在使用。YouTube 限制同一个直播流密钥上可同时进行的直播数量。",
+  "yt.live.streamHelp": "此目标的直播绑定到你频道中哪一个可重复使用的直播流。polyemesis 绝不会更改你的直播流密钥。"
 }

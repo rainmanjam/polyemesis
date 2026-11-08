@@ -39,6 +39,7 @@ import type {
   AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
+  YouTubeStreamRow,
   YouTubeVerticalView,
   BulkDestReport,
   DelayDumpResult,
@@ -957,6 +958,12 @@ export const api = {
   endFacebookBroadcast: (id: DestinationId) =>
     post<BroadcastEnd>(`/destinations/${id}/facebook/end-broadcast`),
 
+  /** The connected YouTube channel's reusable streams, for the stream picker. No keys. */
+  youtubeStreams: (accountId: number, destinationId?: DestinationId) =>
+    get<{ supported: boolean; reason?: string; streams?: YouTubeStreamRow[] }>(
+      `/platforms/accounts/${accountId}/youtube/streams` +
+        (destinationId === undefined ? "" : `?destinationId=${destinationId}`),
+    ),
   /* --- YouTube vertical half (#7) ------------------------------------- */
   /** Pairs a YouTube destination with a new 9:16 vertical half. `tier` is a key
    *  from YOUTUBE_VERTICAL_TIERS (lib/youtubeVertical.ts), pinned to the server. */

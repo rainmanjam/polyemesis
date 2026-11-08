@@ -245,7 +245,13 @@ type YouTubeBroadcastControls struct {
 	// ClosedCaptionsType is closedCaptionsDisabled, closedCaptionsHttpPost or
 	// closedCaptionsEmbedded.
 	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+	// StreamID pins the YouTube liveStream a live-now broadcast is bound to. Empty means the stream whose key
+	// this destination already publishes with. It is NOT a toggle and is never pushed: it is excluded from Empty.
+	StreamID string `json:"streamId,omitempty"`
 }
+
+// ytStreamIDPattern is the shape of a liveStream id: URL-safe characters, with dots, dashes and underscores.
+var ytStreamIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // Empty reports whether there is nothing to push.
 func (c *YouTubeBroadcastControls) Empty() bool {
@@ -259,6 +265,9 @@ func (c *YouTubeBroadcastControls) Problems() []string {
 		return nil
 	}
 	var probs []string
+	if c.StreamID != "" && !ytStreamIDPattern.MatchString(c.StreamID) {
+		probs = append(probs, "the pinned YouTube stream id is not a stream id; pick the stream from the list")
+	}
 	switch c.LatencyPreference {
 	case "", YTLatencyNormal, YTLatencyLow, YTLatencyUltraLow:
 	default:

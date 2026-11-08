@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "메모 삭제",
   "viewerCard.deleteConfirm": "메모 삭제 — 확인",
   "viewerCard.tagBadgeTitle": "태그: {tags}",
-  "viewerCard.notInFirstPage": "YouTube는 처음 {count}명의 관리자만 목록에 표시하며, 이 시청자는 그 안에 없습니다. 관리자라면 YouTube Studio에서 해제하세요."
+  "viewerCard.notInFirstPage": "YouTube는 처음 {count}명의 관리자만 목록에 표시하며, 이 시청자는 그 안에 없습니다. 관리자라면 YouTube Studio에서 해제하세요.",
+  "yt.live.streamLabel": "YouTube 스트림",
+  "yt.live.streamDefault": "현재 키와 일치하는 스트림",
+  "yt.live.streamOption": "{title} ({status}, 상태 {health})",
+  "yt.live.streamLoading": "채널의 스트림을 불러오는 중…",
+  "yt.live.streamError": "YouTube 스트림을 불러오지 못했습니다: {message}",
+  "yt.live.streamUsedBy": "{names}에서도 사용 중입니다. YouTube는 하나의 스트림 키로 동시에 라이브할 수 있는 방송 수를 제한합니다.",
+  "yt.live.streamHelp": "이 대상의 방송을 채널의 재사용 가능한 스트림 중 어느 것에 연결할지 정합니다. polyemesis는 스트림 키를 절대 변경하지 않습니다."
 }

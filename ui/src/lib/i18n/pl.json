@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Usuń notatkę",
   "viewerCard.deleteConfirm": "Usuń notatkę — potwierdź",
   "viewerCard.tagBadgeTitle": "Tagi: {tags}",
-  "viewerCard.notInFirstPage": "YouTube pokazuje tylko pierwszych {count} moderatorów, a tego widza wśród nich nie ma. Jeśli jest moderatorem, odbierz mu rolę w YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube pokazuje tylko pierwszych {count} moderatorów, a tego widza wśród nich nie ma. Jeśli jest moderatorem, odbierz mu rolę w YouTube Studio.",
+  "yt.live.streamLabel": "Strumień YouTube",
+  "yt.live.streamDefault": "Strumień pasujący do mojego bieżącego klucza",
+  "yt.live.streamOption": "{title} ({status}, kondycja {health})",
+  "yt.live.streamLoading": "Wczytywanie strumieni Twojego kanału…",
+  "yt.live.streamError": "Nie udało się wczytać Twoich strumieni YouTube: {message}",
+  "yt.live.streamUsedBy": "Używany także przez: {names}. YouTube ogranicza liczbę transmisji, które mogą być na żywo na jednym kluczu strumienia.",
+  "yt.live.streamHelp": "Z którym z wielokrotnego użytku strumieni Twojego kanału powiązana jest transmisja tego celu. polyemesis nigdy nie zmienia Twojego klucza strumienia."
 }

@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Elimina nota",
   "viewerCard.deleteConfirm": "Elimina nota — conferma",
   "viewerCard.tagBadgeTitle": "Tag: {tags}",
-  "viewerCard.notInFirstPage": "YouTube elenca solo i primi {count} moderatori e questo spettatore non è tra questi. Se è un moderatore, rimuovilo da YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube elenca solo i primi {count} moderatori e questo spettatore non è tra questi. Se è un moderatore, rimuovilo da YouTube Studio.",
+  "yt.live.streamLabel": "Stream YouTube",
+  "yt.live.streamDefault": "Lo stream che corrisponde alla mia chiave attuale",
+  "yt.live.streamOption": "{title} ({status}, stato {health})",
+  "yt.live.streamLoading": "Caricamento degli stream del tuo canale…",
+  "yt.live.streamError": "Impossibile caricare i tuoi stream YouTube: {message}",
+  "yt.live.streamUsedBy": "Usato anche da {names}. YouTube limita quante dirette possono essere attive con una stessa chiave stream.",
+  "yt.live.streamHelp": "A quale degli stream riutilizzabili del tuo canale è collegata la diretta di questa destinazione. polyemesis non modifica mai la tua chiave stream."
 }

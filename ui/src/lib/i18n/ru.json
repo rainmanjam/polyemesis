@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Удалить заметку",
   "viewerCard.deleteConfirm": "Удалить заметку — подтвердить",
   "viewerCard.tagBadgeTitle": "Теги: {tags}",
-  "viewerCard.notInFirstPage": "YouTube показывает только первых {count} модераторов, и этого зрителя среди них нет. Если он модератор, снимите его в YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube показывает только первых {count} модераторов, и этого зрителя среди них нет. Если он модератор, снимите его в YouTube Studio.",
+  "yt.live.streamLabel": "Трансляционный поток YouTube",
+  "yt.live.streamDefault": "Поток, соответствующий моему текущему ключу",
+  "yt.live.streamOption": "{title} ({status}, состояние {health})",
+  "yt.live.streamLoading": "Загрузка потоков вашего канала…",
+  "yt.live.streamError": "Не удалось загрузить ваши потоки YouTube: {message}",
+  "yt.live.streamUsedBy": "Также используется: {names}. YouTube ограничивает число трансляций, которые могут идти в эфире на одном ключе потока.",
+  "yt.live.streamHelp": "К какому из многоразовых потоков вашего канала привязана трансляция этого назначения. polyemesis никогда не меняет ваш ключ потока."
 }

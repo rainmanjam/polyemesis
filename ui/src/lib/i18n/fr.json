@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Supprimer la note",
   "viewerCard.deleteConfirm": "Supprimer la note — confirmer",
   "viewerCard.tagBadgeTitle": "Étiquettes : {tags}",
-  "viewerCard.notInFirstPage": "YouTube ne liste que les {count} premiers modérateurs et ce spectateur n'en fait pas partie. S'il est modérateur, retirez-le dans YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube ne liste que les {count} premiers modérateurs et ce spectateur n'en fait pas partie. S'il est modérateur, retirez-le dans YouTube Studio.",
+  "yt.live.streamLabel": "Flux YouTube",
+  "yt.live.streamDefault": "Le flux correspondant à ma clé actuelle",
+  "yt.live.streamOption": "{title} ({status}, état {health})",
+  "yt.live.streamLoading": "Chargement des flux de votre chaîne…",
+  "yt.live.streamError": "Impossible de charger vos flux YouTube : {message}",
+  "yt.live.streamUsedBy": "Également utilisé par {names}. YouTube limite le nombre de diffusions pouvant être en direct sur une même clé de flux.",
+  "yt.live.streamHelp": "Le flux réutilisable de votre chaîne auquel la diffusion de cette destination est liée. polyemesis ne modifie jamais votre clé de flux."
 }

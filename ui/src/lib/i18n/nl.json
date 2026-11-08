@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Notitie verwijderen",
   "viewerCard.deleteConfirm": "Notitie verwijderen — bevestigen",
   "viewerCard.tagBadgeTitle": "Labels: {tags}",
-  "viewerCard.notInFirstPage": "YouTube toont alleen de eerste {count} moderators en deze kijker staat er niet bij. Als die een moderator is, verwijder die dan in YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube toont alleen de eerste {count} moderators en deze kijker staat er niet bij. Als die een moderator is, verwijder die dan in YouTube Studio.",
+  "yt.live.streamLabel": "YouTube-stream",
+  "yt.live.streamDefault": "De stream die bij mijn huidige sleutel hoort",
+  "yt.live.streamOption": "{title} ({status}, status {health})",
+  "yt.live.streamLoading": "De streams van je kanaal worden geladen…",
+  "yt.live.streamError": "Je YouTube-streams konden niet worden geladen: {message}",
+  "yt.live.streamUsedBy": "Wordt ook gebruikt door {names}. YouTube beperkt hoeveel uitzendingen tegelijk live kunnen zijn op één streamsleutel.",
+  "yt.live.streamHelp": "Aan welke van de herbruikbare streams van je kanaal de uitzending van deze bestemming is gekoppeld. polyemesis wijzigt nooit je streamsleutel."
 }

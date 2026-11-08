@@ -3191,6 +3191,24 @@ export interface YouTubeBroadcastControls {
   enableAutoStart?: boolean;
   enableAutoStop?: boolean;
   closedCaptionsType?: "closedCaptionsDisabled" | "closedCaptionsHttpPost" | "closedCaptionsEmbedded";
+  /** Pins the reusable YouTube stream a go-live broadcast is bound to. Absent means the
+   *  stream whose key this destination already publishes with. Never a key. */
+  streamId?: string;
+}
+
+/** One reusable stream of the connected channel, as GET /platforms/accounts/{id}/youtube/streams
+ *  lists it. There is deliberately no key or ingest address field: the server never sends one. */
+export interface YouTubeStreamRow {
+  id: string;
+  title: string;
+  resolution?: string;
+  frameRate?: string;
+  streamStatus?: string;
+  health?: string;
+  /** True for the stream the queried destination publishes with or has pinned. */
+  current?: boolean;
+  /** The other destinations publishing to this stream. */
+  usedBy?: { id: number; name: string }[];
 }
 
 /** One Page a Facebook broadcast crossposts to at create time, and whether it

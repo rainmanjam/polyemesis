@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "Notiz löschen",
   "viewerCard.deleteConfirm": "Notiz löschen — bestätigen",
   "viewerCard.tagBadgeTitle": "Tags: {tags}",
-  "viewerCard.notInFirstPage": "YouTube listet nur die ersten {count} Moderatoren, und dieser Zuschauer ist nicht darunter. Falls er Moderator ist, entferne ihn in YouTube Studio."
+  "viewerCard.notInFirstPage": "YouTube listet nur die ersten {count} Moderatoren, und dieser Zuschauer ist nicht darunter. Falls er Moderator ist, entferne ihn in YouTube Studio.",
+  "yt.live.streamLabel": "YouTube-Stream",
+  "yt.live.streamDefault": "Der Stream, der zu meinem aktuellen Schlüssel passt",
+  "yt.live.streamOption": "{title} ({status}, Zustand {health})",
+  "yt.live.streamLoading": "Die Streams deines Kanals werden geladen …",
+  "yt.live.streamError": "Deine YouTube-Streams konnten nicht geladen werden: {message}",
+  "yt.live.streamUsedBy": "Wird auch von {names} verwendet. YouTube begrenzt, wie viele Übertragungen pro Stream-Schlüssel gleichzeitig live sein können.",
+  "yt.live.streamHelp": "An welchen der wiederverwendbaren Streams deines Kanals die Übertragung dieses Ziels gebunden ist. polyemesis ändert niemals deinen Stream-Schlüssel."
 }

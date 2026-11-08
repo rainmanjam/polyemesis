@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-four `GET`s among the thirty-six refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirty-five `GET`s among the thirty-seven refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,7 +135,7 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirty-six routes are refused outright**, for three different reasons. Masking
+**Thirty-seven routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last twenty-seven are `403` because of what
@@ -147,6 +147,7 @@ are `403` because of what they *do*. The last twenty-seven are `403` because of 
 | `POST /destinations/{id}/expert/preview` | the same argv |
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /platforms/accounts/{id}/youtube/streams` | calls YouTube with the account's token; lists the channel's reusable streams (never keys) |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against the routes flagged `readDenied`, and a row missing from one side tells the reader nothing about which side is right |
 | `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token. Paced to one YouTube call a minute per pair, and made only while one of the two halves is live (`live` in the response says which); the call is charged to the chat quota budget |
@@ -1973,6 +1974,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `POST` | `/platforms/credentials/{platform}/check` |
 | `POST` | `/platforms/credentials/{platform}/device`, `/platforms/credentials/{platform}/device/poll` |
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats`, `/destinations/{id}/facebook/stream-health` |
+| `GET` | `/platforms/accounts/{id}/youtube/streams` — the connected channel's reusable streams for the destination picker: `{supported, streams: [{id, title, resolution, frameRate, streamStatus, health, current, usedBy}]}`; `?destinationId=` marks that destination's own stream `current` and lists the other destinations on each stream in `usedBy`. **Never a stream key or ingest address.** Refused to a read token. One YouTube quota unit per page |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |

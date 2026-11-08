@@ -4503,5 +4503,12 @@
   "viewerCard.deleteNote": "メモを削除",
   "viewerCard.deleteConfirm": "メモを削除 — 確認",
   "viewerCard.tagBadgeTitle": "タグ: {tags}",
-  "viewerCard.notInFirstPage": "YouTube が一覧に表示するのは最初の{count}人のモデレーターだけで、この視聴者はその中にいません。モデレーターの場合は YouTube Studio で解除してください。"
+  "viewerCard.notInFirstPage": "YouTube が一覧に表示するのは最初の{count}人のモデレーターだけで、この視聴者はその中にいません。モデレーターの場合は YouTube Studio で解除してください。",
+  "yt.live.streamLabel": "YouTube ストリーム",
+  "yt.live.streamDefault": "現在のキーに対応するストリーム",
+  "yt.live.streamOption": "{title}（{status}、ヘルス {health}）",
+  "yt.live.streamLoading": "チャンネルのストリームを読み込み中…",
+  "yt.live.streamError": "YouTube のストリームを読み込めませんでした: {message}",
+  "yt.live.streamUsedBy": "{names} でも使用されています。YouTube では、1 つのストリームキーでライブ配信できるブロードキャスト数に制限があります。",
+  "yt.live.streamHelp": "この配信先のブロードキャストを、チャンネルの再利用可能なストリームのどれに紐付けるかを選びます。polyemesis がストリームキーを変更することはありません。"
 }

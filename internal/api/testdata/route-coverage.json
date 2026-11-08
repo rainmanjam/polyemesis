@@ -12,10 +12,10 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 332,
+    "methodPatternPairs": 333,
     "swept": 80,
     "excused": 64,
-    "denied": 188,
+    "denied": 189,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -1135,6 +1135,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/accounts/{id}/stats",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/accounts/{id}/youtube/streams",
       "coverage": "denied",
       "zeroSource": "unguarded"
     },
@@ -3003,6 +3009,16 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/platforms/accounts/{id}/youtube/streams",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "youtubeStreams"
     },
     {
       "route": "GET /api/v1/playout/offline-clip",

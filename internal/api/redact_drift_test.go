@@ -72,6 +72,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.compliance.youtube.enableDvr":          sPublic,
 	"destination.compliance.youtube.latencyPreference":  sPublic,
 	"destination.compliance.youtube.recordFromStart":    sPublic,
+	"destination.compliance.youtube.streamId":           sPublic, // a YouTube liveStream id, not its key
 	"destination.createdAt":                             sPublic,
 	"destination.enabled":                               sPublic,
 	"destination.expertAckReencode":                     sPublic,

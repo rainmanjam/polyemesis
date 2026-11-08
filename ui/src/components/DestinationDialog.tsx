@@ -1,3 +1,4 @@
+import { YouTubeLiveNowPanel } from "@/components/YouTubeLiveNowPanel";
 import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
 import { settingsHref } from "@/lib/settingsSearch";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -2263,6 +2264,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           <StepPanel n={4} step={step}>
           {platform === "youtube" && editing && destination && (
             <YouTubeVerticalPanel destinationId={destination.id} />
+          )}
+          {platform === "youtube" && accountId !== "none" && (
+            <YouTubeLiveNowPanel
+              accountId={Number(accountId)}
+              destinationId={destination?.id}
+              controls={compliance.youtube}
+              onChange={(patch) => setCompliance(withYouTubeControl(compliance, patch))}
+            />
           )}
           {platform === "x" && (
             <XConsolePanel

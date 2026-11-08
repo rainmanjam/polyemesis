@@ -750,6 +750,7 @@ func (d Destination) Validate() error {
 
 	d.xGoLiveProblems(add)
 	d.xControlsProblems(add)
+	d.youtubeStreamProblems(add)
 
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
@@ -849,6 +850,13 @@ func (d Destination) xGoLiveProblems(add problemAdder) {
 		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
 			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
 		}
+	}
+}
+
+// youtubeStreamProblems refuses a pinned YouTube stream on a destination that is not YouTube.
+func (d Destination) youtubeStreamProblems(add problemAdder) {
+	if y := d.Compliance.YouTube; y != nil && y.StreamID != "" && d.Platform != PlatformYouTube {
+		add("a pinned YouTube stream is read only by YouTube; %s has no such setting", d.Platform)
 	}
 }
 

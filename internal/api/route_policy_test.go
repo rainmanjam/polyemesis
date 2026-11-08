@@ -103,6 +103,7 @@ func TestRoutePolicyIsWhatWasRegistered(t *testing.T) {
 		"/api/v1/library/search",
 		"/api/v1/metadata/broadcast-window",
 		"/api/v1/platforms/accounts/{id}/stats",
+		"/api/v1/platforms/accounts/{id}/youtube/streams",
 		"/api/v1/recordings/stems/{name}/download",
 		"/api/v1/recordings/{id}/chat",
 		"/api/v1/recordings/{id}/download",
