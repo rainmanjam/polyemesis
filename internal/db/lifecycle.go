@@ -128,6 +128,20 @@ type BroadcastControl struct {
 	// ends the show. Never set for any other platform. Not part of Empty: alone
 	// it says nothing about a broadcast.
 	Renewed bool `json:"renewed,omitempty"`
+	// Opened is true when BroadcastID is a broadcast polyemesis itself created for this destination at go-live
+	// (YouTube's live-now broadcast), as opposed to one announced ahead of a scheduled show or made in
+	// YouTube Studio. Only an opened one is renewed when it completes while the destination is still on: a
+	// completed announced broadcast stays a fault. Meaningful only beside a BroadcastID; not part of Empty.
+	Opened bool `json:"opened,omitempty"`
+	// Created is the ORIGIN of an Opened broadcast: true when polyemesis created it, false when it adopted an event
+	// the operator picked. Only a created broadcast that never aired is ever deleted (on switch-off, or when the
+	// destination is switched to Studio's Stream now); an adopted event is never deleted.
+	Created bool `json:"created,omitempty"`
+	// OpenAttemptMS is when polyemesis began opening a YouTube broadcast for this destination, persisted BEFORE the
+	// insert and cleared when the open is recorded. Its presence on a later attempt proves an earlier attempt of ours
+	// may have created a broadcast it never recorded, which is the only case in which an upcoming broadcast that looks
+	// like ours is reused (and then treated as created by polyemesis). Without it nothing is ever adopted.
+	OpenAttemptMS int64 `json:"openAttemptMs,omitempty"`
 }
 
 // Empty reports whether this block says anything at all.

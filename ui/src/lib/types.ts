@@ -3191,6 +3191,54 @@ export interface YouTubeBroadcastControls {
   enableAutoStart?: boolean;
   enableAutoStop?: boolean;
   closedCaptionsType?: "closedCaptionsDisabled" | "closedCaptionsHttpPost" | "closedCaptionsEmbedded";
+  /** Pins the reusable YouTube stream a go-live broadcast is bound to. Absent means the
+   *  stream whose key this destination already publishes with. Never a key. */
+  streamId?: string;
+  /** True turns off the broadcast polyemesis creates at go-live ("use YouTube Studio's Stream now
+   *  instead"). Absent is the default: polyemesis creates and drives its own. */
+  studioStreamNow?: boolean;
+  /** An existing YouTube event (broadcast id) to use at go-live instead of creating one. */
+  eventId?: string;
+  /** The operator's confirmation to move the picked event off a different, idle stream. */
+  rebindEvent?: boolean;
+  /** Applied when polyemesis creates the broadcast (or a scheduled show). */
+  description?: string;
+  /** A YouTube category name, applied to the broadcast polyemesis creates. */
+  category?: string;
+  /** Makes the broadcast 360-degree. */
+  projection360?: boolean;
+}
+
+/** One upcoming or active event of the connected channel, as GET /platforms/accounts/{id}/youtube/events
+ *  lists it. No key or ingest address: the server never sends one. */
+export interface YouTubeEventRow {
+  id: string;
+  title: string;
+  scheduledStart?: string;
+  privacy?: string;
+  status: string;
+  enableAutoStart: boolean;
+  enableAutoStop: boolean;
+  boundStreamId?: string;
+  /** Whether the bound stream is receiving video. Absent when the event is bound to no stream. */
+  streamActive?: boolean;
+  /** True when the event is bound to the stream the queried destination publishes with. */
+  onThisStream?: boolean;
+}
+
+/** One reusable stream of the connected channel, as GET /platforms/accounts/{id}/youtube/streams
+ *  lists it. There is deliberately no key or ingest address field: the server never sends one. */
+export interface YouTubeStreamRow {
+  id: string;
+  title: string;
+  resolution?: string;
+  frameRate?: string;
+  streamStatus?: string;
+  health?: string;
+  /** True for the stream the queried destination publishes with or has pinned. */
+  current?: boolean;
+  /** The other destinations publishing to this stream. */
+  usedBy?: { id: number; name: string }[];
 }
 
 /** One Page a Facebook broadcast crossposts to at create time, and whether it
@@ -3255,6 +3303,14 @@ export interface BroadcastControl {
    *  after X ended the previous one while the destination stayed on. Cleared
    *  when the destination is switched off. */
   renewed?: boolean;
+  /** YouTube only: true when polyemesis itself created this broadcast at go-live, rather than it being
+   *  announced ahead or made in YouTube Studio. Only such a broadcast is renewed when it finishes. */
+  opened?: boolean;
+  /** YouTube only: with `opened`, true when polyemesis created the broadcast and false when it adopted a picked
+   *  event. Only a created broadcast that never aired is deleted on switch-off. */
+  created?: boolean;
+  /** YouTube only: when polyemesis began opening a broadcast, kept until the open is recorded (milliseconds). */
+  openAttemptMs?: number;
   /** What went wrong, in the operator's words, or absent when nothing has.
    *
    *  A fault here NEVER means the stream stopped: the server does not stop a

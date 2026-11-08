@@ -750,6 +750,7 @@ func (d Destination) Validate() error {
 
 	d.xGoLiveProblems(add)
 	d.xControlsProblems(add)
+	d.youtubeStreamProblems(add)
 
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
@@ -842,13 +843,42 @@ func (d Destination) xGoLiveProblems(add problemAdder) {
 		}
 	}
 
-	// The X go-live title: only X sends it, and X bounds it by its post length.
+	// The go-live title: X sends it with its PUBLISH, bounded by its post length, and a YouTube live-now broadcast
+	// is created with it, bounded by YouTube's title limit.
 	if d.GoLiveTitle != "" {
-		if d.Platform != PlatformX {
-			add("a go-live title is sent only to X; %s takes its title from the go-live composer", d.Platform)
-		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
+		n := utf8.RuneCountInString(d.GoLiveTitle)
+		switch {
+		case !TakesGoLiveTitle(d.Platform):
+			add("a go-live title is sent only to X and YouTube; %s takes its title from the go-live composer", d.Platform)
+		case d.Platform == PlatformX && n > XGoLiveTitleMax:
 			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
+		case d.Platform == PlatformYouTube && n > YouTubeGoLiveTitleMax:
+			add("the go-live title is %d characters and YouTube allows %d", n, YouTubeGoLiveTitleMax)
 		}
+	}
+}
+
+// YouTubeLiveNow reports whether polyemesis creates and drives the YouTube broadcast for this destination at
+// go-live: a YouTube RTMP destination linked to a connected account that has not been switched to Studio's
+// Stream now. A manual-key destination with no account is never touched.
+func (d *Destination) YouTubeLiveNow() bool {
+	if d == nil || d.Platform != PlatformYouTube || d.AccountID == nil || d.Kind != DestRTMP {
+		return false
+	}
+	return d.Compliance.YouTube == nil || !d.Compliance.YouTube.StudioStreamNow
+}
+
+// YouTubeGoLiveTitleMax is YouTube's limit on a broadcast title, in characters.
+const YouTubeGoLiveTitleMax = 100
+
+// TakesGoLiveTitle reports whether a platform sends a destination's go-live title: X on its PUBLISH, YouTube when
+// polyemesis creates the live-now broadcast.
+func TakesGoLiveTitle(p Platform) bool { return p == PlatformX || p == PlatformYouTube }
+
+// youtubeStreamProblems refuses a pinned YouTube stream on a destination that is not YouTube.
+func (d Destination) youtubeStreamProblems(add problemAdder) {
+	if d.Compliance.YouTube.OnlyForYouTube() && d.Platform != PlatformYouTube {
+		add("a pinned YouTube stream, event and broadcast fields are read only by YouTube; %s has no such settings", d.Platform)
 	}
 }
 

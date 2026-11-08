@@ -104,8 +104,8 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 	// structurally natural reading rather than a documented one. Indexing on
 	// that reading would panic on the day it is wrong.
 	if len(list.Items) == 0 {
-		return nil, fmt.Errorf("YouTube returned no broadcast with id %q; it may belong to another "+
-			"channel, or have been deleted", id)
+		return nil, fmt.Errorf("%w with id %q (YouTube returned none); it may belong to another "+
+			"channel, or have been deleted", ErrBroadcastNotListed, id)
 	}
 	b := list.Items[0]
 

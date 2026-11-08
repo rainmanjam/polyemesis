@@ -56,6 +56,11 @@ type livestreamGated interface {
 // It reads the provider this server resolves through, so a test's set and
 // production agree.
 func (s *Server) livestreamGate(platform db.Platform) string {
+	// X only. YouTube's provider answers LivestreamAccess too (oauth.BroadcastCreator requires it), always true,
+	// and it has no gate for the setup guide to report.
+	if platform != db.PlatformX {
+		return ""
+	}
 	p, err := s.providers.Get(platform)
 	if err != nil {
 		return ""
@@ -1132,6 +1137,7 @@ func firstBackup(b *oauth.Broadcast) (url, key string) {
 // Zero is live now, which is what every go-live passes.
 func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.IngestOptions {
 	return oauth.IngestOptions{
+		YouTubeEvent:    youTubeEventFields(dest),
 		Privacy:         dest.Compliance.FacebookPrivacy,
 		Crosspost:       dest.Facebook.Crosspost,
 		DonateCharityID: dest.Facebook.DonateCharityID,
@@ -1924,4 +1930,18 @@ func (s *Server) addBackupIngestAfterSave(ctx context.Context, saved *db.Destina
 func backupNotStoredWarning(err error) string {
 	return "Facebook added a redundant ingest to this broadcast, but it could not be saved: " +
 		redactErr(err) + ". The destination is otherwise saved and will go live on its primary feed."
+}
+
+// youTubeEventFields are the create-time fields a YouTube destination's stored settings give a scheduled show:
+// description, the made-for-kids declaration, latency, DVR and 360 projection. Empty for any other platform, and
+// for a YouTube destination that set none, so nothing changes for an existing setup.
+func youTubeEventFields(dest *db.Destination) oauth.EventFields {
+	if dest == nil || dest.Platform != db.PlatformYouTube {
+		return oauth.EventFields{}
+	}
+	f := oauth.EventFields{MadeForKids: dest.Compliance.MadeForKids}
+	if y := dest.Compliance.YouTube; y != nil {
+		f.Description, f.Latency, f.EnableDvr, f.Projection360 = y.Description, y.LatencyPreference, y.EnableDvr, y.Projection360
+	}
+	return f
 }

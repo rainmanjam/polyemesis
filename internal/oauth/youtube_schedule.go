@@ -297,14 +297,25 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 		"status": map[string]any{"privacyStatus": ytScheduledPrivacy},
 	}
 	parts := "snippet,status"
+	// The destination's create-time fields, sent only when set: a show created without any is created exactly
+	// as it always was. (A recurring show's template then sets its own title and description over these.)
+	ev := opts.YouTubeEvent
+	if d := strings.TrimSpace(ev.Description); d != "" {
+		payload["snippet"].(map[string]any)["description"] = d
+	}
+	if ev.MadeForKids != nil {
+		payload["status"].(map[string]any)["selfDeclaredMadeForKids"] = *ev.MadeForKids
+	}
+	details := ev.contentDetails()
 	if opts.CaptionPOST {
-		payload["contentDetails"] = map[string]any{
-			"closedCaptionsType": ytClosedCaptionsHTTPPost,
-			"monitorStream": map[string]any{
-				"enableMonitorStream":    true,
-				"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
-			},
+		details["closedCaptionsType"] = ytClosedCaptionsHTTPPost
+		details["monitorStream"] = map[string]any{
+			"enableMonitorStream":    true,
+			"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
 		}
+	}
+	if len(details) > 0 {
+		payload["contentDetails"] = details
 		parts += ",contentDetails"
 	}
 	// requestJSON, NOT postJSON, AND THE ADVICE BELOW DEPENDS ON IT. postJSON
@@ -458,7 +469,11 @@ func (y *YouTube) RescheduleBroadcast(ctx context.Context, accessToken, broadcas
 
 // errBroadcastNotListed is what broadcastByID returns when the list has no match. Its text is the start of
 // that refusal, so a caller that tests for it reads the same words an operator would.
-var errBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
+var errBroadcastNotListed = ErrBroadcastNotListed
+
+// ErrBroadcastNotListed is the typed "this broadcast is gone" answer: YouTube lists no broadcast with the id (deleted
+// in Studio or by polyemesis, or it belongs to another channel). A caller that is cleaning up treats it as done.
+var ErrBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
 
 // broadcastByID reads one broadcast, with every part a write has to carry back.
 func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID string) (*ytBroadcast, error) {
@@ -538,14 +553,17 @@ func ytBroadcastCreateAdvice(err error) error {
 	return err
 }
 
-// deleteBroadcast removes a broadcast this package created and could not
-// finish setting up.
+// deleteBroadcast removes a broadcast polyemesis ITSELF created.
 //
-// ONLY EVER CALLED ON A BROADCAST CREATED SECONDS EARLIER IN THE SAME
-// FUNCTION, and that constraint is what makes it safe to have at all. A
-// general "delete a YouTube broadcast" helper on this provider would be a
-// loaded gun: nothing else in polyemesis should be able to remove an
-// operator's event page, and there is no caller that should want to.
+// THIS WAS "ONLY EVER CALLED ON A BROADCAST CREATED SECONDS EARLIER IN THE SAME FUNCTION", and the rule has been
+// widened on purpose, to exactly three callers, each of which holds proof the broadcast is polyemesis's own:
+//   - IngestFor and OpenLiveNow, for a broadcast they inserted a moment ago and could not bind;
+//   - DeleteUnairedBroadcast, for a live-now broadcast the coordinator recorded as CREATED by polyemesis
+//     (BroadcastControl.Created) that is still created or ready, because a never-aired Public event with auto-start
+//     on, bound to the destination's stream, would otherwise air on any later video sent to that key.
+//
+// A broadcast the operator made, or picked from their list, is never passed here: that origin is recorded
+// separately and DeleteUnairedBroadcast refuses a status that is not created or ready.
 //
 // A 404 is success. The broadcast not being there is the state this is trying
 // to reach, and treating "already gone" as a failure would turn a clean

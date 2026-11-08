@@ -1033,9 +1033,14 @@ func New(o Options) *Server {
 		// broadcast at once rather than after its poll.
 		s.lifecycle.goLiveTitle = s.xGoLiveTitle
 		s.lifecycle.pointChat = s.setXBroadcast
+		// YouTube: the liveChatId of the broadcast polyemesis opens, and the install's allowance for the open.
+		s.lifecycle.pointYouTubeChat = s.setYouTubeLiveChat
+		s.lifecycle.quotaAfford = func(cost int) bool { return s.ytQuota().Afford(cost) }
+		s.lifecycle.quotaPause = func() { s.ytQuota().Pause() }
 		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.
+		s.lifecycle.delivering = s.destinationDelivering
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
 	cs := db.DefaultSettings().Chat
@@ -1761,6 +1766,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			api.Get(r, "/platforms/accounts/{id}/stats", s.handleAccountStats, readDenied)
+			// The account's reusable YouTube streams, for the destination dialog's stream picker. It calls
+			// YouTube, so a read token is denied; it never carries a stream key or ingest address.
+			api.Get(r, "/platforms/accounts/{id}/youtube/streams", s.handleYouTubeStreams, readDenied)
+			// The account's upcoming and active YouTube events, and the one click that turns an event's
+			// auto-start on. Both call YouTube; neither carries a key.
+			api.Get(r, "/platforms/accounts/{id}/youtube/events", s.handleYouTubeEvents, readDenied)
+			api.Post(r, "/platforms/accounts/{id}/youtube/events/{eventId}/auto-start", s.handleYouTubeEventAutoStart, readDenied)
 			// Cross-platform analytics (Wave 4 #4): the live audience picture
 			// and the per-stream reports. Reads of what the sampler stored --
 			// none calls a platform -- and every one is denied to a read

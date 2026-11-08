@@ -1,3 +1,4 @@
+import { YouTubeLiveNowPanel } from "@/components/YouTubeLiveNowPanel";
 import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
 import { settingsHref } from "@/lib/settingsSearch";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1247,7 +1248,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // delivering destination is refused by the server with a 409.
         captionMode: captionModeToSend(kind, platform, captionMode),
         // Only X sends a go-live title; every other platform clears it, as the server would.
-        goLiveTitle: platform === "x" ? goLiveTitle : "",
+        goLiveTitle: platform === "x" || platform === "youtube" ? goLiveTitle : "",
         // Only X reads the announcement setting; any other platform clears it,
         // as the server would.
         xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
@@ -2263,6 +2264,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           <StepPanel n={4} step={step}>
           {platform === "youtube" && editing && destination && (
             <YouTubeVerticalPanel destinationId={destination.id} />
+          )}
+          {platform === "youtube" && accountId !== "none" && (
+            <YouTubeLiveNowPanel
+              accountId={Number(accountId)}
+              destinationId={destination?.id}
+              controls={compliance.youtube}
+              onChange={(patch) => setCompliance(withYouTubeControl(compliance, patch))}
+              title={goLiveTitle}
+              onTitleChange={setGoLiveTitle}
+            />
           )}
           {platform === "x" && (
             <XConsolePanel

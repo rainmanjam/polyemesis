@@ -18,7 +18,7 @@ platform, and how to tell it worked.
 - [X](#x)
 - [Twitch](#twitch)
 - [Kick](#kick)
-- [YouTube (being verified)](#youtube-being-verified)
+- [YouTube](#youtube)
 - [Facebook (being verified)](#facebook-being-verified)
 - [Chat actions by platform](#chat-actions-by-platform)
 - [Alerts and chat export](#alerts-and-chat-export)
@@ -231,9 +231,11 @@ off are not redelivered.
 
 ---
 
-## YouTube (being verified)
+## YouTube
 
-This setup is being verified end to end on a live server. The steps follow
+Connecting is verified end to end on a live server. The go-live broadcast is
+checked after each deploy; see [YouTube go-live
+broadcasts](PLATFORMS.md#youtube-go-live-broadcasts). The steps follow
 Google's console and [PLATFORMS.md](PLATFORMS.md#youtube-google).
 
 1. In a [Google Cloud project](https://console.cloud.google.com/apis/credentials),

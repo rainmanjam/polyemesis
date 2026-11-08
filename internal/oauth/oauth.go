@@ -333,6 +333,9 @@ type IngestOptions struct {
 	// not ours to widen. It is enforced by the caller, which is the only layer
 	// that knows the occurrence; this struct carries whatever it is given.
 	ScheduledFor time.Time
+	// YouTubeEvent are the create-time fields (description, made-for-kids, latency, DVR, 360) a YouTube
+	// scheduled show is created with. Zero sends nothing extra, so an existing setup creates what it always did.
+	YouTubeEvent EventFields
 	// DedicatedIngest asks the platform for an ingest stream that belongs to
 	// THIS destination rather than the one the account already shares.
 	//

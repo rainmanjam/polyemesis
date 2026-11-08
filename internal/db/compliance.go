@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Compliance metadata: the fields that are not a nicety.
@@ -245,7 +246,44 @@ type YouTubeBroadcastControls struct {
 	// ClosedCaptionsType is closedCaptionsDisabled, closedCaptionsHttpPost or
 	// closedCaptionsEmbedded.
 	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+	// StreamID pins the YouTube liveStream a live-now broadcast is bound to. Empty means the stream whose key
+	// this destination already publishes with. It is NOT a toggle and is never pushed: it is excluded from Empty.
+	StreamID string `json:"streamId,omitempty"`
+	// StudioStreamNow turns off the broadcast polyemesis creates at go-live ("Use YouTube Studio's Stream now
+	// instead"): the destination then publishes to its key and YouTube's own Stream now makes the broadcast. The
+	// zero value is the default, polyemesis's own broadcast. Not a toggle and never pushed: excluded from Empty.
+	StudioStreamNow bool `json:"studioStreamNow,omitempty"`
+	// EventID is an existing YouTube broadcast ("event") the operator picked to use at go-live instead of a new one:
+	// polyemesis binds it to the destination's stream if it is not already, records it, and reads chat from it. It
+	// never reuses a finished event: once the event completes the destination falls back to creating broadcasts.
+	EventID string `json:"eventId,omitempty"`
+	// RebindEvent is the operator's confirmation that a picked event bound to a DIFFERENT, idle stream may be moved
+	// to this destination's stream. An event whose bound stream is active is never rebound.
+	RebindEvent bool `json:"rebindEvent,omitempty"`
+	// Description, Category and Projection360 are applied when polyemesis creates a go-live broadcast, and to a
+	// scheduled show it creates (never to a picked event, whose own settings are left as they are). Category is a
+	// YouTube category name, applied to the video after the create; Projection360 makes a 360-degree broadcast.
+	// Latency, DVR and the made-for-kids declaration use the controls above and Compliance.MadeForKids.
+	Description   string `json:"description,omitempty"`
+	Category      string `json:"category,omitempty"`
+	Projection360 bool   `json:"projection360,omitempty"`
 }
+
+// YouTubeDescriptionMax and YouTubeCategoryMax bound the free-text create fields: YouTube's description limit
+// is 5000 bytes, and a category name is a short label.
+const (
+	YouTubeDescriptionMax = 5000
+	YouTubeCategoryMax    = 60
+)
+
+// OnlyForYouTube reports whether any YouTube-only setting is present.
+func (c *YouTubeBroadcastControls) OnlyForYouTube() bool {
+	return c != nil && (c.StreamID != "" || c.StudioStreamNow || c.EventID != "" || c.RebindEvent ||
+		c.Description != "" || c.Category != "" || c.Projection360)
+}
+
+// ytStreamIDPattern is the shape of a liveStream id: URL-safe characters, with dots, dashes and underscores.
+var ytStreamIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // Empty reports whether there is nothing to push.
 func (c *YouTubeBroadcastControls) Empty() bool {
@@ -259,6 +297,18 @@ func (c *YouTubeBroadcastControls) Problems() []string {
 		return nil
 	}
 	var probs []string
+	if c.StreamID != "" && !ytStreamIDPattern.MatchString(c.StreamID) {
+		probs = append(probs, "the pinned YouTube stream id is not a stream id; pick the stream from the list")
+	}
+	if c.EventID != "" && !ytStreamIDPattern.MatchString(c.EventID) {
+		probs = append(probs, "the YouTube event id is not a broadcast id; pick the event from the list")
+	}
+	if n := len(c.Description); n > YouTubeDescriptionMax {
+		probs = append(probs, fmt.Sprintf("the YouTube broadcast description is %d bytes and YouTube allows %d", n, YouTubeDescriptionMax))
+	}
+	if n := utf8.RuneCountInString(c.Category); n > YouTubeCategoryMax {
+		probs = append(probs, fmt.Sprintf("the YouTube category name is %d characters; use the category's name from YouTube", n))
+	}
 	switch c.LatencyPreference {
 	case "", YTLatencyNormal, YTLatencyLow, YTLatencyUltraLow:
 	default:

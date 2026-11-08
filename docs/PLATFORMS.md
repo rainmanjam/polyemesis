@@ -552,6 +552,96 @@ review to do that: verification is what Google asks for before *other people*
 can grant it access. A self-hosted install with one operator is the case that
 does not need it.
 
+### YouTube go-live broadcasts
+
+A YouTube destination linked to a connected account has its own broadcast made
+for it when it goes live, so the broadcast polyemesis ends, renews and reads
+chat from is its own and not whichever one YouTube Studio's *Stream now* makes.
+This is on by default. Turn it off per destination with **Use YouTube Studio's
+Stream now instead**; a destination with a pasted stream key and no connected
+account is never touched.
+
+What happens, in order, when the destination is switched on:
+
+1. polyemesis lists the channel's reusable streams (one quota unit) and finds
+   the one that holds the destination's **stored key**, or the stream you picked
+   in the dialog. **It never creates a stream and never changes a key.** A key
+   the channel does not list is a fault on the destination card, because the
+   encoder holds that key.
+2. It checks that the stream has no broadcast already live (one unit). If it
+   has, for example one you started in Studio, polyemesis leaves it alone and
+   says so on the card, quietly, with no alert. Switching the destination off
+   and on checks again. This is also what a destination that was already on air
+   when you upgraded looks like.
+3. When an earlier attempt stamped a marker just before its create (the answer was
+   lost, or the daemon stopped mid-open; markers are believed for twelve minutes)
+   it looks for the broadcast that attempt made (one
+   unit) and reuses it rather than making another; nothing is ever adopted
+   without that marker, so an event you made yourself is never taken. Otherwise
+   it creates the broadcast (one unit) and bind it to the
+   stream (one unit):
+   **auto-start on, auto-stop off**, visibility **Public** unless the
+   destination's visibility says otherwise, and the **go-live title** (or the
+   recurring show's title, or the destination's name). YouTube allows a title of
+   up to 100 characters. Four units in all (five on a retry), charged to the shared daily
+   allowance. If the record of the new broadcast cannot be written, it is deleted
+   rather than left behind.
+4. Video reaches the stream and YouTube takes the broadcast live by itself.
+   Chat reads from this broadcast's own live chat.
+
+Auto-stop is off so that a reconnect gap never ends the broadcast.
+**polyemesis ends it when you switch the destination off**, and when the
+broadcast it made finishes while the destination is still on (you ended it in
+Studio) it makes the next one. A scheduled show that has finished does not stand
+in the way of a later ad-hoc go-live, which opens a live-now broadcast; a
+scheduled show that goes live and then ends while the destination stays on is
+still a fault, as before.
+
+**A broadcast polyemesis created that never aired is deleted** when you switch
+the destination off or switch it to Studio's *Stream now* (one unit): left
+alone it would be a Public event, auto-start on, bound to your stream, that
+could air on any later video sent to that key. A broadcast that went live is
+never deleted, and **an event you picked is never deleted**. A broadcast waiting
+for video, whether polyemesis created it or you picked it, is checked every ten
+minutes or so rather than every fifteen seconds while no video is flowing, and
+every sweep from the moment video starts until it is live.
+
+A failure never stops the stream: a refused create, a spent quota (retried when
+the allowance resets, without using up the retry budget) and an already-live
+broadcast are all faults or holds on the destination.
+
+**Concurrency.** YouTube allows only a few live broadcasts on one stream key.
+The stream picker lists your channel's reusable streams (never their keys) and
+warns when another destination already uses the one you pick. One chat adapter
+serves a channel, so with two destinations on one channel the chat that is read
+is the one opened last.
+
+**Use an existing YouTube event.** Instead of creating a broadcast, a destination
+can use an upcoming or active event you already made (**Use an existing YouTube
+event** in the dialog). At go-live polyemesis binds the event to the
+destination's stream if it is not already, records it, reads chat from it and
+creates nothing. An event bound to a different stream is moved only after you
+confirm it in the dialog, and never while that other stream is receiving video.
+A finished event is never reused: once it ends, the destination creates
+broadcasts again. The picker lists the event's own settings and changes none of
+them: if auto-start is off the dialog says the event will not go live by itself
+and that polyemesis will move it to live once video is flowing, and offers one
+button, **Turn auto-start on for this event**, that changes it only when you
+click it. If auto-stop is off, polyemesis ends the event when you switch the
+destination off.
+
+**What a created broadcast carries.** The title, a description, a category (a
+YouTube category name, applied to the video after the create, about 52 quota
+units), whether it is made for kids (stated explicitly, and *not made for kids*
+unless you declare otherwise in the YouTube controls), latency, DVR and a 360
+projection switch. These also apply to a scheduled show polyemesis creates, from
+the destination's settings; a recurring show's template then sets its own title
+and description. Not yet confirmed against a live channel: whether YouTube
+honours latency on a create (the same read-back caveat the update path has).
+
+If Studio's *Stream now* still creates a second broadcast beside polyemesis's,
+turn *Stream now* off in Studio, or switch the destination to use it.
+
 ### What YouTube chat costs
 
 Unlike every other platform here, YouTube chat is **metered**. Twitch is an IRC

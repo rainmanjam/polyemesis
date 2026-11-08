@@ -8,7 +8,39 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **YouTube go-live broadcasts.** A YouTube destination linked to a connected account now gets its own
+  broadcast when it goes live (auto-start on, auto-stop off, Public unless the destination says otherwise,
+  titled from the go-live title), bound to the stream that holds its stored key. polyemesis ends it when the
+  destination is switched off, makes the next one if it finishes while the destination is still on, and reads
+  chat from it. It never creates a stream or changes a key, and leaves a stream that already has a live
+  broadcast alone. Turn it off per destination with "Use YouTube Studio's Stream now instead". Stored in
+  `compliance.youtube` (`streamId`, `studioStreamNow`) and `lifecycle.opened`; no schema change.
+- A broadcast polyemesis created that never aired is deleted when the destination is switched off or switched to
+  Studio's Stream now (never an adopted event); the open reuses its own earlier unrecorded broadcast and deletes one it
+  could not record; a broadcast waiting for video is read every ten minutes instead of every fifteen seconds
+  (`lifecycle.created` records the origin).
+- **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
+  reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
+  ingest address; the destination dialog stores an optional pinned stream.
+- **Use an existing YouTube event.** A destination can use an upcoming or active event instead of creating a
+  broadcast (`compliance.youtube.eventId`): polyemesis binds it to the destination's stream (moving it off a
+  different idle stream only on confirmation, never off an active one), uses its chat and never reuses a finished
+  event. `GET /api/v1/platforms/accounts/{id}/youtube/events` lists events (never keys) with their auto-start and
+  auto-stop flags; an event with auto-start off is taken live by polyemesis, and
+  `POST /api/v1/platforms/accounts/{id}/youtube/events/{eventId}/auto-start` is the operator's one click to turn
+  auto-start on.
+- **YouTube create fields.** Description, category, made-for-kids (explicit, default not for kids), latency, DVR and
+  a 360 switch apply when polyemesis creates a go-live broadcast or a scheduled show
+  (`compliance.youtube.description`, `category`, `projection360`).
+- **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
+
 ### Fixed
+
+- `PUT /api/v1/destinations/{id}` with a `goLiveTitle` on a platform that never sends one answered 200 and
+  stored nothing; it now answers 400. (A title carried over by a platform switch is still cleared with a
+  warning.)
 
 - **An account-linked Facebook destination can be stopped and started again without pressing "Refresh
   stream key".** A Facebook stream key is valid for one live video, so after a stop the saved key

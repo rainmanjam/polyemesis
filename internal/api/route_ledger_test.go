@@ -600,9 +600,11 @@ var excusedRoutes = map[string]coverageExcus{
 
 	// ---- denied to read tokens outright; the 403 is DRIVEN, not asserted from
 	// the middleware's source.
-	"GET /api/v1/destinations/{id}/expert":          sessionOnly(), // poka-yoke audit 2026-11-04: all five expert routes are session-only
-	"GET /api/v1/clipper/recordings/{id}/keyframes": denied(),
-	"GET /api/v1/platforms/accounts/{id}/stats":     denied(),
+	"GET /api/v1/destinations/{id}/expert":                sessionOnly(), // poka-yoke audit 2026-11-04: all five expert routes are session-only
+	"GET /api/v1/clipper/recordings/{id}/keyframes":       denied(),
+	"GET /api/v1/platforms/accounts/{id}/stats":           denied(),
+	"GET /api/v1/platforms/accounts/{id}/youtube/streams": deniedWithCounterpart("youtubeStreams"),
+	"GET /api/v1/platforms/accounts/{id}/youtube/events":  deniedWithCounterpart("youtubeEvents"),
 	// Same reason as the stats route above it, and the reason is the outbound
 	// call rather than the bytes: reaching this spends the operator's Graph
 	// budget on somebody holding a read token.
@@ -1310,6 +1312,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"overlayDisplayStream":                  proveOverlayDisplayStream,
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
+	"youtubeStreams":                        proveYouTubeStreams,
+	"youtubeEvents":                         proveYouTubeEvents,
 	"chatFlags":                             proveChatFlags,
 	"viewerNotes":                           proveViewerNotes,
 	"chatExport":                            proveChatExport,
