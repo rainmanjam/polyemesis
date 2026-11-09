@@ -103,6 +103,15 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 		w.wait = in.wait
 	}
 	delivering, enabled, targets := lossDestinations(in.dests)
+	if enabled == 0 {
+		// Nothing of this programme is switched on any more: stopped by hand or
+		// deleted. Nothing to guard until something delivers again, and this holds
+		// while the ingest is live too: a later destination that never delivers
+		// must not inherit an arming from before. Merely not carrying (backoff,
+		// reconnecting) is NOT this: see the header.
+		w.reset()
+		return nil, 0, false
+	}
 	if in.primaryLive || in.backupLive {
 		// Arriving: any loss clock is cancelled, whatever it had counted.
 		w.lostSince = time.Time{}
@@ -114,10 +123,11 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 	if !w.armed {
 		return nil, 0, false
 	}
-	if enabled == 0 {
-		// Nothing of this programme is switched on any more: stopped by hand or
-		// deleted. Nothing to guard until something delivers again. Merely not
-		// carrying (backoff, reconnecting) is NOT this: see the header.
+	if len(targets) == 0 {
+		// Enabled destinations exist but every one has failed for good: there is
+		// nothing the stop could do, and nothing is carrying. Disarm, so an
+		// operator restarting one of them hours later, with the ingest still
+		// gone, is not stopped before it has carried a byte.
 		w.reset()
 		return nil, 0, false
 	}
@@ -125,12 +135,6 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 		w.lostSince = now
 	}
 	if now.Sub(w.lostSince) < in.wait {
-		return nil, 0, false
-	}
-	if len(targets) == 0 {
-		// Enabled destinations exist but every one has failed for good: there is
-		// nothing the stop could do, and the clock keeps counting for the ones
-		// that may come back.
 		return nil, 0, false
 	}
 	lostFor = now.Sub(w.lostSince)
@@ -176,19 +180,26 @@ func (e *Engine) autoStopWanted() bool {
 	return e.settings.Ingest.AutoStop.Armed() && e.ingestLoss != nil
 }
 
-// IngestArriving reports whether the primary or the backup ingest was arriving
-// at the last observe sweep (at most one sweep old). The host re-checks it just
-// before stopping, because the stop may have queued behind slow work.
+// IngestArriving reports whether the primary or the backup ingest is arriving
+// now: it was at the last observe sweep, or the hub's byte counter has moved
+// since that sweep (so the answer is never up to a sweep stale in the
+// direction that would stop a programme whose encoder has just returned). The
+// host re-checks it just before stopping, because the stop may have queued
+// behind slow work.
 func (e *Engine) IngestArriving() bool {
 	if e == nil {
 		return false
 	}
-	return e.lossLive.Load()
+	if e.lossLive.Load() {
+		return true
+	}
+	return e.hub != nil && e.hub.RxBytes() > e.lossRx.Load()
 }
 
-// pullReconnectSeconds is how long a pull source may legitimately wait between
-// attempts, 0 for any other ingest.
-func pullReconnectSeconds(ing db.IngestSettings) int {
+// PullReconnectSeconds is how long a pull source may legitimately wait between
+// attempts, 0 for any other ingest. The API reports the effective wait with the
+// same input the engine applies.
+func PullReconnectSeconds(ing db.IngestSettings) int {
 	if ing.Mode != db.IngestPull {
 		return 0
 	}
@@ -213,7 +224,7 @@ func (e *Engine) sweepIngestLossWith(now time.Time, primaryLive bool, dests func
 	if e.settings.Failover.Enabled {
 		fg = e.settings.Failover.GraceSeconds
 	}
-	pull := pullReconnectSeconds(e.settings.Ingest)
+	pull := PullReconnectSeconds(e.settings.Ingest)
 	h := e.ingestLoss
 	configured := ingestConfigured(e.ingest != nil, e.settings.Ingest.Mode, !e.sourceDisabled)
 	e.mu.RUnlock()

@@ -10,18 +10,22 @@ import { api } from "@/lib/api";
 import { WIRE } from "@/lib/contract/wire";
 import { useT } from "@/lib/i18n";
 import { LIMITS } from "@/lib/limits";
-import type { AutoStopSettings, Source } from "@/lib/types";
+import type { AutoStopInfo, AutoStopSettings, Source } from "@/lib/types";
 
 /** Stop on ingest loss: one programme's safety net that stops its live
  *  destinations when neither the primary nor the backup ingest has delivered for
  *  the wait. Off by default.
  *
- *  It saves on its own button, to the source, and always sends the WHOLE object:
- *  the source PUT merges over the stored row and the server wants the request
- *  itself to carry `acknowledged: true` whenever it newly turns this on. The
- *  acknowledgement is its own consent (the warning is the one Stop all gives) and
- *  is not the OBS bridge's stopAcknowledged. The server is the authority; the
- *  form mirrors its rules so the operator is not told a round trip later. */
+ *  It saves on its own button, to the source, and sends ONLY WHAT THIS EDIT
+ *  CHANGED, with the version it read: the source PUT merges over the stored row,
+ *  so a control left open on an old state must not re-send that state (it would
+ *  turn back on what another panel turned off), and `acknowledged` goes only
+ *  when the box was ticked in THIS edit session, never because the value it
+ *  loaded had it. The server refuses a changing write whose version is not the
+ *  stored one (409) and a turn-on that carries none. The acknowledgement is its
+ *  own consent (the warning is the one Stop all gives) and is not the OBS
+ *  bridge's stopAcknowledged. The server is the authority; the form mirrors its
+ *  rules so the operator is not told a round trip later. */
 
 const DEFAULT_WAIT = WIRE.defaults.autoStopWaitSeconds;
 
@@ -35,20 +39,29 @@ export function parseWait(raw: string): { ok: true; seconds: number } | { ok: fa
   return n >= min && n <= max ? { ok: true, seconds: n } : { ok: false };
 }
 
+/** An acknowledgement belongs to an enabled setting; a leftover on an off one
+ *  is not consent for anything. */
+const ackOf = (v: AutoStopSettings | undefined) => (v?.enabled ?? false) && (v?.acknowledged ?? false);
+
 const waitText = (v: AutoStopSettings | undefined) =>
   v?.waitSeconds ? String(v.waitSeconds) : "";
 
 export function AutoStopControl({
   sourceId,
   value,
+  info,
   onSaved,
   idPrefix = "autostop",
 }: Readonly<{
   sourceId: number;
   /** The source's stored ingest.autoStop; absent means off. */
   value: AutoStopSettings | undefined;
-  /** Called with what was saved, so the caller's copy of the source follows. */
-  onSaved?: (next: AutoStopSettings) => void;
+  /** The source's autoStopInfo: the version a changing write must send, and
+   *  the wait the engine really applies. */
+  info?: AutoStopInfo;
+  /** Called with what was saved and the server's fresh info, so the caller's
+   *  copy of the source follows. */
+  onSaved?: (next: AutoStopSettings, info?: AutoStopInfo) => void;
   /** Distinguishes the controls when several programmes share a page. */
   idPrefix?: string;
 }>) {
@@ -57,7 +70,9 @@ export function AutoStopControl({
   const errId = useId();
   const [enabled, setEnabled] = useState(value?.enabled ?? false);
   const [wait, setWait] = useState(waitText(value));
-  const [ack, setAck] = useState(value?.acknowledged ?? false);
+  const [ack, setAck] = useState(ackOf(value));
+  // Ticked in THIS edit session. The stored acknowledgement never travels.
+  const [ackTicked, setAckTicked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,17 +80,33 @@ export function AutoStopControl({
   useEffect(() => {
     setEnabled(value?.enabled ?? false);
     setWait(waitText(value));
-    setAck(value?.acknowledged ?? false);
+    setAck(ackOf(value));
+    setAckTicked(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the stored value's content, not its identity
   }, [stored]);
 
   const parsed = parseWait(wait);
   const { min, max } = LIMITS.autoStopWaitSeconds;
-  const needsAck = enabled && !ack;
+  const enabling = enabled && !(value?.enabled ?? false);
+  // Turning it on needs the box ticked now; an already-on setting keeps the
+  // acknowledgement it was given.
+  const needsAck = enabling ? !ackTicked : enabled && !ack;
   const dirty =
     enabled !== (value?.enabled ?? false) ||
     wait !== waitText(value) ||
-    (enabled && ack !== (value?.acknowledged ?? false));
+    (enabled && ack !== ackOf(value));
+  // The wait the engine really applies, for the STORED setting: shown while the
+  // field is untouched, since an edited one has no server answer yet.
+  const effective =
+    info && value?.enabled && wait === waitText(value) ? (
+      <span className="text-sm text-muted-foreground" data-testid={`${idPrefix}-effective`}>
+        {info.raisedBy === "failover"
+          ? t("autostop.effectiveFailover", { seconds: info.effectiveWaitSeconds })
+          : info.raisedBy === "pull"
+            ? t("autostop.effectivePull", { seconds: info.effectiveWaitSeconds })
+            : t("autostop.effective", { seconds: info.effectiveWaitSeconds })}
+      </span>
+    ) : null;
   const canSave = dirty && parsed.ok && !needsAck && !saving;
 
   const save = async () => {
@@ -85,12 +116,18 @@ export function AutoStopControl({
       waitSeconds: parsed.seconds,
       acknowledged: enabled && ack,
     };
+    // Only what changed in this edit.
+    const patch: Partial<AutoStopSettings> = {};
+    if (enabled !== (value?.enabled ?? false)) patch.enabled = enabled;
+    if (parsed.seconds !== (value?.waitSeconds ?? 0)) patch.waitSeconds = parsed.seconds;
+    if (enabling && ackTicked) patch.acknowledged = true;
+    const body: Record<string, unknown> = { ingest: { autoStop: patch } };
+    if (info?.version) body.autoStopVersion = info.version;
     setSaving(true);
     setError(null);
     try {
-      // Only the autoStop block: the server merges it over the stored ingest.
-      await api.updateSource(sourceId as Source["id"], { ingest: { autoStop: next } } as unknown as Partial<Source>);
-      onSaved?.(next);
+      const saved = await api.updateSource(sourceId as Source["id"], body as unknown as Partial<Source>);
+      onSaved?.(next, saved?.autoStopInfo);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -108,7 +145,10 @@ export function AutoStopControl({
           aria-describedby={hintId}
           onCheckedChange={(on) => {
             setEnabled(on);
-            if (!on) setAck(false);
+            if (!on) {
+              setAck(false);
+              setAckTicked(false);
+            }
           }}
         />
       </div>
@@ -141,6 +181,7 @@ export function AutoStopControl({
             {t("autostop.waitInvalid", { min, max })}
           </span>
         )}
+        {effective}
       </div>
 
       {enabled && (
@@ -151,7 +192,10 @@ export function AutoStopControl({
               id={`${idPrefix}-ack`}
               checked={ack}
               aria-describedby={needsAck ? `${idPrefix}-ack-req` : undefined}
-              onCheckedChange={(v) => setAck(v === true)}
+              onCheckedChange={(v) => {
+                setAck(v === true);
+                setAckTicked(v === true);
+              }}
             />
             {t("autostop.ack")}
           </label>

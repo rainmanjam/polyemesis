@@ -10,6 +10,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,14 @@ import (
 // in the background so each line has something buffered.
 func delayServer(t *testing.T, n int) (s *Server, h http.Handler, sign func(*http.Request), ids []int64) {
 	t.Helper()
+	s, h, sign, ids, _ = delayServerFeed(t, n)
+	return s, h, sign, ids
+}
+
+// delayServerFeed is delayServer that also hands back the way to stop the
+// feed, so a test can make the ingest really go quiet (idempotent).
+func delayServerFeed(t *testing.T, n int) (s *Server, h http.Handler, sign func(*http.Request), ids []int64, stopFeed func()) {
+	t.Helper()
 	s, h, _, sign = engineServer(t, defaultTools(), Options{})
 	hub := s.mgr.Default().Hub()
 	stop := make(chan struct{})
@@ -43,7 +52,9 @@ func delayServer(t *testing.T, n int) (s *Server, h http.Handler, sign func(*htt
 			time.Sleep(2 * time.Millisecond)
 		}
 	}()
-	t.Cleanup(func() { close(stop); <-fed })
+	var once sync.Once
+	stopFeed = func() { once.Do(func() { close(stop); <-fed }) }
+	t.Cleanup(stopFeed)
 	src := onlySourceID(t, h, sign)
 	for i := range n {
 		create := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
@@ -75,7 +86,7 @@ func delayServer(t *testing.T, n int) (s *Server, h http.Handler, sign func(*htt
 	for _, id := range ids {
 		waitPhase(t, s, id, engine.DelayBuffering, 3*time.Minute)
 	}
-	return s, h, sign, ids
+	return s, h, sign, ids, stopFeed
 }
 
 func phaseOf(s *Server, id int64) string {

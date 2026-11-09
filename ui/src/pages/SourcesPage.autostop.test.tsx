@@ -128,7 +128,7 @@ describe("the Sources page and ingest.autoStop", () => {
     fireEvent.click(apply as HTMLElement);
     await waitFor(() => expect(api.updateSource).toHaveBeenCalled());
     expect(vi.mocked(api.updateSource).mock.calls[0][1]).toEqual({
-      ingest: { autoStop: { enabled: false, waitSeconds: 120, acknowledged: false } },
+      ingest: { autoStop: { enabled: false } },
     });
     // Let the save settle.
     await new Promise((r) => setTimeout(r, 50));

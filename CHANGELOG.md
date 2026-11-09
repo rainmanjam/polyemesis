@@ -23,7 +23,9 @@ its first tagged release.
   published as a new `ingest.autostopped` event ([EVENTS.md](docs/EVENTS.md)). If OBS stops and the ingest is lost at the
   same moment there is one stop and one `lastActions` entry. The ingest is re-checked when the stop runs, a destination in
   backoff does not disarm it, a pull source is never judged inside its reconnect delay, and switching it off withdraws
-  the acknowledgement on every write path (`PUT /settings` included). See [API.md](docs/API.md#stop-on-ingest-loss) and
+  the acknowledgement on every write path (`PUT /settings` included). A write that changes it is checked against the
+  version it read (`autoStopInfo.version` / `autoStopVersion`, `409` when stale, required to turn it on), and the control
+  shows the effective wait (`autoStopInfo.effectiveWaitSeconds`). See [API.md](docs/API.md#stop-on-ingest-loss) and
   [OBS-BRIDGE.md](docs/OBS-BRIDGE.md). **Rolling back to v0.16.0 is safe but drops the setting:** v0.16.0 reads the stored
   programme with a lenient decoder and ignores the new key, but its next save of that programme rewrites the row without
   it, so the fallback is off again after a roll-forward. A `PUT /sources/{id}` that sends `ingest.autoStop` to v0.16.0 is a

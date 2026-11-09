@@ -19,10 +19,13 @@ import (
 // Stop-on-ingest-loss, host half. NO REAL WAIT: the engine's clock is tested in
 // internal/engine; here the loss is handed over directly.
 
+// putAutoStop is a write by a caller that has just read the source, so it
+// carries the version of what it read (as every honest caller must).
 func putAutoStop(t *testing.T, o *obsRig, src int64, as map[string]any, want int) []byte {
 	t.Helper()
 	return send(t, o.h, o.sign, http.MethodPut, "/api/v1/sources/"+itoa(src),
-		map[string]any{"ingest": map[string]any{"autoStop": as}}, want)
+		map[string]any{"ingest": map[string]any{"autoStop": as},
+			"autoStopVersion": autoStopVersion(storedAutoStop(t, o, src))}, want)
 }
 
 func storedAutoStop(t *testing.T, o *obsRig, src int64) db.AutoStopSettings {
@@ -285,11 +288,22 @@ func TestOBSStopAndIngestLossAtTheSameMomentAreOneStopThroughTheRealPath(t *test
 // Mutation: pass true as cut in stopForIngestLoss. Observed to fail with
 // `phase "", want draining`.
 func TestIngestLossStopLetsABroadcastDelayTailPlayOut(t *testing.T) {
-	s, h, sign, ids := delayServer(t, 1)
+	s, h, sign, ids, stopFeed := delayServerFeed(t, 1)
 	id := ids[0]
 	src := onlySourceID(t, h, sign)
+	// A loss is a quiet ingest: stop the feed and let the engine's own sweep see
+	// it, because the stop re-checks the ingest when it runs.
+	stopFeed()
+	deadline := time.Now().Add(15 * time.Second)
+	for s.mgr.Engine(src).IngestArriving() {
+		if time.Now().After(deadline) {
+			t.Fatal("the engine never saw the ingest go quiet")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	send(t, h, sign, http.MethodPut, "/api/v1/sources/"+itoa(src),
-		map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": true, "acknowledged": true}}}, http.StatusOK)
+		map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": true, "acknowledged": true}},
+			"autoStopVersion": autoStopVersion(db.AutoStopSettings{})}, http.StatusOK)
 
 	res := s.stopForIngestLoss(context.Background(), engine.IngestLoss{
 		SourceID: src, Wait: 120 * time.Second, LostFor: 120 * time.Second, Destinations: []int64{id}})
@@ -432,5 +446,197 @@ func TestShutdownWaitsForAnOffWorkerIngestLossStop(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if !o.enabled(t, live) {
 		t.Error("a stop was started after shutdown")
+	}
+}
+
+func putAutoStopRaw(t *testing.T, o *obsRig, src int64, body map[string]any, want int) []byte {
+	t.Helper()
+	return send(t, o.h, o.sign, http.MethodPut, "/api/v1/sources/"+itoa(src), body, want)
+}
+
+func autoStopInfoOf(t *testing.T, o *obsRig, src int64) autoStopInfo {
+	t.Helper()
+	var v struct {
+		AutoStop autoStopInfo `json:"autoStopInfo"`
+	}
+	if err := json.Unmarshal(send(t, o.h, o.sign, http.MethodGet, "/api/v1/sources/"+itoa(src), nil, http.StatusOK), &v); err != nil {
+		t.Fatal(err)
+	}
+	return v.AutoStop
+}
+
+// A STALE CONTROL CANNOT RE-ENABLE WHAT ANOTHER PANEL TURNED OFF.
+//
+// The setting is on with the acknowledgement; one panel turns it off; a second
+// control, still open on the old state, sends enabled+acknowledged. Its
+// acknowledgement is perfectly valid, so only the version stops it. The same
+// for an old cached page that sends the whole ingest.
+//
+// Mutation: drop the autoStopStaleWrite call from handleUpdateSource. Observed
+// to fail with "a stale write re-enabled the setting" (status 200, want 409).
+func TestAStaleControlCannotReEnableStopOnIngestLoss(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	armFor(t, o, src)
+	stale := autoStopInfoOf(t, o, src).Version // what the second panel loaded
+
+	putAutoStop(t, o, src, map[string]any{"enabled": false}, http.StatusOK) // the first panel
+
+	body := putAutoStopRaw(t, o, src, map[string]any{
+		"ingest":          map[string]any{"autoStop": map[string]any{"enabled": true, "acknowledged": true, "waitSeconds": 200}},
+		"autoStopVersion": stale}, http.StatusConflict)
+	if !strings.Contains(string(body), "nothing was saved") {
+		t.Fatalf("the refusal does not say nothing was saved: %s", body)
+	}
+	if as := storedAutoStop(t, o, src); as.Enabled {
+		t.Fatalf("a stale write re-enabled the setting: %+v", as)
+	}
+	// A stale edit of only the wait is refused too, not applied to the new state.
+	putAutoStopRaw(t, o, src, map[string]any{
+		"ingest":          map[string]any{"autoStop": map[string]any{"waitSeconds": 300}},
+		"autoStopVersion": stale}, http.StatusConflict)
+	if as := storedAutoStop(t, o, src); as.WaitSeconds == 300 {
+		t.Fatalf("a stale write changed the wait: %+v", as)
+	}
+	// The current version is accepted.
+	putAutoStopRaw(t, o, src, map[string]any{
+		"ingest":          map[string]any{"autoStop": map[string]any{"enabled": true, "acknowledged": true}},
+		"autoStopVersion": autoStopInfoOf(t, o, src).Version}, http.StatusOK)
+	if as := storedAutoStop(t, o, src); !as.Enabled {
+		t.Fatalf("a current write was refused: %+v", as)
+	}
+}
+
+// TURNING IT ON NEEDS A VERSION AT ALL. An old cached SourcesPage sends the
+// whole ingest, which carries the autoStop it read earlier and no version;
+// that cannot be told from a script, so a write that turns the setting on
+// without one is refused (a script reads the source first). Turning it off and
+// editing the wait may omit it.
+//
+// Mutation: drop the `sent == nil` enabling branch of autoStopStaleWrite.
+// Observed to fail with status 200, want 400.
+func TestTurningStopOnIngestLossOnNeedsTheCurrentVersion(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	// An old page's whole-ingest save, acknowledged, no version.
+	var whole map[string]any
+	var view struct {
+		Ingest map[string]any `json:"ingest"`
+	}
+	if err := json.Unmarshal(send(t, o.h, o.sign, http.MethodGet, "/api/v1/sources/"+itoa(src), nil, http.StatusOK), &view); err != nil {
+		t.Fatal(err)
+	}
+	whole = view.Ingest
+	whole["autoStop"] = map[string]any{"enabled": true, "acknowledged": true}
+	body := putAutoStopRaw(t, o, src, map[string]any{"ingest": whole}, http.StatusBadRequest)
+	if !strings.Contains(string(body), "autoStopVersion") {
+		t.Fatalf("the refusal does not name what to send: %s", body)
+	}
+	if as := storedAutoStop(t, o, src); as.Enabled {
+		t.Fatalf("an unversioned write turned it on: %+v", as)
+	}
+	armFor(t, o, src)
+	// Off and wait edits without a version are fine: they cannot start a stop.
+	putAutoStopRaw(t, o, src, map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"waitSeconds": 240}}}, http.StatusOK)
+	putAutoStopRaw(t, o, src, map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": false}}}, http.StatusOK)
+	// A version that is not a string is a 400 in its own words.
+	putAutoStopRaw(t, o, src, map[string]any{"autoStopVersion": 7}, http.StatusBadRequest)
+}
+
+// THE SOURCE SAYS WHAT WAIT THE ENGINE WILL USE, from the same rule.
+//
+// Mutation: pass 0 as the failover grace in autoStopInfoFor. Observed to fail
+// with "effective wait 120, want 330".
+func TestASourceReportsTheEffectiveStopOnIngestLossWait(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	armFor(t, o, src) // waitSeconds 120
+	if got := autoStopInfoOf(t, o, src); got.EffectiveWaitSeconds != 120 || got.RaisedBy != "" || got.Version == "" {
+		t.Fatalf("plain: %+v", got)
+	}
+	if _, err := o.s.store.UpdateSettings(func(s *db.Settings) error {
+		s.Failover.Enabled = true
+		s.Failover.GraceSeconds = 300
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := autoStopInfoOf(t, o, src); got.EffectiveWaitSeconds != 330 || got.RaisedBy != db.AutoStopRaisedByFailover {
+		t.Fatalf("failover grace 300: %+v, want 330 raised by failover", got)
+	}
+	// A pull source: the reconnect delay, from the engine's own function.
+	pull := &db.Source{Ingest: db.IngestSettings{Mode: db.IngestPull, AutoStop: db.AutoStopSettings{Enabled: true, Acknowledged: true}}}
+	pull.Ingest.Pull.ReconnectDelayMaxSeconds = 3600
+	if got := autoStopInfoFor(pull, db.FailoverSettings{}); got.EffectiveWaitSeconds != 3630 || got.RaisedBy != db.AutoStopRaisedByPull {
+		t.Fatalf("pull: %+v, want 3630 raised by pull", got)
+	}
+}
+
+// The decision functions of the consent layers, each on its own: the stale
+// merge they exist for (a stored acknowledgement on a setting that is off) can
+// no longer be produced through the store, so a handler test cannot reach it.
+//
+// Mutations: drop `!prev.Enabled` from autoStopNewlyEnabledWithoutAck (row 3
+// then fails); make sentAutoStopAck read the wrong key (rows 1-2 fail).
+func TestAutoStopConsentDecisions(t *testing.T) {
+	on, off := db.AutoStopSettings{Enabled: true, Acknowledged: true}, db.AutoStopSettings{}
+	staleAck := db.AutoStopSettings{Acknowledged: true} // off, acknowledgement left over
+	for i, c := range []struct {
+		prev, next db.AutoStopSettings
+		sent       bool
+		want       bool
+	}{
+		{off, on, false, true},      // turned on by saying nothing
+		{off, on, true, false},      // turned on with the consent
+		{staleAck, on, false, true}, // the leftover acknowledgement does not count
+		{on, on, false, false},      // already on: an edit of something else
+		{on, off, false, false},     // turning off needs nothing
+		{off, off, false, false},    // untouched
+	} {
+		if got := autoStopNewlyEnabledWithoutAck(c.prev, c.next, c.sent); got != c.want {
+			t.Errorf("case %d: got %v, want %v", i, got, c.want)
+		}
+	}
+	for i, c := range []struct {
+		body string
+		want bool
+	}{
+		{`{"ingest":{"autoStop":{"acknowledged":true}}}`, true},
+		{`{"ingest":{"autoStop":{"acknowledged":false}}}`, false},
+		{`{"ingest":{"autoStop":{"enabled":true}}}`, false},
+		{`{"ingest":{}}`, false},
+		{`not json`, false},
+	} {
+		if got := sentAutoStopAck([]byte(c.body)); got != c.want {
+			t.Errorf("body %d: got %v, want %v", i, got, c.want)
+		}
+	}
+}
+
+// THE RE-CHECK ASKS THE ENGINE THAT SERVES THE PROGRAMME NOW. The engine that
+// decided (bound in Arriving) may have been rebuilt since and answers for a hub
+// that is gone; the one serving the programme now has the ingest arriving.
+//
+// Mutation: drop s.currentIngestArriving from the check in stopForIngestLoss.
+// Observed to fail with "the destination was stopped although the rebuilt
+// engine had the ingest arriving".
+func TestAnIngestLossStopChecksTheEngineNowServingTheProgramme(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	live := o.createDest(t, "live")
+	armFor(t, o, src)
+	o.enable(t, live)
+	eng := o.s.mgr.Engine(src)
+	if eng == nil {
+		t.Fatal("no engine for the programme")
+	}
+	eng.Hub().Deliver(make([]byte, 1316)) // the ingest arrives at the engine now serving it
+
+	staleEngine := func() bool { return false } // the engine that decided, as it was
+	res := o.s.stopForIngestLoss(context.Background(), engine.IngestLoss{
+		SourceID: src, Wait: 120 * time.Second, LostFor: 120 * time.Second,
+		Destinations: []int64{live}, Arriving: staleEngine})
+	if acted(res) || !o.enabled(t, live) {
+		t.Fatalf("the destination was stopped although the rebuilt engine had the ingest arriving: %+v", res)
 	}
 }

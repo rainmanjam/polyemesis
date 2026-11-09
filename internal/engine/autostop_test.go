@@ -521,3 +521,107 @@ func TestTheObserveTickDrivesTheFallbackWithOneStatusPerSweep(t *testing.T) {
 		t.Errorf("%d extra status snapshots taken outside the sweep's one", n)
 	}
 }
+
+// FINDING 1a: EVERY DESTINATION FAILED FOR GOOD DISARMS THE WATCH.
+//
+// Armed, the ingest dies, and every destination ends terminally failed. Hours
+// later an operator restarts one of them with the ingest still gone: it must
+// not be stopped on the next sweep, before it has carried a byte.
+//
+// Mutation: drop the `len(targets) == 0` reset in step (the clock then keeps
+// running and the restarted destination fires at once). Observed to fail with
+// "a restarted destination was stopped before it carried a byte".
+func TestAutoStopDoesNotFireOnARestartAfterEveryDestinationFailed(t *testing.T) {
+	failed := func(id int64) DestStatus {
+		return DestStatus{ID: id, Enabled: true, Process: &supervisor.Status{State: supervisor.StateFailed}}
+	}
+	var w lossWatch
+	w.step(lossT0, lossIn(true, false, lossDelivering(1), lossDelivering(2)))
+	// The ingest dies and, within the wait, every destination fails for good.
+	at := lossT0.Add(2 * time.Second)
+	w.step(at, lossIn(false, false, failed(1), failed(2)))
+	// Hours pass with all of them failed.
+	if f, _ := lossRun(&w, at.Add(2*time.Second), 6*time.Hour, lossIn(false, false, failed(1), failed(2))); !f.IsZero() {
+		t.Fatalf("fired with nothing left to stop, +%v", f.Sub(lossT0))
+	}
+	// The operator restarts one; the ingest is still gone.
+	if f, _ := lossRun(&w, lossT0.Add(7*time.Hour), time.Hour, lossIn(false, false, startingNoData(1), failed(2))); !f.IsZero() {
+		t.Fatal("a restarted destination was stopped before it carried a byte")
+	}
+}
+
+// FINDING 1b: STOPPING EVERY DESTINATION WHILE THE INGEST IS LIVE DISARMS TOO.
+//
+// The arriving branch used to return before the nothing-enabled reset, so the
+// arming survived a stop-all done with the encoder still sending, and
+// destinations started later that never delivered were stopped when the ingest
+// then dropped.
+//
+// Mutation: move the `enabled == 0` reset back below the arriving branch.
+// Observed to fail with "destinations that never delivered were stopped".
+func TestAutoStopDisarmsWhenEveryDestinationIsStoppedWhileTheIngestIsLive(t *testing.T) {
+	var w lossWatch
+	w.step(lossT0, lossIn(true, false, lossDelivering(1)))
+	w.step(lossT0.Add(2*time.Second), lossIn(true, false)) // stop-all, encoder still sending
+	w.step(lossT0.Add(4*time.Second), lossIn(true, false, startingNoData(1)))
+	if f, _ := lossRun(&w, lossT0.Add(6*time.Second), time.Hour, lossIn(false, false, startingNoData(1))); !f.IsZero() {
+		t.Fatal("destinations that never delivered were stopped")
+	}
+}
+
+// FINDING 3: THE BACKUP HALF, AT SWEEP LEVEL. The primary is down but the
+// backup ingest is arriving (Failover().BackupLive): that is a failover, not a
+// loss. Nothing is stopped however long it lasts, and IngestArriving says so.
+//
+// Mutations: pass `backupLive: false` into lossInputs in sweepIngestLossWith
+// (observed to fail with "the fallback stopped a programme whose backup was
+// arriving"); store `lossLive` from primaryLive alone (observed to fail with
+// "IngestArriving ignored the backup").
+func TestAutoStopIgnoresABackupThatIsArrivingAtSweepLevel(t *testing.T) {
+	e, rec := armedEngine(t, db.AutoStopSettings{Enabled: true, Acknowledged: true, WaitSeconds: 90})
+	e.mu.Lock()
+	e.settings.Failover.Enabled = true
+	e.settings.Failover.GraceSeconds = 10 // far below the 30 minutes swept, and the backup is alive for these 10s of real time
+	e.settings.Failover.Backup.Enabled = true
+	e.sel = &selector{live: map[sourceKind]*liveness{
+		sourcePrimary: {},
+		sourceBackup:  {rx: 1, at: time.Now(), since: time.Now()},
+	}}
+	e.mu.Unlock()
+	if fo := e.Failover(); fo == nil || !fo.BackupLive {
+		t.Fatalf("test setup: backup not live: %+v", fo)
+	}
+	e.sweepIngestLoss(lossT0, true)
+	lossSweep(e, lossT0.Add(2*time.Second), 30*time.Minute, false)
+	if rec.n() != 0 {
+		t.Fatal("the fallback stopped a programme whose backup was arriving")
+	}
+	if !e.IngestArriving() {
+		t.Fatal("IngestArriving ignored the backup")
+	}
+}
+
+// FINDING 4: IngestArriving IS NOT UP TO A SWEEP STALE. The last sweep saw
+// nothing; bytes land on the hub afterwards, and the re-check the host makes
+// just before stopping must see them. A freshly rebuilt engine (whose sweep has
+// not run) answers the same way.
+//
+// Mutation: return only e.lossLive.Load(). Observed to fail with "bytes that
+// arrived after the last sweep were not seen".
+func TestIngestArrivingSeesBytesThatLandedAfterTheLastSweep(t *testing.T) {
+	e, _ := armedEngine(t, db.AutoStopSettings{Enabled: true, Acknowledged: true})
+	e.sweepIngestLoss(lossT0, false)
+	if e.IngestArriving() {
+		t.Fatal("arriving with no bytes at all")
+	}
+	e.hub.Deliver(make([]byte, 188))
+	if !e.IngestArriving() {
+		t.Fatal("bytes that arrived after the last sweep were not seen")
+	}
+	// The next sweep is what accounts for them; with no further bytes it settles.
+	e.observeTick(lossT0.Add(2*time.Second), e.hub.RxBytes(), &observeState{firstRx: true})
+	e.observeTick(lossT0.Add(4*time.Second), e.hub.RxBytes(), &observeState{lastRx: e.hub.RxBytes()})
+	if e.IngestArriving() {
+		t.Fatal("still arriving after a sweep saw no new bytes")
+	}
+}

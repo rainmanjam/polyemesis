@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -126,7 +129,10 @@ func (s *Server) stopForIngestLoss(ctx context.Context, l engine.IngestLoss) []o
 	// ran out but it may have queued behind a paced OBS start for a long time,
 	// and an encoder that came back in between (OBS restarting near the end of
 	// the wait) is not a loss. Skips every destination, ends nothing.
-	if l.Arriving != nil && l.Arriving() {
+	// l.Arriving is the engine as it was when it decided; if that engine has
+	// been rebuilt since, its answer is for a hub that no longer exists, so the
+	// engine now serving this programme is asked too.
+	if (l.Arriving != nil && l.Arriving()) || s.currentIngestArriving(l.SourceID) {
 		for _, id := range l.Destinations {
 			skip(id, "", "the ingest returned before the stop ran, so nothing was stopped")
 		}
@@ -158,6 +164,15 @@ func (s *Server) stopForIngestLoss(ctx context.Context, l engine.IngestLoss) []o
 		s.announceIngestStop(l, out)
 	}
 	return out
+}
+
+// currentIngestArriving asks the engine that serves the programme NOW, by
+// source ID. False when there is none.
+func (s *Server) currentIngestArriving(sourceID int64) bool {
+	if s.mgr == nil {
+		return false
+	}
+	return s.mgr.Engine(sourceID).IngestArriving()
 }
 
 func acted(rs []obsbridge.Outcome) bool {
@@ -222,4 +237,99 @@ func sentAutoStopAck(body []byte) bool {
 	}
 	a := b.Ingest.AutoStop.Acknowledged
 	return a != nil && *a
+}
+
+// autoStopInfo is what GET /sources/{id} reports beside the stored setting.
+type autoStopInfo struct {
+	// Version identifies the stored setting. A source PUT that CHANGES
+	// ingest.autoStop sends it back as autoStopVersion, and one that turns the
+	// fallback ON must: see autoStopStaleWrite.
+	Version string `json:"version"`
+	// EffectiveWaitSeconds is the wait the engine applies: the saved wait,
+	// lifted by the floor, the failover grace and a pull source's reconnect
+	// delay (db.AutoStopSettings.EffectiveWaitWhy, the engine's own rule).
+	EffectiveWaitSeconds int `json:"effectiveWaitSeconds"`
+	// RaisedBy names what lifted it above the saved wait ("failover" or "pull"),
+	// absent when nothing did.
+	RaisedBy string `json:"raisedBy,omitempty"`
+}
+
+// autoStopVersion is a digest of the stored setting, so it changes whenever any
+// door changes the setting and no writer can forget to bump it (the same
+// reasoning as settingsVersion).
+func autoStopVersion(a db.AutoStopSettings) string {
+	b, err := json.Marshal(a.Stored())
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+func autoStopInfoFor(src *db.Source, fo db.FailoverSettings) autoStopInfo {
+	grace := 0
+	if fo.Enabled {
+		grace = fo.GraceSeconds
+	}
+	as := src.Ingest.AutoStop
+	w, by := as.EffectiveWaitWhy(grace, engine.PullReconnectSeconds(src.Ingest))
+	return autoStopInfo{Version: autoStopVersion(as), EffectiveWaitSeconds: w, RaisedBy: by}
+}
+
+// takeAutoStopVersion removes the top-level `autoStopVersion` from a source PUT
+// body and returns it (nil when absent): removed, not merely read, because the
+// body is then strictly decoded into db.Source and it is not a source field.
+func takeAutoStopVersion(body []byte) ([]byte, *string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		return body, nil, nil
+	}
+	raw, ok := fields["autoStopVersion"]
+	if !ok {
+		return body, nil, nil
+	}
+	delete(fields, "autoStopVersion")
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, nil, fmt.Errorf("autoStopVersion must be the string GET /sources/{id} returned in autoStopInfo.version")
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, &v, nil
+}
+
+// autoStopStaleWrite refuses a source write that changes ingest.autoStop on the
+// strength of a read that is no longer true. status 0 means accepted.
+//
+// Why a version and not the acknowledgement alone: consent is given to the
+// state the operator SAW. A control left open after the setting was turned off
+// elsewhere still holds enabled+acknowledged, and an old cached page sends the
+// whole ingest; either would otherwise turn a YouTube-ending setting back on
+// with a perfectly valid acknowledgement in the body.
+//
+//   - A write that changes the setting and sends a version that is not the
+//     stored one is a 409, and nothing is saved.
+//   - A write that turns it ON must send a version at all (400 otherwise): a
+//     script reads GET /sources/{id} first, which is what makes the consent
+//     informed. Other changes (the wait, turning it off) may omit it: they cannot
+//     start a stop that the operator had not agreed to.
+func autoStopStaleWrite(prev, next db.AutoStopSettings, sent *string) (status int, msg string) {
+	prev, next = prev.Stored(), next.Stored()
+	if prev == next {
+		return 0, ""
+	}
+	if sent == nil {
+		if next.Enabled && !prev.Enabled {
+			return http.StatusBadRequest, "turning stop on ingest loss on needs the current autoStopInfo.version from " +
+				"GET /sources/{id}, sent as autoStopVersion, so the acknowledgement is given to the setting as it is now"
+		}
+		return 0, ""
+	}
+	if *sent != autoStopVersion(prev) {
+		return http.StatusConflict, "this programme's stop-on-ingest-loss setting was changed after this page " +
+			"loaded it, so nothing was saved. Reload to see the current setting, then make your change again"
+	}
+	return 0, ""
 }

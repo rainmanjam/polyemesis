@@ -1367,6 +1367,10 @@ export interface Source {
 
 /** A source plus what the server computes about it. */
 export interface SourceView extends Source {
+  /** Stop on ingest loss, as the server reads it NOW: the version a write that
+   *  changes `ingest.autoStop` sends back as `autoStopVersion` (a stale one is a
+   *  409), and the wait the engine really applies. */
+  autoStopInfo?: AutoStopInfo;
   /** Ready to paste into an encoder, keyed by protocol, with `<server>` where
    *  the hostname goes. The token is deliberately NOT in these. */
   publishUrls: Record<string, string>;
@@ -1810,6 +1814,16 @@ export interface AutoStopSettings {
   enabled: boolean;
   waitSeconds?: number;
   acknowledged: boolean;
+}
+
+/** What GET /sources/{id} reports beside the stored autoStop setting. */
+export interface AutoStopInfo {
+  version: string;
+  /** The saved wait lifted by the floor, the failover grace and a pull source's
+   *  reconnect delay: what the engine really waits. */
+  effectiveWaitSeconds: number;
+  /** What lifted it above the saved wait; absent when nothing did. */
+  raisedBy?: "failover" | "pull";
 }
 
 /** The primary's last measurement. Each figure is absent until measured, and

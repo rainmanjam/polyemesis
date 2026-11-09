@@ -919,6 +919,19 @@ time, stop that programme's live destinations. It is **off by default**.
   merge can switch it back on from an old one. The Sources page and the OBS bridge
   panel save it only through `AutoStopControl`; the Sources page's other saves
   leave `ingest.autoStop` out of the request.
+- **A write that changes `ingest.autoStop` is checked against what it read.**
+  `GET /sources/{id}` reports `autoStopInfo.version`; send it back on the `PUT`
+  as the top-level `autoStopVersion`. A version that is not the stored one is a
+  `409` and nothing is saved, so a control left open after another panel turned
+  the setting off cannot turn it back on with its (valid) acknowledgement. A
+  request that **turns it on** must carry the version (`400` without): read the
+  source first. Editing the wait or turning it off may omit it. The console
+  sends only the fields it changed, and `acknowledged` only when the box was
+  ticked in that edit.
+- `autoStopInfo.effectiveWaitSeconds` is the wait the engine really applies (the
+  saved wait lifted by the floor, the failover grace and a pull source's
+  reconnect delay), and `autoStopInfo.raisedBy` (`"failover"` or `"pull"`) says
+  what lifted it, absent when nothing did. Computed with the engine's own rule.
 - **Changing the wait restarts the clock.** Lowering it during an outage does not
   fire on the next sweep because of time counted against the old wait; the loss is
   measured from the change. **Pull sources** never act before their reconnect delay

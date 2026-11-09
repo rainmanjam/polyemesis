@@ -191,7 +191,7 @@ describe("the OBS bridge settings", () => {
       fireEvent.click(box.querySelector("button:not([role])") as HTMLElement);
       await waitFor(() => expect(updateSource).toHaveBeenCalled());
       expect(updateSource).toHaveBeenCalledWith(1, {
-        ingest: { autoStop: { enabled: true, waitSeconds: 0, acknowledged: true } },
+        ingest: { autoStop: { enabled: true, acknowledged: true } },
       });
       expect(putObs).not.toHaveBeenCalled();
     });

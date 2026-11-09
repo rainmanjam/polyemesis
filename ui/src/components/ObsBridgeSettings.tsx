@@ -395,10 +395,13 @@ export function ObsBridgeSettings() {
                 sourceId={Number(bridgeSource.id)}
                 idPrefix="obs-autostop"
                 value={bridgeSource.ingest.autoStop}
-                onSaved={(next) =>
+                info={bridgeSource.autoStopInfo}
+                onSaved={(next, info) =>
                   setSources((all) =>
                     all.map((s) =>
-                      s.id === bridgeSource.id ? { ...s, ingest: { ...s.ingest, autoStop: next } } : s,
+                      s.id === bridgeSource.id
+                        ? { ...s, ingest: { ...s.ingest, autoStop: next }, autoStopInfo: info ?? s.autoStopInfo }
+                        : s,
                     ),
                   )
                 }

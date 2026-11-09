@@ -42,9 +42,9 @@ describe("AutoStopControl", () => {
     expect(updateSource).not.toHaveBeenCalled();
   });
 
-  it("sends the whole object in one PUT once acknowledged", async () => {
+  it("sends what changed, with the version it read, in one PUT once acknowledged", async () => {
     const onSaved = vi.fn();
-    render(<AutoStopControl sourceId={7} value={undefined} onSaved={onSaved} />);
+    render(<AutoStopControl sourceId={7} value={undefined} info={{ version: "v1", effectiveWaitSeconds: 120 }} onSaved={onSaved} />);
     fireEvent.click(toggle());
     fireEvent.change(screen.getByLabelText("Seconds with no feed before stopping"), { target: { value: "300" } });
     fireEvent.click(ackBox());
@@ -52,8 +52,11 @@ describe("AutoStopControl", () => {
     await waitFor(() => expect(updateSource).toHaveBeenCalledTimes(1));
     expect(updateSource).toHaveBeenCalledWith(7, {
       ingest: { autoStop: { enabled: true, waitSeconds: 300, acknowledged: true } },
+      autoStopVersion: "v1",
     });
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ enabled: true, waitSeconds: 300, acknowledged: true }));
+    await waitFor(() =>
+      expect(onSaved).toHaveBeenCalledWith({ enabled: true, waitSeconds: 300, acknowledged: true }, undefined),
+    );
   });
 
   it("treats an empty wait as the default (0)", async () => {
@@ -62,8 +65,9 @@ describe("AutoStopControl", () => {
     fireEvent.click(ackBox());
     fireEvent.click(saveBtn());
     await waitFor(() => expect(updateSource).toHaveBeenCalled());
+    // The wait is unchanged (default), so it is not sent.
     expect(updateSource).toHaveBeenCalledWith(7, {
-      ingest: { autoStop: { enabled: true, waitSeconds: 0, acknowledged: true } },
+      ingest: { autoStop: { enabled: true, acknowledged: true } },
     });
   });
 
@@ -89,13 +93,75 @@ describe("AutoStopControl", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("autoStop.acknowledged must be true");
   });
 
-  it("turning it off sends enabled false with the acknowledgement cleared", async () => {
+  it("turning it off sends only enabled false", async () => {
     render(<AutoStopControl sourceId={7} value={{ enabled: true, waitSeconds: 120, acknowledged: true }} />);
     fireEvent.click(toggle());
     fireEvent.click(saveBtn());
     await waitFor(() => expect(updateSource).toHaveBeenCalled());
+    expect(updateSource).toHaveBeenCalledWith(7, { ingest: { autoStop: { enabled: false } } });
+  });
+
+  // A control left open on an old state edits only the wait. It must not
+  // re-send the enabled+acknowledged it loaded: another panel may have turned
+  // the setting off, and that re-send would turn it back on with a valid
+  // acknowledgement.
+  //
+  // Mutation: send { enabled, waitSeconds, acknowledged } whole (the old save).
+  // Observed to fail with the body carrying enabled and acknowledged.
+  it("an edit of only the wait sends only the wait, never the loaded acknowledgement", async () => {
+    render(
+      <AutoStopControl
+        sourceId={7}
+        value={{ enabled: true, waitSeconds: 120, acknowledged: true }}
+        info={{ version: "v1", effectiveWaitSeconds: 120 }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Seconds with no feed before stopping"), { target: { value: "300" } });
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(updateSource).toHaveBeenCalled());
     expect(updateSource).toHaveBeenCalledWith(7, {
-      ingest: { autoStop: { enabled: false, waitSeconds: 120, acknowledged: false } },
+      ingest: { autoStop: { waitSeconds: 300 } },
+      autoStopVersion: "v1",
+    });
+  });
+
+  // Mutation: send acknowledged whenever the loaded value had it. Observed to
+  // fail with acknowledged in a save that only turns the setting off and on.
+  it("acknowledged travels only when the box was ticked in this edit", async () => {
+    render(<AutoStopControl sourceId={7} value={{ enabled: false, waitSeconds: 0, acknowledged: true }} />);
+    fireEvent.click(toggle());
+    // The leftover acknowledgement does not stand in for the tick.
+    expect((saveBtn() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(ackBox());
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(updateSource).toHaveBeenCalled());
+    expect(updateSource).toHaveBeenCalledWith(7, { ingest: { autoStop: { enabled: true, acknowledged: true } } });
+  });
+
+  describe("the effective wait", () => {
+    const stored = { enabled: true, waitSeconds: 120, acknowledged: true };
+    it("is shown for the stored setting", () => {
+      render(<AutoStopControl sourceId={7} value={stored} info={{ version: "v", effectiveWaitSeconds: 120 }} />);
+      expect(screen.getByTestId("autostop-effective").textContent).toBe("Effective wait: 120 s");
+    });
+    it("says what raised it", () => {
+      const { rerender } = render(
+        <AutoStopControl sourceId={7} value={stored} info={{ version: "v", effectiveWaitSeconds: 330, raisedBy: "failover" }} />,
+      );
+      expect(screen.getByTestId("autostop-effective").textContent).toMatch(/^Effective wait: 330 s, .*failover grace/);
+      rerender(
+        <AutoStopControl sourceId={7} value={stored} info={{ version: "v", effectiveWaitSeconds: 3630, raisedBy: "pull" }} />,
+      );
+      expect(screen.getByTestId("autostop-effective").textContent).toMatch(/^Effective wait: 3630 s, .*reconnect delay/);
+    });
+    it("is not shown while the setting is off or the wait is being edited", () => {
+      const { rerender } = render(
+        <AutoStopControl sourceId={7} value={undefined} info={{ version: "v", effectiveWaitSeconds: 120 }} />,
+      );
+      expect(screen.queryByTestId("autostop-effective")).toBeNull();
+      rerender(<AutoStopControl sourceId={7} value={stored} info={{ version: "v", effectiveWaitSeconds: 120 }} />);
+      fireEvent.change(screen.getByLabelText("Seconds with no feed before stopping"), { target: { value: "300" } });
+      expect(screen.queryByTestId("autostop-effective")).toBeNull();
     });
   });
 });

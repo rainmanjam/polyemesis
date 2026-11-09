@@ -62,7 +62,7 @@ import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
 import { ingestPhase, ingestSummary, ingestWithoutAutoStop } from "@/features/sources/sourceIngest";
-import type { AutoStopSettings, Source, SourceId, SourceView } from "@/lib/types";
+import type { AutoStopInfo, AutoStopSettings, Source, SourceId, SourceView } from "@/lib/types";
 
 // hls.js is only needed once a card shows a receiving feed (A2), so it is
 // fetched then, the same way the Dashboard loads it.
@@ -275,11 +275,15 @@ export function SourcesPage() {
             onRotate={() => setRotating(s)}
             onDelete={() => setDeleting(s)}
             onAddDestination={() => setAddingTo(s.id)}
-            onAutoStopSaved={(next) =>
+            onAutoStopSaved={(next, info) =>
               // Local state, not load(): a re-read would hand every card a new
               // `source` and throw away what is typed in it but not yet applied.
               setSources((all) =>
-                all.map((x) => (x.id === s.id ? { ...x, ingest: { ...x.ingest, autoStop: next } } : x)),
+                all.map((x) =>
+                  x.id === s.id
+                    ? { ...x, ingest: { ...x.ingest, autoStop: next }, autoStopInfo: info ?? x.autoStopInfo }
+                    : x,
+                ),
               )
             }
             previewOn={previewOn}
@@ -429,7 +433,7 @@ export function SourceCard({
   onAddDestination?: () => void;
   /** The stop-on-ingest-loss control saved: the page updates its copy of this
    *  source in place. */
-  onAutoStopSaved?: (next: AutoStopSettings) => void;
+  onAutoStopSaved?: (next: AutoStopSettings, info?: AutoStopInfo) => void;
   /** The preview encoder is on, so a receiving card can show a thumbnail. */
   previewOn?: boolean;
 }>) {
@@ -747,7 +751,8 @@ export function SourceCard({
           sourceId={Number(source.id)}
           idPrefix={`source-${source.id}-autostop`}
           value={source.ingest.autoStop}
-          onSaved={(next) => onAutoStopSaved?.(next)}
+          info={source.autoStopInfo}
+          onSaved={(next, info) => onAutoStopSaved?.(next, info)}
         />
 
         {phase === "waiting" && <WaitingForEncoder />}

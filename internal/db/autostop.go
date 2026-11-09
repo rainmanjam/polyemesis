@@ -92,16 +92,36 @@ func (a AutoStopSettings) Wait() int {
 // failoverGraceSeconds is 0 when failover is off, pullReconnectSeconds 0 when
 // the ingest is not a pull source.
 func (a AutoStopSettings) EffectiveWait(failoverGraceSeconds, pullReconnectSeconds int) int {
+	w, _ := a.EffectiveWaitWhy(failoverGraceSeconds, pullReconnectSeconds)
+	return w
+}
+
+// What raised the effective wait above the saved one, for EffectiveWaitWhy.
+const (
+	AutoStopRaisedByFailover = "failover"
+	AutoStopRaisedByPull     = "pull"
+)
+
+// EffectiveWaitWhy is EffectiveWait and the reason it exceeds the saved wait:
+// AutoStopRaisedByFailover, AutoStopRaisedByPull, or "" when nothing raised it
+// (the floor alone does not count: the form already states the minimum). It is
+// the ONE place the rule lives, so what the engine applies and what the API
+// reports cannot drift.
+func (a AutoStopSettings) EffectiveWaitWhy(failoverGraceSeconds, pullReconnectSeconds int) (seconds int, raisedBy string) {
 	w := a.Wait()
 	if w < MinAutoStopWaitSeconds {
 		w = MinAutoStopWaitSeconds
 	}
-	for _, clear := range []int{failoverGraceSeconds, pullReconnectSeconds} {
-		if clear > 0 && w < clear+AutoStopFailoverMarginSeconds {
-			w = clear + AutoStopFailoverMarginSeconds
+	for _, c := range []struct {
+		seconds int
+		by      string
+	}{{failoverGraceSeconds, AutoStopRaisedByFailover}, {pullReconnectSeconds, AutoStopRaisedByPull}} {
+		if c.seconds > 0 && w < c.seconds+AutoStopFailoverMarginSeconds {
+			w = c.seconds + AutoStopFailoverMarginSeconds
+			raisedBy = c.by
 		}
 	}
-	return w
+	return w, raisedBy
 }
 
 // normalized is the stored shape: the acknowledgement belongs to the enabled
@@ -115,6 +135,10 @@ func (a AutoStopSettings) normalized() AutoStopSettings {
 	}
 	return a
 }
+
+// Stored is the shape that is saved and read back (see normalized), for a caller
+// that compares what a request would store against what is stored.
+func (a AutoStopSettings) Stored() AutoStopSettings { return a.normalized() }
 
 func (a AutoStopSettings) problems() []string {
 	var probs []string

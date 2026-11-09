@@ -476,6 +476,9 @@ type Engine struct {
 	// lossLive is whether the ingest (primary or backup) was arriving at the
 	// last observe sweep, for the host's run-time re-check of a queued stop.
 	lossLive atomic.Bool
+	// lossRx is the hub byte counter as of the last observe sweep, so the
+	// re-check can tell bytes that arrived since the sweep from none.
+	lossRx atomic.Uint64
 	// lifecycle is the THIRD consumer of the edges hookWatch derives, and it is
 	// a consumer rather than a second sampler on purpose -- see observeLoop.
 	// It decides when a platform's broadcast goes live and when it ends.
@@ -6150,6 +6153,7 @@ func (e *Engine) observeTick(now time.Time, rx uint64, o *observeState) {
 	// is a different question from "is the source arriving".
 	live := !o.firstRx && rx > o.lastRx
 	o.lastRx, o.firstRx = rx, false
+	e.lossRx.Store(rx)
 
 	var (
 		st   Status

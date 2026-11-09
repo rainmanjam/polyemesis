@@ -1959,6 +1959,23 @@
         "object"
       ],
       "fields": {
+        "autoStopInfo": {
+          "types": [
+            "object"
+          ],
+          "fields": {
+            "effectiveWaitSeconds": {
+              "types": [
+                "number"
+              ]
+            },
+            "version": {
+              "types": [
+                "string"
+              ]
+            }
+          }
+        },
         "createdAt": {
           "types": [
             "string"
