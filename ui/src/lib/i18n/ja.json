@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "新しい順",
   "chatpage.panelStoredTitle": "何も接続されていません。これは保存された履歴です。",
   "chatpage.historyBadge": "履歴",
+  "chatpage.echoLabel": "polyemesis から送信",
   "chatpage.socketClosedTitle": "ライブ接続が切れています。再接続すればメッセージの受信が再開します。",
   "chatpage.deletedOn": "{platform} で削除しました。",
   "chatpage.storedHistory": "保存済みの履歴",

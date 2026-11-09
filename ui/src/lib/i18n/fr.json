@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "plus récents d'abord",
   "chatpage.panelStoredTitle": "Rien n'est rattaché ; ceci est l'historique stocké.",
   "chatpage.historyBadge": "historique",
+  "chatpage.echoLabel": "Envoyé par polyemesis",
   "chatpage.socketClosedTitle": "La connexion en direct est fermée ; les messages reprendront à la reconnexion.",
   "chatpage.deletedOn": "Supprimé sur {platform}.",
   "chatpage.storedHistory": "historique enregistré",

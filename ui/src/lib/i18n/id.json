@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "terbaru dulu",
   "chatpage.panelStoredTitle": "Tidak ada yang terhubung; ini adalah riwayat tersimpan.",
   "chatpage.historyBadge": "riwayat",
+  "chatpage.echoLabel": "Dikirim oleh polyemesis",
   "chatpage.socketClosedTitle": "Soket langsung tertutup; pesan akan berlanjut saat tersambung kembali.",
   "chatpage.deletedOn": "Dihapus di {platform}.",
   "chatpage.storedHistory": "riwayat tersimpan",

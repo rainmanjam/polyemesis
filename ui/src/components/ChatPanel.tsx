@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, useTN, type TranslationKey } from "@/lib/i18n";
 import { toast } from "sonner";
 import {
+  Check,
   CornerUpLeft,
   Filter,
   Loader2,
+  Megaphone,
   MessagesSquare,
   Search,
   Send,
@@ -250,12 +252,16 @@ function MessageRow({
       onContextMenu={openMenu}
       onDoubleClick={openMenu}
       className={cn(
-        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised",
+        // A two-column grid is the hanging indent: the glyph (and the clock,
+        // off the dock) sit in the first column and every wrapped line of the
+        // message stays in the second, under the name, instead of running back
+        // beneath the icon.
+        "group relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         accent.rule,
         m.echo && "bg-primary-dim/40",
       )}
     >
-      <span className="mr-1.5 inline-flex items-center gap-1 align-baseline">
+      <span className="inline-flex h-lh items-center gap-1">
         <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
         {!compact && (
           <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
@@ -263,6 +269,13 @@ function MessageRow({
           </span>
         )}
       </span>
+
+      <div className="min-w-0 [overflow-wrap:anywhere]">
+      {m.echo && (
+        <span className="mr-1 inline-flex align-text-bottom" title={t("chatpage.echoLabel")}>
+          <Megaphone className="h-3 w-3 text-primary-bright" aria-label={t("chatpage.echoLabel")} />
+        </span>
+      )}
 
       {m.replyTo && (
         <span className="mr-1 inline-flex items-center gap-0.5 text-sm text-muted-foreground">
@@ -324,6 +337,18 @@ function MessageRow({
       >
         <MessageBody m={m} />
       </span>
+      </div>
+
+      {/* The dock drops the clock column to keep lines wide; it comes back on
+          hover or keyboard focus, laid over the gutter beside the delete icon. */}
+      {compact && (
+        <span
+          className="tnum pointer-events-none absolute right-6 top-0.5 hidden rounded bg-card-raised px-1 font-mono text-sm text-muted-foreground group-hover:block group-focus-visible:block group-focus-within:block"
+          title={timestamp(m.at)}
+        >
+          {clockTime(m.at)}
+        </span>
+      )}
 
       {/* THE SAME GATE THE MENU USES, on the icon that does the same thing.
           
@@ -446,40 +471,72 @@ export function ChatTimeline({
 
 // ------------------------------------------------------------------- filters
 
+/** The one chip shape the header filters and the composer's "Sending to" share,
+ *  so the two rows read as the same control. Fixed height and no wrapping: a
+ *  row of these scrolls sideways inside its own strip instead of growing taller.
+ *  The ring is inset-safe because the strips pad their edges. */
+const CHIP =
+  "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-sm font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+/** A horizontally scrolling strip for chips. Scrolling rather than a "Filter (n)"
+ *  popover: a platform toggle is a one-tap, glanceable state ("is Kick hidden?"),
+ *  and a popover would bury that behind a second tap on the busiest surface in
+ *  the console. At the widths the panel takes (360px up) the glyph-only chips
+ *  fit without scrolling for the six platforms; the scroll is the safety net for
+ *  an unusually long list, not the normal case. */
+const STRIP =
+  "flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain px-0.5 py-0.5 [scrollbar-width:thin]";
+
 /** Platform toggles. Every platform that has spoken or is connected gets a chip;
- *  turning one off hides it from the timeline and nothing else. */
+ *  turning one off hides it from the timeline and nothing else.
+ *
+ *  Three states, none carried by colour alone: on (the platform's own tint),
+ *  off (plain, glyph dimmed), and a dashed border for a platform that has
+ *  spoken but has no connected account right now. The word is hidden below the
+ *  container's @xl width and left to the accessible name, so the glyph alone
+ *  carries the chip on a narrow panel. */
 export function PlatformFilter({
   platforms,
   hidden,
   onToggle,
   counts,
+  attached,
+  className,
 }: Readonly<{
   platforms: ChatPlatform[];
   hidden: Set<ChatPlatform>;
   onToggle: (p: ChatPlatform) => void;
   counts?: Map<ChatPlatform, number>;
+  /** Platforms with a connected account. A platform outside it is drawn dashed.
+   *  Omitted, every chip is drawn as attached. */
+  attached?: Set<ChatPlatform>;
+  className?: string;
 }>) {
+  const t = useT();
   if (platforms.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      <Filter className="h-3 w-3 text-muted-foreground" aria-hidden />
+    <div className={cn(STRIP, className)}>
+      <Filter className="mr-0.5 hidden h-3 w-3 shrink-0 text-muted-foreground @xl:block" aria-hidden />
       {platforms.map((p) => {
         const accent = accentFor(p);
         const Icon = accent.icon;
         const on = !hidden.has(p);
+        const noAccount = attached !== undefined && !attached.has(p);
         return (
           <button
             key={p}
             type="button"
             onClick={() => onToggle(p)}
             aria-pressed={on}
+            title={noAccount ? `${accent.label}: ${t("chatpage.verdictNotConnected")}` : accent.label}
             className={cn(
-              "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-sm font-semibold uppercase tracking-wider transition-colors",
-              on ? accent.chipOn : "border-border text-muted-foreground hover:text-muted-foreground",
+              CHIP,
+              on ? accent.chipOn : "border-border text-muted-foreground hover:bg-card-raised hover:text-foreground",
+              noAccount && "border-dashed",
             )}
           >
-            <Icon className="h-3 w-3" />
-            {accent.label}
+            <Icon className={cn("h-3.5 w-3.5", !on && "opacity-60")} />
+            <span className="sr-only @xl:not-sr-only">{accent.label}</span>
             {counts?.get(p) ? <span className="tnum font-mono">{counts.get(p)}</span> : null}
           </button>
         );
@@ -769,53 +826,58 @@ export function ChatComposer({
         </div>
       )}
       {showTargets && (
-        <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[11px]">
-          <span className="text-muted-foreground">{t("chatpage.targetsLabel")}</span>
-          {connected.map(({ key, status: st }) => {
-            const on = selected.includes(key);
-            const isLive = liveKeys.includes(key);
-            const base = accentFor(st.platform).label;
-            const label =
-              perPlatform(st.platform) > 1 ? `${base} · ${st.channel || st.account || ""}` : base;
-            const hint = t(isLive ? "chatpage.targetLive" : "chatpage.targetNotLive", {
-              platform: label,
-            });
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={on}
-                title={hint}
-                aria-label={hint}
-                onClick={() => toggleTarget(key)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5",
-                  on ? "border-primary/60 bg-primary/10" : "border-border text-muted-foreground",
-                )}
-              >
-                <StatusDot tone={isLive ? "live" : "idle"} size="sm" />
-                {label}
-              </button>
-            );
-          })}
-          <Button
-            variant="link"
-            size="sm"
-            className="h-auto p-0 text-[11px]"
-            onClick={() => setChosen(connectedKeys)}
-          >
-            {t("chatpage.targetsAll")}
-          </Button>
-          {chosen !== null && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px]">
+          <span className="shrink-0 text-muted-foreground">{t("chatpage.targetsLabel")}</span>
+          <div className={STRIP}>
+            {connected.map(({ key, status: st }) => {
+              const on = selected.includes(key);
+              const isLive = liveKeys.includes(key);
+              const base = accentFor(st.platform).label;
+              const label =
+                perPlatform(st.platform) > 1 ? `${base} · ${st.channel || st.account || ""}` : base;
+              const hint = t(isLive ? "chatpage.targetLive" : "chatpage.targetNotLive", {
+                platform: label,
+              });
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={on}
+                  title={hint}
+                  aria-label={hint}
+                  onClick={() => toggleTarget(key)}
+                  className={cn(
+                    CHIP,
+                    on
+                      ? "border-primary/60 bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-card-raised hover:text-foreground",
+                  )}
+                >
+                  <StatusDot tone={isLive ? "live" : "idle"} size="sm" />
+                  {label}
+                  {on && <Check className="h-3 w-3 text-primary-bright" aria-hidden />}
+                </button>
+              );
+            })}
             <Button
               variant="link"
               size="sm"
-              className="h-auto p-0 text-[11px]"
-              onClick={() => setChosen(null)}
+              className="h-auto shrink-0 whitespace-nowrap p-0 px-1 text-[11px]"
+              onClick={() => setChosen(connectedKeys)}
             >
-              {t("chatpage.targetsLive")}
+              {t("chatpage.targetsAll")}
             </Button>
-          )}
+            {chosen !== null && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto shrink-0 whitespace-nowrap p-0 px-1 text-[11px]"
+                onClick={() => setChosen(null)}
+              >
+                {t("chatpage.targetsLive")}
+              </Button>
+            )}
+          </div>
         </div>
       )}
       {liveUnknown && (
@@ -1161,6 +1223,7 @@ export function ChatPanel({
     [messages, hidden],
   );
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
+  const attached = useMemo(() => new Set(statuses.map((s) => s.platform)), [statuses]);
 
   const toggle = (p: ChatPlatform) =>
     setHidden((prev) => {
@@ -1201,7 +1264,7 @@ export function ChatPanel({
   );
 
   return (
-    <div className={cn("flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
+    <div className={cn("@container flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
       <ConfirmDeleteMessage
         target={confirmDelete.target}
         onOpenChange={confirmDelete.onOpenChange}
@@ -1228,32 +1291,39 @@ export function ChatPanel({
           onReply={showComposer ? setReplyTo : undefined}
         />
       )}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
-        <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-[12px] font-semibold">{t("chatpage.title")}</span>
-        {stored && (
-          <Badge variant="outline" title={t("chatpage.panelStoredTitle")}>
-            {t("chatpage.historyBadge")}
-          </Badge>
-        )}
-        {configured && !connected && (
-          <Badge variant="warn" title={t("chatpage.socketClosedTitle")}>
-            {t("chrome.socketOffline")}
-          </Badge>
-        )}
-        {/* #13/#21: unlike a closed socket, a frame that failed to parse gives
-            no other signal at all -- `connected` still reads true. */}
-        {frameError && (
-          <Badge
-            variant="warn"
-            title={t("i18nSweep.chatFrameErrorHint")}
-          >
-            {t("i18nSweep.frameError")}
-          </Badge>
-        )}
-        <div className="ml-auto">
-          <PlatformFilter platforms={platforms} hidden={hidden} onToggle={toggle} />
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1">
+        <div className="flex min-w-0 shrink items-center gap-1.5">
+          <MessagesSquare className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground @sm:block" />
+          <span className="shrink-0 text-[12px] font-semibold">{t("chatpage.title")}</span>
+          {stored && (
+            <Badge variant="outline" className="shrink-0" title={t("chatpage.panelStoredTitle")}>
+              {t("chatpage.historyBadge")}
+            </Badge>
+          )}
+          {configured && !connected && (
+            <Badge variant="warn" className="shrink-0" title={t("chatpage.socketClosedTitle")}>
+              {t("chrome.socketOffline")}
+            </Badge>
+          )}
+          {/* #13/#21: unlike a closed socket, a frame that failed to parse gives
+              no other signal at all -- `connected` still reads true. */}
+          {frameError && (
+            <Badge
+              variant="warn"
+              className="shrink-0"
+              title={t("i18nSweep.chatFrameErrorHint")}
+            >
+              {t("i18nSweep.frameError")}
+            </Badge>
+          )}
         </div>
+        <PlatformFilter
+          className="ml-auto"
+          platforms={platforms}
+          hidden={hidden}
+          onToggle={toggle}
+          attached={attached}
+        />
       </div>
 
       <ChatSearchBox search={search} />

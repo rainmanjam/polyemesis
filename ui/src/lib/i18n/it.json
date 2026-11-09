@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "prima i più recenti",
   "chatpage.panelStoredTitle": "Non è collegato nulla; questa è la cronologia memorizzata.",
   "chatpage.historyBadge": "cronologia",
+  "chatpage.echoLabel": "Inviato da polyemesis",
   "chatpage.socketClosedTitle": "Il socket live è chiuso; i messaggi riprenderanno alla riconnessione.",
   "chatpage.deletedOn": "Eliminato su {platform}.",
   "chatpage.storedHistory": "cronologia salvata",

@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "newest first",
   "chatpage.panelStoredTitle": "Nothing is connected; this is the stored scrollback.",
   "chatpage.historyBadge": "history",
+  "chatpage.echoLabel": "Sent by polyemesis",
   "chatpage.socketClosedTitle": "The live socket is closed; messages will resume when it reconnects.",
   "chatpage.deletedOn": "Deleted on {platform}.",
   "chatpage.storedHistory": "stored history",
