@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Kategori",
   "yt.live.categoryHelp": "Gaming veya Music gibi bir YouTube kategori adı. Boş bırakılırsa YouTube varsayılanı korunur. polyemesis'in oluşturduğu yayına uygulanır.",
   "yt.live.projection360": "360° video",
-  "yt.live.kidsNote": "polyemesis'in oluşturduğu bir yayın, aşağıdaki YouTube denetimlerinde (gecikme ve DVR de buradan ayarlanır) aksini belirtmediğiniz sürece çocuklara yönelik olmadığı beyan edilir. Çocuklara yönelik ayarı yorumları, reklamları ve bildirimleri etkiler, bu yüzden içeriğinize uygun şekilde ayarlayın."
+  "yt.live.kidsNote": "polyemesis'in oluşturduğu bir yayın, aşağıdaki YouTube denetimlerinde (gecikme ve DVR de buradan ayarlanır) aksini belirtmediğiniz sürece çocuklara yönelik olmadığı beyan edilir. Çocuklara yönelik ayarı yorumları, reklamları ve bildirimleri etkiler, bu yüzden içeriğinize uygun şekilde ayarlayın.",
+  "studioEvents.title": "YouTube Studio'dan",
+  "studioEvents.badge": "YouTube Studio'dan",
+  "studioEvents.open": "Studio'da aç",
+  "studioEvents.useFor": "{destination} için kullan",
+  "studioEvents.used": "{destination} canlı yayına geçtiğinde {title} kullanılacak.",
+  "studioEvents.useFailed": "Bu etkinlik kullanılamadı: {reason}",
+  "studioEvents.stale": "{accounts} etkinlikleri yenilenemedi; daha önce okunanlar gösteriliyor.",
+  "studioEvents.studioNow": "{destination}, YouTube Studio'nun \"Stream now\" özelliğini kullanıyor, bu yüzden polyemesis bu etkinliği kullanmaz. Önce hedefin ayarlarından bunu kapatın."
 }

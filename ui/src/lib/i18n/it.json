@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Categoria",
   "yt.live.categoryHelp": "Il nome di una categoria YouTube, come Gaming o Music. Se vuoto, resta il valore predefinito di YouTube. Applicata alla diretta creata da polyemesis.",
   "yt.live.projection360": "Video a 360°",
-  "yt.live.kidsNote": "Una diretta creata da polyemesis viene dichiarata come non destinata ai bambini, a meno che tu non indichi diversamente nei controlli YouTube qui sotto, che impostano anche latenza e DVR. «Destinato ai bambini» influisce su commenti, annunci e notifiche, quindi impostalo in base ai tuoi contenuti."
+  "yt.live.kidsNote": "Una diretta creata da polyemesis viene dichiarata come non destinata ai bambini, a meno che tu non indichi diversamente nei controlli YouTube qui sotto, che impostano anche latenza e DVR. «Destinato ai bambini» influisce su commenti, annunci e notifiche, quindi impostalo in base ai tuoi contenuti.",
+  "studioEvents.title": "Da YouTube Studio",
+  "studioEvents.badge": "da YouTube Studio",
+  "studioEvents.open": "Apri in Studio",
+  "studioEvents.useFor": "Usa per {destination}",
+  "studioEvents.used": "{title} verrà usato quando {destination} andrà in diretta.",
+  "studioEvents.useFailed": "Impossibile usare questo evento: {reason}",
+  "studioEvents.stale": "Impossibile aggiornare gli eventi di {accounts}; vengono mostrati quelli letti in precedenza.",
+  "studioEvents.studioNow": "{destination} usa «Stream now» di YouTube Studio, quindi polyemesis non userebbe questo evento. Disattivalo prima nelle impostazioni della destinazione."
 }

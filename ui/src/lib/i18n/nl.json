@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Categorie",
   "yt.live.categoryHelp": "Een YouTube-categorienaam zoals Gaming of Music. Leeg behoudt de standaardwaarde van YouTube. Wordt toegepast op de uitzending die polyemesis aanmaakt.",
   "yt.live.projection360": "360°-video",
-  "yt.live.kidsNote": "Een uitzending die polyemesis aanmaakt, wordt als niet gemaakt voor kinderen aangemerkt, tenzij je hieronder in de YouTube-instellingen anders aangeeft; daar stel je ook latentie en DVR in. Gemaakt voor kinderen heeft invloed op reacties, advertenties en meldingen, dus stel het in passend bij je content."
+  "yt.live.kidsNote": "Een uitzending die polyemesis aanmaakt, wordt als niet gemaakt voor kinderen aangemerkt, tenzij je hieronder in de YouTube-instellingen anders aangeeft; daar stel je ook latentie en DVR in. Gemaakt voor kinderen heeft invloed op reacties, advertenties en meldingen, dus stel het in passend bij je content.",
+  "studioEvents.title": "Van YouTube Studio",
+  "studioEvents.badge": "van YouTube Studio",
+  "studioEvents.open": "Openen in Studio",
+  "studioEvents.useFor": "Gebruiken voor {destination}",
+  "studioEvents.used": "{title} wordt gebruikt zodra {destination} live gaat.",
+  "studioEvents.useFailed": "Kon dit evenement niet gebruiken: {reason}",
+  "studioEvents.stale": "Kon de evenementen van {accounts} niet vernieuwen; de eerder gelezen evenementen worden getoond.",
+  "studioEvents.studioNow": "{destination} gebruikt \"Stream now\" van YouTube Studio, dus polyemesis zou dit evenement niet gebruiken. Zet dat eerst uit in de instellingen van de bestemming."
 }

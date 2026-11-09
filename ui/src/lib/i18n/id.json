@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Kategori",
   "yt.live.categoryHelp": "Nama kategori YouTube seperti Gaming atau Music. Jika kosong, default YouTube dipertahankan. Diterapkan pada siaran yang dibuat polyemesis.",
   "yt.live.projection360": "Video 360°",
-  "yt.live.kidsNote": "Siaran yang dibuat polyemesis dinyatakan tidak dibuat untuk anak-anak kecuali Anda menyatakan sebaliknya di kontrol YouTube di bawah, yang juga mengatur latensi dan DVR. Dibuat untuk anak-anak memengaruhi komentar, iklan, dan notifikasi, jadi sesuaikan dengan konten Anda."
+  "yt.live.kidsNote": "Siaran yang dibuat polyemesis dinyatakan tidak dibuat untuk anak-anak kecuali Anda menyatakan sebaliknya di kontrol YouTube di bawah, yang juga mengatur latensi dan DVR. Dibuat untuk anak-anak memengaruhi komentar, iklan, dan notifikasi, jadi sesuaikan dengan konten Anda.",
+  "studioEvents.title": "Dari YouTube Studio",
+  "studioEvents.badge": "dari YouTube Studio",
+  "studioEvents.open": "Buka di Studio",
+  "studioEvents.useFor": "Gunakan untuk {destination}",
+  "studioEvents.used": "{title} akan digunakan saat {destination} tayang langsung.",
+  "studioEvents.useFailed": "Tidak dapat menggunakan acara ini: {reason}",
+  "studioEvents.stale": "Tidak dapat menyegarkan acara dari {accounts}; menampilkan data yang dibaca sebelumnya.",
+  "studioEvents.studioNow": "{destination} menggunakan \"Stream now\" dari YouTube Studio, sehingga polyemesis tidak akan memakai acara ini. Nonaktifkan dulu di pengaturan tujuan."
 }

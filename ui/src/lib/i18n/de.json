@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Kategorie",
   "yt.live.categoryHelp": "Ein YouTube-Kategoriename wie Gaming oder Music. Leer bleibt der YouTube-Standard. Wird auf die Übertragung angewendet, die polyemesis erstellt.",
   "yt.live.projection360": "360°-Video",
-  "yt.live.kidsNote": "Eine von polyemesis erstellte Übertragung wird als nicht für Kinder gemacht deklariert, sofern du unten in den YouTube-Einstellungen nichts anderes angibst; dort legst du auch Latenz und DVR fest. „Für Kinder“ wirkt sich auf Kommentare, Werbung und Benachrichtigungen aus, stelle es also passend zu deinen Inhalten ein."
+  "yt.live.kidsNote": "Eine von polyemesis erstellte Übertragung wird als nicht für Kinder gemacht deklariert, sofern du unten in den YouTube-Einstellungen nichts anderes angibst; dort legst du auch Latenz und DVR fest. „Für Kinder“ wirkt sich auf Kommentare, Werbung und Benachrichtigungen aus, stelle es also passend zu deinen Inhalten ein.",
+  "studioEvents.title": "Aus YouTube Studio",
+  "studioEvents.badge": "aus YouTube Studio",
+  "studioEvents.open": "In Studio öffnen",
+  "studioEvents.useFor": "Für {destination} verwenden",
+  "studioEvents.used": "{title} wird verwendet, wenn {destination} live geht.",
+  "studioEvents.useFailed": "Dieses Event konnte nicht verwendet werden: {reason}",
+  "studioEvents.stale": "Die Events von {accounts} konnten nicht aktualisiert werden; es werden die zuvor gelesenen angezeigt.",
+  "studioEvents.studioNow": "{destination} nutzt „Stream now“ von YouTube Studio, daher würde polyemesis dieses Event nicht verwenden. Deaktiviere das zuerst in den Einstellungen des Ziels."
 }

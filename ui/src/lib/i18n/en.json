@@ -4537,5 +4537,13 @@
   "yt.live.categoryLabel": "Category",
   "yt.live.categoryHelp": "A YouTube category name such as Gaming or Music. Empty leaves YouTube's default. Applied to the broadcast polyemesis creates.",
   "yt.live.projection360": "360° video",
-  "yt.live.kidsNote": "A broadcast polyemesis creates is declared not made for kids unless you declare otherwise in the YouTube controls below, which also set latency and DVR. Made for kids affects comments, ads and notifications, so set it to match your content."
+  "yt.live.kidsNote": "A broadcast polyemesis creates is declared not made for kids unless you declare otherwise in the YouTube controls below, which also set latency and DVR. Made for kids affects comments, ads and notifications, so set it to match your content.",
+  "studioEvents.title": "From YouTube Studio",
+  "studioEvents.badge": "from YouTube Studio",
+  "studioEvents.open": "Open in Studio",
+  "studioEvents.useFor": "Use for {destination}",
+  "studioEvents.used": "{title} will be used when {destination} goes live.",
+  "studioEvents.useFailed": "Could not use this event: {reason}",
+  "studioEvents.stale": "Could not refresh the events of {accounts}; showing what was read earlier.",
+  "studioEvents.studioNow": "{destination} uses YouTube Studio's Stream now, so polyemesis would not use this event. Turn that off in the destination's settings first."
 }

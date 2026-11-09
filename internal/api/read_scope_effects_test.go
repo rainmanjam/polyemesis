@@ -119,6 +119,8 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
 			"the report names the stream's top chatters"},
 
+		{http.MethodGet, "/api/v1/youtube/studio-events", nil,
+			"a YouTube call made with each connected account's token, listing the channel's upcoming events"},
 		{http.MethodGet, "/api/v1/chat/moderators?platform=youtube", nil,
 			"the roster is read with the owner's token and each read spends 50 quota units"},
 

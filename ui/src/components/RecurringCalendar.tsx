@@ -25,6 +25,7 @@ import { classifySkip } from "@/lib/recurringOutcome";
 import { listOccurrences, retitleOccurrence, skipOccurrence } from "@/lib/recurringApi";
 import type { OccurrenceView } from "@/lib/types";
 import { timestamp } from "@/lib/format";
+import { StudioEventsCalendar } from "@/components/StudioEventsCalendar";
 
 /** Two weeks, the same default window the server uses when no bounds are sent. */
 const WINDOW_MS = 14 * 24 * 3_600_000;
@@ -153,6 +154,7 @@ export function RecurringCalendar() {
           );
         })}
       </ul>
+      <StudioEventsCalendar ownEventIds={new Set((rows ?? []).map((o) => o.eventId).filter((id) => id !== ""))} />
       <ConfirmDestructive
         open={skipTarget !== null}
         onOpenChange={(open) => {

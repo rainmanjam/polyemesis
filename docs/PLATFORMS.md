@@ -639,6 +639,14 @@ the destination's settings; a recurring show's template then sets its own title
 and description. Not yet confirmed against a live channel: whether YouTube
 honours latency on a create (the same read-back caveat the update path has).
 
+**Studio's events in the calendar.** The schedule calendar also lists YouTube
+Studio's own upcoming events for every connected YouTube account, read-only and
+marked *from YouTube Studio*, each with a link to open it in Studio and a **Use
+for** button per YouTube destination on that account, which stores the event the
+same way the dialog's picker does. An event polyemesis made for one of its own
+occurrences is not listed twice. The list is read at most every 15 minutes per
+account (three quota units), served from a cache in between.
+
 If Studio's *Stream now* still creates a second broadcast beside polyemesis's,
 turn *Stream now* off in Studio, or switch the destination to use it.
 

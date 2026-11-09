@@ -39,6 +39,7 @@ import type {
   AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
+  StudioEventView,
   YouTubeEventRow,
   YouTubeStreamRow,
   YouTubeVerticalView,
@@ -971,6 +972,9 @@ export const api = {
       `/platforms/accounts/${accountId}/youtube/events` +
         (destinationId === undefined ? "" : `?destinationId=${destinationId}`),
     ),
+  /** YouTube Studio's own upcoming events for the schedule calendar. The server caches 15 minutes per account. */
+  youtubeStudioEvents: () =>
+    get<{ events: StudioEventView[]; stale: string[]; refreshedAt?: string }>("/youtube/studio-events"),
   /** The operator's click: turns auto-start on for one event. */
   youtubeEventAutoStart: (accountId: number, eventId: string) =>
     post<{ eventId: string; enableAutoStart: boolean }>(
