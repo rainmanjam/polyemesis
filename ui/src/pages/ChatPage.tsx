@@ -124,6 +124,7 @@ export function ChatPage() {
   };
 
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
+  const attached = useMemo(() => new Set(statuses.map((s) => s.platform)), [statuses]);
   const counts = useMemo(() => {
     const m = new Map<ChatPlatform, number>();
     messages.forEach((msg) => m.set(msg.platform, (m.get(msg.platform) ?? 0) + 1));
@@ -343,7 +344,7 @@ export function ChatPage() {
         className={tab === "chat" ? "grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]" : "hidden"}
       >
         {/* ---- the merged timeline ---- */}
-        <section className="flex min-h-0 flex-col rounded-md border border-border bg-card">
+        <section className="@container flex min-h-0 flex-col rounded-md border border-border bg-card">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1.5">
             <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-semibold">{t("chatpage.timeline")}</span>
@@ -352,7 +353,7 @@ export function ChatPage() {
                 ? t("chatpage.shownOfTotal", { shown: visible.length, total: messages.length })
                 : visible.length}
             </span>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
               {/* A toggle, so aria-pressed says which list is on screen. The
                   count rides in the accessible name too: a number beside an
                   icon is otherwise announced as a bare digit. */}
@@ -373,6 +374,7 @@ export function ChatPage() {
                 hidden={hidden}
                 onToggle={toggle}
                 counts={counts}
+                attached={attached}
               />
             </div>
           </div>

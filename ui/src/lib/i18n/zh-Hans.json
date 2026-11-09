@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "最新优先",
   "chatpage.panelStoredTitle": "当前没有任何连接；这是已存储的历史记录。",
   "chatpage.historyBadge": "历史",
+  "chatpage.echoLabel": "由 polyemesis 发送",
   "chatpage.socketClosedTitle": "实时连接已关闭；重新连接后消息会恢复。",
   "chatpage.deletedOn": "已在 {platform} 上删除。",
   "chatpage.storedHistory": "已存储的历史",
