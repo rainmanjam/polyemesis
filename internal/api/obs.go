@@ -382,6 +382,15 @@ func (s *Server) liveLevelsAvailable() bool {
 	return ffmpeg.LiveCommandsSupported()
 }
 
+// sceneWouldSilence is the one message for a scene rule that would leave a
+// destination with no audio. It is reached two ways -- the preset cannot build
+// against the live ingest's tracks (routing.ErrPresetSilent), or it builds but
+// keeps none of the tracks in this destination's mix -- and which one a rule
+// hits depends only on whether a stream is arriving, so the operator must not
+// be told two stories about the same rule.
+const sceneWouldSilence = "the preset keeps none of the tracks in this destination's mix, so applying it as mutes would " +
+	"silence the destination; changing which tracks it carries needs a restart, which a scene switch never does"
+
 // applySceneLevels applies one scene rule to one destination.
 //
 // WHAT A SCENE CAN CHANGE IS LEVELS, AND ONLY LEVELS. A routing preset, applied
@@ -422,7 +431,9 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 	}
 
 	src := routing.DefaultSource()
-	if eng := s.engineForSource(row.SourceID); eng != nil {
+	if s.sceneSource != nil {
+		src = s.sceneSource(row.SourceID)
+	} else if eng := s.engineForSource(row.SourceID); eng != nil {
 		src = eng.Source()
 	}
 	opts := routing.DefaultPresetOptsFor(src)
@@ -430,14 +441,16 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 		opts = *rule.Opts
 	}
 	preset, err := routing.ApplyPreset(rule.Preset, src, opts)
+	if errors.Is(err, routing.ErrPresetSilent) {
+		return skip(sceneWouldSilence)
+	}
 	if err != nil {
 		res.Outcome, res.Message = string(bulkFailed), err.Error()
 		return res
 	}
 	next, changed, notes, silent := sceneLevels(row.Profile, preset)
 	if silent {
-		return skip("the preset keeps none of the tracks in this destination's mix, so applying it as mutes would " +
-			"silence the destination; changing which tracks it carries needs a restart, which a scene switch never does")
+		return skip(sceneWouldSilence)
 	}
 	if !changed {
 		res.Outcome = outcomeApplied

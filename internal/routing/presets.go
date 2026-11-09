@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -289,6 +290,22 @@ func presetBuilder(id string) (func(string, presetCtx) (Profile, error), bool) {
 	return nil, false
 }
 
+// ErrPresetSilent is what ApplyPreset's error matches (errors.Is) when the
+// preset, applied to this ingest's tracks, would select no audio at all. It is
+// a condition rather than a failure for a caller that applies presets as
+// levels (the OBS bridge's scene rules skip it); the error's own text, which
+// says which preset and why, is unchanged.
+var ErrPresetSilent = errors.New("preset would leave no audio")
+
+type presetSilentError struct{ msg string }
+
+func (e *presetSilentError) Error() string        { return e.msg }
+func (e *presetSilentError) Is(target error) bool { return target == ErrPresetSilent }
+
+func silentPreset(format string, args ...any) error {
+	return &presetSilentError{msg: fmt.Sprintf(format, args...)}
+}
+
 func presetByID(id string) (Preset, bool) {
 	for _, p := range Presets() {
 		if p.ID == id {
@@ -311,7 +328,7 @@ func buildNoMusic(id string, c presetCtx) (Profile, error) {
 	}
 	p := c.selecting(sel)
 	if len(p.SelectedTracks()) == 0 {
-		return Profile{}, fmt.Errorf("preset %q would leave no audio: the ingest only carries the excluded track", id)
+		return Profile{}, silentPreset("preset %q would leave no audio: the ingest only carries the excluded track", id)
 	}
 	return p, nil
 }
@@ -345,7 +362,7 @@ func buildExceptMusic(id string, c presetCtx) (Profile, error) {
 
 	p := c.selecting(sel)
 	if len(p.SelectedTracks()) == 0 {
-		return Profile{}, fmt.Errorf("preset %q would leave no audio: every track the ingest carries is music", id)
+		return Profile{}, silentPreset("preset %q would leave no audio: every track the ingest carries is music", id)
 	}
 	// The standing instruction, which is the part that survives the streamer
 	// moving music to another track. Inert until something is actually marked
@@ -385,7 +402,7 @@ func buildPlatform(id string, c presetCtx) (Profile, error) {
 
 	p, dec := ApplyMusicPolicy(c.selecting(c.allTracks()), c.src, plat, c.opts.MusicPolicy)
 	if len(p.SelectedTracks()) == 0 {
-		return Profile{}, fmt.Errorf("preset %q would leave no audio: %s, and every track the ingest carries is marked as music", id, dec.Summary)
+		return Profile{}, silentPreset("preset %q would leave no audio: %s, and every track the ingest carries is marked as music", id, dec.Summary)
 	}
 	return p, nil
 }
