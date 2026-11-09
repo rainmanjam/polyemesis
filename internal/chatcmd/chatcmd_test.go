@@ -43,15 +43,32 @@ func (p *fakeProgramme) FixSource() error {
 }
 
 type fakeSender struct {
-	mu   sync.Mutex
-	sent []string
+	mu     sync.Mutex
+	sent   []string
+	byChat map[string][]string // platform/account -> what SendEach was told to post there
 }
 
-func (s *fakeSender) Send(_ context.Context, text string) ([]chat.SendResult, error) {
+// SendEach offers three connected chats and records what textFor says to each.
+func (s *fakeSender) SendEach(_ context.Context, textFor func(db.Platform, string) string) ([]chat.SendResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sent = append(s.sent, text)
-	return nil, nil
+	if s.byChat == nil {
+		s.byChat = map[string][]string{}
+	}
+	var out []chat.SendResult
+	for _, c := range []chat.SendResult{
+		{Platform: db.PlatformKick, Account: "k"},
+		{Platform: db.PlatformTwitch, Account: "t"},
+		{Platform: db.PlatformYouTube, Account: "yt"},
+	} {
+		if text := textFor(c.Platform, c.Account); text != "" {
+			s.byChat[string(c.Platform)+"/"+c.Account] = append(s.byChat[string(c.Platform)+"/"+c.Account], text)
+			s.sent = append(s.sent, text)
+			c.OK = true
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeSender) all() []string {
@@ -95,7 +112,7 @@ func newRig(t *testing.T) *rig {
 
 func msg(text string, mod bool) chat.Message {
 	return chat.Message{
-		ID: "m1", Platform: db.PlatformTwitch, Text: text,
+		ID: "m1", Platform: db.PlatformTwitch, Account: "t", Text: text,
 		Author: chat.Author{ID: "u1", Name: "someone", Moderator: mod},
 	}
 }
@@ -290,7 +307,7 @@ func TestRunAnswersAChatMessageFromTheBus(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for len(r.send.all()) == 0 && time.Now().Before(deadline) {
-		bus.Publish(events.TypeChat, chat.Message{ID: "x", Platform: db.PlatformTwitch, Text: "!bitrate", At: time.Now()})
+		bus.Publish(events.TypeChat, chat.Message{ID: "x", Platform: db.PlatformTwitch, Account: "t", Text: "!bitrate", At: time.Now()})
 		time.Sleep(20 * time.Millisecond)
 	}
 	if len(r.send.all()) == 0 {
@@ -307,7 +324,7 @@ func TestRunAnswersAChatMessageFromTheBus(t *testing.T) {
 
 type failingSender struct{}
 
-func (failingSender) Send(context.Context, string) ([]chat.SendResult, error) {
+func (failingSender) SendEach(context.Context, func(db.Platform, string) string) ([]chat.SendResult, error) {
 	return nil, errors.New("no platform connected")
 }
 
@@ -318,5 +335,23 @@ func TestAReplyThatCannotBeSentIsLogged(t *testing.T) {
 	r.say(msg("!bitrate", false))
 	if !strings.Contains(r.logBuf.String(), "reply failed") {
 		t.Errorf("a failed reply was not logged: %q", r.logBuf.String())
+	}
+}
+
+// A command typed in one chat is answered in that chat. It used to be answered
+// in every connected chat, so a !bitrate typed in YouTube was also posted in
+// Kick and Twitch channels that were not streaming.
+func TestACommandIsAnsweredOnlyInTheChatItCameFrom(t *testing.T) {
+	r := newRig(t)
+	m := msg("!bitrate", false)
+	m.Platform, m.Account = db.PlatformYouTube, "yt"
+	r.say(m)
+	r.send.mu.Lock()
+	defer r.send.mu.Unlock()
+	if len(r.send.byChat) != 1 || len(r.send.byChat["youtube/yt"]) != 1 {
+		t.Fatalf("replies by chat = %v, want exactly one, in youtube/yt", r.send.byChat)
+	}
+	if len(r.send.sent) != 1 {
+		t.Fatalf("a reply also went out through the unfiltered path: %q", r.send.sent)
 	}
 }

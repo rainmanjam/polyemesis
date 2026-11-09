@@ -57,9 +57,11 @@ type Programme interface {
 	FixSource() error
 }
 
-// Sender is the existing chat send: every connected platform, quota-paced.
+// Sender is the hub's per-chat send, quota-paced. A command is answered in the
+// chat it was typed in and nowhere else, so this is SendEach, not the fan-out:
+// a !bitrate typed in YouTube is not a message for Kick and Twitch.
 type Sender interface {
-	Send(ctx context.Context, text string) ([]chat.SendResult, error)
+	SendEach(ctx context.Context, textFor func(p db.Platform, account string) string) ([]chat.SendResult, error)
 }
 
 // Options wires a Handler.
@@ -149,34 +151,34 @@ func (h *Handler) Handle(ctx context.Context, m chat.Message) {
 
 	prog, found := h.opts.Resolve(cfg.SourceID)
 	if !found {
-		h.reply(ctx, "The programme chat commands control is not running.")
+		h.reply(ctx, m, "The programme chat commands control is not running.")
 		return
 	}
 	switch cmd {
 	case "bitrate":
-		h.reply(ctx, bitrateLine(prog.Report()))
+		h.reply(ctx, m, bitrateLine(prog.Report()))
 	case "switch":
 		if arg == "" {
-			h.reply(ctx, "Usage: !switch primary | backup | playlist | slate | auto")
+			h.reply(ctx, m, "Usage: !switch primary | backup | playlist | slate | auto")
 			return
 		}
 		h.audit(m, cmd, arg)
 		if err := prog.SwitchSource(arg); err != nil {
-			h.reply(ctx, "Could not switch: "+err.Error())
+			h.reply(ctx, m, "Could not switch: "+err.Error())
 			return
 		}
 		if arg == "auto" {
-			h.reply(ctx, "Source selection is automatic again.")
+			h.reply(ctx, m, "Source selection is automatic again.")
 			return
 		}
-		h.reply(ctx, "Switched to "+arg+".")
+		h.reply(ctx, m, "Switched to "+arg+".")
 	case "fix":
 		h.audit(m, cmd, "")
 		if err := prog.FixSource(); err != nil {
-			h.reply(ctx, "Could not refresh the feed: "+err.Error())
+			h.reply(ctx, m, "Could not refresh the feed: "+err.Error())
 			return
 		}
-		h.reply(ctx, "Refreshing the feed; source selection is automatic again.")
+		h.reply(ctx, m, "Refreshing the feed; source selection is automatic again.")
 	}
 }
 
@@ -234,13 +236,20 @@ func (h *Handler) audit(m chat.Message, cmd, arg string) {
 		"author", m.Author.Name, "authorId", m.Author.ID)
 }
 
-func (h *Handler) reply(ctx context.Context, text string) {
+// reply answers in the chat the command came from: same platform, same account.
+func (h *Handler) reply(ctx context.Context, m chat.Message, text string) {
 	if h.opts.Sender == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	if _, err := h.opts.Sender.Send(ctx, text); err != nil {
+	_, err := h.opts.Sender.SendEach(ctx, func(p db.Platform, account string) string {
+		if p == m.Platform && account == m.Account {
+			return text
+		}
+		return ""
+	})
+	if err != nil {
 		h.opts.Log.Warn("chat command reply failed", "err", err)
 	}
 }

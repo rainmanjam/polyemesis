@@ -4,7 +4,7 @@ import { KEY_STATE } from "../src/render.js";
 import { pollClock } from "../src/runtime.js";
 import { ADMIN, PAIRED, READ, json, malformedJson, runtimeFor, settle, surface } from "./fakeInstall.js";
 
-// The chat poll key (#14). Press starts the poll its settings describe, announced in every chat; while
+// The chat poll key (#14). Press starts the poll its settings describe, announced in every live chat; while
 // a poll runs the face shows the votes and the time left, and a HELD press ends it -- the poll read at
 // key down, never one started since.
 

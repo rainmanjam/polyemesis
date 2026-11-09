@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Question du sondage",
   "streamdeck.pi.pollOptions": "Choix, un par ligne (2 à 6)",
   "streamdeck.pi.pollDuration": "Durée (secondes)",
-  "streamdeck.pi.pollHint": "Appuyez pour lancer le sondage dans tous les chats. Pendant qu'il tourne, la touche affiche les votes et le temps restant ; maintenez-la pour le terminer plus tôt.",
+  "streamdeck.pi.pollHint": "Appuyez pour lancer le sondage dans tous les chats en direct. Pendant qu'il tourne, la touche affiche les votes et le temps restant ; maintenez-la pour le terminer plus tôt.",
   "streamdeck.pi.cutTail": "Couper la fin différée",
   "streamdeck.pi.cutTailHint": "Un arrêt maintenu coupe aussi ce qui reste en mémoire tampon : plus rien n’est diffusé. Maintenir pendant la diffusion de la fin la coupe.",
   "streamdeck.pi.dumpSeconds": "Secondes à purger",

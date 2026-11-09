@@ -2010,9 +2010,10 @@ optional target:
 |---|---|
 | `{"text": ...}` or `"to": "live"` | the live chats only (the default) |
 | `"to": "all"` | every connected chat that can take a message (the behaviour before this default) |
-| `"platforms": ["kick", "twitch"]` | exactly those platforms, live or not; the others are not mentioned. A listed platform with no chat comes back `skipped`, `reason: "notConnected"` |
+| `"platforms": ["kick", "twitch"]` | every chat on those platforms (all of a platform's accounts), live or not; the others are not mentioned. A listed platform with no chat comes back `skipped`, `reason: "notConnected"` |
+| `"accounts": [{"platform": "twitch", "account": "<ref>"}]` | exactly those chats, for an install with two channels on one platform; a named account with no chat comes back `notConnected` |
 
-`to` and `platforms` are alternatives; both together, an unknown `to` or an
+`to`, `platforms` and `accounts` are alternatives; two together, an unknown `to` or an
 unknown platform is `400`. A chat is **live** when it has an enabled destination
 that is on air (running, or reconnecting) linked to that account, or, for
 YouTube and X, when the chat adapter reports a live chat or broadcast. A
@@ -2021,14 +2022,15 @@ platform when exactly one chat account is connected there. Twitch's and Kick's
 chat being connected says nothing about whether the channel is streaming, so it
 is not used. Each connected chat that is not live comes back `skipped: true`,
 `reason: "notLive"`, `detail: "not live"`. When no chat that can take a message
-is live and no target is given, the answer is `409` "no platform is live; choose
-platforms to send to": a send never quietly goes nowhere. `reason` is additive
+is live and no target is given, the answer is `409` (`code: "no_platform_live"`, "no platform is live; send "to":"all" or "platforms":[...] to choose"): a send never quietly goes nowhere. `reason` is additive
 (`"notLive"`, `"notConnected"`); a platform that cannot post at all stays
 `skipped` with its `detail` and no `reason`. A chat is a send target
 (`canSend` on its row in `GET /chat`) only when polyemesis can post to that
 platform and the capability matrix in `GET /platforms/capabilities` does not
 mark its `chatSend` as `no`; any other chat comes back `skipped` with the
 reason. Facebook is the case the matrix rules out.
+
+`GET /chat/live` is deliberately readable with a `read` token, unlike `GET /chat`: it carries no message content and no credential, only the platform, the account ref and two booleans per chat, the same fields the account list already shows a read token.
 
 `GET /chat/live` answers `{targets: [{platform, account, canSend, live}], anyLive}`,
 the same reading a default send uses; the composer's chips come from it. Chat

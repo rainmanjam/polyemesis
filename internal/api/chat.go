@@ -74,11 +74,21 @@ type chatSendRequest struct {
 	// two are alternatives; neither applies to a reply, which has its own target.
 	To        string   `json:"to,omitempty"`
 	Platforms []string `json:"platforms,omitempty"`
+	// Accounts names exact chats (platform and account ref), for an operator
+	// with two channels on one platform. Liveness is per account, so a chip per
+	// account needs a way to send per account. An alternative to Platforms.
+	Accounts []chatReplyAccount `json:"accounts,omitempty"`
 	// ReplyTo answers one message on the platform that issued it, instead of
 	// fanning out. AsBot asks for that platform's bot identity (Kick only) and
 	// is meaningful only together with ReplyTo.
 	ReplyTo *chatReplyTarget `json:"replyTo,omitempty"`
 	AsBot   bool             `json:"asBot,omitempty"`
+}
+
+// chatReplyAccount is one chat named by platform and account.
+type chatReplyAccount struct {
+	Platform string `json:"platform"`
+	Account  string `json:"account"`
 }
 
 // chatReplyTarget addresses the message being answered. The id is opaque and
@@ -263,7 +273,10 @@ func (s *Server) handleChatSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // noPlatformLive is the 409 for a default send when no connected chat is live.
-const noPlatformLive = "no platform is live; choose platforms to send to"
+const noPlatformLive = `no platform is live; send "to":"all" or "platforms":[...] to choose`
+
+// codeNoPlatformLive lets a client show its own translated sentence for the 409.
+const codeNoPlatformLive = "no_platform_live"
 
 // tallySend pre-counts a set of results into the response.
 func tallySend(results []chat.SendResult) chatSendResponse {
@@ -306,20 +319,34 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `"to" is "live" or "all"; to name platforms, send "platforms"`)
 		return
 	}
-	var named map[db.Platform]bool
-	if len(req.Platforms) > 0 {
-		if to != "" {
-			writeError(w, http.StatusBadRequest, `send either "to" or "platforms", not both`)
+	var named *namedChats
+	if len(req.Platforms) > 0 || len(req.Accounts) > 0 {
+		if to != "" || (len(req.Platforms) > 0 && len(req.Accounts) > 0) {
+			writeError(w, http.StatusBadRequest, `send one of "to", "platforms" or "accounts"`)
 			return
 		}
-		named = make(map[db.Platform]bool, len(req.Platforms))
-		for _, name := range req.Platforms {
+		named = &namedChats{platforms: map[db.Platform]bool{}, accounts: map[string]bool{}}
+		check := func(name string) (db.Platform, bool) {
 			name = strings.ToLower(strings.TrimSpace(name))
 			if _, ok := platform.ByEnum(name); !ok {
 				writeError(w, http.StatusBadRequest, "unknown platform "+strconv.Quote(name))
+				return "", false
+			}
+			return db.Platform(name), true
+		}
+		for _, name := range req.Platforms {
+			p, ok := check(name)
+			if !ok {
 				return
 			}
-			named[db.Platform(name)] = true
+			named.platforms[p] = true
+		}
+		for _, a := range req.Accounts {
+			p, ok := check(a.Platform)
+			if !ok {
+				return
+			}
+			named.accounts[chatKey(p, strings.TrimSpace(a.Account))] = true
 		}
 	}
 
@@ -330,8 +357,8 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	var pick func(p db.Platform, account string) chat.SkipReason
 	switch {
 	case named != nil:
-		pick = func(p db.Platform, _ string) chat.SkipReason {
-			if named[p] {
+		pick = func(p db.Platform, account string) chat.SkipReason {
+			if named.has(p, account) {
 				return ""
 			}
 			return chat.SkipNotSelected
@@ -343,7 +370,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		live := s.liveChats()
 		if statuses := s.chat.Statuses(); len(statuses) > 0 && !live.anyLive(statuses) {
 			// Never a send to nowhere: the operator is told to choose.
-			writeError(w, http.StatusConflict, noPlatformLive)
+			writeErrorCode(w, http.StatusConflict, codeNoPlatformLive, noPlatformLive)
 			return
 		}
 		pick = func(p db.Platform, account string) chat.SkipReason {
@@ -360,7 +387,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if named != nil {
-		results = namedResults(results, named)
+		results = named.filter(results)
 	}
 	// 200 even when every platform failed: the request was carried out and the
 	// per-platform verdicts are the answer. A status code cannot say "Twitch
@@ -369,31 +396,49 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tallySend(results))
 }
 
-// namedResults keeps the results for the platforms the operator asked for, and
-// adds a "not connected" one for each of them that has no chat. The platforms
-// they left out are dropped: they chose the targets, and a row per other
-// platform would be noise.
-func namedResults(results []chat.SendResult, named map[db.Platform]bool) []chat.SendResult {
-	out := make([]chat.SendResult, 0, len(named))
-	seen := map[db.Platform]bool{}
+// namedChats is what the operator asked for: whole platforms, or exact accounts.
+type namedChats struct {
+	platforms map[db.Platform]bool
+	accounts  map[string]bool // chatKey
+}
+
+func (n *namedChats) has(p db.Platform, account string) bool {
+	return n.platforms[p] || n.accounts[chatKey(p, account)]
+}
+
+// filter keeps the results for the chats the operator asked for, and adds a
+// "not connected" one for each platform or account they named that has no chat.
+// The chats they left out are dropped: they chose the targets, and a row per
+// other chat would be noise.
+func (n *namedChats) filter(results []chat.SendResult) []chat.SendResult {
+	out := make([]chat.SendResult, 0, len(results))
+	seenPlat := map[db.Platform]bool{}
+	seenAcct := map[string]bool{}
 	for _, res := range results {
 		if res.Reason == string(chat.SkipNotSelected) {
 			continue
 		}
-		seen[res.Platform] = true
+		seenPlat[res.Platform] = true
+		seenAcct[chatKey(res.Platform, res.Account)] = true
 		out = append(out, res)
 	}
-	var missing []chat.SendResult
-	for p := range named {
-		if !seen[p] {
-			missing = append(missing, chat.SendResult{
-				Platform: p, Skipped: true,
-				Reason: string(chat.SkipNotConnected), Detail: chat.SkipNotConnected.Detail(),
-			})
+	notConnected := func(p db.Platform, account string) chat.SendResult {
+		return chat.SendResult{
+			Platform: p, Account: account, Skipped: true,
+			Reason: string(chat.SkipNotConnected), Detail: chat.SkipNotConnected.Detail(),
 		}
 	}
-	sort.Slice(missing, func(i, j int) bool { return missing[i].Platform < missing[j].Platform })
-	out = append(out, missing...)
+	for p := range n.platforms {
+		if !seenPlat[p] {
+			out = append(out, notConnected(p, ""))
+		}
+	}
+	for k := range n.accounts {
+		if !seenAcct[k] {
+			p, account, _ := strings.Cut(k, "\x00")
+			out = append(out, notConnected(db.Platform(p), account))
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Platform != out[j].Platform {
 			return out[i].Platform < out[j].Platform

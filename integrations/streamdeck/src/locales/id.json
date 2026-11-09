@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Pertanyaan polling",
   "streamdeck.pi.pollOptions": "Pilihan, satu per baris (2 sampai 6)",
   "streamdeck.pi.pollDuration": "Durasi (detik)",
-  "streamdeck.pi.pollHint": "Tekan untuk memulai polling di setiap obrolan. Selama berjalan, tombol menampilkan suara dan sisa waktu; tahan untuk mengakhirinya lebih awal.",
+  "streamdeck.pi.pollHint": "Tekan untuk memulai polling di setiap obrolan yang live. Selama berjalan, tombol menampilkan suara dan sisa waktu; tahan untuk mengakhirinya lebih awal.",
   "streamdeck.pi.cutTail": "Potong sisa jeda",
   "streamdeck.pi.cutTailHint": "Berhenti dengan menahan juga memotong yang masih di buffer, jadi tidak ada lagi yang tayang. Menahan saat sisa tayang akan memotongnya.",
   "streamdeck.pi.dumpSeconds": "Detik yang dibuang",

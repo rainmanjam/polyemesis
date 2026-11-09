@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Anket sorusu",
   "streamdeck.pi.pollOptions": "Seçenekler, her satıra bir tane (2 ile 6 arası)",
   "streamdeck.pi.pollDuration": "Süre (saniye)",
-  "streamdeck.pi.pollHint": "Anketi her sohbette başlatmak için basın. Sürerken tuş oyları ve kalan süreyi gösterir; erken bitirmek için basılı tutun.",
+  "streamdeck.pi.pollHint": "Anketi her canlı sohbette başlatmak için basın. Sürerken tuş oyları ve kalan süreyi gösterir; erken bitirmek için basılı tutun.",
   "streamdeck.pi.cutTail": "Gecikmeli kalanı kes",
   "streamdeck.pi.cutTailHint": "Basılı tutulan durdurma, arabellekte kalanı da keser; böylece başka bir şey yayına çıkmaz. Kalan yayındayken basılı tutmak onu keser.",
   "streamdeck.pi.dumpSeconds": "Atılacak saniye",

@@ -47,16 +47,15 @@ its first tagged release.
   every connected chat; by default it now posts only to a chat whose platform has an enabled destination on air
   (running, or reconnecting) linked to that account, or, for YouTube and X, whose adapter reports a live chat
   or broadcast. Every other connected chat comes back as a result with `skipped: true`, `reason: "notLive"` and
-  `detail: "not live"`. When nothing is live the request is refused with `409` ("no platform is live; choose
-  platforms to send to") rather than posting nowhere. To get the old behaviour send `"to": "all"`; to name the
-  platforms send `"platforms": ["kick", "twitch"]` (live or not; one that has no chat comes back
+  `detail: "not live"`. When nothing is live the request is refused with `409` (`code: "no_platform_live"`, "no platform is live; send "to":"all" or "platforms":[...] to choose") rather than posting nowhere. To get the old behaviour send `"to": "all"`; to name the
+  platforms send `"platforms": ["kick", "twitch"]`, or `"accounts": [{"platform": ..., "account": ...}]` for exact chats (live or not; one that has no chat comes back
   `reason: "notConnected"`). `"to": "live"` spells out the default. A client that sends only `text` keeps
   working, but on a stream that is live on one platform its message no longer reaches the others, and on an
   idle install it gets `409` instead of a send. Replies (`replyTo`) are unchanged. The chat composer shows the
   platforms a message will go to as chips (on for the live ones), lets you add a platform that is not live or
   pick "All connected", and says so when nothing is live; `GET /api/v1/chat/live` is the reading it uses. Chat
   polls follow the same rule: the announcement and the result go to the live chats, and the others are recorded
-  as "not live". The rollover notice and chat command replies are unchanged.
+  as "not live". Chat-command replies (`!bitrate` and friends) now answer only in the chat the command was typed in, and a destination playing out its delay tail still counts as live. The rollover notice is unchanged.
 
 ### Fixed
 

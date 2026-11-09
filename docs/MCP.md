@@ -149,7 +149,7 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `create_clip` | Cut the last N seconds (1–3600) into a clip | | `POST /clips` |
 | `schedule_broadcast` | Schedule destinations to start or stop, once or daily/weekly | **yes, for a stop** | `POST /schedules` |
 | `start_poll` | Start a [chat poll](POLLS.md): `question`, 2–6 `options`, `durationSeconds`, `mirrorTwitch`, `mirrorYouTube`, `mirrorFacebook`. Without confirm, answers with the exact message it would post | **yes** | `POST /polls` |
-| `end_poll` | End the running poll early; the result is posted in every chat. `pollId`. Without confirm, answers with the poll it would end | **yes** | `POST /polls/{id}/end` |
+| `end_poll` | End the running poll early; the result is posted in every live chat. `pollId`. Without confirm, answers with the poll it would end | **yes** | `POST /polls/{id}/end` |
 
 Every tool carries MCP annotations. Read and content tools are `readOnlyHint`.
 The stop family, retry, presets, `set_recording` and `schedule_broadcast` are

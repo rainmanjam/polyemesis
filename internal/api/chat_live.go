@@ -5,7 +5,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // Which chats are "live", for chat send and chat polls.
@@ -53,24 +52,13 @@ var onAirDestinations = func(s *Server) []onAirDest {
 	var out []onAirDest
 	for _, e := range s.mgr.Engines() {
 		for _, d := range e.Status().Destinations {
-			if !d.Enabled || !carrying(d.Process, d.BackupProcess) {
+			if !d.OnAir() {
 				continue
 			}
 			out = append(out, onAirDest{Platform: d.Platform, AccountID: accountOf[d.ID]})
 		}
 	}
 	return out
-}
-
-// carrying is engine's processCarrying: running, or reconnecting, which is
-// still mid-broadcast to the people watching.
-func carrying(ps ...*supervisor.Status) bool {
-	for _, p := range ps {
-		if p != nil && (p.State == supervisor.StateRunning || p.State == supervisor.StateReconnecting) {
-			return true
-		}
-	}
-	return false
 }
 
 // chatLiveSet answers "is this connected chat live" for one moment.

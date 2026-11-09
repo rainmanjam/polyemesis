@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusDot } from "@/components/signature/StatusDot";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
 import type { SignalTone } from "@/lib/signal";
 import { useAuthorInk } from "@/hooks/useAppliedTheme";
@@ -556,18 +556,28 @@ export function ChatComposer({
   // null until read and when the read fails; then the composer behaves as it
   // always did and lets the server decide.
   const [live, setLive] = useState<ChatLiveView | null>(null);
+  const [liveFailed, setLiveFailed] = useState(false);
   // null follows the live default; a list is the operator's explicit choice.
-  const [chosen, setChosen] = useState<ChatPlatform[] | null>(null);
+  const [chosen, setChosen] = useState<string[] | null>(null);
   useEffect(() => {
     if (!configured || replyTo) return;
     let on = true;
     const read = () => {
       try {
         Promise.resolve(api.chatLive())
-          .then((v) => on && setLive(v))
-          .catch(() => on && setLive(null));
+          .then((v) => {
+            if (!on) return;
+            setLive(v);
+            setLiveFailed(false);
+          })
+          .catch(() => {
+            if (!on) return;
+            setLive(null);
+            setLiveFailed(true);
+          });
       } catch {
         setLive(null);
+        setLiveFailed(true);
       }
     };
     read();
@@ -580,31 +590,44 @@ export function ChatComposer({
 
   const allSenders = statuses.filter((s) => s.canSend);
   // A reply goes to the one platform it answers, so only that platform's limit applies.
+  // Liveness is per account, so the chips are too: one chip per connected chat
+  // that can send. A platform with two accounts shows the channel on each chip.
+  const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
   const connected = useMemo(
-    () => [...new Set(allSenders.map((s) => s.platform))],
+    () => allSenders.map((s) => ({ key: chatKeyOf(s.platform, s.account), status: s })),
     [allSenders],
   );
-  const livePlatforms = useMemo(
-    () => connected.filter((p) => live?.targets.some((x) => x.platform === p && x.canSend && x.live)),
+  const connectedKeys = useMemo(() => connected.map((c) => c.key), [connected]);
+  const liveKeys = useMemo(
+    () =>
+      connected
+        .filter((c) =>
+          live?.targets.some(
+            (x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live,
+          ),
+        )
+        .map((c) => c.key),
     [connected, live],
   );
-  // What this message will reach, as platforms. Without a reading it is every
-  // sender, which is what the placeholder always said.
-  const selected = chosen ?? (live ? livePlatforms : connected);
+  // What this message will reach. Without a reading it is every sender.
+  const selected = chosen ?? (live ? liveKeys : connectedKeys);
   const noneLive = !replyTo && !!live && chosen === null && !live.anyLive;
   const nothingChosen = !replyTo && chosen !== null && chosen.length === 0;
   const showTargets = !replyTo && !!live && connected.length > 0;
-  const toggleTarget = (p: ChatPlatform) => {
-    const base = chosen ?? livePlatforms;
-    const next = base.includes(p) ? base.filter((x) => x !== p) : [...base, p];
+  const liveUnknown = !replyTo && liveFailed && connected.length > 0;
+  // Two accounts on one platform: the chip says which channel it is.
+  const perPlatform = (p: ChatPlatform) => connected.filter((c) => c.status.platform === p).length;
+  const toggleTarget = (key: string) => {
+    const base = chosen ?? liveKeys;
+    const next = base.includes(key) ? base.filter((x) => x !== key) : [...base, key];
     const sameAsLive =
-      next.length === livePlatforms.length && livePlatforms.every((x) => next.includes(x));
+      next.length === liveKeys.length && liveKeys.every((x) => next.includes(x));
     // Back on the live set is following it again, so a go-live is picked up.
     setChosen(sameAsLive ? null : next);
   };
   const senders = replyTo
     ? allSenders.filter((s) => s.platform === replyTo.platform)
-    : allSenders.filter((s) => selected.includes(s.platform));
+    : allSenders.filter((s) => selected.includes(chatKeyOf(s.platform, s.account)));
   // The strictest published limit among the platforms that will actually
   // receive this. Advisory only: over it the counter turns amber and the send
   // button still works, because the platform is the authority on its own rules
@@ -629,9 +652,14 @@ export function ChatComposer({
    *  the server decides at the moment of sending, not at the moment of reading. */
   const sendTarget = (): ChatSendTarget | undefined => {
     if (chosen === null) return undefined;
-    return chosen.length === connected.length && connected.every((p) => chosen.includes(p))
-      ? { to: "all" }
-      : { platforms: chosen };
+    if (chosen.length === connectedKeys.length && connectedKeys.every((k) => chosen.includes(k))) {
+      return { to: "all" };
+    }
+    return {
+      accounts: connected
+        .filter((c) => chosen.includes(c.key))
+        .map((c) => ({ platform: c.status.platform, account: c.status.account ?? "" })),
+    };
   };
 
   const sendPlain = (body: string) => {
@@ -678,7 +706,13 @@ export function ChatComposer({
       }
     } catch (err) {
       setResults(null);
-      toast.error(err instanceof Error ? err.message : t("chatpage.couldNotSend"));
+      if (err instanceof ApiError && err.code === "no_platform_live") {
+        // The server's sentence is English and names JSON fields; the composer
+        // says it in the operator's language and the chips are the way out.
+        toast.error(t("chatpage.sendRefusedNoneLive"));
+      } else {
+        toast.error(err instanceof Error ? err.message : t("chatpage.couldNotSend"));
+      }
     } finally {
       setSending(false);
     }
@@ -740,19 +774,23 @@ export function ChatComposer({
       {showTargets && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[11px]">
           <span className="text-muted-foreground">{t("chatpage.targetsLabel")}</span>
-          {connected.map((p) => {
-            const on = selected.includes(p);
-            const isLive = livePlatforms.includes(p);
-            const label = accentFor(p).label;
-            const hint = t(isLive ? "chatpage.targetLive" : "chatpage.targetNotLive", { platform: label });
+          {connected.map(({ key, status: st }) => {
+            const on = selected.includes(key);
+            const isLive = liveKeys.includes(key);
+            const base = accentFor(st.platform).label;
+            const label =
+              perPlatform(st.platform) > 1 ? `${base} · ${st.channel || st.account || ""}` : base;
+            const hint = t(isLive ? "chatpage.targetLive" : "chatpage.targetNotLive", {
+              platform: label,
+            });
             return (
               <button
-                key={p}
+                key={key}
                 type="button"
                 aria-pressed={on}
                 title={hint}
                 aria-label={hint}
-                onClick={() => toggleTarget(p)}
+                onClick={() => toggleTarget(key)}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full border px-2 py-0.5",
                   on ? "border-primary/60 bg-primary/10" : "border-border text-muted-foreground",
@@ -767,7 +805,7 @@ export function ChatComposer({
             variant="link"
             size="sm"
             className="h-auto p-0 text-[11px]"
-            onClick={() => setChosen(connected)}
+            onClick={() => setChosen(connectedKeys)}
           >
             {t("chatpage.targetsAll")}
           </Button>
@@ -782,6 +820,11 @@ export function ChatComposer({
             </Button>
           )}
         </div>
+      )}
+      {liveUnknown && (
+        <p role="status" className="mb-1.5 text-[11px] text-muted-foreground">
+          {t("chatpage.liveUnknown")}
+        </p>
       )}
       {(noneLive || nothingChosen) && (
         <p role="status" className="mb-1.5 text-[11px] text-warn">
@@ -814,7 +857,9 @@ export function ChatComposer({
               ? t("chatpage.notConnected")
               : senders.length === 0
                 ? t("chatpage.targetsPick")
-                : t("chatpage.sendTo", {
+                : !replyTo && !live
+                  ? t("chatpage.sendLiveDefault")
+                  : t("chatpage.sendTo", {
                   platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
                 })
           }

@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "投票の質問",
   "streamdeck.pi.pollOptions": "選択肢 (1行に1つ、2〜6個)",
   "streamdeck.pi.pollDuration": "時間 (秒)",
-  "streamdeck.pi.pollHint": "押すとすべてのチャットで投票を開始します。実行中はキーに票数と残り時間が表示され、長押しで早めに終了できます。",
+  "streamdeck.pi.pollHint": "押すとライブ中のすべてのチャットで投票を開始します。実行中はキーに票数と残り時間が表示され、長押しで早めに終了できます。",
   "streamdeck.pi.cutTail": "遅延分をカット",
   "streamdeck.pi.cutTailHint": "長押しの停止で、バッファに残っている分もカットし、それ以上は送出されません。遅延分の送出中に長押しするとカットします。",
   "streamdeck.pi.dumpSeconds": "ダンプする秒数",

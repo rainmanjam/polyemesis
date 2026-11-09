@@ -198,7 +198,7 @@ func TestChatSendWithNothingLiveAsksTheOperatorToChoose(t *testing.T) {
 	if code != http.StatusConflict {
 		t.Fatalf("code = %d, want 409: %s", code, raw)
 	}
-	if !strings.Contains(raw, "no platform is live; choose platforms to send to") {
+	if !strings.Contains(raw, "no platform is live; send ") {
 		t.Errorf("body = %s, want the message that names the choice", raw)
 	}
 	if f.youtube.count()+f.kick.count()+f.twitch.count() != 0 {
@@ -345,5 +345,55 @@ func TestPollAnnouncementFollowsTheLiveDefault(t *testing.T) {
 	}
 	if _, ok := got[db.PlatformKick]; ok {
 		t.Errorf("kick has a result although the poll had no text for it: %+v", got[db.PlatformKick])
+	}
+}
+
+// Liveness is per account, so an operator with two channels on one platform can
+// name the one they mean: "accounts" sends to exactly those chats.
+func TestChatSendToNamedAccountsReachesOnlyThoseChats(t *testing.T) {
+	f := newLiveFixture(t)
+	second := &recAdapter{platform: db.PlatformTwitch, account: "tw-two"}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := f.s.chat.Attach(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	code, out, raw := f.send(map[string]any{"text": "hi", "accounts": []map[string]string{
+		{"platform": "twitch", "account": "tw-two"},
+		{"platform": "kick", "account": "no-such"},
+	}})
+	if code != http.StatusOK {
+		t.Fatalf("code=%d: %s", code, raw)
+	}
+	if second.count() != 1 || f.twitch.count() != 0 || f.kick.count() != 0 {
+		t.Fatalf("posted second=%d twitch=%d kick=%d, want 1/0/0", second.count(), f.twitch.count(), f.kick.count())
+	}
+	if out.Sent != 1 || out.Skipped != 1 {
+		t.Fatalf("out = %+v", out)
+	}
+	var missing chat.SendResult
+	for _, r := range out.Results {
+		if r.Platform == db.PlatformKick {
+			missing = r
+		}
+	}
+	if missing.Reason != "notConnected" || missing.Account != "no-such" {
+		t.Fatalf("missing = %+v, want notConnected for the named account", missing)
+	}
+	// Alternatives, not a mix.
+	if code, _, _ := f.send(map[string]any{"text": "x", "accounts": []map[string]string{{"platform": "kick", "account": "k"}}, "platforms": []string{"kick"}}); code != http.StatusBadRequest {
+		t.Errorf("accounts with platforms: code = %d, want 400", code)
+	}
+}
+
+// The 409 carries a code the UI translates by, and names the fields to send.
+func TestChatSendNothingLiveIs409WithACodeAndTheFieldsToChooseWith(t *testing.T) {
+	f := newLiveFixture(t)
+	code, _, raw := f.send(map[string]any{"text": "test"})
+	var e apiError
+	_ = json.Unmarshal([]byte(raw), &e)
+	if code != http.StatusConflict || e.Code != "no_platform_live" ||
+		!strings.Contains(e.Error, `"to":"all"`) || !strings.Contains(e.Error, `"platforms"`) {
+		t.Fatalf("code=%d body=%s", code, raw)
 	}
 }

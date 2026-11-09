@@ -13,17 +13,23 @@ import type { ChatLiveView, ChatPlatform, ChatStatus } from "@/lib/types";
 
 const sendChat = vi.fn();
 const chatLive = vi.fn();
-vi.mock("@/lib/api", () => ({
-  api: {
-    sendChat: (...a: unknown[]) => sendChat(...a),
-    chatLive: () => chatLive(),
-  },
-}));
+const toastError = vi.fn();
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    api: {
+      sendChat: (...a: unknown[]) => sendChat(...a),
+      chatLive: () => chatLive(),
+    },
+  };
+});
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() },
+  toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn(), message: vi.fn() },
 }));
 
 const { ChatComposer } = await import("./ChatPanel");
+const { ApiError } = await import("@/lib/api");
 
 function status(platform: ChatPlatform): ChatStatus {
   return {
@@ -60,6 +66,7 @@ beforeEach(() => {
     skipped: 0,
   });
   chatLive.mockReset();
+  toastError.mockReset();
 });
 afterEach(cleanup);
 
@@ -99,7 +106,7 @@ describe("the composer's targets", () => {
     expect(chip("Kick").getAttribute("aria-pressed")).toBe("true");
     send(type("hello"));
     await waitFor(() =>
-      expect(sendChat).toHaveBeenCalledWith("hello", { platforms: ["youtube", "kick"] }),
+      expect(sendChat).toHaveBeenCalledWith("hello", { accounts: [{ platform: "kick", account: "kick-acct" }, { platform: "youtube", account: "youtube-acct" }] }),
     );
   });
 
@@ -131,7 +138,7 @@ describe("the composer's targets", () => {
     fireEvent.click(chip("Twitch"));
     expect(screen.queryByText(/Nothing is live/)).toBeNull();
     send(box);
-    await waitFor(() => expect(sendChat).toHaveBeenCalledWith("hello", { platforms: ["twitch"] }));
+    await waitFor(() => expect(sendChat).toHaveBeenCalledWith("hello", { accounts: [{ platform: "twitch", account: "twitch-acct" }] }));
   });
 
   it("falls back to the old behaviour when the live reading cannot be had", async () => {
@@ -140,6 +147,11 @@ describe("the composer's targets", () => {
     send(type("hello"));
     await waitFor(() => expect(sendChat).toHaveBeenCalledWith("hello"));
     expect(screen.queryByText("Sending to")).toBeNull();
+    // It does not claim to know where this goes: no "Send to <everyone>", and it says so.
+    expect(await screen.findByText(/Can't tell what is live/)).toBeTruthy();
+    expect((screen.getByLabelText(/message/i) as HTMLTextAreaElement).placeholder).toBe(
+      "Send to live platforms",
+    );
   });
 
   it("returns to the live default after a send, so an explicit choice is for one message", async () => {
@@ -149,5 +161,46 @@ describe("the composer's targets", () => {
     send(type("one"));
     await waitFor(() => expect(sendChat).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(chip("Kick").getAttribute("aria-pressed")).toBe("false"));
+  });
+});
+
+describe("the composer, one chip per account", () => {
+  it("labels two channels on one platform and sends to the one chosen", async () => {
+    const two = [
+      { ...status("twitch"), account: "tw-a", channel: "alpha" },
+      { ...status("twitch"), account: "tw-b", channel: "beta" },
+    ];
+    chatLive.mockResolvedValue({
+      targets: [
+        { platform: "twitch", account: "tw-a", canSend: true, live: true },
+        { platform: "twitch", account: "tw-b", canSend: true, live: false },
+      ],
+      anyLive: true,
+    });
+    render(<ChatComposer statuses={two} limits={[]} configured />);
+    await screen.findByText("Sending to");
+    expect(chip("Twitch · alpha").getAttribute("aria-pressed")).toBe("true");
+    expect(chip("Twitch · beta").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip("Twitch · alpha")); // leave the live one out, take the other
+    fireEvent.click(chip("Twitch · beta"));
+    send(type("hello"));
+    await waitFor(() =>
+      expect(sendChat).toHaveBeenCalledWith("hello", {
+        accounts: [{ platform: "twitch", account: "tw-b" }],
+      }),
+    );
+  });
+});
+
+describe("a 409 because nothing is live", () => {
+  it("is shown in the operator's language, not as the server's English", async () => {
+    chatLive.mockResolvedValue(view("youtube"));
+    sendChat.mockRejectedValue(
+      new ApiError(409, `no platform is live; send "to":"all" or "platforms":[...] to choose`, "no_platform_live"),
+    );
+    await renderComposer();
+    send(type("hello"));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith("Nothing is live, so nothing was sent. Choose where to send it.");
   });
 });

@@ -2762,7 +2762,10 @@ export interface ChatSendResult {
 
 /** Where a plain chat message goes. Absent means the server's default: only the
  *  platforms that are live. `all` is every connected chat; a list names them. */
-export type ChatSendTarget = { to: "all" } | { platforms: ChatPlatform[] };
+export type ChatSendTarget =
+  | { to: "all" }
+  | { platforms: ChatPlatform[] }
+  | { accounts: { platform: ChatPlatform; account: string }[] };
 
 /** One connected chat as GET /chat/live reports it. `live` is the reading a
  *  default send uses, so a chip that is on by default is exactly where a send
