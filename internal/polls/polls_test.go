@@ -138,3 +138,27 @@ func TestTheClosingAnnouncementSaysWhoWon(t *testing.T) {
 		t.Errorf("none: %q", got)
 	}
 }
+
+// TestTheClosingAnnouncementAgreesWithItsCounts: "1 vote", "2 votes", for the
+// total and for a tie's per-option count.
+func TestTheClosingAnnouncementAgreesWithItsCounts(t *testing.T) {
+	for _, c := range []struct {
+		votes []int
+		want  string
+	}{
+		{[]int{1, 0}, "POLL CLOSED: q — a wins with 100% (1 of 1 vote)."},
+		{[]int{2, 0}, "POLL CLOSED: q — a wins with 100% (2 of 2 votes)."},
+		{[]int{2, 1}, "POLL CLOSED: q — a wins with 66% (2 of 3 votes)."},
+		{[]int{1, 1}, "POLL CLOSED: q — a tie between a, b, 1 vote each (2 in all)."},
+		{[]int{2, 2}, "POLL CLOSED: q — a tie between a, b, 2 votes each (4 in all)."},
+	} {
+		total := 0
+		opts := []OptionResult{{Label: "a", Votes: c.votes[0]}, {Label: "b", Votes: c.votes[1]}}
+		for _, v := range c.votes {
+			total += v
+		}
+		if got := EndText(Result{Question: "q", Total: total, Options: opts}); got != c.want {
+			t.Errorf("votes %v: %q, want %q", c.votes, got, c.want)
+		}
+	}
+}

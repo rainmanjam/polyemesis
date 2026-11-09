@@ -195,15 +195,24 @@ func EndTextMax(r Result, limit int) string {
 			return fmt.Sprintf("POLL CLOSED: %s — no votes.", q)
 		case len(w) == 1:
 			v := r.Options[w[0]].Votes
-			return fmt.Sprintf("POLL CLOSED: %s — %s wins with %d%% (%d of %d votes).",
-				q, labels[w[0]], v*100/r.Total, v, r.Total)
+			return fmt.Sprintf("POLL CLOSED: %s — %s wins with %d%% (%d of %d %s).",
+				q, labels[w[0]], v*100/r.Total, v, r.Total, voteWord(r.Total))
 		default:
 			names := make([]string, len(w))
 			for i, k := range w {
 				names[i] = labels[k]
 			}
-			return fmt.Sprintf("POLL CLOSED: %s — a tie between %s, %d votes each (%d in all).",
-				q, strings.Join(names, ", "), r.Options[w[0]].Votes, r.Total)
+			each := r.Options[w[0]].Votes
+			return fmt.Sprintf("POLL CLOSED: %s — a tie between %s, %d %s each (%d in all).",
+				q, strings.Join(names, ", "), each, voteWord(each), r.Total)
 		}
 	})
+}
+
+// voteWord is "vote" for exactly one and "votes" otherwise.
+func voteWord(n int) string {
+	if n == 1 {
+		return "vote"
+	}
+	return "votes"
 }
