@@ -24,6 +24,7 @@ nothing is sent, the same rule the Stream Deck plugin applies.
 """
 
 import json
+import os
 import queue
 import ssl
 import threading
@@ -47,6 +48,15 @@ _worker = None
 _stop = threading.Event()
 
 TIMEOUT_SECONDS = 5
+
+# Where a system CA bundle lives, tried in order when Python's own store is
+# empty: macOS and many Linux distros, Debian/Ubuntu, RHEL.
+SYSTEM_CA_BUNDLES = (
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+)
+_bundle_logged = False
 RETRIES = 2
 
 
@@ -162,7 +172,42 @@ def _context():
         return None
     if _ca_file:
         return ssl.create_default_context(cafile=_ca_file)
-    return ssl.create_default_context()
+    return _default_context()
+
+
+def _default_context():
+    """The default context, unless Python's store has no CA certificates.
+
+    The python.org macOS Python that OBS loads ships with an empty store, so
+    every https report failed with "unable to get local issuer certificate".
+    Then use certifi's bundle if it is installed, else the first system bundle.
+    Verification is never switched off."""
+    ctx = ssl.create_default_context()
+    if ctx.cert_store_stats().get("x509_ca", 0) > 0:
+        return ctx
+    candidates = []
+    try:
+        import certifi
+
+        candidates.append(("certifi", certifi.where()))
+    except Exception:  # noqa: BLE001 -- certifi is optional
+        pass
+    candidates += [("system", p) for p in SYSTEM_CA_BUNDLES if os.path.isfile(p)]
+    for kind, path in candidates:
+        try:
+            fallback = ssl.create_default_context(cafile=path)
+        except (OSError, ssl.SSLError):
+            continue
+        _log_bundle_once(kind, path)
+        return fallback
+    return ctx
+
+
+def _log_bundle_once(kind, path):
+    global _bundle_logged
+    if not _bundle_logged:
+        _bundle_logged = True
+        print("polyemesis: Python has no CA certificates of its own; verifying with the %s bundle %s" % (kind, path))
 
 
 def _send(body):

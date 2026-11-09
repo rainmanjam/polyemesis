@@ -10,6 +10,11 @@ its first tagged release.
 
 ### Fixed
 
+- **The OBS script no longer fails every report with `CERTIFICATE_VERIFY_FAILED` on macOS.** The python.org Python that OBS loads has an empty
+  CA store, so even a valid Let's Encrypt site was refused. When no **CA certificate** is set and the store is empty, the script now
+  falls back to `certifi`, then the first system bundle (`/etc/ssl/cert.pem`, Debian, RHEL), and logs which one it used. A chosen CA
+  file still wins, a populated store is untouched, and verification is never disabled.
+
 - **An OBS scene rule that would silence a destination is now reported the same way whether or not the destination is streaming.**
   Applying "no music" to a destination whose mix is only track 1 read `skipped` with "the preset keeps none of the tracks in this
   destination's mix..." while the destination was stopped, but `failed` with "preset \"no-music\" would leave no audio: the ingest
