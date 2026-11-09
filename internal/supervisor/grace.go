@@ -98,6 +98,12 @@ const (
 	wakeEvery         = 500 * time.Millisecond
 )
 
+// WakeAfter is wakeAfter for callers outside the package that must give a
+// stopping child room to be woken before they give up on it. The selector's
+// switch (engine.seamStopWait) is the one: it cuts the outgoing hop's input at
+// its own deadline, and a wake sent after that cut reaches nothing.
+const WakeAfter = wakeAfter
+
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and
 // the empty string -- get ShutdownGrace, which is the point.
 func graceFor(kind procname.Kind) time.Duration {

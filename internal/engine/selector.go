@@ -108,12 +108,23 @@ import (
 
 const (
 	// seamStopWait is how long a switch waits for the outgoing copy hop to exit
-	// before starting its replacement anyway. See retireFeed. Five times the
-	// 0.105s a healthy FFmpeg takes to answer SIGTERM with its input flowing
-	// (the measurement in manager.go), so a feed that is merely busy still exits
-	// inside it; the only feed that does not is one wedged in a read, and the
-	// grace period that wedge used to cost is what this bounds.
-	seamStopWait = 500 * time.Millisecond
+	// before starting its replacement anyway. See retireFeed.
+	//
+	// IT MUST OUTLAST THE SUPERVISOR'S WAKE. A hop reading a quiet relay does not
+	// answer SIGTERM; the supervisor sends it a wake (Spec.WakeOnStop) at
+	// supervisor.WakeAfter, and that wake is what lets it exit and flush. This
+	// used to be a flat 500ms, shorter than the wake: retireFeed cut the hop's
+	// subscription at 500ms, relay.Hub.Wake found no subscriber at 750ms and did
+	// nothing, and the hop sat there until the 8s grace and a SIGKILL. Measured
+	// with real FFmpeg (#126): the switch returned at 501ms detached, the old hop
+	// was gone at 8.011s with no final progress block, and tearing down the
+	// replacement right after the switch waited 7.5s on it.
+	//
+	// The margin is for FFmpeg to act on the wake and be reaped; a healthy hop
+	// (0.105s with input flowing, see manager.go) never gets near it. The cost is
+	// paid only when the outgoing hop is quiet, which is a failover away from a
+	// dead source, and it is about 0.3s of extra offset lag over the flat 500ms.
+	seamStopWait = supervisor.WakeAfter + 250*time.Millisecond
 	// selectorSweep is how often liveness is re-evaluated. Well under any
 	// sensible grace period, so a switch lands near its deadline rather than up
 	// to a whole period late.

@@ -10,6 +10,13 @@ its first tagged release.
 
 ### Fixed
 
+- **A failover away from a quiet source no longer leaves its old relay hop to be killed 8 seconds later.** The
+  switch waited 500ms for the outgoing copy hop and then cut its relay subscription, but the supervisor wakes a
+  stopping hop on a quiet feed at 750ms, and the wake found no subscriber. The hop was never woken: it was detached
+  at 501ms, SIGKILLed at 8.011s with no final progress block, and a settings reconcile or shutdown right after the
+  switch waited 7.5s on it (measured with real FFmpeg). The switch now waits long enough for the wake (about 0.75s
+  rather than 0.5s, only when the old hop is quiet), and the hop exits cleanly inside the seam with its final
+  progress block. No input read timeout was added: a consumer must ride through quiet patches. Refs #126.
 - **YouTube chat now connects to a broadcast polyemesis created at go-live.** The chat was pointed at the new
   broadcast's chat before it was live, YouTube answered "not found", the adapter counted that chat as ended and then
   refused it for ever when the broadcast went live (chat sat "waiting for a YouTube broadcast to go live" beside a
