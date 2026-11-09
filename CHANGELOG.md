@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Fixed
 
+- **An OBS scene rule that would silence a destination is now reported the same way whether or not the destination is streaming.**
+  Applying "no music" to a destination whose mix is only track 1 read `skipped` with "the preset keeps none of the tracks in this
+  destination's mix..." while the destination was stopped, but `failed` with "preset \"no-music\" would leave no audio: the ingest
+  only carries the excluded track" while it streamed, because a live ingest carrying only that track makes the preset itself
+  unbuildable and the bridge classed any preset error as `failed`. Routing presets now return a typed `ErrPresetSilent` for "would
+  leave no audio" (message unchanged on the presets API), and the bridge maps it to `skipped` with the one message, as OBS-BRIDGE.md
+  says. `failed` stays for real errors such as an unknown preset.
+
 - **A failover away from a quiet source no longer leaves its old relay hop to be killed 8 seconds later.** The
   switch waited a fixed 500ms for the outgoing copy hop and then cut its relay subscription, but the supervisor
   wakes a stopping hop on a quiet feed at 750ms, and the wake found no subscriber. The hop was never woken: it was
