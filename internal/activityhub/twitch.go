@@ -434,10 +434,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 	var drainC <-chan eventsub.Frame
 	var drainTimer *time.Timer
 	var drainDone <-chan time.Time
-	drainWindow := t.cfg.DrainWindow
-	if drainWindow <= 0 {
-		drainWindow = twitchDrainWindow
-	}
+	drainWindow := t.drainWindow()
 	endDrain := func() {
 		if draining != nil {
 			draining.Close()
@@ -463,16 +460,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			// select picks at random among ready cases, so the window can win
 			// against frames already read off the old socket. Hand those over
 			// before it is closed: they are the messages Twitch will not repeat.
-			for open := true; open && drainC != nil; {
-				select {
-				case f, ok := <-drainC:
-					if open = t.drained(ctx, f, ok, emit); !open {
-						break
-					}
-				default:
-					open = false
-				}
-			}
+			t.flushDrained(ctx, drainC, emit)
 			endDrain()
 
 		case <-timer.C:
@@ -573,6 +561,30 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			default:
 				t.ignored.Add(1)
 			}
+		}
+	}
+}
+
+// drainWindow is the configured drain window, or twitchDrainWindow when unset.
+func (t *Twitch) drainWindow() time.Duration {
+	if t.cfg.DrainWindow > 0 {
+		return t.cfg.DrainWindow
+	}
+	return twitchDrainWindow
+}
+
+// flushDrained hands over every frame already buffered on the old socket's
+// channel, without waiting for more, stopping at the first sign the socket is
+// finished (closed channel or an error frame).
+func (t *Twitch) flushDrained(ctx context.Context, c <-chan eventsub.Frame, emit func(activity.Event)) {
+	for {
+		select {
+		case f, ok := <-c:
+			if !t.drained(ctx, f, ok, emit) {
+				return
+			}
+		default:
+			return
 		}
 	}
 }

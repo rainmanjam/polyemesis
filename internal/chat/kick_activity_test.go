@@ -383,6 +383,26 @@ func kindState(t *testing.T, a *KickAdapter, k activity.Kind) activity.KindStatu
 	return activity.KindStatus{}
 }
 
+// waitKindsSettled waits until Run has finished its first subscription check:
+// chat is live and no activity kind is still waiting for Kick to confirm. A wait
+// on ONE kind is not this -- the kinds are reported as the check proceeds, so a
+// test that read the rest straight after saw "unknown" and health "connecting"
+// (CI, 0.00s).
+func waitKindsSettled(t *testing.T, a *KickAdapter) {
+	t.Helper()
+	waitFor(t, "chat live and every activity kind answered", func() bool {
+		if a.Health().State != StateLive {
+			return false
+		}
+		for _, ks := range a.ActivityKinds() {
+			if ks.State == activity.KindUnknown {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func TestKickRunSubscribesToEveryActivityEventOnceAndReportsThemOn(t *testing.T) {
 	f := &fakeKickEvents{}
 	api := httptest.NewServer(f)
@@ -394,7 +414,7 @@ func TestKickRunSubscribesToEveryActivityEventOnceAndReportsThemOn(t *testing.T)
 	stop := runKick(t, a)
 	defer stop()
 	waitFor(t, "the activity POST", func() bool { return f.count("POST-ACT ") == 1 })
-	waitFor(t, "all on", func() bool { return kindState(t, a, activity.KindModeration).State == activity.KindOn })
+	waitKindsSettled(t, a)
 
 	f.mu.Lock()
 	post := f.actPosts[0]
@@ -455,7 +475,7 @@ func TestKickTierGatedEventIsUnavailableNotAnError(t *testing.T) {
 	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = api.URL; c.Tick = 5 * time.Millisecond })
 	stop := runKick(t, a)
 	defer stop()
-	waitFor(t, "tip unavailable", func() bool { return kindState(t, a, activity.KindTip).State == activity.KindUnavailable })
+	waitKindsSettled(t, a)
 	tip := kindState(t, a, activity.KindTip)
 	if !strings.Contains(tip.Detail, "KICKs are not enabled for this channel") {
 		t.Errorf("detail %q is not in Kick's words", tip.Detail)
@@ -486,8 +506,7 @@ func TestKickRefusedActivityBatchNeverCostsChatOrTheOtherEvents(t *testing.T) {
 	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = api.URL; c.Tick = 5 * time.Millisecond })
 	stop := runKick(t, a)
 	defer stop()
-	waitFor(t, "redemption unavailable", func() bool { return kindState(t, a, activity.KindRedemption).State == activity.KindUnavailable })
-	waitFor(t, "follow on", func() bool { return kindState(t, a, activity.KindFollow).State == activity.KindOn })
+	waitKindsSettled(t, a)
 	if got := kindState(t, a, activity.KindRedemption); !strings.Contains(got.Detail, "event is not available") {
 		t.Errorf("detail = %q", got.Detail)
 	}

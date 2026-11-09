@@ -344,6 +344,17 @@ func (m *Manager) publishEngine(id int64, eng *Engine) {
 	m.applyEngineSettings(eng, m.engineSettingsSnapshot())
 }
 
+// SetRelayPortRange moves the manager's relay port pool to [base, base+span).
+//
+// For tests, and only before Start. Every manager defaults to the same
+// 21000-21499 range, so concurrently running test binaries (the whole suite runs
+// one per package) hand out the same ports, and a datagram still in flight from
+// one process's publisher lands in another's capture socket. A test that asserts
+// "nothing has arrived" needs a pool nobody else sends to.
+func (m *Manager) SetRelayPortRange(base, span int) {
+	m.alloc = relay.NewPortAllocator(base, span)
+}
+
 // NewManager builds the manager. No engines exist until Start.
 func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker) *Manager {
 	m := &Manager{

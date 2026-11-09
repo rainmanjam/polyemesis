@@ -137,6 +137,12 @@ func engineServerWithSettings(t *testing.T, tools *ffmpeg.Tools, o Options, muta
 	// A manager rather than a bare engine: the API is source-aware now, and
 	// Start is what creates the engine for the source the migration made.
 	eng := engine.NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)), cfg, store, tools, bus)
+	// A relay port pool of this package's own. On the shared default (21000-21499)
+	// the clip buffer's capture socket could be handed a port another test
+	// binary's publisher was still sending to, so an "empty" buffer held 1692
+	// bytes (nine TS packets) and the 409 test saw a 201. Nothing in this
+	// package spawns a real publisher, so nothing sends to this range.
+	eng.SetRelayPortRange(apiRelayPortBase, 500)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatalf("engine manager Start: %v", err)
 	}
@@ -157,6 +163,10 @@ func engineServerWithSettings(t *testing.T, tools *ffmpeg.Tools, o Options, muta
 	setTestServer(s, h)
 	return s, h, store, login(t, h)
 }
+
+// apiRelayPortBase starts the relay port pool every API test engine allocates
+// from; see engineServerWithSettings.
+const apiRelayPortBase = 26000
 
 // lastTestServer is the Server most recently built by renditionServer.
 //
