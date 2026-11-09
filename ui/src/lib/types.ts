@@ -1367,6 +1367,10 @@ export interface Source {
 
 /** A source plus what the server computes about it. */
 export interface SourceView extends Source {
+  /** Stop on ingest loss, as the server reads it NOW: the version a write that
+   *  changes `ingest.autoStop` sends back as `autoStopVersion` (a stale one is a
+   *  409), and the wait the engine really applies. */
+  autoStopInfo?: AutoStopInfo;
   /** Ready to paste into an encoder, keyed by protocol, with `<server>` where
    *  the hostname goes. The token is deliberately NOT in these. */
   publishUrls: Record<string, string>;
@@ -1480,6 +1484,9 @@ export interface Settings {
      *  because it is per programme: failover itself is install-wide, but link
      *  quality belongs to one encoder's uplink. */
     degraded?: DegradedSettings;
+    /** This programme's stop-on-ingest-loss fallback. Optional: absent means
+     *  off. Edited by AutoStopControl, which always sends the whole object. */
+    autoStop?: AutoStopSettings;
   };
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
@@ -1796,6 +1803,27 @@ export interface DegradedSettings {
   maxLossPercent?: number;
   /** How long a breach -- and a recovery -- must last. 0 means the default. */
   sustainSeconds?: number;
+}
+
+/** Stop on ingest loss: stops a programme's live destinations when neither its
+ *  primary nor its backup ingest has delivered for `waitSeconds`. `waitSeconds`
+ *  0 or absent means the default; otherwise limits.autoStopWaitSeconds. The
+ *  server refuses turning it on unless the same request carries
+ *  `acknowledged: true`. */
+export interface AutoStopSettings {
+  enabled: boolean;
+  waitSeconds?: number;
+  acknowledged: boolean;
+}
+
+/** What GET /sources/{id} reports beside the stored autoStop setting. */
+export interface AutoStopInfo {
+  version: string;
+  /** The saved wait lifted by the floor, the failover grace and a pull source's
+   *  reconnect delay: what the engine really waits. */
+  effectiveWaitSeconds: number;
+  /** What lifted it above the saved wait; absent when nothing did. */
+  raisedBy?: "failover" | "pull";
 }
 
 /** The primary's last measurement. Each figure is absent until measured, and
@@ -4410,7 +4438,7 @@ export interface ObsOutcome {
 export interface ObsActionRecord {
   at: string;
   action: "start" | "stop" | "scene";
-  via: "websocket" | "script";
+  via: "websocket" | "script" | "ingest";
   scene?: string;
   preset?: string;
   results: ObsOutcome[];

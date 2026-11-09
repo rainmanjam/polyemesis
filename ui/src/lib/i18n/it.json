@@ -4558,5 +4558,19 @@
   "studioEvents.used": "{title} verrà usato quando {destination} andrà in diretta.",
   "studioEvents.useFailed": "Impossibile usare questo evento: {reason}",
   "studioEvents.stale": "Impossibile aggiornare gli eventi di {accounts}; vengono mostrati quelli letti in precedenza.",
-  "studioEvents.studioNow": "{destination} usa «Stream now» di YouTube Studio, quindi polyemesis non userebbe questo evento. Disattivalo prima nelle impostazioni della destinazione."
+  "studioEvents.studioNow": "{destination} usa «Stream now» di YouTube Studio, quindi polyemesis non userebbe questo evento. Disattivalo prima nelle impostazioni della destinazione.",
+  "autostop.title": "Interrompi alla perdita dell'ingresso",
+  "autostop.desc": "Una rete di sicurezza che funziona con qualsiasi encoder: OBS, vMix, hardware o zaino IRL. Se né il flusso primario né quello di backup arrivano durante l'attesa indicata sotto, le destinazioni live di questo programma si fermano invece di trasmettere il nulla. Disattivato per impostazione predefinita.",
+  "autostop.details": "Uno slate o una playlist in onda non conta come flusso. Il passaggio al backup non è una perdita, e una riconnessione entro l'attesa non interrompe nulla. Le destinazioni con ritardo di trasmissione finiscono prima di mandare in onda la coda ritardata.",
+  "autostop.wait": "Secondi senza flusso prima dell'interruzione",
+  "autostop.waitHint": "Da {min} a {max} secondi. Lascia vuoto per il valore predefinito di {default}.",
+  "autostop.waitInvalid": "Inserisci un numero intero da {min} a {max}, oppure lascia vuoto per il valore predefinito.",
+  "autostop.effective": "Attesa effettiva: {seconds} s",
+  "autostop.effectiveFailover": "Attesa effettiva: {seconds} s, aumentata per restare oltre il periodo di tolleranza del failover.",
+  "autostop.effectivePull": "Attesa effettiva: {seconds} s, aumentata per restare oltre il ritardo di riconnessione di questa sorgente pull.",
+  "autostop.warning": "Interrompere le destinazioni termina definitivamente ogni diretta YouTube tra di esse. Riavviarle rimette il video in linea, ma non riporta indietro la diretta.",
+  "autostop.ackRequired": "Seleziona la casella per confermare prima di attivarlo.",
+  "autostop.programme": "Questa impostazione appartiene al programma «{name}» e viene salvata lì, non nel bridge OBS.",
+  "obs.viaIngest": "ripiego per perdita dell'ingresso",
+  "autostop.ack": "Ho capito che fermare chiude le trasmissioni YouTube"
 }

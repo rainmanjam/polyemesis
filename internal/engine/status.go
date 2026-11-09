@@ -419,6 +419,7 @@ func (e *Engine) Status() Status {
 			Loudness:     []meters.Report{},
 		}
 	}
+	e.statusCalls.Add(1)
 	snap := e.statusSnapshot()
 
 	// Read outside the lock: it is published atomically by reconcileOutputs and

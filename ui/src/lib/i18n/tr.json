@@ -4558,5 +4558,19 @@
   "studioEvents.used": "{destination} canlı yayına geçtiğinde {title} kullanılacak.",
   "studioEvents.useFailed": "Bu etkinlik kullanılamadı: {reason}",
   "studioEvents.stale": "{accounts} etkinlikleri yenilenemedi; daha önce okunanlar gösteriliyor.",
-  "studioEvents.studioNow": "{destination}, YouTube Studio'nun \"Stream now\" özelliğini kullanıyor, bu yüzden polyemesis bu etkinliği kullanmaz. Önce hedefin ayarlarından bunu kapatın."
+  "studioEvents.studioNow": "{destination}, YouTube Studio'nun \"Stream now\" özelliğini kullanıyor, bu yüzden polyemesis bu etkinliği kullanmaz. Önce hedefin ayarlarından bunu kapatın.",
+  "autostop.title": "Giriş kaybolunca durdur",
+  "autostop.desc": "Her kodlayıcıyla çalışan bir güvenlik ağı: OBS, vMix, donanım veya IRL sırt çantası. Aşağıdaki bekleme süresi boyunca ne birincil ne de yedek akış gelirse, bu programın canlı hedefleri hiçbir şey yayınlamak yerine durdurulur. Varsayılan olarak kapalıdır.",
+  "autostop.details": "Yayındaki bir slate veya oynatma listesi akış sayılmaz. Yedeğe geçmek bir kayıp değildir ve bekleme süresi içindeki yeniden bağlanma hiçbir şeyi durdurmaz. Yayın gecikmesi olan hedefler önce gecikmeli kuyruğunu yayınlamayı bitirir.",
+  "autostop.wait": "Durdurmadan önce akışsız geçen saniye",
+  "autostop.waitHint": "{min} ile {max} saniye arası. Varsayılan değer olan {default} için boş bırakın.",
+  "autostop.waitInvalid": "{min} ile {max} arasında bir tam sayı girin veya varsayılan için boş bırakın.",
+  "autostop.effective": "Etkin bekleme: {seconds} sn",
+  "autostop.effectiveFailover": "Etkin bekleme: {seconds} sn, yük devretme tolerans süresini aşacak şekilde yükseltildi.",
+  "autostop.effectivePull": "Etkin bekleme: {seconds} sn, bu çekme kaynağının yeniden bağlanma gecikmesini aşacak şekilde yükseltildi.",
+  "autostop.warning": "Hedefleri durdurmak, aralarındaki her canlı YouTube yayınını kalıcı olarak sonlandırır. Yeniden başlatmak görüntüyü hatta geri verir ama yayını geri getirmez.",
+  "autostop.ackRequired": "Bunu açmadan önce onaylamak için kutuyu işaretleyin.",
+  "autostop.programme": "Bu ayar “{name}” programına aittir ve OBS köprüsüne değil, o programa kaydedilir.",
+  "obs.viaIngest": "giriş kaybı yedeği",
+  "autostop.ack": "Durdurmanın YouTube yayınlarını bitirdiğini anlıyorum"
 }

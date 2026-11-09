@@ -60,6 +60,9 @@ type managerSettingsProbe struct {
 	gate *alerts.InstallGate
 	// facebookCaptions is pushed open, so an engine that missed it reads false.
 	facebookCaptions bool
+	// lossHits counts calls of the stop-on-ingest-loss handler pushed to the
+	// manager: a func cannot be compared, so the engine's copy is CALLED.
+	lossHits *atomic.Int32
 }
 
 func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
@@ -77,7 +80,9 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 		accounts:         &accountHealthProbe{},
 		platforms:        &stubPlatformHealth{release: make(chan struct{})},
 		facebookCaptions: true,
+		lossHits:         &atomic.Int32{},
 	}
+	m.SetIngestLossHandler(func(IngestLoss) { p.lossHits.Add(1) })
 	m.SetTranscriber(p.tw, p.modelsDir, func(name string, args []string) (string, []string) {
 		return p.niceMark, args
 	})
@@ -111,7 +116,19 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	attempts, hookd, lifecycle := eng.alertAttempts, eng.hooks, eng.lifecycle
 	gate, keys, stream := eng.alertGate, eng.keyChecker, eng.stream
 	accounts, platforms := eng.accountHealthReader, eng.platformHealthChecker
+	loss := eng.ingestLoss
 	eng.mu.RUnlock()
+
+	if loss == nil {
+		t.Errorf("%s: no stop-on-ingest-loss handler: this programme would never stop "+
+			"its destinations when its ingest is lost", what)
+	} else {
+		before := p.lossHits.Load()
+		loss(IngestLoss{})
+		if p.lossHits.Load() != before+1 {
+			t.Errorf("%s: the stop-on-ingest-loss handler is not the API's", what)
+		}
+	}
 
 	if accounts != p.accounts {
 		t.Errorf("%s: account health reader = %v, want the API's: this programme's "+
@@ -319,7 +336,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"accountHealth", "alertAttempts", "alertGate", "facebookCaptions", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "platHealth", "stream", "tw"}
+	covered := []string{"accountHealth", "alertAttempts", "alertGate", "facebookCaptions", "hooks", "ingestLoss", "keyChecker", "lifecycle", "modelsDir", "nice", "platHealth", "stream", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())

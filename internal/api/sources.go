@@ -122,6 +122,10 @@ type sourceView struct {
 	// sentences already differ; what changes with the state is whether anything
 	// is still on air. The argument for the split is on pullUploadRefusal.
 	PullUploadUnchecked string `json:"pullUploadUnchecked,omitempty"`
+	// AutoStop is what the stop-on-ingest-loss control needs and the stored
+	// setting does not carry: the version a changing write must send back, and
+	// the wait the engine will really apply. Derived on every read, never stored.
+	AutoStop autoStopInfo `json:"autoStopInfo"`
 }
 
 // readScopeCannotSeePublishTokens reports whether this request's principal must
@@ -180,8 +184,10 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 	// wrong port is more useful than no URL at all, and the Sources page is
 	// where an operator goes precisely when something is not working.
 	listeners := db.DefaultSettings().Listeners
+	failover := db.DefaultSettings().Failover
 	if st, err := s.store.GetSettings(); err == nil {
 		listeners = st.Listeners
+		failover = st.Failover
 	}
 	if s.mgr != nil {
 		publishing = s.mgr.SharedIngestPublishing(src.ID)
@@ -211,6 +217,7 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		ListenerHealth: health,
 
 		PullUploadUnchecked: s.pullUploadUnchecked(src),
+		AutoStop:            autoStopInfoFor(src, failover),
 	}
 	// POPULATED FROM THE STORE THE DELETE ITSELF CASCADES THROUGH. Issue #304.
 	//
@@ -554,10 +561,32 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	// Start from the stored row so a PUT that omits the token does not blank a
 	// secret the operator has already pasted into an encoder.
 	row := *existing
-	if !decodeJSON(w, r, &row) {
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	body, sentASVersion, err := takeAutoStopVersion(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := decodeJSONInto(body, &row); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	row.ID = id
+	// Stop-on-ingest-loss ends YouTube broadcasts for good, and this PUT merges
+	// over the stored row: an acknowledgement given once would let a later
+	// request switch it on by saying nothing. Turning it ON has to carry the
+	// acknowledgement itself.
+	if autoStopNewlyEnabledWithoutAck(existing.Ingest.AutoStop, row.Ingest.AutoStop, sentAutoStopAck(body)) {
+		writeError(w, http.StatusBadRequest, db.AutoStopAckText)
+		return
+	}
+	if status, msg := autoStopStaleWrite(existing.Ingest.AutoStop, row.Ingest.AutoStop, sentASVersion); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
 	// Clearing a chosen mode is refused, for the reason the create refuses
 	// unset and scoped the way handlePutSettings scopes it: to CLEARING. A row
 	// already unset -- one whose ingest blob will not parse reads back with the

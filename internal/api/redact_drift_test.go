@@ -378,6 +378,9 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.ingest.srt.latencyMs":                          sPublic,
 	// #6: degraded-link thresholds, the SRTLA port, chat commands. Numbers and
 	// switches; none carries a credential.
+	"settings.ingest.autoStop.enabled":        sPublic,
+	"settings.ingest.autoStop.waitSeconds":    sPublic,
+	"settings.ingest.autoStop.acknowledged":   sPublic,
 	"settings.ingest.degraded.enabled":        sPublic,
 	"settings.ingest.degraded.minBitrateKbps": sPublic,
 	"settings.ingest.degraded.maxRttMs":       sPublic,
@@ -485,6 +488,9 @@ var leafSensitivity = map[string]sensitivity{
 	"source.ingest.rtmp.app":                       sPublic,
 	"source.ingest.rtmp.streamKey":                 sSecret,
 	"source.ingest.srt.latencyMs":                  sPublic,
+	"source.ingest.autoStop.enabled":               sPublic,
+	"source.ingest.autoStop.waitSeconds":           sPublic,
+	"source.ingest.autoStop.acknowledged":          sPublic,
 	"source.ingest.degraded.enabled":               sPublic,
 	"source.ingest.degraded.minBitrateKbps":        sPublic,
 	"source.ingest.degraded.maxRttMs":              sPublic,

@@ -22,6 +22,12 @@ const (
 	ViaWebSocket Via = "websocket"
 	// ViaScript: the OBS script, through POST /api/v1/obs/events.
 	ViaScript Via = "script"
+	// ViaIngest: not a way a fact reaches the bridge but a way a STOP came to
+	// be -- the programme's stop-on-ingest-loss fallback (db.AutoStopSettings)
+	// ran it, on the same worker and the same stop path. It appears only in
+	// ActionRecord.Via: Event.validate refuses it, so neither obs-websocket nor
+	// the script can claim it.
+	ViaIngest Via = "ingest"
 )
 
 // Kind is one of the three facts the bridge acts on. The strings are the
@@ -226,6 +232,10 @@ const (
 	jobStart jobKind = iota
 	jobStop
 	jobScene
+	// jobIngest is a stop the ingest-loss fallback asked for. Its own kind, not
+	// jobStop: runJob re-checks a jobStop against OBS's state and the bridge's
+	// StopOnStream arming, and the fallback is independent of both.
+	jobIngest
 )
 
 type job struct {
@@ -235,6 +245,8 @@ type job struct {
 	cancel context.CancelFunc
 	rule   SceneRule
 	scene  string
+	// run is a jobIngest's work.
+	run func(ctx context.Context) []Outcome
 }
 
 // Bridge is the OBS bridge. One per process.
@@ -389,6 +401,72 @@ func (b *Bridge) Handle(ev Event) error {
 	return nil
 }
 
+// DrivesSource reports whether the bridge is on and drives this programme.
+func (b *Bridge) DrivesSource(sourceID int64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.drivesLocked(sourceID)
+}
+
+func (b *Bridge) drivesLocked(sourceID int64) bool {
+	return b.cfg.Enabled && b.cfg.SourceID != nil && *b.cfg.SourceID == sourceID
+}
+
+// RunIngestStop runs the ingest-loss fallback's stop on the bridge's worker when
+// the bridge drives that programme, and reports whether it did. False means the
+// bridge is not involved (off, another programme, or its queue is full) and the
+// caller runs the stop itself -- and then hands what it did to RecordIngestStop,
+// so a full queue does not cost the status page its record.
+//
+// ONE STOP, ONE RECORD. It is serialised with every OBS-driven stop, because
+// they share the worker. It does NOT cancel an OBS stop still waiting out its
+// grace: the fallback stops only destinations that are switched on and not
+// failed for good, and the OBS stop skips every row that is already off, so
+// whichever arrives second finds nothing to do and records nothing -- while a
+// destination only one of them selects (a bridge-picked one the fallback did
+// not list, e.g. one that was in backoff) still gets the OBS stop it was owed.
+// A stop that finds nothing left to stop (every outcome skipped) writes no
+// record.
+func (b *Bridge) RunIngestStop(sourceID int64, run func(ctx context.Context) []Outcome) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.drivesLocked(sourceID) {
+		return false
+	}
+	select {
+	case b.jobs <- job{kind: jobIngest, via: ViaIngest, ctx: b.ctx, run: run}:
+		return true
+	default:
+		return false
+	}
+}
+
+// RecordIngestStop writes the status page's record for a fallback stop that ran
+// OFF the worker because the queue was full. Nothing if the bridge does not
+// drive that programme or the stop did nothing.
+func (b *Bridge) RecordIngestStop(sourceID int64, results []Outcome) {
+	b.mu.Lock()
+	drives := b.drivesLocked(sourceID)
+	b.mu.Unlock()
+	if !drives || !acted(results) {
+		return
+	}
+	if results == nil {
+		results = []Outcome{}
+	}
+	b.record(ActionRecord{At: b.now(), Action: "stop", Via: ViaIngest, Results: results})
+}
+
+// acted reports whether any outcome is something other than "nothing happened".
+func acted(rs []Outcome) bool {
+	for _, r := range rs {
+		if r.Outcome != "skipped" {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Bridge) streamStartedLocked(ev Event) {
 	if b.streaming != nil && *b.streaming {
 		// The same state reported again -- by the other way in, or by a
@@ -503,7 +581,7 @@ func jobName(k jobKind) string {
 	switch k {
 	case jobStart:
 		return "start"
-	case jobStop:
+	case jobStop, jobIngest:
 		return "stop"
 	default:
 		return "scene"
@@ -532,6 +610,12 @@ func (b *Bridge) runJob(j job) {
 	b.mu.Unlock()
 	if j.cancel != nil {
 		defer j.cancel()
+	}
+	if j.kind == jobIngest {
+		// Independent of the bridge's switches: the fallback is configured on
+		// the programme, and runs with the bridge off or its actions unset.
+		b.runIngestJob(j)
+		return
 	}
 	if a == nil || !cfg.Enabled {
 		return
@@ -562,6 +646,29 @@ func (b *Bridge) runJob(j job) {
 	if rec.Results == nil {
 		rec.Results = []Outcome{}
 	}
+	if j.kind == jobStop && len(rec.Results) > 0 && !acted(rec.Results) {
+		// Every destination was already stopped -- by the ingest-loss fallback,
+		// or by hand: this stop did nothing, so it records nothing.
+		b.log.Debug("OBS bridge: a stop found every destination already stopped")
+		return
+	}
+	b.record(rec)
+}
+
+// runIngestJob runs a fallback stop and records it if it stopped anything.
+func (b *Bridge) runIngestJob(j job) {
+	rec := ActionRecord{At: b.now(), Action: "stop", Via: ViaIngest, Results: j.run(j.ctx)}
+	if rec.Results == nil {
+		rec.Results = []Outcome{}
+	}
+	if !acted(rec.Results) {
+		return
+	}
+	b.record(rec)
+}
+
+// record prepends rec to the status page's list and logs it.
+func (b *Bridge) record(rec ActionRecord) {
 	b.mu.Lock()
 	b.records = append([]ActionRecord{rec}, b.records...)
 	if len(b.records) > maxActionRecords {

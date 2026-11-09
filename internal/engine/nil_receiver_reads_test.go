@@ -36,6 +36,8 @@ var nilEngineAnswers = map[string]bool{
 	"MeterInterval": true,
 	"Processes":     true,
 	"Alerts":        true,
+	// Nothing is arriving on an install with no programme.
+	"IngestArriving": true,
 	// The delivery budget the manager pushed in. Zero is the honest answer on
 	// an install with no programme: nobody pushed one, so nothing is clamped
 	// and the alerts package default is what a delivery would use. Answering

@@ -462,6 +462,23 @@ type Engine struct {
 	// assembled field by field; every use is nil-safe. See stream.go.
 	stream      *eventstream.Hub
 	streamWatch *eventstream.Watcher
+	// ingestLoss is the stop-on-ingest-loss fallback's handler (under e.mu),
+	// lossW its clock (owned by observeLoop) and lossDests a test's way to say
+	// what is on air. See autostop.go.
+	ingestLoss IngestLossHandler
+	lossW      lossWatch
+	lossDests  func() []DestStatus
+	// sweepStatus is a test's way to see how often one sweep takes a status
+	// snapshot; nil means Status.
+	sweepStatus func() Status
+	// statusCalls counts Status snapshots, so a test can say a sweep took one.
+	statusCalls atomic.Int64
+	// lossLive is whether the ingest (primary or backup) was arriving at the
+	// last observe sweep, for the host's run-time re-check of a queued stop.
+	lossLive atomic.Bool
+	// lossRx is the hub byte counter as of the last observe sweep, so the
+	// re-check can tell bytes that arrived since the sweep from none.
+	lossRx atomic.Uint64
 	// lifecycle is the THIRD consumer of the edges hookWatch derives, and it is
 	// a consumer rather than a second sampler on purpose -- see observeLoop.
 	// It decides when a platform's broadcast goes live and when it ends.
@@ -6103,55 +6120,89 @@ func (e *Engine) observeLoop(ctx context.Context) {
 	tick := time.NewTicker(alertSweep)
 	defer tick.Stop()
 
-	var (
-		lastRx   uint64
-		firstRx  = true
-		disk     alerts.DiskState
-		diskAt   time.Time
-		haveDisk bool
-	)
+	state := observeState{firstRx: true}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			// Liveness from bytes on the hub, not from process state: an SRT or
-			// RTMP listener sits in "running" for as long as it waits for a
-			// publisher, which is a different question from "is the source
-			// arriving".
-			rx := e.hub.RxBytes()
-			live := !firstRx && rx > lastRx
-			lastRx, firstRx = rx, false
-
-			// A server with no consumer at all -- no alert rule, no hook, no
-			// lifecycle platform, no timeline recorder -- pays for the cached
-			// lookups and nothing else: no status snapshot, no queries, no
-			// disk read. Adding the first one starts the timers from that
-			// moment, which is the only honest thing it could do.
-			//
-			// An engine built with a store always has the timeline recorder,
-			// so in production the sweep now always runs: one status
-			// snapshot per alertSweep, and the disk read on its own
-			// alertDiskEvery cadence below. That is the price of a timeline
-			// that records without an alert rule having to exist first.
-			//
-			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
-			// alerts.Notifier and transcribe.Tools use. Guarding at the call
-			// site instead is what makes the two diverge.
-			if !e.sweepWanted() {
-				haveDisk = false
-				continue
-			}
-
-			if !haveDisk || now.Sub(diskAt) >= alertDiskEvery {
-				disk, haveDisk, diskAt = e.diskState(), true, now
-			}
-			snap := e.alertSnapshot(now, live)
-			snap.Disk = disk
-			e.observeAlerts(snap)
-			e.observeEdges(snap)
+			e.observeTick(now, e.hub.RxBytes(), &state)
 		}
 	}
+}
+
+// observeState is what one observe sweep remembers for the next.
+type observeState struct {
+	lastRx   uint64
+	firstRx  bool
+	disk     alerts.DiskState
+	diskAt   time.Time
+	haveDisk bool
+}
+
+// observeTick is one sweep of observeLoop, taking the hub's byte counter as an
+// argument so a test drives exactly the path the loop does: it is what wires the
+// stop-on-ingest-loss step to the loop at all.
+//
+// The status snapshot is taken at most ONCE per sweep and shared by the
+// fallback and the alert/edge consumers; it is taken lazily, so a sweep nobody
+// wants still pays for nothing.
+func (e *Engine) observeTick(now time.Time, rx uint64, o *observeState) {
+	// Liveness from bytes on the hub, not from process state: an SRT or RTMP
+	// listener sits in "running" for as long as it waits for a publisher, which
+	// is a different question from "is the source arriving".
+	live := !o.firstRx && rx > o.lastRx
+	o.lastRx, o.firstRx = rx, false
+	e.lossRx.Store(rx)
+
+	var (
+		st   Status
+		have bool
+	)
+	status := func() Status {
+		if !have {
+			if e.sweepStatus != nil {
+				st, have = e.sweepStatus(), true
+			} else {
+				st, have = e.Status(), true
+			}
+		}
+		return st
+	}
+
+	// The stop-on-ingest-loss fallback steps on the SAME `live` the alert
+	// watcher judges below, before the sweepWanted gate: it is its own
+	// consumer, and an install with only this switched on must still be
+	// watched. It does nothing unless armed. See autostop.go.
+	e.sweepIngestLossWith(now, live, func() []DestStatus { return status().Destinations })
+
+	// A server with no consumer at all -- no alert rule, no hook, no
+	// lifecycle platform, no timeline recorder -- pays for the cached
+	// lookups and nothing else: no status snapshot, no queries, no
+	// disk read. Adding the first one starts the timers from that
+	// moment, which is the only honest thing it could do.
+	//
+	// An engine built with a store always has the timeline recorder,
+	// so in production the sweep now always runs: one status
+	// snapshot per alertSweep, and the disk read on its own
+	// alertDiskEvery cadence below. That is the price of a timeline
+	// that records without an alert rule having to exist first.
+	//
+	// e.hooks may be nil; HasHooks is nil-safe, the same discipline
+	// alerts.Notifier and transcribe.Tools use. Guarding at the call
+	// site instead is what makes the two diverge.
+	if !e.sweepWanted() {
+		o.haveDisk = false
+		return
+	}
+
+	if !o.haveDisk || now.Sub(o.diskAt) >= alertDiskEvery {
+		o.disk, o.haveDisk, o.diskAt = e.diskState(), true, now
+	}
+	snap := e.alertSnapshotFrom(status(), now, live)
+	snap.Disk = o.disk
+	e.observeAlerts(snap)
+	e.observeEdges(snap)
 }
 
 // observeAlerts is one sweep of the alert watcher: stamp it with this
@@ -6211,7 +6262,12 @@ func (e *Engine) SetAlertGate(g *alerts.InstallGate) {
 // Nothing secret crosses this boundary: a destination contributes its name,
 // platform and error, never its URL or stream key.
 func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
-	st := e.Status()
+	return e.alertSnapshotFrom(e.Status(), now, ingestLive)
+}
+
+// alertSnapshotFrom is alertSnapshot over a status the caller already took, so
+// one sweep reads it once.
+func (e *Engine) alertSnapshotFrom(st Status, now time.Time, ingestLive bool) alerts.Snapshot {
 	// Configured as Status decided it, not as "has an ingest process": an SRT
 	// source has an ingest and no child. See ingestConfigured.
 	snap := alerts.Snapshot{At: now, IngestLive: ingestLive, IngestConfigured: st.ingestConfigured}

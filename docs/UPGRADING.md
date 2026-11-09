@@ -232,6 +232,15 @@ There is **no downgrade**. An older binary against a newer database is
 unsupported and may fail in ways that are not obvious. Restore the backup
 instead.
 
+One case is known to be benign, and is written down so nobody has to guess: a
+setting added to a programme's stored `ingest` block, such as
+`ingest.autoStop` (stop on ingest loss), needs no migration (the schema version
+stays 1). An older binary reads the stored row with a lenient decoder and ignores
+the key, so a rollback still starts. Its next save of that programme rewrites the
+row without the key, which leaves the feature off after you move forward again;
+switch it back on. The older binary's API rejects a request that sends the key
+(`400`, unknown field), so a script that does must not run against it.
+
 ## Version-specific notes
 
 > **Everything in this section is released and applies to you.** Read every

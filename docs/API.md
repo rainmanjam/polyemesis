@@ -887,6 +887,90 @@ curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" -H 'Content-Type: applicat
 Send only stored fields on a `PUT`. Server-computed ones (`publishUrls`,
 `publishing`, `tokenEnforced`) are rejected.
 
+#### Stop on ingest loss
+
+`ingest.autoStop` is a programme's safety net for any encoder (OBS with the
+[bridge](OBS-BRIDGE.md) off or failing, vMix, a hardware encoder, an IRL
+backpack over [SRTLA](SRTLA.md)): when the ingest has stopped arriving for a set
+time, stop that programme's live destinations. It is **off by default**.
+
+```json
+{"ingest": {"autoStop": {"enabled": true, "waitSeconds": 120, "acknowledged": true}}}
+```
+
+- `waitSeconds` is how long the ingest must stay lost. `0` or absent means the
+  default, **120**. The floor is **60** and the ceiling **3600**; anything else is
+  a `400`. The floor is above every timer inside polyemesis that can look like a
+  loss and recover: the ingest-lost alert's 20 seconds, the stall and disconnect
+  windows of 5, and the 30 second ceiling on how long a dropped RTMP or pull ingest
+  waits before it is restarted. A publisher that reconnects inside the wait stops
+  nothing. A programme with failover on never acts sooner than its failover grace
+  plus 30 seconds, so raising the grace later cannot make the fallback race the
+  selector. The bounds are in `WIRE`/`limits.ts` for the console.
+- `acknowledged` is required to turn it on, and the server answers `400` without it.
+  Stopping a destination ends its YouTube broadcast permanently, which is what
+  `POST /destinations/stop-all` makes every caller confirm. The OBS bridge's
+  `stopAcknowledged` is consent to stop when OBS stops and is not this. Because a
+  `PUT` merges over the stored row, a request that turns it on from off must itself
+  carry `"acknowledged": true`; one given earlier does not carry over. The same
+  holds for `PUT /settings`, which writes `ingest` through to the default
+  programme. Switching it off **withdraws** the acknowledgement (the server stores
+  `acknowledged: false` whenever `enabled` is false, on every write path), so no
+  merge can switch it back on from an old one. The Sources page and the OBS bridge
+  panel save it only through `AutoStopControl`; the Sources page's other saves
+  leave `ingest.autoStop` out of the request.
+- **A write that changes `ingest.autoStop` is checked against what it read.**
+  `GET /sources/{id}` reports `autoStopInfo.version`; send it back on the `PUT`
+  as the top-level `autoStopVersion`. A version that is not the stored one is a
+  `409` and nothing is saved, so a control left open after another panel turned
+  the setting off cannot turn it back on with its (valid) acknowledgement. A
+  request that **turns it on** must carry the version (`400` without): read the
+  source first. Editing the wait or turning it off may omit it. The console
+  sends only the fields it changed, and `acknowledged` only when the box was
+  ticked in that edit.
+- `autoStopInfo.effectiveWaitSeconds` is the wait the engine really applies (the
+  saved wait lifted by the floor, the failover grace and a pull source's
+  reconnect delay), and `autoStopInfo.raisedBy` (`"failover"` or `"pull"`) says
+  what lifted it, absent when nothing did. Computed with the engine's own rule.
+- **Changing the wait restarts the clock.** Lowering it during an outage does not
+  fire on the next sweep because of time counted against the old wait; the loss is
+  measured from the change. **Pull sources** never act before their reconnect delay
+  (`pull.reconnectDelayMaxSeconds`, up to 3600, default 30) plus 30 seconds: the
+  floor above reasons about a listener's respawn backoff, and a pull source may
+  legitimately wait that long between attempts. Like the failover clearance this can
+  lift the effective wait above 3600; the saved value is untouched.
+
+**Lost** means neither the primary nor the backup ingest is delivering. A slate or
+playlist on air does not count as a stream, so a programme sitting on its slate with
+no encoder is lost, the opposite of how the start hold treats them. A failover to
+the backup is not a loss. The same sweep that raises `ingest.lost` judges it: the
+primary from the byte count the alert watches, the backup from failover's own
+sampling of it.
+
+**It arms only on evidence.** It watches only after the ingest has arrived while at
+least one of the programme's destinations was delivering media. A boot, an idle
+programme and a destination that never received data never arm it. When the ingest
+returns inside the wait the clock is cancelled, and when it fires it fires once,
+disarms, and never restarts anything on recovery. It disarms before firing only
+when **no** destination of the programme is switched on any more (stopped by hand,
+deleted); destinations that are on but not carrying, for example every one in backoff
+after the platform dropped a starved connection, do not disarm it, and the stop still
+comes at the wait.
+
+**What it stops.** The programme's destinations that are switched on and not failed
+for good (carrying media, holding a delay buffer or waiting out a backoff), through the same
+stop the Stop button and the OBS bridge use, and never a destination that has moved to
+another programme. A destination with a [broadcast delay](BROADCAST-DELAY.md) is
+stopped as a drain, not a cut: it finishes airing the delayed tail and then ends, so
+the audience is not cut off from programme they have not yet seen. The ingest is
+**re-checked when the stop runs**: the stop can queue behind a paced OBS start, and if
+the encoder came back in the meantime nothing is stopped.
+
+**What it records.** A log line, an [`ingest.autostopped`](EVENTS.md) event on
+`/events`, and, when the OBS bridge drives that programme, an entry in
+`GET /obs`'s `status.lastActions` with `via: "ingest"`. The `ingest.lost` alert has
+already fired by then (at 20 seconds, critical); no further alert is raised.
+
 ### Services
 
 The platform registry: ingest servers, encoder ceilings and codecs for the

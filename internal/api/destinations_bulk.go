@@ -345,12 +345,20 @@ func bulkBody(enabled bool, results []bulkDestResult) map[string]any {
 
 // bulkOne applies the intent to one row and describes what came back.
 func (s *Server) bulkOne(row *db.Destination, enabled bool) bulkDestResult {
-	res := bulkDestResult{ID: row.ID, Name: row.Name, Platform: row.Platform}
-
 	// Stop-all CUTS every broadcast delay (#11). It is the panic button, and a
 	// panic button that left fifteen minutes of buffered programme airing
 	// would not be one.
-	ctl := s.applyDestinationEnabled(row.ID, enabled, !enabled)
+	return s.bulkOneCut(row, enabled, !enabled)
+}
+
+// bulkOneCut is bulkOne with the delay's fate chosen by the caller. Only a stop
+// has one: cut=false lets a broadcast delay's tail play out, then stops (the
+// ingest-loss fallback, whose whole premise is that the buffered tail is
+// programme the audience has not yet seen).
+func (s *Server) bulkOneCut(row *db.Destination, enabled, cut bool) bulkDestResult {
+	res := bulkDestResult{ID: row.ID, Name: row.Name, Platform: row.Platform}
+
+	ctl := s.applyDestinationEnabled(row.ID, enabled, cut)
 	switch {
 	case ctl.StoreErr != nil:
 		// Overwhelmingly db.ErrNotFound: the row was deleted between the list

@@ -9,6 +9,10 @@
   "status": 200,
   "body": [
     {
+      "autoStopInfo": {
+        "effectiveWaitSeconds": 120,
+        "version": "e6f3ecb1508777e4"
+      },
       "createdAt": "2026-01-01T00:00:00Z",
       "destinations": 6,
       "enabled": true,
@@ -20,6 +24,11 @@
             "track": 0
           }
         ],
+        "autoStop": {
+          "acknowledged": false,
+          "enabled": false,
+          "waitSeconds": 0
+        },
         "degraded": {
           "enabled": false,
           "maxLossPercent": 15,

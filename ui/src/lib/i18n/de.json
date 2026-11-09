@@ -4558,5 +4558,19 @@
   "studioEvents.used": "{title} wird verwendet, wenn {destination} live geht.",
   "studioEvents.useFailed": "Dieses Event konnte nicht verwendet werden: {reason}",
   "studioEvents.stale": "Die Events von {accounts} konnten nicht aktualisiert werden; es werden die zuvor gelesenen angezeigt.",
-  "studioEvents.studioNow": "{destination} nutzt „Stream now“ von YouTube Studio, daher würde polyemesis dieses Event nicht verwenden. Deaktiviere das zuerst in den Einstellungen des Ziels."
+  "studioEvents.studioNow": "{destination} nutzt „Stream now“ von YouTube Studio, daher würde polyemesis dieses Event nicht verwenden. Deaktiviere das zuerst in den Einstellungen des Ziels.",
+  "autostop.title": "Bei Eingangsverlust stoppen",
+  "autostop.desc": "Ein Sicherheitsnetz für jeden Encoder: OBS, vMix, Hardware oder IRL-Rucksack. Kommt weder der Primär- noch der Backup-Feed innerhalb der unten eingestellten Wartezeit an, stoppen die Live-Ziele dieses Programms, statt nichts auszustrahlen. Standardmäßig aus.",
+  "autostop.details": "Ein Slate oder eine Playlist auf Sendung zählt nicht als Feed. Der Wechsel auf das Backup ist kein Verlust, und eine Wiederverbindung innerhalb der Wartezeit stoppt nichts. Ziele mit Sendeverzögerung senden ihren verzögerten Rest zuerst zu Ende.",
+  "autostop.wait": "Sekunden ohne Feed bis zum Stoppen",
+  "autostop.waitHint": "{min} bis {max} Sekunden. Leer lassen für den Standardwert {default}.",
+  "autostop.waitInvalid": "Gib eine ganze Zahl von {min} bis {max} ein oder lass das Feld für den Standardwert leer.",
+  "autostop.effective": "Tatsächliche Wartezeit: {seconds} s",
+  "autostop.effectiveFailover": "Tatsächliche Wartezeit: {seconds} s, angehoben, damit sie über der Failover-Schonfrist liegt.",
+  "autostop.effectivePull": "Tatsächliche Wartezeit: {seconds} s, angehoben, damit sie über der Wiederverbindungspause dieser Pull-Quelle liegt.",
+  "autostop.warning": "Das Stoppen der Ziele beendet jede darunter laufende YouTube-Übertragung endgültig. Ein erneuter Start bringt das Video wieder auf die Leitung, aber nicht die Übertragung zurück.",
+  "autostop.ackRequired": "Setze zur Bestätigung den Haken, bevor du dies einschaltest.",
+  "autostop.programme": "Diese Einstellung gehört zum Programm „{name}“ und wird dort gespeichert, nicht in der OBS-Bridge.",
+  "obs.viaIngest": "Fallback bei Eingangsverlust",
+  "autostop.ack": "Mir ist klar, dass Stoppen YouTube-Übertragungen beendet"
 }

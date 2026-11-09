@@ -42,6 +42,17 @@ bitrate falls far enough to trip degraded-link failover.
 `polyemesis_srtla_links` on the [metrics endpoint](MONITORING.md) counts the
 links per programme. The [Grafana dashboard](GRAFANA.md) graphs it.
 
+## If the backpack goes quiet
+
+A bonded backpack can drop out for good: a flat battery, a car that drove out of
+coverage, a modem rig that locked up. Turn on **stop on ingest loss** for the
+programme (see [API.md](API.md#stop-on-ingest-loss)) and, if neither the primary nor the
+backup ingest arrives for the wait you set (two minutes by default), its live
+destinations stop instead of airing dead video until someone notices. A modem
+dropping out and coming back inside the wait stops nothing. It is off until you
+turn it on, and it asks for the same confirmation **Stop all** does, because
+stopping ends a YouTube broadcast for good.
+
 ## Limits
 
 - At most **8 links** per bonded session, and **200** bonded sessions at once.

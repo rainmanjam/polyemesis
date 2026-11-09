@@ -73,7 +73,10 @@ itself only serves `ws://`.
 going down, or polyemesis restarting is not you stopping the stream. When the
 link comes back, polyemesis reads where OBS is and acts on nothing it reads
 that way. If OBS stopped streaming while the link was down, stop the
-destinations yourself.
+destinations yourself, or turn on [stop on ingest loss](API.md#stop-on-ingest-loss),
+the opt-in fallback described [below](#stop-on-ingest-loss-the-fallback).
+It watches the video arriving at polyemesis and not the connection to OBS, so it
+works whether the bridge is connected, failing or off.
 
 ## Set up: OBS reports to polyemesis
 
@@ -136,6 +139,24 @@ it once, when you turn automatic stopping on. Then:
 - With a grace period, polyemesis waits that many seconds after OBS stops. If
   OBS starts streaming again within the grace period, nothing is stopped.
 - OBS reconnecting (`OBS_WEBSOCKET_OUTPUT_RECONNECTING`) is not a stop.
+
+### Stop on ingest loss: the fallback
+
+**Settings, OBS bridge** also shows **Stop when the ingest is lost** for the
+programme the bridge drives. It is the same setting as the one on the
+programme's own settings: one switch, one wait, stored on the programme. There
+is no second timer. It is the safety net for when the bridge is not configured,
+or fails, or the encoder is not OBS at all: if neither the primary nor the backup
+ingest has arrived for the wait (two minutes by default), the programme's live
+destinations stop. It is off until you turn it on, and it asks for its own
+confirmation, the **Stop all** warning, because it ends YouTube broadcasts for
+good. The confirmation you gave for stopping when OBS stops does not count for it.
+Details, including what does and does not count as lost, are in
+[API.md](API.md#stop-on-ingest-loss).
+
+If OBS stops and the ingest is lost at the same moment, the destinations are
+stopped once and `status.lastActions` has one stop entry. A stop made by the
+fallback is recorded with `via: "ingest"`.
 
 ## Scene rules
 

@@ -13,6 +13,7 @@ import type {
   Preset,
   SourceView,
 } from "@/lib/types";
+import { AutoStopControl } from "@/components/AutoStopControl";
 import { SecretInput } from "@/components/SecretInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,8 +55,14 @@ function streamingText(streaming: boolean | null | undefined, t: Translator): st
 }
 
 function actionText(a: ObsActionRecord, t: Translator): string {
-  if (a.action === "scene") return t("obs.actionScene", { scene: a.scene ?? "" });
-  return a.action === "start" ? t("obs.actionStart") : t("obs.actionStop");
+  const what =
+    a.action === "scene"
+      ? t("obs.actionScene", { scene: a.scene ?? "" })
+      : a.action === "start"
+        ? t("obs.actionStart")
+        : t("obs.actionStop");
+  // A stop the ingest-loss fallback made, not OBS: say so.
+  return a.via === "ingest" ? `${what} (${t("obs.viaIngest")})` : what;
 }
 
 /** Status is re-read on this period while the section is open, so the
@@ -122,6 +129,15 @@ export function ObsBridgeSettings() {
     () => dests.filter((d) => draft !== null && Number(d.sourceId ?? Number.NaN) === draft.sourceId),
     [dests, draft],
   );
+
+  // The bridge's programme: its sourceId, or the install's default programme
+  // when that is null (the load below resolves the draft the same way).
+  const bridgeSource = useMemo(() => {
+    if (!draft) return undefined;
+    return draft.sourceId === null
+      ? (sources.find((s) => s.isDefault) ?? sources[0])
+      : sources.find((s) => Number(s.id) === draft.sourceId);
+  }, [draft, sources]);
 
   const set = useCallback((patch: Partial<ObsConfig>) => setDraft((d) => (d ? { ...d, ...patch } : d)), []);
 
@@ -365,6 +381,33 @@ export function ObsBridgeSettings() {
           </div>
 
           <span className="text-sm text-muted-foreground">{t("obs.scriptHint")}</span>
+
+          {/* The programme's own stop-on-ingest-loss setting, the same stored
+              value Sources edits. It saves through the sources API, not this
+              form, and adds nothing to the bridge's configuration. */}
+          {bridgeSource && (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground" data-testid="obs-autostop-programme">
+                {t("autostop.programme", { name: bridgeSource.name })}
+              </span>
+              <AutoStopControl
+                key={bridgeSource.id}
+                sourceId={Number(bridgeSource.id)}
+                idPrefix="obs-autostop"
+                value={bridgeSource.ingest.autoStop}
+                info={bridgeSource.autoStopInfo}
+                onSaved={(next, info) =>
+                  setSources((all) =>
+                    all.map((s) =>
+                      s.id === bridgeSource.id
+                        ? { ...s, ingest: { ...s.ingest, autoStop: next }, autoStopInfo: info ?? s.autoStopInfo }
+                        : s,
+                    ),
+                  )
+                }
+              />
+            </div>
+          )}
 
           <div>
             <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>

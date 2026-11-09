@@ -44,6 +44,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
+import { AutoStopControl } from "@/components/AutoStopControl";
 import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { PullIngestFields } from "@/components/PullIngestFields";
@@ -60,8 +61,8 @@ import { tokenNotEnforcedKey } from "@/features/sources/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
-import { ingestPhase, ingestSummary } from "@/features/sources/sourceIngest";
-import type { Source, SourceId, SourceView } from "@/lib/types";
+import { ingestPhase, ingestSummary, ingestWithoutAutoStop } from "@/features/sources/sourceIngest";
+import type { AutoStopInfo, AutoStopSettings, Source, SourceId, SourceView } from "@/lib/types";
 
 // hls.js is only needed once a card shows a receiving feed (A2), so it is
 // fetched then, the same way the Dashboard loads it.
@@ -161,7 +162,7 @@ export function SourcesPage() {
       const body: Partial<Source> = {
         name: s.name,
         enabled: s.enabled,
-        ingest: s.ingest,
+        ingest: ingestWithoutAutoStop(s.ingest),
         token: s.token,
         position: s.position,
         // Carried every save, null included: the server decodes over the stored
@@ -170,6 +171,7 @@ export function SourcesPage() {
         captionTrack: s.captionTrack ?? null,
         ...changes,
       };
+      if (body.ingest) body.ingest = ingestWithoutAutoStop(body.ingest);
       await api.updateSource(s.id, body);
       await load();
     } catch (e) {
@@ -273,6 +275,17 @@ export function SourcesPage() {
             onRotate={() => setRotating(s)}
             onDelete={() => setDeleting(s)}
             onAddDestination={() => setAddingTo(s.id)}
+            onAutoStopSaved={(next, info) =>
+              // Local state, not load(): a re-read would hand every card a new
+              // `source` and throw away what is typed in it but not yet applied.
+              setSources((all) =>
+                all.map((x) =>
+                  x.id === s.id
+                    ? { ...x, ingest: { ...x.ingest, autoStop: next }, autoStopInfo: info ?? x.autoStopInfo }
+                    : x,
+                ),
+              )
+            }
             previewOn={previewOn}
           />
         ))}
@@ -407,6 +420,7 @@ export function SourceCard({
   onRotate,
   onDelete,
   onAddDestination,
+  onAutoStopSaved,
   previewOn = false,
 }: Readonly<{
   source: SourceView;
@@ -417,6 +431,9 @@ export function SourceCard({
   /** A30. Opens the destination dialog on this programme. Absent in tests that
    *  do not exercise the receiving card, so the button is then not drawn. */
   onAddDestination?: () => void;
+  /** The stop-on-ingest-loss control saved: the page updates its copy of this
+   *  source in place. */
+  onAutoStopSaved?: (next: AutoStopSettings, info?: AutoStopInfo) => void;
   /** The preview encoder is on, so a receiving card can show a thumbnail. */
   previewOn?: boolean;
 }>) {
@@ -433,13 +450,19 @@ export function SourceCard({
   // restarts this source's ingest. That turned tabbing out of a port field into
   // a dropped broadcast -- an outage as the side effect of a keystroke nobody
   // meant as a decision. Edits now accumulate here and go nowhere until Apply.
-  const [draft, setDraft] = useState(source.ingest);
-  useEffect(() => setDraft(source.ingest), [source.ingest]);
+  //
+  // The draft never holds ingest.autoStop (see ingestWithoutAutoStop): it saves
+  // on its own button, so saving it neither dirties this draft nor resets it.
+  const storedIngest = ingestWithoutAutoStop(source.ingest);
+  const storedKey = JSON.stringify(storedIngest);
+  const [draft, setDraft] = useState(storedIngest);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the stored ingest's content, not its identity
+  useEffect(() => setDraft(ingestWithoutAutoStop(source.ingest)), [storedKey]);
 
   const ing = draft;
   const setIngest = (changes: Partial<Source["ingest"]>) =>
     setDraft((d) => ({ ...d, ...changes }));
-  const dirty = JSON.stringify(draft) !== JSON.stringify(source.ingest);
+  const dirty = JSON.stringify(draft) !== storedKey;
   // The state of the feed as the server reports it, not as the draft reads.
   // Derived from the saved source so an unsaved protocol change does not
   // claim an encoder is waiting on a port that is not yet listening.
@@ -722,6 +745,16 @@ export function SourceCard({
           onChange={(degraded) => setIngest({ degraded })}
         />
 
+        {/* This programme's stop-on-ingest-loss safety net. Saves on its own
+            button, like the OBS bridge panel that edits the same stored value. */}
+        <AutoStopControl
+          sourceId={Number(source.id)}
+          idPrefix={`source-${source.id}-autostop`}
+          value={source.ingest.autoStop}
+          info={source.autoStopInfo}
+          onSaved={(next, info) => onAutoStopSaved?.(next, info)}
+        />
+
         {phase === "waiting" && <WaitingForEncoder />}
 
         {phase === "receiving" && (
@@ -775,7 +808,7 @@ export function SourceCard({
             <span className="min-w-0 flex-1 text-sm">
               {source.publishing ? t("sources.dirtyPublishing") : t("sources.dirtyIdle")}
             </span>
-            <Button size="sm" variant="ghost" onClick={() => setDraft(source.ingest)} disabled={busy}>
+            <Button size="sm" variant="ghost" onClick={() => setDraft(storedIngest)} disabled={busy}>
               {t("common.discard")}
             </Button>
             <Button

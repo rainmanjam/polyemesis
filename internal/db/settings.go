@@ -136,6 +136,13 @@ type IngestSettings struct {
 	// A zero value is "off, with no thresholds": it validates, and it is what
 	// a row from before #6 decodes to.
 	Degraded DegradedSettings `json:"degraded"`
+	// AutoStop is this programme's stop-on-ingest-loss fallback: when neither
+	// the primary nor the backup ingest has delivered for WaitSeconds, stop the
+	// programme's live destinations. See AutoStopSettings.
+	//
+	// ON THE INGEST FOR THE REASON Degraded IS: it is per programme, it needs no
+	// column, and a row from before it decodes to the zero value, which is off.
+	AutoStop AutoStopSettings `json:"autoStop"`
 }
 
 // problems reports everything wrong with one ingest configuration.
@@ -214,6 +221,7 @@ func (i IngestSettings) problems() []string {
 			"the source is addressed by its token, not by this)")
 	}
 	probs = append(probs, i.Degraded.problems()...)
+	probs = append(probs, i.AutoStop.problems()...)
 	return probs
 }
 
@@ -3256,6 +3264,7 @@ func (d *DB) UpdateSettings(mutate func(*Settings) error) (Settings, error) {
 	case err != nil:
 		return Settings{}, err
 	}
+	s.Ingest.AutoStop = s.Ingest.AutoStop.normalized()
 	if err := s.Validate(); err != nil {
 		return Settings{}, InvalidSettingsError{Err: err}
 	}

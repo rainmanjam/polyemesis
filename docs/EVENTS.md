@@ -170,6 +170,7 @@ real producer, to actually be emitted.
 | `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, dropping, or dumped; data carries the delay and the buffer, and a dump says what it took. |
 | `ingest.published` | ingest | yes | Data started arriving on a programme's ingest. |
 | `ingest.disconnected` | ingest | yes | Nothing has arrived on a programme's ingest for the disconnect window. |
+| `ingest.autostopped` | ingest | yes | The stop-on-ingest-loss fallback stopped a programme's live destinations because neither its primary nor its backup ingest arrived for the whole wait; data says how long and what happened to each. |
 | `failover.switched` | failover | yes | A programme switched between its primary, backup and slate sources. |
 | `broadcast.live` | broadcast | yes | A platform broadcast was moved on air (or into testing) by polyemesis. |
 | `broadcast.complete` | broadcast | yes | A platform broadcast was ended by polyemesis. |
@@ -401,6 +402,16 @@ Replay treats a removed line differently for an overlay key: a `chat.display`
 that a later `chat.undisplay` removed is never replayed to an overlay, whatever
 `Last-Event-ID` it resumes from. An admin subscriber is replayed both events,
 in the order they happened.
+
+### Ingest auto-stop
+
+`ingest.autostopped` is `{waitSeconds, lostForSeconds, results}`, with `source` set
+to the programme. `results` is one row per destination, as `status.lastActions` has
+them: `id`, `name`, `outcome` (`stopped`, `warned`, `failed` or `skipped`) and a
+`message` when it is not a clean stop. It is published only when something was
+stopped, never for a stop that found everything already off. It is a stream event
+only: it has no webhook trigger. See
+[stop on ingest loss](API.md#stop-on-ingest-loss).
 
 ### OBS
 

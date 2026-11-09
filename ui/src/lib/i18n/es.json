@@ -4558,5 +4558,19 @@
   "studioEvents.used": "Se usará {title} cuando {destination} salga en directo.",
   "studioEvents.useFailed": "No se pudo usar este evento: {reason}",
   "studioEvents.stale": "No se pudieron actualizar los eventos de {accounts}; se muestran los leídos anteriormente.",
-  "studioEvents.studioNow": "{destination} usa «Stream now» de YouTube Studio, por lo que polyemesis no usaría este evento. Desactívalo primero en los ajustes del destino."
+  "studioEvents.studioNow": "{destination} usa «Stream now» de YouTube Studio, por lo que polyemesis no usaría este evento. Desactívalo primero en los ajustes del destino.",
+  "autostop.title": "Detener al perder la entrada",
+  "autostop.desc": "Una red de seguridad que funciona con cualquier codificador: OBS, vMix, hardware o una mochila IRL. Si ni la señal principal ni la de respaldo llegan durante la espera indicada abajo, los destinos en directo de este programa se detienen en lugar de emitir nada. Desactivado por defecto.",
+  "autostop.details": "Una pizarra o una lista de reproducción en el aire no cuenta como señal. Pasar al respaldo no es una pérdida, y una reconexión dentro de la espera no detiene nada. Los destinos con retardo de emisión terminan primero de emitir su cola retrasada.",
+  "autostop.wait": "Segundos sin señal antes de detener",
+  "autostop.waitHint": "De {min} a {max} segundos. Déjalo vacío para usar el valor predeterminado de {default}.",
+  "autostop.waitInvalid": "Introduce un número entero de {min} a {max}, o déjalo vacío para usar el valor predeterminado.",
+  "autostop.effective": "Espera efectiva: {seconds} s",
+  "autostop.effectiveFailover": "Espera efectiva: {seconds} s, aumentada para superar el periodo de gracia de la conmutación por error.",
+  "autostop.effectivePull": "Espera efectiva: {seconds} s, aumentada para superar el retardo de reconexión de esta fuente de extracción.",
+  "autostop.warning": "Detener los destinos pone fin de forma definitiva a cualquier emisión de YouTube en directo entre ellos. Volver a iniciarlos devuelve el vídeo a la línea, pero no recupera la emisión.",
+  "autostop.ackRequired": "Marca la casilla para confirmar antes de activar esto.",
+  "autostop.programme": "Este ajuste pertenece al programa «{name}» y se guarda en él, no en el puente de OBS.",
+  "obs.viaIngest": "respaldo por pérdida de entrada",
+  "autostop.ack": "Entiendo que detener termina las emisiones de YouTube"
 }

@@ -4558,5 +4558,19 @@
   "studioEvents.used": "{title} wordt gebruikt zodra {destination} live gaat.",
   "studioEvents.useFailed": "Kon dit evenement niet gebruiken: {reason}",
   "studioEvents.stale": "Kon de evenementen van {accounts} niet vernieuwen; de eerder gelezen evenementen worden getoond.",
-  "studioEvents.studioNow": "{destination} gebruikt \"Stream now\" van YouTube Studio, dus polyemesis zou dit evenement niet gebruiken. Zet dat eerst uit in de instellingen van de bestemming."
+  "studioEvents.studioNow": "{destination} gebruikt \"Stream now\" van YouTube Studio, dus polyemesis zou dit evenement niet gebruiken. Zet dat eerst uit in de instellingen van de bestemming.",
+  "autostop.title": "Stoppen bij verlies van ingang",
+  "autostop.desc": "Een vangnet dat met elke encoder werkt: OBS, vMix, hardware of een IRL-rugzak. Komt noch de primaire noch de back-upfeed binnen tijdens de wachttijd hieronder, dan stoppen de live bestemmingen van dit programma in plaats van niets uit te zenden. Standaard uit.",
+  "autostop.details": "Een slate of afspeellijst in de lucht telt niet als feed. Overschakelen naar de back-up is geen verlies, en opnieuw verbinden binnen de wachttijd stopt niets. Bestemmingen met uitzendvertraging zenden eerst hun vertraagde staart uit.",
+  "autostop.wait": "Seconden zonder feed voor het stoppen",
+  "autostop.waitHint": "{min} tot {max} seconden. Laat leeg voor de standaardwaarde van {default}.",
+  "autostop.waitInvalid": "Voer een geheel getal van {min} tot {max} in, of laat leeg voor de standaardwaarde.",
+  "autostop.effective": "Effectieve wachttijd: {seconds} s",
+  "autostop.effectiveFailover": "Effectieve wachttijd: {seconds} s, verhoogd om boven de failover-respijttijd te blijven.",
+  "autostop.effectivePull": "Effectieve wachttijd: {seconds} s, verhoogd om boven de herverbindingsvertraging van deze pull-bron te blijven.",
+  "autostop.warning": "Het stoppen van bestemmingen beëindigt elke live YouTube-uitzending daaronder definitief. Opnieuw starten brengt de video terug op de lijn, maar niet de uitzending.",
+  "autostop.ackRequired": "Vink het vakje aan om te bevestigen voordat je dit inschakelt.",
+  "autostop.programme": "Deze instelling hoort bij het programma “{name}” en wordt daar opgeslagen, niet in de OBS-bridge.",
+  "obs.viaIngest": "terugval bij verlies van ingang",
+  "autostop.ack": "Ik begrijp dat stoppen YouTube-uitzendingen beëindigt"
 }

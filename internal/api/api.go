@@ -426,6 +426,9 @@ type Server struct {
 	// liveLevelsAvailable and runProbe.
 	liveLevels  func() bool
 	probeRunner func(ctx context.Context, name string, args []string) ([]byte, error)
+	// ingestStops runs stop-on-ingest-loss stops that are off the OBS worker;
+	// see autostop.go.
+	ingestStops ingestStopRunner
 	// sceneSource replaces the live ingest layout a scene rule's preset is built
 	// against (a test seam; nil means the programme's engine).
 	sceneSource func(*int64) routing.Source
@@ -1093,6 +1096,8 @@ func New(o Options) *Server {
 	// facebook_fresh_key.go.
 	if s.mgr != nil {
 		s.mgr.SetStartPrep(s.prepareDestinationStarts)
+		// The stop-on-ingest-loss fallback: each engine decides, this stops.
+		s.mgr.SetIngestLossHandler(s.ingestLossStop)
 	}
 	return s
 }

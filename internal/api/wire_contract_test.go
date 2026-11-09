@@ -192,6 +192,9 @@ type wireDefaults struct {
 	FailoverReturnStableSec int `json:"failoverReturnStableSeconds"`
 	MQTTIntervalSeconds     int `json:"mqttIntervalSeconds"`
 	MQTTKeepAliveSeconds    int `json:"mqttKeepAliveSeconds"`
+	// AutoStopWaitSeconds is the stop-on-ingest-loss wait a programme gets when
+	// it turns the fallback on and picks none (db.DefaultAutoStopWaitSeconds).
+	AutoStopWaitSeconds int `json:"autoStopWaitSeconds"`
 }
 
 type wireSite struct {
@@ -538,6 +541,7 @@ func buildWireContract(t *testing.T) wireContract {
 			AlertRetryAttempts:      def.Alerts.RetryAttempts,
 			FailoverGraceSeconds:    def.Failover.GraceSeconds, FailoverReturnStableSec: def.Failover.ReturnStableSeconds,
 			MQTTIntervalSeconds: def.MQTT.IntervalSecond, MQTTKeepAliveSeconds: def.MQTT.KeepAliveSec,
+			AutoStopWaitSeconds: db.DefaultAutoStopWaitSeconds,
 		},
 		RenditionBounds: wireRenditionBounds{
 			MinDimension: db.MinRenditionDimension, MaxDimension: db.MaxRenditionDimension,

@@ -1845,6 +1845,12 @@ func (s *Server) mergeSavedSettings(settings *db.Settings, body []byte, sentVers
 	}
 	// The platform-term record is the server's, never the client's.
 	settings.Automod.Protection.Native = native
+	// Stop-on-ingest-loss is the programme's, merged over the SOURCE (the base
+	// above), and this write goes through to the default source: turning it ON
+	// carries the acknowledgement here too, exactly as a source PUT must.
+	if autoStopNewlyEnabledWithoutAck(stored.ingest.AutoStop, settings.Ingest.AutoStop, sentAutoStopAck(body)) {
+		return false, badRequestError{db.AutoStopAckText}
+	}
 	// A per-install MQTT instance when MQTT is first set up with the shared
 	// default, so two installs on one broker cannot collide. Never for an
 	// install that was ever configured: its topic tree is a contract.

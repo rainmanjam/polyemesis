@@ -105,6 +105,10 @@ const (
 	TypeOBSConnection   Type = "obs.connection"
 	TypeOBSStream       Type = "obs.stream"
 	TypeOBSScene        Type = "obs.scene"
+	// TypeIngestAutoStopped is the stop-on-ingest-loss fallback
+	// (db.AutoStopSettings) having stopped a programme's live destinations.
+	// Stream-only: it has no webhook trigger, as destination.level has none.
+	TypeIngestAutoStopped Type = "ingest.autostopped"
 )
 
 // Access says whether a read-scoped API token receives a type. The zero value
@@ -185,6 +189,7 @@ var catalogue = []Spec{
 	// Ingest and failover.
 	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest.", nil},
 	{TypeIngestDisconnected, TopicIngest, Granted, "Nothing has arrived on a programme's ingest for the disconnect window.", nil},
+	{TypeIngestAutoStopped, TopicIngest, Granted, "The stop-on-ingest-loss fallback stopped a programme's live destinations because neither its primary nor its backup ingest arrived for the whole wait; data says how long and what happened to each.", nil},
 	{TypeFailoverSwitched, TopicFailover, Granted, "A programme switched between its primary, backup and slate sources.", nil},
 
 	// Go-live and stop: the platform broadcast's own lifecycle.

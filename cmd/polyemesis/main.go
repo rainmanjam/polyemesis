@@ -688,6 +688,7 @@ func run(h *hooks) error {
 	// a broadcast live. An unclean shutdown -- a kill, a power cut -- is covered
 	// instead by the platform's enableAutoStop plus the boot reconciliation the
 	// next start performs before its first tick.
+	srv.StopIngestLossWithin(shutdownCtx)
 	srv.DrainLifecycleWithin(shutdownCtx)
 	eng.StopWithin(shutdownCtx)
 	// The job queue, its governor and the history sweep were cancelled with
