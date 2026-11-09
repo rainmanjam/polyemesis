@@ -209,7 +209,11 @@ func completerFor(url string) Completer {
 	cfg := automod.DefaultModelConfig()
 	cfg.Enabled, cfg.Endpoint, cfg.Model = true, url, "fake-model"
 	cfg.KeyBinding = db.NormalizeEndpoint(url)
-	cfg.Timeout = 2 * time.Second
+	// A safety net, not a claim: the fake answers at once, so a healthy call
+	// never nears it. At 2s the whole-suite -race run starved this test's
+	// goroutines past the deadline before the request reached the server
+	// ("model \"failed\" after 0 calls", 2.07s), failing the model open.
+	cfg.Timeout = 30 * time.Second
 	b := automod.NewBudget()
 	return func(ctx context.Context, system, user string) (string, error) {
 		return automod.Complete(ctx, cfg, b, system, user)

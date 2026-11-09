@@ -295,7 +295,9 @@ func startTwitch(t *testing.T, f *fakeTwitch, mod func(*TwitchConfig)) *twRig {
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// A safety net on an event wait: cond is polled and the wait ends the
+	// moment it holds, so only a hang costs the full 30s.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

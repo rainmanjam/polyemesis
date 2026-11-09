@@ -71,10 +71,10 @@ func dest(id any, name, state string) map[string]any {
 // Mutation: `if len(still) == 0 {` -> `if len(still) == 0 &&
 // !time.Now().Before(deadline) {` in waitStopped, so it notices they stopped
 // but still waits out the whole budget.
-// Observed to fail with "waitStopped burned its whole 2s budget on destinations
-// that stopped after 3 samples".
+// Observed to fail with "waitStopped took N /status samples on destinations
+// that stopped at sample 3" (N in the thousands: it polls for the whole budget).
 func TestWaitStoppedReturnsAsSoonAsTheDestinationsAreGone(t *testing.T) {
-	statusServer(t, func(sample int64) []map[string]any {
+	samples := statusServer(t, func(sample int64) []map[string]any {
 		state := "running"
 		if sample >= 3 {
 			state = "exited"
@@ -82,20 +82,21 @@ func TestWaitStoppedReturnsAsSoonAsTheDestinationsAreGone(t *testing.T) {
 		return []map[string]any{dest(1.0, "A", state), dest(2.0, "B", state)}
 	})
 
-	started := time.Now()
-	still := waitStopped([]string{"1", "2"}, 2*time.Second)
-	elapsed := time.Since(started)
+	// The budget is deliberately huge: it is only a safety net so a regression
+	// cannot hang the suite. The claim is asserted on the NUMBER of /status
+	// samples, never on elapsed time, so a starved CPU cannot flip it.
+	still := waitStopped([]string{"1", "2"}, 10*time.Second)
 
 	if len(still) != 0 {
 		t.Fatalf("waitStopped reported %v still running on a server that stopped them", still)
 	}
-	// A ceiling of 200ms against a 2s budget: 40 poll intervals of headroom, so
-	// this measures "it did not wait for the deadline" and not "the machine is
-	// fast". The sleep it replaces would have been 3s here.
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("waitStopped burned %s of its 2s budget on destinations that stopped after "+
-			"3 samples: the poll is not ending early, so it costs the same fixed price on "+
-			"every run of every matrix OS that the sleep did", elapsed.Round(time.Millisecond))
+	// The server reports the destinations gone from sample 3 on. A poll that
+	// ends early returns on exactly that sample; one that keeps waiting out its
+	// budget (the sleep this replaced did, for 3s) takes more.
+	if got := samples.Load(); got != 3 {
+		t.Errorf("waitStopped took %d /status samples on destinations that stopped at "+
+			"sample 3: the poll is not ending as soon as they are gone, so it costs the "+
+			"same fixed price on every run of every matrix OS that the sleep did", got)
 	}
 }
 

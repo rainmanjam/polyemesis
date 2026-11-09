@@ -62,6 +62,10 @@ type TwitchConfig struct {
 	// KeepaliveGrace is added to Twitch's keepalive timeout before the silence
 	// counts as a dead socket. Default 5 s.
 	KeepaliveGrace time.Duration
+	// DrainWindow is how long the old socket is still read after a reconnect
+	// swap. Default twitchDrainWindow (1 s); tests widen it so a starved CPU
+	// cannot close the old socket before its buffered frames were read.
+	DrainWindow time.Duration
 	// TierRecheck is how often the channel's account type is read again.
 	// Default 24 h.
 	TierRecheck time.Duration
@@ -430,6 +434,10 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 	var drainC <-chan eventsub.Frame
 	var drainTimer *time.Timer
 	var drainDone <-chan time.Time
+	drainWindow := t.cfg.DrainWindow
+	if drainWindow <= 0 {
+		drainWindow = twitchDrainWindow
+	}
 	endDrain := func() {
 		if draining != nil {
 			draining.Close()
@@ -447,23 +455,24 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			return ctx.Err()
 
 		case f, open := <-drainC:
-			if !open || f.Err != nil {
+			if !t.drained(ctx, f, open, emit) {
 				endDrain()
-				continue
-			}
-			if f.Bad {
-				t.unparseable.Add(1)
-				continue
-			}
-			t.observe(f.Msg)
-			switch f.Msg.Type() {
-			case eventsub.TypeNotification:
-				t.notification(ctx, f.Msg, emit)
-			case eventsub.TypeRevocation:
-				t.revocation(f.Msg)
 			}
 
 		case <-drainDone:
+			// select picks at random among ready cases, so the window can win
+			// against frames already read off the old socket. Hand those over
+			// before it is closed: they are the messages Twitch will not repeat.
+			for open := true; open && drainC != nil; {
+				select {
+				case f, ok := <-drainC:
+					if open = t.drained(ctx, f, ok, emit); !open {
+						break
+					}
+				default:
+					open = false
+				}
+			}
 			endDrain()
 
 		case <-timer.C:
@@ -513,7 +522,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 				endDrain()
 				if oldC != nil {
 					draining, drainC = old, oldC
-					drainTimer = time.NewTimer(twitchDrainWindow)
+					drainTimer = time.NewTimer(drainWindow)
 					drainDone = drainTimer.C
 				} else {
 					old.Close()
@@ -566,6 +575,26 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			}
 		}
 	}
+}
+
+// drained handles one frame read from the old socket during the drain window
+// and reports whether the old socket is still worth reading.
+func (t *Twitch) drained(ctx context.Context, f eventsub.Frame, open bool, emit func(activity.Event)) bool {
+	if !open || f.Err != nil {
+		return false
+	}
+	if f.Bad {
+		t.unparseable.Add(1)
+		return true
+	}
+	t.observe(f.Msg)
+	switch f.Msg.Type() {
+	case eventsub.TypeNotification:
+		t.notification(ctx, f.Msg, emit)
+	case eventsub.TypeRevocation:
+		t.revocation(f.Msg)
+	}
+	return true
 }
 
 func (t *Twitch) keepaliveFor(s eventsub.SessionInfo) time.Duration {

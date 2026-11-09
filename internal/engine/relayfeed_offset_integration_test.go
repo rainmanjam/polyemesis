@@ -444,14 +444,35 @@ func TestAnUnpacedCopyHopPublishesFasterThanRealtime(t *testing.T) {
 	if fast.span() < 1 {
 		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", fast.span())
 	}
-	// The publisher pushes the fixture at four times realtime (see runRelayHop
-	// for why not faster), and the hop keeps up. If this ever failed -- media taking as long as its own
-	// duration to cross an unpaced copy -- the hop would be pacing itself
-	// somewhere, and the lead this measures could not exist.
-	if fast.publishWall > time.Duration(fast.span()*float64(time.Second)) {
-		t.Errorf("%.3fs of media took %s to cross an unpaced copy hop; the hop appears to be "+
-			"paced, which contradicts the absence of -re in ffmpeg.RelayFeedArgs",
-			fast.span(), fast.publishWall)
+	// A PACED CONTROL, measured in the same test, on the same machine, at the
+	// same moment. The claim is relative -- "the unpaced hop crosses media
+	// meaningfully faster than a paced one does" -- not an absolute 1.0x, because
+	// an absolute threshold is really a claim about how starved the host is.
+	// On GitHub's 3-vCPU macOS runner this run landed at exactly 1.0x realtime
+	// (healthy runs: 4.0-4.2x) and failed a test that proves nothing about
+	// pacing at that point.
+	//
+	// Every run's wall time is span/rate plus a stall s that is the machine's
+	// doing (process start, scheduling). Both runs pay the same s, so the paced
+	// run (rate 1) takes span+s and the unpaced one (rate 4) takes span/4+s.
+	// Starvation squeezes the ratio toward 1 only as s dwarfs the whole span,
+	// and a hop that PACES itself erases the difference entirely (ratio 1),
+	// which is the regression this guards. 0.8 sits between the two with room
+	// either side: a healthy run is about 0.26 (1.4s against 5.5s), an unpaced run that lost
+	// 0.75 of its span to stalls (the 1.0x case above) is about 0.57.
+	paced := runRelayHop(t, ffmpegBin, fixture, 0, true)
+	t.Logf("paced control: %.3fs of media published while the publisher ran for %s (%d datagrams)",
+		paced.span(), paced.publishWall.Round(time.Millisecond), paced.packets)
+	if paced.span() < 1 {
+		t.Fatalf("the paced control captured only %.3fs of media; there is nothing to compare", paced.span())
+	}
+	fastRate := fast.span() / fast.publishWall.Seconds()
+	pacedRate := paced.span() / paced.publishWall.Seconds()
+	if ratio := fast.publishWall.Seconds() / paced.publishWall.Seconds(); ratio > 0.8 {
+		t.Errorf("an unpaced copy hop took %.2f of a paced one's wall time (%.1fx vs %.1fx realtime); "+
+			"it must be meaningfully faster (at most 0.8) or the hop is paced somewhere, which "+
+			"contradicts the absence of -re in ffmpeg.RelayFeedArgs",
+			ratio, fastRate, pacedRate)
 	}
 	t.Logf("the unpaced hop ran %.1fx realtime", fast.span()/fast.publishWall.Seconds())
 }
