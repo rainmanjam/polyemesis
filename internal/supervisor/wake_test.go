@@ -2,11 +2,17 @@ package supervisor
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"runtime"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/procname"
 )
 
 // Spec.WakeOnStop is what lets a relay consumer stopped on a quiet feed finish
@@ -145,5 +151,87 @@ func TestExportedWakeScheduleMatchesTheSupervisors(t *testing.T) {
 	}
 	if WakeAfter <= 0 || WakeEvery <= 0 {
 		t.Fatalf("wake schedule must be positive, got %v, %v", WakeAfter, WakeEvery)
+	}
+}
+
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// A loudness monitor stopped on a quiet feed is woken at wakeAfter and needs a
+// moment to act on the packet. Its grace used to be fastGrace (1s), which left
+// 250ms after the first wake and SIGKILLed it, with a WARN, on a healthy stop.
+// The child here answers 400ms after the wake: slower than that window, well
+// inside any sane one.
+func TestAWokenOutputlessChildIsNotKilledOnAHealthyQuietStop(t *testing.T) {
+	skipWithoutSIGTERM(t)
+	var logs syncBuf
+	var pid atomic.Int64
+	var woken atomic.Bool
+	spec := Spec{
+		Name: "loudness:4", Kind: procname.KindLoudness,
+		WakeOnStop: func() {
+			if woken.Swap(true) {
+				return
+			}
+			go func() {
+				time.Sleep(400 * time.Millisecond)
+				if proc, err := os.FindProcess(int(pid.Load())); err == nil {
+					_ = proc.Kill()
+				}
+			}()
+		},
+	}
+	f := fakeDeaf(60 * time.Second)
+	spec.Bin, spec.Args = f.bin, f.args
+	p := New(slog.New(slog.NewTextHandler(&logs, nil)), spec)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
+	p.Start()
+	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
+	waitForDeaf(t, p)
+	pid.Store(int64(p.Status().PID))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err != nil {
+		t.Fatalf("Stop returned %v", err)
+	}
+	p.escalators.Wait()
+	if strings.Contains(logs.String(), graceEscalationLogLine) {
+		t.Errorf("a healthy stop was SIGKILLed after the grace (%v) cut across the wake schedule:\n%s",
+			p.grace, logs.String())
+	}
+}
+
+// Whatever kind a child is, a grace shorter than the wake schedule plus a
+// post-wake window would kill it before it could act on its wake.
+func TestEveryGraceLeavesRoomForTheWakeWhenThereIsOne(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, kind := range []procname.Kind{procname.KindMeters, procname.KindLoudness, procname.KindSilence} {
+		p := New(quiet, Spec{Name: string(kind), Kind: kind, Bin: "/bin/true", WakeOnStop: func() {}})
+		if min := wakeAfter + wakeEvery + postWakeGrace; p.grace < min {
+			t.Errorf("%s: grace %v leaves less than %v after the repeat wake", kind, p.grace, postWakeGrace)
+		}
+		bare := New(quiet, Spec{Name: string(kind), Kind: kind, Bin: "/bin/true"})
+		if bare.grace != fastGrace {
+			t.Errorf("%s without a wake: grace %v, want %v", kind, bare.grace, fastGrace)
+		}
 	}
 }

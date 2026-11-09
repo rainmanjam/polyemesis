@@ -175,7 +175,7 @@ func TestAProbeDiscardedAsStaleDoesNotClearTheFailureCount(t *testing.T) {
 func TestAModeChangeClearsTheFailureHistory(t *testing.T) {
 	src := readEngineFile(t, "engine.go")
 	body := funcBody(t, src, "func (e *Engine) reconcileIngest(s, prev db.Settings) {")
-	at := strings.Index(body, "if e.measuredMode != s.Ingest.Mode {")
+	at := strings.Index(body, "if modeChanged {")
 	if at < 0 {
 		t.Fatal("cannot find the ingest-mode change branch")
 	}

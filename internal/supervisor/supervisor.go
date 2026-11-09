@@ -572,7 +572,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		state:      StateStopped,
 		logs:       newRing(logRingSize),
 		secrets:    redact.NewSecretSet(log, spec.Secrets...),
-		grace:      graceFor(spec.Kind),
+		grace:      graceWithWake(spec.Kind, spec.WakeOnStop != nil),
 		drain:      drainGrace,
 		stallAfter: StallAfter,
 		warmup:     decoderWarmup,

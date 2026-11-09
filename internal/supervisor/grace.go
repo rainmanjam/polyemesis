@@ -115,3 +115,25 @@ func graceFor(kind procname.Kind) time.Duration {
 	}
 	return ShutdownGrace
 }
+
+// postWakeGrace is how long after the repeat wake a woken child still has to
+// act on it before it is killed.
+const postWakeGrace = 500 * time.Millisecond
+
+// graceWithWake is graceFor, widened when the child is woken while it stops.
+//
+// fastGrace is one second, and a quiet-feed consumer is first woken at
+// wakeAfter (0.75s): that left 250ms to act on the packet, and a loudness
+// monitor stopped on a quiet feed was SIGKILLed with a WARN on a healthy stop
+// (staging, dest:4 and dest:7). A child that has a wake needs the first wake,
+// one repeat, and a window after it. A child with no wake is unchanged, and so
+// is every kind already at or above that (recorder, destinations: 8s). A
+// flowing feed exits in ~0.1s and never reaches any of this; only a wedged
+// child pays the extra 0.75s.
+func graceWithWake(kind procname.Kind, woken bool) time.Duration {
+	g := graceFor(kind)
+	if woken {
+		g = max(g, wakeAfter+wakeEvery+postWakeGrace)
+	}
+	return g
+}
