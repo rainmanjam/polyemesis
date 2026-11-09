@@ -436,7 +436,7 @@ func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []p
 		id, err := p.CreatePoll(ctx, spec.Question, spec.Options)
 		if err != nil {
 			status := polls.NativeFailed
-			if errors.Is(err, chat.ErrPollQuota) {
+			if errors.Is(err, chat.ErrPollQuota) || errors.Is(err, chat.ErrPollNoLiveChat) {
 				status = polls.NativeSkipped
 			}
 			out = append(out, polls.Mirrored{Account: p.Account(), Result: polls.NativeResult{
@@ -530,8 +530,13 @@ func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []po
 		p, err := tw.CreatePoll(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, spec.Question, spec.Options, spec.DurationSeconds)
 		if err != nil {
 			created("")
-			// A 403 is the ordinary answer for a channel that is not an
-			// Affiliate or Partner. Said once, on the poll.
+			// A channel that is not an Affiliate or Partner (Twitch's 403), or
+			// a token without the scope, is skipped, not failed: the chat poll
+			// runs as usual. Said once, on the poll, in plain words.
+			if errors.Is(err, oauth.ErrTwitchPollsNotAvailable) || errors.Is(err, oauth.ErrTwitchPollsReconnect) {
+				out = append(out, skipped(err.Error()))
+				continue
+			}
 			out = append(out, polls.Mirrored{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
 				Reason: redact.Redact(err.Error())}})
 			continue

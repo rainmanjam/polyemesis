@@ -3,9 +3,11 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -91,8 +93,26 @@ func TestTwitchPollRefusalSaysWhy(t *testing.T) {
 	var seen []string
 	tw := twitchPollStub(t, http.StatusForbidden, `{"error":"Forbidden","status":403,"message":"The broadcaster is not a partner or affiliate"}`, &seen)
 	_, err := tw.CreatePoll(context.Background(), "cid", "tok", "55", "q", []string{"a", "b"}, 60)
-	if err == nil || !strings.Contains(err.Error(), "403") {
+	if !errors.Is(err, ErrTwitchPollsNotAvailable) || strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "http") {
 		t.Errorf("err = %v", err)
+	}
+	// Any other refusal keeps its status and is not mistaken for that one.
+	for _, c := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusForbidden, `{"error":"Forbidden","status":403,"message":"banned"}`},
+		{http.StatusInternalServerError, `{"error":"x","status":500,"message":"not a partner or affiliate"}`},
+	} {
+		tw := twitchPollStub(t, c.status, c.body, &seen)
+		_, err := tw.CreatePoll(context.Background(), "cid", "tok", "55", "q", []string{"a", "b"}, 60)
+		if err == nil || errors.Is(err, ErrTwitchPollsNotAvailable) || !strings.Contains(err.Error(), strconv.Itoa(c.status)) {
+			t.Errorf("status %d: err = %v", c.status, err)
+		}
+	}
+	tw = twitchPollStub(t, http.StatusUnauthorized, `{"error":"Unauthorized","status":401,"message":"Missing scope: channel:manage:polls"}`, &seen)
+	if _, err := tw.CreatePoll(context.Background(), "cid", "tok", "55", "q", []string{"a", "b"}, 60); !errors.Is(err, ErrTwitchPollsReconnect) {
+		t.Errorf("missing scope: err = %v", err)
 	}
 }
 

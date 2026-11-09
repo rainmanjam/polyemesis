@@ -41,6 +41,11 @@ type PollTallyReader interface {
 // without the native one.
 var ErrPollQuota = errors.New("not enough YouTube API quota above the send reserve for a native poll")
 
+// ErrPollNoLiveChat is CreatePoll refusing because no live chat is open on the
+// channel: there is nothing to run a poll in, and the chat poll runs without
+// the native one.
+var ErrPollNoLiveChat = errors.New("YouTube has no live chat open right now")
+
 // NativePollers returns every attached adapter on platform p that can run a
 // native poll, in account order.
 func (h *Hub) NativePollers(p db.Platform) []NativePoller {
@@ -146,7 +151,7 @@ func (y *YouTubeAdapter) CreatePoll(ctx context.Context, question string, option
 	chatID := y.chatID
 	y.mu.Unlock()
 	if chatID == "" {
-		return "", fmt.Errorf("YouTube has no live chat open right now")
+		return "", ErrPollNoLiveChat
 	}
 	if !y.budget.fitsAboveReserve(QuotaCostPollCreate + QuotaCostPollClose) {
 		return "", ErrPollQuota

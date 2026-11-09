@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Fixed
 
+- **A native Twitch poll refused for a non-Affiliate channel is now skipped, not failed, and the closing message says "1 vote".**
+  Twitch answers 403 ("not a partner or affiliate") for a channel that cannot run polls, and the poll showed that as
+  `failed` with the request URL, the broadcaster id and the raw JSON, though docs/POLLS.md says it is skipped. It now reads
+  `skipped` with "Twitch runs polls only for Affiliate and Partner channels; this channel is neither, so chat votes by
+  number". A token missing `channel:manage:polls` reads `skipped` with "reconnect", and a YouTube chat with no live chat
+  open is `skipped` too, as documented; any other 403 or a 500 stays `failed`. The closing announcement said "(1 of 1
+  votes)" and "1 votes each" for a tie; it now agrees with its counts.
+
 - **A destination started before the ingest layout was measured is no longer torn down and restarted.** On an
   idle box the hold's 75s ceiling was stamped at boot, so it had expired by the time an encoder connected. The first
   start went out provisionally and cleared the clock, the next start (the OBS bridge presses two a couple of seconds

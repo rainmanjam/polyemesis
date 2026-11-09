@@ -204,6 +204,8 @@ type helixPolls struct {
 	created []map[string]any
 	ended   int
 	status  int
+	// errBody is the body sent with status; the default is a bare 403.
+	errBody string
 }
 
 func (f *helixPolls) handler(t *testing.T) http.HandlerFunc {
@@ -218,7 +220,11 @@ func (f *helixPolls) handler(t *testing.T) http.HandlerFunc {
 		}
 		if f.status != 0 {
 			w.WriteHeader(f.status)
-			_, _ = w.Write([]byte(`{"status":403,"message":"not an affiliate"}`))
+			body := f.errBody
+			if body == "" {
+				body = `{"error":"Forbidden","status":403,"message":"not an affiliate"}`
+			}
+			_, _ = w.Write([]byte(body))
 			return
 		}
 		body := `{"data":[{"id":"np1","status":"ACTIVE","choices":[{"votes":4},{"votes":1}]}]}`
@@ -362,6 +368,59 @@ func TestAPollThatTwitchCannotRunIsNotMirrored(t *testing.T) {
 	fake.mu.Unlock()
 }
 
+// TestTwitchRefusalsAreSkippedOrFailedByWhatTheyAre: Twitch's 403 for a
+// channel that is not an Affiliate or Partner is a skip with a plain reason
+// (docs/POLLS.md), carrying neither the URL, the broadcaster id nor the JSON.
+// Any other refusal -- a different 403, a 500 -- is a real failure.
+func TestTwitchRefusalsAreSkippedOrFailedByWhatTheyAre(t *testing.T) {
+	spec := polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorTwitch: true}
+	cases := []struct {
+		name, body string
+		status     int
+		want       string
+	}{
+		{"not affiliate", `{"error":"Forbidden","status":403,"message":"Error.PermissionDenied: ownedBy 18194576 is not a partner or affiliate"}`,
+			http.StatusForbidden, polls.NativeSkipped},
+		{"other 403", `{"error":"Forbidden","status":403,"message":"the broadcaster has banned this client"}`,
+			http.StatusForbidden, polls.NativeFailed},
+		{"server error", `{"error":"Internal Server Error","status":500,"message":"boom"}`,
+			http.StatusInternalServerError, polls.NativeFailed},
+		{"missing scope", `{"error":"Unauthorized","status":401,"message":"Missing scope: channel:manage:polls"}`,
+			http.StatusUnauthorized, polls.NativeSkipped},
+		{"expired token", `{"error":"Unauthorized","status":401,"message":"Invalid OAuth token"}`,
+			http.StatusUnauthorized, polls.NativeFailed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := &helixPolls{status: c.status, errBody: c.body}
+			helix := httptest.NewServer(fake.handler(t))
+			t.Cleanup(helix.Close)
+			s, _, store := pollServer(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(helix.URL))})
+			_ = store.PutPlatformCreds(s.box, db.PlatformTwitch, "cid", "secret")
+			seedTwitch(t, s, store, "18194576", "channel:manage:polls")
+			got := s.PollMirror().Start(t.Context(), spec)
+			if len(got) != 1 || got[0].Result.Status != c.want {
+				t.Fatalf("result = %+v, want status %s", got, c.want)
+			}
+			if c.want != polls.NativeSkipped {
+				return
+			}
+			reason := got[0].Result.Reason
+			for _, leak := range []string{"http", "18194576", "{", "403", "401"} {
+				if strings.Contains(reason, leak) {
+					t.Errorf("reason %q leaks %q", reason, leak)
+				}
+			}
+			if c.name == "not affiliate" && !strings.Contains(reason, "Affiliate and Partner") {
+				t.Errorf("reason = %q", reason)
+			}
+			if c.name == "missing scope" && !strings.Contains(reason, "reconnect") {
+				t.Errorf("reason = %q", reason)
+			}
+		})
+	}
+}
+
 // pollerAdapter is a YouTube chat that can run a native poll, without a
 // network: the real request shapes are tested in internal/chat.
 type pollerAdapter struct {
@@ -434,6 +493,16 @@ func TestAPollIsMirroredToYouTubeAndCountedAtClose(t *testing.T) {
 	cur, _ = s.polls.Current()
 	if len(cur.Native) != 1 || cur.Native[0].Status != polls.NativeSkipped || cur.Total != 1 {
 		t.Errorf("no quota = %+v", cur)
+	}
+	_, _ = s.polls.End(r.ID)
+	s.polls.Wait()
+	// No live chat open: the docs call that a skip, not a failure.
+	yt.err = chat.ErrPollNoLiveChat
+	r, _ = s.polls.Start(polls.Spec{Question: "q3", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorYouTube: true})
+	s.polls.Wait()
+	cur, _ = s.polls.Current()
+	if len(cur.Native) != 1 || cur.Native[0].Status != polls.NativeSkipped {
+		t.Errorf("no live chat = %+v", cur.Native)
 	}
 	// Five options: YouTube allows four.
 	m := s.PollMirror()

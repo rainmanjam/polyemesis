@@ -157,7 +157,9 @@ Channel-points voting is always off.
 A Twitch poll is skipped, with the reason shown under the poll, when:
 
 - the channel is not a Twitch Affiliate or Partner. Twitch runs polls only for
-  those, and answers 403 otherwise;
+  those, and answers 403 otherwise. The reason reads "Twitch runs polls only
+  for Affiliate and Partner channels; this channel is neither, so chat votes by
+  number". Any other Twitch error is shown as failed;
 - the Twitch account was connected before polyemesis asked for the
   `channel:manage:polls` permission. Reconnect it once under **Settings →
   Platform credentials**; the account is marked "reconnect needed";

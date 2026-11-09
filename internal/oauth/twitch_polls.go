@@ -2,9 +2,12 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -25,6 +28,40 @@ const (
 	TwitchPollMinDuration = 15
 	TwitchPollMaxDuration = 1800
 )
+
+// ErrTwitchPollsNotAvailable is Create Poll refused because the channel is not
+// an Affiliate or Partner. The text is the reason shown to the operator, so it
+// carries no URL, broadcaster id or JSON.
+var ErrTwitchPollsNotAvailable = errors.New("Twitch runs polls only for Affiliate and Partner channels; this channel is neither, so chat votes by number")
+
+// ErrTwitchPollsReconnect is Create Poll refused because the token lacks
+// channel:manage:polls: the account was connected before that scope existed.
+var ErrTwitchPollsReconnect = errors.New("reconnect this Twitch account to allow native polls")
+
+// twitchPollRefusal maps Create Poll's two ordinary refusals to their
+// sentinels, and returns any other error unchanged. Helix's error body has no
+// machine-readable code (just error, status and a free-text message), so a 403
+// is told apart from other 403s by its documented message ("... is not a
+// partner or affiliate"); the status gate keeps that from matching anywhere
+// else. A missing scope is a 401 whose message names the scope.
+func twitchPollRefusal(err error) error {
+	var se *statusError
+	if !errors.As(err, &se) {
+		return err
+	}
+	var env struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal([]byte(se.payload()), &env)
+	msg := strings.ToLower(env.Message)
+	switch {
+	case se.Status == http.StatusForbidden && strings.Contains(msg, "partner or affiliate"):
+		return ErrTwitchPollsNotAvailable
+	case se.Status == http.StatusUnauthorized && strings.Contains(msg, "scope") && strings.Contains(msg, "channel:manage:polls"):
+		return ErrTwitchPollsReconnect
+	}
+	return err
+}
 
 // TwitchPoll is a native poll as polyemesis needs it: its id, Twitch's status,
 // and the vote count of each choice in order. Twitch's counts are anonymous.
@@ -98,7 +135,7 @@ func (t *Twitch) CreatePoll(ctx context.Context, clientID, accessToken, broadcas
 	}
 	if err := t.requestJSON(ctx, http.MethodPost, t.apiEndpoint()+twitchPollsPath, accessToken, body,
 		helixHeaders(clientID), &out); err != nil {
-		return nil, err
+		return nil, twitchPollRefusal(err)
 	}
 	return firstPoll(out.Data)
 }
