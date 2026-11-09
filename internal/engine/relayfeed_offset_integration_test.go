@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -100,6 +101,13 @@ type relayHopResult struct {
 	// publishWall is how long the publisher took to push the whole fixture in.
 	publishWall time.Duration
 	packets     int
+	// hopLag is how long after the publisher's LAST datagram went into the hub
+	// the hop's last datagram came out, read before the hop is signalled (so
+	// its shutdown flush is not counted). It is the hop's own pacing, and it
+	// does not depend on how fast the publisher managed to run: a hop that
+	// emits as fast as it is fed trails its input by milliseconds, one that
+	// paces itself trails it by span - publishWall.
+	hopLag time.Duration
 }
 
 func (r relayHopResult) span() float64 { return r.lastDTS - r.firstDTS }
@@ -133,12 +141,14 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		t.Fatalf("create %s: %v", outPath, err)
 	}
 	captured := make(chan int, 1)
+	var lastOut atomic.Int64 // unix nanos of the hop's latest datagram
 	go func() {
 		buf := make([]byte, 65536)
 		n := 0
 		for {
 			read, _, err := sink.ReadFrom(buf)
 			if read > 0 {
+				lastOut.Store(time.Now().UnixNano())
 				_, _ = outFile.Write(buf[:read])
 				n++
 			}
@@ -218,6 +228,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		t.Fatalf("publish the fixture: %v\n%s", err, pubErr.String())
 	}
 	publishWall := time.Since(started)
+	publishEnd := time.Now()
 
 	// Let the hop finish what is in flight, then take it down the way the engine
 	// does -- SIGTERM, not a kill. That is not cosmetic here: on the signal
@@ -230,6 +241,10 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	// SIGTERM gets a deadline of its own, because an FFmpeg blocked on a UDP read
 	// with nothing arriving is exactly the wedge stopTimeout exists for.
 	time.Sleep(1500 * time.Millisecond)
+	var hopLag time.Duration
+	if at := lastOut.Load(); at > publishEnd.UnixNano() {
+		hopLag = time.Duration(at - publishEnd.UnixNano())
+	}
 	_ = feed.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-progDone:
@@ -260,7 +275,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	return relayHopResult{
 		firstDTS: first, lastDTS: last,
 		outTimeMs: prog.OutTimeMS, progressDone: prog.Done,
-		publishWall: publishWall, packets: packets,
+		publishWall: publishWall, packets: packets, hopLag: hopLag,
 	}
 }
 
@@ -438,20 +453,50 @@ func TestAnUnpacedCopyHopPublishesFasterThanRealtime(t *testing.T) {
 	offsetBenchFixture(t, ffmpegBin, fixture)
 
 	fast := runRelayHop(t, ffmpegBin, fixture, 0, false)
-	t.Logf("unpaced: %.3fs of media published while the publisher ran for %s (%d datagrams)",
-		fast.span(), fast.publishWall.Round(time.Millisecond), fast.packets)
+	span := fast.span()
+	pubRate := span / fast.publishWall.Seconds()
+	t.Logf("unpaced: %.3fs of media published while the publisher ran for %s (%.1fx realtime, %d datagrams); "+
+		"the hop's last datagram trailed the publisher's by %s",
+		span, fast.publishWall.Round(time.Millisecond), pubRate, fast.packets, fast.hopLag.Round(time.Millisecond))
 
-	if fast.span() < 1 {
-		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", fast.span())
+	if span < 1 {
+		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", span)
 	}
-	// The publisher pushes the fixture at four times realtime (see runRelayHop
-	// for why not faster), and the hop keeps up. If this ever failed -- media taking as long as its own
-	// duration to cross an unpaced copy -- the hop would be pacing itself
-	// somewhere, and the lead this measures could not exist.
-	if fast.publishWall > time.Duration(fast.span()*float64(time.Second)) {
-		t.Errorf("%.3fs of media took %s to cross an unpaced copy hop; the hop appears to be "+
-			"paced, which contradicts the absence of -re in ffmpeg.RelayFeedArgs",
-			fast.span(), fast.publishWall)
+
+	// THE CLAIM IS ABOUT THE HOP, NOT ABOUT THE PUBLISHER. "The hop adds no
+	// pacing of its own" means it emits what it is fed as it is fed: its last
+	// datagram comes out right behind the publisher's last one going in,
+	// whatever speed the publisher managed.
+	//
+	// An earlier version asserted that the PUBLISHER's wall time beat realtime
+	// (then a paced control's). That measures the publisher, which on a starved
+	// 3-vCPU runner only reached 1.1-1.2x of the 4x it was asked for, so no
+	// ratio between runs could mean anything there.
+	//
+	// A hop that paces itself (-re) emits the span at realtime from its first
+	// datagram, so it trails its input by about span - publishWall.
+	paceLag := time.Duration((span - fast.publishWall.Seconds()) * float64(time.Second))
+
+	// Holds on any machine, however slow: a hop that keeps up trails by
+	// milliseconds, and two seconds is more than a starved runner's scheduling.
+	const keepUp = 2 * time.Second
+	if fast.hopLag > keepUp {
+		t.Errorf("the hop's last datagram trailed the publisher's by %s (more than %s): the hop is not "+
+			"keeping up with its input, which contradicts the absence of -re in ffmpeg.RelayFeedArgs",
+			fast.hopLag.Round(time.Millisecond), keepUp)
 	}
-	t.Logf("the unpaced hop ran %.1fx realtime", fast.span()/fast.publishWall.Seconds())
+	// And where the publisher was fast enough to tell the two apart (a pacing
+	// hop would trail by at least a second), it must trail by well under what
+	// pacing would cost.
+	if paceLag >= time.Second {
+		if fast.hopLag > paceLag/2 {
+			t.Errorf("the hop trailed its input by %s where a self-pacing hop would trail by about %s: "+
+				"the hop appears to be paced", fast.hopLag.Round(time.Millisecond), paceLag.Round(time.Millisecond))
+		}
+	} else {
+		// Not a skip: the assertion above ran and held. This only says how much
+		// it could prove on this machine.
+		t.Logf("the publisher ran at only %.1fx realtime, so a self-pacing hop would trail by just %s: "+
+			"the check above held but could not distinguish pacing here", pubRate, paceLag.Round(time.Millisecond))
+	}
 }

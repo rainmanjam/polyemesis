@@ -69,6 +69,7 @@ func playoutOriginServer(t *testing.T, set db.PlayoutSettings, pub playoutPublis
 	// binding a real port from a unit test. The manifest is planted below, so
 	// nothing depends on a child having produced one.
 	eng := engine.NewManager(log, cfg, store, defaultTools(), bus)
+	eng.SetRelayPortRange(apiRelayPortBase, 500) // see engineServerWithSettings
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatalf("engine manager Start: %v", err)
 	}

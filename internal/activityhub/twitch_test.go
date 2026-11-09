@@ -375,7 +375,14 @@ func TestTooManyRequestsIsAKindStateNotAFailure(t *testing.T) {
 func TestARateLimitThatResetsSoonIsWaitedOutOnce(t *testing.T) {
 	f := newFakeTwitch(t)
 	f.status["channel.follow"] = 429
-	f.reset["channel.follow"] = itoa(time.Now().Add(1 * time.Second).Unix())
+	// Ratelimit-Reset is whole unix SECONDS, so .Unix() truncates: a reset
+	// computed 1s ahead lands anywhere in (0s, 1s] from now, and when the clock
+	// sits late in a second it is already past by the time the source reads it.
+	// The source then (correctly) does not wait, answers "limit reached", and the
+	// test failed in 0.01s on CI. Three seconds ahead leaves at least two after
+	// truncation, inside the source's 5s wait-it-out window, so the assertion
+	// below is about the retry and not about which fraction of a second it ran in.
+	f.reset["channel.follow"] = itoa(time.Now().Add(3 * time.Second).Unix())
 	r := startTwitch(t, f, nil)
 	r.ready()
 	if st := r.kind(activity.KindFollow); st.State != activity.KindOn {
@@ -791,7 +798,12 @@ func TestNothingSentOnTheOldSocketDuringTheSwapIsLost(t *testing.T) {
 	const burst = 12
 	for round := 0; round < 15; round++ {
 		f := newFakeTwitch(t)
-		r := startTwitch(t, f, nil)
+		// The drain window is how long the old socket is still read after the
+		// swap. At its 1s default a process starved for longer than that (the
+		// full -race suite in parallel did it: this test took 19s) closed the old
+		// socket with part of the burst unread. Widened here so the test asserts
+		// ordering, not scheduling; the wait below ends on the event.
+		r := startTwitch(t, f, func(c *TwitchConfig) { c.DrainWindow = time.Minute })
 		old := r.ready()
 		old.send(reconnectMsg("rc", f.ws2URL()))
 		for i := 0; i < burst; i++ {

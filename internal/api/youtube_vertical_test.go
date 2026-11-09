@@ -280,6 +280,7 @@ func verticalServer(t *testing.T, base string) (*Server, http.Handler, *db.DB) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	bus := events.NewBroker()
 	eng := engine.NewManager(quiet, cfg, store, defaultTools(), bus)
+	eng.SetRelayPortRange(apiRelayPortBase, 500) // see engineServerWithSettings
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatalf("engine manager Start: %v", err)
 	}

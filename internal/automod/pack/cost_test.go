@@ -19,8 +19,7 @@ import (
 const costGateNs = 15_000
 
 func TestPackFormCostGate(t *testing.T) {
-	gate := gateNs(t, costGateNs)
-	r := fastestOf(BenchmarkPackForm)
+	r, gate := measure(t, costGateNs, BenchmarkPackForm)
 	ns := r.NsPerOp()
 	t.Logf("pack form + lookup: %d ns/op, %d allocs/op", ns, r.AllocsPerOp())
 	if ns > gate {
@@ -73,18 +72,39 @@ func calibrationWork(b *testing.B) {
 	}
 }
 
-// gateNs scales a time budget to this machine: by how much slower than the
-// reference machine calibrationWork runs here (never below 1, never above 4,
-// so no runner is slow enough to hide a quadratic), and by ten under coverage
-// instrumentation, which slows every statement.
-func gateNs(t *testing.T, budget int64) int64 {
+// gateHeadroom is the slack on a machine-scaled gate. A calibration run and a
+// measurement are two samples of a machine whose load moves, and a gate that
+// must hold between them needs a little room. A real quadratic costs many times
+// the budget, not a quarter more.
+const gateHeadroom = 1.25
+
+// measure runs fn and returns its fastest result with the gate it is held to,
+// scaled to this machine by a calibration taken RIGHT NEXT TO it: one before
+// and one after, the slower of the two, so a load spike during the benchmark
+// raises the gate by as much as it raised the benchmark.
+//
+// It used to calibrate once per test and then measure each benchmark in turn.
+// Load changes between the two (the whole suite's other packages ran beside
+// this one), so a quiet calibration set a tight gate that a busy measurement
+// then exceeded: digits cost 22,514 ns against a 21,121 ns gate on CI.
+//
+// The scale is clamped to 1..4 as before, so no runner is slow enough to hide a
+// quadratic, and widened tenfold under coverage instrumentation, which slows
+// every statement.
+func measure(t *testing.T, budget int64, fn func(*testing.B)) (testing.BenchmarkResult, int64) {
 	t.Helper()
-	scale := float64(fastestOf(calibrationWork).NsPerOp()) / calibrationRefNs
-	scale = math.Min(math.Max(scale, 1), 4)
+	before := fastestOf(calibrationWork).NsPerOp()
+	r := fastestOf(fn)
+	after := fastestOf(calibrationWork).NsPerOp()
+	cal := before
+	if after > cal {
+		cal = after
+	}
+	scale := math.Min(math.Max(float64(cal)/calibrationRefNs, 1), 4)
 	if testing.CoverMode() != "" {
 		scale *= 10
 	}
-	g := int64(float64(budget) * scale)
-	t.Logf("time gate %d ns (budget %d ns x %.2f for this machine)", g, budget, scale)
-	return g
+	g := int64(float64(budget) * scale * gateHeadroom)
+	t.Logf("time gate %d ns (budget %d ns x %.2f for this machine x %.2f headroom)", g, budget, scale, gateHeadroom)
+	return r, g
 }

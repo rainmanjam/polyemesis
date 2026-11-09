@@ -145,7 +145,13 @@ func testHub(t *testing.T, opts ...Option) *Hub {
 // waitFor polls until cond holds, so a test never sleeps a fixed amount.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	// A safety-net deadline on an EVENT wait, not a timing claim: cond is polled
+	// every millisecond and the wait ends the instant it holds, so a healthy run
+	// never gets near this. It was 2s, which a loaded machine running the whole
+	// repository's -race suite in parallel could exceed before the adapter's
+	// goroutine had made its first request (kick_test.go: "timed out waiting for
+	// the subscription lookup" / "the first POST", both at exactly 2.00s).
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

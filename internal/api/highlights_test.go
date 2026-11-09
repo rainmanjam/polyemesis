@@ -21,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/highlights"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
 // highlightFixture is a server with a job queue (no workers, so nothing runs),
@@ -36,7 +37,16 @@ func highlightFixture(t *testing.T) (http.Handler, func(*http.Request), *Server,
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("MASTER"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := srv.store.UpsertRecording(&db.Recording{Filename: name, StartedAt: time.Now().Add(-time.Hour),
+	// StartedAt is the instant the NAME says, not "an hour ago". The recording
+	// manager's background scan indexes every file it finds with the time read
+	// from its name, and the first writer of a row's started_at wins (the upsert
+	// never updates it), so a fixture that disagreed with its own filename had
+	// its order decided by whether the scan or the test got there first.
+	started, ok := segname.TrailingStamp(name)
+	if !ok {
+		t.Fatalf("%s carries no start stamp", name)
+	}
+	if err := srv.store.UpsertRecording(&db.Recording{Filename: name, StartedAt: started,
 		DurationMS: 600_000, Tracks: 2}); err != nil {
 		t.Fatal(err)
 	}
@@ -488,10 +498,16 @@ func TestClipTemplatesReplaceByNameAndSurviveAnUnreadableRow(t *testing.T) {
 func TestASessionHasOneReviewQueueWhicheverFileIsOpened(t *testing.T) {
 	h, sign, srv, first := highlightFixture(t)
 	dir := srv.eng().Recordings().Dir()
-	const second = "rec-20261102-100000.mkv"
+	// Ten minutes after the first file, by its NAME as well as its row: see
+	// highlightFixture. Named 10:00 against a 09:10 row, a scan that indexed the
+	// file before the test registered it put the second file FIRST ("the scan is
+	// keyed 3 over 2 parts"). The scan below is deliberate, so the ordering is
+	// proved to hold whichever of the two gets there first.
+	const second = "rec-20261102-091000.mkv"
 	if err := os.WriteFile(filepath.Join(dir, second), []byte("MASTER"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	srv.eng().Recordings().Scan()
 	firstRec, _ := srv.store.GetRecording(first)
 	if err := srv.store.UpsertRecording(&db.Recording{Filename: second, StartedAt: firstRec.StartedAt.Add(10 * time.Minute),
 		DurationMS: 600_000}); err != nil {

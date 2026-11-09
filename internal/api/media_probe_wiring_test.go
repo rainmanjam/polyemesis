@@ -107,6 +107,7 @@ func managerServerWithSettings(t *testing.T, tools *ffmpeg.Tools, mutate func(*d
 	bus := events.NewBroker()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng := engine.NewManager(quiet, cfg, store, tools, bus)
+	eng.SetRelayPortRange(apiRelayPortBase, 500) // see engineServerWithSettings
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatalf("engine manager Start: %v", err)
 	}
@@ -307,6 +308,7 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 	bus := events.NewBroker()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng := engine.NewManager(quiet, cfg, store, tools, bus)
+	eng.SetRelayPortRange(apiRelayPortBase, 500) // see engineServerWithSettings
 	// Start used to REFUSE an install with no engines, which is exactly the
 	// state under test, so this call used to have its error thrown away. It is
 	// asserted now: a boot with no sources is a boot, and the only thing left
