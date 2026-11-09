@@ -48,6 +48,14 @@ func wedgedFeedBinary(t *testing.T) (bin, armed string) {
 	return bin, armed
 }
 
+// wedgedSwitchBudget is the latency a switch away from a TRULY wedged feed (one
+// that answers neither SIGTERM nor a wake) may cost, as a number written down
+// rather than one derived from seamStopCap, so retuning the cap cannot quietly
+// move it. The production cap is 1.75s (first wake 0.75s, one repeat 0.5s,
+// post-wake grace 0.25s, scheduling slack 0.25s); 2.2s leaves room for a loaded
+// CI runner. It stays far under the 8s grace the wedge used to cost.
+const wedgedSwitchBudget = 2200 * time.Millisecond
+
 func TestASwitchAwayFromAWedgedFeedDoesNotWaitOutItsGracePeriod(t *testing.T) {
 	e := failoverEngine(t)
 	bin, armed := wedgedFeedBinary(t)
@@ -93,6 +101,7 @@ func TestASwitchAwayFromAWedgedFeedDoesNotWaitOutItsGracePeriod(t *testing.T) {
 	began := time.Now()
 	e.step(s, t0.Add(20*time.Second))
 	took := time.Since(began)
+	t.Logf("switch away from a wedged feed took %s", took.Round(time.Millisecond))
 
 	e.mu.RLock()
 	active, inFeed := e.sel.active, e.sel.feed
@@ -103,7 +112,7 @@ func TestASwitchAwayFromAWedgedFeedDoesNotWaitOutItsGracePeriod(t *testing.T) {
 
 	// Row 17: the switch is the decision plus a short, bounded wait -- not the
 	// decision plus the outgoing child's whole grace period.
-	if took > 3*time.Second {
+	if took > wedgedSwitchBudget {
 		t.Errorf("the switch away from a wedged feed took %s; it waited out the outgoing "+
 			"child's grace period instead of starting the replacement", took.Round(time.Millisecond))
 	}
@@ -115,7 +124,7 @@ func TestASwitchAwayFromAWedgedFeedDoesNotWaitOutItsGracePeriod(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("one switch wrote %d seam lines:\n%s", len(lines), buf.String())
 	}
-	if ms := seamFloat(t, lines[0], "teardownMs"); ms > float64(seamStopWait.Milliseconds())+500 {
+	if ms := seamFloat(t, lines[0], "teardownMs"); ms > float64(wedgedSwitchBudget.Milliseconds()) {
 		t.Errorf("teardownMs = %.0f: the incoming timeline starts that far behind wall clock, "+
 			"and the next switch jumps forward by it", ms)
 	}
@@ -259,7 +268,8 @@ func TestASwitchAwayFromAHealthyFeedSignalsItBeforeCuttingItsInput(t *testing.T)
 		t.Errorf("outDetached = %q for a feed that exits on SIGTERM; the ledger reports a "+
 			"wedge that did not happen", lines[0]["outDetached"])
 	}
-	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopWait.Milliseconds()) {
+	t.Logf("healthy hop (exits 0.2s after SIGTERM): teardownMs = %.0f", seamFloat(t, lines[0], "teardownMs"))
+	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopCap.Milliseconds()) {
 		t.Errorf("teardownMs = %.0f for a feed that exits 0.2 s after SIGTERM; the switch "+
 			"paid the whole seam wait", ms)
 	}
@@ -339,7 +349,7 @@ func TestAQuickSwitchBackDoesNotWaitForTheFeedBeforeLast(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("one switch wrote %d seam lines:\n%s", len(lines), buf.String())
 	}
-	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopWait.Milliseconds()) {
+	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopCap.Milliseconds()) {
 		t.Errorf("teardownMs = %.0f: stopping a slate that exits at once waited on the "+
 			"feed before it, still dying from the previous switch", ms)
 	}

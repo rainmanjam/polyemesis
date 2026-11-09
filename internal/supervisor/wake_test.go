@@ -134,3 +134,16 @@ func TestTheFirstWakeWaitsOutFFmpegsStatsPeriod(t *testing.T) {
 			wakeAfter, wakeEvery, g)
 	}
 }
+
+// WakeAfter and WakeEvery are the exported views of the schedule the supervisor
+// runs; the engine derives its seam cap from them, so they must not drift from
+// the values the wake loop uses.
+func TestExportedWakeScheduleMatchesTheSupervisors(t *testing.T) {
+	if WakeAfter != wakeAfter || WakeEvery != wakeEvery {
+		t.Fatalf("exported schedule (%v, %v) differs from the supervisor's (%v, %v)",
+			WakeAfter, WakeEvery, wakeAfter, wakeEvery)
+	}
+	if WakeAfter <= 0 || WakeEvery <= 0 {
+		t.Fatalf("wake schedule must be positive, got %v, %v", WakeAfter, WakeEvery)
+	}
+}

@@ -98,6 +98,15 @@ const (
 	wakeEvery         = 500 * time.Millisecond
 )
 
+// WakeAfter and WakeEvery are the wake schedule for callers outside the package:
+// the first wake lands WakeAfter past the SIGTERM and a repeat every WakeEvery
+// after it. The selector's switch (engine.seamStopCap) derives its hard cap from
+// them, and the offset bench stops its hop on the same schedule.
+const (
+	WakeAfter = wakeAfter
+	WakeEvery = wakeEvery
+)
+
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and
 // the empty string -- get ShutdownGrace, which is the point.
 func graceFor(kind procname.Kind) time.Duration {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/relay"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // What -output_ts_offset actually does, and how fast an unpaced copy hop runs.
@@ -237,26 +238,47 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	//
 	// The stdout pipe is drained to EOF BEFORE Wait, never after: os/exec closes
 	// the pipe when it sees the child exit, so a Wait that lands first truncates
-	// the parser's read and takes the final progress block with it. And the
-	// SIGTERM gets a deadline of its own, because an FFmpeg blocked on a UDP read
-	// with nothing arriving is exactly the wedge stopTimeout exists for.
+	// the parser's read and takes the final progress block with it.
+	//
+	// THE WAKE IS PRODUCTION'S, NOT A KILL. A hop blocked reading a quiet UDP
+	// input does not answer SIGTERM alone; production's supervisor sends it
+	// relay.Hub.Wake (Spec.WakeOnStop, via relayWaker) at supervisor.WakeAfter
+	// and then every 500ms, and that is what lets it exit and flush. This used to
+	// SIGTERM a bare exec.Command and kill it after 2s, so the "did not exit"
+	// log below described the bench and not the product. The schedule here is the
+	// supervisor's own; the 2s deadline is only a backstop, and the kill path
+	// after it logs if it is ever reached.
 	time.Sleep(1500 * time.Millisecond)
 	var hopLag time.Duration
 	if at := lastOut.Load(); at > publishEnd.UnixNano() {
 		hopLag = time.Duration(at - publishEnd.UnixNano())
 	}
 	_ = feed.Process.Signal(syscall.SIGTERM)
+	stopWake := make(chan struct{})
+	wakeDone := make(chan struct{})
+	go func() {
+		defer close(wakeDone)
+		t := time.NewTimer(supervisor.WakeAfter)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopWake:
+				return
+			case <-t.C:
+				hub.Wake("offsetbench")
+				t.Reset(supervisor.WakeEvery)
+			}
+		}
+	}()
 	select {
 	case <-progDone:
-	// Two seconds rather than the supervisor's own deadline: the measured
-	// behaviour is that it does not exit at all on this input, so a longer wait
-	// only makes the suite slower. The wait exists so that a future FFmpeg which
-	// DOES exit is seen doing it rather than killed before it can.
 	case <-time.After(2 * time.Second):
-		t.Log("the hop did not exit on SIGTERM within 2s; killing it")
+		t.Log("the hop did not exit on SIGTERM plus the production wake within 2s; killing it")
 		_ = feed.Process.Kill()
 		<-progDone
 	}
+	close(stopWake)
+	<-wakeDone
 	_ = feed.Wait()
 	_ = sink.Close()
 	packets := <-captured
@@ -427,13 +449,13 @@ func TestOutputTSOffsetAddsToTheInputTimelineRatherThanSettingIt(t *testing.T) {
 	// NOT AN ASSERTION, BECAUSE IT IS TIMING-DEPENDENT -- and it is the finding
 	// with the most to say about #126 that this bench turned up.
 	//
-	// The hop does not answer SIGTERM while it is blocked reading a UDP input
-	// that has gone quiet: both runs above had to be killed after five seconds.
-	// That is not a lab artefact. A full acceptance run recorded a teardown of
-	// 8002ms at the seam where the encoder disappeared, which is the same
-	// condition, and it means the tier clock advances by seconds during a switch
-	// while the incoming feed's offset was fixed at the decision time. Left as an
-	// observation on purpose: this branch is instrumenting #126, not fixing it.
+	// The hop does not answer a bare SIGTERM while it is blocked reading a UDP
+	// input that has gone quiet. A full acceptance run recorded a teardown of
+	// 8002ms at a seam where the encoder disappeared, which is the same
+	// condition. Production answers it with a wake (see the stop above), and
+	// the switch path now waits long enough for that wake to land -- see
+	// seamStopCap and TestASwitchAwayFromAQuietRealFeedExitsCleanlyInsideTheSeam.
+	// With the wake this bench sees the hop exit and its final progress block.
 	t.Logf("final progress block present: offset-0 run %v, offset-100 run %v", a.progressDone, b.progressDone)
 }
 
