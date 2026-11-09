@@ -42,6 +42,12 @@ const (
 	ytCategoryUnits = 52
 )
 
+// openLock serialises opens of one destination.
+func (c *lifecycleCoordinator) openLock(id int64) func() {
+	c.openOnce.Do(func() { c.openLocks = newKeyedMutex() })
+	return c.openLocks.Lock(id)
+}
+
 // ytTitleFor is the broadcast title: the destination's go-live title (or the recurring show's rendered one),
 // else the destination's name.
 func (c *lifecycleCoordinator) ytTitleFor(d *db.Destination) string {
@@ -75,6 +81,17 @@ func (c *lifecycleCoordinator) holdQuiet(d *db.Destination, broadcastID, text st
 
 // openYouTube opens one live-now broadcast for d and records it.
 func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destination, op oauth.LiveNowOpener) {
+	// ONE OPEN AT A TIME PER DESTINATION. The start path opens the broadcast before video is allowed to flow and the
+	// sweep opens one for an enabled row that has none; without this both could insert. After the lock the row is
+	// read again: if it now names a different broadcast than the one this call was made about, somebody opened it.
+	unlock := c.openLock(d.ID)
+	defer unlock()
+	if cur, err := c.store.GetDestination(d.ID); err == nil && cur != nil {
+		if lifecycleBroadcastID(cur) != lifecycleBroadcastID(d) {
+			return
+		}
+		d = cur
+	}
 	// Failures are recorded against the id the row already holds (the finished broadcast, on a renewal), never
 	// against "": recordControl would store "" and the announcement mirror would come back.
 	failID := lifecycleBroadcastID(d)

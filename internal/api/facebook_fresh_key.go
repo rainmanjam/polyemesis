@@ -160,6 +160,11 @@ func (s *Server) renewFacebookKeyLocked(ctx context.Context, id int64, requireEn
 	if requireEnabled && !row.Enabled {
 		return false, ""
 	}
+	if row.Platform == db.PlatformYouTube {
+		// The same start path opens a YouTube destination's broadcast BEFORE video can flow. No key changes, so it
+		// never reports a renewal (a Restart then needs no reconcile for it).
+		return false, s.openYouTubeBeforeStart(ctx, row)
+	}
 	now := time.Now()
 	inUse := s.destinationInUse(id)
 	if !needsFreshFacebookKey(row, inUse, now, s.scheduleGrace) {
@@ -202,7 +207,8 @@ func (s *Server) prepareDestinationStarts(ids []int64) (release func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), scheduledRenewTimeout)
 	for _, id := range ids {
 		row, err := s.store.GetDestination(id)
-		if err != nil || row == nil || row.Platform != db.PlatformFacebook || row.AccountID == nil {
+		if err != nil || row == nil || row.AccountID == nil ||
+			!(row.Platform == db.PlatformFacebook || (row.Platform == db.PlatformYouTube && row.YouTubeLiveNow())) {
 			continue
 		}
 		wg.Add(1)

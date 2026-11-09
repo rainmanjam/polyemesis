@@ -31,6 +31,8 @@ type ynBroadcast struct {
 	latency, projection any
 	desc                any
 	start               time.Time // scheduledStartTime; zero reads as two minutes from now
+	monitorOn           bool      // contentDetails.monitorStream.enableMonitorStream
+	boundActive         bool      // the stream was already active when the broadcast was bound: auto-start never fires
 }
 
 // ynFake is YouTube as a destination sees it: one reusable stream holding ynKey, and the broadcasts made on it.
@@ -42,13 +44,15 @@ type ynFake struct {
 	seq         int
 	calls       []string // "METHOD path" in order
 	inserts     int
-	transitions []string // broadcastStatus values sent
-	refuseTrans string   // reason to refuse a transition with, once
-	deletes     []string // ids deleted
-	dropInsert  bool     // the insert creates the broadcast and then the answer never arrives
-	onInsert    func()   // runs when an insert lands, before the answer
-	deleteCode  int      // when set, every DELETE answers this status and deletes nothing
-	quotaSpent  bool     // every call answers 403 quotaExceeded
+	transitions []string      // broadcastStatus values sent
+	refuseTrans string        // reason to refuse a transition with, once
+	deletes     []string      // ids deleted
+	dropInsert  bool          // the insert creates the broadcast and then the answer never arrives
+	onInsert    func()        // runs when an insert lands, before the answer
+	deleteCode  int           // when set, every DELETE answers this status and deletes nothing
+	onBind      func()        // runs when a bind lands
+	hang        chan struct{} // when set, every request waits for it to be closed first
+	quotaSpent  bool          // every call answers 403 quotaExceeded
 }
 
 func newYnFake() *ynFake {
@@ -65,6 +69,16 @@ func (f *ynFake) set(m func(*ynFake)) { f.mu.Lock(); defer f.mu.Unlock(); m(f) }
 
 func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		hang := f.hang
+		f.mu.Unlock()
+		if hang != nil {
+			select {
+			case <-hang:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -97,8 +111,8 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 					continue
 				}
 				items = append(items, fmt.Sprintf(`{"id":%q,"snippet":{"title":%q,"liveChatId":%q,"scheduledStartTime":%q},"status":{"lifeCycleStatus":%q},`+
-					`"contentDetails":{"boundStreamId":%q,"enableAutoStart":%v,"enableAutoStop":%v,"monitorStream":{"enableMonitorStream":false}}}`,
-					id, b.title, b.chat, startOf(b).UTC().Format(time.RFC3339), b.status, b.bound, b.autoStart == true, b.autoStop == true))
+					`"contentDetails":{"boundStreamId":%q,"enableAutoStart":%v,"enableAutoStop":%v,"monitorStream":{"enableMonitorStream":%v}}}`,
+					id, b.title, b.chat, startOf(b).UTC().Format(time.RFC3339), b.status, b.bound, b.autoStart == true, b.autoStop == true, b.monitorOn))
 			}
 			fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts":
@@ -112,7 +126,7 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 				autoStart: body["contentDetails"]["enableAutoStart"], autoStop: body["contentDetails"]["enableAutoStop"],
 				kids: body["status"]["selfDeclaredMadeForKids"], dvr: body["contentDetails"]["enableDvr"],
 				latency: body["contentDetails"]["latencyPreference"], projection: body["contentDetails"]["projection"],
-				desc: body["snippet"]["description"], start: time.Now().Add(2 * time.Minute)}
+				desc: body["snippet"]["description"], start: time.Now().Add(2 * time.Minute), monitorOn: monitorFrom(body["contentDetails"])}
 			if f.onInsert != nil {
 				f.onInsert()
 			}
@@ -133,11 +147,21 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts/bind":
 			if b := f.bcasts[q.Get("id")]; b != nil {
 				b.bound = q.Get("streamId")
+				b.boundActive = f.streamState == "active"
+			}
+			if f.onBind != nil {
+				f.onBind()
 			}
 			_, _ = io.WriteString(w, `{}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/liveBroadcasts/transition":
 			to := q.Get("broadcastStatus")
 			f.transitions = append(f.transitions, to)
+			if b := f.bcasts[q.Get("id")]; b != nil && to == "testing" && b.boundActive {
+				// YouTube refuses testing for a stream that was already active when the broadcast was bound.
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, `{"error":{"code":403,"errors":[{"domain":"youtube.liveBroadcast","reason":"invalidTransition"}]}}`)
+				return
+			}
 			if f.refuseTrans != "" {
 				reason := f.refuseTrans
 				f.refuseTrans = ""
@@ -589,6 +613,16 @@ func TestAnAutoStartRaceRefusalRaisesNoAlertOnAShowThatIsLive(t *testing.T) {
 	if len(*faults) != 0 {
 		t.Errorf("faults = %+v: an auto-start race alerted on a show that is live", *faults)
 	}
+}
+
+// monitorFrom reads enableMonitorStream from an insert body, defaulting to ON as YouTube does.
+func monitorFrom(details map[string]any) bool {
+	if ms, ok := details["monitorStream"].(map[string]any); ok {
+		if v, ok := ms["enableMonitorStream"].(bool); ok {
+			return v
+		}
+	}
+	return true
 }
 
 func (f *ynFake) deleted() []string {
@@ -1242,5 +1276,59 @@ func TestADeletedDestinationsCleanupIsBoundedAndNeverActsOnARowThatStillExists(t
 	sweep(c3, 3)
 	if d := f3.deleted(); len(d) != 0 {
 		t.Errorf("deleted %v for a row that still exists", d)
+	}
+}
+
+// ---------------------------------------------------------------- open before video, and the already-active fallback
+
+// The live-staging bug: video was already flowing when the broadcast was bound, so auto-start never fired, and the
+// fallback went to testing, which YouTube refuses. A created broadcast with the monitor stream off (set explicitly
+// at insert) goes straight to live.
+func TestAReadyBroadcastOnAnAlreadyActiveStreamGoesStraightToLiveWhenTheMonitorStreamIsOff(t *testing.T) {
+	f := newYnFake() // the stream is already active when the broadcast is bound
+	c, store, _, _ := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	if !f.bcasts["bcast-1"].boundActive || f.bcasts["bcast-1"].monitorOn {
+		t.Fatalf("broadcast = %+v, want bound to an active stream with the monitor stream explicitly off", *f.bcasts["bcast-1"])
+	}
+	upEdge(c)
+	sweep(c, 2)
+	if _, _, trans := f.snapshot(); len(trans) != 1 || trans[0] != "live" {
+		t.Errorf("transitions = %v, want live and only live", trans)
+	}
+	if got := store.get(3); got.Lifecycle.Phase != "live" || got.Lifecycle.Fault != "" {
+		t.Errorf("lifecycle = %+v", got.Lifecycle)
+	}
+}
+
+// With the monitor stream ON the broadcast goes to testing first, then live.
+func TestAReadyBroadcastWithTheMonitorStreamOnGoesToTestingThenLive(t *testing.T) {
+	f := newYnFake()
+	f.streamState = "inactive" // bound before video, as the open-first path does
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev", monitorOn: true}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, _ := ynFixture(t, f, row)
+	sweep(c, 1) // adopted and bound while the stream is idle
+	f.set(func(f *ynFake) { f.streamState = "active" })
+	upEdge(c)
+	sweep(c, 3)
+	if _, _, trans := f.snapshot(); len(trans) != 2 || trans[0] != "testing" || trans[1] != "live" {
+		t.Errorf("transitions = %v, want testing then live", trans)
+	}
+}
+
+// An adopted event with auto-start off and an active stream is taken live by the coordinator.
+func TestAnAdoptedAutoStartOffEventOnAnActiveStreamIsTakenLive(t *testing.T) {
+	f := newYnFake() // active
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, _ := ynFixture(t, f, row)
+	sweep(c, 1)
+	upEdge(c)
+	sweep(c, 2)
+	if _, _, trans := f.snapshot(); len(trans) != 1 || trans[0] != "live" {
+		t.Errorf("transitions = %v, want live", trans)
 	}
 }
