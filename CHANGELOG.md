@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A YouTube destination's broadcast is opened before video is allowed to flow.** The broadcast used to be inserted
+  and bound by the coordinator's sweep a few seconds AFTER video reached YouTube, so auto-start (which fires on the
+  stream's inactive-to-active edge) never fired and the broadcast sat "ready" with chat waiting. Start, Start all,
+  Restart, a save that enables the destination and scheduled starts now open it first (bounded at 10 seconds; a
+  failed or slow open starts the destination anyway and the coordinator opens it later; a supervisor respawn never
+  opens). The insert sets the monitor stream explicitly off, and a ready broadcast on an already-active stream goes
+  straight to live (to testing first only when the monitor stream is on).
+
 ### Added
 
 - **YouTube go-live broadcasts.** A YouTube destination linked to a connected account now gets its own

@@ -252,3 +252,27 @@ func TestYouTubeQuotaSpentRecognisesASpentAllowanceAndNothingElse(t *testing.T) 
 		t.Error("a plain error is not a spent allowance")
 	}
 }
+
+// The insert states the monitor stream explicitly: off for an ordinary go-live (so the fallback goes straight to live
+// when auto-start never fires), on for a caption destination, which needs it.
+func TestTheInsertStatesTheMonitorStreamExplicitly(t *testing.T) {
+	var log []capture
+	y := lnStub(t, &log, nil)
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey}); err != nil {
+		t.Fatal(err)
+	}
+	cd := find(log, http.MethodPost, ytBroadcastsPath).Body["contentDetails"].(map[string]any)
+	ms, _ := cd["monitorStream"].(map[string]any)
+	if v, ok := ms["enableMonitorStream"]; !ok || v != false {
+		t.Errorf("monitorStream = %v, want enableMonitorStream explicitly false", cd["monitorStream"])
+	}
+	log = nil
+	y = lnStub(t, &log, nil)
+	if _, err := y.OpenLiveNow(context.Background(), "tok", LiveNowRequest{StreamKey: lnKey, CaptionPOST: true, CaptionDelay: 30e9}); err != nil {
+		t.Fatal(err)
+	}
+	cd = find(log, http.MethodPost, ytBroadcastsPath).Body["contentDetails"].(map[string]any)
+	if ms, _ := cd["monitorStream"].(map[string]any); ms["enableMonitorStream"] != true {
+		t.Errorf("a caption destination's monitor stream = %v, want on", cd["monitorStream"])
+	}
+}

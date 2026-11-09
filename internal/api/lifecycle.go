@@ -398,6 +398,9 @@ type lifecycleCoordinator struct {
 	// delivering is a read-only predicate for the same question, for the first sweeps after a restart, before any
 	// edge has been seen. Nil means edges only.
 	delivering func(id int64) bool
+	// openLocks serialises YouTube opens per destination (see openYouTube).
+	openOnce  sync.Once
+	openLocks *keyedMutex
 	// liveSkips is how many more sweeps each confirmed-live destination may be
 	// skipped before its state is read again. See lifecycleLiveRecheckEvery;
 	// absent means due now, which is the safe direction and the one a restart

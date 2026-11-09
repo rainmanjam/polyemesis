@@ -395,6 +395,12 @@ func (y *YouTube) insertLiveNow(ctx context.Context, accessToken string, req Liv
 	}
 	details := req.EventFields.contentDetails()
 	details["enableAutoStart"], details["enableAutoStop"] = true, false
+	if !req.CaptionPOST {
+		// EXPLICIT, because YouTube's default is ON and the testing transition then has preconditions that fail for a
+		// stream that was already active when the broadcast was bound (auto-start never fires). With the monitor stream
+		// off the coordinator's fallback goes straight to live. A caption destination needs it on and sets it below.
+		details["monitorStream"] = map[string]any{"enableMonitorStream": false}
+	}
 	if req.CaptionPOST {
 		details["closedCaptionsType"] = ytClosedCaptionsHTTPPost
 		details["monitorStream"] = map[string]any{

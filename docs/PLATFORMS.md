@@ -561,6 +561,14 @@ This is on by default. Turn it off per destination with **Use YouTube Studio's
 Stream now instead**; a destination with a pasted stream key and no connected
 account is never touched.
 
+The broadcast is opened **before video is allowed to flow**: Start, Start all,
+Restart, a save that switches the destination on and a scheduled start each open
+it first, the same way OBS creates and binds before it sends, because YouTube's
+auto-start fires on the stream going from idle to active. The open is bounded at
+ten seconds; if it fails or is slow the destination starts anyway and polyemesis
+opens the broadcast on its next check, then takes it live itself. A supervisor
+respawn never opens another.
+
 What happens, in order, when the destination is switched on:
 
 1. polyemesis lists the channel's reusable streams (one quota unit) and finds
