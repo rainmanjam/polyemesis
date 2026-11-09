@@ -22,7 +22,7 @@
     "astro": "^7.4.4",
     "mermaid": "^12.2.0",
     "motion": "^14.9.0",
-    "tailwindcss": "^4.1.18",
+    "tailwindcss": "^4.3.5",
     "typescript": "^6.0.3"
   },
   "devDependencies": {
