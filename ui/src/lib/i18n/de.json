@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "neueste zuerst",
   "chatpage.panelStoredTitle": "Nichts ist verbunden; dies ist der gespeicherte Verlauf.",
   "chatpage.historyBadge": "Verlauf",
+  "chatpage.echoLabel": "Von polyemesis gesendet",
   "chatpage.socketClosedTitle": "Die Live-Verbindung ist geschlossen; Nachrichten kommen wieder, sobald sie sich neu verbindet.",
   "chatpage.deletedOn": "Auf {platform} gelöscht.",
   "chatpage.storedHistory": "gespeicherter Verlauf",

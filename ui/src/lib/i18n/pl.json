@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "od najnowszych",
   "chatpage.panelStoredTitle": "Nic nie jest podłączone; to zapisana historia.",
   "chatpage.historyBadge": "historia",
+  "chatpage.echoLabel": "Wysłane przez polyemesis",
   "chatpage.socketClosedTitle": "Połączenie na żywo jest zamknięte; wiadomości wrócą po ponownym połączeniu.",
   "chatpage.deletedOn": "Usunięto na {platform}.",
   "chatpage.storedHistory": "zapisana historia",

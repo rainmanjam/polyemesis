@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "önce en yeniler",
   "chatpage.panelStoredTitle": "Hiçbir şey bağlı değil; bu saklanan geçmiştir.",
   "chatpage.historyBadge": "geçmiş",
+  "chatpage.echoLabel": "polyemesis tarafından gönderildi",
   "chatpage.socketClosedTitle": "Canlı bağlantı kapalı; yeniden bağlandığında mesajlar gelmeye devam edecek.",
   "chatpage.deletedOn": "{platform} üzerinde silindi.",
   "chatpage.storedHistory": "kayıtlı geçmiş",

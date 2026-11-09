@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "спочатку нові",
   "chatpage.panelStoredTitle": "Нічого не підключено; це збережена історія.",
   "chatpage.historyBadge": "історія",
+  "chatpage.echoLabel": "Надіслано polyemesis",
   "chatpage.socketClosedTitle": "Живе з'єднання закрите; повідомлення знову надходитимуть, коли воно відновиться.",
   "chatpage.deletedOn": "Вилучено на {platform}.",
   "chatpage.storedHistory": "збережена історія",

@@ -2588,6 +2588,7 @@
   "chatpage.newestFirst": "nieuwste eerst",
   "chatpage.panelStoredTitle": "Er is niets gekoppeld; dit is de opgeslagen geschiedenis.",
   "chatpage.historyBadge": "geschiedenis",
+  "chatpage.echoLabel": "Verstuurd door polyemesis",
   "chatpage.socketClosedTitle": "De live-socket is gesloten; berichten komen weer binnen zodra hij opnieuw verbindt.",
   "chatpage.deletedOn": "Verwijderd op {platform}.",
   "chatpage.storedHistory": "opgeslagen geschiedenis",

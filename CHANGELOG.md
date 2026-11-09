@@ -31,6 +31,18 @@ its first tagged release.
   it, so the fallback is off again after a roll-forward. A `PUT /sources/{id}` that sends `ingest.autoStop` to v0.16.0 is a
   `400` (it rejects unknown fields on requests).
 
+### Changed
+
+- **The chat panel's header, rows and "Sending to" row hold their shape on a narrow panel.** The header was three rows
+  at the Dashboard's width (title and badges floating beside a wrapped run of large uppercase chips); it is now one row.
+  The platform filters are compact toggles that drop their word below a container width of 36rem (the logo carries
+  the chip, the name stays in the accessible name), keep `aria-pressed`, draw a dashed border for a platform with no
+  connected account, and scroll sideways inside their own strip instead of wrapping. Messages are a two-column grid, so a
+  wrapped line stays under the name rather than running back beneath the icon; the dock shows the time on hover or
+  focus. A message polyemesis sent itself (the server's `echo` flag, including poll announcements) carries a megaphone
+  mark. The composer's targets use the same chip, with a check when selected, and scroll rather than wrap. Adds one
+  string, `chatpage.echoLabel`, to all 15 locales.
+
 ### Fixed
 
 - **A native Twitch poll refused for a non-Affiliate channel is now skipped, not failed, and the closing message says "1 vote".**
