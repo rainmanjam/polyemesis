@@ -262,15 +262,17 @@ func TestABackupOrSlateOnlyStreamStillReleasesTheHoldAtTheCeiling(t *testing.T) 
 // Mutation: delete the `if expiryFlipped { ... }` call in probeLoop.
 func TestTheHoldCeilingReleasesDestinationsOnAQuietStreamWithoutAReconcile(t *testing.T) {
 	e := probeLoopEngine(t)
-	time.Sleep(100 * time.Millisecond) // after the loop's baseline read
+	// A burst EVERY round until the loop reacts: a single burst after a fixed
+	// sleep becomes the loop's baseline if it lands before the loop took its
+	// own, and then nothing ever moves.
 	var cc uint8
-	for range 20 {
-		e.hub.Deliver(tsDatagram(&cc))
-	}
 	deadline := time.Now().Add(15 * time.Second)
 	for e.holdSince.Load() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("the clock never started after the stream was seen")
+		}
+		for range 20 {
+			e.hub.Deliver(tsDatagram(&cc))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -298,7 +300,7 @@ func TestAStaleTickDoesNotSetStreamSeenAfterTheIngestChanged(t *testing.T) {
 	e.mu.Lock()
 	e.sourceGen++ // reconcileIngest cleared the flag and moved the generation
 	e.mu.Unlock()
-	e.noteStreamSeen(gen, true)
+	e.noteStreamSeen(gen, feedIngest)
 	if e.streamSeen.Load() || e.holdSince.Load() != 0 {
 		t.Error("a tick from the old ingest re-set the flag after the ingest changed")
 	}
@@ -306,8 +308,121 @@ func TestAStaleTickDoesNotSetStreamSeenAfterTheIngestChanged(t *testing.T) {
 	e.mu.RLock()
 	gen = e.sourceGen
 	e.mu.RUnlock()
-	e.noteStreamSeen(gen, true)
+	e.noteStreamSeen(gen, feedIngest)
 	if !e.streamSeen.Load() {
 		t.Error("a current tick did not set the flag")
+	}
+}
+
+// A TICK THAT STRADDLES A MODE CHANGE MUST NOT COUNT THE OLD INGEST'S BYTES.
+// feedWatch compared against the previous tick's baseline, so RTMP bytes
+// delivered just before a switch to SRT read as movement under the new
+// generation, and the 75s clock started with no SRT stream. The first tick of a
+// new generation now only takes a baseline.
+//
+// The three calls are probeLoop's own, in its order: read the generation, ask
+// the watch, note the result.
+//
+// Mutation: delete the `if gen != w.gen { clear(w.last); w.gen = gen }` block
+// in feedWatch.advanced.
+func TestATickStraddlingAModeChangeOnlyTakesABaseline(t *testing.T) {
+	e, _, _ := srtStoreEngine(t)
+	reconcileOrFail(t, e) // a destination is held, so a clock could start
+	feeds := newFeedWatch(e)
+
+	var cc uint8
+	for range 20 {
+		e.hub.Deliver(tsDatagram(&cc)) // the OLD ingest's last bytes
+	}
+	e.mu.Lock()
+	e.sourceGen++ // the mode changed: reconcileIngest cleared the flag
+	e.mu.Unlock()
+	e.streamSeen.Store(false)
+	e.holdSince.Store(0)
+
+	tick := func() {
+		e.mu.RLock()
+		gen := e.sourceGen
+		e.mu.RUnlock()
+		e.noteStreamSeen(gen, feeds.advanced(gen))
+	}
+	tick()
+	if e.streamSeen.Load() || e.holdSince.Load() != 0 {
+		t.Fatal("the old ingest's bytes started the new generation's clock")
+	}
+	for range 20 {
+		e.hub.Deliver(tsDatagram(&cc)) // the new ingest
+	}
+	tick()
+	if !e.streamSeen.Load() || e.holdSince.Load() == 0 {
+		t.Error("bytes from the new ingest, after the baseline, were not counted")
+	}
+}
+
+// THE SLATE COUNTS ONLY UNTIL AN ENCODER CONNECTS, AND THE WAIT IS MEASURED
+// FROM THE ENCODER. The layout probe reads the primary hub, so it cannot
+// measure the slate; a slate-only go-live is released by the ceiling alone and
+// the slate must start the clock (TestABackupOrSlateOnly...). But a slate that
+// plays from boot started it before any encoder was there, and the 75s ran out
+// first. A real ingest now restarts a clock the slate began.
+//
+// Mutation: delete the `if e.slateSeen.Swap(false) && ... { e.holdSince.Store(0) }`
+// block in noteStreamSeen.
+func TestASlateFromBootDoesNotStartTheWaitBeforeTheEncoderConnects(t *testing.T) {
+	e := probeLoopEngine(t)
+	slate, err := relay.New(slog.New(&startCounter{}), freeUDPPort(t))
+	if err != nil {
+		t.Fatalf("relay.New: %v", err)
+	}
+	t.Cleanup(func() { _ = slate.Close() })
+	e.mu.Lock()
+	e.sel = &selector{hub: slate, active: sourceSlate}
+	e.mu.Unlock()
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	feedUntil(t, slate, stop)
+
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(15 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	waitFor("the slate to start the clock", func() bool { return e.holdSince.Load() != 0 })
+	atSlate := e.holdSince.Load()
+	time.Sleep(400 * time.Millisecond) // the encoder connects later
+
+	var cc uint8
+	waitFor("the encoder's arrival to restart the clock", func() bool {
+		for range 20 {
+			e.hub.Deliver(tsDatagram(&cc))
+		}
+		return e.holdSince.Load() > atSlate+int64(300*time.Millisecond)
+	})
+	if n := runningDests(e); n != 0 {
+		t.Errorf("%d destinations out; the wait had not run out", n)
+	}
+}
+
+// NO HOLD, NO CLOCK. With no destination waiting, a stream seen must not start
+// the hold's clock (and reconcileAfterHoldExpiry must not then warn that
+// destinations are being started provisionally when none was held).
+//
+// Mutation: drop the `hold != nil` condition in noteStreamSeen.
+func TestAStreamSeenWithNothingHeldDoesNotStartTheClock(t *testing.T) {
+	e, _, _ := srtStoreEngine(t) // no Reconcile: nothing is held
+	e.mu.RLock()
+	gen := e.sourceGen
+	e.mu.RUnlock()
+	e.noteStreamSeen(gen, feedIngest)
+	if !e.streamSeen.Load() {
+		t.Error("the stream was not noted")
+	}
+	if e.holdSince.Load() != 0 {
+		t.Error("the clock started with no destination held")
 	}
 }

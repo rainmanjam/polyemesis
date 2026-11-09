@@ -17,10 +17,12 @@ its first tagged release.
   probe landed: a live viewer lost about 10s, and a single-use key would have broken. The ceiling now runs only once
   a stream has been seen, stays expired until a layout is measured, and a destination stopped by the hold is logged.
   A start made before the layout is known now waits for it, for at most 75 seconds of stream: after that, or once
-  probing has failed five times, destinations start provisionally and stay up. Any feed reaching the selector counts as
-  a stream, so a backup or the slate going live before the primary connects (or an engine restart with the primary
-  down) still releases destinations at that bound rather than holding them. Only a real ingest-mode change resets the
-  wait, so a second start press no longer tears down the first.
+  probing has failed five times, destinations start provisionally and stay up. A backup or the slate going live before
+  the primary connects (or an engine restart with the primary down) still releases destinations at that bound rather
+  than holding them: the layout probe reads only the primary, so the bound is the only thing that can release those.
+  The slate counts only while neither ingest is receiving, and a wait it began restarts when an encoder connects, so a
+  slate that plays from boot does not use up the wait before the encoder arrives. Only an ingest-mode change or an
+  ingest restart resets the wait, so a second start press no longer tears down the first.
 - **A loudness monitor (and the ingest meter) is no longer SIGKILLed on a healthy stop.** Its 1s grace left 250ms
   after the first quiet-feed wake at 750ms, so every stop on a quiet feed logged "process did not exit after grace
   period". A child with a wake now gets the wake schedule plus a 500ms window (1.75s); children with no wake and the

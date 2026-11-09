@@ -573,6 +573,9 @@ type Engine struct {
 	// started, set by probeLoop and cleared wherever the layout is invalidated.
 	// The hold's ceiling only runs while it is true: see reconcileOutputs.
 	streamSeen atomic.Bool
+	// slateSeen is that streamSeen was set by the slate alone, with no ingest
+	// delivering yet. Cleared with streamSeen, and when an ingest delivers.
+	slateSeen atomic.Bool
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -1817,6 +1820,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// expired latch survive an RTMP to SRT switch, so destinations kept
 		// running provisionally before a single SRT probe.
 		e.streamSeen.Store(false)
+		e.slateSeen.Store(false)
 		e.holdSince.Store(0)
 		// The failure history belongs to the OLD transport. Without this, five
 		// failed RTMP probes followed by a switch to SRT started destinations
@@ -1944,6 +1948,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// keeps the layout, because a layout that was measured stays measured.
 	e.invalidate()
 	e.streamSeen.Store(false)
+	e.slateSeen.Store(false)
 	e.holdSince.Store(0)
 	// A new ingest gets a fresh hold. The failure count is about THIS stream,
 	// so carrying it across a restart would start the next one provisionally
@@ -2160,50 +2165,103 @@ func (e *Engine) holdExpired(now time.Time) bool {
 	return now.Sub(time.Unix(0, since)) >= holdCeiling
 }
 
-// feedWatch notices that any feed is reaching the selector's output: the
-// primary, the backup, or the slate and playlist behind the selector. A stream
-// is "seen" on any of them, because that is what the hold waits for. Counting
-// only the primary held destinations forever when the backup or the slate went
-// live before the primary connected, or when the engine restarted with the
-// primary down; before the ceiling they went out after 75s.
+// feedKind is what a tick of feedWatch saw.
+type feedKind int
+
+const (
+	feedNone feedKind = iota
+	// feedSlate is bytes on the selector's output (the slate or playlist
+	// behind it) while neither ingest was receiving.
+	feedSlate
+	// feedIngest is bytes on the primary or the backup ingest hub: an
+	// encoder is really connected.
+	feedIngest
+)
+
+// feedWatch notices that a feed is reaching the engine. The layout probe reads
+// e.hub, the PRIMARY ingest hub (probeOnce subscribes to it and probeLoop's
+// "flowing" is its RxBytes), never the selector's output, so it can measure
+// neither the backup nor the slate. A backup-only or slate-only go-live
+// therefore never reaches the probe's give-up, and only the hold's ceiling can
+// release it: the ceiling has to start on those feeds, or destinations are held
+// forever.
+//
+// But the slate plays from boot on a source that has one, and counting it
+// unconditionally started the 75s clock before any encoder connected, so the
+// first start went out provisionally and restarted when the probe landed. So
+// the primary and the backup always count (a real encoder), and the selector's
+// output counts only while neither of them is receiving. When an ingest then
+// arrives, noteStreamSeen restarts a clock the slate began.
 type feedWatch struct {
 	e    *Engine
 	last map[*relay.Hub]uint64
+	// gen is the sourceGen the baselines belong to.
+	gen uint64
 }
 
 func newFeedWatch(e *Engine) *feedWatch {
 	w := &feedWatch{e: e, last: map[*relay.Hub]uint64{}}
-	w.advanced() // baseline: bytes already counted are not a new stream
+	e.mu.RLock()
+	w.gen = e.sourceGen
+	e.mu.RUnlock()
+	w.advanced(w.gen) // baseline: bytes already counted are not a new stream
 	return w
 }
 
-// advanced reports whether any watched hub carried bytes since the last call.
-// Counters are per hub, so a hub that replaces another (a new backup listener)
-// starts from its own baseline instead of reading as a jump.
-func (w *feedWatch) advanced() bool {
-	hubs := []*relay.Hub{w.e.hub, w.e.backupHub(), w.e.downstreamHub()}
-	moved := false
-	seen := make(map[*relay.Hub]struct{}, len(hubs))
-	for _, h := range hubs {
+// advanced reports what carried bytes since the last call. Counters are per
+// hub, so a hub that replaces another (a new backup listener) starts from its
+// own baseline instead of reading as a jump.
+//
+// gen is the sourceGen the caller read BEFORE this call. When it differs from
+// the generation the baselines were taken under, the ingest changed (a mode
+// switch or a restart): bytes since the last tick may be the OLD ingest's last
+// gasp, so the baselines are dropped and this tick only takes new ones.
+func (w *feedWatch) advanced(gen uint64) feedKind {
+	if gen != w.gen {
+		clear(w.last)
+		w.gen = gen
+	}
+	ingest := []*relay.Hub{w.e.hub, w.e.backupHub()}
+	down := w.e.downstreamHub()
+	seen := make(map[*relay.Hub]struct{}, 3)
+	ingestMoved, downMoved, receiving := false, false, false
+	visit := func(h *relay.Hub, isIngest bool) {
 		if h == nil {
-			continue
+			return
 		}
 		if _, dup := seen[h]; dup {
-			continue
+			return
 		}
 		seen[h] = struct{}{}
 		rx := h.RxBytes()
+		moved := false
 		if prev, ok := w.last[h]; ok && rx > prev {
 			moved = true
 		}
 		w.last[h] = rx
+		if isIngest {
+			ingestMoved = ingestMoved || moved
+			receiving = receiving || h.Stats().ReceivingSec > 0
+		} else {
+			downMoved = downMoved || moved
+		}
 	}
+	for _, h := range ingest {
+		visit(h, true)
+	}
+	visit(down, false)
 	for h := range w.last {
 		if _, ok := seen[h]; !ok {
 			delete(w.last, h)
 		}
 	}
-	return moved
+	switch {
+	case ingestMoved:
+		return feedIngest
+	case downMoved && !receiving:
+		return feedSlate
+	}
+	return feedNone
 }
 
 // noteStreamSeen records that a feed has been seen and starts the hold's clock
@@ -2211,8 +2269,14 @@ func (w *feedWatch) advanced() bool {
 // snapshotted before the bytes were read: under e.mu, the same lock
 // reconcileIngest clears the flag under, so a tick that began on the old ingest
 // cannot set the flag just after the new one cleared it.
-func (e *Engine) noteStreamSeen(gen uint64, anyFeed bool) {
-	if !anyFeed {
+//
+// The clock starts here only while a hold is active; with no destination
+// waiting there is nothing to time, and reconcileOutputs starts it when one is.
+// A clock the slate started is restarted when a real ingest first delivers, so
+// the wait is measured from the encoder, unless it already ran out: an expiry
+// stays expired.
+func (e *Engine) noteStreamSeen(gen uint64, kind feedKind) {
+	if kind == feedNone {
 		return
 	}
 	e.mu.Lock()
@@ -2220,9 +2284,18 @@ func (e *Engine) noteStreamSeen(gen uint64, anyFeed bool) {
 	if e.sourceGen != gen {
 		return
 	}
+	now := time.Now()
+	if kind == feedIngest {
+		if e.slateSeen.Swap(false) && !e.holdExpired(now) {
+			e.holdSince.Store(0)
+		}
+	} else if !e.streamSeen.Load() {
+		e.slateSeen.Store(true)
+	}
 	e.streamSeen.Store(true)
-	if !e.measured {
-		e.holdBegan(time.Now())
+	hold, _ := e.destHold.Load().(*HoldStatus)
+	if !e.measured && hold != nil {
+		e.holdBegan(now)
 	}
 }
 
@@ -2235,8 +2308,11 @@ func (e *Engine) reconcileAfterHoldExpiry() {
 	if measured {
 		return
 	}
-	e.log.Warn("the ingest layout is still unknown after the hold ceiling; starting destinations provisionally",
-		"ceiling", holdCeiling.String())
+	// Nothing held means nothing is being released, so there is nothing to say.
+	if hold, _ := e.destHold.Load().(*HoldStatus); hold != nil {
+		e.log.Warn("the ingest layout is still unknown after the hold ceiling; starting destinations provisionally",
+			"ceiling", holdCeiling.String())
+	}
 	settings := e.Settings()
 	e.reconcileMu.Lock()
 	err := e.reconcileDownstream(settings)
@@ -4003,8 +4079,7 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		e.mu.RLock()
 		gen := e.sourceGen
 		e.mu.RUnlock()
-		anyFeed := feeds.advanced()
-		e.noteStreamSeen(gen, anyFeed)
+		e.noteStreamSeen(gen, feeds.advanced(gen))
 		// The ceiling is driven by this loop, not by whichever reconcile happens
 		// to arrive: a stream that alternates between quiet and flowing never
 		// produced a `changed` or a give-up flip, so nothing re-planned when the
