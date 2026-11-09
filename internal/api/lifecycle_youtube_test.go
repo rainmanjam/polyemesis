@@ -37,22 +37,23 @@ type ynBroadcast struct {
 
 // ynFake is YouTube as a destination sees it: one reusable stream holding ynKey, and the broadcasts made on it.
 type ynFake struct {
-	mu          sync.Mutex
-	listedKey   string // the key the stream carries; "" removes the stream
-	streamState string // streamStatus of the bound stream
-	bcasts      map[string]*ynBroadcast
-	seq         int
-	calls       []string // "METHOD path" in order
-	inserts     int
-	transitions []string      // broadcastStatus values sent
-	refuseTrans string        // reason to refuse a transition with, once
-	deletes     []string      // ids deleted
-	dropInsert  bool          // the insert creates the broadcast and then the answer never arrives
-	onInsert    func()        // runs when an insert lands, before the answer
-	deleteCode  int           // when set, every DELETE answers this status and deletes nothing
-	onBind      func()        // runs when a bind lands
-	hang        chan struct{} // when set, every request waits for it to be closed first
-	quotaSpent  bool          // every call answers 403 quotaExceeded
+	mu           sync.Mutex
+	listedKey    string // the key the stream carries; "" removes the stream
+	streamState  string // streamStatus of the bound stream
+	bcasts       map[string]*ynBroadcast
+	seq          int
+	calls        []string // "METHOD path" in order
+	inserts      int
+	transitions  []string      // broadcastStatus values sent
+	refuseTrans  string        // reason to refuse a transition with, once
+	deletes      []string      // ids deleted
+	dropInsert   bool          // the insert creates the broadcast and then the answer never arrives
+	onInsert     func()        // runs when an insert lands, before the answer
+	deleteCode   int           // when set, every DELETE answers this status and deletes nothing
+	onBind       func()        // runs when a bind lands
+	noInsertChat bool          // the insert answer carries no liveChatId (the list shows it once the broadcast is live)
+	hang         chan struct{} // when set, every request waits for it to be closed first
+	quotaSpent   bool          // every call answers 403 quotaExceeded
 }
 
 func newYnFake() *ynFake {
@@ -133,7 +134,11 @@ func (f *ynFake) handler(t *testing.T) http.HandlerFunc {
 			if f.dropInsert {
 				panic(http.ErrAbortHandler)
 			}
-			fmt.Fprintf(w, `{"id":%q,"snippet":{"liveChatId":%q},"status":{"lifeCycleStatus":"created"}}`, id, f.bcasts[id].chat)
+			insertChat := f.bcasts[id].chat
+			if f.noInsertChat {
+				insertChat = ""
+			}
+			fmt.Fprintf(w, `{"id":%q,"snippet":{"liveChatId":%q},"status":{"lifeCycleStatus":"created"}}`, id, insertChat)
 		case r.Method == http.MethodDelete && r.URL.Path == "/liveBroadcasts":
 			if f.deleteCode != 0 {
 				w.WriteHeader(f.deleteCode)
@@ -1330,5 +1335,65 @@ func TestAnAdoptedAutoStartOffEventOnAnActiveStreamIsTakenLive(t *testing.T) {
 	sweep(c, 2)
 	if _, _, trans := f.snapshot(); len(trans) != 1 || trans[0] != "live" {
 		t.Errorf("transitions = %v, want live", trans)
+	}
+}
+
+// The chat is pointed at the live broadcast's own chat as soon as a state read shows its liveChatId, whether or not
+// the insert answered with one, and again on each later live read (an adapter rebuilt since is pointed back).
+func TestChatIsPointedAtTheBroadcastsChatOnceAStateReadShowsIt(t *testing.T) {
+	f := newYnFake()
+	f.noInsertChat = true
+	c, _, _, chat := ynFixture(t, f, ynRow(true))
+	sweep(c, 1)
+	if ids := chat.all(); len(ids) != 0 {
+		t.Fatalf("chat pointers = %v, want none: the insert carried no liveChatId", ids)
+	}
+	f.set(func(f *ynFake) { f.bcasts["bcast-1"].status = "live" })
+	upEdge(c)
+	sweep(c, 1)
+	if ids := chat.all(); len(ids) != 1 || ids[0] != "chat-1" {
+		t.Errorf("chat pointers = %v, want chat-1 once the state read shows it", ids)
+	}
+	readNow(c)
+	sweep(c, 1) // the next live read points it again
+	if ids := chat.all(); len(ids) != 2 {
+		t.Errorf("chat pointers = %v, want the live read to point again", ids)
+	}
+}
+
+// An adopted event is pointed on its live read too.
+func TestAnAdoptedEventsChatIsPointedOnItsLiveRead(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"}
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, chat := ynFixture(t, f, row)
+	sweep(c, 1)
+	before := len(chat.all())
+	f.set(func(f *ynFake) { f.bcasts["ev-1"].status = "live" })
+	upEdge(c)
+	sweep(c, 1)
+	if ids := chat.all(); len(ids) != before+1 || ids[len(ids)-1] != "chat-ev" {
+		t.Errorf("chat pointers = %v, want the adopted event's chat pointed on its live read", ids)
+	}
+}
+
+// When the coordinator itself takes the broadcast live, chat is pointed in the same sweep (one more state read), not
+// after the settled-live cadence next asks.
+func TestTakingABroadcastLiveAlsoPointsChatInTheSameSweep(t *testing.T) {
+	f := newYnFake()
+	f.bcasts["ev-1"] = &ynBroadcast{status: "ready", chat: "chat-ev"} // auto-start off: the coordinator transitions it
+	row := ynRow(true)
+	row.Compliance.YouTube = &db.YouTubeBroadcastControls{EventID: "ev-1"}
+	c, _, _, chat := ynFixture(t, f, row)
+	sweep(c, 1)
+	before := len(chat.all())
+	upEdge(c)
+	sweep(c, 1) // reads ready + active stream, sends live, reads the live state
+	if _, _, trans := f.snapshot(); len(trans) != 1 || trans[0] != "live" {
+		t.Fatalf("transitions = %v", trans)
+	}
+	if ids := chat.all(); len(ids) != before+1 || ids[len(ids)-1] != "chat-ev" {
+		t.Errorf("chat pointers = %v, want the chat pointed in the sweep that took it live", ids)
 	}
 }

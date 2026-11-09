@@ -71,7 +71,8 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title string `json:"title"`
+				Title      string `json:"title"`
+				LiveChatID string `json:"liveChatId"`
 			} `json:"snippet"`
 			Status struct {
 				LifeCycleStatus string `json:"lifeCycleStatus"`
@@ -112,6 +113,7 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 	state := &BroadcastLifecycleState{
 		BroadcastID:   firstNonEmpty(b.ID, id),
 		Title:         b.Snippet.Title,
+		LiveChatID:    b.Snippet.LiveChatID,
 		Status:        b.Status.LifeCycleStatus,
 		BoundStreamID: b.ContentDetails.BoundStreamID,
 		MonitorStream: b.ContentDetails.MonitorStream.EnableMonitorStream,
