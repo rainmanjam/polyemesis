@@ -677,3 +677,70 @@ func TestASceneRuleWithNoOptionsFollowsTheProgrammesTrackRoles(t *testing.T) {
 		}
 	}
 }
+
+// One scene rule ("no music" on a destination whose mix is only track 1) used
+// to be reported two ways depending on whether a stream was arriving: skipped
+// with the "keeps none of the tracks" message while stopped, failed with the
+// routing package's "would leave no audio" error while streaming, because a live
+// ingest carrying only the excluded track makes the preset itself unbuildable.
+// Both are the same condition, "this preset would silence the destination", and
+// both are a skip with the same message; failed is for real errors.
+//
+// Mutation: drop the errors.Is(err, routing.ErrPresetSilent) branch in
+// applySceneLevels and the live case reads failed again.
+func TestASceneRuleThatWouldSilenceADestinationIsSkippedWithOneMessageWhetherOrNotItIsLive(t *testing.T) {
+	cases := []struct {
+		name string
+		src  func(*int64) routing.Source // nil: the programme's own (stopped, placeholder layout)
+	}{
+		{"destination stopped", nil},
+		{"destination live: the ingest carries only track 1", func(*int64) routing.Source {
+			return routing.Source{Tracks: []routing.Track{{Index: 0, Channels: 2, Codec: "aac", Layout: "stereo"}}}
+		}},
+	}
+	var msgs []string
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := obsServer(t)
+			withLiveLevels(o.s, true)
+			o.s.sceneSource = tc.src
+			sel := o.createDest(t, "twitch")
+			row, err := o.s.store.GetDestination(sel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.Profile = simpleProfile(0)
+			if _, err := o.s.store.UpdateDestination(row); err != nil {
+				t.Fatal(err)
+			}
+			out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetNoMusic,
+				Opts: &routing.PresetOpts{MusicTrack: 0}})
+			if out.Outcome != string(bulkSkipped) {
+				t.Fatalf("outcome = %q (%q), want skipped", out.Outcome, out.Message)
+			}
+			if out.Message != sceneWouldSilence {
+				t.Errorf("message = %q, want the one shared message", out.Message)
+			}
+			msgs = append(msgs, out.Message)
+			row, _ = o.s.store.GetDestination(sel)
+			if row.Profile.Tracks[0].Muted {
+				t.Error("a skipped scene rule still wrote a mute")
+			}
+		})
+	}
+	if len(msgs) == 2 && msgs[0] != msgs[1] {
+		t.Errorf("the two cases told different stories: %q vs %q", msgs[0], msgs[1])
+	}
+}
+
+// failed stays for a real error: a preset id that does not exist is not a rule
+// that would silence anything.
+func TestASceneRuleWithAnUnknownPresetStillFails(t *testing.T) {
+	o := obsServer(t)
+	withLiveLevels(o.s, true)
+	sel := o.createDest(t, "twitch")
+	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: "no-such-preset"})
+	if out.Outcome != string(bulkFailed) || !strings.Contains(out.Message, "no-such-preset") {
+		t.Fatalf("outcome = %+v, want failed naming the preset", out)
+	}
+}

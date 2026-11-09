@@ -48,6 +48,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
+	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/stats"
@@ -425,6 +426,9 @@ type Server struct {
 	// liveLevelsAvailable and runProbe.
 	liveLevels  func() bool
 	probeRunner func(ctx context.Context, name string, args []string) ([]byte, error)
+	// sceneSource replaces the live ingest layout a scene rule's preset is built
+	// against (a test seam; nil means the programme's engine).
+	sceneSource func(*int64) routing.Source
 
 	log *slog.Logger
 	// acctHealth is each connected account's last token-refresh outcome (A5).
