@@ -1820,6 +1820,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// survive a path segment. See chat.go.
 			api.Get(r, "/chat", s.handleChatOverview, readDenied)
 			api.Get(r, "/chat/messages", s.handleChatMessages, readDenied)
+			// Which connected chats are live, for the composer's chips. The
+			// same reading POST /chat/send defaults to. No message content and
+			// no credential: platform, account ref, and two booleans, like the
+			// account list a read token already gets.
+			r.Get("/chat/live", s.handleChatLive)
 			// Finding one comment again. Searches the table rather than the
 			// Hub's ring, which only holds this process's lifetime.
 			api.Get(r, "/chat/search", s.handleChatSearch, readDenied)

@@ -50,7 +50,9 @@ import type {
   ChatOverview,
   ChatPlatform,
   ChatSearchResult,
+  ChatLiveView,
   ChatSendResponse,
+  ChatSendTarget,
   ChatMute,
   XChatModerator,
   ChatSettings,
@@ -1436,7 +1438,10 @@ export const api = {
   /** Fan-out. Answers 200 even when every platform failed: the per-platform
    *  verdicts are the answer, and a status code cannot say "Twitch took it and
    *  YouTube did not". */
-  sendChat: (text: string) => post<ChatSendResponse>("/chat/send", { text }),
+  sendChat: (text: string, target?: ChatSendTarget) =>
+    post<ChatSendResponse>("/chat/send", { text, ...target }),
+  /** Which connected chats are live right now: what a send with no target uses. */
+  chatLive: () => get<ChatLiveView>("/chat/live"),
   /** Answer one message on the platform that issued it. Not a fan-out: the
    *  response carries a single result. asBot posts as the platform's bot
    *  identity where it has one (Kick). */

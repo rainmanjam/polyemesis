@@ -1986,6 +1986,7 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/users/notes`, `/chat/flags` |
+| `GET` | `/chat/live` — which connected chats are live right now, for the composer's send targets |
 | `GET` | `/chat/mutes`, `/chat/moderators` — X's muted viewers (with the end of each timed mute) and chat moderators; `platform` and `account` in the query. `/chat/moderators` answers `{moderators, appliesToAllBroadcasts}` for X, each moderator `{userId, username, name}`; for YouTube it answers `{moderators}` only, each `{id, channelId, displayName, ...}` (fields a platform does not use are left out) |
 | `GET` | `/chat/export` — any window of stored chat, streamed as `json`, `csv` or `ndjson` |
 | `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
@@ -2001,12 +2002,38 @@ in the schedule's `warnings` (on an update) for removal on Facebook.
 | `GET` `POST` `PUT` `PATCH` `DELETE` | `/chat/twitch/{resource}` — Twitch's channel tools; the method picks the verb (see below) |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
-`POST /chat/send` posts to every connected chat that can take a message and
-answers one result per chat. A chat is a send target (`canSend` on its row in
-`GET /chat`) only when polyemesis can post to that platform and the capability
-matrix in `GET /platforms/capabilities` does not mark its `chatSend` as `no`;
-any other chat comes back `skipped` with the reason. Facebook is the case the
-matrix rules out. Polls and the MCP tools post through the same path.
+`POST /chat/send` posts a message, **by default only to the platforms that are
+live**, and answers one result per connected chat. The body is `text`, plus an
+optional target:
+
+| Body | Goes to |
+|---|---|
+| `{"text": ...}` or `"to": "live"` | the live chats only (the default) |
+| `"to": "all"` | every connected chat that can take a message (the behaviour before this default) |
+| `"platforms": ["kick", "twitch"]` | exactly those platforms, live or not; the others are not mentioned. A listed platform with no chat comes back `skipped`, `reason: "notConnected"` |
+
+`to` and `platforms` are alternatives; both together, an unknown `to` or an
+unknown platform is `400`. A chat is **live** when it has an enabled destination
+that is on air (running, or reconnecting) linked to that account, or, for
+YouTube and X, when the chat adapter reports a live chat or broadcast. A
+destination with no linked account (a pasted stream key) counts for its
+platform when exactly one chat account is connected there. Twitch's and Kick's
+chat being connected says nothing about whether the channel is streaming, so it
+is not used. Each connected chat that is not live comes back `skipped: true`,
+`reason: "notLive"`, `detail: "not live"`. When no chat that can take a message
+is live and no target is given, the answer is `409` "no platform is live; choose
+platforms to send to": a send never quietly goes nowhere. `reason` is additive
+(`"notLive"`, `"notConnected"`); a platform that cannot post at all stays
+`skipped` with its `detail` and no `reason`. A chat is a send target
+(`canSend` on its row in `GET /chat`) only when polyemesis can post to that
+platform and the capability matrix in `GET /platforms/capabilities` does not
+mark its `chatSend` as `no`; any other chat comes back `skipped` with the
+reason. Facebook is the case the matrix rules out.
+
+`GET /chat/live` answers `{targets: [{platform, account, canSend, live}], anyLive}`,
+the same reading a default send uses; the composer's chips come from it. Chat
+polls (the console, MCP `start_poll` and `end_poll`, the Stream Deck poll key)
+announce and report their result in the live chats only, by the same rule.
 
 `POST /chat/send` also takes `replyTo` (`platform`, `account`, `id` of the
 message being answered) and `asBot`. With `replyTo` the message is not fanned

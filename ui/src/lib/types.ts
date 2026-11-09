@@ -2753,7 +2753,31 @@ export interface ChatSendResult {
   account?: string;
   ok: boolean;
   skipped?: boolean;
+  /** Why a skip was the sender's choice: "notLive" (nothing on air on that
+   *  platform) or "notConnected" (asked for, no chat attached). Absent for a
+   *  platform that simply cannot post, and for every send. */
+  reason?: "notLive" | "notConnected";
   detail?: string;
+}
+
+/** Where a plain chat message goes. Absent means the server's default: only the
+ *  platforms that are live. `all` is every connected chat; a list names them. */
+export type ChatSendTarget = { to: "all" } | { platforms: ChatPlatform[] };
+
+/** One connected chat as GET /chat/live reports it. `live` is the reading a
+ *  default send uses, so a chip that is on by default is exactly where a send
+ *  with no target would go. */
+export interface ChatLiveTarget {
+  platform: ChatPlatform;
+  account?: string;
+  canSend: boolean;
+  live: boolean;
+}
+
+export interface ChatLiveView {
+  targets: ChatLiveTarget[];
+  /** False means a send with no target is refused with 409. */
+  anyLive: boolean;
 }
 
 export interface ChatSendResponse {

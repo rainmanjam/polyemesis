@@ -29,8 +29,8 @@ const errInvalidPollID = "invalid poll id"
 // for what never leaves internal/polls, so there is nothing here to withhold
 // from a read token, and the GETs follow the method rule like the rest of the
 // API -- a monitoring script or a read-only MCP client can show the result.
-// Starting and ending a poll posts into every chat as the streamer, so both
-// are admin.
+// Starting and ending a poll posts into every LIVE chat as the streamer (see
+// PollSender), so both are admin.
 
 const pollsUnavailable = "polls need the chat hub, which this server was started without"
 
@@ -324,6 +324,50 @@ type twitchPollRef struct {
 	accountID     int64
 	broadcasterID string
 	pollID        string
+}
+
+// PollSender is the polls engine's way into chat: the hub's per-chat send,
+// narrowed to the chats that are live, by the same reading POST /chat/send
+// defaults to. A poll announced into a Kick chat that is not streaming was the
+// same mistake as a test message posted there.
+func (s *Server) PollSender() polls.Sender { return livePollSender{s: s} }
+
+type livePollSender struct{ s *Server }
+
+// SendEach posts each live chat its own text. A chat that is not live and that
+// the poll had text for comes back as skipped "not live", so the poll's record
+// says where it was not announced; a chat the poll had no text for is absent,
+// as in the hub.
+func (p livePollSender) SendEach(ctx context.Context, textFor func(db.Platform, string) string) ([]chat.SendResult, error) {
+	if p.s.chat == nil {
+		return nil, errors.New("chat is not running on this server")
+	}
+	live := p.s.liveChats()
+	res, err := p.s.chat.SendEach(ctx, func(pl db.Platform, account string) string {
+		if !live.Live(pl, account) {
+			return ""
+		}
+		return textFor(pl, account)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, st := range p.s.chat.Statuses() {
+		if live.Live(st.Platform, st.Account) || strings.TrimSpace(textFor(st.Platform, st.Account)) == "" {
+			continue
+		}
+		res = append(res, chat.SendResult{
+			Platform: st.Platform, Account: st.Account, Skipped: true,
+			Reason: string(chat.SkipNotLive), Detail: chat.SkipNotLive.Detail(),
+		})
+	}
+	sort.SliceStable(res, func(i, j int) bool {
+		if res[i].Platform != res[j].Platform {
+			return res[i].Platform < res[j].Platform
+		}
+		return res[i].Account < res[j].Account
+	})
+	return res, nil
 }
 
 // PollMirror is the native-poll mirror for the polls engine.

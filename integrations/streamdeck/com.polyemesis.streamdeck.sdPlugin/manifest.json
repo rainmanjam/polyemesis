@@ -498,7 +498,7 @@
     {
       "UUID": "com.polyemesis.streamdeck.poll",
       "Name": "Chat poll",
-      "Tooltip": "Starts the chat poll set on this key, announced in every chat. While it runs, shows the votes and time left; hold to end it early. Needs an admin token.",
+      "Tooltip": "Starts the chat poll set on this key, announced in the live chats. While it runs, shows the votes and time left; hold to end it early. Needs an admin token.",
       "Icon": "imgs/actions/poll",
       "Controllers": [
         "Keypad"

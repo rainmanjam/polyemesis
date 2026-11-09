@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,12 @@ type chatOverview struct {
 // chatSendRequest is the send box's payload.
 type chatSendRequest struct {
 	Text string `json:"text"`
+	// To says where a plain message goes: "live" (the default when absent) is
+	// only the platforms with something on air, "all" is every connected chat.
+	// Platforms names the platforms instead, whether or not they are live. The
+	// two are alternatives; neither applies to a reply, which has its own target.
+	To        string   `json:"to,omitempty"`
+	Platforms []string `json:"platforms,omitempty"`
 	// ReplyTo answers one message on the platform that issued it, instead of
 	// fanning out. AsBot asks for that platform's bot identity (Kick only) and
 	// is meaningful only together with ReplyTo.
@@ -255,7 +262,27 @@ func (s *Server) handleChatSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleChatSend fans one message out to every connected platform.
+// noPlatformLive is the 409 for a default send when no connected chat is live.
+const noPlatformLive = "no platform is live; choose platforms to send to"
+
+// tallySend pre-counts a set of results into the response.
+func tallySend(results []chat.SendResult) chatSendResponse {
+	out := chatSendResponse{Results: results}
+	for _, res := range results {
+		switch {
+		case res.OK:
+			out.Sent++
+		case res.Skipped:
+			out.Skipped++
+		default:
+			out.Failed++
+		}
+	}
+	return out
+}
+
+// handleChatSend posts one message, by default only to the platforms that are
+// live. "to":"all" or a "platforms" list override that.
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if !s.requireChat(w) {
 		return
@@ -274,32 +301,106 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	to := strings.ToLower(strings.TrimSpace(req.To))
+	if to != "" && to != "live" && to != "all" {
+		writeError(w, http.StatusBadRequest, `"to" is "live" or "all"; to name platforms, send "platforms"`)
+		return
+	}
+	var named map[db.Platform]bool
+	if len(req.Platforms) > 0 {
+		if to != "" {
+			writeError(w, http.StatusBadRequest, `send either "to" or "platforms", not both`)
+			return
+		}
+		named = make(map[db.Platform]bool, len(req.Platforms))
+		for _, name := range req.Platforms {
+			name = strings.ToLower(strings.TrimSpace(name))
+			if _, ok := platform.ByEnum(name); !ok {
+				writeError(w, http.StatusBadRequest, "unknown platform "+strconv.Quote(name))
+				return
+			}
+			named[db.Platform(name)] = true
+		}
+	}
+
 	// No length check. Each platform's limit is published in the overview so
 	// the composer can warn, but the platform itself is the authority on what
 	// it will accept, and refusing here would silently cost the operator a
 	// message every platform would have taken.
-	results, err := s.chat.Send(r.Context(), req.Text)
+	var pick func(p db.Platform, account string) chat.SkipReason
+	switch {
+	case named != nil:
+		pick = func(p db.Platform, _ string) chat.SkipReason {
+			if named[p] {
+				return ""
+			}
+			return chat.SkipNotSelected
+		}
+	case to == "all":
+		pick = func(db.Platform, string) chat.SkipReason { return "" }
+	default:
+		// The live default. Read once, so the 409 and the picks agree.
+		live := s.liveChats()
+		if statuses := s.chat.Statuses(); len(statuses) > 0 && !live.anyLive(statuses) {
+			// Never a send to nowhere: the operator is told to choose.
+			writeError(w, http.StatusConflict, noPlatformLive)
+			return
+		}
+		pick = func(p db.Platform, account string) chat.SkipReason {
+			if live.Live(p, account) {
+				return ""
+			}
+			return chat.SkipNotLive
+		}
+	}
+
+	results, err := s.chat.SendTo(r.Context(), req.Text, pick)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-
-	out := chatSendResponse{Results: results}
-	for _, res := range results {
-		switch {
-		case res.OK:
-			out.Sent++
-		case res.Skipped:
-			out.Skipped++
-		default:
-			out.Failed++
-		}
+	if named != nil {
+		results = namedResults(results, named)
 	}
 	// 200 even when every platform failed: the request was carried out and the
 	// per-platform verdicts are the answer. A status code cannot say "Twitch
 	// took it and YouTube did not", and collapsing it to one would throw away
 	// the half that worked.
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, tallySend(results))
+}
+
+// namedResults keeps the results for the platforms the operator asked for, and
+// adds a "not connected" one for each of them that has no chat. The platforms
+// they left out are dropped: they chose the targets, and a row per other
+// platform would be noise.
+func namedResults(results []chat.SendResult, named map[db.Platform]bool) []chat.SendResult {
+	out := make([]chat.SendResult, 0, len(named))
+	seen := map[db.Platform]bool{}
+	for _, res := range results {
+		if res.Reason == string(chat.SkipNotSelected) {
+			continue
+		}
+		seen[res.Platform] = true
+		out = append(out, res)
+	}
+	var missing []chat.SendResult
+	for p := range named {
+		if !seen[p] {
+			missing = append(missing, chat.SendResult{
+				Platform: p, Skipped: true,
+				Reason: string(chat.SkipNotConnected), Detail: chat.SkipNotConnected.Detail(),
+			})
+		}
+	}
+	sort.Slice(missing, func(i, j int) bool { return missing[i].Platform < missing[j].Platform })
+	out = append(out, missing...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Platform != out[j].Platform {
+			return out[i].Platform < out[j].Platform
+		}
+		return out[i].Account < out[j].Account
+	})
+	return out
 }
 
 // sendChatReply answers one message. The reply is one platform's business, so
@@ -317,16 +418,7 @@ func (s *Server) sendChatReply(w http.ResponseWriter, r *http.Request, req chatS
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	out := chatSendResponse{Results: []chat.SendResult{res}}
-	switch {
-	case res.OK:
-		out.Sent++
-	case res.Skipped:
-		out.Skipped++
-	default:
-		out.Failed++
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, tallySend([]chat.SendResult{res}))
 }
 
 // handleChatDeleteMessage removes one message on the platform that issued it.

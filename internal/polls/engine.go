@@ -214,6 +214,19 @@ func (e *Engine) SetMirror(m Mirror) {
 	e.mu.Unlock()
 }
 
+// SetSender replaces where announcements go. The API server installs a sender
+// that narrows them to the live chats, and it is built after the engine for the
+// reason the mirror is: it reads what is on air through the server. Nil leaves
+// the current sender.
+func (e *Engine) SetSender(s Sender) {
+	if s == nil {
+		return
+	}
+	e.mu.Lock()
+	e.send = s
+	e.mu.Unlock()
+}
+
 // ------------------------------------------------------------- lifecycle
 
 // Start opens a poll. It is announced in every chat, and mirrored where asked,

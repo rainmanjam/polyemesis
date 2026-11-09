@@ -779,8 +779,8 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "start_poll", title: "Start a chat poll", tier: mcpWrite,
-			confirms:    "every call: it posts into every connected chat as the streamer",
-			description: "Start a chat poll: a question with 2 to 6 options, open for 15 to 3600 seconds. It is announced in every connected chat as the streamer, so it needs confirm:true; without it, answers with the exact message that would be posted. Viewers vote by typing the option's number. One poll at a time.",
+			confirms:    "every call: it posts into every live chat as the streamer",
+			description: "Start a chat poll: a question with 2 to 6 options, open for 15 to 3600 seconds. It is announced as the streamer in the chats that are live (a connected chat whose platform has nothing on air is skipped), so it needs confirm:true; without it, answers with the exact message that would be posted. Viewers vote by typing the option's number. One poll at a time.",
 			props: map[string]any{
 				"question": map[string]any{"type": "string", "minLength": 1, "maxLength": polls.MaxQuestion},
 				"options": map[string]any{"type": "array", "minItems": polls.MinOptions, "maxItems": polls.MaxOptions,
@@ -797,8 +797,8 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "end_poll", title: "End the chat poll", tier: mcpWrite, destructive: true,
-			confirms:    "every call: it closes the poll early and posts the result into every connected chat as the streamer",
-			description: "End the running chat poll early. The result is announced in every chat as the streamer, so it needs confirm:true; without it, answers with the poll it would end.",
+			confirms:    "every call: it closes the poll early and posts the result into every live chat as the streamer",
+			description: "End the running chat poll early. The result is announced as the streamer in the live chats, so it needs confirm:true; without it, answers with the poll it would end.",
 			props: map[string]any{
 				"pollId":  map[string]any{"type": "integer", "minimum": 1, "maximum": mcpMaxID, "description": "From get_polls."},
 				"confirm": schemaConfirm,
@@ -1481,7 +1481,7 @@ func runStartPoll(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 	}
 	c.target = "chat poll"
 	if !a.Confirm {
-		return c.refusal("Not done: starting a poll posts this message into every connected chat as the "+
+		return c.refusal("Not done: starting a poll posts this message into every live chat as the "+
 			"streamer. Show it to the user, then call start_poll again with confirm:true.",
 			map[string]any{"announcement": polls.StartText(spec), "options": spec.Options,
 				"durationSeconds": spec.DurationSeconds})

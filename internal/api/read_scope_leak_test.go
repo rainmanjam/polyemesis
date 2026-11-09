@@ -590,6 +590,8 @@ func leakRoutes() []string {
 		"/api/v1/alerts/meta",
 		"/api/v1/auth/me",
 		"/api/v1/automod/stats",
+		// Which chats are live: platform, account ref and two booleans, no content.
+		"/api/v1/chat/live",
 		// The four chat GETs left this sweep when a read token stopped being
 		// able to make them (staging-readiness row 32); they are asserted as
 		// refused in TestReadTokenIsDeniedTheRoutesThatAreNotReads instead.

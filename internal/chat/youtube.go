@@ -246,6 +246,15 @@ func (y *YouTubeAdapter) SetLiveChatID(id string) {
 	}
 }
 
+// LiveChat reports whether a live chat is open: the adapter holds a chat id,
+// which it only does while a broadcast is active (it forgets it when the chat
+// ends and while it waits for the next).
+func (y *YouTubeAdapter) LiveChat() bool {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	return y.chatID != ""
+}
+
 // sleepOrWake is cfg.Sleep that SetLiveChatID can cut short. It reports false only when the sleep itself says to
 // stop (its context ended) and nobody woke it.
 func (y *YouTubeAdapter) sleepOrWake(ctx context.Context, d time.Duration) bool {
