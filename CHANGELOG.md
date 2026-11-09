@@ -10,6 +10,10 @@ its first tagged release.
 
 ### Fixed
 
+- **The OBS script no longer fails every report with `CERTIFICATE_VERIFY_FAILED` on macOS.** The python.org Python that OBS loads has an empty
+  CA store, so even a valid Let's Encrypt site was refused. When no **CA certificate** is set and the store is empty, the script now
+  falls back to `certifi`, then the first system bundle (`/etc/ssl/cert.pem`, Debian, RHEL), and logs which one it used. A chosen CA
+  file still wins, a populated store is untouched, and verification is never disabled.
 - **A failover away from a quiet source no longer leaves its old relay hop to be killed 8 seconds later.** The
   switch waited a fixed 500ms for the outgoing copy hop and then cut its relay subscription, but the supervisor
   wakes a stopping hop on a quiet feed at 750ms, and the wake found no subscriber. The hop was never woken: it was

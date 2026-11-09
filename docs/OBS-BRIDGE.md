@@ -92,9 +92,14 @@ destinations yourself.
    - The address must be `https://`, or `http://` only to the same machine
      (`localhost`, `127.0.0.1`, `[::1]`). Anything else is refused and nothing is
      sent: the token would cross the network unencrypted. The script log says so.
-   - If your install uses its own self-signed certificate, download the CA from
-     `GET /api/v1/tls/ca` and choose it as **CA certificate**. Verification is
-     never switched off.
+   - The python.org Python for macOS ships without CA certificates. When
+     Python's own store is empty, the script finds a bundle itself (`certifi` if
+     installed, else `/etc/ssl/cert.pem`, `/etc/ssl/certs/ca-certificates.crt`
+     or `/etc/pki/tls/certs/ca-bundle.crt`) and logs which one it used. Nothing
+     to set for a site with a public certificate such as Let's Encrypt.
+   - **CA certificate** is only needed for a self-signed install: download the
+     CA from `GET /api/v1/tls/ca` and choose it. It always wins over the
+     automatic bundle. Verification is never switched off.
    - **Report scene switches** is on by default.
 
 OBS keeps script settings, the token included, in plain text in your scene
@@ -108,6 +113,11 @@ The script sends from a background thread, so a slow or unreachable polyemesis
 never freezes OBS. A failed report is retried twice and then given up, and the
 OBS script log says why, without the token. A `409` means the bridge is
 switched off in polyemesis.
+
+`CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate` in the
+script log on a site with a public certificate means the Python OBS loaded has
+no CA certificates and none of the bundles above exists. Install `certifi` for
+that Python, or point **CA certificate** at a CA bundle file.
 
 ## Starting and stopping
 
