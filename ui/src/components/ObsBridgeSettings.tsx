@@ -386,19 +386,24 @@ export function ObsBridgeSettings() {
               value Sources edits. It saves through the sources API, not this
               form, and adds nothing to the bridge's configuration. */}
           {bridgeSource && (
-            <AutoStopControl
-              key={bridgeSource.id}
-              sourceId={Number(bridgeSource.id)}
-              idPrefix="obs-autostop"
-              value={bridgeSource.ingest.autoStop}
-              onSaved={(next) =>
-                setSources((all) =>
-                  all.map((s) =>
-                    s.id === bridgeSource.id ? { ...s, ingest: { ...s.ingest, autoStop: next } } : s,
-                  ),
-                )
-              }
-            />
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground" data-testid="obs-autostop-programme">
+                {t("autostop.programme", { name: bridgeSource.name })}
+              </span>
+              <AutoStopControl
+                key={bridgeSource.id}
+                sourceId={Number(bridgeSource.id)}
+                idPrefix="obs-autostop"
+                value={bridgeSource.ingest.autoStop}
+                onSaved={(next) =>
+                  setSources((all) =>
+                    all.map((s) =>
+                      s.id === bridgeSource.id ? { ...s, ingest: { ...s.ingest, autoStop: next } } : s,
+                    ),
+                  )
+                }
+              />
+            </div>
           )}
 
           <div>

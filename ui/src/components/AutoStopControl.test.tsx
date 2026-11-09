@@ -25,7 +25,12 @@ describe("AutoStopControl", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
     const wait = screen.getByLabelText("Seconds with no feed before stopping") as HTMLInputElement;
     expect(wait.placeholder).toBe(String(WIRE.defaults.autoStopWaitSeconds));
-    expect((saveBtn() as HTMLButtonElement).disabled).toBe(true);
+    // Nothing pending, no Apply: the Sources page's e2e (and its users) rely on
+    // "Apply" meaning "there is something to apply". Mutation: render the button
+    // unconditionally. Observed to fail with the button present.
+    expect(screen.queryByRole("button", { name: /Apply/ })).toBeNull();
+    fireEvent.click(toggle());
+    expect(saveBtn()).toBeTruthy();
   });
 
   it("will not save an enable until the acknowledgement is ticked", () => {

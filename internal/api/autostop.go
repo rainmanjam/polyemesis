@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -41,7 +42,64 @@ func (s *Server) ingestLossStop(l engine.IngestLoss) {
 	if s.obs != nil && s.obs.RunIngestStop(l.SourceID, run) {
 		return
 	}
-	go run(context.Background())
+	// Otherwise it runs on the server's own lifetime, which shutdown cancels and
+	// waits for (StopIngestLossWithin). A queue that was full still gets its
+	// record: RecordIngestStop is a no-op when the bridge is not involved.
+	s.ingestStops.start(func(ctx context.Context) {
+		res := run(ctx)
+		if s.obs != nil {
+			s.obs.RecordIngestStop(l.SourceID, res)
+		}
+	})
+}
+
+// StopIngestLossWithin ends the fallback's off-worker stops before the process
+// goes away: it cancels their context and waits for them within ctx.
+func (s *Server) StopIngestLossWithin(ctx context.Context) { s.ingestStops.shutdown(ctx) }
+
+// ingestStopRunner runs the fallback's stops that are not on the OBS worker, on
+// one lifetime context with a WaitGroup, so shutdown can end and await them
+// instead of leaving a goroutine mid-stop. Lazily initialised: a Server is
+// built bare in tests.
+type ingestStopRunner struct {
+	mu     sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	closed bool
+}
+
+func (r *ingestStopRunner) start(fn func(ctx context.Context)) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	if r.ctx == nil {
+		r.ctx, r.cancel = context.WithCancel(context.Background())
+	}
+	ctx := r.ctx
+	r.wg.Add(1)
+	r.mu.Unlock()
+	go func() {
+		defer r.wg.Done()
+		fn(ctx)
+	}()
+}
+
+func (r *ingestStopRunner) shutdown(ctx context.Context) {
+	r.mu.Lock()
+	r.closed = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.mu.Unlock()
+	done := make(chan struct{})
+	go func() { r.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // stopForIngestLoss stops the programme's live destinations and reports what it
@@ -61,6 +119,16 @@ func (s *Server) stopForIngestLoss(ctx context.Context, l engine.IngestLoss) []o
 	if err != nil || !src.Ingest.AutoStop.Armed() {
 		for _, id := range l.Destinations {
 			skip(id, "", "the stop-on-ingest-loss setting was turned off before it ran, so nothing was stopped")
+		}
+		return out
+	}
+	// And the ingest itself, at THIS moment: the stop was decided when the wait
+	// ran out but it may have queued behind a paced OBS start for a long time,
+	// and an encoder that came back in between (OBS restarting near the end of
+	// the wait) is not a loss. Skips every destination, ends nothing.
+	if l.Arriving != nil && l.Arriving() {
+		for _, id := range l.Destinations {
+			skip(id, "", "the ingest returned before the stop ran, so nothing was stopped")
 		}
 		return out
 	}

@@ -78,19 +78,42 @@ func (a AutoStopSettings) Wait() int {
 	return a.WaitSeconds
 }
 
-// EffectiveWait is the wait the engine actually uses: never below the floor and
+// EffectiveWait is the wait the engine actually uses: never below the floor,
 // never below the programme's configured failover grace plus the margin, so a
 // grace raised after the wait was saved cannot make the fallback act inside the
-// selector's own decision window. failoverGraceSeconds is 0 when failover is off.
-func (a AutoStopSettings) EffectiveWait(failoverGraceSeconds int) int {
+// selector's own decision window, and for a PULL source never below its longest
+// reconnect delay plus the margin: the floor's reasoning (twice the 30s respawn
+// backoff) only holds for listeners, while a pull source may legitimately wait
+// up to PullSettings.ReconnectDelayMaxSeconds (3600) between attempts, and an
+// outage inside that is the source retrying, not a loss. Like the failover
+// clearance this may lift the wait above MaxAutoStopWaitSeconds; the saved value
+// is untouched.
+//
+// failoverGraceSeconds is 0 when failover is off, pullReconnectSeconds 0 when
+// the ingest is not a pull source.
+func (a AutoStopSettings) EffectiveWait(failoverGraceSeconds, pullReconnectSeconds int) int {
 	w := a.Wait()
 	if w < MinAutoStopWaitSeconds {
 		w = MinAutoStopWaitSeconds
 	}
-	if failoverGraceSeconds > 0 && w < failoverGraceSeconds+AutoStopFailoverMarginSeconds {
-		w = failoverGraceSeconds + AutoStopFailoverMarginSeconds
+	for _, clear := range []int{failoverGraceSeconds, pullReconnectSeconds} {
+		if clear > 0 && w < clear+AutoStopFailoverMarginSeconds {
+			w = clear + AutoStopFailoverMarginSeconds
+		}
 	}
 	return w
+}
+
+// normalized is the stored shape: the acknowledgement belongs to the enabled
+// setting it was given for, so switching the fallback off withdraws it. Without
+// this an acknowledgement given once outlives the setting, and any merge path
+// that sets enabled=true and says nothing else (PUT /settings, a source PUT, an
+// import) would turn it back on without the operator ever agreeing again.
+func (a AutoStopSettings) normalized() AutoStopSettings {
+	if !a.Enabled {
+		a.Acknowledged = false
+	}
+	return a
 }
 
 func (a AutoStopSettings) problems() []string {

@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Enter a whole number from {min} to {max}, or leave it empty for the default.",
   "autostop.warning": "Stopping destinations ends any live YouTube broadcast among them for good. Starting them again puts video back on the wire, but it does not bring the broadcast back.",
   "autostop.ackRequired": "Tick the box to confirm before turning this on.",
+  "autostop.programme": "This setting belongs to the programme “{name}” and is saved to it, not to the OBS bridge.",
   "obs.viaIngest": "ingest loss fallback",
   "autostop.ack": "I understand that stopping ends YouTube broadcasts"
 }

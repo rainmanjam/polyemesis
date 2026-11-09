@@ -195,7 +195,7 @@ var settingsReload = map[string]ReloadRule{
 	"failover.return":                               {ClassLive, "applySourceChoice", noteSweepSelector},
 	"failover.returnStableSeconds":                  {ClassLive, "applySourceChoice", noteSweepSelector},
 	"ingest.autoStop.enabled":                       {ClassLive, "sweepIngestLoss", "read on every observe sweep; switching it off resets the loss clock and disarms it"},
-	"ingest.autoStop.waitSeconds":                   {ClassLive, "sweepIngestLoss", "read on every observe sweep; a loss already counting is measured against the new wait"},
+	"ingest.autoStop.waitSeconds":                   {ClassLive, "sweepIngestLoss", "read on every observe sweep; changing it restarts a loss already counting, so a lowered wait cannot fire on the next sweep"},
 	"ingest.autoStop.acknowledged":                  {ClassLive, "sweepIngestLoss", "read on every observe sweep; withdrawing it disarms the fallback"},
 	"ingest.degraded.enabled":                       {ClassLive, "sampleSources", "read by sweepSelector every 500ms; switching it off resets the monitor and releases a degraded primary"},
 	"ingest.degraded.minBitrateKbps":                {ClassLive, "sampleSources", noteSweepSelector},

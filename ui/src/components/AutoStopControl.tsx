@@ -169,11 +169,16 @@ export function AutoStopControl({
         </span>
       )}
 
-      <div>
-        <Button type="button" size="sm" disabled={!canSave} onClick={() => void save()}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.apply")}
-        </Button>
-      </div>
+      {/* Only while there is something to save, like the card's own Apply: a
+          second always-present "Apply" would break the page's "nothing pending
+          means no Apply button" invariant. */}
+      {(dirty || saving) && (
+        <div>
+          <Button type="button" size="sm" disabled={!canSave} onClick={() => void save()}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.apply")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

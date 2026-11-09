@@ -106,6 +106,7 @@ func validateSource(s *Source) error {
 	if len(s.Name) > MaxSourceNameLength {
 		return fmt.Errorf("source name must be at most %d characters", MaxSourceNameLength)
 	}
+	s.Ingest.AutoStop = s.Ingest.AutoStop.normalized()
 	if probs := s.Ingest.problems(); len(probs) > 0 {
 		return fmt.Errorf("ingest settings: %s", strings.Join(probs, "; "))
 	}
@@ -165,6 +166,9 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 	if err := json.Unmarshal([]byte(ingestJSON), &s.Ingest); err != nil {
 		s.Ingest = DefaultSettings().Ingest
 	}
+	// A row written before the acknowledgement was withdrawn on switch-off reads
+	// as if it had been.
+	s.Ingest.AutoStop = s.Ingest.AutoStop.normalized()
 	s.CreatedAt = time.Unix(created, 0)
 	s.UpdatedAt = time.Unix(updated, 0)
 	return &s, nil

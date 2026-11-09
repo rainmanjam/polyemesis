@@ -426,6 +426,9 @@ type Server struct {
 	// liveLevelsAvailable and runProbe.
 	liveLevels  func() bool
 	probeRunner func(ctx context.Context, name string, args []string) ([]byte, error)
+	// ingestStops runs stop-on-ingest-loss stops that are off the OBS worker;
+	// see autostop.go.
+	ingestStops ingestStopRunner
 	// sceneSource replaces the live ingest layout a scene rule's preset is built
 	// against (a test seam; nil means the programme's engine).
 	sceneSource func(*int64) routing.Source

@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Informe um número inteiro de {min} a {max}, ou deixe vazio para usar o padrão.",
   "autostop.warning": "Parar destinos encerra de vez qualquer transmissão ao vivo do YouTube entre eles. Iniciá-los de novo recoloca o vídeo na linha, mas não traz a transmissão de volta.",
   "autostop.ackRequired": "Marque a caixa para confirmar antes de ativar isto.",
+  "autostop.programme": "Esta configuração pertence ao programa “{name}” e é salva nele, não na ponte do OBS.",
   "obs.viaIngest": "reserva por perda de entrada",
   "autostop.ack": "Entendo que parar encerra transmissões do YouTube"
 }

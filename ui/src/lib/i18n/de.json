@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Gib eine ganze Zahl von {min} bis {max} ein oder lass das Feld für den Standardwert leer.",
   "autostop.warning": "Das Stoppen der Ziele beendet jede darunter laufende YouTube-Übertragung endgültig. Ein erneuter Start bringt das Video wieder auf die Leitung, aber nicht die Übertragung zurück.",
   "autostop.ackRequired": "Setze zur Bestätigung den Haken, bevor du dies einschaltest.",
+  "autostop.programme": "Diese Einstellung gehört zum Programm „{name}“ und wird dort gespeichert, nicht in der OBS-Bridge.",
   "obs.viaIngest": "Fallback bei Eingangsverlust",
   "autostop.ack": "Mir ist klar, dass Stoppen YouTube-Übertragungen beendet"
 }

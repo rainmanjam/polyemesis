@@ -65,17 +65,17 @@ func TestAutoStopWaitBounds(t *testing.T) {
 // "effective wait 120, want 330".
 func TestAutoStopEffectiveWaitClearsTheFailoverGrace(t *testing.T) {
 	a := AutoStopSettings{Enabled: true, Acknowledged: true}
-	if got := a.EffectiveWait(0); got != DefaultAutoStopWaitSeconds {
+	if got := a.EffectiveWait(0, 0); got != DefaultAutoStopWaitSeconds {
 		t.Errorf("default wait is %d, want %d", got, DefaultAutoStopWaitSeconds)
 	}
-	if got := a.EffectiveWait(MaxFailoverGraceSeconds); got != MaxFailoverGraceSeconds+AutoStopFailoverMarginSeconds {
+	if got := a.EffectiveWait(MaxFailoverGraceSeconds, 0); got != MaxFailoverGraceSeconds+AutoStopFailoverMarginSeconds {
 		t.Errorf("effective wait %d, want %d", got, MaxFailoverGraceSeconds+AutoStopFailoverMarginSeconds)
 	}
-	if got := (AutoStopSettings{WaitSeconds: 3600}).EffectiveWait(300); got != 3600 {
+	if got := (AutoStopSettings{WaitSeconds: 3600}).EffectiveWait(300, 0); got != 3600 {
 		t.Errorf("a long wait was shortened to %d", got)
 	}
 	// A hand-edited row below the floor is lifted, not obeyed.
-	if got := (AutoStopSettings{WaitSeconds: 1}).EffectiveWait(0); got != MinAutoStopWaitSeconds {
+	if got := (AutoStopSettings{WaitSeconds: 1}).EffectiveWait(0, 0); got != MinAutoStopWaitSeconds {
 		t.Errorf("a wait of 1s became %d, want the %ds floor", got, MinAutoStopWaitSeconds)
 	}
 }
@@ -109,5 +109,62 @@ func TestAutoStopIsOffByDefaultAndRoundTrips(t *testing.T) {
 	bad := &Source{Name: "Bad", Enabled: true, Ingest: autoStopIngest(AutoStopSettings{Enabled: true})}
 	if err := d.CreateSource(bad); err == nil {
 		t.Fatal("a source enabling auto-stop without the acknowledgement was stored")
+	}
+}
+
+// A pull source may legitimately wait up to its reconnect delay between
+// attempts, so the 60s floor (twice the LISTENER respawn backoff) is not enough
+// for it: the wait clears the reconnect delay plus the margin.
+//
+// Mutation: drop pullReconnectSeconds from the loop in EffectiveWait. Observed
+// to fail with "effective wait 120, want 3630".
+func TestAutoStopEffectiveWaitClearsAPullSourcesReconnectDelay(t *testing.T) {
+	a := AutoStopSettings{Enabled: true, Acknowledged: true}
+	if got := a.EffectiveWait(0, 3600); got != 3600+AutoStopFailoverMarginSeconds {
+		t.Errorf("effective wait %d, want %d", got, 3600+AutoStopFailoverMarginSeconds)
+	}
+	if got := a.EffectiveWait(0, 30); got != DefaultAutoStopWaitSeconds {
+		t.Errorf("the default pull delay lifted the default wait to %d", got)
+	}
+	if got := a.EffectiveWait(300, 600); got != 600+AutoStopFailoverMarginSeconds {
+		t.Errorf("both clearances: %d, want the larger, %d", got, 600+AutoStopFailoverMarginSeconds)
+	}
+}
+
+// The acknowledgement belongs to the enabled setting it was given for: any
+// write that leaves the fallback off stores it withdrawn, on every store path,
+// so no merge can later turn it on by saying nothing else.
+//
+// Mutation: drop the normalized() call from validateSource (source path) or
+// from UpdateSettings (settings path). Each observed to fail with "the
+// acknowledgement outlived the setting".
+func TestSwitchingAutoStopOffWithdrawsTheAcknowledgement(t *testing.T) {
+	d := testDB(t)
+	src := &Source{Name: "p", Enabled: true, Ingest: DefaultSettings().Ingest}
+	src.Ingest.Mode = IngestSRT
+	src.Ingest.AutoStop = AutoStopSettings{Enabled: true, Acknowledged: true}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatal(err)
+	}
+	src.Ingest.AutoStop.Enabled = false // the ack is left true, as a stale merge would
+	if err := d.UpdateSource(src); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.GetSource(src.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Ingest.AutoStop.Acknowledged {
+		t.Error("the acknowledgement outlived the setting (source)")
+	}
+	st, err := d.UpdateSettings(func(s *Settings) error {
+		s.Ingest.AutoStop = AutoStopSettings{Enabled: false, Acknowledged: true}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Ingest.AutoStop.Acknowledged {
+		t.Error("the acknowledgement outlived the setting (settings)")
 	}
 }

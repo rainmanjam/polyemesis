@@ -196,6 +196,13 @@ describe("the OBS bridge settings", () => {
       expect(putObs).not.toHaveBeenCalled();
     });
 
+    // Mutation: drop the programme line from the mount. Observed to fail.
+    it("names the programme it edits", async () => {
+      render(<ObsBridgeSettings />);
+      await screen.findByTestId("obs-status");
+      expect(screen.getByTestId("obs-autostop-programme").textContent).toContain("Studio A");
+    });
+
     it("resolves a null sourceId to the default programme", async () => {
       getObs.mockImplementation(async () => response({ sourceId: null }));
       render(<ObsBridgeSettings />);

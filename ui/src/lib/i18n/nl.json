@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Voer een geheel getal van {min} tot {max} in, of laat leeg voor de standaardwaarde.",
   "autostop.warning": "Het stoppen van bestemmingen beëindigt elke live YouTube-uitzending daaronder definitief. Opnieuw starten brengt de video terug op de lijn, maar niet de uitzending.",
   "autostop.ackRequired": "Vink het vakje aan om te bevestigen voordat je dit inschakelt.",
+  "autostop.programme": "Deze instelling hoort bij het programma “{name}” en wordt daar opgeslagen, niet in de OBS-bridge.",
   "obs.viaIngest": "terugval bij verlies van ingang",
   "autostop.ack": "Ik begrijp dat stoppen YouTube-uitzendingen beëindigt"
 }

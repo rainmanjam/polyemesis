@@ -2,6 +2,10 @@ package engine
 
 import (
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // STOP-ON-INGEST-LOSS (settings.ingest.autoStop; db.AutoStopSettings).
@@ -26,9 +30,14 @@ import (
 // least one enabled destination has delivered media (a process running with
 // uptime). A boot, an idle programme, a destination still starting and a
 // destination that never got data therefore never arm it: it cannot fire from a
-// clean start. It disarms when nothing is on air any more, and after it has
-// fired once; only the ingest returning AND a destination delivering arms it
-// again. Recovery cancels the clock. Nothing is ever restarted.
+// clean start. It disarms when NO destination of the programme is enabled any
+// more (stopped by hand or deleted), and after it has fired once; only the
+// ingest returning AND a destination delivering arms it again. Destinations
+// that are enabled but merely not carrying for a while -- every one in backoff
+// after the platform dropped a starved RTMP connection -- do NOT disarm it: that
+// is exactly what a dead ingest does to them, and the stop must still come.
+// Recovery cancels the clock; so does any change of the wait. Nothing is ever
+// restarted.
 //
 // THE STOP ITSELF IS THE HOST'S. The engine hands IngestLoss to the handler the
 // API installs (Manager.SetIngestLossHandler), which runs the existing stop path
@@ -42,10 +51,16 @@ type IngestLoss struct {
 	// clearance (db.AutoStopSettings.EffectiveWait), and LostFor how long the
 	// ingest had actually been gone when it fired.
 	Wait, LostFor time.Duration
-	// Destinations are this programme's destinations that were on air at that
-	// moment, enabled and with a process carrying media or holding a delay
-	// buffer. Never another programme's: the engine only knows its own.
+	// Destinations are this programme's destinations that were switched on at
+	// that moment and not terminally failed: carrying media, holding a delay
+	// buffer, or waiting out a backoff to try again. Never another programme's:
+	// the engine only knows its own.
 	Destinations []int64
+	// Arriving reports, at the time it is called, whether the primary or the
+	// backup ingest is arriving. The host calls it just before it stops: the
+	// stop may have queued behind slow work, and an ingest that came back in the
+	// meantime is not a loss. Nil means "unknown", and the stop goes ahead.
+	Arriving func() bool
 }
 
 // IngestLossHandler is called from the observe sweep, with no engine lock held.
@@ -68,6 +83,10 @@ type lossInputs struct {
 type lossWatch struct {
 	armed     bool
 	lostSince time.Time
+	// wait is the wait the clock was last measured against. A different one
+	// restarts the clock: lowering the wait mid-outage must not fire on the next
+	// sweep because of time counted against the old one.
+	wait time.Duration
 }
 
 func (w *lossWatch) reset() { *w = lossWatch{} }
@@ -79,7 +98,11 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 		w.reset()
 		return nil, 0, false
 	}
-	delivering, onAir := lossDestinations(in.dests)
+	if w.wait != in.wait {
+		w.lostSince = time.Time{}
+		w.wait = in.wait
+	}
+	delivering, enabled, targets := lossDestinations(in.dests)
 	if in.primaryLive || in.backupLive {
 		// Arriving: any loss clock is cancelled, whatever it had counted.
 		w.lostSince = time.Time{}
@@ -91,9 +114,10 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 	if !w.armed {
 		return nil, 0, false
 	}
-	if len(onAir) == 0 {
-		// Whatever it would stop is already off: stopped by hand, failed, or
-		// deleted. Nothing to guard until something delivers again.
+	if enabled == 0 {
+		// Nothing of this programme is switched on any more: stopped by hand or
+		// deleted. Nothing to guard until something delivers again. Merely not
+		// carrying (backoff, reconnecting) is NOT this: see the header.
 		w.reset()
 		return nil, 0, false
 	}
@@ -103,27 +127,37 @@ func (w *lossWatch) step(now time.Time, in lossInputs) (ids []int64, lostFor tim
 	if now.Sub(w.lostSince) < in.wait {
 		return nil, 0, false
 	}
+	if len(targets) == 0 {
+		// Enabled destinations exist but every one has failed for good: there is
+		// nothing the stop could do, and the clock keeps counting for the ones
+		// that may come back.
+		return nil, 0, false
+	}
 	lostFor = now.Sub(w.lostSince)
 	// Fired: disarmed until the ingest returns and something delivers again.
 	w.armed = false
-	return onAir, lostFor, true
+	return targets, lostFor, true
 }
 
-// lossDestinations splits one sweep's destinations into "has delivered media"
-// (what arms the watch) and "is on air" (what the stop would reach).
-func lossDestinations(dests []DestStatus) (delivering bool, onAir []int64) {
+// lossDestinations reads one sweep's destinations: whether any has delivered
+// media (what arms the watch), how many are switched on (what keeps it armed)
+// and which the stop would reach -- switched on and not terminally failed, so a
+// destination waiting out a backoff is included and a failed one is not.
+func lossDestinations(dests []DestStatus) (delivering bool, enabled int, targets []int64) {
 	for _, d := range dests {
 		if !d.Enabled {
 			continue
 		}
+		enabled++
 		if processDelivering(d.Process) {
 			delivering = true
 		}
-		if d.OnAir() || delayHoldsBack(d) {
-			onAir = append(onAir, d.ID)
+		if d.Process != nil && d.Process.State == supervisor.StateFailed && !d.OnAir() {
+			continue
 		}
+		targets = append(targets, d.ID)
 	}
-	return delivering, onAir
+	return delivering, enabled, targets
 }
 
 // SetIngestLossHandler installs what is called when the fallback fires. A
@@ -142,24 +176,44 @@ func (e *Engine) autoStopWanted() bool {
 	return e.settings.Ingest.AutoStop.Armed() && e.ingestLoss != nil
 }
 
-// lossDestStatuses is where the sweep reads destinations from; a test replaces
-// it, so no FFmpeg is needed to say "a destination delivered".
-func (e *Engine) lossDestStatuses() []DestStatus {
-	if e.lossDests != nil {
-		return e.lossDests()
+// IngestArriving reports whether the primary or the backup ingest was arriving
+// at the last observe sweep (at most one sweep old). The host re-checks it just
+// before stopping, because the stop may have queued behind slow work.
+func (e *Engine) IngestArriving() bool {
+	if e == nil {
+		return false
 	}
-	return e.Status().Destinations
+	return e.lossLive.Load()
 }
 
-// sweepIngestLoss is the fallback's one step per observe sweep. primaryLive is
-// the same value the sweep hands the alert watcher as IngestLive.
+// pullReconnectSeconds is how long a pull source may legitimately wait between
+// attempts, 0 for any other ingest.
+func pullReconnectSeconds(ing db.IngestSettings) int {
+	if ing.Mode != db.IngestPull {
+		return 0
+	}
+	if d := ing.Pull.ReconnectDelayMaxSeconds; d > 0 {
+		return d
+	}
+	return ffmpeg.DefaultPullReconnectDelayMax
+}
+
+// sweepIngestLoss is sweepIngestLossWith taking its own status snapshot.
 func (e *Engine) sweepIngestLoss(now time.Time, primaryLive bool) {
+	e.sweepIngestLossWith(now, primaryLive, func() []DestStatus { return e.Status().Destinations })
+}
+
+// sweepIngestLossWith is the fallback's one step per observe sweep. primaryLive
+// is the same value the sweep hands the alert watcher as IngestLive; dests is
+// only called when the fallback is armed.
+func (e *Engine) sweepIngestLossWith(now time.Time, primaryLive bool, dests func() []DestStatus) {
 	e.mu.RLock()
 	as := e.settings.Ingest.AutoStop
 	fg := 0
 	if e.settings.Failover.Enabled {
 		fg = e.settings.Failover.GraceSeconds
 	}
+	pull := pullReconnectSeconds(e.settings.Ingest)
 	h := e.ingestLoss
 	configured := ingestConfigured(e.ingest != nil, e.settings.Ingest.Mode, !e.sourceDisabled)
 	e.mu.RUnlock()
@@ -167,16 +221,22 @@ func (e *Engine) sweepIngestLoss(now time.Time, primaryLive bool) {
 		e.lossW.reset()
 		return
 	}
-	in := lossInputs{
-		configured:  configured,
-		primaryLive: primaryLive,
-		wait:        time.Duration(as.EffectiveWait(fg)) * time.Second,
-		dests:       e.lossDestStatuses(),
-	}
+	backupLive := false
 	if fo := e.Failover(); fo != nil {
 		// The selector's own sampling of the backup ingest's hub. False when
 		// failover is off, which is right: there is no backup then.
-		in.backupLive = fo.BackupLive
+		backupLive = fo.BackupLive
+	}
+	e.lossLive.Store(primaryLive || backupLive)
+	if e.lossDests != nil {
+		dests = e.lossDests
+	}
+	in := lossInputs{
+		configured:  configured,
+		primaryLive: primaryLive,
+		backupLive:  backupLive,
+		wait:        time.Duration(as.EffectiveWait(fg, pull)) * time.Second,
+		dests:       dests(),
 	}
 	ids, lostFor, fire := e.lossW.step(now, in)
 	if !fire {
@@ -185,6 +245,7 @@ func (e *Engine) sweepIngestLoss(now time.Time, primaryLive bool) {
 	loss := IngestLoss{
 		SourceID: e.sourceID, SourceName: e.SourceName(),
 		Wait: in.wait, LostFor: lostFor, Destinations: ids,
+		Arriving: e.IngestArriving,
 	}
 	e.log.Warn("ingest lost for the whole auto-stop wait; stopping this programme's live destinations",
 		"source", e.sourceID, "wait", in.wait, "lostFor", lostFor, "destinations", len(ids))

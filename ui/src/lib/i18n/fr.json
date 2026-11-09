@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Saisissez un nombre entier de {min} à {max}, ou laissez vide pour la valeur par défaut.",
   "autostop.warning": "Arrêter les destinations met fin définitivement à toute diffusion YouTube en direct parmi elles. Les redémarrer remet la vidéo sur la ligne, mais ne rend pas la diffusion.",
   "autostop.ackRequired": "Cochez la case pour confirmer avant d'activer ceci.",
+  "autostop.programme": "Ce réglage appartient au programme « {name} » et y est enregistré, pas dans le pont OBS.",
   "obs.viaIngest": "repli sur perte d'entrée",
   "autostop.ack": "Je comprends qu'arrêter met fin aux diffusions YouTube"
 }

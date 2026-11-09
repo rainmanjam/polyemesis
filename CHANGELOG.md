@@ -21,7 +21,9 @@ its first tagged release.
   was delivering, and never restarts anything on recovery. A destination with a broadcast delay finishes airing its tail
   before it ends. The stop is the one the bridge uses, recorded in `lastActions` with a new `via: "ingest"`, logged, and
   published as a new `ingest.autostopped` event ([EVENTS.md](docs/EVENTS.md)). If OBS stops and the ingest is lost at the
-  same moment there is one stop and one `lastActions` entry. See [API.md](docs/API.md#stop-on-ingest-loss) and
+  same moment there is one stop and one `lastActions` entry. The ingest is re-checked when the stop runs, a destination in
+  backoff does not disarm it, a pull source is never judged inside its reconnect delay, and switching it off withdraws
+  the acknowledgement on every write path (`PUT /settings` included). See [API.md](docs/API.md#stop-on-ingest-loss) and
   [OBS-BRIDGE.md](docs/OBS-BRIDGE.md). **Rolling back to v0.16.0 is safe but drops the setting:** v0.16.0 reads the stored
   programme with a lenient decoder and ignores the new key, but its next save of that programme rewrites the row without
   it, so the fallback is off again after a roll-forward. A `PUT /sources/{id}` that sends `ingest.autoStop` to v0.16.0 is a

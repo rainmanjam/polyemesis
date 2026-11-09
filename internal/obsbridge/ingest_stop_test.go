@@ -180,11 +180,17 @@ func TestIngestLossThenOBSStopIsOneStopAndOneRecord(t *testing.T) {
 	}
 }
 
-// An OBS stop still waiting out its grace is cancelled by the fallback's stop,
-// which covers the same destinations: nothing is left pending.
-func TestAnIngestLossStopCancelsAPendingOBSStop(t *testing.T) {
+// An OBS stop still waiting out its grace is NOT cancelled by the fallback's
+// stop: the fallback stops only destinations that are on and not failed for
+// good, and a destination the bridge selected but the fallback did not list
+// (here: one the fallback's run left alone) is still owed OBS's stop. It then
+// runs, stops it, and is recorded -- one stop for it, one record.
+//
+// Mutation: call b.cancelStopLocked() in RunIngestStop. Observed to fail with
+// "the OBS stop was cancelled".
+func TestAnIngestLossStopLeavesAPendingOBSStopToStopWhatItDidNotList(t *testing.T) {
 	cfg := driving(3)
-	cfg.StopGraceSeconds = 3600
+	cfg.StopGraceSeconds = 1
 	r, w := ingestRig(t, cfg)
 	if err := r.b.Handle(obsbridge.Event{Kind: obsbridge.KindStreamStarted, Via: obsbridge.ViaScript}); err != nil {
 		t.Fatal(err)
@@ -196,9 +202,32 @@ func TestAnIngestLossStopCancelsAPendingOBSStop(t *testing.T) {
 	if r.b.Status().StopPendingUntil == nil {
 		t.Fatal("OBS's stop is not pending")
 	}
-	r.b.RunIngestStop(3, func(context.Context) []obsbridge.Outcome { return w.stop() })
-	if r.b.Status().StopPendingUntil != nil {
-		t.Fatal("the OBS stop is still pending after the fallback stopped everything")
+	// The fallback's stop did nothing for this destination (it was not listed).
+	r.b.RunIngestStop(3, func(context.Context) []obsbridge.Outcome { return nil })
+	if r.b.Status().StopPendingUntil == nil {
+		t.Fatal("the OBS stop was cancelled")
+	}
+	expectCall(t, r.acts.stopCalled, "the OBS stop, after its grace")
+	if n := w.stopCount(); n != 1 {
+		t.Fatalf("the destination was stopped %d times, want 1", n)
+	}
+}
+
+// A fallback stop that ran OFF the worker (its queue was full) is still
+// recorded, once, and only for a programme the bridge drives.
+//
+// Mutation: make RecordIngestStop a no-op. Observed to fail with "no record".
+func TestAnOffWorkerIngestLossStopIsStillRecorded(t *testing.T) {
+	r, _ := ingestRig(t, driving(3))
+	done := []obsbridge.Outcome{{ID: 7, Outcome: "stopped"}}
+	r.b.RecordIngestStop(4, done) // not this bridge's programme
+	r.b.RecordIngestStop(3, []obsbridge.Outcome{{ID: 7, Outcome: "skipped"}})
+	if len(records(r)) != 0 {
+		t.Fatalf("recorded a stop that did nothing or another programme's: %+v", records(r))
+	}
+	r.b.RecordIngestStop(3, done)
+	if got := records(r); len(got) != 1 || got[0].Via != obsbridge.ViaIngest {
+		t.Fatalf("no record: %+v", got)
 	}
 }
 

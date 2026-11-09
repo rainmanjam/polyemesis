@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Masukkan bilangan bulat dari {min} sampai {max}, atau kosongkan untuk memakai default.",
   "autostop.warning": "Menghentikan tujuan mengakhiri siaran YouTube langsung di antaranya secara permanen. Memulainya lagi mengembalikan video ke jalur, tetapi tidak mengembalikan siarannya.",
   "autostop.ackRequired": "Centang kotak untuk mengonfirmasi sebelum mengaktifkan ini.",
+  "autostop.programme": "Pengaturan ini milik program “{name}” dan disimpan di sana, bukan di jembatan OBS.",
   "obs.viaIngest": "cadangan saat masukan hilang",
   "autostop.ack": "Saya paham bahwa menghentikan mengakhiri siaran YouTube"
 }

@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Inserisci un numero intero da {min} a {max}, oppure lascia vuoto per il valore predefinito.",
   "autostop.warning": "Interrompere le destinazioni termina definitivamente ogni diretta YouTube tra di esse. Riavviarle rimette il video in linea, ma non riporta indietro la diretta.",
   "autostop.ackRequired": "Seleziona la casella per confermare prima di attivarlo.",
+  "autostop.programme": "Questa impostazione appartiene al programma «{name}» e viene salvata lì, non nel bridge OBS.",
   "obs.viaIngest": "ripiego per perdita dell'ingresso",
   "autostop.ack": "Ho capito che fermare chiude le trasmissioni YouTube"
 }

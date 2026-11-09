@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "Introduce un número entero de {min} a {max}, o déjalo vacío para usar el valor predeterminado.",
   "autostop.warning": "Detener los destinos pone fin de forma definitiva a cualquier emisión de YouTube en directo entre ellos. Volver a iniciarlos devuelve el vídeo a la línea, pero no recupera la emisión.",
   "autostop.ackRequired": "Marca la casilla para confirmar antes de activar esto.",
+  "autostop.programme": "Este ajuste pertenece al programa «{name}» y se guarda en él, no en el puente de OBS.",
   "obs.viaIngest": "respaldo por pérdida de entrada",
   "autostop.ack": "Entiendo que detener termina las emisiones de YouTube"
 }

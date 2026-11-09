@@ -331,3 +331,193 @@ func TestTheWaitClearsTheConfiguredFailoverGrace(t *testing.T) {
 		t.Fatalf("handler called %d times after grace+margin, want 1", rec.n())
 	}
 }
+
+// FINDING 4: DESTINATIONS IN BACKOFF DO NOT DISARM THE WATCH. A dead ingest
+// starves the platform connections, every destination goes into backoff, and a
+// sweep with nothing carrying must not forget the loss: the stop still comes at
+// the wait, and reaches those destinations.
+//
+// Mutation: reset the watch when nothing is on air (the old `len(onAir)==0`).
+// Observed to fail with "the fallback never fired with every destination in
+// backoff".
+func TestAutoStopStillFiresWhenEveryDestinationIsInBackoff(t *testing.T) {
+	var w lossWatch
+	d := lossDelivering(1)
+	w.step(lossT0, lossIn(true, false, d, lossDelivering(2)))
+	backoff := func(id int64) DestStatus {
+		return DestStatus{ID: id, Enabled: true, Process: &supervisor.Status{State: supervisor.StateStarting}}
+	}
+	at, ids := lossRun(&w, lossT0.Add(2*time.Second), 3*time.Minute, lossIn(false, false, backoff(1), backoff(2)))
+	if at.IsZero() {
+		t.Fatal("the fallback never fired with every destination in backoff")
+	}
+	if want := lossT0.Add(2*time.Second + lossWait); !at.Equal(want) {
+		t.Errorf("fired at +%v, want +%v", at.Sub(lossT0), want.Sub(lossT0))
+	}
+	if !reflect.DeepEqual(ids, []int64{1, 2}) {
+		t.Errorf("stopped %v, want [1 2]", ids)
+	}
+	// ...and a programme with nothing enabled at all still disarms, and an
+	// armed-then-never-delivering one never fires at boot (guards 1 above).
+	w = lossWatch{}
+	w.step(lossT0, lossIn(true, false, d))
+	off := d
+	off.Enabled = false
+	w.step(lossT0.Add(2*time.Second), lossIn(false, false, off))
+	if f, _ := lossRun(&w, lossT0.Add(4*time.Second), time.Hour, lossIn(false, false, d)); !f.IsZero() {
+		t.Fatal("fired after every destination had been switched off")
+	}
+}
+
+// FINDING 8: A CHANGE OF THE WAIT RESTARTS THE CLOCK. Lowering the wait during
+// an outage must not fire on the next sweep because of time counted against the
+// old wait.
+//
+// Mutation: drop the `w.wait != in.wait` restart in step. Observed to fail with
+// "fired on the sweep after the wait was lowered".
+func TestAutoStopLoweringTheWaitMidOutageRestartsTheClock(t *testing.T) {
+	var w lossWatch
+	d := lossDelivering(1)
+	long := lossIn(true, false, d)
+	long.wait = 10 * time.Minute
+	w.step(lossT0, long)
+	long.primaryLive = false
+	for at := lossT0.Add(2 * time.Second); at.Before(lossT0.Add(5 * time.Minute)); at = at.Add(2 * time.Second) {
+		w.step(at, long)
+	}
+	short := lossIn(false, false, d) // 2 minutes, already exceeded by the outage so far
+	at := lossT0.Add(5 * time.Minute)
+	if _, _, fire := w.step(at, short); fire {
+		t.Fatal("fired on the sweep after the wait was lowered")
+	}
+	f, _ := lossRun(&w, at.Add(2*time.Second), 3*time.Minute, short)
+	if f.IsZero() || f.Sub(at) < lossWait {
+		t.Fatalf("fired at +%v after the change, want a fresh %v", f.Sub(at), lossWait)
+	}
+}
+
+// FINDING 6: SWITCHING THE FEATURE OFF RESETS THE CLOCK. Lost for wait-10s,
+// toggled off, toggled on: the old count is gone, and the watch is not armed
+// again until the ingest has arrived with something delivering.
+//
+// Mutation: remove `e.lossW.reset()` from the not-armed branch of
+// sweepIngestLossWith. Observed to fail with "fired from a clock that was
+// switched off".
+func TestTogglingAutoStopOffResetsTheLossClock(t *testing.T) {
+	armed := db.AutoStopSettings{Enabled: true, Acknowledged: true, WaitSeconds: 90}
+	e, rec := armedEngine(t, armed)
+	e.sweepIngestLoss(lossT0, true)
+	lossSweep(e, lossT0.Add(2*time.Second), 80*time.Second, false) // wait - 10s
+	if rec.n() != 0 {
+		t.Fatal("fired early")
+	}
+	set := func(as db.AutoStopSettings) {
+		e.mu.Lock()
+		e.settings.Ingest.AutoStop = as
+		e.mu.Unlock()
+	}
+	at := lossT0.Add(84 * time.Second)
+	set(db.AutoStopSettings{})
+	e.sweepIngestLoss(at, false) // off
+	set(armed)
+	// On again, ingest still gone: a fresh wait is needed, and with nothing seen
+	// arriving since it is never armed, so it does not fire at all.
+	lossSweep(e, at.Add(2*time.Second), 10*time.Minute, false)
+	if rec.n() != 0 {
+		t.Fatal("fired from a clock that was switched off")
+	}
+	// Once the ingest has arrived again, a loss is judged from scratch.
+	back := at.Add(11 * time.Minute)
+	e.sweepIngestLoss(back, true)
+	lossSweep(e, back.Add(2*time.Second), 80*time.Second, false)
+	if rec.n() != 0 {
+		t.Fatal("fired before a fresh wait")
+	}
+	lossSweep(e, back.Add(82*time.Second), 20*time.Second, false)
+	if rec.n() != 1 {
+		t.Fatalf("handler called %d times after a fresh wait, want 1", rec.n())
+	}
+}
+
+// FINDING 8, PULL SOURCES: the 60s floor reasons about a listener's respawn
+// backoff; a pull source may wait up to its reconnect delay between attempts,
+// and an outage inside that is the source retrying.
+//
+// Mutation: pass 0 for the pull reconnect in sweepIngestLossWith. Observed to
+// fail with "a pull source fired inside its reconnect delay".
+func TestAutoStopWaitsOutAPullSourcesReconnectDelay(t *testing.T) {
+	e, rec := armedEngine(t, db.AutoStopSettings{Enabled: true, Acknowledged: true, WaitSeconds: 90})
+	e.mu.Lock()
+	e.settings.Ingest.Mode = db.IngestPull
+	e.settings.Ingest.Pull.ReconnectDelayMaxSeconds = 600
+	e.ingest = &supervisor.Process{} // a pull source has a child; the sweep only asks whether there is one
+	e.mu.Unlock()
+	e.sweepIngestLoss(lossT0, true)
+	lossSweep(e, lossT0.Add(2*time.Second), 620*time.Second, false)
+	if rec.n() != 0 {
+		t.Fatal("a pull source fired inside its reconnect delay")
+	}
+	lossSweep(e, lossT0.Add(622*time.Second), 40*time.Second, false)
+	if rec.n() != 1 {
+		t.Fatalf("handler called %d times after reconnect delay + margin, want 1", rec.n())
+	}
+}
+
+// The run-time liveness the host re-checks is the engine's own last sweep.
+//
+// Mutation: drop the lossLive.Store in sweepIngestLossWith. Observed to fail
+// with "IngestArriving did not follow the ingest".
+func TestIngestArrivingFollowsTheLastSweep(t *testing.T) {
+	e, _ := armedEngine(t, db.AutoStopSettings{Enabled: true, Acknowledged: true})
+	e.sweepIngestLoss(lossT0, true)
+	if !e.IngestArriving() {
+		t.Fatal("IngestArriving did not follow the ingest")
+	}
+	e.sweepIngestLoss(lossT0.Add(2*time.Second), false)
+	if e.IngestArriving() {
+		t.Fatal("IngestArriving stayed true after the ingest stopped")
+	}
+}
+
+// FINDING 7: THE WIRING. observeLoop's per-tick body is observeTick(now, rx):
+// a hub whose byte counter moves and then stops drives the fallback through the
+// tick, once, with ONE status snapshot per sweep.
+//
+// Mutations: delete the sweepIngestLossWith call in observeTick (observed to
+// fail with "the handler was never called from the observe tick"); read
+// e.Status() again in alertSnapshot instead of using the sweep's (observed to
+// fail with "status snapshots per sweep").
+func TestTheObserveTickDrivesTheFallbackWithOneStatusPerSweep(t *testing.T) {
+	e, rec := armedEngine(t, db.AutoStopSettings{Enabled: true, Acknowledged: true, WaitSeconds: 60})
+	e.lossDests = nil
+	var statuses int
+	e.sweepStatus = func() Status {
+		statuses++
+		return Status{Destinations: []DestStatus{lossDelivering(7)}}
+	}
+	realBefore := e.statusCalls.Load()
+	st := observeState{firstRx: true}
+	at := lossT0
+	rx := uint64(1000)
+	tick := func() { e.observeTick(at, rx, &st); at = at.Add(2 * time.Second) }
+	tick() // first sweep: nothing to compare to
+	for i := 0; i < 5; i++ {
+		rx += 500
+		tick() // arriving
+	}
+	for i := 0; i < 40; i++ { // 80s of silence, past the 60s floor
+		tick()
+	}
+	if rec.n() != 1 {
+		t.Fatalf("the handler was never called from the observe tick (called %d times)", rec.n())
+	}
+	if rec.hits[0].Destinations[0] != 7 {
+		t.Errorf("handed %+v", rec.hits[0])
+	}
+	if sweeps := 1 + 5 + 40; statuses != sweeps {
+		t.Errorf("%d status snapshots per sweep over %d sweeps, want exactly 1 each", statuses, sweeps)
+	}
+	if n := e.statusCalls.Load() - realBefore; n != 0 {
+		t.Errorf("%d extra status snapshots taken outside the sweep's one", n)
+	}
+}

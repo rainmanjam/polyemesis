@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "{min}~{max} 사이의 정수를 입력하거나, 기본값을 쓰려면 비워 두세요.",
   "autostop.warning": "대상을 중지하면 그중 진행 중인 YouTube 라이브 방송이 영구적으로 종료됩니다. 다시 시작하면 영상은 다시 나가지만 방송은 되살아나지 않습니다.",
   "autostop.ackRequired": "켜기 전에 확인란을 선택해 확인해 주세요.",
+  "autostop.programme": "이 설정은 프로그램 “{name}”에 속하며 OBS 브리지가 아니라 해당 프로그램에 저장됩니다.",
   "obs.viaIngest": "입력 끊김 대체 동작",
   "autostop.ack": "멈추면 YouTube 방송이 끝난다는 것을 이해합니다"
 }

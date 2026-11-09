@@ -415,14 +415,18 @@ func (b *Bridge) drivesLocked(sourceID int64) bool {
 // RunIngestStop runs the ingest-loss fallback's stop on the bridge's worker when
 // the bridge drives that programme, and reports whether it did. False means the
 // bridge is not involved (off, another programme, or its queue is full) and the
-// caller runs the stop itself.
+// caller runs the stop itself -- and then hands what it did to RecordIngestStop,
+// so a full queue does not cost the status page its record.
 //
 // ONE STOP, ONE RECORD. It is serialised with every OBS-driven stop, because
-// they share the worker, and it cancels an OBS stop still waiting out its grace:
-// the fallback's stop covers every live destination of the programme, which is
-// a superset of the bridge's selection. A stop that finds nothing left to stop
-// (every outcome skipped) writes no record, so whichever of the two arrives
-// second does nothing and says nothing.
+// they share the worker. It does NOT cancel an OBS stop still waiting out its
+// grace: the fallback stops only destinations that are switched on and not
+// failed for good, and the OBS stop skips every row that is already off, so
+// whichever arrives second finds nothing to do and records nothing -- while a
+// destination only one of them selects (a bridge-picked one the fallback did
+// not list, e.g. one that was in backoff) still gets the OBS stop it was owed.
+// A stop that finds nothing left to stop (every outcome skipped) writes no
+// record.
 func (b *Bridge) RunIngestStop(sourceID int64, run func(ctx context.Context) []Outcome) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -431,11 +435,26 @@ func (b *Bridge) RunIngestStop(sourceID int64, run func(ctx context.Context) []O
 	}
 	select {
 	case b.jobs <- job{kind: jobIngest, via: ViaIngest, ctx: b.ctx, run: run}:
+		return true
 	default:
 		return false
 	}
-	b.cancelStopLocked()
-	return true
+}
+
+// RecordIngestStop writes the status page's record for a fallback stop that ran
+// OFF the worker because the queue was full. Nothing if the bridge does not
+// drive that programme or the stop did nothing.
+func (b *Bridge) RecordIngestStop(sourceID int64, results []Outcome) {
+	b.mu.Lock()
+	drives := b.drivesLocked(sourceID)
+	b.mu.Unlock()
+	if !drives || !acted(results) {
+		return
+	}
+	if results == nil {
+		results = []Outcome{}
+	}
+	b.record(ActionRecord{At: b.now(), Action: "stop", Via: ViaIngest, Results: results})
 }
 
 // acted reports whether any outcome is something other than "nothing happened".

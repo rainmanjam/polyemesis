@@ -1,4 +1,4 @@
-import type { SourceView } from "@/lib/types";
+import type { Source, SourceView } from "@/lib/types";
 
 /* What a source card can honestly say about its ingest.
  *
@@ -56,3 +56,15 @@ export function ingestSummary(
   if (mode === "rtmp") return { proto: "RTMP", detail: null };
   return null;
 }
+
+/** An ingest block without its stop-on-ingest-loss setting.
+ *
+ *  AutoStopControl is the ONLY writer of `ingest.autoStop`: the source PUT merges
+ *  over the stored row, so leaving the key out keeps whatever is stored, while
+ *  sending the page's copy back would re-apply a stale tab's (or an old cached
+ *  UI's) view of a setting that ends YouTube broadcasts. */
+export function ingestWithoutAutoStop(ingest: Source["ingest"]): Source["ingest"] {
+  const { autoStop: _omitted, ...rest } = ingest;
+  return rest;
+}
+

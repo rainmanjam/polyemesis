@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +40,8 @@ func storedAutoStop(t *testing.T, o *obsRig, src int64) db.AutoStopSettings {
 //
 // Mutations: drop the Enabled && !Acknowledged branch of AutoStopSettings.problems
 // (cases 1-2 then answer 200); drop the autoStopNewlyEnabledWithoutAck check in
-// handleUpdateSource (case 4 then answers 200). Each observed to fail.
+// handleUpdateSource and mergeSavedSettings (cases 4-5 then answer 200, with the
+// normalization removed from db too). Each observed to fail.
 func TestEnablingStopOnIngestLossWithoutTheAcknowledgementIsA400(t *testing.T) {
 	o := obsServer(t)
 	src := onlySourceID(t, o.h, o.sign)
@@ -74,14 +76,32 @@ func TestEnablingStopOnIngestLossWithoutTheAcknowledgementIsA400(t *testing.T) {
 		t.Fatalf("stored %+v, want %+v", got, want)
 	}
 
-	// 4. A PUT merges over the stored row, so the acknowledgement given above is
-	// still stored. Turning it OFF and then ON again by saying nothing must not
-	// ride on it.
+	// 4. Turning it OFF withdraws the acknowledgement, so turning it ON again by
+	// saying nothing cannot ride on the one given above -- through the source
+	// route AND through PUT /settings, which writes the ingest block through to
+	// the default programme.
 	putAutoStop(t, o, src, map[string]any{"enabled": false}, http.StatusOK)
-	if as := storedAutoStop(t, o, src); !as.Acknowledged || as.Enabled {
+	if as := storedAutoStop(t, o, src); as.Acknowledged || as.Enabled {
 		t.Fatalf("after switching off: %+v", as)
 	}
 	putAutoStop(t, o, src, map[string]any{"enabled": true}, http.StatusBadRequest)
+	// 5. The same through PUT /settings (the reproduced hole).
+	send(t, o.h, o.sign, http.MethodPut, "/api/v1/settings",
+		map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": true}}}, http.StatusBadRequest)
+	if as := storedAutoStop(t, o, src); as.Enabled {
+		t.Fatalf("PUT /settings enabled it without consent: %+v", as)
+	}
+	// With the acknowledgement in the body it is accepted, on both.
+	send(t, o.h, o.sign, http.MethodPut, "/api/v1/settings",
+		map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": true, "acknowledged": true}}}, http.StatusOK)
+	if as := storedAutoStop(t, o, src); !as.Enabled || !as.Acknowledged {
+		t.Fatalf("PUT /settings with the acknowledgement did not enable it: %+v", as)
+	}
+	send(t, o.h, o.sign, http.MethodPut, "/api/v1/settings",
+		map[string]any{"ingest": map[string]any{"autoStop": map[string]any{"enabled": false}}}, http.StatusOK)
+	if as := storedAutoStop(t, o, src); as.Enabled || as.Acknowledged {
+		t.Fatalf("PUT /settings switching off left %+v", as)
+	}
 	putAutoStop(t, o, src, map[string]any{"enabled": true, "acknowledged": true}, http.StatusOK)
 }
 
@@ -278,5 +298,139 @@ func TestIngestLossStopLetsABroadcastDelayTailPlayOut(t *testing.T) {
 	}
 	if p := phaseOf(s, id); p != engine.DelayDraining {
 		t.Fatalf("phase %q, want draining: the buffered tail must play out", p)
+	}
+}
+
+// FALSE TRIGGER: THE STOP RE-CHECKS THE INGEST WHEN IT RUNS. The stop is queued
+// on the OBS worker behind a slow (paced) start; the encoder comes back while it
+// waits. It must stop nothing, and record nothing.
+//
+// Mutation: drop the l.Arriving check in stopForIngestLoss. Observed to fail
+// with "the destination was stopped although the ingest had returned".
+func TestAnIngestLossStopQueuedBehindASlowStartStopsNothingWhenTheIngestReturns(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	live := o.createDest(t, "live")
+	o.putConfig(t, map[string]any{
+		"enabled": true, "sourceId": src, "destinations": []int64{live},
+		"startOnStream": true, "stopOnStream": true, "stopAcknowledged": true,
+	}, http.StatusOK)
+	armFor(t, o, src)
+	o.enable(t, live)
+
+	var arriving atomic.Bool
+	release := make(chan struct{})
+	started := make(chan struct{})
+	// The slow start: occupies the worker.
+	if !o.b.RunIngestStop(src, func(context.Context) []obsbridge.Outcome {
+		close(started)
+		<-release
+		return nil
+	}) {
+		t.Fatal("the bridge did not take the blocking job")
+	}
+	<-started
+	loss := engine.IngestLoss{SourceID: src, Wait: 120 * time.Second, LostFor: 120 * time.Second,
+		Destinations: []int64{live}, Arriving: arriving.Load}
+	o.s.ingestLossStop(loss) // queued behind the slow job
+	arriving.Store(true)     // the encoder is back before the worker gets to it
+	close(release)
+
+	time.Sleep(200 * time.Millisecond)
+	if !o.enabled(t, live) {
+		t.Fatal("the destination was stopped although the ingest had returned")
+	}
+	for _, a := range o.b.Status().LastActions {
+		if a.Via == obsbridge.ViaIngest {
+			t.Fatalf("a stop that did nothing was recorded: %+v", a)
+		}
+	}
+	// And the same stop, with the ingest still gone, does stop it.
+	arriving.Store(false)
+	o.s.ingestLossStop(loss)
+	waitUntil(t, "the stop", func() bool { return !o.enabled(t, live) })
+}
+
+// A fallback stop whose bridge queue is full runs off the worker and is still
+// recorded in lastActions.
+//
+// Mutation: drop the RecordIngestStop call in ingestLossStop. Observed to fail
+// with "no record".
+func TestAnIngestLossStopWithAFullBridgeQueueIsStillRecorded(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	live := o.createDest(t, "live")
+	o.putConfig(t, map[string]any{
+		"enabled": true, "sourceId": src, "destinations": []int64{live},
+		"startOnStream": true, "stopOnStream": true, "stopAcknowledged": true,
+	}, http.StatusOK)
+	armFor(t, o, src)
+	o.enable(t, live)
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	o.b.RunIngestStop(src, func(context.Context) []obsbridge.Outcome { close(started); <-release; return nil })
+	<-started
+	for o.b.RunIngestStop(src, func(context.Context) []obsbridge.Outcome { return nil }) {
+	} // until the queue refuses
+	defer close(release)
+
+	o.s.ingestLossStop(engine.IngestLoss{SourceID: src, Wait: 120 * time.Second, LostFor: 120 * time.Second,
+		Destinations: []int64{live}})
+	waitUntil(t, "the off-worker stop", func() bool { return !o.enabled(t, live) })
+	waitUntil(t, "its record", func() bool {
+		for _, a := range o.b.Status().LastActions {
+			if a.Via == obsbridge.ViaIngest && len(a.Results) == 1 && a.Results[0].Outcome != "skipped" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// The off-worker stop has a shutdown hook: StopIngestLossWithin cancels it and
+// WAITS for it.
+//
+// Mutation: drop the WaitGroup wait in ingestStopRunner.shutdown. Observed to
+// fail with "returned while a stop was still running".
+func TestShutdownWaitsForAnOffWorkerIngestLossStop(t *testing.T) {
+	o := obsServer(t)
+	src := onlySourceID(t, o.h, o.sign)
+	live := o.createDest(t, "live")
+	armFor(t, o, src)
+	o.enable(t, live)
+
+	inside := make(chan struct{})
+	release := make(chan struct{})
+	o.s.ingestLossStop(engine.IngestLoss{SourceID: src, Wait: 120 * time.Second, LostFor: 120 * time.Second,
+		Destinations: []int64{live}, Arriving: func() bool { close(inside); <-release; return false }})
+	<-inside
+	returned := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		o.s.StopIngestLossWithin(ctx)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		t.Fatal("returned while a stop was still running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown never finished")
+	}
+	// The stop ran under the cancelled context: it ended nothing.
+	if !o.enabled(t, live) {
+		t.Error("a stop that started shutting down still ended a destination")
+	}
+	// And nothing new starts afterwards.
+	o.s.ingestLossStop(engine.IngestLoss{SourceID: src, Destinations: []int64{live}})
+	time.Sleep(50 * time.Millisecond)
+	if !o.enabled(t, live) {
+		t.Error("a stop was started after shutdown")
 	}
 }

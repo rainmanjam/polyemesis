@@ -3264,6 +3264,7 @@ func (d *DB) UpdateSettings(mutate func(*Settings) error) (Settings, error) {
 	case err != nil:
 		return Settings{}, err
 	}
+	s.Ingest.AutoStop = s.Ingest.AutoStop.normalized()
 	if err := s.Validate(); err != nil {
 		return Settings{}, InvalidSettingsError{Err: err}
 	}

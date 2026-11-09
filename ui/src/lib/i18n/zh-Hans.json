@@ -4566,6 +4566,7 @@
   "autostop.waitInvalid": "请输入 {min} 至 {max} 之间的整数，或留空以使用默认值。",
   "autostop.warning": "停止目标会永久结束其中所有正在进行的 YouTube 直播。重新启动后画面会恢复传输，但直播不会恢复。",
   "autostop.ackRequired": "开启前请勾选此框确认。",
+  "autostop.programme": "此设置属于节目“{name}”，保存在该节目中，而不是 OBS 桥接里。",
   "obs.viaIngest": "输入中断回退",
   "autostop.ack": "我明白停止会结束 YouTube 直播"
 }
