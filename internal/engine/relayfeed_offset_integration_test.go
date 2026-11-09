@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -100,6 +101,13 @@ type relayHopResult struct {
 	// publishWall is how long the publisher took to push the whole fixture in.
 	publishWall time.Duration
 	packets     int
+	// hopLag is how long after the publisher's LAST datagram went into the hub
+	// the hop's last datagram came out, read before the hop is signalled (so
+	// its shutdown flush is not counted). It is the hop's own pacing, and it
+	// does not depend on how fast the publisher managed to run: a hop that
+	// emits as fast as it is fed trails its input by milliseconds, one that
+	// paces itself trails it by span - publishWall.
+	hopLag time.Duration
 }
 
 func (r relayHopResult) span() float64 { return r.lastDTS - r.firstDTS }
@@ -133,12 +141,14 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		t.Fatalf("create %s: %v", outPath, err)
 	}
 	captured := make(chan int, 1)
+	var lastOut atomic.Int64 // unix nanos of the hop's latest datagram
 	go func() {
 		buf := make([]byte, 65536)
 		n := 0
 		for {
 			read, _, err := sink.ReadFrom(buf)
 			if read > 0 {
+				lastOut.Store(time.Now().UnixNano())
 				_, _ = outFile.Write(buf[:read])
 				n++
 			}
@@ -218,6 +228,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		t.Fatalf("publish the fixture: %v\n%s", err, pubErr.String())
 	}
 	publishWall := time.Since(started)
+	publishEnd := time.Now()
 
 	// Let the hop finish what is in flight, then take it down the way the engine
 	// does -- SIGTERM, not a kill. That is not cosmetic here: on the signal
@@ -230,6 +241,10 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	// SIGTERM gets a deadline of its own, because an FFmpeg blocked on a UDP read
 	// with nothing arriving is exactly the wedge stopTimeout exists for.
 	time.Sleep(1500 * time.Millisecond)
+	var hopLag time.Duration
+	if at := lastOut.Load(); at > publishEnd.UnixNano() {
+		hopLag = time.Duration(at - publishEnd.UnixNano())
+	}
 	_ = feed.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-progDone:
@@ -260,7 +275,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	return relayHopResult{
 		firstDTS: first, lastDTS: last,
 		outTimeMs: prog.OutTimeMS, progressDone: prog.Done,
-		publishWall: publishWall, packets: packets,
+		publishWall: publishWall, packets: packets, hopLag: hopLag,
 	}
 }
 
@@ -438,41 +453,50 @@ func TestAnUnpacedCopyHopPublishesFasterThanRealtime(t *testing.T) {
 	offsetBenchFixture(t, ffmpegBin, fixture)
 
 	fast := runRelayHop(t, ffmpegBin, fixture, 0, false)
-	t.Logf("unpaced: %.3fs of media published while the publisher ran for %s (%d datagrams)",
-		fast.span(), fast.publishWall.Round(time.Millisecond), fast.packets)
+	span := fast.span()
+	pubRate := span / fast.publishWall.Seconds()
+	t.Logf("unpaced: %.3fs of media published while the publisher ran for %s (%.1fx realtime, %d datagrams); "+
+		"the hop's last datagram trailed the publisher's by %s",
+		span, fast.publishWall.Round(time.Millisecond), pubRate, fast.packets, fast.hopLag.Round(time.Millisecond))
 
-	if fast.span() < 1 {
-		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", fast.span())
+	if span < 1 {
+		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", span)
 	}
-	// A PACED CONTROL, measured in the same test, on the same machine, at the
-	// same moment. The claim is relative -- "the unpaced hop crosses media
-	// meaningfully faster than a paced one does" -- not an absolute 1.0x, because
-	// an absolute threshold is really a claim about how starved the host is.
-	// On GitHub's 3-vCPU macOS runner this run landed at exactly 1.0x realtime
-	// (healthy runs: 4.0-4.2x) and failed a test that proves nothing about
-	// pacing at that point.
+
+	// THE CLAIM IS ABOUT THE HOP, NOT ABOUT THE PUBLISHER. "The hop adds no
+	// pacing of its own" means it emits what it is fed as it is fed: its last
+	// datagram comes out right behind the publisher's last one going in,
+	// whatever speed the publisher managed.
 	//
-	// Every run's wall time is span/rate plus a stall s that is the machine's
-	// doing (process start, scheduling). Both runs pay the same s, so the paced
-	// run (rate 1) takes span+s and the unpaced one (rate 4) takes span/4+s.
-	// Starvation squeezes the ratio toward 1 only as s dwarfs the whole span,
-	// and a hop that PACES itself erases the difference entirely (ratio 1),
-	// which is the regression this guards. 0.8 sits between the two with room
-	// either side: a healthy run is about 0.26 (1.4s against 5.5s), an unpaced run that lost
-	// 0.75 of its span to stalls (the 1.0x case above) is about 0.57.
-	paced := runRelayHop(t, ffmpegBin, fixture, 0, true)
-	t.Logf("paced control: %.3fs of media published while the publisher ran for %s (%d datagrams)",
-		paced.span(), paced.publishWall.Round(time.Millisecond), paced.packets)
-	if paced.span() < 1 {
-		t.Fatalf("the paced control captured only %.3fs of media; there is nothing to compare", paced.span())
+	// An earlier version asserted that the PUBLISHER's wall time beat realtime
+	// (then a paced control's). That measures the publisher, which on a starved
+	// 3-vCPU runner only reached 1.1-1.2x of the 4x it was asked for, so no
+	// ratio between runs could mean anything there.
+	//
+	// A hop that paces itself (-re) emits the span at realtime from its first
+	// datagram, so it trails its input by about span - publishWall.
+	paceLag := time.Duration((span - fast.publishWall.Seconds()) * float64(time.Second))
+
+	// Holds on any machine, however slow: a hop that keeps up trails by
+	// milliseconds, and two seconds is more than a starved runner's scheduling.
+	const keepUp = 2 * time.Second
+	if fast.hopLag > keepUp {
+		t.Errorf("the hop's last datagram trailed the publisher's by %s (more than %s): the hop is not "+
+			"keeping up with its input, which contradicts the absence of -re in ffmpeg.RelayFeedArgs",
+			fast.hopLag.Round(time.Millisecond), keepUp)
 	}
-	fastRate := fast.span() / fast.publishWall.Seconds()
-	pacedRate := paced.span() / paced.publishWall.Seconds()
-	if ratio := fast.publishWall.Seconds() / paced.publishWall.Seconds(); ratio > 0.8 {
-		t.Errorf("an unpaced copy hop took %.2f of a paced one's wall time (%.1fx vs %.1fx realtime); "+
-			"it must be meaningfully faster (at most 0.8) or the hop is paced somewhere, which "+
-			"contradicts the absence of -re in ffmpeg.RelayFeedArgs",
-			ratio, fastRate, pacedRate)
+	// And where the publisher was fast enough to tell the two apart (a pacing
+	// hop would trail by at least a second), it must trail by well under what
+	// pacing would cost.
+	if paceLag >= time.Second {
+		if fast.hopLag > paceLag/2 {
+			t.Errorf("the hop trailed its input by %s where a self-pacing hop would trail by about %s: "+
+				"the hop appears to be paced", fast.hopLag.Round(time.Millisecond), paceLag.Round(time.Millisecond))
+		}
+	} else {
+		// Not a skip: the assertion above ran and held. This only says how much
+		// it could prove on this machine.
+		t.Logf("the publisher ran at only %.1fx realtime, so a self-pacing hop would trail by just %s: "+
+			"the check above held but could not distinguish pacing here", pubRate, paceLag.Round(time.Millisecond))
 	}
-	t.Logf("the unpaced hop ran %.1fx realtime", fast.span()/fast.publishWall.Seconds())
 }

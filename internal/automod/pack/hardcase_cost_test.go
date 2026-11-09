@@ -39,10 +39,8 @@ func BenchmarkSignalsEdgeDigits(b *testing.B) { benchSignals(b, edgeLine) }
 func BenchmarkSignalsCutFields(b *testing.B)  { benchSignals(b, cutLine) }
 
 func TestSignalsCostGate(t *testing.T) {
-
-	edgeGate, cutGate := gateNs(t, signalsEdgeLineGateNs), gateNs(t, signalsCutFieldGateNs)
-	edge := fastestOf(BenchmarkSignalsEdgeDigits)
-	cut := fastestOf(BenchmarkSignalsCutFields)
+	edge, edgeGate := measure(t, signalsEdgeLineGateNs, BenchmarkSignalsEdgeDigits)
+	cut, cutGate := measure(t, signalsCutFieldGateNs, BenchmarkSignalsCutFields)
 	t.Logf("edge digits: %d ns/op %d allocs/op; cut fields: %d ns/op %d allocs/op",
 		edge.NsPerOp(), edge.AllocsPerOp(), cut.NsPerOp(), cut.AllocsPerOp())
 	if edge.NsPerOp() > edgeGate {

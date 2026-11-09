@@ -54,12 +54,11 @@ func BenchmarkCheckerDigits(b *testing.B) {
 // TestCheckerCostGate holds the whole stateless checker to the same 15 µs
 // ceiling as the form alone: CheckFast runs on the adapter goroutine.
 func TestCheckerCostGate(t *testing.T) {
-	gate := gateNs(t, costGateNs)
 	for name, fn := range map[string]func(*testing.B){
 		"plain": BenchmarkCheckerPlain, "busy": BenchmarkCheckerBusy, "digits": BenchmarkCheckerDigits,
 		"500-names": BenchmarkCheckerManyNames,
 	} {
-		r := fastestOf(fn)
+		r, gate := measure(t, costGateNs, fn)
 		t.Logf("%s: %d ns/op, %d allocs/op", name, r.NsPerOp(), r.AllocsPerOp())
 		if r.NsPerOp() > gate {
 			t.Errorf("%s costs %d ns/op, over the %d ns gate", name, r.NsPerOp(), gate)
@@ -134,9 +133,8 @@ func BenchmarkNearDupCapEvict(b *testing.B) {
 }
 
 func TestWindowedCostGate(t *testing.T) {
-	gate := gateNs(t, costGateNs)
 	for name, fn := range map[string]func(*testing.B){"near-dup": BenchmarkNearDupWorst, "raid": BenchmarkRaidWorst, "near-dup-at-cap": BenchmarkNearDupCapEvict} {
-		r := fastestOf(fn)
+		r, gate := measure(t, costGateNs, fn)
 		t.Logf("%s worst case: %d ns/op, %d allocs/op", name, r.NsPerOp(), r.AllocsPerOp())
 		if r.NsPerOp() > gate {
 			t.Errorf("%s worst case costs %d ns/op, over the %d ns gate", name, r.NsPerOp(), gate)
