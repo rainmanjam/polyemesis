@@ -527,6 +527,8 @@ func run(h *hooks) error {
 	go srv.RefreshLoop(ctx)
 	// The native Twitch poll mirror reads accounts and tokens through the API.
 	pollEngine.SetMirror(srv.PollMirror())
+	// Announcements go to the chats that are live, as POST /chat/send does.
+	pollEngine.SetSender(srv.PollSender())
 	// Pre-announces scheduled Facebook broadcasts, so a show on a schedule has
 	// an event page before it starts. Best-effort by construction: it runs
 	// ahead of the stream and nothing downstream waits on it, so a failure

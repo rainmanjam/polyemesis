@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Vraag van de peiling",
   "streamdeck.pi.pollOptions": "Opties, één per regel (2 tot 6)",
   "streamdeck.pi.pollDuration": "Duur (seconden)",
-  "streamdeck.pi.pollHint": "Druk om de peiling in elke chat te starten. Zolang hij loopt, toont de toets de stemmen en de resterende tijd; houd hem vast om eerder te stoppen.",
+  "streamdeck.pi.pollHint": "Druk om de peiling in elke live chat te starten. Zolang hij loopt, toont de toets de stemmen en de resterende tijd; houd hem vast om eerder te stoppen.",
   "streamdeck.pi.cutTail": "Vertraagde rest knippen",
   "streamdeck.pi.cutTailHint": "Een vastgehouden stop knipt ook wat nog gebufferd is, zodat er niets meer uitgezonden wordt. Vasthouden terwijl de rest loopt, knipt die.",
   "streamdeck.pi.dumpSeconds": "Seconden om te dumpen",

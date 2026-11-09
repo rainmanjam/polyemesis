@@ -756,6 +756,14 @@ func (h *Hub) History(limit int) []Message {
 // retry that double-posts them. The error return is only for a request that
 // was never attempted at all.
 func (h *Hub) Send(ctx context.Context, text string) ([]SendResult, error) {
+	return h.SendTo(ctx, text, func(db.Platform, string) SkipReason { return "" })
+}
+
+// SendTo is Send with a say over which chats get the message. pick returns ""
+// to post to a chat, or the reason to leave it out. Every connected chat comes
+// back as a result, the ones left out as skipped with that reason, so the
+// operator sees where the message did NOT go as well as where it did.
+func (h *Hub) SendTo(ctx context.Context, text string, pick func(p db.Platform, account string) SkipReason) ([]SendResult, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, fmt.Errorf("chat: nothing to send")
@@ -775,6 +783,13 @@ func (h *Hub) Send(ctx context.Context, text string) ([]SendResult, error) {
 	results := make([]SendResult, len(rs))
 	var wg sync.WaitGroup
 	for i, r := range rs {
+		if why := pick(r.platform, r.account); why != "" {
+			results[i] = SendResult{
+				Platform: r.platform, Account: r.account, Skipped: true,
+				Reason: string(why), Detail: why.Detail(),
+			}
+			continue
+		}
 		wg.Add(1)
 		go func(i int, r *runner) {
 			defer wg.Done()
@@ -790,6 +805,18 @@ func (h *Hub) Send(ctx context.Context, text string) ([]SendResult, error) {
 		return results[i].Account < results[j].Account
 	})
 	return results, nil
+}
+
+// LiveChat reports whether the chat adapter for one account says a live chat is
+// open. False for an adapter that cannot tell, which is not the same as "not
+// live": the caller combines it with the destinations that are on air.
+func (h *Hub) LiveChat(p db.Platform, account string) bool {
+	a, ok := h.Adapter(p, account)
+	if !ok {
+		return false
+	}
+	lc, ok := a.(LiveChatter)
+	return ok && lc.LiveChat()
 }
 
 // Reply answers one message on the platform that issued it. Unlike Send it is

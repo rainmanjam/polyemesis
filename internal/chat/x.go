@@ -141,6 +141,11 @@ func (x *XAdapter) SetBroadcast(id string) {
 	x.toldMu.Unlock()
 }
 
+// LiveChat reports whether the lifecycle coordinator has told the adapter of a
+// running broadcast. It is not the 15-second poll's answer: a broadcast published
+// outside polyemesis is found by Send, not claimed here without an API call.
+func (x *XAdapter) LiveChat() bool { return x.toldBroadcast() != "" }
+
 // toldBroadcast is the id SetBroadcast last recorded.
 func (x *XAdapter) toldBroadcast() string {
 	x.toldMu.Lock()

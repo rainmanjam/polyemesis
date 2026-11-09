@@ -42,7 +42,9 @@ func (f *chatFakeEngine) FixSource() error                 { f.fixed = true; ret
 
 type nopSender struct{}
 
-func (nopSender) Send(context.Context, string) ([]chat.SendResult, error) { return nil, nil }
+func (nopSender) SendEach(context.Context, func(db.Platform, string) string) ([]chat.SendResult, error) {
+	return nil, nil
+}
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 

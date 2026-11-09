@@ -264,7 +264,7 @@ export class PolyemesisClient {
     };
   }
 
-  /** Starts a chat poll, announced in every chat. Needs an admin token. */
+  /** Starts a chat poll, announced in the live chats. Needs an admin token. */
   startPoll(spec: PollSpec): Promise<unknown> {
     return this.call("POST", "/polls", undefined, spec);
   }

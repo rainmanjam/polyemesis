@@ -1,9 +1,11 @@
 # Chat polls
 
-**One poll, asked in every connected chat at once, counted as one result.**
+**One poll, asked in every live chat at once, counted as one result.**
 
 You ask a question with two to six options. Polyemesis posts it into every
-chat it can send to. Viewers vote by typing the option's number, and the result
+live chat it can send to: a chat whose platform has a destination on air (a connected
+chat that is not streaming is skipped and recorded as "not live"). Votes are counted
+from every chat. Viewers vote by typing the option's number, and the result
 updates live in the console and, if you add it, on stream.
 
 ## Start a poll
@@ -25,7 +27,7 @@ Only one poll runs at a time, because "type 1" can only mean one thing in a
 chat at once. Line breaks and control characters in the question or an option
 become spaces before anything is sent.
 
-When the poll opens, polyemesis posts this into every connected chat:
+When the poll opens, polyemesis posts this into every live chat:
 
 ```text
 POLL: Next map? — 1) Dust 2) Mirage — type 1-2 or !vote N to vote. 2 min to vote.
@@ -37,7 +39,7 @@ When it closes, it posts the result:
 POLL CLOSED: Next map? — Dust wins with 64% (41 of 64 votes).
 ```
 
-The same words go to every chat, and they never name a platform. If a long
+The same words go to every live chat, and they never name a platform. If a long
 poll would not fit the strictest chat (YouTube allows 200 characters), the
 option labels are shortened in the message. They are never shortened anywhere
 else.
@@ -94,7 +96,7 @@ No result, event, export or history row names a viewer.
 That is why a `read` API token can see results: `GET /api/v1/polls` and the
 `poll` events carry the same counts the console shows, and nothing else.
 Starting and ending a poll need an `admin` token, because they post into every
-chat as you.
+live chat as you.
 
 ## On stream: the poll widget
 

@@ -12,8 +12,8 @@
   "guardedFloor": 32,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 336,
-    "swept": 80,
+    "methodPatternPairs": 337,
+    "swept": 81,
     "excused": 64,
     "denied": 192,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 10,
-    "invariant": 63,
+    "invariant": 64,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 3,
     "unstable": 4
@@ -278,6 +278,12 @@
       "method": "TRACE",
       "pattern": "/api/v1/chat/kick/{secret}",
       "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/live",
+      "coverage": "swept",
       "zeroSource": "unguarded"
     },
     {
@@ -2089,6 +2095,11 @@
     {
       "path": "/api/v1/automod/stats",
       "pattern": "GET /api/v1/automod/stats",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/chat/live",
+      "pattern": "GET /api/v1/chat/live",
       "class": "invariant"
     },
     {

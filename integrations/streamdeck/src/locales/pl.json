@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Pytanie ankiety",
   "streamdeck.pi.pollOptions": "Opcje, jedna w wierszu (od 2 do 6)",
   "streamdeck.pi.pollDuration": "Czas trwania (sekundy)",
-  "streamdeck.pi.pollHint": "Naciśnij, by rozpocząć ankietę na każdym czacie. W trakcie klawisz pokazuje głosy i pozostały czas; przytrzymaj go, by zakończyć ją wcześniej.",
+  "streamdeck.pi.pollHint": "Naciśnij, by rozpocząć ankietę na każdym czacie na żywo. W trakcie klawisz pokazuje głosy i pozostały czas; przytrzymaj go, by zakończyć ją wcześniej.",
   "streamdeck.pi.cutTail": "Utnij opóźnioną końcówkę",
   "streamdeck.pi.cutTailHint": "Przytrzymane zatrzymanie ucina też to, co jest jeszcze w buforze, więc nic więcej nie trafi na antenę. Przytrzymanie w trakcie nadawania końcówki ją ucina.",
   "streamdeck.pi.dumpSeconds": "Sekundy do zrzucenia",

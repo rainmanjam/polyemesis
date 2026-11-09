@@ -214,6 +214,26 @@ func (e *Engine) SetMirror(m Mirror) {
 	e.mu.Unlock()
 }
 
+// sender is the current Sender, read under the lock SetSender writes it under.
+func (e *Engine) sender() Sender {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.send
+}
+
+// SetSender replaces where announcements go. The API server installs a sender
+// that narrows them to the live chats, and it is built after the engine for the
+// reason the mirror is: it reads what is on air through the server. Nil leaves
+// the current sender.
+func (e *Engine) SetSender(s Sender) {
+	if s == nil {
+		return
+	}
+	e.mu.Lock()
+	e.send = s
+	e.mu.Unlock()
+}
+
 // ------------------------------------------------------------- lifecycle
 
 // Start opens a poll. It is announced in every chat, and mirrored where asked,
@@ -271,7 +291,7 @@ func (e *Engine) Start(s Spec) (Result, error) {
 			if mirror {
 				e.startMirror(ctx, a)
 			}
-			if e.send != nil {
+			if e.sender() != nil {
 				e.announceStart(ctx, a)
 			}
 		})
@@ -540,7 +560,11 @@ func (e *Engine) announceStart(ctx context.Context, a *active) {
 }
 
 func (e *Engine) sendEach(ctx context.Context, textFor func(db.Platform, string) string) []Announcement {
-	res, err := e.send.SendEach(ctx, textFor)
+	snd := e.sender()
+	if snd == nil {
+		return nil
+	}
+	res, err := snd.SendEach(ctx, textFor)
 	if err != nil {
 		e.log.Warn("polls: announce", "err", err)
 		return []Announcement{{OK: false, Detail: redact.Redact(err.Error())}}

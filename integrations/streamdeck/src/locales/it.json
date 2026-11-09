@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Domanda del sondaggio",
   "streamdeck.pi.pollOptions": "Opzioni, una per riga (da 2 a 6)",
   "streamdeck.pi.pollDuration": "Durata (secondi)",
-  "streamdeck.pi.pollHint": "Premi per avviare il sondaggio in ogni chat. Mentre è in corso, il tasto mostra i voti e il tempo rimasto; tienilo premuto per terminarlo prima.",
+  "streamdeck.pi.pollHint": "Premi per avviare il sondaggio in ogni chat in diretta. Mentre è in corso, il tasto mostra i voti e il tempo rimasto; tienilo premuto per terminarlo prima.",
   "streamdeck.pi.cutTail": "Taglia la coda in ritardo",
   "streamdeck.pi.cutTailHint": "Uno stop tenuto premuto taglia anche ciò che è ancora nel buffer, così non va in onda altro. Tenere premuto mentre la coda è in onda la taglia.",
   "streamdeck.pi.dumpSeconds": "Secondi da scartare",

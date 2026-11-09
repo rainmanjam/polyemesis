@@ -119,3 +119,15 @@ func childlessIngestState(mode db.IngestMode, enabled bool, srtPort int, srtBoun
 		return supervisor.StateFailed
 	}
 }
+
+// OnAir reports whether this destination is carrying media to viewers: switched
+// on (or stopped but playing its delayed tail out, which delayStillPublishing
+// calls still on the air) and with a process running or reconnecting on either
+// tier. Chat send and chat polls read "live" from here, so they cannot drift
+// from what the engine itself treats as on air.
+func (d DestStatus) OnAir() bool {
+	if !d.Enabled && !delayStillPublishing(d) {
+		return false
+	}
+	return processCarrying(d.Process) || processCarrying(d.BackupProcess)
+}

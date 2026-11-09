@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "투표 질문",
   "streamdeck.pi.pollOptions": "선택지, 한 줄에 하나 (2~6개)",
   "streamdeck.pi.pollDuration": "시간 (초)",
-  "streamdeck.pi.pollHint": "누르면 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다.",
+  "streamdeck.pi.pollHint": "누르면 라이브 중인 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다.",
   "streamdeck.pi.cutTail": "지연분 잘라내기",
   "streamdeck.pi.cutTailHint": "길게 눌러 중지하면 버퍼에 남은 분량도 잘라내 더 이상 송출되지 않습니다. 지연분 송출 중에 길게 누르면 잘라냅니다.",
   "streamdeck.pi.dumpSeconds": "덤프할 초",

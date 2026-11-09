@@ -61,6 +61,22 @@ its first tagged release.
   between, or the last one marked stale when a refresh fails. Simultaneous requests share one refresh, and "Use for" clears an earlier rebind confirmation and refuses a destination on Stream now, with a reason.
 - **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
 
+### Changed
+
+- **Upgrade note: chat send now goes only to platforms that are live.** `POST /api/v1/chat/send` used to post to
+  every connected chat; by default it now posts only to a chat whose platform has an enabled destination on air
+  (running, or reconnecting) linked to that account, or, for YouTube and X, whose adapter reports a live chat
+  or broadcast. Every other connected chat comes back as a result with `skipped: true`, `reason: "notLive"` and
+  `detail: "not live"`. When nothing is live the request is refused with `409` (`code: "no_platform_live"`, "no platform is live; send "to":"all" or "platforms":[...] to choose") rather than posting nowhere. To get the old behaviour send `"to": "all"`; to name the
+  platforms send `"platforms": ["kick", "twitch"]`, or `"accounts": [{"platform": ..., "account": ...}]` for exact chats (live or not; one that has no chat comes back
+  `reason: "notConnected"`). `"to": "live"` spells out the default. A client that sends only `text` keeps
+  working, but on a stream that is live on one platform its message no longer reaches the others, and on an
+  idle install it gets `409` instead of a send. Replies (`replyTo`) are unchanged. The chat composer shows the
+  platforms a message will go to as chips (on for the live ones), lets you add a platform that is not live or
+  pick "All connected", and says so when nothing is live; `GET /api/v1/chat/live` is the reading it uses. Chat
+  polls follow the same rule: the announcement and the result go to the live chats, and the others are recorded
+  as "not live". Chat-command replies (`!bitrate` and friends) now answer only in the chat the command was typed in, and a destination playing out its delay tail still counts as live. The rollover notice is unchanged.
+
 ### Fixed
 
 - `PUT /api/v1/destinations/{id}` with a `goLiveTitle` on a platform that never sends one answered 200 and

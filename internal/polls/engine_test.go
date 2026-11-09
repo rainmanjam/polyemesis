@@ -744,3 +744,40 @@ func TestAnnounceMaxIsTheSendLimitWhereShorter(t *testing.T) {
 		}
 	}
 }
+
+// SetSender swaps where the announcement goes, and a nil leaves it alone, so a
+// server that has no live-narrowing sender to offer cannot unplug chat.
+func TestSetSenderReplacesTheAnnouncementPathAndIgnoresNil(t *testing.T) {
+	first, second := &fakeSender{}, &fakeSender{}
+	f := newFixture(t, WithSender(first))
+	f.e.SetSender(nil)
+	f.e.SetSender(second)
+	f.start(t)
+	f.e.Wait()
+	if len(first.texts) != 0 || len(second.texts) == 0 {
+		t.Fatalf("first got %d, second got %d; the announcement should reach only the replacement", len(first.texts), len(second.texts))
+	}
+}
+
+// SetSender while announcements are in flight: the sender is read under the
+// engine's lock, so -race sees no unsynchronised read of it.
+func TestSetSenderWhileAnnouncingIsRaceFree(t *testing.T) {
+	f := newFixture(t, WithSender(&fakeSender{}))
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				f.e.SetSender(&fakeSender{})
+			}
+		}
+	}()
+	f.start(t)
+	f.e.Wait()
+	close(stop)
+	<-done
+}

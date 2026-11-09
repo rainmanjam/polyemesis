@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusDot } from "@/components/signature/StatusDot";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
 import type { SignalTone } from "@/lib/signal";
 import { useAuthorInk } from "@/hooks/useAppliedTheme";
@@ -43,6 +43,8 @@ import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import type {
   ChatLimit,
+  ChatLiveView,
+  ChatSendTarget,
   ChatMessage,
   ChatPlatform,
   ChatSendResult,
@@ -123,6 +125,8 @@ function newCountLabel(t: ReturnType<typeof useT>, behind: number): string {
 
 function verdictLabel(t: ReturnType<typeof useT>, r: ChatSendResult): string {
   if (r.ok) return t("chatpage.verdictSent");
+  if (r.reason === "notLive") return t("chatpage.verdictNotLive");
+  if (r.reason === "notConnected") return t("chatpage.verdictNotConnected");
   if (r.skipped) return t("chatpage.verdictCannotSend");
   return t("chatpage.verdictFailed");
 }
@@ -504,7 +508,7 @@ function SendVerdict({ results }: Readonly<{ results: ChatSendResult[] }>) {
             <span className={accent.text}>{accent.label}</span>
             <span className="text-muted-foreground">
               {verdictLabel(t, r)}
-              {r.detail ? ` — ${r.detail}` : ""}
+              {r.detail && !r.reason ? ` — ${r.detail}` : ""}
             </span>
           </span>
         );
@@ -544,9 +548,83 @@ export function ChatComposer({
   // is kept here so it can be put back and re-sent where it failed.
   const [unsent, setUnsent] = useState("");
 
+  // WHERE THIS GOES. A message with no reply target goes, by default, only to
+  // the platforms that are live: a connected chat is not a streaming one, and a
+  // test line meant for one stream was once posted in two channels that were
+  // not on air. `live` is the server's own reading (GET /chat/live), the same
+  // one a send with no target uses, so the chips cannot disagree with it. It is
+  // null until read and when the read fails; then the composer behaves as it
+  // always did and lets the server decide.
+  const [live, setLive] = useState<ChatLiveView | null>(null);
+  const [liveFailed, setLiveFailed] = useState(false);
+  // null follows the live default; a list is the operator's explicit choice.
+  const [chosen, setChosen] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!configured || replyTo) return;
+    let on = true;
+    const read = () => {
+      // Started inside the chain so a synchronous throw lands in .catch too.
+      Promise.resolve()
+        .then(() => api.chatLive())
+        .then((v) => {
+          if (!on) return;
+          setLive(v);
+          setLiveFailed(false);
+        })
+        .catch(() => {
+          if (!on) return;
+          setLive(null);
+          setLiveFailed(true);
+        });
+    };
+    read();
+    const id = window.setInterval(read, 10_000);
+    return () => {
+      on = false;
+      window.clearInterval(id);
+    };
+  }, [configured, replyTo, statuses]);
+
   const allSenders = statuses.filter((s) => s.canSend);
   // A reply goes to the one platform it answers, so only that platform's limit applies.
-  const senders = replyTo ? allSenders.filter((s) => s.platform === replyTo.platform) : allSenders;
+  // Liveness is per account, so the chips are too: one chip per connected chat
+  // that can send. A platform with two accounts shows the channel on each chip.
+  const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
+  const connected = useMemo(
+    () => allSenders.map((s) => ({ key: chatKeyOf(s.platform, s.account), status: s })),
+    [allSenders],
+  );
+  const connectedKeys = useMemo(() => connected.map((c) => c.key), [connected]);
+  const liveKeys = useMemo(
+    () =>
+      connected
+        .filter((c) =>
+          live?.targets.some(
+            (x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live,
+          ),
+        )
+        .map((c) => c.key),
+    [connected, live],
+  );
+  // What this message will reach. Without a reading it is every sender.
+  const selected = chosen ?? (live ? liveKeys : connectedKeys);
+  const noneLive = !replyTo && !!live && chosen === null && !live.anyLive;
+  const nothingChosen = !replyTo && chosen !== null && chosen.length === 0;
+  const showTargets = !replyTo && !!live && connected.length > 0;
+  const liveUnknown = !replyTo && liveFailed && connected.length > 0;
+  // Two accounts on one platform: the chip says which channel it is.
+  const perPlatform = (p: ChatPlatform) => connected.filter((c) => c.status.platform === p).length;
+  const toggleTarget = (key: string) => {
+    const base = chosen ?? liveKeys;
+    const next = base.includes(key) ? base.filter((x) => x !== key) : [...base, key];
+    const sameAsLive =
+      next.length === liveKeys.length && liveKeys.every((x) => next.includes(x));
+    // Back on the live set is following it again, so a go-live is picked up.
+    setChosen(sameAsLive ? null : next);
+  };
+  const senders = replyTo
+    ? allSenders.filter((s) => s.platform === replyTo.platform)
+    : allSenders.filter((s) => selected.includes(chatKeyOf(s.platform, s.account)));
   // The strictest published limit among the platforms that will actually
   // receive this. Advisory only: over it the counter turns amber and the send
   // button still works, because the platform is the authority on its own rules
@@ -567,9 +645,28 @@ export function ChatComposer({
 
   const over = strictest > 0 && [...text].length > strictest;
 
+  /** The target the server is told. None when following the live default, so
+   *  the server decides at the moment of sending, not at the moment of reading. */
+  const sendTarget = (): ChatSendTarget | undefined => {
+    if (chosen === null) return undefined;
+    if (chosen.length === connectedKeys.length && connectedKeys.every((k) => chosen.includes(k))) {
+      return { to: "all" };
+    }
+    return {
+      accounts: connected
+        .filter((c) => chosen.includes(c.key))
+        .map((c) => ({ platform: c.status.platform, account: c.status.account ?? "" })),
+    };
+  };
+
+  const sendPlain = (body: string) => {
+    const to = sendTarget();
+    return to ? api.sendChat(body, to) : api.sendChat(body);
+  };
+
   const send = async () => {
     const body = text.trim();
-    if (!body || sending) return;
+    if (!body || sending || noneLive || nothingChosen) return;
     const target = replyTo;
     setSending(true);
     // A stale offer must not overwrite the next draft with an older message.
@@ -581,7 +678,7 @@ export function ChatComposer({
             body,
             asBot,
           )
-        : await api.sendChat(body);
+        : await sendPlain(body);
       setResults(res.results);
       // THE DRAFT IS CLEARED ONLY WHEN SOMETHING TOOK IT (poka-yoke audit
       // 2026-11-04). It used to be cleared before the answer was read, so a
@@ -590,6 +687,9 @@ export function ChatComposer({
       // while the send is in flight, and a draft typed meanwhile is the
       // operator's next message, not this one.
       if (res.sent > 0) {
+        // An explicit choice is for this message. The next one follows what is
+        // live again, so "all" cannot linger as a surprise.
+        setChosen(null);
         setText((cur) => (cur.trim() === body ? "" : cur));
         if (target) onCancelReply?.(target.id);
       }
@@ -603,7 +703,13 @@ export function ChatComposer({
       }
     } catch (err) {
       setResults(null);
-      toast.error(err instanceof Error ? err.message : t("chatpage.couldNotSend"));
+      if (err instanceof ApiError && err.code === "no_platform_live") {
+        // The server's sentence is English and names JSON fields; the composer
+        // says it in the operator's language and the chips are the way out.
+        toast.error(t("chatpage.sendRefusedNoneLive"));
+      } else {
+        toast.error(err instanceof Error ? err.message : t("chatpage.couldNotSend"));
+      }
     } finally {
       setSending(false);
     }
@@ -662,6 +768,66 @@ export function ChatComposer({
           </Button>
         </div>
       )}
+      {showTargets && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[11px]">
+          <span className="text-muted-foreground">{t("chatpage.targetsLabel")}</span>
+          {connected.map(({ key, status: st }) => {
+            const on = selected.includes(key);
+            const isLive = liveKeys.includes(key);
+            const base = accentFor(st.platform).label;
+            const label =
+              perPlatform(st.platform) > 1 ? `${base} · ${st.channel || st.account || ""}` : base;
+            const hint = t(isLive ? "chatpage.targetLive" : "chatpage.targetNotLive", {
+              platform: label,
+            });
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={on}
+                title={hint}
+                aria-label={hint}
+                onClick={() => toggleTarget(key)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5",
+                  on ? "border-primary/60 bg-primary/10" : "border-border text-muted-foreground",
+                )}
+              >
+                <StatusDot tone={isLive ? "live" : "idle"} size="sm" />
+                {label}
+              </button>
+            );
+          })}
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-[11px]"
+            onClick={() => setChosen(connectedKeys)}
+          >
+            {t("chatpage.targetsAll")}
+          </Button>
+          {chosen !== null && (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-[11px]"
+              onClick={() => setChosen(null)}
+            >
+              {t("chatpage.targetsLive")}
+            </Button>
+          )}
+        </div>
+      )}
+      {liveUnknown && (
+        <p role="status" className="mb-1.5 text-[11px] text-muted-foreground">
+          {t("chatpage.liveUnknown")}
+        </p>
+      )}
+      {(noneLive || nothingChosen) && (
+        <p role="status" className="mb-1.5 text-[11px] text-warn">
+          {t(noneLive ? "chatpage.targetsNoneLive" : "chatpage.targetsPick")}
+        </p>
+      )}
       <div className="flex items-end gap-1.5">
         <Textarea
           value={text}
@@ -684,9 +850,13 @@ export function ChatComposer({
               ? t("chatpage.replyPlaceholder", { name: replyTo.author.name })
               : // The field says the state in two words. The reason is text under
             // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
-            senders.length === 0
+            allSenders.length === 0
               ? t("chatpage.notConnected")
-              : t("chatpage.sendTo", {
+              : senders.length === 0
+                ? t("chatpage.targetsPick")
+                : !replyTo && !live
+                  ? t("chatpage.sendLiveDefault")
+                  : t("chatpage.sendTo", {
                   platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
                 })
           }
@@ -697,7 +867,7 @@ export function ChatComposer({
               : t("chatpage.composerAria")
           }
         />
-        {senders.length === 0 && (
+        {allSenders.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("chatpage.noSender")}</p>
         )}
         {/* Compact (the Dashboard dock) drops the word, so the glyph needs a
@@ -705,7 +875,7 @@ export function ChatComposer({
         <Button
           size="sm"
           onClick={() => void send()}
-          disabled={sending || !text.trim()}
+          disabled={sending || !text.trim() || noneLive || nothingChosen}
           aria-label={compact ? t("chatpage.send") : undefined}
           title={compact ? t("chatpage.send") : undefined}
         >

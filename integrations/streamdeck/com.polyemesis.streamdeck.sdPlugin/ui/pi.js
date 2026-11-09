@@ -89,7 +89,7 @@
     }
     savedPresetId = $("presetId").value;
     if (isPollAction()) {
-      // The poll key's poll: what it posts into every chat when pressed. The plugin drops blank
+      // The poll key's poll: what it posts into every live chat when pressed. The plugin drops blank
       // lines and the server checks the rest, so nothing is second-guessed here.
       const question = $("pollQuestion").value.trim();
       if (question) payload.pollQuestion = question;

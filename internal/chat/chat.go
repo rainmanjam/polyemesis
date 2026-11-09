@@ -323,8 +323,50 @@ type SendResult struct {
 	// Skipped separates "this platform cannot send" from "this send failed".
 	// The first is a permanent property the operator should see once; the
 	// second is worth retrying.
-	Skipped bool   `json:"skipped,omitempty"`
-	Detail  string `json:"detail,omitempty"`
+	Skipped bool `json:"skipped,omitempty"`
+	// Reason is the machine-readable cause of a skip the sender chose, so a
+	// client can localise it instead of matching Detail: "notLive" for a chat
+	// whose platform has nothing on air, "notConnected" for a platform that was
+	// asked for and has no chat. Absent for a skip that is a property of the
+	// platform ("cannot post") and for every send.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// SkipReason says why a fan-out left one chat out. Empty means "post to it".
+type SkipReason string
+
+const (
+	// SkipNotLive is a connected chat whose platform has nothing on air.
+	SkipNotLive SkipReason = "notLive"
+	// SkipNotSelected is a chat the sender did not ask for. SendTo reports it so
+	// a caller can see it; the API drops it, because the operator named the
+	// platforms and did not need to be told about the others.
+	SkipNotSelected SkipReason = "notSelected"
+	// SkipNotConnected is a platform that was asked for and has no chat attached.
+	SkipNotConnected SkipReason = "notConnected"
+)
+
+// Detail is the sentence that goes with the code.
+func (r SkipReason) Detail() string {
+	switch r {
+	case SkipNotLive:
+		return "not live"
+	case SkipNotConnected:
+		return "not connected"
+	case SkipNotSelected:
+		return "not selected"
+	}
+	return string(r)
+}
+
+// LiveChatter is the optional half of an adapter that knows whether a live
+// chat is open right now: a YouTube broadcast being read, an X broadcast the
+// lifecycle published. Twitch and Kick cannot say it: their chat connects
+// whether or not the channel is streaming, which is why this is a separate
+// signal from State.
+type LiveChatter interface {
+	LiveChat() bool
 }
 
 // ErrFatal marks a failure that reconnecting cannot fix — a rejected token, a

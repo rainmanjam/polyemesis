@@ -321,6 +321,15 @@ code and against each platform's published API on 2026-11-07.
   generic Video comments edge documents a POST nobody has shown works on a
   live video, so polyemesis does not send to Facebook chat.
 
+**Where a message goes.** A message sent from the chat composer or
+`POST /chat/send` goes by default only to the platforms that are live: a chat
+whose platform has an enabled destination on air linked to that account (or, for
+YouTube and X, a live chat or broadcast the adapter reports). Twitch and Kick
+chat connect whether or not the channel is streaming, so being connected is not
+enough. A platform that is not live is reported "not live" and gets nothing; pick
+it in the composer, send `"platforms"` or send `"to": "all"` to post there
+anyway. Replies go to the platform of the message they answer, live or not.
+
 Not every row is a button in the console. The Twitch channel tools are served
 from `/chat/twitch/{resource}` in the [API](API.md); what each needs, and the
 Twitch scopes behind them, is in [PLATFORMS.md](PLATFORMS.md#twitch).

@@ -111,7 +111,7 @@
   "streamdeck.pi.pollQuestion": "Poll question",
   "streamdeck.pi.pollOptions": "Options, one per line (2 to 6)",
   "streamdeck.pi.pollDuration": "Duration (seconds)",
-  "streamdeck.pi.pollHint": "Press to start the poll in every chat. While it runs, the key shows the votes and time left; hold it to end the poll early.",
+  "streamdeck.pi.pollHint": "Press to start the poll in every live chat. While it runs, the key shows the votes and time left; hold it to end the poll early.",
   "streamdeck.pi.cutTail": "Cut the delayed tail",
   "streamdeck.pi.cutTailHint": "A held stop also cuts what is still buffered, so nothing more airs. Holding while the tail airs cuts it.",
   "streamdeck.pi.dumpSeconds": "Seconds to dump",
