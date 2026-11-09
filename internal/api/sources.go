@@ -554,10 +554,23 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	// Start from the stored row so a PUT that omits the token does not blank a
 	// secret the operator has already pasted into an encoder.
 	row := *existing
-	if !decodeJSON(w, r, &row) {
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	if err := decodeJSONInto(body, &row); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	row.ID = id
+	// Stop-on-ingest-loss ends YouTube broadcasts for good, and this PUT merges
+	// over the stored row: an acknowledgement given once would let a later
+	// request switch it on by saying nothing. Turning it ON has to carry the
+	// acknowledgement itself.
+	if autoStopNewlyEnabledWithoutAck(existing.Ingest.AutoStop, row.Ingest.AutoStop, sentAutoStopAck(body)) {
+		writeError(w, http.StatusBadRequest, db.AutoStopAckText)
+		return
+	}
 	// Clearing a chosen mode is refused, for the reason the create refuses
 	// unset and scoped the way handlePutSettings scopes it: to CLEARING. A row
 	// already unset -- one whose ingest blob will not parse reads back with the

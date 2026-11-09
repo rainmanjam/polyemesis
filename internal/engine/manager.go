@@ -228,6 +228,8 @@ type engineSettings struct {
 	// facebookCaptions is the startup environment's caption switch, like
 	// alertGate not something anybody saves.
 	facebookCaptions bool
+	// ingestLoss is the stop-on-ingest-loss handler the API installs.
+	ingestLoss IngestLossHandler
 }
 
 // engineSettingsSnapshot reads the settings block WHOLE, in one acquisition of
@@ -279,6 +281,7 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetPlatformHealth(s.platHealth)
 	eng.SetAlertGate(s.alertGate)
 	eng.SetFacebookCaptions(s.facebookCaptions)
+	eng.SetIngestLossHandler(s.ingestLoss)
 }
 
 // applyEngineSettingsAll is the other half: every save ends here rather than
@@ -1624,6 +1627,13 @@ func (m *Manager) SetFacebookCaptions(open bool) {
 // created later, through the same one path as SetHooks.
 func (m *Manager) SetStream(h *eventstream.Hub) {
 	m.saveEngineSetting(func(s *engineSettings) { s.stream = h })
+}
+
+// SetIngestLossHandler installs what every engine calls when its programme's
+// ingest has stayed lost for the auto-stop wait, now and for any engine created
+// later, through the same one path as SetStream.
+func (m *Manager) SetIngestLossHandler(h IngestLossHandler) {
+	m.saveEngineSetting(func(s *engineSettings) { s.ingestLoss = h })
 }
 
 // SetStartPrep installs a function the scheduler's actuator calls ONCE with

@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{destination} がライブ配信を開始すると、{title} が使用されます。",
   "studioEvents.useFailed": "このイベントを使用できませんでした: {reason}",
   "studioEvents.stale": "{accounts} のイベントを更新できませんでした。以前に読み込んだ内容を表示しています。",
-  "studioEvents.studioNow": "{destination} は YouTube Studio の「Stream now」を使用しているため、polyemesis はこのイベントを使用しません。先に配信先の設定でこれをオフにしてください。"
+  "studioEvents.studioNow": "{destination} は YouTube Studio の「Stream now」を使用しているため、polyemesis はこのイベントを使用しません。先に配信先の設定でこれをオフにしてください。",
+  "autostop.title": "入力が途絶えたら停止",
+  "autostop.desc": "OBS、vMix、ハードウェア機器、モバイル配信用バックパックなど、どのエンコーダーでも使える安全網です。下の待機時間のあいだプライマリもバックアップも届かなければ、何も流さず続けるかわりに、このプログラムのライブ配信先を停止します。初期設定ではオフです。",
+  "autostop.details": "放送中のスレートやプレイリストは入力としては数えません。バックアップへの切り替えは途絶ではなく、待機時間内の再接続では何も停止しません。放送ディレイのある配信先は、遅延分を流し終えてから終了します。",
+  "autostop.wait": "フィードなしから停止までの秒数",
+  "autostop.waitHint": "{min}〜{max}秒。空欄の場合は既定値の{default}秒になります。",
+  "autostop.waitInvalid": "{min}〜{max}の整数を入力するか、既定値にするには空欄のままにしてください。",
+  "autostop.warning": "配信先を停止すると、その中の YouTube ライブ配信は完全に終了します。再開すると映像は戻りますが、ライブ配信は元に戻りません。",
+  "autostop.ackRequired": "オンにする前に、チェックボックスで確認してください。",
+  "obs.viaIngest": "入力途絶フォールバック",
+  "autostop.ack": "停止すると YouTube 配信が終了することを理解しました"
 }

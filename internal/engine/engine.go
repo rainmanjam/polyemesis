@@ -462,6 +462,12 @@ type Engine struct {
 	// assembled field by field; every use is nil-safe. See stream.go.
 	stream      *eventstream.Hub
 	streamWatch *eventstream.Watcher
+	// ingestLoss is the stop-on-ingest-loss fallback's handler (under e.mu),
+	// lossW its clock (owned by observeLoop) and lossDests a test's way to say
+	// what is on air. See autostop.go.
+	ingestLoss IngestLossHandler
+	lossW      lossWatch
+	lossDests  func() []DestStatus
 	// lifecycle is the THIRD consumer of the edges hookWatch derives, and it is
 	// a consumer rather than a second sampler on purpose -- see observeLoop.
 	// It decides when a platform's broadcast goes live and when it ends.
@@ -6122,6 +6128,12 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			rx := e.hub.RxBytes()
 			live := !firstRx && rx > lastRx
 			lastRx, firstRx = rx, false
+
+			// The stop-on-ingest-loss fallback steps on the SAME `live` the alert
+			// watcher judges below, before the sweepWanted gate: it is its own
+			// consumer, and an install with only this switched on must still be
+			// watched. It does nothing unless armed. See autostop.go.
+			e.sweepIngestLoss(now, live)
 
 			// A server with no consumer at all -- no alert rule, no hook, no
 			// lifecycle platform, no timeline recorder -- pays for the cached

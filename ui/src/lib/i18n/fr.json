@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{title} sera utilisé lorsque {destination} passera en direct.",
   "studioEvents.useFailed": "Impossible d'utiliser cet événement : {reason}",
   "studioEvents.stale": "Impossible d'actualiser les événements de {accounts} ; affichage de ceux lus précédemment.",
-  "studioEvents.studioNow": "{destination} utilise « Stream now » de YouTube Studio, donc polyemesis n’utiliserait pas cet événement. Désactivez d’abord cette option dans les paramètres de la destination."
+  "studioEvents.studioNow": "{destination} utilise « Stream now » de YouTube Studio, donc polyemesis n’utiliserait pas cet événement. Désactivez d’abord cette option dans les paramètres de la destination.",
+  "autostop.title": "Arrêter en cas de perte d'entrée",
+  "autostop.desc": "Un filet de sécurité compatible avec tout encodeur : OBS, vMix, matériel ou sac à dos IRL. Si ni le flux principal ni le flux de secours n'arrive pendant l'attente ci-dessous, les destinations en direct de ce programme s'arrêtent au lieu de ne rien diffuser. Désactivé par défaut.",
+  "autostop.details": "Un slate ou une playlist à l'antenne ne compte pas comme un flux. Le basculement vers le secours n'est pas une perte, et une reconnexion pendant l'attente n'arrête rien. Les destinations avec un délai de diffusion finissent d'abord de diffuser leur queue différée.",
+  "autostop.wait": "Secondes sans flux avant l'arrêt",
+  "autostop.waitHint": "De {min} à {max} secondes. Laissez vide pour la valeur par défaut de {default}.",
+  "autostop.waitInvalid": "Saisissez un nombre entier de {min} à {max}, ou laissez vide pour la valeur par défaut.",
+  "autostop.warning": "Arrêter les destinations met fin définitivement à toute diffusion YouTube en direct parmi elles. Les redémarrer remet la vidéo sur la ligne, mais ne rend pas la diffusion.",
+  "autostop.ackRequired": "Cochez la case pour confirmer avant d'activer ceci.",
+  "obs.viaIngest": "repli sur perte d'entrée",
+  "autostop.ack": "Je comprends qu'arrêter met fin aux diffusions YouTube"
 }

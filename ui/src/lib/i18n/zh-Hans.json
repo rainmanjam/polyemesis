@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{destination} 开始直播时将使用 {title}。",
   "studioEvents.useFailed": "无法使用此活动：{reason}",
   "studioEvents.stale": "无法刷新 {accounts} 的活动；显示的是之前读取的内容。",
-  "studioEvents.studioNow": "{destination} 使用 YouTube Studio 的“Stream now”，因此 polyemesis 不会使用此活动。请先在目标设置中将其关闭。"
+  "studioEvents.studioNow": "{destination} 使用 YouTube Studio 的“Stream now”，因此 polyemesis 不会使用此活动。请先在目标设置中将其关闭。",
+  "autostop.title": "输入中断时停止",
+  "autostop.desc": "适用于任何编码器的安全网：OBS、vMix、硬件设备或 IRL 背包。如果在下方的等待时间内，主输入和备用输入都没有到达，该节目的直播目标会停止，而不是播出空白。默认关闭。",
+  "autostop.details": "正在播出的待机画面或播放列表不算输入。切换到备用不算中断，等待时间内重新连接也不会停止任何内容。设有播出延迟的目标会先播完延迟的尾部再结束。",
+  "autostop.wait": "无输入多少秒后停止",
+  "autostop.waitHint": "{min} 至 {max} 秒。留空则使用默认值 {default}。",
+  "autostop.waitInvalid": "请输入 {min} 至 {max} 之间的整数，或留空以使用默认值。",
+  "autostop.warning": "停止目标会永久结束其中所有正在进行的 YouTube 直播。重新启动后画面会恢复传输，但直播不会恢复。",
+  "autostop.ackRequired": "开启前请勾选此框确认。",
+  "obs.viaIngest": "输入中断回退",
+  "autostop.ack": "我明白停止会结束 YouTube 直播"
 }

@@ -20,6 +20,11 @@
             "track": 0
           }
         ],
+        "autoStop": {
+          "acknowledged": false,
+          "enabled": false,
+          "waitSeconds": 0
+        },
         "degraded": {
           "enabled": false,
           "maxLossPercent": 15,

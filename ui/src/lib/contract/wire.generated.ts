@@ -210,7 +210,8 @@ export const WIRE = {
     "failoverGraceSeconds": 5,
     "failoverReturnStableSeconds": 30,
     "mqttIntervalSeconds": 10,
-    "mqttKeepAliveSeconds": 30
+    "mqttKeepAliveSeconds": 30,
+    "autoStopWaitSeconds": 120
   },
   "renditionBounds": {
     "minDimension": 128,

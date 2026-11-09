@@ -1093,6 +1093,8 @@ func New(o Options) *Server {
 	// facebook_fresh_key.go.
 	if s.mgr != nil {
 		s.mgr.SetStartPrep(s.prepareDestinationStarts)
+		// The stop-on-ingest-loss fallback: each engine decides, this stops.
+		s.mgr.SetIngestLossHandler(s.ingestLossStop)
 	}
 	return s
 }

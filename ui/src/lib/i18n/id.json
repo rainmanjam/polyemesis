@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{title} akan digunakan saat {destination} tayang langsung.",
   "studioEvents.useFailed": "Tidak dapat menggunakan acara ini: {reason}",
   "studioEvents.stale": "Tidak dapat menyegarkan acara dari {accounts}; menampilkan data yang dibaca sebelumnya.",
-  "studioEvents.studioNow": "{destination} menggunakan \"Stream now\" dari YouTube Studio, sehingga polyemesis tidak akan memakai acara ini. Nonaktifkan dulu di pengaturan tujuan."
+  "studioEvents.studioNow": "{destination} menggunakan \"Stream now\" dari YouTube Studio, sehingga polyemesis tidak akan memakai acara ini. Nonaktifkan dulu di pengaturan tujuan.",
+  "autostop.title": "Hentikan saat masukan hilang",
+  "autostop.desc": "Jaring pengaman yang bekerja dengan encoder apa pun: OBS, vMix, perangkat keras, atau ransel IRL. Jika feed utama maupun cadangan tidak masuk selama waktu tunggu di bawah, tujuan langsung program ini berhenti alih-alih menayangkan kekosongan. Nonaktif secara default.",
+  "autostop.details": "Slate atau playlist yang sedang tayang tidak dihitung sebagai feed. Beralih ke cadangan bukan kehilangan, dan koneksi ulang dalam waktu tunggu tidak menghentikan apa pun. Tujuan dengan jeda siaran menyelesaikan dulu sisa tayangan yang tertunda.",
+  "autostop.wait": "Detik tanpa feed sebelum berhenti",
+  "autostop.waitHint": "{min} sampai {max} detik. Kosongkan untuk memakai default {default}.",
+  "autostop.waitInvalid": "Masukkan bilangan bulat dari {min} sampai {max}, atau kosongkan untuk memakai default.",
+  "autostop.warning": "Menghentikan tujuan mengakhiri siaran YouTube langsung di antaranya secara permanen. Memulainya lagi mengembalikan video ke jalur, tetapi tidak mengembalikan siarannya.",
+  "autostop.ackRequired": "Centang kotak untuk mengonfirmasi sebelum mengaktifkan ini.",
+  "obs.viaIngest": "cadangan saat masukan hilang",
+  "autostop.ack": "Saya paham bahwa menghentikan mengakhiri siaran YouTube"
 }

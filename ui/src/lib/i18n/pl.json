@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{title} zostanie użyty, gdy {destination} wystartuje na żywo.",
   "studioEvents.useFailed": "Nie udało się użyć tego wydarzenia: {reason}",
   "studioEvents.stale": "Nie udało się odświeżyć wydarzeń z {accounts}; wyświetlane są wcześniej odczytane.",
-  "studioEvents.studioNow": "{destination} korzysta z funkcji „Stream now” w YouTube Studio, więc polyemesis nie użyłby tego wydarzenia. Najpierw wyłącz ją w ustawieniach miejsca docelowego."
+  "studioEvents.studioNow": "{destination} korzysta z funkcji „Stream now” w YouTube Studio, więc polyemesis nie użyłby tego wydarzenia. Najpierw wyłącz ją w ustawieniach miejsca docelowego.",
+  "autostop.title": "Zatrzymaj po utracie wejścia",
+  "autostop.desc": "Siatka bezpieczeństwa działająca z dowolnym enkoderem: OBS, vMix, sprzętowym lub plecakiem IRL. Jeśli przez czas oczekiwania podany niżej nie dociera ani sygnał główny, ani zapasowy, aktywne cele tego programu są zatrzymywane, zamiast nadawać pustkę. Domyślnie wyłączone.",
+  "autostop.details": "Slajd lub playlista na antenie nie liczy się jako sygnał. Przełączenie na zapas nie jest utratą, a ponowne połączenie w czasie oczekiwania niczego nie zatrzymuje. Cele z opóźnieniem emisji najpierw kończą nadawanie opóźnionej końcówki.",
+  "autostop.wait": "Sekundy bez sygnału przed zatrzymaniem",
+  "autostop.waitHint": "Od {min} do {max} sekund. Zostaw puste, aby użyć wartości domyślnej {default}.",
+  "autostop.waitInvalid": "Wpisz liczbę całkowitą od {min} do {max} albo zostaw puste, aby użyć wartości domyślnej.",
+  "autostop.warning": "Zatrzymanie celów trwale kończy każdą transmisję YouTube na żywo wśród nich. Ponowne uruchomienie przywraca obraz na łącze, ale nie przywraca transmisji.",
+  "autostop.ackRequired": "Zaznacz pole, aby potwierdzić przed włączeniem.",
+  "obs.viaIngest": "awaryjne zatrzymanie po utracie wejścia",
+  "autostop.ack": "Rozumiem, że zatrzymanie kończy transmisje YouTube"
 }

@@ -344,6 +344,15 @@ func (a obsActions) Stop(_ context.Context, cfg obsbridge.Config) []obsbridge.Ou
 			out = append(out, *bad)
 			continue
 		}
+		if !row.Enabled {
+			// Already off -- by the programme's stop-on-ingest-loss fallback, or
+			// by hand. Pressing stop on it again would end nothing and, with the
+			// fallback, would double-record one stop; the bridge writes no
+			// lastActions entry for a stop that did nothing.
+			out = append(out, obsbridge.Outcome{ID: id, Name: row.Name, Outcome: string(bulkSkipped),
+				Message: "already stopped"})
+			continue
+		}
 		out = append(out, fromBulk(a.s.bulkOne(row, bulkStop.enabled())))
 	}
 	return out

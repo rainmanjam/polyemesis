@@ -924,6 +924,12 @@ const NOT_A_CONTROL: Record<string, string> = {
     "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
   "ingest.degraded.sustainSeconds":
     "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
+  "ingest.autoStop.enabled":
+    "edited per programme by AutoStopControl, on Sources (SourcesPage.tsx) and Settings → OBS bridge (ObsBridgeSettings.tsx). It saves through the sources API on its own button, so Settings → Ingest's Save carries the stored value back unchanged",
+  "ingest.autoStop.waitSeconds":
+    "edited per programme by AutoStopControl, on Sources (SourcesPage.tsx) and Settings → OBS bridge (ObsBridgeSettings.tsx). It saves through the sources API on its own button, so Settings → Ingest's Save carries the stored value back unchanged",
+  "ingest.autoStop.acknowledged":
+    "edited per programme by AutoStopControl, on Sources (SourcesPage.tsx) and Settings → OBS bridge (ObsBridgeSettings.tsx). It saves through the sources API on its own button, so Settings → Ingest's Save carries the stored value back unchanged",
 };
 
 /** Leaves a control DOES reach, by a route this guard cannot measure. Each one

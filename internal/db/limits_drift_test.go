@@ -43,6 +43,7 @@ func TestUIBoundsMatchTheGoValidators(t *testing.T) {
 		"alertRetryAttempts":       {MinAlertRetryAttempts, MaxAlertRetryAttempts},
 		"analyticsIntervalSeconds": {analytics.MinIntervalSeconds, analytics.MaxIntervalSeconds},
 		"analyticsRetentionDays":   {analytics.MinRetentionDays, analytics.MaxRetentionDays},
+		"autoStopWaitSeconds":      {MinAutoStopWaitSeconds, MaxAutoStopWaitSeconds},
 	}
 
 	for name, bounds := range want {

@@ -44,6 +44,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
+import { AutoStopControl } from "@/components/AutoStopControl";
 import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { PullIngestFields } from "@/components/PullIngestFields";
@@ -273,6 +274,7 @@ export function SourcesPage() {
             onRotate={() => setRotating(s)}
             onDelete={() => setDeleting(s)}
             onAddDestination={() => setAddingTo(s.id)}
+            onAutoStopSaved={() => void load()}
             previewOn={previewOn}
           />
         ))}
@@ -407,6 +409,7 @@ export function SourceCard({
   onRotate,
   onDelete,
   onAddDestination,
+  onAutoStopSaved,
   previewOn = false,
 }: Readonly<{
   source: SourceView;
@@ -417,6 +420,9 @@ export function SourceCard({
   /** A30. Opens the destination dialog on this programme. Absent in tests that
    *  do not exercise the receiving card, so the button is then not drawn. */
   onAddDestination?: () => void;
+  /** The stop-on-ingest-loss control saved; the page re-reads the sources so
+   *  this card's draft follows the stored ingest. */
+  onAutoStopSaved?: () => void;
   /** The preview encoder is on, so a receiving card can show a thumbnail. */
   previewOn?: boolean;
 }>) {
@@ -720,6 +726,15 @@ export function SourceCard({
           idPrefix={`source-${source.id}-degraded`}
           value={ing.degraded}
           onChange={(degraded) => setIngest({ degraded })}
+        />
+
+        {/* This programme's stop-on-ingest-loss safety net. Saves on its own
+            button, like the OBS bridge panel that edits the same stored value. */}
+        <AutoStopControl
+          sourceId={Number(source.id)}
+          idPrefix={`source-${source.id}-autostop`}
+          value={source.ingest.autoStop}
+          onSaved={() => onAutoStopSaved?.()}
         />
 
         {phase === "waiting" && <WaitingForEncoder />}

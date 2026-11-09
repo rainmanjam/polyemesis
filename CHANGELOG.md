@@ -8,6 +8,25 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **Stop on ingest loss: an opt-in safety net for any encoder.** A programme can now stop its live destinations when
+  neither its primary nor its backup ingest has arrived for a set time (default 120 seconds, 60 to 3600). It works with
+  the OBS bridge off or failing and with any encoder (OBS, vMix, hardware, IRL backpacks over SRTLA), and Settings, OBS
+  bridge shows and edits the same setting for the bridge's programme: one setting on the programme (`ingest.autoStop`), one
+  timer. **Off by default**, and it needs its own acknowledgement of the **Stop all** warning (stopping ends a YouTube
+  broadcast for good): the OBS bridge's `stopAcknowledged` does not cover it, and a save that turns it on without
+  `acknowledged: true` is a `400`. A slate or playlist on air does not count as a stream; a failover to the backup is not a
+  loss; a publisher that reconnects inside the wait stops nothing; it arms only after the ingest arrived while a destination
+  was delivering, and never restarts anything on recovery. A destination with a broadcast delay finishes airing its tail
+  before it ends. The stop is the one the bridge uses, recorded in `lastActions` with a new `via: "ingest"`, logged, and
+  published as a new `ingest.autostopped` event ([EVENTS.md](docs/EVENTS.md)). If OBS stops and the ingest is lost at the
+  same moment there is one stop and one `lastActions` entry. See [API.md](docs/API.md#stop-on-ingest-loss) and
+  [OBS-BRIDGE.md](docs/OBS-BRIDGE.md). **Rolling back to v0.16.0 is safe but drops the setting:** v0.16.0 reads the stored
+  programme with a lenient decoder and ignores the new key, but its next save of that programme rewrites the row without
+  it, so the fallback is off again after a roll-forward. A `PUT /sources/{id}` that sends `ingest.autoStop` to v0.16.0 is a
+  `400` (it rejects unknown fields on requests).
+
 ### Fixed
 
 - **A native Twitch poll refused for a non-Affiliate channel is now skipped, not failed, and the closing message says "1 vote".**

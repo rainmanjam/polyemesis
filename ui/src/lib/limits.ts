@@ -56,6 +56,12 @@ export const LIMITS = {
    *  climbs to a 30s ceiling. */
   alertRetryAttempts: { min: 1, max: 10 } as Bound,
 
+  /** Stop-on-ingest-loss (settings.ingest.autoStop): seconds neither the primary
+   *  nor the backup ingest may arrive before the programme's live destinations
+   *  stop. The floor clears the engine's own loss timers; the ceiling is one
+   *  hour. internal/db.MinAutoStopWaitSeconds / MaxAutoStopWaitSeconds. */
+  autoStopWaitSeconds: { min: 60, max: 3600 } as Bound,
+
   /** The audience sampler (Wave 4 #4): seconds between samples while on air,
    *  and days a finished stream's report is kept. internal/analytics. */
   analyticsIntervalSeconds: { min: 30, max: 900 } as Bound,

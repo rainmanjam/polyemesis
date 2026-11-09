@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{title} será usado quando {destination} entrar ao vivo.",
   "studioEvents.useFailed": "Não foi possível usar este evento: {reason}",
   "studioEvents.stale": "Não foi possível atualizar os eventos de {accounts}; exibindo o que foi lido anteriormente.",
-  "studioEvents.studioNow": "{destination} usa o \"Stream now\" do YouTube Studio, então o polyemesis não usaria este evento. Desative isso primeiro nas configurações do destino."
+  "studioEvents.studioNow": "{destination} usa o \"Stream now\" do YouTube Studio, então o polyemesis não usaria este evento. Desative isso primeiro nas configurações do destino.",
+  "autostop.title": "Parar ao perder a entrada",
+  "autostop.desc": "Uma rede de segurança que funciona com qualquer codificador: OBS, vMix, hardware ou mochila IRL. Se nem o sinal principal nem o de reserva chegarem durante a espera abaixo, os destinos ao vivo deste programa são parados em vez de transmitir o nada. Desativado por padrão.",
+  "autostop.details": "Uma lâmina ou playlist no ar não conta como sinal. Passar para o reserva não é uma perda, e uma reconexão dentro da espera não para nada. Destinos com atraso de transmissão terminam primeiro de exibir a cauda atrasada.",
+  "autostop.wait": "Segundos sem sinal antes de parar",
+  "autostop.waitHint": "De {min} a {max} segundos. Deixe vazio para usar o padrão de {default}.",
+  "autostop.waitInvalid": "Informe um número inteiro de {min} a {max}, ou deixe vazio para usar o padrão.",
+  "autostop.warning": "Parar destinos encerra de vez qualquer transmissão ao vivo do YouTube entre eles. Iniciá-los de novo recoloca o vídeo na linha, mas não traz a transmissão de volta.",
+  "autostop.ackRequired": "Marque a caixa para confirmar antes de ativar isto.",
+  "obs.viaIngest": "reserva por perda de entrada",
+  "autostop.ack": "Entendo que parar encerra transmissões do YouTube"
 }

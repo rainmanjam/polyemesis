@@ -1480,6 +1480,9 @@ export interface Settings {
      *  because it is per programme: failover itself is install-wide, but link
      *  quality belongs to one encoder's uplink. */
     degraded?: DegradedSettings;
+    /** This programme's stop-on-ingest-loss fallback. Optional: absent means
+     *  off. Edited by AutoStopControl, which always sends the whole object. */
+    autoStop?: AutoStopSettings;
   };
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
@@ -1796,6 +1799,17 @@ export interface DegradedSettings {
   maxLossPercent?: number;
   /** How long a breach -- and a recovery -- must last. 0 means the default. */
   sustainSeconds?: number;
+}
+
+/** Stop on ingest loss: stops a programme's live destinations when neither its
+ *  primary nor its backup ingest has delivered for `waitSeconds`. `waitSeconds`
+ *  0 or absent means the default; otherwise limits.autoStopWaitSeconds. The
+ *  server refuses turning it on unless the same request carries
+ *  `acknowledged: true`. */
+export interface AutoStopSettings {
+  enabled: boolean;
+  waitSeconds?: number;
+  acknowledged: boolean;
 }
 
 /** The primary's last measurement. Each figure is absent until measured, and
@@ -4410,7 +4424,7 @@ export interface ObsOutcome {
 export interface ObsActionRecord {
   at: string;
   action: "start" | "stop" | "scene";
-  via: "websocket" | "script";
+  via: "websocket" | "script" | "ingest";
   scene?: string;
   preset?: string;
   results: ObsOutcome[];

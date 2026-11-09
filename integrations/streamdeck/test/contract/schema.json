@@ -2006,6 +2006,28 @@
                 }
               }
             },
+            "autoStop": {
+              "types": [
+                "object"
+              ],
+              "fields": {
+                "acknowledged": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "enabled": {
+                  "types": [
+                    "boolean"
+                  ]
+                },
+                "waitSeconds": {
+                  "types": [
+                    "number"
+                  ]
+                }
+              }
+            },
             "degraded": {
               "types": [
                 "object"

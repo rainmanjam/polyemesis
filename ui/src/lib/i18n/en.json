@@ -4557,5 +4557,15 @@
   "studioEvents.used": "{title} will be used when {destination} goes live.",
   "studioEvents.useFailed": "Could not use this event: {reason}",
   "studioEvents.stale": "Could not refresh the events of {accounts}; showing what was read earlier.",
-  "studioEvents.studioNow": "{destination} uses YouTube Studio's Stream now, so polyemesis would not use this event. Turn that off in the destination's settings first."
+  "studioEvents.studioNow": "{destination} uses YouTube Studio's Stream now, so polyemesis would not use this event. Turn that off in the destination's settings first.",
+  "autostop.title": "Stop on ingest loss",
+  "autostop.desc": "A safety net that works with any encoder: OBS, vMix, hardware or an IRL backpack. If neither the primary nor the backup feed arrives for the wait below, this programme's live destinations stop instead of airing nothing. Off by default.",
+  "autostop.details": "A slate or playlist on air does not count as a feed. Switching to the backup is not a loss, and a reconnect inside the wait stops nothing. Destinations with a broadcast delay finish airing their delayed tail first.",
+  "autostop.wait": "Seconds with no feed before stopping",
+  "autostop.waitHint": "{min} to {max} seconds. Leave empty for the default of {default}.",
+  "autostop.waitInvalid": "Enter a whole number from {min} to {max}, or leave it empty for the default.",
+  "autostop.warning": "Stopping destinations ends any live YouTube broadcast among them for good. Starting them again puts video back on the wire, but it does not bring the broadcast back.",
+  "autostop.ackRequired": "Tick the box to confirm before turning this on.",
+  "obs.viaIngest": "ingest loss fallback",
+  "autostop.ack": "I understand that stopping ends YouTube broadcasts"
 }
