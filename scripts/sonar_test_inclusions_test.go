@@ -49,7 +49,11 @@ func isTestPath(rel string) bool {
 			return true
 		}
 	}
-	return false
+	// Python marks a test by its prefix, not its suffix: the OBS script's
+	// tests are integrations/obs/test_polyemesis_obs.py, which was scored as
+	// production code with 0% coverage until the glob below was added.
+	base := filepath.Base(rel)
+	return strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py")
 }
 
 // skipDirs are trees SonarCloud never sees, so a test file inside one is not
@@ -184,6 +188,8 @@ func TestTheInclusionMatcherActuallyDiscriminates(t *testing.T) {
 		{"*.test.ts", "web/src/x.test.ts", false, "a single * does not span directories"},
 		{"**/testdata/**", "internal/api/testdata/faketool/main.go", true, "a fixture binary is test code"},
 		{"**/testdata/**", "internal/api/handlers.go", false, "and an ordinary file is not"},
+		{"**/test_*.py", "integrations/obs/test_polyemesis_obs.py", true, "a Python test is test code"},
+		{"**/test_*.py", "integrations/obs/polyemesis_obs.py", false, "and the script it tests is not"},
 	}
 	for _, c := range []struct {
 		path string
@@ -194,6 +200,8 @@ func TestTheInclusionMatcherActuallyDiscriminates(t *testing.T) {
 		{"internal/db/db_test.go", true},
 		{"internal/db/db.go", false},
 		{"internal/api/handlers.go", false},
+		{"integrations/obs/test_polyemesis_obs.py", true},
+		{"integrations/obs/polyemesis_obs.py", false},
 	} {
 		if got := isTestPath(c.path); got != c.want {
 			t.Errorf("isTestPath(%q) = %v, want %v", c.path, got, c.want)
