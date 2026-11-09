@@ -563,22 +563,19 @@ export function ChatComposer({
     if (!configured || replyTo) return;
     let on = true;
     const read = () => {
-      try {
-        Promise.resolve(api.chatLive())
-          .then((v) => {
-            if (!on) return;
-            setLive(v);
-            setLiveFailed(false);
-          })
-          .catch(() => {
-            if (!on) return;
-            setLive(null);
-            setLiveFailed(true);
-          });
-      } catch {
-        setLive(null);
-        setLiveFailed(true);
-      }
+      // Started inside the chain so a synchronous throw lands in .catch too.
+      Promise.resolve()
+        .then(() => api.chatLive())
+        .then((v) => {
+          if (!on) return;
+          setLive(v);
+          setLiveFailed(false);
+        })
+        .catch(() => {
+          if (!on) return;
+          setLive(null);
+          setLiveFailed(true);
+        });
     };
     read();
     const id = window.setInterval(read, 10_000);
