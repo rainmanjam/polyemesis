@@ -26,7 +26,7 @@
 # docs/DESIGN-SYSTEM.md on why the design tokens are a checked-in copy.
 
 # --- build ------------------------------------------------------------------
-FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS build
 # The repo layout is reproduced under /repo, so web/'s relative paths (../docs,
 # ../../internal/...) resolve exactly as they do in a checkout.
 WORKDIR /repo/web
