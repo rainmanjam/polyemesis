@@ -41,8 +41,14 @@ export function StudioEventsCalendar({ ownEventIds }: Readonly<{ ownEventIds: Re
   }, [load]);
 
   useEffect(() => {
-    // A failed read leaves the list as it was (empty): the only effect is that no "Use for" button is offered.
-    api.listDestinations().then((rows) => setDests(rows.map((r) => r.destination)), () => undefined);
+    // A failed or malformed read leaves the list as it was (empty): the only effect is that no "Use for" button
+    // is offered. The calendar sits on pages whose own reads may answer anything, so a non-list must not throw.
+    api.listDestinations().then(
+      (rows) => {
+        if (Array.isArray(rows)) setDests(rows.map((r) => r.destination));
+      },
+      () => undefined,
+    );
   }, []);
 
   const shown = (events ?? []).filter((e) => !ownEventIds.has(e.id));
