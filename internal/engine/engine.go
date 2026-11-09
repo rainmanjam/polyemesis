@@ -1793,17 +1793,31 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// the comment above describes, reached through the one door it did not
 	// close.
 	e.mu.Lock()
-	if e.measuredMode != s.Ingest.Mode {
+	// "Changed" is asked of the SETTINGS, not of measuredMode. measuredMode is
+	// IngestUnset until a layout is measured, so comparing against it was true
+	// on EVERY reconcile before the first probe landed: each start press reset
+	// probeFails and bumped sourceGen, which discarded an in-flight probe and
+	// kept the give-up from ever being reached -- and a destination started
+	// provisionally after the give-up was torn down by the next press. The
+	// measured half is kept for a layout measured under a mode the settings no
+	// longer name, which a settings write that bypassed Reconcile could cause.
+	modeChanged := prev.Ingest.Mode != s.Ingest.Mode ||
+		(e.measured && e.measuredMode != s.Ingest.Mode)
+	if modeChanged {
 		if e.measured {
 			// invalidate does both halves, generation included.
 			e.invalidate()
-			e.streamSeen.Store(false)
-			e.holdSince.Store(0)
 		} else {
 			// Nothing measured to put back, but a probe may still be in flight
 			// and it has to be told its result is stale.
 			e.sourceGen++
 		}
+		// Both branches: the stream seen and the hold's clock belong to the OLD
+		// transport. Clearing them only when a layout had been measured let an
+		// expired latch survive an RTMP to SRT switch, so destinations kept
+		// running provisionally before a single SRT probe.
+		e.streamSeen.Store(false)
+		e.holdSince.Store(0)
 		// The failure history belongs to the OLD transport. Without this, five
 		// failed RTMP probes followed by a switch to SRT started destinations
 		// provisionally on the very next reconcile, before a single SRT probe
@@ -2144,6 +2158,93 @@ func (e *Engine) holdExpired(now time.Time) bool {
 		return false
 	}
 	return now.Sub(time.Unix(0, since)) >= holdCeiling
+}
+
+// feedWatch notices that any feed is reaching the selector's output: the
+// primary, the backup, or the slate and playlist behind the selector. A stream
+// is "seen" on any of them, because that is what the hold waits for. Counting
+// only the primary held destinations forever when the backup or the slate went
+// live before the primary connected, or when the engine restarted with the
+// primary down; before the ceiling they went out after 75s.
+type feedWatch struct {
+	e    *Engine
+	last map[*relay.Hub]uint64
+}
+
+func newFeedWatch(e *Engine) *feedWatch {
+	w := &feedWatch{e: e, last: map[*relay.Hub]uint64{}}
+	w.advanced() // baseline: bytes already counted are not a new stream
+	return w
+}
+
+// advanced reports whether any watched hub carried bytes since the last call.
+// Counters are per hub, so a hub that replaces another (a new backup listener)
+// starts from its own baseline instead of reading as a jump.
+func (w *feedWatch) advanced() bool {
+	hubs := []*relay.Hub{w.e.hub, w.e.backupHub(), w.e.downstreamHub()}
+	moved := false
+	seen := make(map[*relay.Hub]struct{}, len(hubs))
+	for _, h := range hubs {
+		if h == nil {
+			continue
+		}
+		if _, dup := seen[h]; dup {
+			continue
+		}
+		seen[h] = struct{}{}
+		rx := h.RxBytes()
+		if prev, ok := w.last[h]; ok && rx > prev {
+			moved = true
+		}
+		w.last[h] = rx
+	}
+	for h := range w.last {
+		if _, ok := seen[h]; !ok {
+			delete(w.last, h)
+		}
+	}
+	return moved
+}
+
+// noteStreamSeen records that a feed has been seen and starts the hold's clock
+// if destinations are waiting on an unmeasured layout. gen is the sourceGen
+// snapshotted before the bytes were read: under e.mu, the same lock
+// reconcileIngest clears the flag under, so a tick that began on the old ingest
+// cannot set the flag just after the new one cleared it.
+func (e *Engine) noteStreamSeen(gen uint64, anyFeed bool) {
+	if !anyFeed {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.sourceGen != gen {
+		return
+	}
+	e.streamSeen.Store(true)
+	if !e.measured {
+		e.holdBegan(time.Now())
+	}
+}
+
+// reconcileAfterHoldExpiry re-plans once the hold's ceiling has run out, so the
+// destinations it was holding go out without waiting for an unrelated reconcile.
+func (e *Engine) reconcileAfterHoldExpiry() {
+	e.mu.RLock()
+	measured := e.measured
+	e.mu.RUnlock()
+	if measured {
+		return
+	}
+	e.log.Warn("the ingest layout is still unknown after the hold ceiling; starting destinations provisionally",
+		"ceiling", holdCeiling.String())
+	settings := e.Settings()
+	e.reconcileMu.Lock()
+	err := e.reconcileDownstream(settings)
+	e.reconcileMu.Unlock()
+	if err != nil {
+		e.log.Warn("hold ceiling reached but the outputs could not be reconciled; the next reconcile will", "err", err)
+	}
+	e.publishStatus()
 }
 
 func (e *Engine) reconcileRecorder(s db.Settings) {
@@ -3057,7 +3158,9 @@ func (e *Engine) logStoppedForHold() {
 	e.mu.RLock()
 	var names []string
 	for _, d := range e.dests {
-		if d != nil && d.proc != nil && d.row != nil {
+		// proc == nil is included: stopDestinations tears those entries down
+		// too, so leaving them out made the log understate what was stopped.
+		if d != nil && d.row != nil {
 			names = append(names, d.row.Name)
 		}
 	}
@@ -3066,8 +3169,8 @@ func (e *Engine) logStoppedForHold() {
 		return
 	}
 	slices.Sort(names)
-	e.log.Warn("stopping destinations: the ingest layout they started against is no longer known; "+
-		"they restart once it is measured", "dests", names)
+	e.log.Warn("stopping destinations: the ingest layout is not known, so the plan for them is empty; "+
+		"they restart once it is measured or the hold gives up", "dests", names)
 }
 
 // renditionGone reports whether the store has no rendition with this id. A
@@ -3885,12 +3988,32 @@ func (e *Engine) probeLoop(ctx context.Context) {
 	// signal that means "there is a stream to probe".
 	lastRx := e.hub.RxBytes()
 	idleRounds := 0
+	feeds := newFeedWatch(e)
+	wasExpired := false
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		}
+
+		// Snapshotted BEFORE the bytes are read, so a stream-seen flag set from
+		// this tick can be refused if the ingest changed under it.
+		e.mu.RLock()
+		gen := e.sourceGen
+		e.mu.RUnlock()
+		anyFeed := feeds.advanced()
+		e.noteStreamSeen(gen, anyFeed)
+		// The ceiling is driven by this loop, not by whichever reconcile happens
+		// to arrive: a stream that alternates between quiet and flowing never
+		// produced a `changed` or a give-up flip, so nothing re-planned when the
+		// clock ran out (#473). Expiry is an edge like the give-up is.
+		expiredNow := e.holdExpired(time.Now())
+		expiryFlipped := expiredNow && !wasExpired
+		wasExpired = expiredNow
+		if expiryFlipped {
+			e.reconcileAfterHoldExpiry()
 		}
 
 		rx := e.hub.RxBytes()
@@ -3900,7 +4023,6 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		next := fast
 		if flowing {
 			idleRounds = 0
-			e.streamSeen.Store(true)
 			// The hold's exit is a STATE TRANSITION, not a layout change, and
 			// reconciling only on `changed` left the exit inert.
 			//
