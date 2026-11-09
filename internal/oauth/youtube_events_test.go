@@ -477,3 +477,14 @@ func TestBroadcastStateSaysNotListedWithATypedError(t *testing.T) {
 		t.Errorf("err = %v, want ErrBroadcastNotListed", err)
 	}
 }
+
+func TestBroadcastStateCarriesTheLiveChatId(t *testing.T) {
+	var log []capture
+	y := lnStub(t, &log, map[string]http.HandlerFunc{"GET " + ytBroadcastsPath: func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"items":[{"id":"b-1","snippet":{"title":"t","liveChatId":"chat-b1"},"status":{"lifeCycleStatus":"live"},"contentDetails":{}}]}`)
+	}})
+	st, err := y.BroadcastState(context.Background(), "tok", "b-1")
+	if err != nil || st.LiveChatID != "chat-b1" {
+		t.Errorf("state = %+v %v, want the liveChatId", st, err)
+	}
+}

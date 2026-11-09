@@ -82,6 +82,8 @@ type BroadcastLifecycleState struct {
 	// between the broadcast and the stream whose liveness gates the transition
 	// to testing, and without it the precondition below cannot be read at all.
 	BoundStreamID string `json:"boundStreamId,omitempty"`
+	// LiveChatID is the broadcast's chat, from the same read (snippet.liveChatId). Empty when YouTube reports none.
+	LiveChatID string `json:"liveChatId,omitempty"`
 	// StreamStatus is the bound stream's liveness verbatim -- active, created,
 	// error, inactive, ready. NOT the health: those are two different fields on
 	// the same resource and conflating them is a documented bug. Only

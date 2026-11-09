@@ -370,3 +370,19 @@ func (s *Server) deleteNeverAiredOnDestinationDelete(ctx context.Context, d *db.
 	}
 	return ""
 }
+
+// pointChatFromState points the account's YouTube chat adapter at the broadcast's own live chat when a state read of a
+// broadcast whose chat is open shows its liveChatId. It covers a broadcast created by polyemesis (whose insert answer
+// may carry no id, or whose chat was not open when the open pointed at it) and an adopted event alike, and it is
+// repeated on each live read, which is cheap and idempotent and re-points an adapter rebuilt since. Pointing also
+// wakes a waiting adapter and clears its "this chat ended" mark. See chat.YouTubeAdapter.SetLiveChatID.
+func (c *lifecycleCoordinator) pointChatFromState(d *db.Destination, st *oauth.BroadcastLifecycleState) {
+	if c.pointYouTubeChat == nil || d.Platform != db.PlatformYouTube || d.AccountID == nil || st == nil ||
+		strings.TrimSpace(st.LiveChatID) == "" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(st.Status)) {
+	case phaseLive, phaseTesting, phaseLiveStarting, phaseTestStarting:
+		c.pointYouTubeChat(*d.AccountID, st.LiveChatID)
+	}
+}

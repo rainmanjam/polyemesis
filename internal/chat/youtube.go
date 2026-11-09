@@ -98,6 +98,9 @@ type YouTubeAdapter struct {
 	chatID string
 	// wake ends a wait for a broadcast early; SetLiveChatID sends on it. Buffered one and sent without blocking.
 	wake chan struct{}
+	// endedID is the chat that last finished and endedAt when; see Run.
+	endedID string
+	endedAt time.Time
 	// act is the activity decoder's state: what it has seen, when it began.
 	act ytActivity
 	// tallies is the last count each poll message was seen with in a list page;
@@ -165,16 +168,17 @@ func (y *YouTubeAdapter) setHealth(state State, detail string) {
 // for a broadcast is a normal state, not a failure.
 func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 	idleFor := ytBroadcastPoll
-	// endedID is the chat that last finished. A broadcast can stay listed as
-	// active after its chat has ended or been disabled, so rediscovering the
-	// same id means "nothing new", not "a chat to poll".
-	endedID := ""
+	// The chat that last finished (y.endedID) is remembered for ytEndedHold. A broadcast can stay listed as active
+	// after its chat has ended or been disabled, so rediscovering the same id soon after means "nothing new", not
+	// "a chat to poll". It is NOT remembered for ever, and an explicit SetLiveChatID clears it: a chat pointed at
+	// before its broadcast was live answers "not found", counts as ended, and was then refused again when the
+	// broadcast went live (found live on staging: chat waited 7 minutes beside a live broadcast).
 	for ctx.Err() == nil {
 		chatID, err := y.liveChatID(ctx)
 		if err != nil {
 			return err
 		}
-		if chatID != "" && chatID == endedID {
+		if chatID != "" && y.recentlyEnded(chatID) {
 			y.mu.Lock()
 			y.chatID = ""
 			y.mu.Unlock()
@@ -207,12 +211,16 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 			continue
 		}
 		idleFor = ytBroadcastPoll
-		endedID = ""
+		y.mu.Lock()
+		y.endedID = ""
+		y.mu.Unlock()
 
 		if err := y.pump(ctx, chatID, sink); err != nil {
 			return err
 		}
-		endedID = chatID
+		y.mu.Lock()
+		y.endedID, y.endedAt = chatID, y.cfg.Now()
+		y.mu.Unlock()
 		// The chat ended. Forget the id so the next round rediscovers, in case
 		// the operator starts a second broadcast without restarting anything.
 		y.mu.Lock()
@@ -224,12 +232,23 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 		// Wait before rediscovering: the broadcast list can still show the
 		// chat that just ended, and looping straight back spent the day's
 		// quota in a second.
-		if !y.cfg.Sleep(ctx, idleFor) {
+		// Wakeable: a SetLiveChatID (the coordinator pointing at the broadcast that is now live) must not wait this out.
+		if !y.sleepOrWake(ctx, idleFor) {
 			return nil
 		}
 		idleFor = min(idleFor*2, ytBroadcastPollMax)
 	}
 	return nil
+}
+
+// ytEndedHold is how long a chat that finished is not read again when discovery lists it again.
+const ytEndedHold = 3 * time.Minute
+
+// recentlyEnded reports whether id is the chat that finished less than ytEndedHold ago.
+func (y *YouTubeAdapter) recentlyEnded(id string) bool {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	return y.endedID == id && y.cfg.Now().Sub(y.endedAt) < ytEndedHold
 }
 
 // SetLiveChatID points the adapter at a chat, and "" lets it find one again. The go-live path calls it with the
@@ -239,6 +258,7 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 func (y *YouTubeAdapter) SetLiveChatID(id string) {
 	y.mu.Lock()
 	y.chatID = strings.TrimSpace(id)
+	y.endedID = "" // an explicit pointing overrides "this chat ended": the caller knows the broadcast is live now
 	y.mu.Unlock()
 	select {
 	case y.wake <- struct{}{}:

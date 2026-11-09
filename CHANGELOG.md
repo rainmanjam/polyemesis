@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Fixed
 
+- **YouTube chat now connects to a broadcast polyemesis created at go-live.** The chat was pointed at the new
+  broadcast's chat before it was live, YouTube answered "not found", the adapter counted that chat as ended and then
+  refused it for ever when the broadcast went live (chat sat "waiting for a YouTube broadcast to go live" beside a
+  live broadcast). Pointing the chat again now clears that mark and wakes the adapter even from the wait after an
+  ended chat, a chat that ended is retried after three minutes when discovery lists it again, and the coordinator
+  points chat at the broadcast's own `liveChatId` from every state read of a live or testing broadcast (created or
+  adopted), and in the sweep that takes it live.
+
+### Fixed
+
 - **A YouTube destination's broadcast is opened before video is allowed to flow.** The broadcast used to be inserted
   and bound by the coordinator's sweep a few seconds AFTER video reached YouTube, so auto-start (which fires on the
   stream's inactive-to-active edge) never fired and the broadcast sat "ready" with chat waiting. Start, Start all,

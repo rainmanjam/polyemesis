@@ -1337,6 +1337,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	if !d.Enabled && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
 		return
 	}
+	c.pointChatFromState(d, st)
 	plan := planLifecycle(d.Enabled, st)
 	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.YouTubeLiveNow() &&
 		strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
@@ -1634,6 +1635,13 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	}
 	if plan.Send == oauth.PhaseLive {
 		c.tellChat(d.Platform, d.AccountID, broadcastID)
+		if d.Platform == db.PlatformYouTube {
+			// The transition just made it live. Read it once more for its liveChatId (the insert may not have carried
+			// one) rather than leave chat waiting until the settled-live cadence next asks.
+			if st, serr := prov.BroadcastState(ctx, acct.AccessToken, broadcastID); serr == nil {
+				c.pointChatFromState(d, st)
+			}
+		}
 	}
 	// TRACKED BEFORE THE RECORD IS WRITTEN. The broadcast is on air from here, and the tracked target is what
 	// endOrphan ends if the row is deleted before the next sweep. Tracking it only after a successful write

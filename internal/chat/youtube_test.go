@@ -541,3 +541,107 @@ func TestYouTubeAdapterReadsTheChatItIsPointedAtWithoutWaitingOutItsBackoff(t *t
 	cancel()
 	<-done
 }
+
+// A chat pointed at BEFORE its broadcast is live answers "not found" and counts as ended. Pointing at it again once the
+// broadcast IS live must read it: the explicit pointing overrides the ended mark, and it wakes the adapter even though
+// it is in the wait that follows an ended chat.
+func TestPointingAgainAtAChatThatWasNotYetLiveReadsItPromptly(t *testing.T) {
+	var live atomic.Bool
+	var notFound atomic.Int64
+	reads := make(chan struct{}, 8)
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		if !strings.Contains(r.URL.Path, "liveChat/messages") {
+			fmt.Fprint(w, `{"items":[]}`)
+			return
+		}
+		if !live.Load() {
+			notFound.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"errors":[{"reason":"liveChatNotFound"}]}}`)
+			return
+		}
+		select {
+		case reads <- struct{}{}:
+		default:
+		}
+		fmt.Fprint(w, `{"items":[],"pollingIntervalMillis":60000,"nextPageToken":"n"}`)
+	})
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) {
+		// Every wait is one only a SetLiveChatID wake (or the end of the test) can cut short.
+		c.Sleep = func(ctx context.Context, d time.Duration) bool { <-ctx.Done(); return false }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = a.Run(ctx, SinkFunc(func(Message) {})) }()
+
+	a.SetLiveChatID("chat-1") // pointed at open, before the broadcast is live: the chat answers not found
+	deadline := time.Now().Add(2 * time.Second)
+	for notFound.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if notFound.Load() == 0 {
+		t.Fatal("the adapter never polled the chat it was pointed at")
+	}
+	time.Sleep(50 * time.Millisecond) // it ends the chat and goes into the wait that follows
+	live.Store(true)
+	a.SetLiveChatID("chat-1") // the broadcast is live now
+	select {
+	case <-reads:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pointing at the same chat again did not read it: the ended mark or the unwakeable wait held it")
+	}
+	cancel()
+	<-done
+}
+
+// The same chat found again by discovery is read again once the ended mark expires, so a chat that was not yet live
+// when it ended is picked up when its broadcast goes live.
+func TestADiscoveredChatThatEndedIsRetriedAfterTheHold(t *testing.T) {
+	var live atomic.Bool
+	var clock atomic.Int64
+	reads := make(chan struct{}, 8)
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/liveBroadcasts"):
+			// A PRIVATE active broadcast: discovery asks for active broadcasts whatever their privacy.
+			fmt.Fprint(w, `{"items":[{"snippet":{"liveChatId":"chat-p","title":"t"},"status":{"privacyStatus":"private"}}]}`)
+		case !live.Load():
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"errors":[{"reason":"liveChatNotFound"}]}}`)
+		default:
+			select {
+			case reads <- struct{}{}:
+			default:
+			}
+			fmt.Fprint(w, `{"items":[],"pollingIntervalMillis":60000,"nextPageToken":"n"}`)
+		}
+	})
+	base := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) {
+		c.Now = func() time.Time { return base.Add(time.Duration(clock.Load())) }
+		c.Sleep = func(ctx context.Context, d time.Duration) bool {
+			// Each wait passes the time it was asked for, then yields briefly so the test can observe.
+			clock.Add(int64(d))
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(5 * time.Millisecond):
+				return true
+			}
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = a.Run(ctx, SinkFunc(func(Message) {})) }()
+	time.Sleep(100 * time.Millisecond) // it found chat-p while the broadcast had no readable chat, and ended it
+	live.Store(true)
+	select {
+	case <-reads:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a chat that ended before its broadcast was live was never retried, however long the wait")
+	}
+	cancel()
+	<-done
+}
