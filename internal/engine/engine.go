@@ -569,6 +569,10 @@ type Engine struct {
 	// held. Atomic for the same reason probeFails is: read from the probe loop
 	// and written from reconcile.
 	holdSince atomic.Int64
+	// streamSeen is whether the relay has carried bytes since the ingest last
+	// started, set by probeLoop and cleared wherever the layout is invalidated.
+	// The hold's ceiling only runs while it is true: see reconcileOutputs.
+	streamSeen atomic.Bool
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -1793,6 +1797,8 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		if e.measured {
 			// invalidate does both halves, generation included.
 			e.invalidate()
+			e.streamSeen.Store(false)
+			e.holdSince.Store(0)
 		} else {
 			// Nothing measured to put back, but a probe may still be in flight
 			// and it has to be told its result is stale.
@@ -1923,6 +1929,8 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// probeLoop's idle branch does NEITHER on purpose -- it drops probed but
 	// keeps the layout, because a layout that was measured stays measured.
 	e.invalidate()
+	e.streamSeen.Store(false)
+	e.holdSince.Store(0)
 	// A new ingest gets a fresh hold. The failure count is about THIS stream,
 	// so carrying it across a restart would start the next one provisionally
 	// before anything had been tried.
@@ -2903,9 +2911,26 @@ func (e *Engine) reconcileOutputs() error {
 	holdDests := !measured && silenceSig == "" && !unmeasurable
 	// Stamped from the decision, so the clock starts with the hold and cannot
 	// keep running once it is over.
-	if holdDests {
+	//
+	// THE CLOCK RUNS ONLY WHILE A STREAM HAS BEEN SEEN, AND ONCE THE CEILING HAS
+	// FIRED IT STAYS FIRED. Both halves were found on staging (OBS bridge, two
+	// destinations started two seconds apart). The ceiling is about probing that
+	// is not happening, but it was stamped by the first held reconcile -- at
+	// boot on an idle box -- so it had expired long before an encoder connected.
+	// The first start then went out provisionally, and the pass that let it out
+	// cleared the clock; the very next reconcile (the second start) held again,
+	// planned nothing and tore the first destination down, to start it again
+	// when the probe finally landed. Waiting is the only behaviour that cannot
+	// do that, so the clock does not run before there is a stream to probe, and
+	// an expiry is kept until a layout is measured or the ingest is invalidated.
+	switch {
+	case holdDests && e.streamSeen.Load():
 		e.holdBegan(now)
-	} else {
+	case holdDests:
+		e.holdSince.Store(0)
+	case unmeasurable:
+		// Latched: do not clear, or the next pass flips back to holding.
+	default:
 		e.holdSince.Store(0)
 	}
 	// Published from the decision itself, not recomputed anywhere else, so
@@ -2968,6 +2993,12 @@ func (e *Engine) reconcileOutputs() error {
 	// destination's graph can be vouched for, so none may keep running. They
 	// come back on the next reconcile once the probe lands.
 	plans := map[int64]destPlan{}
+	if holdDests {
+		// A destination still running here was started against a layout that
+		// has since been invalidated. It is stopped, and it was once stopped
+		// without a word.
+		e.logStoppedForHold()
+	}
 	if !holdDests {
 		plans = e.planDestinations(destRows, wantRends, src, srcSig, unmeasurable)
 	}
@@ -3019,6 +3050,24 @@ func (e *Engine) reconcileOutputs() error {
 		e.startDestinations(plans)
 	}
 	return nil
+}
+
+// logStoppedForHold names the destinations the hold is about to stop.
+func (e *Engine) logStoppedForHold() {
+	e.mu.RLock()
+	var names []string
+	for _, d := range e.dests {
+		if d != nil && d.proc != nil && d.row != nil {
+			names = append(names, d.row.Name)
+		}
+	}
+	e.mu.RUnlock()
+	if len(names) == 0 {
+		return
+	}
+	slices.Sort(names)
+	e.log.Warn("stopping destinations: the ingest layout they started against is no longer known; "+
+		"they restart once it is measured", "dests", names)
 }
 
 // renditionGone reports whether the store has no rendition with this id. A
@@ -3851,6 +3900,7 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		next := fast
 		if flowing {
 			idleRounds = 0
+			e.streamSeen.Store(true)
 			// The hold's exit is a STATE TRANSITION, not a layout change, and
 			// reconciling only on `changed` left the exit inert.
 			//

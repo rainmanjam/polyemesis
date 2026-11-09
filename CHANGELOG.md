@@ -10,6 +10,17 @@ its first tagged release.
 
 ### Fixed
 
+- **A destination started before the ingest layout was measured is no longer torn down and restarted.** On an
+  idle box the hold's 75s ceiling was stamped at boot, so it had expired by the time an encoder connected. The first
+  start went out provisionally and cleared the clock, the next start (the OBS bridge presses two a couple of seconds
+  apart) re-held with an empty plan and stopped the first destination with no log line, and it started again when the
+  probe landed: a live viewer lost about 10s, and a single-use key would have broken. The ceiling now runs only once
+  a stream has been seen, stays expired until a layout is measured, and a destination stopped by the hold is logged.
+  A start made before the layout is known now waits for it.
+- **A loudness monitor (and the ingest meter) is no longer SIGKILLed on a healthy stop.** Its 1s grace left 250ms
+  after the first quiet-feed wake at 750ms, so every stop on a quiet feed logged "process did not exit after grace
+  period". A child with a wake now gets the wake schedule plus a 500ms window (1.75s); children with no wake and the
+  8s kinds are unchanged.
 - **A failover away from a quiet source no longer leaves its old relay hop to be killed 8 seconds later.** The
   switch waited a fixed 500ms for the outgoing copy hop and then cut its relay subscription, but the supervisor
   wakes a stopping hop on a quiet feed at 750ms, and the wake found no subscriber. The hop was never woken: it was
