@@ -266,7 +266,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 				return
 			case <-t.C:
 				hub.Wake("offsetbench")
-				t.Reset(500 * time.Millisecond)
+				t.Reset(supervisor.WakeEvery)
 			}
 		}
 	}()
@@ -454,7 +454,7 @@ func TestOutputTSOffsetAddsToTheInputTimelineRatherThanSettingIt(t *testing.T) {
 	// 8002ms at a seam where the encoder disappeared, which is the same
 	// condition. Production answers it with a wake (see the stop above), and
 	// the switch path now waits long enough for that wake to land -- see
-	// seamStopWait and TestASwitchAwayFromAQuietRealFeedExitsCleanlyInsideTheSeam.
+	// seamStopCap and TestASwitchAwayFromAQuietRealFeedExitsCleanlyInsideTheSeam.
 	// With the wake this bench sees the hop exit and its final progress block.
 	t.Logf("final progress block present: offset-0 run %v, offset-100 run %v", a.progressDone, b.progressDone)
 }

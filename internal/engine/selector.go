@@ -107,24 +107,41 @@ import (
 // work does not own.
 
 const (
-	// seamStopWait is how long a switch waits for the outgoing copy hop to exit
-	// before starting its replacement anyway. See retireFeed.
+	// seamStopCap is the HARD CAP on how long a switch waits for the outgoing
+	// copy hop to exit before it cuts the hop's input and starts the replacement
+	// anyway. See retireFeed. It is a cap and not the wait: a healthy hop exits in
+	// ~0.1s (manager.go) and a quiet one is released by the supervisor's wake, and
+	// retireFeed returns the moment the hop is gone. Only a feed that neither
+	// answers SIGTERM nor a wake -- the genuinely wedged reader -- pays the cap.
 	//
-	// IT MUST OUTLAST THE SUPERVISOR'S WAKE. A hop reading a quiet relay does not
-	// answer SIGTERM; the supervisor sends it a wake (Spec.WakeOnStop) at
-	// supervisor.WakeAfter, and that wake is what lets it exit and flush. This
-	// used to be a flat 500ms, shorter than the wake: retireFeed cut the hop's
-	// subscription at 500ms, relay.Hub.Wake found no subscriber at 750ms and did
-	// nothing, and the hop sat there until the 8s grace and a SIGKILL. Measured
-	// with real FFmpeg (#126): the switch returned at 501ms detached, the old hop
-	// was gone at 8.011s with no final progress block, and tearing down the
-	// replacement right after the switch waited 7.5s on it.
+	// WHY THIS NUMBER. A hop reading a quiet relay is woken by the supervisor
+	// (Spec.WakeOnStop) at supervisor.WakeAfter and again every
+	// supervisor.WakeEvery, the repeat being there for a dropped first datagram.
+	// retireFeed must not cut the input before a wake has landed (the wake finds
+	// no subscriber afterwards: the original 8s zombie, #126), so the cap covers
+	// the first wake, one repeat, and the post-wake grace for FFmpeg to flush
+	// (seamPostWakeGrace), plus seamSchedSlack for the Stop goroutine to be
+	// scheduled and take the supervisor's locks before it arms the wake timer:
+	// 750 + 500 + 250 + 250 = 1.75s. The cap is measured from retireFeed's
+	// start; the wake timer starts later by that slack, which is why the slack is
+	// in the sum. Correctness does not depend on the slack being enough: the wait
+	// is driven by the wake actually being delivered, not by this arithmetic.
 	//
-	// The margin is for FFmpeg to act on the wake and be reaped; a healthy hop
-	// (0.105s with input flowing, see manager.go) never gets near it. The cost is
-	// paid only when the outgoing hop is quiet, which is a failover away from a
-	// dead source, and it is about 0.3s of extra offset lag over the flat 500ms.
-	seamStopWait = supervisor.WakeAfter + 250*time.Millisecond
+	// Cost against the flat 500ms this replaced: a switch away from a quiet hop
+	// that exits on the first wake costs about 0.3s more (the wake at 0.75s
+	// instead of the cut at 0.5s); one that needs the repeat costs about 0.8s
+	// more; a wedged hop costs the cap, 1.25s more.
+	seamStopCap = supervisor.WakeAfter + supervisor.WakeEvery + seamPostWakeGrace + seamSchedSlack
+	// seamPostWakeGrace is how long after a delivered wake (the repeat, at the
+	// earliest) the hop gets to flush and exit before its input is cut. A wake
+	// released packet reaches an FFmpeg that is already stopping, which
+	// finishes in tens of milliseconds; a quarter second is several times that.
+	seamPostWakeGrace = 250 * time.Millisecond
+	// seamSchedSlack: see seamStopCap.
+	seamSchedSlack = 250 * time.Millisecond
+	// seamWakesBeforeCut is the wakes that must have been delivered before the
+	// post-wake grace can end the wait: the first, and one repeat. See seamStopCap.
+	seamWakesBeforeCut = 2
 	// selectorSweep is how often liveness is re-evaluated. Well under any
 	// sensible grace period, so a switch lands near its deadline rather than up
 	// to a whole period late.
@@ -210,6 +227,12 @@ type sourceFeed struct {
 	in      *relay.Hub
 	port    int
 	subName string
+	// woken receives one signal for every stop-time wake the relay actually
+	// delivered to this feed's hop (see startFeed), so retireFeed can wait for the
+	// wake to land instead of guessing how long it takes. Buffered and sent
+	// without blocking: the supervisor's wake loop must never stall on it. Nil
+	// for a feed with no relay subscription.
+	woken chan struct{}
 	// upstream hashes what the feed's command line depends on, so a settings
 	// change respawns the feed without disturbing anything downstream of it.
 	upstream  string
@@ -1702,6 +1725,11 @@ func (e *Engine) detachFeedForSilence(silenceSig string) {
 	e.teardownFeed(feed)
 }
 
+// hubWake sends the stop-time wake and reports whether one was delivered. A
+// variable so a test can lose or observe a wake; startFeed reads it once, on the
+// caller's goroutine, so replacing it never races a running supervisor.
+var hubWake = (*relay.Hub).Wake
+
 // startFeed spawns the process that publishes one source into the selector's
 // hub. The caller must hold selMu.
 func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig string, now time.Time) *sourceFeed {
@@ -1798,6 +1826,23 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	// Deliberately not AutoRestart: a respawn has to be rebuilt with a current
 	// timestamp offset, so the sweep owns it.
 	spec.AutoRestart = false
+	if spec.WakeOnStop != nil && feed.in != nil {
+		// Report each wake that reaches the hop. relayWaker discards Hub.Wake's
+		// answer; this is the one place that needs it, and the hub and name are
+		// captured now because retireFeed clears feed.subName before the hop is
+		// gone.
+		hub, name, wake := feed.in, feed.subName, hubWake
+		feed.woken = make(chan struct{}, 8)
+		woken := feed.woken
+		spec.WakeOnStop = func() {
+			if wake(hub, name) {
+				select {
+				case woken <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
 	feed.proc = supervisor.New(e.log, spec)
 
 	e.mu.Lock()
@@ -1917,11 +1962,33 @@ func (e *Engine) stopOwn(f *sourceFeed) error {
 // subscription before signalling it -- a recovery back to the primary, a pin, a
 // respawn -- would manufacture exactly the wedge this exists to survive, on
 // every switch. So a feed that is still being fed gets its SIGTERM while it is
-// still being fed, and exits inside seamStopWait; its subscription and port are
-// then given back in the usual order.
+// still being fed, and exits at once; its subscription and port are then given
+// back in the usual order.
 //
-// Only a feed still there after seamStopWait is the wedged reader, and only then
-// is its input cut. That is what makes starting its replacement early safe
+// A QUIET HOP IS WAITED FOR BY EVENT, NOT BY CLOCK. It does not answer SIGTERM;
+// the supervisor wakes it (Spec.WakeOnStop) and that is what lets it exit. The
+// input must not be cut before a wake has reached it, because Hub.Wake does
+// nothing for a name the hub no longer holds. So startFeed wraps the feed's
+// wake to report each one actually delivered (sourceFeed.woken), and the wait
+// ends at the FIRST of: the hop exited; a wake and one repeat were delivered and
+// seamPostWakeGrace has passed since the last (the repeat is the supervisor's
+// cover for a dropped first datagram, so a lost first wake is still recovered);
+// or seamStopCap, the hard cap. No timing constant has to out-run goroutine
+// scheduling or the supervisor's locks for the wake to land first.
+//
+// THE WAIT STAYS UNDER selMu, deliberately. Every caller holds selMu across
+// ensureFeed, which is what makes "cut the old hop's input, then start the
+// replacement" one step no other switch, sweep or reconcile can interleave with.
+// Waiting outside it would need a "switch in flight" state in sel (feed already
+// retiring, replacement not yet started) that SwitchSource, reconcileSelector,
+// the sweep and Stop would each have to honour, or a second ensureFeed could
+// retire the same hop twice or start a feed beside one that is still publishing:
+// the two-publisher hazard below. Not provable here, so not done. The hold is
+// bounded instead: ~0.1s healthy, under 1.3s for a quiet hop (one wake and its
+// repeat), and seamStopCap for a wedged one.
+//
+// Only a feed still there after that is the wedged reader, and only then is its
+// input cut. That is what makes starting its replacement early safe
 // rather than a gamble: a copy hop with no input has nothing left to publish
 // into the selector, so it cannot become the second publisher on one hub that
 // teardownFeed warns about. It also frees selectorSubName on that hub before
@@ -1969,21 +2036,60 @@ func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <
 		}
 	}
 
-	timer := time.NewTimer(seamStopWait)
-	defer timer.Stop()
-	select {
-	case err := <-stopped:
-		finish()
-		return e.reportStop(f, err), false, f.prev
-	case <-timer.C:
-		// It may have finished on the boundary; completion wins the tie, as
-		// it does in supervisor.stop.
+	// stopped has the last word on every path out of the wait: completion wins a
+	// tie with a timer, as it does in supervisor.stop.
+	exited := func() (error, bool) {
+		select {
+		case err := <-stopped:
+			return err, true
+		default:
+			return nil, false
+		}
+	}
+	capTimer := time.NewTimer(seamStopCap)
+	defer capTimer.Stop()
+	var graceTimer *time.Timer
+	var graceC <-chan time.Time
+	defer func() {
+		if graceTimer != nil {
+			graceTimer.Stop()
+		}
+	}()
+	wakes := 0
+wait:
+	for {
 		select {
 		case err := <-stopped:
 			finish()
 			return e.reportStop(f, err), false, f.prev
-		default:
+		case <-f.woken:
+			// The first wake releases the hop's held packet; the repeat covers
+			// the first being dropped, so the input is not cut before it. Each
+			// later wake pushes the grace out, still inside the cap.
+			wakes++
+			if wakes >= seamWakesBeforeCut {
+				if graceTimer == nil {
+					graceTimer = time.NewTimer(seamPostWakeGrace)
+				} else {
+					if !graceTimer.Stop() {
+						select {
+						case <-graceTimer.C:
+						default:
+						}
+					}
+					graceTimer.Reset(seamPostWakeGrace)
+				}
+				graceC = graceTimer.C
+			}
+		case <-graceC:
+			break wait
+		case <-capTimer.C:
+			break wait
 		}
+	}
+	if err, ok := exited(); ok {
+		finish()
+		return e.reportStop(f, err), false, f.prev
 	}
 
 	// Wedged. Cut it off from its input, so that it has nothing left to publish
