@@ -9,9 +9,9 @@ platform in turn; every platform is optional and independent.
 path between them: what to put on the server, what to register at each
 platform, and how to tell it worked.
 
-> **Upgrading?** After upgrading to this release, reconnect Twitch and X once:
-> both ask for new permissions, and a granted scope never reaches a login that
-> was issued earlier.
+> **Upgrading from 0.15.0 or earlier?** Reconnect Twitch and X once: both ask
+> for new permissions, and a granted scope never reaches a login that was
+> issued earlier.
 
 - [Server prerequisites](#server-prerequisites)
 - [The same four steps on every platform](#the-same-four-steps-on-every-platform)

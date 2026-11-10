@@ -311,6 +311,31 @@ ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
     </div>
   </section>
 
+  {/* ------------------------------------------------------ once it works -- */}
+  <section id="after" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">Once it works</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        Let OBS press Start for every destination
+      </h2>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        The OBS bridge starts the destinations you picked when OBS starts
+        streaming, and can stop them when it stops, with a grace period so a
+        quick restart ends nothing. A scene change can apply a routing preset,
+        so “Just Chatting” can drop the music track on one platform. It runs
+        over obs-websocket, or from a script inside OBS when polyemesis cannot
+        reach your PC. <a class="underline" href="/docs/obs-bridge">OBS bridge</a>.
+      </p>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        If you would rather not depend on OBS at all, turn on stop on ingest loss
+        for the programme. If neither the primary nor the backup ingest arrives
+        for the wait you set (two minutes by default), its live destinations stop
+        instead of airing dead video. It watches the video arriving, so it works
+        with any encoder, and it is off until you turn it on.
+      </p>
+    </div>
+  </section>
+
   {/* ---------------------------------------------------------- gotchas ---- */}
   <section id="gotchas" class="border-t border-line py-16 sm:py-20">
     <div class="wrap max-w-3xl">

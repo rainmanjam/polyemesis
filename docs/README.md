@@ -24,10 +24,15 @@ deliberately does not do, and how to get it running. These are the details.
 | [AUDIO-ROUTING.md](AUDIO-ROUTING.md) | Simple mode, the mix matrix, clip protection, loudness and delay |
 | [RENDITIONS.md](RENDITIONS.md) | Shared video encodes, ref counting, presets and hardware encoders |
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |
+| [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md) | From an installed server to streaming and chat on X, Twitch, Kick, YouTube and Facebook, including where a chat message goes |
+| [SRTLA.md](SRTLA.md) | Bonded IRL encoders (BELABOX, Moblin, IRL Pro) over several links, and stopping the destinations if the backpack goes quiet |
+| [POLLS.md](POLLS.md) | One chat poll asked in every live chat and counted as one result |
 | [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) | Going live from a file, on a schedule, with no encoder attached |
 | [MONITORING.md](MONITORING.md) | Prometheus metrics, alerts, and automation with API tokens |
 | [MQTT.md](MQTT.md) | Retained telemetry and Home Assistant discovery |
 | [ACTIVITY.md](ACTIVITY.md) | Viewer activity — follows, subs, tips and raids as one event for the console, the OBS alerts overlay, the events stream and opt-in webhooks |
+| [EVENTS.md](EVENTS.md) | The events stream: every event type, its topic and payload, including `ingest.autostopped` |
+| [MCP.md](MCP.md) | Connect an AI assistant: tools, scopes and confirmations |
 | [HOOKS.md](HOOKS.md) | Signed lifecycle webhooks — one POST per transition, for a script rather than a person |
 | [API.md](API.md) | Every HTTP route, authentication, and a worked example |
 | [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md) | The palette, type scale and motion vocabulary the app and website share |
