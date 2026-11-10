@@ -252,6 +252,38 @@ switch it back on. The older binary's API rejects a request that sends the key
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.17.0
+
+**Chat send now goes only to platforms that are live.** `POST /api/v1/chat/send`
+and the chat composer used to post to every connected chat. By default they now
+post only to a chat whose platform has an enabled destination on air linked to
+that account (or, for YouTube and X, a live chat or broadcast). The others come
+back `skipped` with `reason: "notLive"`, and when nothing is live the request is
+refused with `409` (`code: "no_platform_live"`). A script that sends only `text`
+and relied on the old fan-out should send `"to": "all"`, or name the platforms
+with `"platforms": [...]`. Chat polls follow the same rule. See
+[API.md](API.md) and [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md).
+
+**A YouTube destination linked to a connected account now gets its own
+broadcast when it goes live.** It is on by default: polyemesis creates the
+broadcast, binds it to the stream that holds your stored key, ends it when you
+switch the destination off, and reads chat from it. It never creates a stream or
+changes a key, and it leaves a stream that already has a live broadcast alone, so
+a destination that was on air when you upgrade is not touched until you switch it
+off and on. To keep using YouTube Studio's *Stream now*, turn on **Use YouTube
+Studio's Stream now instead** on the destination. See
+[PLATFORMS.md](PLATFORMS.md#youtube-go-live-broadcasts).
+
+**A Facebook destination linked to a connected account fetches a fresh live
+video every time it starts**, so you no longer press *Refresh key* after a stop.
+A pasted key is unchanged.
+
+**Stop on ingest loss is new and off.** Nothing changes until you turn it on for
+a programme; it asks for its own confirmation. See
+[OBS-BRIDGE.md](OBS-BRIDGE.md#stop-on-ingest-loss-the-fallback). The rollback
+note for the setting is in the paragraph on `ingest.autoStop` under
+*What migrations do*.
+
 ### Upgrading to 0.16.0
 
 **X Livestream is on by default.** `POLYEMESIS_X_LIVESTREAM` unset or empty now
