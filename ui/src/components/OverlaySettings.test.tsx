@@ -143,10 +143,10 @@ describe("the overlay view", () => {
 
   it("draws the overlay over a transparent background and the dock over a solid one", () => {
     render(<ChatOverlayView lines={lines} style={classic} mode="overlay" />);
-    expect(screen.getByRole("log").style.background).toBe("transparent");
+    expect(screen.getByRole("log").style.backgroundColor).toBe("transparent");
     cleanup();
     render(<ChatOverlayView lines={lines} style={classic} mode="dock" />);
-    expect(screen.getByRole("log").style.background).not.toBe("transparent");
+    expect(screen.getByRole("log").style.backgroundColor).not.toBe("transparent");
   });
 
   it("uses the viewer's colour only when asked to", () => {
