@@ -713,9 +713,10 @@ jobs:
     # what it cost the one time it was got wrong.
     needs: changes
     runs-on: ${{ matrix.os }}
-    # Above the 15m per-package go test timeout below. Windows needs the room:
-    # internal/db alone has been measured at 265-300s and once past 600s.
-    timeout-minutes: 30
+    # Above the per-package go test timeout below (25m on Windows, 15m elsewhere).
+    # Windows needs the room: internal/db alone has been measured at 265-300s and
+    # once past 600s, and internal/api at 530-720s.
+    timeout-minutes: 40
     strategy:
       # Never cancel siblings: when Windows and macOS both break, both answers
       # are wanted, and fail-fast would turn one fix into two round trips.
@@ -855,7 +856,8 @@ jobs:
       # test that HANGS, and that failure does not get less likely because the
       # suite got faster.
       #
-      # 15m is well past any observed Windows run for the slowest package, and it is
+      # The ceiling (see the note below: 25m on Windows) is deliberately set above the
+      # observed runs and it is
       # deliberately BELOW this job's timeout-minutes. Go's timeout panics with
       # a goroutine dump naming the running test; the job timeout just kills the
       # runner and tells you nothing. Whichever fires first decides how much you
@@ -875,8 +877,20 @@ jobs:
       # All three runners, not just Windows. The crash has only ever been seen
       # on Windows, and "only ever been seen" is exactly the claim that needs
       # something watching the other two to stay true.
+      #
+      # THE WINDOWS CEILING IS 25m, NOT 15m (2026-11-10). internal/api on
+      # windows-latest took 531-717s over the last seven green main runs
+      # (ubuntu: ~180s), so the 15m ceiling sat at 1.25x the slowest green run;
+      # run 42636491169 (cb968b71) hit it at 900s with no test hung -- the panic
+      # listed only tests that were mid-flight and seconds old -- on a slow
+      # runner. The package's idle waits were cut in the same change (the delay
+      # tests now overlap their 15s probe-give-up waits), but the remaining time
+      # is CPU on a runner ~3.5x slower than the other two, which this does not
+      # cure. 25m is ~1.7x the slowest green run. It is still well below the
+      # job's 40m, so a real hang still ends in Go's goroutine dump and not in a
+      # killed runner.
       - if: needs.changes.outputs.code == 'true'
-        run: go run ./scripts/cmd/gotest -timeout 15m ./...
+        run: go run ./scripts/cmd/gotest -timeout ${{ matrix.os == 'windows-latest' && '25m' || '15m' }} ./...
 
       # THE RACE DETECTOR, ON WINDOWS ONLY, ON THE ONE PACKAGE THAT CRASHES.
       #
