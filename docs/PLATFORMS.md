@@ -915,6 +915,9 @@ anyone else's behalf needs Advanced Access to `publish_video` (profiles) or
 `pages_manage_posts` plus `pages_read_engagement` (Pages). Budget days, not
 minutes, and start it before you need it.
 
+Step by step, with the text to adapt and the recordings to make, see
+[Meta App Review for Facebook](META-APP-REVIEW.md).
+
 1. <https://developers.facebook.com/apps> → **Create app**, use case *Other*,
    type *Business*. A **Live Video API** use case is being verified as the
    alternative; see [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md#facebook-being-verified),

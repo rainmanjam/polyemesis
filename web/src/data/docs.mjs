@@ -211,6 +211,8 @@ const DOCS_BY_SECTION = {
       "From an installed server to streaming and chat on X, Twitch, Kick, YouTube and Facebook: the server prerequisites, each platform's app, and where a chat message goes."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
       "YouTube, Twitch, Kick, Facebook and Rumble. Go-live broadcasts and Studio events on YouTube; anything taking RTMP or SRT works with a pasted key."],
+    ["META-APP-REVIEW.md", "Meta App Review for Facebook",
+      "When you need it, what to submit for publish_video and the Page permissions, the recordings, and how to give a reviewer safe access to your own server."],
     ["ROLLOVER.md", "Planned rollover before platform caps",
       "Replace a live YouTube broadcast before its 12-hour archive cap, reconnect Twitch before its 48-hour cap, and count down the rest. Triggers: a margin, a quiet window, or an OBS scene."],
     ["RECURRING-EVENTS.md", "Recurring broadcast events: templates and look-ahead",
