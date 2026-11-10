@@ -138,6 +138,12 @@ func postJSON(t *testing.T, h http.Handler, sign func(*http.Request), path strin
 // destination then keeps airing); drop the CutDelay in applyDestinationEnabled
 // (Stop now on a draining destination then cuts nothing).
 func TestTheBroadcastDelayKillSwitchThroughREST(t *testing.T) {
+	// Parallel: nearly all of this test's wall time is the engine holding the
+	// destination until its layout probe gives up (probeGiveUp x probeFastCadence
+	// = 15s against the stand-in's missing ffprobe), not CPU, so the delay tests
+	// overlap their waits instead of serialising ~45s of idle time (and ~3x that
+	// on Windows, where this package runs near its 15m ceiling).
+	t.Parallel()
 	s, h, sign, ids := delayServer(t, 3)
 	plain, deleted, all := ids[0], ids[1], ids[2]
 

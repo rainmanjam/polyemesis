@@ -261,9 +261,20 @@ func TestOBSStopAndIngestLossAtTheSameMomentAreOneStopThroughTheRealPath(t *test
 				obsStop()
 			}
 			waitUntil(t, "the destination to stop", func() bool { return !o.enabled(t, live) })
-			// Settle: a barrier job after both.
-			o.b.RunIngestStop(src, func(context.Context) []obsbridge.Outcome { return nil })
-			time.Sleep(150 * time.Millisecond)
+			// Settle: a barrier job queued behind both. RunIngestStop only ENQUEUES,
+			// so wait for the worker to reach the barrier -- the worker runs jobs
+			// one at a time, so both stops have then run and recorded. (A fixed
+			// sleep here read lastActions before a loaded runner's worker had
+			// finished the first stop: "0 stop records".)
+			reached := make(chan struct{})
+			if !o.b.RunIngestStop(src, func(context.Context) []obsbridge.Outcome { close(reached); return nil }) {
+				t.Fatal("the barrier job was not queued")
+			}
+			select {
+			case <-reached:
+			case <-time.After(60 * time.Second):
+				t.Fatal("the bridge worker never reached the barrier job")
+			}
 
 			var stops []obsbridge.ActionRecord
 			for _, a := range o.b.Status().LastActions {
@@ -288,6 +299,12 @@ func TestOBSStopAndIngestLossAtTheSameMomentAreOneStopThroughTheRealPath(t *test
 // Mutation: pass true as cut in stopForIngestLoss. Observed to fail with
 // `phase "", want draining`.
 func TestIngestLossStopLetsABroadcastDelayTailPlayOut(t *testing.T) {
+	// Parallel: nearly all of this test's wall time is the engine holding the
+	// destination until its layout probe gives up (probeGiveUp x probeFastCadence
+	// = 15s against the stand-in's missing ffprobe), not CPU, so the delay tests
+	// overlap their waits instead of serialising ~45s of idle time (and ~3x that
+	// on Windows, where this package runs near its 15m ceiling).
+	t.Parallel()
 	s, h, sign, ids, stopFeed := delayServerFeed(t, 1)
 	id := ids[0]
 	src := onlySourceID(t, h, sign)

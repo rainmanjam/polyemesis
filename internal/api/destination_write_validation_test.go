@@ -54,6 +54,12 @@ func TestPutRefusesASilentProfileThatPostRefuses(t *testing.T) {
 //
 // Mutation: drop the cut step from the source delete.
 func TestDeletingAProgrammeCutsItsDelayedDestinationsLikeDeletingThem(t *testing.T) {
+	// Parallel: nearly all of this test's wall time is the engine holding the
+	// destination until its layout probe gives up (probeGiveUp x probeFastCadence
+	// = 15s against the stand-in's missing ffprobe), not CPU, so the delay tests
+	// overlap their waits instead of serialising ~45s of idle time (and ~3x that
+	// on Windows, where this package runs near its 15m ceiling).
+	t.Parallel()
 	s, h, sign, ids := delayServer(t, 1)
 	id := ids[0]
 	if phaseOf(s, id) != engine.DelayBuffering {
