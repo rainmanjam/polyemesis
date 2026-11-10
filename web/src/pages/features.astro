@@ -173,6 +173,7 @@ const sections = [
     title: "Stop pasting stream keys",
     body: [
       "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. On YouTube and Kick it takes the ingest URL too; on Facebook it creates the broadcast and splits out the RTMPS ingest and key; on Kick it also reads viewer stats back.",
+      "On YouTube the broadcast is made for you: a destination linked to your channel gets its own broadcast when it goes live, opened before video flows and bound to the stream that holds your stored key, which polyemesis never changes. It ends the broadcast when you switch the destination off, reads chat from it, and lists YouTube Studio's upcoming events in the schedule calendar so you can point a destination at one. Prefer Studio's Stream now? Turn this off per destination. On Facebook a destination fetches a fresh live video every time it starts, so a stop and start needs no key refresh.",
       "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
       "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one: twenty-three other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
     ],
@@ -233,7 +234,7 @@ const sections = [
     eyebrow: "Chat",
     title: "Five platforms in one timeline",
     body: [
-      "One merged feed reading YouTube, Twitch, Kick, Facebook and Rumble. The send box fans out to YouTube, Twitch and Kick, with per-platform verdicts when half the fan-out fails, because partial delivery is the normal case. Facebook is read and moderate only; Rumble is read only, and polls, because its API offers no socket.",
+      "One merged feed reading YouTube, Twitch, Kick, Facebook and Rumble. The send box posts to YouTube, Twitch and Kick, by default only to the platforms that are live, with a chip per platform to add one that is not, and per-platform verdicts when half the send fails, because partial delivery is the normal case. Facebook is read and moderate only; Rumble is read only, and polls, because its API offers no socket.",
       "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick, plus a moderator card showing what one person has said across every platform at once.",
     ],
     shot: "09-chat.png",
@@ -591,6 +592,8 @@ const rooms = [
           { h: "Audience across platforms", p: "Viewer counts from YouTube, Twitch, Kick and your own player, live on the Dashboard and as a report per stream, with CSV, Prometheus and MQTT exports. A count a platform does not report reads as not reported, never 0.", href: "/docs/monitoring" },
           { h: "Transcription and search", p: "Whisper runs over the archive on a queue that yields to the live stream, and the transcript is searchable, so you can find the moment somebody said it.", href: "/docs/architecture" },
           { h: "Automated moderation", p: "Rules that act across all five chat platforms, and a moderator card showing what one person has said on every one of them at once.", href: "/docs/platforms" },
+          { h: "Stop on ingest loss", p: "If neither the primary nor the backup ingest arrives for a wait you set, the programme's live destinations stop instead of airing dead video. It watches the video arriving, so it covers any encoder, IRL backpacks over SRTLA included. Off until you turn it on.", href: "/docs/obs-bridge" },
+          { h: "OBS bridge", p: "OBS starting and stopping a stream starts and stops the destinations you picked, and a scene change applies a routing preset, over obs-websocket or a script inside OBS.", href: "/docs/obs-bridge" },
           { h: "Broadcast from a file", p: "A file on a loop as the ingest, turned on by a schedule, so a programme can go out when nobody is at the desk.", href: "/docs/scheduled-broadcast" },
           { h: "Home Assistant", p: "Retained MQTT telemetry with discovery, so the stream shows up as entities in a dashboard you already run. An on-air light is an automation, not a project.", href: "/docs/mqtt" },
           { h: "Signed lifecycle webhooks", p: "One POST the moment a stream starts or a destination fails, in order, so a script can act on it. Alerts coalesce for a human; these deliberately do not.", href: "/docs/hooks" },

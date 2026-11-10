@@ -72,6 +72,21 @@ hot. One upload, one video encode, different audio per platform.
   persistent key pasted from instagram.com; you click Go live in Instagram,
   and each live video runs up to an hour. [→ PLATFORMS.md](docs/PLATFORMS.md),
   and [→ CONNECTING-PLATFORMS.md](docs/CONNECTING-PLATFORMS.md) for setup end to end
+- **YouTube go-live broadcasts, made for you.** A YouTube destination linked to
+  a connected account gets its own broadcast when it goes live, opened before
+  video flows and bound to the stream that holds your stored key, so the key
+  never changes. polyemesis ends it when you switch the destination off, reads
+  chat from it, and shows YouTube Studio's upcoming events in the schedule
+  calendar. Turn it off per destination to use Studio's Stream now instead.
+  [→ PLATFORMS.md](docs/PLATFORMS.md#youtube-go-live-broadcasts)
+- **A fresh Facebook live video on every start.** A destination linked to a
+  connected Facebook account fetches a new live video each time it starts, so a
+  stop and start never reuses a finished video's key.
+  [→ PLATFORMS.md](docs/PLATFORMS.md)
+- **Chat that sends only to platforms that are live.** A message from the chat
+  composer or `POST /chat/send` goes by default only to the chats whose platform
+  is on air; pick others, or send to all, when you want them.
+  [→ CONNECTING-PLATFORMS.md](docs/CONNECTING-PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
   card showing what one person has said across every platform at once, which no
   single platform's own tooling does.
@@ -80,6 +95,16 @@ hot. One upload, one video encode, different audio per platform.
   landscape tier and a vertical one alike. [→ RENDITIONS.md](docs/RENDITIONS.md)
 - **Failover** with a standby ingest, a generated slate, and a source selector
   that switches without restarting a single destination.
+- **OBS bridge.** OBS starting and stopping a stream starts and stops the
+  destinations you picked, and a scene change applies a routing preset, over
+  obs-websocket or a script inside OBS. [→ OBS-BRIDGE.md](docs/OBS-BRIDGE.md)
+- **Stop on ingest loss, for any encoder.** Opt in per programme and, if neither
+  the primary nor the backup ingest arrives for the wait you set (two minutes by
+  default), its live destinations stop instead of airing dead video. It watches
+  the video arriving, not the connection to OBS, so it covers OBS, vMix,
+  hardware encoders and IRL backpacks over SRTLA. Off until you turn it on.
+  [→ OBS-BRIDGE.md](docs/OBS-BRIDGE.md#stop-on-ingest-loss-the-fallback),
+  [→ SRTLA.md](docs/SRTLA.md#if-the-backpack-goes-quiet)
 - **Post-production**: segmented multitrack recording with retention, a job
   queue, Whisper transcription with full-text search, and a clip editor that
   suggests highlights, exports 9:16 vertical shorts with burned-in captions,

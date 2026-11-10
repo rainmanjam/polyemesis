@@ -57,6 +57,14 @@ const features = [
     d: "A source selector that switches without restarting a single destination. Off by default: with it off the pipeline is byte-for-byte what it was before.",
   },
   {
+    t: "A YouTube broadcast made for you, on the key you already have",
+    d: "A destination linked to your channel gets its own broadcast when it goes live, bound to your stored stream key, which is never changed. It ends when you switch the destination off, and YouTube Studio's upcoming events show in the schedule calendar.",
+  },
+  {
+    t: "Stop on ingest loss, for any encoder",
+    d: "Opt in, and if neither your primary nor backup ingest arrives for the wait you set, the live destinations stop instead of airing dead video. It covers OBS, hardware encoders and IRL backpacks over SRTLA, and is off until you turn it on.",
+  },
+  {
     t: "Live captions, the way each platform takes them",
     d: "Transcribed on your own machine, then sent inside the Twitch stream, to YouTube's caption ingestion (provisional), and as a Captions track on your own player, with your spellings applied everywhere.",
   },
