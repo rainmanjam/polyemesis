@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "告警规则已更改",
   "auto.evMCPAction": "AI 助手操作（MCP）",
   "auto.evDelayDumped": "已丢弃播出延迟",
+  "auto.evIngestAutoStopped": "因摄取中断已自动停止",
   "auto.evDiskLow": "磁盘空间不足",
   "auto.evDiskRecovered": "磁盘已恢复",
   "auto.evIngestLost": "输入已丢失",

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
@@ -184,18 +186,70 @@ func acted(rs []obsbridge.Outcome) bool {
 	return false
 }
 
+// auditIngestAutoStopped builds the alert: stop-on-ingest-loss ended a
+// programme's live destinations. Operational rather than an audit event, so it
+// carries a coalescing Key (one subject per programme, so two programmes
+// stopping together are two messages and one flapping programme is one).
+//
+// Programme and counts are fields, and sourceId/sourceName are spelled as the
+// engine watcher spells them, so a script routing ingest.lost by programme
+// routes this the same way. The programme name is operator-typed free text and
+// goes through the notifier's redaction like every other field. failed is the
+// number of destinations the stop tried and could not end; it is mentioned only
+// when it is not zero, because then "stopped 0" would hide that something is
+// still on air.
+func auditIngestAutoStopped(l engine.IngestLoss, stopped, failed int) alerts.Event {
+	lost := l.LostFor.Round(time.Second)
+	text := fmt.Sprintf("Neither the primary nor the backup ingest arrived for %s (the wait was %s), so %d "+
+		"live destination(s) were stopped. Nothing restarts by itself: go live again once the encoder is back.",
+		lost, l.Wait.Round(time.Second), stopped)
+	if failed > 0 {
+		text += fmt.Sprintf(" %d more could not be stopped and may still be on air.", failed)
+	}
+	title := "Stopped automatically: ingest lost"
+	if l.SourceName != "" {
+		title += ": " + l.SourceName
+	}
+	ev := alerts.Event{
+		Type:     alerts.TypeIngestAutoStopped,
+		Severity: alerts.SeverityCritical,
+		Key:      fmt.Sprintf("ingest.autostopped:%d", l.SourceID),
+		Title:    title,
+		Text:     text,
+		At:       time.Now(),
+	}.
+		WithField("sourceId", strconv.FormatInt(l.SourceID, 10)).
+		WithField("sourceName", l.SourceName).
+		WithField("wait", l.Wait.Round(time.Second).String()).
+		WithField("lostFor", lost.String()).
+		WithField("stopped", strconv.Itoa(stopped))
+	if failed > 0 {
+		ev = ev.WithField("failed", strconv.Itoa(failed))
+	}
+	return ev
+}
+
 // announceIngestStop writes the log line and publishes the event. It is called
 // only when something was actually stopped.
 func (s *Server) announceIngestStop(l engine.IngestLoss, results []obsbridge.Outcome) {
-	stopped := 0
+	stopped, failed := 0, 0
 	for _, r := range results {
-		if r.Outcome == string(bulkStopped) || r.Outcome == string(bulkWarned) {
+		switch r.Outcome {
+		case string(bulkStopped), string(bulkWarned):
 			stopped++
+		case string(bulkFailed):
+			failed++
 		}
 	}
 	s.log.Warn("stop-on-ingest-loss stopped the programme's live destinations",
 		"source", l.SourceID, "name", l.SourceName, "wait", l.Wait, "lostFor", l.LostFor.Round(time.Second),
 		"stopped", stopped, "of", len(results))
+	// The alert is raised HERE, where the stop has actually happened, and not at
+	// the engine's decision: the run-time re-check above can skip everything (the
+	// ingest came back, the setting was turned off), and an alert for a stop that
+	// did not happen would be a false page. It goes before the stream check so a
+	// server without an events hub still alerts.
+	s.publishAudit(auditIngestAutoStopped(l, stopped, failed))
 	if s.stream == nil {
 		return
 	}

@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Uyarı kuralı değiştirildi",
   "auto.evMCPAction": "Yapay zekâ asistanı eylemi (MCP)",
   "auto.evDelayDumped": "Yayın gecikmesi atıldı",
+  "auto.evIngestAutoStopped": "Ingest kaybı nedeniyle otomatik olarak durduruldu",
   "auto.evDiskLow": "Disk azalıyor",
   "auto.evDiskRecovered": "Disk toparlandı",
   "auto.evIngestLost": "Giriş kaybedildi",

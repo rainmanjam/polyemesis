@@ -140,6 +140,13 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 		// field this process did not write -- the service's error text.
 		case alerts.TypeOffloadStuck:
 			continue
+		// ingest.autostopped is operational and raised here, for the same
+		// reason: it carries a coalescing Key per programme, which an audit
+		// event must not. TestAnIngestAutoStoppedAlertNeverCarriesASecret plants
+		// a secret in the one field of it that is operator-typed text, the
+		// programme name, and asserts the same three encodings.
+		case alerts.TypeIngestAutoStopped:
+			continue
 		}
 		if !seen[ty] {
 			t.Errorf("%s is subscribable but has no entry in everyAuditEvent, so nothing checks it for leaks", ty)

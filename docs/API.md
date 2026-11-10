@@ -969,7 +969,7 @@ the encoder came back in the meantime nothing is stopped.
 **What it records.** A log line, an [`ingest.autostopped`](EVENTS.md) event on
 `/events`, and, when the OBS bridge drives that programme, an entry in
 `GET /obs`'s `status.lastActions` with `via: "ingest"`. The `ingest.lost` alert has
-already fired by then (at 20 seconds, critical); no further alert is raised.
+already fired by then (at 20 seconds, critical). The stop itself raises one more, optional, alert: [`ingest.autostopped`](MONITORING.md#the-stream-conditions-and-what-trips-them) (critical), once per stop and only when a destination was actually stopped, so a stop the re-check skipped sends nothing. It reaches every alert rule that subscribes to it, or has an empty `events` list.
 
 ### Services
 

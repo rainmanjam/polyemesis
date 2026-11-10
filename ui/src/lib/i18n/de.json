@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Alarmregel geändert",
   "auto.evMCPAction": "Aktion eines KI-Assistenten (MCP)",
   "auto.evDelayDumped": "Sendeverzögerung gedumpt",
+  "auto.evIngestAutoStopped": "Nach Ingest-Verlust automatisch gestoppt",
   "auto.evDiskLow": "Speicherplatz wird knapp",
   "auto.evDiskRecovered": "Speicherplatz wieder verfügbar",
   "auto.evIngestLost": "Eingang verloren",

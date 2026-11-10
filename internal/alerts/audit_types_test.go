@@ -85,24 +85,30 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	offload := []Type{TypeOffloadStuck}
 	// The ninth, delay.dumped, an audit event appended after that.
 	dumped := []Type{TypeDelayDumped}
+	// The tenth, ingest.autostopped (stop-on-ingest-loss), an operational event
+	// appended after that.
+	autostopped := []Type{TypeIngestAutoStopped}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held)+len(offload)+len(dumped) {
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held)+len(offload)+len(dumped)+len(autostopped) {
 		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + "+
-			"%d lifecycle + %d diagnostics + %d rule audit + %d held + %d offload + %d dumped",
+			"%d lifecycle + %d diagnostics + %d rule audit + %d held + %d offload + %d dumped + %d autostopped",
 			len(all), len(operational), len(auditTypes), len(health), len(lifecycle),
-			len(diagnostics), len(ruleAudit), len(held), len(offload), len(dumped))
+			len(diagnostics), len(ruleAudit), len(held), len(offload), len(dumped), len(autostopped))
 	}
-	if all[len(all)-4] != TypeMCPAction {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-4, all[len(all)-4], TypeMCPAction)
+	if all[len(all)-5] != TypeMCPAction {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-5, all[len(all)-5], TypeMCPAction)
 	}
-	if all[len(all)-3] != TypeDestinationHeld {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-3, all[len(all)-3], TypeDestinationHeld)
+	if all[len(all)-4] != TypeDestinationHeld {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-4, all[len(all)-4], TypeDestinationHeld)
 	}
-	if all[len(all)-2] != TypeOffloadStuck {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeOffloadStuck)
+	if all[len(all)-3] != TypeOffloadStuck {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-3, all[len(all)-3], TypeOffloadStuck)
 	}
-	if last := all[len(all)-1]; last != TypeDelayDumped {
-		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeDelayDumped)
+	if all[len(all)-2] != TypeDelayDumped {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeDelayDumped)
+	}
+	if last := all[len(all)-1]; last != TypeIngestAutoStopped {
+		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeIngestAutoStopped)
 	}
 	for i, want := range operational {
 		if all[i] != want {

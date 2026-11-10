@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Aturan peringatan diubah",
   "auto.evMCPAction": "Tindakan asisten AI (MCP)",
   "auto.evDelayDumped": "Jeda siaran dibuang",
+  "auto.evIngestAutoStopped": "Dihentikan otomatis setelah ingest hilang",
   "auto.evDiskLow": "Disk menipis",
   "auto.evDiskRecovered": "Disk pulih",
   "auto.evIngestLost": "Masukan hilang",

@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "알림 규칙 변경됨",
   "auto.evMCPAction": "AI 어시스턴트 작업 (MCP)",
   "auto.evDelayDumped": "방송 지연 덤프됨",
+  "auto.evIngestAutoStopped": "인제스트 끊김으로 자동 중지됨",
   "auto.evDiskLow": "디스크 공간 부족",
   "auto.evDiskRecovered": "디스크 복구됨",
   "auto.evIngestLost": "입력 끊김",

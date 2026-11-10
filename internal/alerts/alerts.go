@@ -196,6 +196,25 @@ const (
 	// audience saw -- the same kind of record a clip is, in the other
 	// direction. It names the destination and the amount, never the content.
 	TypeDelayDumped Type = "delay.dumped"
+	// TypeIngestAutoStopped fires once when stop-on-ingest-loss
+	// (settings.ingest.autoStop) has stopped a programme's live destinations
+	// because the ingest stayed lost for the whole wait: the same fact as the
+	// events stream's ingest.autostopped, one name on every surface.
+	//
+	// NOT TypeIngestLost, which fired 20 seconds into the same outage and says
+	// only that data stopped. This says polyemesis ACTED: it ended broadcasts
+	// (a YouTube broadcast cannot be resumed) and nothing will go out again
+	// until somebody goes live. Critical, because ingest.lost already is for the
+	// outage and this is the point where it became unrecoverable by itself.
+	//
+	// It has no recovery twin. A stop is a one-off action, not a condition that
+	// ends: the programme stays stopped when the ingest returns (nothing is ever
+	// restarted), so an "autostopped recovered" would claim something that did
+	// not happen. ingest.recovered still closes the outage itself.
+	//
+	// It is raised only where a destination was actually stopped, so a stop that
+	// found the ingest back, or the setting turned off, sends nothing.
+	TypeIngestAutoStopped Type = "ingest.autostopped"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -259,6 +278,8 @@ func AllTypes() []Type {
 		TypeOffloadStuck,
 		// The ninth, an audit event, appended like every row before it.
 		TypeDelayDumped,
+		// The tenth: stop-on-ingest-loss stopped a programme's destinations.
+		TypeIngestAutoStopped,
 	}
 }
 

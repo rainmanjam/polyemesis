@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Regola di avviso modificata",
   "auto.evMCPAction": "Azione di un assistente IA (MCP)",
   "auto.evDelayDumped": "Ritardo di trasmissione scartato",
+  "auto.evIngestAutoStopped": "Fermato automaticamente dopo la perdita dell'ingest",
   "auto.evDiskLow": "Disco in esaurimento",
   "auto.evDiskRecovered": "Disco ripristinato",
   "auto.evIngestLost": "Ingresso perso",
