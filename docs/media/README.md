@@ -43,9 +43,14 @@ attached to the install, which needs live OAuth credentials for a real channel
 
 So that one capture serves fixture messages to the real page. **The interface
 is genuine and the messages are not.** What the shot demonstrates — four
-platforms merged into one timeline, per-platform attribution, a send box that
-knows which platforms can currently accept a message — is real behaviour of the
-real component, rendered from data the harness supplies.
+platforms merged into one timeline with a toggle each, per-platform attribution,
+a long message wrapping under its author's name, polyemesis's own poll result
+marked with the megaphone, and a send box whose chips show where a message goes
+(the live platforms by default, Kick connected but not live) — is real behaviour
+of the real component, rendered from data the harness supplies. Besides
+`/chat`, the harness serves `/chat/live`, which is what decides the chip state.
+The shot is clipped to the timeline and composer at a 1440×720 viewport, so the
+site's small display of it stays legible.
 
 Before this it photographed the empty state, *"Chat is running but no platform
 account is attached yet"*, under a test named "four platforms in one hub". The

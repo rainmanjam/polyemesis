@@ -636,16 +636,21 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
  */
 const CHAT_PLATFORMS = ["youtube", "twitch", "facebook", "kick"] as const;
 
-const DEMO_CHAT = [
+// The optional fourth field marks a message polyemesis sent itself (a poll
+// announcement), which the panel draws with the megaphone and a tinted row.
+// The long Kick line exists to wrap: the shot shows the hanging indent.
+const DEMO_CHAT: readonly (readonly [string, string, string, boolean?])[] = [
   ["twitch", "hexcode", "wait, one ingest and it fans out to all four?"],
   ["youtube", "mira_dev", "the per-destination audio thing is the bit I want"],
-  ["kick", "nightowl_", "so the VOD track drops the music bed automatically"],
+  ["kick", "nightowl_", "so the VOD track drops the music bed automatically, and the live mix keeps it? that is exactly what I wanted for my channel, no more muting the whole stream"],
   ["facebook", "Dana Whitfield", "audio is noticeably cleaner this week"],
   ["youtube", "sam_tk", "how many destinations can it drive at once?"],
   ["twitch", "brb_afk", "5.5 Mbps and zero dropped frames, that's the whole point"],
   ["kick", "vexcarter", "does moderation reach back to the platform or just hide it here"],
   ["facebook", "Ana Ruiz", "one timeline for four chats is genuinely the feature"],
-] as const;
+  ["twitch", "polyemesis", "Poll closed: which mix for the VOD? Voice only 62%, Full mix 38%", true],
+  ["youtube", "mira_dev", "voice only, obviously"],
+];
 
 test("chat — four platforms in one hub", async ({ page }) => {
   // WHICH PLATFORMS THE SEND BOX MAY NAME comes from the server's capability
@@ -684,7 +689,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
           })),
           // Newest last, seconds apart, so the timeline reads as a conversation
           // rather than as a burst that all arrived at once.
-          messages: DEMO_CHAT.map(([platform, name, text], i) => ({
+          messages: DEMO_CHAT.map(([platform, name, text, echo], i) => ({
             id: `demo-${i}`,
             platform,
             account: platform === "facebook" ? "Polyemesis" : "polyemesis",
@@ -692,6 +697,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
             author: { id: `u-${name}`, name },
             text,
             at: new Date(Date.now() - (DEMO_CHAT.length - i) * 17_000).toISOString(),
+            ...(echo ? { echo: true } : {}),
           })),
           limits: CHAT_PLATFORMS.filter(canSend).map((platform) => ({
             platform,
@@ -701,9 +707,34 @@ test("chat — four platforms in one hub", async ({ page }) => {
       }),
   );
 
+  // The composer's "Sending to" chips come from GET /chat/live: a send with no
+  // target goes only to platforms that are live. YouTube and Twitch are on air
+  // here and Kick is connected but not, so the shot shows both chip states.
+  await page.route(
+    (url) => url.pathname === "/api/v1/chat/live",
+    (route) =>
+      route.fulfill({
+        json: {
+          anyLive: true,
+          targets: CHAT_PLATFORMS.filter(canSend).map((platform) => ({
+            platform,
+            account: "polyemesis",
+            canSend: true,
+            live: platform !== "kick",
+          })),
+        },
+      }),
+  );
+
+  // A shorter viewport, clipped to the timeline card and its composer. At the
+  // full 1440x900 the ten messages fill a third of the panel and the rest is
+  // empty space, and the side cards (moderator tools that need a live account)
+  // raise a "not connected" toast. The site shows this shot at about 600px
+  // wide, so the clip keeps the message text legible.
+  await page.setViewportSize({ width: 1440, height: 720 });
   await page.goto("/chat");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/09-chat.png` });
+  await page.screenshot({ path: `${OUT}/09-chat.png`, clip: { x: 180, y: 150, width: 950, height: 560 } });
 });
 
 test("playout — serving a player from polyemesis itself", async ({ page }) => {
