@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.17.0] — 2026-11-10
+
 ### Added
 
 - **A guide to Meta App Review for Facebook (docs).** `docs/META-APP-REVIEW.md` says when an operator needs review at
@@ -34,6 +38,37 @@ its first tagged release.
   it, so the fallback is off again after a roll-forward. A `PUT /sources/{id}` that sends `ingest.autoStop` to v0.16.0 is a
   `400` (it rejects unknown fields on requests).
 
+- **YouTube go-live broadcasts.** A YouTube destination linked to a connected account now gets its own
+  broadcast when it goes live (auto-start on, auto-stop off, Public unless the destination says otherwise,
+  titled from the go-live title), bound to the stream that holds its stored key. polyemesis ends it when the
+  destination is switched off, makes the next one if it finishes while the destination is still on, and reads
+  chat from it. It never creates a stream or changes a key, and leaves a stream that already has a live
+  broadcast alone. Turn it off per destination with "Use YouTube Studio's Stream now instead". Stored in
+  `compliance.youtube` (`streamId`, `studioStreamNow`) and `lifecycle.opened`; no schema change.
+- A broadcast polyemesis created that never aired is deleted when the destination is switched off or switched to
+  Studio's Stream now (never an adopted event); the open reuses its own earlier unrecorded broadcast and deletes one it
+  could not record; a broadcast waiting for video is read every ten minutes instead of every fifteen seconds
+  (`lifecycle.created` records the origin).
+- **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
+  reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
+  ingest address; the destination dialog stores an optional pinned stream.
+- **Use an existing YouTube event.** A destination can use an upcoming or active event instead of creating a
+  broadcast (`compliance.youtube.eventId`): polyemesis binds it to the destination's stream (moving it off a
+  different idle stream only on confirmation, never off an active one), uses its chat and never reuses a finished
+  event. `GET /api/v1/platforms/accounts/{id}/youtube/events` lists events (never keys) with their auto-start and
+  auto-stop flags; an event with auto-start off is taken live by polyemesis, and
+  `POST /api/v1/platforms/accounts/{id}/youtube/events/{eventId}/auto-start` is the operator's one click to turn
+  auto-start on.
+- **YouTube create fields.** Description, category, made-for-kids (explicit, default not for kids), latency, DVR and
+  a 360 switch apply when polyemesis creates a go-live broadcast or a scheduled show
+  (`compliance.youtube.description`, `category`, `projection360`).
+- **YouTube Studio events in the schedule calendar.** The calendar shows YouTube Studio's own upcoming events,
+  read-only and marked "from YouTube Studio", with a link to open each in Studio and a "Use for destination"
+  action that stores it as the destination's event. `GET /api/v1/youtube/studio-events` (refused to a read token,
+  never a key) asks each account at most once every 15 minutes (three quota units) and serves the cached answer
+  between, or the last one marked stale when a refresh fails. Simultaneous requests share one refresh, and "Use for" clears an earlier rebind confirmation and refuses a destination on Stream now, with a reason.
+- **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
+
 ### Changed
 
 - **The chat panel's header, rows and "Sending to" row hold their shape on a narrow panel.** The header was three rows
@@ -45,6 +80,20 @@ its first tagged release.
   focus. A message polyemesis sent itself (the server's `echo` flag, including poll announcements) carries a megaphone
   mark. The composer's targets use the same chip, with a check when selected, and scroll rather than wrap. Adds one
   string, `chatpage.echoLabel`, to all 15 locales.
+
+- **Upgrade note: chat send now goes only to platforms that are live.** `POST /api/v1/chat/send` used to post to
+  every connected chat; by default it now posts only to a chat whose platform has an enabled destination on air
+  (running, or reconnecting) linked to that account, or, for YouTube and X, whose adapter reports a live chat
+  or broadcast. Every other connected chat comes back as a result with `skipped: true`, `reason: "notLive"` and
+  `detail: "not live"`. When nothing is live the request is refused with `409` (`code: "no_platform_live"`, "no platform is live; send "to":"all" or "platforms":[...] to choose") rather than posting nowhere. To get the old behaviour send `"to": "all"`; to name the
+  platforms send `"platforms": ["kick", "twitch"]`, or `"accounts": [{"platform": ..., "account": ...}]` for exact chats (live or not; one that has no chat comes back
+  `reason: "notConnected"`). `"to": "live"` spells out the default. A client that sends only `text` keeps
+  working, but on a stream that is live on one platform its message no longer reaches the others, and on an
+  idle install it gets `409` instead of a send. Replies (`replyTo`) are unchanged. The chat composer shows the
+  platforms a message will go to as chips (on for the live ones), lets you add a platform that is not live or
+  pick "All connected", and says so when nothing is live; `GET /api/v1/chat/live` is the reading it uses. Chat
+  polls follow the same rule: the announcement and the result go to the live chats, and the others are recorded
+  as "not live". Chat-command replies (`!bitrate` and friends) now answer only in the chat the command was typed in, and a destination playing out its delay tail still counts as live. The rollover notice is unchanged.
 
 ### Fixed
 
@@ -106,8 +155,6 @@ its first tagged release.
   points chat at the broadcast's own `liveChatId` from every state read of a live or testing broadcast (created or
   adopted), and in the sweep that takes it live.
 
-### Fixed
-
 - **A YouTube destination's broadcast is opened before video is allowed to flow.** The broadcast used to be inserted
   and bound by the coordinator's sweep a few seconds AFTER video reached YouTube, so auto-start (which fires on the
   stream's inactive-to-active edge) never fired and the broadcast sat "ready" with chat waiting. Start, Start all,
@@ -115,57 +162,6 @@ its first tagged release.
   failed or slow open starts the destination anyway and the coordinator opens it later; a supervisor respawn never
   opens). The insert sets the monitor stream explicitly off, and a ready broadcast on an already-active stream goes
   straight to live (to testing first only when the monitor stream is on).
-
-### Added
-
-- **YouTube go-live broadcasts.** A YouTube destination linked to a connected account now gets its own
-  broadcast when it goes live (auto-start on, auto-stop off, Public unless the destination says otherwise,
-  titled from the go-live title), bound to the stream that holds its stored key. polyemesis ends it when the
-  destination is switched off, makes the next one if it finishes while the destination is still on, and reads
-  chat from it. It never creates a stream or changes a key, and leaves a stream that already has a live
-  broadcast alone. Turn it off per destination with "Use YouTube Studio's Stream now instead". Stored in
-  `compliance.youtube` (`streamId`, `studioStreamNow`) and `lifecycle.opened`; no schema change.
-- A broadcast polyemesis created that never aired is deleted when the destination is switched off or switched to
-  Studio's Stream now (never an adopted event); the open reuses its own earlier unrecorded broadcast and deletes one it
-  could not record; a broadcast waiting for video is read every ten minutes instead of every fifteen seconds
-  (`lifecycle.created` records the origin).
-- **YouTube stream picker.** `GET /api/v1/platforms/accounts/{id}/youtube/streams` lists the channel's
-  reusable streams (id, title, resolution, health, which other destinations use each) and never a key or
-  ingest address; the destination dialog stores an optional pinned stream.
-- **Use an existing YouTube event.** A destination can use an upcoming or active event instead of creating a
-  broadcast (`compliance.youtube.eventId`): polyemesis binds it to the destination's stream (moving it off a
-  different idle stream only on confirmation, never off an active one), uses its chat and never reuses a finished
-  event. `GET /api/v1/platforms/accounts/{id}/youtube/events` lists events (never keys) with their auto-start and
-  auto-stop flags; an event with auto-start off is taken live by polyemesis, and
-  `POST /api/v1/platforms/accounts/{id}/youtube/events/{eventId}/auto-start` is the operator's one click to turn
-  auto-start on.
-- **YouTube create fields.** Description, category, made-for-kids (explicit, default not for kids), latency, DVR and
-  a 360 switch apply when polyemesis creates a go-live broadcast or a scheduled show
-  (`compliance.youtube.description`, `category`, `projection360`).
-- **YouTube Studio events in the schedule calendar.** The calendar shows YouTube Studio's own upcoming events,
-  read-only and marked "from YouTube Studio", with a link to open each in Studio and a "Use for destination"
-  action that stores it as the destination's event. `GET /api/v1/youtube/studio-events` (refused to a read token,
-  never a key) asks each account at most once every 15 minutes (three quota units) and serves the cached answer
-  between, or the last one marked stale when a refresh fails. Simultaneous requests share one refresh, and "Use for" clears an earlier rebind confirmation and refuses a destination on Stream now, with a reason.
-- **Go-live title for YouTube.** `goLiveTitle` is accepted on a YouTube destination (up to 100 characters).
-
-### Changed
-
-- **Upgrade note: chat send now goes only to platforms that are live.** `POST /api/v1/chat/send` used to post to
-  every connected chat; by default it now posts only to a chat whose platform has an enabled destination on air
-  (running, or reconnecting) linked to that account, or, for YouTube and X, whose adapter reports a live chat
-  or broadcast. Every other connected chat comes back as a result with `skipped: true`, `reason: "notLive"` and
-  `detail: "not live"`. When nothing is live the request is refused with `409` (`code: "no_platform_live"`, "no platform is live; send "to":"all" or "platforms":[...] to choose") rather than posting nowhere. To get the old behaviour send `"to": "all"`; to name the
-  platforms send `"platforms": ["kick", "twitch"]`, or `"accounts": [{"platform": ..., "account": ...}]` for exact chats (live or not; one that has no chat comes back
-  `reason: "notConnected"`). `"to": "live"` spells out the default. A client that sends only `text` keeps
-  working, but on a stream that is live on one platform its message no longer reaches the others, and on an
-  idle install it gets `409` instead of a send. Replies (`replyTo`) are unchanged. The chat composer shows the
-  platforms a message will go to as chips (on for the live ones), lets you add a platform that is not live or
-  pick "All connected", and says so when nothing is live; `GET /api/v1/chat/live` is the reading it uses. Chat
-  polls follow the same rule: the announcement and the result go to the live chats, and the others are recorded
-  as "not live". Chat-command replies (`!bitrate` and friends) now answer only in the chat the command was typed in, and a destination playing out its delay tail still counts as live. The rollover notice is unchanged.
-
-### Fixed
 
 - `PUT /api/v1/destinations/{id}` with a `goLiveTitle` on a platform that never sends one answered 200 and
   stored nothing; it now answers 400. (A title carried over by a platform switch is still cleared with a
@@ -7757,7 +7753,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/rainmanjam/polyemesis/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/rainmanjam/polyemesis/compare/v0.13.0...v0.14.0

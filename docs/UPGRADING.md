@@ -284,6 +284,13 @@ a programme; it asks for its own confirmation. See
 note for the setting is in the paragraph on `ingest.autoStop` under
 *What migrations do*.
 
+**No schema change, and a 0.16.0 binary opens a 0.17.0 database.** The schema
+version stays 1 and nothing in this release adds a table or a column. Settings
+0.16.0 does not know — stop on ingest loss and the new YouTube broadcast options
+on a destination — are read leniently and ignored by 0.16.0, and dropped the
+next time it saves that programme or destination. For a clean rollback, restore
+the backup you took before upgrading.
+
 ### Upgrading to 0.16.0
 
 **X Livestream is on by default.** `POLYEMESIS_X_LIVESTREAM` unset or empty now
