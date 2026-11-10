@@ -8,7 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **An optional alert when stop on ingest loss fires: `ingest.autostopped`.** Stopping ends YouTube broadcasts for good, so
+  the operator now can be told through any alert rule (a webhook, Discord or Slack). It is raised once per stop, at
+  `critical`, naming the programme (`sourceId`, `sourceName`), the wait, how long the ingest was gone (`lostFor`) and how many
+  destinations were stopped (`failed` too when some could not be), and only after a destination was actually stopped: a stop
+  that the run-time re-check skips (the ingest came back) or one with the setting off sends nothing. It has no recovery
+  alert, because a stop is a one-off action and nothing restarts by itself. It can fire only on a programme where you turned
+  stop on ingest loss on, and rules that name their `events` hear it only if they list it. It is in the rule editor's event
+  picker, in all 15 languages. See [MONITORING.md](docs/MONITORING.md) and [OBS-BRIDGE.md](docs/OBS-BRIDGE.md).
 
 ## [0.17.0] — 2026-11-10
 

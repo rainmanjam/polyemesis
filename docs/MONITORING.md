@@ -561,7 +561,7 @@ way in, so nothing here has ever been near a stream key.
 
 ### The stream conditions, and what trips them
 
-Eleven of the subscribable types are the stream conditions. The thresholds are
+Twelve of the subscribable types are the stream conditions. The thresholds are
 stated because an operator picking events in the rule editor needs to know what
 is behind each name, and because a dwell time is not a delay — it is the
 difference between an alert and a mute button.
@@ -570,6 +570,7 @@ difference between an alert and a mute button.
 |---|---|---|
 | `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state. An enabled SRT source counts as configured although it has no ingest process, the same as an RTMP or pull source; before this fix `ingest.lost` never fired for SRT. Like RTMP and pull, it also fires once if nothing has arrived 20 seconds after the server starts |
 | `ingest.recovered` | `info` | the source is delivering again |
+| `ingest.autostopped` | `critical` | [stop on ingest loss](API.md#stop-on-ingest-loss) stopped a programme's live destinations because neither its primary nor its backup ingest arrived for the whole wait. Fires **once per stop**, after at least one destination was actually stopped, so a stop that found the ingest back, or the setting turned off, sends nothing. Names the programme (`sourceId`, `sourceName`), the `wait`, how long the ingest was gone (`lostFor`) and how many destinations were `stopped`, plus `failed` when some could not be. Stopping ends YouTube broadcasts for good and nothing restarts by itself, so this is the point where `ingest.lost` (already `critical`, 20 seconds in) became something only a person can fix. **It has no recovery twin**: a stop is a one-off action, not a condition that ends, and the programme stays stopped when the ingest returns (`ingest.recovered` still reports the ingest). Subscribable like every type: an empty `events` list includes it, but it can only ever fire for a programme where you turned stop on ingest loss on, which is off by default and needs its own acknowledgement, so no install hears it unless it opted in to the stop; to opt out of the alert alone, list the types you want in `events` |
 | `destination.down` | `critical` | an **enabled** destination has not been delivering for **20 seconds**. A destination you turned off is not down, and turning it back on starts the clock fresh rather than firing on the time it spent disabled |
 | `destination.recovered` | `info` | it is delivering again |
 | `destination.held` | `critical` | polyemesis stopped retrying an enabled destination after repeated quick rejections, and nothing happens until you press **Retry**. Fires **once per hold**, at the sweep the hold begins and without waiting for the `destination.down` dwell, because a hold is the verdict that no reconnect is coming. The `destination.down` still fires on its own clock and still says "held" in its text. Carries the same `reason`, `cause` and `detail` fields as the down, and is the one to page on if you want only the stops that will not fix themselves |

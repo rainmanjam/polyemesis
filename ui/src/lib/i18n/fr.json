@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Règle d'alerte modifiée",
   "auto.evMCPAction": "Action d'un assistant IA (MCP)",
   "auto.evDelayDumped": "Différé de diffusion vidé",
+  "auto.evIngestAutoStopped": "Arrêt automatique après perte de l'ingest",
   "auto.evDiskLow": "Espace disque faible",
   "auto.evDiskRecovered": "Espace disque rétabli",
   "auto.evIngestLost": "Entrée perdue",

@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Zmieniono regułę alertu",
   "auto.evMCPAction": "Działanie asystenta AI (MCP)",
   "auto.evDelayDumped": "Zrzucono opóźnienie transmisji",
+  "auto.evIngestAutoStopped": "Zatrzymano automatycznie po utracie ingestu",
   "auto.evDiskLow": "Kończy się miejsce na dysku",
   "auto.evDiskRecovered": "Dysk przywrócony",
   "auto.evIngestLost": "Utracono wejście",

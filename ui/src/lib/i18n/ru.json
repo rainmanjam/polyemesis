@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Правило оповещения изменено",
   "auto.evMCPAction": "Действие ИИ-ассистента (MCP)",
   "auto.evDelayDumped": "Задержка трансляции сброшена",
+  "auto.evIngestAutoStopped": "Автоматически остановлено из-за потери входящего потока",
   "auto.evDiskLow": "Мало места на диске",
   "auto.evDiskRecovered": "Место на диске восстановлено",
   "auto.evIngestLost": "Вход потерян",

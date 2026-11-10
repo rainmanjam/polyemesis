@@ -158,6 +158,11 @@ If OBS stops and the ingest is lost at the same moment, the destinations are
 stopped once and `status.lastActions` has one stop entry. A stop made by the
 fallback is recorded with `via: "ingest"`.
 
+To be told when it fires, subscribe an [alert rule](MONITORING.md#the-stream-conditions-and-what-trips-them) (webhook, Discord
+or Slack) to `ingest.autostopped`. It is sent once per stop, at `critical`, names the programme,
+the wait, how long the ingest was gone and how many destinations were stopped, and is never sent when the stop found nothing to
+stop because the ingest had come back.
+
 ## Scene rules
 
 A scene rule maps one OBS scene name, matched exactly, to one routing preset.

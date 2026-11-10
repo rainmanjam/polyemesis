@@ -197,6 +197,7 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "delay.dumped": "auto.evDelayDumped",
   "destination.held": "auto.destinationHeld",
   "offload.stuck": "auto.offloadStuck",
+  "ingest.autostopped": "auto.evIngestAutoStopped",
 };
 
 /** app-council A57: severity and payload format are stored machine values,

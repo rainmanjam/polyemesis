@@ -67,6 +67,7 @@
   "auto.evAlertRuleChanged": "Alert rule changed",
   "auto.evMCPAction": "AI assistant action (MCP)",
   "auto.evDelayDumped": "Broadcast delay dumped",
+  "auto.evIngestAutoStopped": "Stopped automatically after ingest loss",
   "auto.evDiskLow": "Disk running low",
   "auto.evDiskRecovered": "Disk recovered",
   "auto.evIngestLost": "Ingest lost",
