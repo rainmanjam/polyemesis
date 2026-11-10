@@ -40,6 +40,8 @@ describe("naturalWidth", () => {
   it("never exceeds the item's own max-width", () => {
     const sw = el("button", { offset: 100 }, "max-width: 120px");
     sw.append(el("span", { offset: 80, client: 80, scroll: 200 }));
+    // jsdom 31 returns no computed style for a disconnected element (as a browser does).
+    document.body.append(sw);
     expect(naturalWidth(sw)).toBe(120);
   });
 });

@@ -62,7 +62,7 @@ describe("the overlay page", () => {
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.every((k) => k === "pov_pathkey")).toBe(true);
     // The dock's solid background, not the overlay's transparent one.
-    expect((container.firstElementChild as HTMLElement).style.background).not.toBe("transparent");
+    expect((container.firstElementChild as HTMLElement).style.backgroundColor).not.toBe("transparent");
   });
 
   it("draws nothing, not an error, when the key is refused", async () => {
@@ -118,7 +118,7 @@ describe("the poll widget page (#14)", () => {
     expect(screen.getByText("75%")).toBeTruthy();
     expect(screen.queryByText("chat line here")).toBeNull();
     expect(container.textContent?.toLowerCase()).not.toMatch(/twitch|youtube|kick|ttv/);
-    expect((container.firstElementChild as HTMLElement).style.background).toBe("transparent");
+    expect((container.firstElementChild as HTMLElement).style.backgroundColor).toBe("transparent");
   });
 
   it("draws nothing while no poll is running", async () => {

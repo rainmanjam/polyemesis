@@ -58,7 +58,7 @@ describe("the alerts overlay page", () => {
     const box = container.querySelector("[data-alert-id]") as HTMLElement;
     expect(box.dataset.alertLayout).toBe("banner");
     expect(calls.every((c) => c.key === "pov_al" && !c.url.includes("pov_al"))).toBe(true);
-    expect(document.documentElement.style.background).toBe("transparent");
+    expect(document.documentElement.style.backgroundColor).toBe("transparent");
   });
 
   it("reads the key from the path form", async () => {
