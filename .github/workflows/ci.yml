@@ -954,7 +954,7 @@ jobs:
       # timeout-minutes because this step BACKGROUNDS A PROCESS, and a step that
       # holds a pid can wait on something that never comes. 2 against a measured
       # 2-4s (n=21) is still 30x headroom now that the build is not inside it.
-      # Deliberately below the job's timeout-minutes: 30, per the discipline at
+      # Deliberately below the job's timeout-minutes: 40, per the discipline at
       # :154-158 and :305-311 -- whichever timeout fires first decides how much
       # you learn, so the narrowest one has to.
       - name: Start the server and check it serves
@@ -1051,7 +1051,7 @@ jobs:
       #
       # timeout-minutes for the same reason as the step above: it backgrounds a
       # process. 8 against a measured 91-93s (n=21) is roughly 5x headroom, and
-      # it is below the job's 30 on purpose -- a step timeout names the step
+      # it is below the job's 40 on purpose -- a step timeout names the step
       # that hung, a job timeout names nothing.
       - name: Push a broadcast through it and measure the output
         if: needs.changes.outputs.code == 'true'
