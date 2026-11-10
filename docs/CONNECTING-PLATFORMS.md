@@ -278,7 +278,7 @@ Open points: polyemesis signs in with scope-based Facebook Login
 may need a configuration instead of scopes; that is not yet verified. Meta
 also requires App Review before anyone but you can connect an account; your own
 account works at once as a developer or tester of your own app. See
-[PLATFORMS.md](PLATFORMS.md#facebook-live-meta).
+[PLATFORMS.md](PLATFORMS.md#facebook-live-meta) and [Meta App Review for Facebook](META-APP-REVIEW.md).
 
 ---
 

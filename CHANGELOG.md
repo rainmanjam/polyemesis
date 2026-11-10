@@ -10,6 +10,9 @@ its first tagged release.
 
 ### Added
 
+- **A guide to Meta App Review for Facebook (docs).** `docs/META-APP-REVIEW.md` says when an operator needs review at
+  all, what to submit for each permission polyemesis asks for, the use case text and recording scripts, the app settings
+  Meta requires, and how to give a reviewer access to a self-hosted server without handing over a production admin login.
 - **Stop on ingest loss: an opt-in safety net for any encoder.** A programme can now stop its live destinations when
   neither its primary nor its backup ingest has arrived for a set time (default 120 seconds, 60 to 3600). It works with
   the OBS bridge off or failing and with any encoder (OBS, vMix, hardware, IRL backpacks over SRTLA), and Settings, OBS
