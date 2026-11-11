@@ -278,14 +278,22 @@ func autoStopNewlyEnabledWithoutAck(prev, next db.AutoStopSettings, sentAck bool
 // sentAutoStopAck reports whether a source body says ingest.autoStop.acknowledged
 // is true. Unparseable bodies say false; the strict decode has already refused
 // them by the time this matters.
+// sourceAutoStopAck, sourceIngestAck and sourceBodyAck mirror the part of a
+// source body that sentAutoStopAck reads; the JSON tags match the wire names.
+type sourceAutoStopAck struct {
+	Acknowledged *bool `json:"acknowledged"`
+}
+
+type sourceIngestAck struct {
+	AutoStop sourceAutoStopAck `json:"autoStop"`
+}
+
+type sourceBodyAck struct {
+	Ingest sourceIngestAck `json:"ingest"`
+}
+
 func sentAutoStopAck(body []byte) bool {
-	var b struct {
-		Ingest struct {
-			AutoStop struct {
-				Acknowledged *bool `json:"acknowledged"`
-			} `json:"autoStop"`
-		} `json:"ingest"`
-	}
+	var b sourceBodyAck
 	if json.Unmarshal(body, &b) != nil {
 		return false
 	}
