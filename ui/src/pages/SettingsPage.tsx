@@ -4046,7 +4046,7 @@ function ApiTokens() {
     // the previous one was a moment ago.
     await copyText(minted.plaintext, minted.plaintext);
   };
-  const tokenCopied = minted != null && copiedKey === minted.plaintext;
+  const tokenCopied = copiedKey === minted?.plaintext;
 
   const renderTokenList = () => {
     if (readFailed(tokens)) {
