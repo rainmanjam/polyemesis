@@ -426,3 +426,38 @@ describe("the features page sections", () => {
     expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
   });
 });
+
+/* THE SPLIT DIAGRAM (homepage redesign, Task 3). It renders four times on the
+ * home page (three hero panels and how-it-works), so any id would repeat, and
+ * its destination cards stay generic divs until the hero script upgrades them
+ * to buttons: a label on a div is announced inconsistently, so the name lives
+ * in data-label until then. */
+describe("the split diagram", () => {
+  const diagram = () => readFileSync(join(here, "..", "components", "home", "SplitDiagram.astro"), "utf8");
+
+  it("SplitDiagram emits no ids and no aria-label on generic divs", () => {
+    const src = diagram();
+    expect(src).not.toMatch(/\sid=/);
+    expect(src).not.toMatch(/<div[^>]*aria-label/);
+  });
+
+  /* geometry.ts's anchors are these tracks' centres: h columns 9/50/91%, v rows
+   * .10/.40 and the destination band .56-1. Change one, change the other. */
+  it("keeps the grid tracks geometry.ts's anchors are computed from", () => {
+    const css = diagram().replace(/\s+/g, " ");
+    // v (default): one column, row bands 20/12/16/8/44.
+    expect(css).toContain(
+      "grid-template-rows: minmax(0, 20fr) minmax(0, 12fr) minmax(0, 16fr) minmax(0, 8fr) minmax(0, 44fr);",
+    );
+    expect(css).toContain("grid-template-columns: repeat(5, minmax(0, 1fr));"); // sources across
+    expect(css).toContain(
+      "grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr));",
+    ); // destinations 2 x 2
+    // h (>= 768px): columns 18/22/20/22/18, five source rows, four destination rows.
+    expect(css).toContain(
+      "grid-template-columns: minmax(0, 18fr) minmax(0, 22fr) minmax(0, 20fr) minmax(0, 22fr) minmax(0, 18fr);",
+    );
+    expect(css).toContain("grid-template-rows: repeat(5, minmax(0, 1fr));");
+    expect(css).toContain("grid-template-rows: repeat(4, minmax(0, 1fr));");
+  });
+});
