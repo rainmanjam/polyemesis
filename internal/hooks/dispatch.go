@@ -484,27 +484,7 @@ func (d *Dispatcher) reload() {
 		d.log.Warn("cannot read hooks; keeping the running set", "err", err)
 		return
 	}
-	want := make(map[int64]Hook, len(rows))
-	for _, h := range rows {
-		n := h.Normalized()
-		if err := n.Validate(); err != nil {
-			// LOUD FOR THIS ONE, quiet for the rest. #715. An unreadable
-			// signing secret is a fact about the machine that an operator can
-			// fix and would otherwise learn only from a hook that stopped
-			// firing; every other refusal here is something they typed and were
-			// already told about at save time.
-			if n.Enabled && errors.Is(err, ErrSecretUnreadable) {
-				d.log.Error("a hook is not being delivered because its signing secret "+
-					"could not be read on this machine; restore the key file or re-enter "+
-					"the secret. Nothing is being sent unsigned.",
-					"hook", n.ID, "name", n.Name)
-			}
-			continue
-		}
-		if n.Enabled {
-			want[n.ID] = n
-		}
-	}
+	want := d.wantedHooks(rows)
 
 	d.mu.Lock()
 	var stopping []*worker
@@ -537,6 +517,34 @@ func (d *Dispatcher) reload() {
 	for _, w := range stopping {
 		w.stop()
 	}
+}
+
+// wantedHooks returns the enabled hooks that pass validation, by id. A hook that
+// fails validation is left out; the one whose secret cannot be read is logged
+// loudly, the rest quietly.
+func (d *Dispatcher) wantedHooks(rows []Hook) map[int64]Hook {
+	want := make(map[int64]Hook, len(rows))
+	for _, h := range rows {
+		n := h.Normalized()
+		if err := n.Validate(); err != nil {
+			// LOUD FOR THIS ONE, quiet for the rest. #715. An unreadable
+			// signing secret is a fact about the machine that an operator can
+			// fix and would otherwise learn only from a hook that stopped
+			// firing; every other refusal here is something they typed and were
+			// already told about at save time.
+			if n.Enabled && errors.Is(err, ErrSecretUnreadable) {
+				d.log.Error("a hook is not being delivered because its signing secret "+
+					"could not be read on this machine; restore the key file or re-enter "+
+					"the secret. Nothing is being sent unsigned.",
+					"hook", n.ID, "name", n.Name)
+			}
+			continue
+		}
+		if n.Enabled {
+			want[n.ID] = n
+		}
+	}
+	return want
 }
 
 // startWorker spawns one endpoint's goroutine. Called with d.mu held.
