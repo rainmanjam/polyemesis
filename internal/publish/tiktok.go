@@ -145,6 +145,43 @@ type tkStatus struct {
 }
 
 // Publish implements Adapter.
+// forgetRemote drops the stored publish id and its upload session, so the next
+// attempt starts a fresh init.
+func forgetRemote(r Run) error {
+	if err := r.Sess.SaveRemote(""); err != nil {
+		return err
+	}
+	return r.Sess.Clear()
+}
+
+// checkCreatorInfo asks TikTok whether this account may post a private video of
+// this length, and returns the failure that says why not.
+func (t *TikTok) checkCreatorInfo(ctx context.Context, r Run) *Failure {
+	env, f := t.call(ctx, r.Cred.AccessToken, "/v2/post/publish/creator_info/query/", nil)
+	if f != nil {
+		return f
+	}
+	var ci struct {
+		Options []string `json:"privacy_level_options"`
+		MaxSec  int      `json:"max_video_post_duration_sec"`
+	}
+	_ = json.Unmarshal(env.Data, &ci)
+	ok := false
+	for _, o := range ci.Options {
+		if o == TikTokPrivacy {
+			ok = true
+		}
+	}
+	if !ok {
+		return fail(CausePrivacyUnavailable, false,
+			"TikTok did not offer a private posting option for this account, and polyemesis posts only privately until the app is audited")
+	}
+	if ci.MaxSec > 0 && r.File.Seconds > float64(ci.MaxSec) {
+		return fail(CauseClipRejected, false, "this clip is %.0f seconds and this TikTok account may post up to %d", r.File.Seconds, ci.MaxSec)
+	}
+	return nil
+}
+
 func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 	total := r.File.Size
 	if total <= 0 {
@@ -167,10 +204,7 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 		case "FAILED":
 			// Terminal on TikTok's side: nothing was posted, so a fresh init
 			// cannot double-post. Forget the dead one first.
-			if err := r.Sess.SaveRemote(""); err != nil {
-				return Done{}, err
-			}
-			if err := r.Sess.Clear(); err != nil {
+			if err := forgetRemote(r); err != nil {
 				return Done{}, err
 			}
 			upload = ""
@@ -188,10 +222,7 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 				// The post was opened for different words or a different file and
 				// its final chunk has not gone out, so it can never complete: the
 				// person's latest confirmation gets a fresh one.
-				if err := r.Sess.SaveRemote(""); err != nil {
-					return Done{}, err
-				}
-				if err := r.Sess.Clear(); err != nil {
+				if err := forgetRemote(r); err != nil {
 					return Done{}, err
 				}
 			case upload == "":
@@ -208,31 +239,12 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 
 	// Creator info first: it says whether the private option exists and how long
 	// a video this account may post.
-	env, f := t.call(ctx, r.Cred.AccessToken, "/v2/post/publish/creator_info/query/", nil)
-	if f != nil {
+	if f := t.checkCreatorInfo(ctx, r); f != nil {
 		return Done{}, f
-	}
-	var ci struct {
-		Options []string `json:"privacy_level_options"`
-		MaxSec  int      `json:"max_video_post_duration_sec"`
-	}
-	_ = json.Unmarshal(env.Data, &ci)
-	ok := false
-	for _, o := range ci.Options {
-		if o == TikTokPrivacy {
-			ok = true
-		}
-	}
-	if !ok {
-		return Done{}, fail(CausePrivacyUnavailable, false,
-			"TikTok did not offer a private posting option for this account, and polyemesis posts only privately until the app is audited")
-	}
-	if ci.MaxSec > 0 && r.File.Seconds > float64(ci.MaxSec) {
-		return Done{}, fail(CauseClipRejected, false, "this clip is %.0f seconds and this TikTok account may post up to %d", r.File.Seconds, ci.MaxSec)
 	}
 
 	chunk, count := tikTokChunks(total)
-	env, f = t.call(ctx, r.Cred.AccessToken, "/v2/post/publish/video/init/", map[string]any{
+	env, f := t.call(ctx, r.Cred.AccessToken, "/v2/post/publish/video/init/", map[string]any{
 		"post_info": map[string]any{
 			"title":                captionFor(r.Meta),
 			"privacy_level":        TikTokPrivacy,
