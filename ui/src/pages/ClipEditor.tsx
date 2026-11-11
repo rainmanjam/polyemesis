@@ -1097,9 +1097,9 @@ export function ClipEditor() {
                       aria-label={t("clipedit.filterTranscript")}
                     />
                   </div>
-                  <div
+                  <div // NOSONAR S6848: delegated listener that reads the text selection the mouse made; keyboard users pick lines through the rows themselves
                     className="flex max-h-[28rem] flex-col gap-0.5 overflow-y-auto"
-                    onMouseUp={onTranscriptMouseUp} // NOSONAR S6848: delegated listener that reads the text selection the mouse made; keyboard users pick lines through the rows themselves
+                    onMouseUp={onTranscriptMouseUp}
                   >
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-center text-tiny text-muted-foreground">
