@@ -350,9 +350,10 @@ jobs:
           # ceiling and report "cancelled", naming nothing; --retry so a transient
           # 502 on a green build does not turn it red.
           api() {
+            local url="$1" dest="$2"
             curl -sSf --proto '=https' --tlsv1.2 --max-time 30 \
               --retry 3 --retry-all-errors --retry-delay 5 \
-              -K "$cfg" "$1" -o "$2"
+              -K "$cfg" "$url" -o "$dest"
           }
 
           report=.scannerwork/report-task.txt
@@ -389,6 +390,9 @@ jobs:
               "")
                 echo "::error title=Unreadable task status::the API answered for task $task_id without a status field."
                 exit 1 ;;
+              # PENDING, IN_PROGRESS and any other status mean the task is still
+              # running: fall through to the sleep so the loop keeps polling.
+              *) ;;
             esac
             sleep 5
           done
