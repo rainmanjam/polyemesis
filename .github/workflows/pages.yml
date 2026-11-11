@@ -321,7 +321,14 @@ jobs:
       - name: Install Chromium
         timeout-minutes: 10
         run: |
-          npx --no-install playwright install-deps chromium
+          # install-deps is apt, and apt can be down on its own: on 2026-11-11
+          # every *.ubuntu.com host failed DNS on the runners for over an hour
+          # while everything else resolved, and that alone blocked a publish.
+          # The image already carries Chrome and the libraries it links, so a
+          # failed install-deps is a warning, not a stop. If a library really
+          # is missing, the browser checks below fail at launch, by name.
+          timeout 360 npx --no-install playwright install-deps chromium ||
+            echo "::warning::playwright install-deps failed (apt unreachable?); relying on the image's libraries"
           npx --no-install playwright install chromium
 
       - name: Card layout (browser)
