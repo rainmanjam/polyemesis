@@ -5,6 +5,7 @@ import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
 import SignalPath from "../components/SignalPath.astro";
+import Problem from "../components/home/Problem.astro";
 import { Picture } from "astro:assets";
 import meters from "../assets/shots/04-meters.png";
 import { lqipStyle } from "../lib/lqip";
@@ -181,6 +182,8 @@ const features = [
       </div>
     </div>
   </section>
+
+  <Problem />
 
   <SpecStrip />
 
@@ -507,4 +510,9 @@ const features = [
       </div>
     </div>
   </section>
+
+  <script>
+    const go = () => import("../scripts/home/boot").then((m) => m.boot(document));
+    "requestIdleCallback" in window ? requestIdleCallback(go, { timeout: 2000 }) : setTimeout(go, 200);
+  </script>
 </Base>
