@@ -124,8 +124,33 @@ type kickActivityState struct {
 // Never returns a chat problem: its outcomes are per-event states.
 func (k *KickAdapter) syncActivity(ctx context.Context, endpoint string, have map[string]string, listed int) {
 	now := k.cfg.Now()
+	want := k.eventsToPost(now, have, listed)
+	if len(want) == 0 {
+		return
+	}
+
+	err := k.postActivity(ctx, endpoint, want)
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	// The batch was refused as a whole. If it was Kick objecting to the request
+	// (not auth, not an outage), one bad event must not cost the rest: ask for
+	// each on its own.
+	if len(want) > 1 && kickDeclines(err) {
+		k.postEachEvent(ctx, endpoint, want)
+		return
+	}
+	k.mu.Lock()
+	k.act.retry = true
+	k.mu.Unlock()
+}
+
+// eventsToPost returns the activity events that still need a subscription, and
+// resets the retry flag. It also seeds the per-event state on first use.
+func (k *KickAdapter) eventsToPost(now time.Time, have map[string]string, listed int) []string {
 	var want []string
 	k.mu.Lock()
+	defer k.mu.Unlock()
 	if k.act.ev == nil {
 		k.act.ev = map[string]kickEventState{}
 		k.act.posted = map[string]time.Time{}
@@ -147,30 +172,18 @@ func (k *KickAdapter) syncActivity(ctx context.Context, endpoint string, have ma
 		}
 		want = append(want, d.name)
 	}
-	k.mu.Unlock()
-	if len(want) == 0 {
-		return
-	}
+	return want
+}
 
-	err := k.postActivity(ctx, endpoint, want)
-	if err == nil || ctx.Err() != nil {
-		return
-	}
-	// The batch was refused as a whole. If it was Kick objecting to the request
-	// (not auth, not an outage), one bad event must not cost the rest: ask for
-	// each on its own.
-	if len(want) > 1 && kickDeclines(err) {
-		for _, name := range want {
-			if ctx.Err() != nil {
-				return
-			}
-			_ = k.postActivity(ctx, endpoint, []string{name})
+// postEachEvent asks for each event on its own, after a batch Kick objected to
+// as a whole, so one bad event does not cost the rest.
+func (k *KickAdapter) postEachEvent(ctx context.Context, endpoint string, want []string) {
+	for _, name := range want {
+		if ctx.Err() != nil {
+			return
 		}
-		return
+		_ = k.postActivity(ctx, endpoint, []string{name})
 	}
-	k.mu.Lock()
-	k.act.retry = true
-	k.mu.Unlock()
 }
 
 // kickDeclines reports whether err is Kick saying no to the request itself.
@@ -210,29 +223,7 @@ func (k *KickAdapter) postActivity(ctx context.Context, endpoint string, names [
 	k.mu.Unlock()
 
 	if err := k.api(ctx, http.MethodPost, endpoint, body, &created); err != nil {
-		if ctx.Err() != nil {
-			k.unstampPosted(names)
-			return err
-		}
-		if ae, ok := err.(*apiError); ok && (ae.Status == http.StatusBadRequest || ae.Status == http.StatusConflict) && kickSaysDuplicate(ae.Body) {
-			k.setEvents(names, kickEventState{state: activity.KindOn, at: now})
-			return nil
-		}
-		if len(names) == 1 && kickDeclines(err) {
-			k.setEvents(names, kickEventState{state: activity.KindUnavailable, at: now,
-				detail: "Kick declined the " + names[0] + " subscription for this account: " + kickSaid(err)})
-			return nil
-		}
-		// Transient failure: we tried and failed, we did not create it, so the
-		// issue #419 "we just created it" backoff must not apply.
-		k.unstampPosted(names)
-		if len(names) == 1 {
-			k.mu.Lock()
-			k.act.retry = true
-			k.mu.Unlock()
-			return nil
-		}
-		return err
+		return k.postFailed(ctx, names, err, now)
 	}
 
 	answered := map[string]bool{}
@@ -253,6 +244,34 @@ func (k *KickAdapter) postActivity(ctx context.Context, endpoint string, names [
 		}
 	}
 	return nil
+}
+
+// postFailed decides what a failed subscribe request means for the names it
+// covered, and returns what postActivity should return.
+func (k *KickAdapter) postFailed(ctx context.Context, names []string, err error, now time.Time) error {
+	if ctx.Err() != nil {
+		k.unstampPosted(names)
+		return err
+	}
+	if ae, ok := err.(*apiError); ok && (ae.Status == http.StatusBadRequest || ae.Status == http.StatusConflict) && kickSaysDuplicate(ae.Body) {
+		k.setEvents(names, kickEventState{state: activity.KindOn, at: now})
+		return nil
+	}
+	if len(names) == 1 && kickDeclines(err) {
+		k.setEvents(names, kickEventState{state: activity.KindUnavailable, at: now,
+			detail: "Kick declined the " + names[0] + " subscription for this account: " + kickSaid(err)})
+		return nil
+	}
+	// Transient failure: we tried and failed, we did not create it, so the
+	// issue #419 "we just created it" backoff must not apply.
+	k.unstampPosted(names)
+	if len(names) == 1 {
+		k.mu.Lock()
+		k.act.retry = true
+		k.mu.Unlock()
+		return nil
+	}
+	return err
 }
 
 // unstampPosted forgets the posted stamp for events whose request failed
@@ -592,32 +611,45 @@ func decodeKickRedemption(body []byte, ev *activity.Event, d *kickActDecoded) bo
 	return true
 }
 
+// decodeDelivery reads one delivery and gives it its identity, account and
+// time. ok is false when the delivery does not make a valid event.
+func (k *KickAdapter) decodeDelivery(def kickActivityDef, messageID, timestamp string, body []byte) (kickActDecoded, bool) {
+	d, ok := kickActivityFrom(def, body)
+	if !ok {
+		return d, false
+	}
+	d.ev.Source.ID = firstNonEmpty(d.ev.Source.ID, messageID)
+	if d.ev.Source.ID == "" {
+		// No header: the same bytes are the same delivery.
+		sum := sha256.Sum256(append([]byte(def.name+"\x00"), body...))
+		d.ev.Source.ID = "sha-" + hex.EncodeToString(sum[:12])
+	}
+	d.ev.Account = k.cfg.AccountRef
+	hdr := parseKickTime(timestamp)
+	if d.ev.At.IsZero() {
+		d.ev.At = firstTime(d.at, hdr)
+	}
+	d.ev = d.ev.Normalise(k.cfg.Now)
+	return d, d.ev.Validate() == nil
+}
+
+// dropMalformed counts a delivery that could not be read and logs its type and
+// length only.
+func (k *KickAdapter) dropMalformed(def kickActivityDef, body []byte) {
+	k.mu.Lock()
+	k.act.malformed++
+	k.mu.Unlock()
+	// Type and length only: the body is viewer data and is not kept.
+	k.cfg.Log.Debug("kick activity: could not read a delivery", "event", def.name, "bytes", len(body))
+}
+
 // ingestActivity handles one activity delivery that has already passed
 // signature verification.
 func (k *KickAdapter) ingestActivity(def kickActivityDef, messageID, timestamp string, body []byte) {
 	now := k.cfg.Now()
-	d, ok := kickActivityFrom(def, body)
-	if ok {
-		d.ev.Source.ID = firstNonEmpty(d.ev.Source.ID, messageID)
-		if d.ev.Source.ID == "" {
-			// No header: the same bytes are the same delivery.
-			sum := sha256.Sum256(append([]byte(def.name+"\x00"), body...))
-			d.ev.Source.ID = "sha-" + hex.EncodeToString(sum[:12])
-		}
-		d.ev.Account = k.cfg.AccountRef
-		hdr := parseKickTime(timestamp)
-		if d.ev.At.IsZero() {
-			d.ev.At = firstTime(d.at, hdr)
-		}
-		d.ev = d.ev.Normalise(k.cfg.Now)
-		ok = d.ev.Validate() == nil
-	}
+	d, ok := k.decodeDelivery(def, messageID, timestamp, body)
 	if !ok {
-		k.mu.Lock()
-		k.act.malformed++
-		k.mu.Unlock()
-		// Type and length only: the body is viewer data and is not kept.
-		k.cfg.Log.Debug("kick activity: could not read a delivery", "event", def.name, "bytes", len(body))
+		k.dropMalformed(def, body)
 		return
 	}
 
