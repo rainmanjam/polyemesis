@@ -269,14 +269,14 @@ func (t *TwitchAdapter) helix(ctx context.Context, method, path string, q url.Va
 	if t.cfg.HelixToken != nil {
 		tokenFn = capture
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, tokenFn, headers, body, out)
+	err := doJSONHeaders(ctx, t.cfg.HTTP, jsonCall{method: method, endpoint: endpoint, token: tokenFn, headers: headers}, body, out)
 	if statusOf(err) == http.StatusUnauthorized && t.cfg.HelixRefresh != nil && !missingScope(err) && !clientMismatch(err) {
 		// Not a scope problem, so the token is stale, revoked or invalid. One
 		// forced refresh settles which: if it works the call is retried, and if
 		// it does not the original 401 stands for unauthorizedAdvice to explain.
 		tok, rerr := t.cfg.HelixRefresh(ctx, used)
 		if rerr == nil && tok != "" {
-			err = doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, StaticToken(tok), headers, body, out)
+			err = doJSONHeaders(ctx, t.cfg.HTTP, jsonCall{method: method, endpoint: endpoint, token: StaticToken(tok), headers: headers}, body, out)
 		} else if rerr != nil {
 			err = &refreshFailedError{err: err, cause: rerr}
 		}
