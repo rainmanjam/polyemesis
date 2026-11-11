@@ -99,7 +99,9 @@ jobs:
           MINUTES_IN: ${{ inputs.minutes || '30' }}
         run: |
           set -euo pipefail
-          case "$MINUTES_IN" in ''|*[!0-9]*) echo "::error::minutes must be a whole number, got '$MINUTES_IN'"; exit 1 ;; esac
+          # Only the bad values are matched above; a whole number falls through
+          # to the range check below, so the default is the success path.
+          case "$MINUTES_IN" in ''|*[!0-9]*) echo "::error::minutes must be a whole number, got '$MINUTES_IN'"; exit 1 ;; *) ;; esac
           if [ "$MINUTES_IN" -lt 1 ] || [ "$MINUTES_IN" -gt 120 ]; then
             echo "::error::minutes must be 1-120, got $MINUTES_IN"; exit 1
           fi
