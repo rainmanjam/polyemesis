@@ -366,33 +366,7 @@ func (s *Server) handlePublishTargets(w http.ResponseWriter, r *http.Request) {
 	out := publishTargetsView{ClipJobID: clipJobID, Seconds: file.Seconds, Vertical: file.Vertical}
 	out.Prefill = s.publishPrefill(clipJobID, file)
 	for _, id := range []string{publish.PlatformYouTube, publish.PlatformTikTok, publish.PlatformX} {
-		pv := publishPlatformView{ID: id, Enabled: true, Configured: creds[db.Platform(id)], Accounts: []publishAccountView{}}
-		switch id {
-		case publish.PlatformYouTube:
-			pv.Privacy = publishPrivacyView{Default: publish.PrivacyPrivate,
-				Options: []string{publish.PrivacyPrivate, publish.PrivacyUnlisted, publish.PrivacyPublic}}
-			pv.QuotaUnits = platform.YouTubeCostUploadVideo
-		case publish.PlatformTikTok:
-			pv.Privacy = publishPrivacyView{Default: publish.TikTokPrivacy, Options: []string{publish.TikTokPrivacy}, Forced: true}
-		case publish.PlatformX:
-			pv.Privacy = publishPrivacyView{Default: publish.PrivacyPublic, Options: []string{publish.PrivacyPublic}, Forced: true}
-			if !s.publishGates.XPublish {
-				pv.Enabled = false
-				pv.GatedReason = publish.XGateCopy
-			}
-		}
-		for _, a := range accts {
-			if string(a.Platform) != id {
-				continue
-			}
-			av := publishAccountView{ID: a.ID, Name: a.AccountName}
-			if publish.GrantFailure(id, a.Scopes) != nil {
-				av.NeedsReconnect = true
-				av.ConnectPath = oauthStartPath(id)
-			}
-			pv.Accounts = append(pv.Accounts, av)
-		}
-		out.Platforms = append(out.Platforms, pv)
+		out.Platforms = append(out.Platforms, s.buildPublishPlatformView(id, creds, accts))
 	}
 	pubs, err := s.store.ListPublicationsForClip(clipJobID)
 	if err != nil {
@@ -404,6 +378,38 @@ func (s *Server) handlePublishTargets(w http.ResponseWriter, r *http.Request) {
 		out.Publication = append(out.Publication, s.publicationView(p))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// buildPublishPlatformView is one platform's row on the publish page: its privacy
+// choices, its quota cost, whether it is gated, and the accounts connected to it.
+func (s *Server) buildPublishPlatformView(id string, creds map[db.Platform]bool, accts []db.PlatformAccount) publishPlatformView {
+	pv := publishPlatformView{ID: id, Enabled: true, Configured: creds[db.Platform(id)], Accounts: []publishAccountView{}}
+	switch id {
+	case publish.PlatformYouTube:
+		pv.Privacy = publishPrivacyView{Default: publish.PrivacyPrivate,
+			Options: []string{publish.PrivacyPrivate, publish.PrivacyUnlisted, publish.PrivacyPublic}}
+		pv.QuotaUnits = platform.YouTubeCostUploadVideo
+	case publish.PlatformTikTok:
+		pv.Privacy = publishPrivacyView{Default: publish.TikTokPrivacy, Options: []string{publish.TikTokPrivacy}, Forced: true}
+	case publish.PlatformX:
+		pv.Privacy = publishPrivacyView{Default: publish.PrivacyPublic, Options: []string{publish.PrivacyPublic}, Forced: true}
+		if !s.publishGates.XPublish {
+			pv.Enabled = false
+			pv.GatedReason = publish.XGateCopy
+		}
+	}
+	for _, a := range accts {
+		if string(a.Platform) != id {
+			continue
+		}
+		av := publishAccountView{ID: a.ID, Name: a.AccountName}
+		if publish.GrantFailure(id, a.Scopes) != nil {
+			av.NeedsReconnect = true
+			av.ConnectPath = oauthStartPath(id)
+		}
+		pv.Accounts = append(pv.Accounts, av)
+	}
+	return pv
 }
 
 func parseInt64(s string) (int64, error) {
