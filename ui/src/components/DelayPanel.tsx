@@ -181,7 +181,7 @@ export function DelayPanel({
       {result && (
         <output
           data-testid="delay-dump-result"
-          className={cn("block text-[11px]", result.ok ? "text-muted-foreground" : "text-down")}
+          className={cn("block text-pretty text-[11px]", result.ok ? "text-muted-foreground" : "text-down")}
         >
           {dumpResultText(result, t)}
         </output>

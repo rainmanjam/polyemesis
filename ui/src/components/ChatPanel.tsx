@@ -646,29 +646,21 @@ export function ChatComposer({
   // A reply goes to the one platform it answers, so only that platform's limit applies.
   // Liveness is per account, so the chips are too: one chip per connected chat
   // that can send. A platform with two accounts shows the channel on each chip.
-  const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
   const connected = useMemo(
     () => allSenders.map((s) => ({ key: chatKeyOf(s.platform, s.account), status: s })),
     [allSenders],
   );
   const connectedKeys = useMemo(() => connected.map((c) => c.key), [connected]);
-  const liveKeys = useMemo(
-    () =>
-      connected
-        .filter((c) =>
-          live?.targets.some(
-            (x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live,
-          ),
-        )
-        .map((c) => c.key),
-    [connected, live],
-  );
+  const liveKeys = useMemo(() => liveChatKeys(connected, live), [connected, live]);
   // What this message will reach. Without a reading it is every sender.
   const selected = chosen ?? (live ? liveKeys : connectedKeys);
-  const noneLive = !replyTo && !!live && chosen === null && !live.anyLive;
-  const nothingChosen = !replyTo && chosen !== null && chosen.length === 0;
-  const showTargets = !replyTo && !!live && connected.length > 0;
-  const liveUnknown = !replyTo && liveFailed && connected.length > 0;
+  const { noneLive, nothingChosen, showTargets, liveUnknown } = targetNotices(
+    replyTo,
+    live,
+    liveFailed,
+    connected.length,
+    chosen,
+  );
   // Two accounts on one platform: the chip says which channel it is.
   const perPlatform = (p: ChatPlatform) => connected.filter((c) => c.status.platform === p).length;
   const toggleTarget = (key: string) => {
@@ -751,16 +743,11 @@ export function ChatComposer({
         if (target) onCancelReply?.(target.id);
       }
       setUnsent(!replyTo && res.sent > 0 && res.failed > 0 ? body : "");
-      if (res.failed > 0) {
-        toast.error(
-          res.sent > 0
-            ? t("chatpage.sentPartial", { sent: res.sent, failed: res.failed })
-            : t("chatpage.noneAccepted"),
-        );
-      }
+      const partial = partialSendText(res, t);
+      if (partial !== null) toast.error(partial);
     } catch (err) {
       setResults(null);
-      if (err instanceof ApiError && err.code === "no_platform_live") {
+      if (isNoPlatformLive(err)) {
         // The server's sentence is English and names JSON fields; the composer
         // says it in the operator's language and the chips are the way out.
         toast.error(t("chatpage.sendRefusedNoneLive"));
@@ -881,12 +868,12 @@ export function ChatComposer({
         </div>
       )}
       {liveUnknown && (
-        <output className="block mb-1.5 text-[11px] text-muted-foreground">
+        <output className="block text-pretty mb-1.5 text-[11px] text-muted-foreground">
           {t("chatpage.liveUnknown")}
         </output>
       )}
       {(noneLive || nothingChosen) && (
-        <output className="block mb-1.5 text-[11px] text-warn">
+        <output className="block text-pretty mb-1.5 text-[11px] text-warn">
           {t(noneLive ? "chatpage.targetsNoneLive" : "chatpage.targetsPick")}
         </output>
       )}
@@ -1453,4 +1440,44 @@ function composerPlaceholder(
   if (senders.length === 0) return t("chatpage.targetsPick");
   if (!live) return t("chatpage.sendLiveDefault");
   return t("chatpage.sendTo", { platforms: senders.map((s) => accentFor(s.platform).label).join(", ") });
+}
+
+// One key per connected chat: a platform with two accounts has two keys.
+const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
+
+// The connected chats the live reading marks as able to send and live right now.
+function liveChatKeys<T extends { key: string }>(connected: readonly T[], live: ChatLiveView | null): string[] {
+  return connected
+    .filter((c) => live?.targets.some((x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live))
+    .map((c) => c.key);
+}
+
+// Which target notices the composer shows, from the reply being answered, the
+// live reading, and the chats the user has picked (null means "follow live").
+function targetNotices(
+  replyTo: unknown,
+  live: ChatLiveView | null,
+  liveFailed: boolean,
+  connectedCount: number,
+  chosen: readonly string[] | null,
+) {
+  return {
+    noneLive: !replyTo && !!live && chosen === null && !live.anyLive,
+    nothingChosen: !replyTo && chosen !== null && chosen.length === 0,
+    showTargets: !replyTo && !!live && connectedCount > 0,
+    liveUnknown: !replyTo && liveFailed && connectedCount > 0,
+  };
+}
+
+// The warning for a send that some platforms refused: null when every one went out.
+function partialSendText(res: { sent: number; failed: number }, t: Translator): string | null {
+  if (res.failed <= 0) return null;
+  return res.sent > 0
+    ? t("chatpage.sentPartial", { sent: res.sent, failed: res.failed })
+    : t("chatpage.noneAccepted");
+}
+
+// The server refuses a send with this code when no platform is live.
+function isNoPlatformLive(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "no_platform_live";
 }

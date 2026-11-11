@@ -563,7 +563,7 @@ export function AutomodConfig({
                     </p>
                   )}
                   {brakeOn && (
-                    <output className="block text-xs text-warn">
+                    <output className="block text-pretty text-xs text-warn">
                       {t("automod.modelBrake")}
                     </output>
                   )}
