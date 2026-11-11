@@ -485,6 +485,84 @@ func droppedSince(prev map[string]struct{}, ls rumbleLivestream, limit int) (dro
 // for a broadcast is a normal state on a platform whose chat cannot exist
 // without one, and reporting it as a failure would make the account list read
 // as broken every morning before the operator goes live.
+// rumbleSaturated reports whether chat is arriving about as fast as the snapshot
+// can hold it, judged by entries NEW since the last poll. The snapshot's own size
+// cannot be the test: once a chat has 50 lines every poll returns 50, so a quiet
+// chat would be polled at the floor for the rest of the broadcast.
+func rumbleSaturated(dropped, hadPrev bool, fresh, chatCap int) bool {
+	return dropped || (hadPrev && fresh >= chatCap*3/4)
+}
+
+// backfillCutoff is the replay floor for the first delivery of a broadcast: the
+// recent window is shown once, then first is cleared.
+func (r *RumbleAdapter) backfillCutoff(first *bool) time.Time {
+	cutoff := time.Time{}
+	if *first {
+		cutoff = r.cfg.Now().Add(-rumbleDefaultBackfill)
+		*first = false
+	}
+	return cutoff
+}
+
+// nextRumblePoll chooses the wait before the next poll. Back off while nobody is
+// talking and snap back the moment they are.
+func (r *RumbleAdapter) nextRumblePoll(wait time.Duration, saturated bool, delivered int) time.Duration {
+	switch {
+	case saturated:
+		// Most of a full response is new, so older messages are being cut
+		// (or about to be): read as fast as the floor allows. The floor is the same
+		// conservative one no configuration can go under.
+		return rumbleMinPoll
+	case delivered == 0:
+		if wait *= 2; wait > rumbleMaxPoll {
+			wait = rumbleMaxPoll
+		}
+		return wait
+	default:
+		return r.pollInterval()
+	}
+}
+
+// emitRumbleActivity reports one poll's activity. Activity leaves through the
+// activity door, never as chat. A poll with no live stream drops the rant list.
+func (r *RumbleAdapter) emitRumbleActivity(sink Sink, acts *rumbleActivityState, l rumbleActivityLists, live bool, stream *rumbleLivestream) {
+	var liveForActivity *rumbleLivestream
+	if live {
+		liveForActivity = stream
+	} else {
+		acts.resetRants()
+	}
+	for _, ev := range r.observeActivity(acts, l, liveForActivity) {
+		emitActivity(sink, ev)
+	}
+}
+
+// waitForRumbleStream waits out an offline poll. It reports true when Run should
+// stop because the wait was cancelled.
+func (r *RumbleAdapter) waitForRumbleStream(ctx context.Context) bool {
+	r.setHealth(StateDegraded,
+		"waiting for a Rumble live stream to start; chat begins when it does")
+	return !r.cfg.Sleep(ctx, rumbleOfflinePoll)
+}
+
+// fetchFailed handles a failed poll. stop says Run must return ret; otherwise
+// Run waits out the retry delay (already done here) and polls again.
+func (r *RumbleAdapter) fetchFailed(ctx context.Context, err error, failures *int) (stop bool, ret error) {
+	cerr := r.classify(err)
+	if IsFatal(cerr) {
+		return true, cerr
+	}
+	*failures++
+	if *failures >= rumbleMaxFailures {
+		return true, cerr
+	}
+	r.setTransient(cerr.Error())
+	if !r.cfg.Sleep(ctx, r.retryDelay(*failures-1, retryAfterFrom(err))) {
+		return true, nil
+	}
+	return false, nil
+}
+
 func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 	var (
 		first = true
@@ -498,17 +576,8 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 	for ctx.Err() == nil {
 		resp, err := r.fetch(ctx)
 		if err != nil {
-			cerr := r.classify(err)
-			if IsFatal(cerr) {
-				return cerr
-			}
-			failures++
-			if failures >= rumbleMaxFailures {
-				return cerr
-			}
-			r.setTransient(cerr.Error())
-			if !r.cfg.Sleep(ctx, r.retryDelay(failures-1, retryAfterFrom(err))) {
-				return nil
+			if stop, ret := r.fetchFailed(ctx, err, &failures); stop {
+				return ret
 			}
 			continue
 		}
@@ -518,21 +587,11 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		// Activity first, and before the offline branch: follows and
 		// subscriptions are channel-level and arrive with nothing live. The
 		// events leave through the activity door, never as chat.
-		var liveForActivity *rumbleLivestream
-		if ok {
-			liveForActivity = &live
-		} else {
-			acts.resetRants()
-		}
-		for _, ev := range r.observeActivity(acts, rumbleActivityLists{
+		r.emitRumbleActivity(sink, acts, rumbleActivityLists{
 			followers: resp.Followers.Recent, subscribers: resp.Subscribers.Recent, gifted: resp.GiftedSubs.Recent,
-		}, liveForActivity) {
-			emitActivity(sink, ev)
-		}
+		}, ok, &live)
 		if !ok {
-			r.setHealth(StateDegraded,
-				"waiting for a Rumble live stream to start; chat begins when it does")
-			if !r.cfg.Sleep(ctx, rumbleOfflinePoll) {
+			if r.waitForRumbleStream(ctx) {
 				return nil
 			}
 			// Re-arm the backfill window, so a SECOND broadcast is bounded the
@@ -550,11 +609,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 			continue
 		}
 
-		cutoff := time.Time{}
-		if first {
-			cutoff = r.cfg.Now().Add(-rumbleDefaultBackfill)
-			first = false
-		}
+		cutoff := r.backfillCutoff(&first)
 
 		delivered := r.deliver(live, cutoff, sink)
 		dropped, fresh, cur := droppedSince(prev, live, resp.chatCap())
@@ -568,7 +623,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		// own size cannot be the test: once a chat has 50 lines every poll
 		// returns 50, so a quiet chat would be polled at the floor for the
 		// rest of the broadcast.
-		saturated := dropped || (hadPrev && fresh >= resp.chatCap()*3/4)
+		saturated := rumbleSaturated(dropped, hadPrev, fresh, resp.chatCap())
 		// The viewer count is read from the poll that just succeeded rather
 		// than fetched, which is the entire cost of this feature: one field off
 		// a response already in hand, no second request, no second credential.
@@ -577,19 +632,7 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		// Back off while nobody is talking and snap back the moment they are.
 		// A silent chat polled every ten seconds for eight hours is 2,880
 		// requests that told us nothing.
-		switch {
-		case saturated:
-			// Most of a full response is new, so older messages are being cut
-			// (or about to be): read as fast as the floor allows. The floor is the same
-			// conservative one no configuration can go under.
-			wait = rumbleMinPoll
-		case delivered == 0:
-			if wait *= 2; wait > rumbleMaxPoll {
-				wait = rumbleMaxPoll
-			}
-		default:
-			wait = r.pollInterval()
-		}
+		wait = r.nextRumblePoll(wait, saturated, delivered)
 		if !r.cfg.Sleep(ctx, wait) {
 			return nil
 		}
