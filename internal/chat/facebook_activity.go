@@ -111,19 +111,9 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 		return
 	}
 	now := f.cfg.Now()
-	f.mu.Lock()
-	st := &f.react
-	if st.video != videoID {
-		*st = fbReactions{video: videoID}
-	}
-	st.polls++
-	due := st.polls%fbReactionPolls == 1 // the first poll, then every third
-	if !due || (!st.lastSample.IsZero() && now.Sub(st.lastSample) < fbReactionEvery) || now.Before(st.retryAfter) {
-		f.mu.Unlock()
+	if !f.claimReactionSample(now, videoID) {
 		return
 	}
-	st.lastSample = now
-	f.mu.Unlock()
 
 	total, err := f.reactionCount(ctx, videoID, "")
 	if err != nil {
@@ -148,6 +138,51 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 	f.mu.Lock()
 	oldTypes := f.react.byType
 	f.mu.Unlock()
+	types := f.readReactionTypes(ctx, videoID, oldTypes)
+
+	f.mu.Lock()
+	st := &f.react
+	start := st.windowStart
+	st.total, st.byType, st.windowStart, st.seeded = total, types, now, true
+	f.mu.Unlock()
+	if !seeded || delta < 0 {
+		return // the baseline, or people un-reacting: not news
+	}
+	breakdown := reactionBreakdown(types, oldTypes)
+	emitActivity(sink, activity.Event{
+		Kind:      activity.KindReaction,
+		At:        now,
+		Count:     int(min(delta, activity.MaxCount)),
+		Breakdown: breakdown,
+		Source: activity.Source{
+			Type: fbSourceReactions,
+			ID:   fmt.Sprintf("%s:%d", videoID, start.Unix()),
+		},
+	})
+}
+
+// claimReactionSample reports whether this poll should sample the reactions: the
+// first poll of every third, not too soon after the last sample, and not while
+// Facebook has asked to back off. A due sample is stamped with now.
+func (f *FacebookAdapter) claimReactionSample(now time.Time, videoID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := &f.react
+	if st.video != videoID {
+		*st = fbReactions{video: videoID}
+	}
+	st.polls++
+	due := st.polls%fbReactionPolls == 1 // the first poll, then every third
+	if !due || (!st.lastSample.IsZero() && now.Sub(st.lastSample) < fbReactionEvery) || now.Before(st.retryAfter) {
+		return false
+	}
+	st.lastSample = now
+	return true
+}
+
+// readReactionTypes reads the count for each reaction type. A type that cannot
+// be read is left out; the count is still true.
+func (f *FacebookAdapter) readReactionTypes(ctx context.Context, videoID string, oldTypes map[string]int64) map[string]int64 {
 	types := map[string]int64{}
 	for _, ty := range fbReactionTypes {
 		k := strings.ToLower(ty)
@@ -157,15 +192,12 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 			types[k] = old // keep its baseline; a failed read must not zero it
 		}
 	}
+	return types
+}
 
-	f.mu.Lock()
-	st = &f.react
-	start := st.windowStart
-	st.total, st.byType, st.windowStart, st.seeded = total, types, now, true
-	f.mu.Unlock()
-	if !seeded || delta < 0 {
-		return // the baseline, or people un-reacting: not news
-	}
+// reactionBreakdown is the per-type growth since the last baseline. nil when no
+// type grew.
+func reactionBreakdown(types, oldTypes map[string]int64) map[string]int {
 	breakdown := map[string]int{}
 	for k, n := range types {
 		old, ok := oldTypes[k]
@@ -177,18 +209,9 @@ func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sin
 		}
 	}
 	if len(breakdown) == 0 {
-		breakdown = nil
+		return nil
 	}
-	emitActivity(sink, activity.Event{
-		Kind:      activity.KindReaction,
-		At:        now,
-		Count:     int(min(delta, activity.MaxCount)),
-		Breakdown: breakdown,
-		Source: activity.Source{
-			Type: fbSourceReactions,
-			ID:   fmt.Sprintf("%s:%d", videoID, start.Unix()),
-		},
-	})
+	return breakdown
 }
 
 // reactionFailed records why a sample failed. Permission is a kind state; the
