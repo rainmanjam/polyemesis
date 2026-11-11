@@ -767,8 +767,7 @@ export function SourceCard({
         {phase === "waiting" && <WaitingForEncoder />}
 
         {phase === "receiving" && (
-          <div
-            role="status"
+          <output
             className="flex items-start gap-3 rounded-md border border-ok/30 bg-ok-dim/20 px-3 py-2"
           >
             {/* WHAT IS ARRIVING, not only that something is (A2). A small live
@@ -803,7 +802,7 @@ export function SourceCard({
                 </Button>
               )}
             </div>
-          </div>
+          </output>
         )}
 
         {dirty && (
