@@ -57,7 +57,13 @@ function build(): HTMLElement {
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const dest = (k: StoryKey, id: string) => $<HTMLButtonElement>(`#panel-${k} .dest[data-dest="${id}"]`);
 const status = () => $("[data-status]");
-const key = (el: Element, k: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+/** Returns false when a listener called preventDefault. */
+const key = (el: Element, k: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+const hover = (el: Element, type: "pointerover" | "pointerout", relatedTarget: Element | null = null) => {
+  const e = new MouseEvent(type, { bubbles: true, relatedTarget });
+  Object.defineProperty(e, "pointerType", { value: "mouse" });
+  el.dispatchEvent(e);
+};
 
 beforeEach(() => {
   allowed = true;
@@ -65,6 +71,12 @@ beforeEach(() => {
   subs = [];
   observers = [];
   vi.stubGlobal("IntersectionObserver", StubIO);
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  });
+  vi.stubGlobal("scrollTo", vi.fn());
+  vi.stubGlobal("matchMedia", (q: string) => ({ media: q, matches: false, addEventListener() {}, removeEventListener() {} }));
   gate = {
     allowed: () => allowed,
     userPaused: () => userPaused,
@@ -172,15 +184,17 @@ describe("initHero", () => {
     start();
     const yt = dest("streamer", "youtube");
     // A real button turns Enter and Space into a click; jsdom does not, so the
-    // click stands in for the browser's synthesis.
+    // click stands in for the browser's synthesis. That holds only for a real
+    // button whose keydown nobody cancelled, so both are asserted.
+    expect(yt.tagName).toBe("BUTTON");
     yt.focus();
-    key(yt, "Enter");
+    expect(key(yt, "Enter")).toBe(true);
     yt.click();
     expect(yt.getAttribute("aria-pressed")).toBe("true");
     key(yt, "Escape");
     expect(yt.getAttribute("aria-pressed")).toBe("false");
     expect(status().textContent).toBe(statusFor(STORIES.streamer, null, true).text);
-    key(yt, " ");
+    expect(key(yt, " ")).toBe(true);
     yt.click();
     expect(yt.getAttribute("aria-pressed")).toBe("true");
     expect(dest("streamer", "twitch").classList.contains("dim")).toBe(true);
@@ -207,6 +221,58 @@ describe("initHero", () => {
     expect(yt.getAttribute("aria-pressed")).toBe("false");
     yt.dispatchEvent(new MouseEvent("pointerout", { bubbles: true }));
     expect(status().querySelector("b")).toBeNull();
+  });
+
+  it("a hover sweep across cards writes the status once per card", () => {
+    start();
+    const yt = dest("streamer", "youtube");
+    const tw = dest("streamer", "twitch");
+    const writes = vi.spyOn(status(), "replaceChildren");
+    hover(tw, "pointerover");
+    hover(tw.querySelector(".dest-name")!, "pointerout", tw); // within the card
+    hover(tw, "pointerout", yt); // straight onto the next card
+    hover(yt, "pointerover");
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(status().querySelector("b")!.textContent).toBe("YouTube");
+    hover(yt, "pointerout", document.body); // off the cards
+    expect(writes).toHaveBeenCalledTimes(3);
+    expect(status().querySelector("b")).toBeNull();
+  });
+
+  it("previews on keyboard focus only when :focus-visible matches", () => {
+    start();
+    const yt = dest("streamer", "youtube");
+    const matches = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, s: string) {
+      return s === ":focus-visible";
+    });
+    yt.focus();
+    expect(status().querySelector("b")!.textContent).toBe("YouTube");
+    yt.blur();
+    expect(status().querySelector("b")).toBeNull();
+    // A browser that cannot parse :focus-visible throws; that is "not visible".
+    matches.mockImplementation(() => {
+      throw new SyntaxError("unsupported");
+    });
+    yt.focus();
+    expect(status().querySelector("b")).toBeNull();
+    matches.mockRestore();
+  });
+
+  it("re-selecting the shown story keeps the pin", () => {
+    start();
+    dest("streamer", "youtube").click();
+    $("#tab-streamer").click();
+    expect(dest("streamer", "youtube").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("makes the fading panel inert during the swap", () => {
+    vi.useFakeTimers();
+    start();
+    hero!.setStory("sports");
+    expect($("#panel-streamer").inert).toBe(true);
+    vi.advanceTimersByTime(150);
+    expect($("#panel-streamer").inert).toBe(false);
+    expect($("#panel-streamer").hidden).toBe(true);
   });
 
   it("dims the music chip when YouTube is soloed", () => {

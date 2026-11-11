@@ -58,14 +58,17 @@ describe("boot", () => {
     });
     const { boot } = await import("./boot");
     document.body.innerHTML = `<button type="button" data-pause aria-pressed="false">Pause motion</button>`;
-    boot(document);
+    const gate = boot(document)!;
     const btn = document.querySelector<HTMLElement>("[data-pause]")!;
+    expect(gate.allowed()).toBe(true);
     btn.click();
+    expect(gate.allowed()).toBe(false);
     expect(setUserPaused).toHaveBeenCalledTimes(1);
     expect(setUserPaused).toHaveBeenLastCalledWith(true);
     expect(btn.getAttribute("aria-pressed")).toBe("true");
     expect(btn.textContent).toBe("Resume motion");
     btn.click();
+    expect(gate.allowed()).toBe(true);
     expect(setUserPaused).toHaveBeenCalledTimes(2);
     expect(setUserPaused).toHaveBeenLastCalledWith(false);
     expect(btn.getAttribute("aria-pressed")).toBe("false");
