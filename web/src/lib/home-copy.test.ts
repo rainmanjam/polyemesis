@@ -127,7 +127,7 @@ describe("the home hero (2026-11 redesign)", () => {
     expect(hero).toMatch(/\.status \{[^}]*min-height: 3lh/);
   });
   it("fades the outgoing panel only while motion is on", () => {
-    expect(hero).toMatch(/prefers-reduced-motion: no-preference\) \{[^@]*\.motion-on \.panel\.swap-out \{ opacity: 0/);
+    expect(hero).toMatch(/prefers-reduced-motion: no-preference\) \{[^@]*:global\(\.motion-on\) \.panel\.swap-out \{ opacity: 0/);
     expect(hero).not.toMatch(/prefers-reduced-motion: reduce/);
   });
   it("puts no pill above the headline and no interaction colour in it", () => {

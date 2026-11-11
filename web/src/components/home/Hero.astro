@@ -123,7 +123,7 @@ const status = statusFor(STORIES[first], null, false);
      .swap-out). Only while motion is on, which is off for reduced-motion
      visitors and while the page's Pause is pressed. */
   @media (prefers-reduced-motion: no-preference) {
-    .motion-on .panel { transition: opacity 150ms ease-out; }
-    .motion-on .panel.swap-out { opacity: 0; }
+    :global(.motion-on) .panel { transition: opacity 150ms ease-out; }
+    :global(.motion-on) .panel.swap-out { opacity: 0; }
   }
 </style>
