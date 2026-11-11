@@ -107,46 +107,79 @@ func Parse(b []byte) (*Pack, error) {
 // once, and has a known category and a tier that belongs to it. A pack that
 // fails this would silently not match what it was written to catch.
 func (p *Pack) Validate() error {
+	if err := p.validateHeader(); err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(p.Entries))
+	severe := severeTerms(p.Entries)
+	for i, e := range p.Entries {
+		if err := p.validateEntry(i, e, seen); err != nil {
+			return err
+		}
+		seen[e.Term] = true
+		if err := p.validateExceptions(i, e, severe); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateHeader checks the pack's id, version and sources.
+func (p *Pack) validateHeader() error {
 	if p.ID == "" || p.Version < 1 {
 		return fmt.Errorf("pack: needs an id and a version of at least 1")
 	}
 	if len(p.Sources) == 0 {
 		return fmt.Errorf("pack %s: needs at least one source", p.ID)
 	}
-	seen := make(map[string]bool, len(p.Entries))
+	return nil
+}
+
+// severeTerms is the set of terms that are severe hate, which no exception may
+// itself be.
+func severeTerms(entries []Entry) map[string]bool {
 	severe := map[string]bool{}
-	for _, e := range p.Entries {
+	for _, e := range entries {
 		if e.Category == CategoryHate && e.Tier == TierSevere {
 			severe[e.Term] = true
 		}
 	}
-	for i, e := range p.Entries {
-		if e.Term == "" || Fold(e.Term) != e.Term {
-			return fmt.Errorf("pack %s: entry %d is not in pack form", p.ID, i)
+	return severe
+}
+
+// validateEntry checks that entry i is in pack form, is not a repeat, and has a
+// category with a tier that belongs to it. seen holds the terms before it.
+func (p *Pack) validateEntry(i int, e Entry, seen map[string]bool) error {
+	if e.Term == "" || Fold(e.Term) != e.Term {
+		return fmt.Errorf("pack %s: entry %d is not in pack form", p.ID, i)
+	}
+	if seen[e.Term] {
+		return fmt.Errorf("pack %s: entry %d repeats a term", p.ID, i)
+	}
+	switch e.Category {
+	case CategoryHate:
+		if e.Tier != TierSevere && e.Tier != TierContextual {
+			return fmt.Errorf("pack %s: entry %d: hate tier %q", p.ID, i, e.Tier)
 		}
-		if seen[e.Term] {
-			return fmt.Errorf("pack %s: entry %d repeats a term", p.ID, i)
+	case CategoryProfanity:
+		if e.Tier != TierMild && e.Tier != TierStrong {
+			return fmt.Errorf("pack %s: entry %d: profanity tier %q", p.ID, i, e.Tier)
 		}
-		seen[e.Term] = true
-		switch e.Category {
-		case CategoryHate:
-			if e.Tier != TierSevere && e.Tier != TierContextual {
-				return fmt.Errorf("pack %s: entry %d: hate tier %q", p.ID, i, e.Tier)
-			}
-		case CategoryProfanity:
-			if e.Tier != TierMild && e.Tier != TierStrong {
-				return fmt.Errorf("pack %s: entry %d: profanity tier %q", p.ID, i, e.Tier)
-			}
-		default:
-			return fmt.Errorf("pack %s: entry %d: category %q", p.ID, i, e.Category)
+	default:
+		return fmt.Errorf("pack %s: entry %d: category %q", p.ID, i, e.Category)
+	}
+	return nil
+}
+
+// validateExceptions checks entry i's exceptions: each is a whole token that
+// contains the term, and none is itself a severe term.
+func (p *Pack) validateExceptions(i int, e Entry, severe map[string]bool) error {
+	for _, x := range e.Except {
+		if Fold(x) != x || strings.ContainsRune(x, ' ') || !strings.Contains(x, e.Term) {
+			return fmt.Errorf("pack %s: entry %d: an exception is not a whole token containing the term", p.ID, i)
 		}
-		for _, x := range e.Except {
-			if Fold(x) != x || strings.ContainsRune(x, ' ') || !strings.Contains(x, e.Term) {
-				return fmt.Errorf("pack %s: entry %d: an exception is not a whole token containing the term", p.ID, i)
-			}
-			if severe[x] {
-				return fmt.Errorf("pack %s: entry %d: an exception is itself a severe term", p.ID, i)
-			}
+		if severe[x] {
+			return fmt.Errorf("pack %s: entry %d: an exception is itself a severe term", p.ID, i)
 		}
 	}
 	return nil
