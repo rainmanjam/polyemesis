@@ -232,33 +232,46 @@ func (s *Server) xGoLiveTitleAt(d *db.Destination, now time.Time) string {
 		bestID int64
 	)
 	for _, tpl := range tpls {
-		sc, ok := schedByID[tpl.ScheduleID]
-		if !ok || !sc.Enabled || sc.Action != scheduler.ActionStart || !scheduleTargets(sc, d.ID) {
+		title, at, id, ok := goLiveCandidate(tpl, schedByID, d, now)
+		if !ok {
 			continue
 		}
-		at, ok := lastOccurrence(sc, now)
-		if !ok || now.Sub(at) >= goLiveWindow {
-			continue
-		}
-		loc, err := sc.Location()
-		if err != nil {
-			continue
-		}
-		title, err := scheduler.RenderTitle(tpl.TitlePattern, at, loc)
-		if err != nil || strings.TrimSpace(title) == "" {
-			continue
-		}
-		if best != "" && (at.Before(bestAt) || (at.Equal(bestAt) && sc.ID > bestID)) {
+		if best != "" && (at.Before(bestAt) || (at.Equal(bestAt) && id > bestID)) {
 			continue
 		}
 		// No length check here: a template renders to at most 100 characters
 		// (scheduler.BroadcastTemplate.Validate), well inside X's 280.
-		best, bestAt, bestID = title, at, sc.ID
+		best, bestAt, bestID = title, at, id
 	}
 	if best != "" {
 		return best
 	}
 	return d.GoLiveTitle
+}
+
+// goLiveCandidate renders the title one template would give d from the start
+// schedule it is attached to, when that schedule is a live start for d that fired
+// inside the go-live window. It reports the start instant and the schedule's ID
+// with it.
+func goLiveCandidate(tpl scheduler.BroadcastTemplate, schedByID map[int64]scheduler.Schedule,
+	d *db.Destination, now time.Time) (title string, at time.Time, id int64, ok bool) {
+	sc, found := schedByID[tpl.ScheduleID]
+	if !found || !sc.Enabled || sc.Action != scheduler.ActionStart || !scheduleTargets(sc, d.ID) {
+		return "", time.Time{}, 0, false
+	}
+	at, ok = lastOccurrence(sc, now)
+	if !ok || now.Sub(at) >= goLiveWindow {
+		return "", time.Time{}, 0, false
+	}
+	loc, err := sc.Location()
+	if err != nil {
+		return "", time.Time{}, 0, false
+	}
+	title, err = scheduler.RenderTitle(tpl.TitlePattern, at, loc)
+	if err != nil || strings.TrimSpace(title) == "" {
+		return "", time.Time{}, 0, false
+	}
+	return title, at, sc.ID, true
 }
 
 // xTitleLiveRefusal is the answer to a go-live title change while the X
