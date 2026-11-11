@@ -54,7 +54,7 @@ const TOLERANCE = 1;
  * another. Change a number alongside the markup change that adds or removes a
  * grid. */
 const REQUIRED = {
-  "/": 1,
+  "/": 2,
   "/features": 1,
   "/comparison": 3,
   "/download": 1,
