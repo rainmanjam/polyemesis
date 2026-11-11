@@ -1,36 +1,5 @@
 Third-party software shipped with polyemesis.com
 
-Three.js 0.187.0 (core and examples/jsm: Line2, LineGeometry, LineMaterial, EffectComposer,
-RenderPass, UnrealBloomPass), bundled into /_astro/three.*.js, scene.*.js and faders.*.js for the
-home page hero. Source: https://registry.npmjs.org/three/-/three-0.187.0.tgz
-Vendored in the repository at web/src/scripts/signal-path/vendor/.
-
-------------------------------------------------------------------------
-
-The MIT License
-
-Copyright © 2010-2026 three.js authors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-------------------------------------------------------------------------
-
 IBM Plex Serif 2.0.0 (Italic, latin split), served as
 /fonts/ibm-plex-serif-italic.woff2 for the italic word in the home page headline.
 Source: https://registry.npmjs.org/@ibm/plex-serif/-/plex-serif-2.0.0.tgz

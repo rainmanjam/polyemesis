@@ -61,6 +61,18 @@ describe("split diagram geometry", () => {
     }
   });
 
+  it("routes the v layout's second-row destinations down the seam, not across the first row", () => {
+    const a = anchors("v", 4);
+    const lower = new Set(STORIES.streamer.dests.slice(2).map((d) => d.id));
+    const lines = linesFor(STORIES.streamer, "v").filter((l) => lower.has(l.to));
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    for (const l of lines) {
+      const nums = l.d.match(/-?\d+(\.\d)?/g)!.map(Number);
+      // M a C c1, c2, end: both control points stay within a few units of the hub's column.
+      for (const cx of [nums[2], nums[4]]) expect(Math.abs(cx - a.hub.x)).toBeLessThanOrEqual(2);
+    }
+  });
+
   it("tags each line with the step table's data-on", () => {
     const ls = linesFor(STORIES.streamer, "h");
     expect(ls.find((l) => l.kind === "video" && l.to === "hub")!.on).toBe("1 2 5");

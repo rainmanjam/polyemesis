@@ -96,6 +96,18 @@ function curve(layout: Layout, a: Pt, b: Pt, pull: [number, number]): string {
   return `M${a.x} ${a.y} C${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
 }
 
+/* A card in the second row of the v layout sits under a card of the first row,
+ * and a curve straight to its centre would pass behind that card (the cards sit
+ * above the lines). Its lines go down the seam between the two columns and hook
+ * into the card from the side, under it: one cubic whose control points stay on
+ * the seam. `off` nudges the audio line a little to the card's side of the seam
+ * so it does not lie on the video line. */
+const SEAM_OFF = 2;
+function seam(a: Pt, b: Pt, off: number): string {
+  const x = a.x + off;
+  return `M${a.x} ${a.y} C${r1(x)} ${b.y}, ${r1(x)} ${b.y}, ${b.x} ${b.y}`;
+}
+
 const SRC_PULL: [number, number] = [0.5, 0.5];
 const VIDEO_PULL: [number, number] = [0.3, 0.7];
 const AUDIO_PULL: [number, number] = [0.65, 0.35];
@@ -112,10 +124,19 @@ export function linesFor(story: Story, layout: Layout): Line[] {
     on: i === 0 ? ON.srcVideo : ON.srcTrack,
   }));
   story.dests.forEach((dest, j) => {
+    const to = a.dst[j];
+    const lower = layout === "v" && to.y > a.dst[0].y;
+    const side = to.x < a.hub.x ? 1 : -1;
     if (dest.video) {
-      lines.push({ d: curve(layout, a.hub, a.dst[j], VIDEO_PULL), kind: "video", from: "hub", to: dest.id, on: ON.dstVideo });
+      lines.push({ d: lower ? seam(a.hub, to, 0) : curve(layout, a.hub, to, VIDEO_PULL), kind: "video", from: "hub", to: dest.id, on: ON.dstVideo });
     }
-    lines.push({ d: curve(layout, a.hub, a.dst[j], AUDIO_PULL), kind: "audio", from: "hub", to: dest.id, on: ON.dstAudio });
+    lines.push({
+      d: lower ? seam(a.hub, to, side * SEAM_OFF) : curve(layout, a.hub, to, AUDIO_PULL),
+      kind: "audio",
+      from: "hub",
+      to: dest.id,
+      on: ON.dstAudio,
+    });
   });
   return lines;
 }
