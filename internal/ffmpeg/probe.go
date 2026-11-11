@@ -82,23 +82,26 @@ type AudioStream struct {
 	Title      string `json:"title"`
 }
 
+// ffprobeStream is one entry of ffprobe's "streams" array.
+type ffprobeStream struct {
+	CodecName     string            `json:"codec_name"`
+	CodecType     string            `json:"codec_type"`
+	Width         int               `json:"width"`
+	Height        int               `json:"height"`
+	PixFmt        string            `json:"pix_fmt"`
+	Profile       string            `json:"profile"`
+	Level         int               `json:"level"`
+	Channels      int               `json:"channels"`
+	ChannelLayout string            `json:"channel_layout"`
+	SampleRate    string            `json:"sample_rate"`
+	BitRate       string            `json:"bit_rate"`
+	AvgFrameRate  string            `json:"avg_frame_rate"`
+	Tags          map[string]string `json:"tags"`
+}
+
 type ffprobeOutput struct {
-	Streams []struct {
-		CodecName     string            `json:"codec_name"`
-		CodecType     string            `json:"codec_type"`
-		Width         int               `json:"width"`
-		Height        int               `json:"height"`
-		PixFmt        string            `json:"pix_fmt"`
-		Profile       string            `json:"profile"`
-		Level         int               `json:"level"`
-		Channels      int               `json:"channels"`
-		ChannelLayout string            `json:"channel_layout"`
-		SampleRate    string            `json:"sample_rate"`
-		BitRate       string            `json:"bit_rate"`
-		AvgFrameRate  string            `json:"avg_frame_rate"`
-		Tags          map[string]string `json:"tags"`
-	} `json:"streams"`
-	Format struct {
+	Streams []ffprobeStream `json:"streams"`
+	Format  struct {
 		Duration   string `json:"duration"`
 		FormatName string `json:"format_name"`
 	} `json:"format"`
@@ -596,40 +599,52 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 				// encoders attach cover art as a second video stream.
 				continue
 			}
-			res.Video = &VideoStream{
-				Codec:     s.CodecName,
-				Width:     s.Width,
-				Height:    s.Height,
-				PixFmt:    s.PixFmt,
-				Profile:   s.Profile,
-				Level:     s.Level,
-				FrameRate: parseRational(s.AvgFrameRate),
-				Bitrate:   atoi(s.BitRate),
-			}
+			res.Video = videoStreamOf(s)
 		case "audio":
-			a := AudioStream{
-				Index:      audioIdx,
-				Codec:      s.CodecName,
-				Channels:   s.Channels,
-				Layout:     s.ChannelLayout,
-				SampleRate: atoi(s.SampleRate),
-				Bitrate:    atoi(s.BitRate),
-			}
-			if a.Channels == 0 {
-				a.Channels = 2
-			}
-			if a.Layout == "" {
-				a.Layout = layoutName(a.Channels)
-			}
-			if s.Tags != nil {
-				a.Language = s.Tags["language"]
-				a.Title = s.Tags["title"]
-			}
-			res.Audio = append(res.Audio, a)
+			res.Audio = append(res.Audio, audioStreamOf(s, audioIdx))
 			audioIdx++
 		}
 	}
 	return res, nil
+}
+
+// videoStreamOf reads a video stream's codec, geometry and rate from ffprobe's
+// entry for it.
+func videoStreamOf(s ffprobeStream) *VideoStream {
+	return &VideoStream{
+		Codec:     s.CodecName,
+		Width:     s.Width,
+		Height:    s.Height,
+		PixFmt:    s.PixFmt,
+		Profile:   s.Profile,
+		Level:     s.Level,
+		FrameRate: parseRational(s.AvgFrameRate),
+		Bitrate:   atoi(s.BitRate),
+	}
+}
+
+// audioStreamOf reads an audio stream at position index, filling in the channel
+// count and layout when ffprobe leaves them out.
+func audioStreamOf(s ffprobeStream, index int) AudioStream {
+	a := AudioStream{
+		Index:      index,
+		Codec:      s.CodecName,
+		Channels:   s.Channels,
+		Layout:     s.ChannelLayout,
+		SampleRate: atoi(s.SampleRate),
+		Bitrate:    atoi(s.BitRate),
+	}
+	if a.Channels == 0 {
+		a.Channels = 2
+	}
+	if a.Layout == "" {
+		a.Layout = layoutName(a.Channels)
+	}
+	if s.Tags != nil {
+		a.Language = s.Tags["language"]
+		a.Title = s.Tags["title"]
+	}
+	return a
 }
 
 // ChannelLayoutName returns the layout name FFmpeg's aformat filter accepts
