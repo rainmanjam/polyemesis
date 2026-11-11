@@ -382,173 +382,214 @@ func parseKickTime(s string) time.Time {
 // the event it says it is.
 func kickActivityFrom(def kickActivityDef, body []byte) (d kickActDecoded, ok bool) {
 	ev := activity.Event{Kind: def.kind, Platform: "kick", Source: activity.Source{Type: def.name}}
-	switch def.name {
-	case kickEvFollowed:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			Follower    kickActUser `json:"follower"`
-		}
-		if json.Unmarshal(body, &p) != nil {
-			return d, false
-		}
-		ev.Actor = p.Follower.actor()
-		d.broadcaster = p.Broadcaster.UserID
-
-	case kickEvSubNew, kickEvSubRenewal:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			Subscriber  kickActUser `json:"subscriber"`
-			Duration    int         `json:"duration"`
-			CreatedAt   string      `json:"created_at"`
-		}
-		if json.Unmarshal(body, &p) != nil {
-			return d, false
-		}
-		ev.Actor = p.Subscriber.actor()
-		ev.Product = "sub"
-		if def.name == kickEvSubRenewal {
-			// Months is the platform's figure; a renewal that does not say is
-			// refused by Validate rather than given an invented 1.
-			ev.Months = p.Duration
-		}
-		d.broadcaster = p.Broadcaster.UserID
-		d.at, d.guarded = parseKickTime(p.CreatedAt), true
-
-	case kickEvSubGifts:
-		var p struct {
-			Broadcaster kickActUser   `json:"broadcaster"`
-			Gifter      kickActUser   `json:"gifter"`
-			Giftees     []kickActUser `json:"giftees"`
-			CreatedAt   string        `json:"created_at"`
-		}
-		if json.Unmarshal(body, &p) != nil {
-			return d, false
-		}
-		ev.Actor = p.Gifter.actor()
-		ev.Product = "sub"
-		ev.Count = len(p.Giftees)
-		for _, g := range p.Giftees {
-			if a := g.actor(); !a.Anonymous {
-				ev.Recipients = append(ev.Recipients, activity.Recipient{ID: a.ID, Name: firstNonEmpty(a.Name, a.Login)})
-			}
-		}
-		d.broadcaster = p.Broadcaster.UserID
-		d.at, d.guarded = parseKickTime(p.CreatedAt), true
-
-	case kickEvKicksGifted:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			Sender      kickActUser `json:"sender"`
-			Gift        struct {
-				Amount  int64  `json:"amount"`
-				Name    string `json:"name"`
-				Tier    string `json:"tier"`
-				Message string `json:"message"`
-			} `json:"gift"`
-			CreatedAt string `json:"created_at"`
-		}
-		if json.Unmarshal(body, &p) != nil || p.Gift.Amount <= 0 {
-			return d, false
-		}
-		ev.Actor = p.Sender.actor()
-		// KICKs are a platform unit. There is no published rate to dollars, so
-		// none is applied.
-		ev.Amount = &activity.Amount{Unit: "kicks", Units: p.Gift.Amount}
-		ev.Message = p.Gift.Message
-		ev.Title = p.Gift.Name
-		ev.Tier = p.Gift.Tier
-		d.broadcaster = p.Broadcaster.UserID
-		d.at, d.guarded = parseKickTime(p.CreatedAt), true
-
-	case kickEvStatus:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			IsLive      *bool       `json:"is_live"`
-			Title       string      `json:"title"`
-			StartedAt   string      `json:"started_at"`
-			EndedAt     string      `json:"ended_at"`
-		}
-		if json.Unmarshal(body, &p) != nil || p.IsLive == nil {
-			return d, false
-		}
-		ev.Phase, ev.Title = "offline", p.Title
-		ev.At = parseKickTime(p.EndedAt)
-		if *p.IsLive {
-			ev.Phase = "online"
-			ev.At = parseKickTime(p.StartedAt)
-		}
-		d.broadcaster = p.Broadcaster.UserID
-
-	case kickEvMetadata:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			Metadata    *struct {
-				Title string `json:"title"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal(body, &p) != nil || p.Metadata == nil {
-			return d, false
-		}
-		ev.Phase, ev.Title = "update", p.Metadata.Title
-		d.broadcaster = p.Broadcaster.UserID
-
-	case kickEvBanned:
-		var p struct {
-			Broadcaster kickActUser `json:"broadcaster"`
-			Moderator   kickActUser `json:"moderator"`
-			BannedUser  kickActUser `json:"banned_user"`
-			Metadata    struct {
-				Reason    string  `json:"reason"`
-				CreatedAt string  `json:"created_at"`
-				ExpiresAt *string `json:"expires_at"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal(body, &p) != nil {
-			return d, false
-		}
-		ev.Actor = p.Moderator.actor()
-		ev.Other = p.BannedUser.actor()
-		ev.Message = p.Metadata.Reason
-		// expires_at is null for a permanent ban.
-		ev.Action = "ban"
-		if p.Metadata.ExpiresAt != nil && strings.TrimSpace(*p.Metadata.ExpiresAt) != "" {
-			ev.Action = "timeout"
-		}
-		d.broadcaster = p.Broadcaster.UserID
-		d.at, d.guarded = parseKickTime(p.Metadata.CreatedAt), true
-
-	case kickEvRedemption:
-		var p struct {
-			ID         string `json:"id"`
-			UserInput  string `json:"user_input"`
-			Status     string `json:"status"`
-			RedeemedAt string `json:"redeemed_at"`
-			Reward     struct {
-				Title string `json:"title"`
-			} `json:"reward"`
-			Redeemer    kickActUser `json:"redeemer"`
-			Broadcaster kickActUser `json:"broadcaster"`
-		}
-		if json.Unmarshal(body, &p) != nil || strings.TrimSpace(p.ID) == "" {
-			return d, false
-		}
-		ev.Actor = p.Redeemer.actor()
-		ev.Title = p.Reward.Title
-		ev.Status = p.Status
-		ev.Message = p.UserInput
-		// One redemption is announced once. This event fires again as the
-		// streamer accepts or rejects it, each time with a new delivery id, so
-		// the dedupe identity is the redemption's own id; the later status
-		// changes are the same fact.
-		ev.Source.ID = p.ID
-		d.broadcaster = p.Broadcaster.UserID
-		d.at, d.guarded = parseKickTime(p.RedeemedAt), true
-
-	default:
+	if !decodeKickPayload(def.name, body, &ev, &d) {
 		return d, false
 	}
 	d.ev = ev
 	return d, true
+}
+
+// decodeKickPayload routes one delivery to the decoder for its event name. It
+// reports false for an unknown name and for any payload that does not decode.
+func decodeKickPayload(name string, body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	switch name {
+	case kickEvFollowed:
+		return decodeKickFollowed(body, ev, d)
+	case kickEvSubNew, kickEvSubRenewal:
+		return decodeKickSub(name, body, ev, d)
+	case kickEvSubGifts:
+		return decodeKickSubGifts(body, ev, d)
+	case kickEvKicksGifted:
+		return decodeKickKicksGifted(body, ev, d)
+	case kickEvStatus:
+		return decodeKickStatus(body, ev, d)
+	case kickEvMetadata:
+		return decodeKickMetadata(body, ev, d)
+	case kickEvBanned:
+		return decodeKickBanned(body, ev, d)
+	case kickEvRedemption:
+		return decodeKickRedemption(body, ev, d)
+	default:
+		return false
+	}
+}
+
+func decodeKickFollowed(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		Follower    kickActUser `json:"follower"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return false
+	}
+	ev.Actor = p.Follower.actor()
+	d.broadcaster = p.Broadcaster.UserID
+	return true
+}
+
+// decodeKickSub covers a new subscription and a renewal, which share a payload.
+func decodeKickSub(name string, body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		Subscriber  kickActUser `json:"subscriber"`
+		Duration    int         `json:"duration"`
+		CreatedAt   string      `json:"created_at"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return false
+	}
+	ev.Actor = p.Subscriber.actor()
+	ev.Product = "sub"
+	if name == kickEvSubRenewal {
+		// Months is the platform's figure; a renewal that does not say is
+		// refused by Validate rather than given an invented 1.
+		ev.Months = p.Duration
+	}
+	d.broadcaster = p.Broadcaster.UserID
+	d.at, d.guarded = parseKickTime(p.CreatedAt), true
+	return true
+}
+
+func decodeKickSubGifts(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser   `json:"broadcaster"`
+		Gifter      kickActUser   `json:"gifter"`
+		Giftees     []kickActUser `json:"giftees"`
+		CreatedAt   string        `json:"created_at"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return false
+	}
+	ev.Actor = p.Gifter.actor()
+	ev.Product = "sub"
+	ev.Count = len(p.Giftees)
+	for _, g := range p.Giftees {
+		if a := g.actor(); !a.Anonymous {
+			ev.Recipients = append(ev.Recipients, activity.Recipient{ID: a.ID, Name: firstNonEmpty(a.Name, a.Login)})
+		}
+	}
+	d.broadcaster = p.Broadcaster.UserID
+	d.at, d.guarded = parseKickTime(p.CreatedAt), true
+	return true
+}
+
+func decodeKickKicksGifted(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		Sender      kickActUser `json:"sender"`
+		Gift        struct {
+			Amount  int64  `json:"amount"`
+			Name    string `json:"name"`
+			Tier    string `json:"tier"`
+			Message string `json:"message"`
+		} `json:"gift"`
+		CreatedAt string `json:"created_at"`
+	}
+	if json.Unmarshal(body, &p) != nil || p.Gift.Amount <= 0 {
+		return false
+	}
+	ev.Actor = p.Sender.actor()
+	// KICKs are a platform unit. There is no published rate to dollars, so
+	// none is applied.
+	ev.Amount = &activity.Amount{Unit: "kicks", Units: p.Gift.Amount}
+	ev.Message = p.Gift.Message
+	ev.Title = p.Gift.Name
+	ev.Tier = p.Gift.Tier
+	d.broadcaster = p.Broadcaster.UserID
+	d.at, d.guarded = parseKickTime(p.CreatedAt), true
+	return true
+}
+
+func decodeKickStatus(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		IsLive      *bool       `json:"is_live"`
+		Title       string      `json:"title"`
+		StartedAt   string      `json:"started_at"`
+		EndedAt     string      `json:"ended_at"`
+	}
+	if json.Unmarshal(body, &p) != nil || p.IsLive == nil {
+		return false
+	}
+	ev.Phase, ev.Title = "offline", p.Title
+	ev.At = parseKickTime(p.EndedAt)
+	if *p.IsLive {
+		ev.Phase = "online"
+		ev.At = parseKickTime(p.StartedAt)
+	}
+	d.broadcaster = p.Broadcaster.UserID
+	return true
+}
+
+func decodeKickMetadata(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		Metadata    *struct {
+			Title string `json:"title"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(body, &p) != nil || p.Metadata == nil {
+		return false
+	}
+	ev.Phase, ev.Title = "update", p.Metadata.Title
+	d.broadcaster = p.Broadcaster.UserID
+	return true
+}
+
+func decodeKickBanned(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		Broadcaster kickActUser `json:"broadcaster"`
+		Moderator   kickActUser `json:"moderator"`
+		BannedUser  kickActUser `json:"banned_user"`
+		Metadata    struct {
+			Reason    string  `json:"reason"`
+			CreatedAt string  `json:"created_at"`
+			ExpiresAt *string `json:"expires_at"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return false
+	}
+	ev.Actor = p.Moderator.actor()
+	ev.Other = p.BannedUser.actor()
+	ev.Message = p.Metadata.Reason
+	// expires_at is null for a permanent ban.
+	ev.Action = "ban"
+	if p.Metadata.ExpiresAt != nil && strings.TrimSpace(*p.Metadata.ExpiresAt) != "" {
+		ev.Action = "timeout"
+	}
+	d.broadcaster = p.Broadcaster.UserID
+	d.at, d.guarded = parseKickTime(p.Metadata.CreatedAt), true
+	return true
+}
+
+func decodeKickRedemption(body []byte, ev *activity.Event, d *kickActDecoded) bool {
+	var p struct {
+		ID         string `json:"id"`
+		UserInput  string `json:"user_input"`
+		Status     string `json:"status"`
+		RedeemedAt string `json:"redeemed_at"`
+		Reward     struct {
+			Title string `json:"title"`
+		} `json:"reward"`
+		Redeemer    kickActUser `json:"redeemer"`
+		Broadcaster kickActUser `json:"broadcaster"`
+	}
+	if json.Unmarshal(body, &p) != nil || strings.TrimSpace(p.ID) == "" {
+		return false
+	}
+	ev.Actor = p.Redeemer.actor()
+	ev.Title = p.Reward.Title
+	ev.Status = p.Status
+	ev.Message = p.UserInput
+	// One redemption is announced once. This event fires again as the
+	// streamer accepts or rejects it, each time with a new delivery id, so
+	// the dedupe identity is the redemption's own id; the later status
+	// changes are the same fact.
+	ev.Source.ID = p.ID
+	d.broadcaster = p.Broadcaster.UserID
+	d.at, d.guarded = parseKickTime(p.RedeemedAt), true
+	return true
 }
 
 // ingestActivity handles one activity delivery that has already passed
