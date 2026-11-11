@@ -248,24 +248,34 @@ func (o RenditionOverlay) problems(width, height int) []string {
 	if err := overlayPathProblem(o.Image); err != nil {
 		add("%v", err)
 	}
+	o.anchorProblems(add)
+	o.placementProblems(add)
+	return probs
+}
 
-	if o.Anchor != "" {
-		known := false
-		for _, a := range ffmpeg.OverlayAnchors {
-			if string(a) == o.Anchor {
-				known = true
-				break
-			}
-		}
-		// Refused rather than accepted, for the same reason an unknown
-		// deinterlace mode is: the filter builder degrades an unrecognised
-		// anchor to top-left, so the operator would get a logo in a corner they
-		// did not choose with nothing to tell them which one is running.
-		if !known {
-			add("unknown overlay anchor %q", o.Anchor)
+// anchorProblems checks that an overlay names an anchor this build knows.
+func (o RenditionOverlay) anchorProblems(add problemAdder) {
+	if o.Anchor == "" {
+		return
+	}
+	known := false
+	for _, a := range ffmpeg.OverlayAnchors {
+		if string(a) == o.Anchor {
+			known = true
+			break
 		}
 	}
+	// Refused rather than accepted, for the same reason an unknown
+	// deinterlace mode is: the filter builder degrades an unrecognised
+	// anchor to top-left, so the operator would get a logo in a corner they
+	// did not choose with nothing to tell them which one is running.
+	if !known {
+		add("unknown overlay anchor %q", o.Anchor)
+	}
+}
 
+// placementProblems checks the width, margins and opacity of an overlay.
+func (o RenditionOverlay) placementProblems(add problemAdder) {
 	if o.WidthPct < MinOverlayWidthPct || o.WidthPct > MaxOverlayWidthPct {
 		add("overlay width %.3f out of range (%.2f-%.2f of the output width)",
 			o.WidthPct, MinOverlayWidthPct, MaxOverlayWidthPct)
@@ -284,7 +294,6 @@ func (o RenditionOverlay) problems(width, height int) []string {
 	if o.Opacity < 0 || o.Opacity > 1 {
 		add("overlay opacity %.3f out of range (0-1)", o.Opacity)
 	}
-	return probs
 }
 
 // Text bounds. Percentages are 0-1 for the reason the overlay's are.
@@ -357,7 +366,14 @@ func (t RenditionText) problems(width, height int) []string {
 		add("text needs the rendition to have an explicit width AND height, " +
 			"because the type is sized as a percentage of the output")
 	}
+	t.contentProblems(add)
+	t.placementProblems(add)
+	t.styleProblems(add)
+	return probs
+}
 
+// contentProblems checks the length and characters of the text and its font.
+func (t RenditionText) contentProblems(add problemAdder) {
 	if len(t.Content) > MaxTextLen {
 		add("text is %d characters, longer than the %d allowed", len(t.Content), MaxTextLen)
 	}
@@ -372,6 +388,10 @@ func (t RenditionText) problems(width, height int) []string {
 	if p := textFontProblem(t.Font); p != "" {
 		add("%s", p)
 	}
+}
+
+// placementProblems checks the anchor, size and margins of the text.
+func (t RenditionText) placementProblems(add problemAdder) {
 	if t.Anchor != "" && !knownAnchor(t.Anchor) {
 		// Refused rather than accepted, for the reason an unknown overlay
 		// anchor is: the filter builder degrades an unrecognised anchor to
@@ -391,6 +411,10 @@ func (t RenditionText) problems(width, height int) []string {
 			add("text %s margin %.3f out of range (0-%.2f)", m.name, m.v, MaxTextMarginPct)
 		}
 	}
+}
+
+// styleProblems checks the text and box colours and the box opacity.
+func (t RenditionText) styleProblems(add problemAdder) {
 	for _, c := range []struct {
 		name string
 		v    string
@@ -402,7 +426,6 @@ func (t RenditionText) problems(width, height int) []string {
 	if t.BoxOpacity < 0 || t.BoxOpacity > 1 {
 		add("box opacity %.3f out of range (0-1)", t.BoxOpacity)
 	}
-	return probs
 }
 
 func knownAnchor(a string) bool {
@@ -457,18 +480,33 @@ func colorProblem(field, v string) string {
 	if name == "" {
 		return fmt.Sprintf("%s %q has no colour before the @", field, v)
 	}
+	if !isColorName(name) {
+		return fmt.Sprintf("%s %q must be a colour name or 0xRRGGBB, optionally @alpha", field, v)
+	}
+	if hasAlpha {
+		return colorAlphaProblem(field, alpha)
+	}
+	return ""
+}
+
+// isColorName reports whether name uses only the characters a colour name or
+// 0xRRGGBB value can contain.
+func isColorName(name string) bool {
 	for _, r := range name {
 		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
 			r >= '0' && r <= '9' || r == '#'
 		if !ok {
-			return fmt.Sprintf("%s %q must be a colour name or 0xRRGGBB, optionally @alpha", field, v)
+			return false
 		}
 	}
-	if hasAlpha {
-		f, err := strconv.ParseFloat(alpha, 64)
-		if err != nil || f < 0 || f > 1 {
-			return fmt.Sprintf("%s alpha %q must be a number from 0 to 1", field, alpha)
-		}
+	return true
+}
+
+// colorAlphaProblem reports an alpha suffix that is not a number from 0 to 1.
+func colorAlphaProblem(field, alpha string) string {
+	f, err := strconv.ParseFloat(alpha, 64)
+	if err != nil || f < 0 || f > 1 {
+		return fmt.Sprintf("%s alpha %q must be a number from 0 to 1", field, alpha)
 	}
 	return ""
 }
