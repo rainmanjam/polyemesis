@@ -299,8 +299,7 @@ export function MetersPage() {
           out of internal/ffmpeg until now. Zero for any ingest anyone is likely
           to send, so this row is normally absent rather than reassuring. */}
       {(source?.metersDropped ?? 0) > 0 && (
-        <div
-          role="status"
+        <output
           className="flex items-start gap-2 rounded-md border border-warn/50 bg-warn/5 px-3 py-2 text-[11px]"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
@@ -315,7 +314,7 @@ export function MetersPage() {
               em: <em>{t("meters.droppedBodyEmph")}</em>,
             })}
           </span>
-        </div>
+        </output>
       )}
 
       <div className="mb-2 flex justify-end">

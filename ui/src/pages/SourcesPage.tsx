@@ -932,13 +932,10 @@ export function SourceCard({
              degraded. Shown even when nothing switched -- with no backup or
              slate the primary stays on air, and this is how the operator
              learns the uplink is breaking up. */
-          <div
-            role="status"
-            className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-sm"
-          >
+          <output className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-sm">
             <span className="font-semibold uppercase tracking-wider text-warn">{t("sources.degraded")}</span>
             <span className="font-mono text-muted-foreground">{source.degraded}</span>
-          </div>
+          </output>
         )}
 
         {/* The token, and the truth about it. */}

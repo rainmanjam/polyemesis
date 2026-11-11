@@ -579,9 +579,9 @@ export function GoLiveComposer() {
                   may not have reached the platform, and only the platform can
                   say which now. */}
               {jobLost && (
-                <p role="status" className="text-sm text-warn">
+                <output className="block text-sm text-warn">
                   {t("dash.pushStatusLost")}
-                </p>
+                </output>
               )}
               {job.results.map((res) => {
                 // A row still "pending" on a lost job is not pushing any more:

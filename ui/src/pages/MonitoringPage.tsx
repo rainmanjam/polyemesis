@@ -1129,9 +1129,9 @@ export function MonitoringPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
-            <p role="status" className="text-tiny text-muted-foreground">
+            <output className="block text-tiny text-muted-foreground">
               {logVerdictText(t, verdictState)}
-            </p>
+            </output>
             {/* A9: the verdict names a process, so it offers that process's
                 log -- outside the status line, which is read as one sentence. */}
             {verdictState.kind === "errors" && filter !== verdictState.process && (
