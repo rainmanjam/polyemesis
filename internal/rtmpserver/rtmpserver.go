@@ -494,13 +494,7 @@ func (s *Server) handle(conn net.Conn) {
 	// is the playout page's job and lives behind authentication. A stream key
 	// is a publish credential; it must not double as a viewing one.
 	if !sc.Publish {
-		if !isLoopback(conn.RemoteAddr()) {
-			s.log.Info("rtmp play refused: not from loopback",
-				"component", logComponent, "peer", peer)
-			return
-		}
-		_ = conn.SetDeadline(time.Time{})
-		s.serveSubscriber(sc, key, peer)
+		s.playSubscriber(conn, sc, key, peer)
 		return
 	}
 
@@ -541,31 +535,7 @@ func (s *Server) handle(conn net.Conn) {
 		}
 	}
 	if verdict := admit(target, found); verdict != admitPublish {
-		if verdict == refuseUnknownKey {
-			// Deliberately says nothing about WHY, and never logs the key nor
-			// the source. An unrecognised key and a well-formed key for a
-			// source that does not exist have to be the same event, or the log
-			// becomes an oracle for whoever can read it.
-			s.log.Info("rtmp publish refused", "component", logComponent, "peer", peer)
-			// Only an unrecognised key counts as a guess. A found-but-disabled
-			// or found-but-not-ready target already proved this caller holds a
-			// real credential, so neither of those branches reaches here. See
-			// internal/authgate.
-			if s.gate.Fail(host) {
-				s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
-					"component", logComponent, "peer", peer)
-			}
-		} else {
-			// Past here the publisher has already proved it holds a valid key,
-			// so naming the reason leaks nothing it does not already know --
-			// and these are the two failures an operator actually has to
-			// diagnose. RTMP carries no typed rejection back to the encoder the
-			// way SRT does, so this log line is the ONLY place they can be told
-			// apart, and collapsing them leaves "my encoder connects and
-			// nothing comes out" with no next step.
-			s.log.Info("rtmp publish refused: "+verdict.String(),
-				"component", logComponent, "peer", peer, "source", target.Name)
-		}
+		s.refusePublish(verdict, target, host, peer)
 		return
 	}
 	// A real key was just presented successfully; nothing this peer guessed
@@ -579,6 +549,47 @@ func (s *Server) handle(conn net.Conn) {
 	_ = conn.SetDeadline(time.Time{})
 
 	s.admitSession(sc, target, peer, key)
+}
+
+// refusePublish logs and gate-records a publisher the key check turned away.
+func (s *Server) refusePublish(verdict verdict, target Target, host, peer string) {
+	if verdict == refuseUnknownKey {
+		// Deliberately says nothing about WHY, and never logs the key nor
+		// the source. An unrecognised key and a well-formed key for a
+		// source that does not exist have to be the same event, or the log
+		// becomes an oracle for whoever can read it.
+		s.log.Info("rtmp publish refused", "component", logComponent, "peer", peer)
+		// Only an unrecognised key counts as a guess. A found-but-disabled
+		// or found-but-not-ready target already proved this caller holds a
+		// real credential, so neither of those branches reaches here. See
+		// internal/authgate.
+		if s.gate.Fail(host) {
+			s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
+				"component", logComponent, "peer", peer)
+		}
+	} else {
+		// Past here the publisher has already proved it holds a valid key,
+		// so naming the reason leaks nothing it does not already know --
+		// and these are the two failures an operator actually has to
+		// diagnose. RTMP carries no typed rejection back to the encoder the
+		// way SRT does, so this log line is the ONLY place they can be told
+		// apart, and collapsing them leaves "my encoder connects and
+		// nothing comes out" with no next step.
+		s.log.Info("rtmp publish refused: "+verdict.String(),
+			"component", logComponent, "peer", peer, "source", target.Name)
+	}
+}
+
+// playSubscriber serves a loopback FFmpeg subscriber that asked to play a
+// programme back out of the server.
+func (s *Server) playSubscriber(conn net.Conn, sc *gortmplib.ServerConn, key, peer string) {
+	if !isLoopback(conn.RemoteAddr()) {
+		s.log.Info("rtmp play refused: not from loopback",
+			"component", logComponent, "peer", peer)
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	s.serveSubscriber(sc, key, peer)
 }
 
 // verdict is what handle decides about a would-be publisher.
