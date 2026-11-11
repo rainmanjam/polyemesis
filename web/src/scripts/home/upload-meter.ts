@@ -33,7 +33,7 @@ export function initUploadMeter(root: HTMLElement, gate: MotionGate): () => void
       const k = uploadFor(bar.dataset.kind as MeterKind, n);
       bar.style.setProperty("--k", String(k / MAX_PLATFORMS));
       bar.classList.toggle("over", k > UPLOAD_LIMIT);
-      const val = bar.closest(".mt")?.querySelector(".val");
+      const val = root.querySelector(`[data-val="${bar.dataset.kind}"]`);
       if (val) val.textContent = `${k}×`;
     }
   };

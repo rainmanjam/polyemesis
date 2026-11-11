@@ -490,4 +490,13 @@ describe("homepage claims match the code (T12)", () => {
   // Spec "Decided": competitors stay generic (not named). Sources live in the PR claims table.
   it("names no competitor in the problem cards", () =>
     expect(problem).not.toMatch(/Restream|Streamlabs|StreamElements|Castr|Aitum|obs-multi-rtmp|MistServer/i));
+  // upload-meter.test.ts builds its fixture by hand; these pin the hooks it
+  // relies on to the markup that ships.
+  it("renders the meter hooks upload-meter.ts reads", () => {
+    expect(problem).toMatch(/<span data-pcount>/);
+    expect(problem.match(/<i data-kind=\{/g)).toHaveLength(2); // the cards' map and the strip
+    expect(problem.match(/<span class="val" data-val=\{/g)).toHaveLength(2);
+  });
+  it("lets screen readers read the platform count the meters count against", () =>
+    expect(problem).toMatch(/<p class="pc">Platforms you stream to:/));
 });
