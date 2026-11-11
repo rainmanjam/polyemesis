@@ -69,21 +69,17 @@ export function UpdateBanner({ onInfo }: Readonly<{ onInfo?: (v: VersionInfo) =>
     api
       .version()
       .then((v) => {
-        if (!alive) return;
+        if (!alive) return null;
         setInfo(v);
         onInfo?.(v);
         // One check per session, and only when the server has never run one --
         // otherwise an install nobody clicks would never learn anything.
-        if (!v.checkedAt) {
-          api
-            .checkUpdate()
-            .then((fresh) => {
-              if (!alive) return;
-              setInfo(fresh);
-              onInfo?.(fresh);
-            })
-            .catch(() => {});
-        }
+        return v.checkedAt ? null : api.checkUpdate();
+      })
+      .then((fresh) => {
+        if (!alive || !fresh) return;
+        setInfo(fresh);
+        onInfo?.(fresh);
       })
       .catch(() => {});
     return () => {
