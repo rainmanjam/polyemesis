@@ -314,7 +314,7 @@ export function RoutingPage() {
     const found = list.find((d) => d.destination.id === Number(id));
     const keep = keepDraftFor.current;
     keepDraftFor.current = null;
-    if (found && keep === found.destination.id) {
+    if (keep === found?.destination.id) {
       // A save answered while the draft had moved on (see save): only the
       // stored row moves, and the newer edit stays pending.
       setSelected(found.destination);
@@ -560,7 +560,7 @@ export function RoutingPage() {
   // features/routing/presetTrackDefaults.ts.
   const shownPresetOpts = useMemo(() => {
     const local: RoleLayout | null =
-      source && annotationsFrom === source.id
+      annotationsFrom === source?.id
         ? { sourceId: source.id, annotations, tracks: tracks.map((tr) => tr.index) }
         : null;
     const roles = roleLayoutFor(editedSourceId, local, destLayout);
@@ -651,7 +651,7 @@ export function RoutingPage() {
   // anything else restarts it. "pending" until THIS draft has compiled.
   const impact = saveImpact({
     stored: storedRouting,
-    draft: liveGraph && liveGraph.profile === profile ? liveGraph.result : undefined,
+    draft: liveGraph?.profile === profile ? liveGraph?.result : undefined,
     storedSampleRate: storedRow?.profile.sampleRate,
     draftSampleRate: profile?.sampleRate,
     secondMixChanged:
@@ -707,7 +707,7 @@ export function RoutingPage() {
               if (!isLiveMix(r)) continue;
               const key = reportKey(r);
               const was = prev[r.destinationId];
-              next[r.destinationId] = was && was.key === key ? was : { key, at: now };
+              next[r.destinationId] = was?.key === key ? was : { key, at: now };
             }
             return next;
           });
