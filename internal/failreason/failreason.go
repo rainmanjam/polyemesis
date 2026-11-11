@@ -325,10 +325,23 @@ func Classify(in Input) (r Reason, ok bool) {
 		lowers[i] = strings.ToLower(l)
 	}
 	opened := tlsSessionOpened(lowers)
+	if classifyByRules(&r, in.Stderr, lowers, opened) ||
+		classifyRefusedKey(&r, in.Stderr, lowers) ||
+		classifySlowUpload(&r, in) ||
+		classifyTimeout(&r, in.Stderr, lowers) {
+		return r, true
+	}
+	r.Cause, r.Line = Unknown, lastMeaningful(in.Stderr, in.Exit)
+	return r, true
+}
+
+// classifyByRules sets r from the first line that matches a rule, and reports
+// whether one did.
+func classifyByRules(r *Reason, stderr, lowers []string, opened bool) bool {
 	for _, ru := range rules {
 		// The FIRST matching line, not the last: the lower layer speaks
 		// first and FFmpeg's generic summary follows it.
-		for i, l := range in.Stderr {
+		for i, l := range stderr {
 			if ru.match(l, lowers[i]) {
 				if ru.cause == TLS && opened && !strings.Contains(lowers[i], "certificate") {
 					// A TLS-layer line from a session that DID open: the
@@ -337,30 +350,44 @@ func Classify(in Input) (r Reason, ok bool) {
 					continue
 				}
 				r.Cause, r.Line = ru.cause, strings.TrimSpace(l)
-				return r, true
+				return true
 			}
 		}
 	}
-	for i, l := range in.Stderr {
+	return false
+}
+
+// classifyRefusedKey reports a stream key the platform refused to open.
+func classifyRefusedKey(r *Reason, stderr, lowers []string) bool {
+	for i, l := range stderr {
 		if openRefused(lowers[i]) {
 			r.Cause, r.Line = KeyRejected, strings.TrimSpace(l)
-			return r, true
+			return true
 		}
 	}
+	return false
+}
+
+// classifySlowUpload reports an upload that moved but crawled.
+func classifySlowUpload(r *Reason, in Input) bool {
 	// Crawling, not stopped. A rate of zero is a stall, and every destination
 	// stalls when the INGEST stops, which is not this destination's upload.
 	if in.Moved && in.RateKnown && in.Rate > 0 && in.Rate < SlowRate {
 		r.Cause, r.Line = UploadTooSlow, lastMeaningful(in.Stderr, in.Exit)
-		return r, true
+		return true
 	}
-	for i, l := range in.Stderr {
+	return false
+}
+
+// classifyTimeout reports a line that names a timeout.
+func classifyTimeout(r *Reason, stderr, lowers []string) bool {
+	for i, l := range stderr {
 		if containsAny(lowers[i], timeoutSubs...) {
 			r.Cause, r.Line = Timeout, strings.TrimSpace(l)
-			return r, true
+			return true
 		}
 	}
-	r.Cause, r.Line = Unknown, lastMeaningful(in.Stderr, in.Exit)
-	return r, true
+	return false
 }
 
 // lastMeaningful is the last stderr line that is about the failure rather than
