@@ -314,9 +314,10 @@ has no display type — its largest step is `--text-display`, a 28px page title 
 so it does not ship that file.
 
 The website also carries **IBM Plex Serif Italic** for the one emphasis word in
-the homepage headline. It is the OFL release's Latin-1 split, about 24 KB
-(24,512 bytes), served from `web/public/fonts/` only and not preloaded. Its
-fallback is the generic `serif`.
+the homepage headline. It is the unmodified Latin-1 split file from the OFL
+release (`@ibm/plex-serif` 2.0.0), about 24 KB (24,512 bytes), served from
+`web/public/fonts/` only and not preloaded. Its fallback is the generic
+`serif`.
 
 This was the loudest half of the gap between this document and the code. The
 website has loaded both families since it was written; the app declared

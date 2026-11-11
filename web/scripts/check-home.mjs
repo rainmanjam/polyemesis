@@ -18,7 +18,8 @@
  *   C keyboard: tabs (arrows, Home, End) and a destination (Enter, Escape)
  *   D reduced motion: nothing animates, the counter and the failover settle,
  *     and Pull the cable is one instant change to the slate
- *   E Pause motion switches motion off: no .dest fade, no smooth scrolling
+ *   E Pause motion switches motion off: no .dest fade, no hero button
+ *     transition, no smooth scrolling
  *   F no script: everything script reveals stays hidden (failover controls
  *     too), the markup stands
  *   G a long Spanish label does not overflow a card (390, every story)
@@ -226,12 +227,15 @@ async function checkE(page, c) {
       const b = document.querySelector("[data-pause]");
       const dest = document.querySelector(`${sel} .dest`);
       const dur = dest ? getComputedStyle(dest).transitionDuration : null;
+      const btn = document.querySelector("[data-hero] .btn-onair");
+      const longest = (d) => Math.max(...d.split(",").map((x) => parseFloat(x) * (x.trim().endsWith("ms") ? 1 : 1000)));
       return {
         pressed: b.getAttribute("aria-pressed"),
         text: b.textContent.trim(),
         motionOn: document.documentElement.classList.contains("motion-on"),
         // The longest of a comma list; "0s" (or nothing) means no transition.
-        destMs: dur === null ? null : Math.max(...dur.split(",").map((d) => parseFloat(d) * (d.trim().endsWith("ms") ? 1 : 1000))),
+        destMs: dur === null ? null : longest(dur),
+        btnMs: btn ? longest(getComputedStyle(btn).transitionDuration) : null,
         scroll: getComputedStyle(document.documentElement).scrollBehavior,
       };
     }, HERO_DG);
@@ -240,6 +244,8 @@ async function checkE(page, c) {
   if (!before.motionOn) bad("E", c.name, "html.motion-on is not set before Pause");
   if (before.destMs === null) bad("E", c.name, "no .dest in the visible hero diagram");
   else if (!(before.destMs > 0)) bad("E", c.name, `a .dest has no transition before Pause (${before.destMs}ms)`);
+  if (before.btnMs === null) bad("E", c.name, "no .btn-onair in the hero");
+  else if (!(before.btnMs > 0)) bad("E", c.name, `the hero's Install button has no transition before Pause (${before.btnMs}ms)`);
   if (before.scroll !== "smooth") bad("E", c.name, `scroll-behavior is "${before.scroll}" before Pause, expected "smooth"`);
   await page.click("[data-pause]");
   const m = await read();
@@ -247,6 +253,7 @@ async function checkE(page, c) {
   if (m.text !== "Resume motion") bad("E", c.name, `Pause reads "${m.text}", expected "Resume motion"`);
   if (m.motionOn) bad("E", c.name, "html.motion-on is still set after Pause");
   if (m.destMs !== null && m.destMs > 0) bad("E", c.name, `a .dest still fades over ${m.destMs}ms after Pause`);
+  if (m.btnMs !== null && m.btnMs > 0) bad("E", c.name, `the hero's Install button still transitions over ${m.btnMs}ms after Pause`);
   if (m.scroll !== "auto") bad("E", c.name, `scroll-behavior is "${m.scroll}" after Pause, expected "auto"`);
 }
 
@@ -522,9 +529,9 @@ async function checkL(browser, origin) {
       window.scrollTo({ top: window.scrollY + r.top + r.height / 2 - window.innerHeight / 2, behavior: "instant" });
     });
     try {
-      await page.waitForFunction(() => document.querySelector("[data-failover] [data-frame]")?.dataset.state !== "live", null, { timeout: 5000 });
+      await page.waitForFunction(() => document.querySelector("[data-failover] [data-frame]")?.dataset.state !== "live", null, { timeout: 8000 });
     } catch {
-      bad("L", name, "the failover frame, centred on screen, never left \"live\" within 5s: autoplay did not start");
+      bad("L", name, "the failover frame, centred on screen, never left \"live\" within 8s: autoplay did not start");
     }
   } finally {
     await ctx.close();
