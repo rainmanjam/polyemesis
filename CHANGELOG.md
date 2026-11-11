@@ -19,6 +19,11 @@ its first tagged release.
   stop on ingest loss on, and rules that name their `events` hear it only if they list it. It is in the rule editor's event
   picker, in all 15 languages. See [MONITORING.md](docs/MONITORING.md) and [OBS-BRIDGE.md](docs/OBS-BRIDGE.md).
 
+### Security
+
+- **Built with Go 1.27.4**, which fixes GO-2026-6859: a race between `http.MaxBytesReader` and header handling
+  that could crash an HTTP/1 server. The binary, the Docker images (default, CUDA, VA-API) and CI all move from 1.27.3.
+
 ## [0.17.0] — 2026-11-10
 
 ### Added
