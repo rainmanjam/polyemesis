@@ -195,9 +195,10 @@ function OverviewTileCard({ tile, onOpen }: Readonly<{ tile: OverviewTile; onOpe
               identical "Reading…" lines, and a text key made them collide, so
               React kept a stale node and the settled tile showed four lines
               from a three-line array. The lines are a fixed-order list, rebuilt
-              whole on every render, so the index is the stable identity. */}
+              whole on every render, so the position is the stable identity; the
+              text is paired with it so the key still reads as content. */}
           {tile.lines.map((line, i) => (
-            <span key={i} className="text-sm first-of-type:font-medium">
+            <span key={`${i}-${line}`} className="text-sm first-of-type:font-medium">
               {line}
             </span>
           ))}
