@@ -232,6 +232,26 @@ func (f *FacebookAdapter) liveVideoID() string {
 }
 
 // Run polls the comment thread until ctx ends.
+// pollStep runs one comment poll and says how long to wait before the next. stop
+// says Run must return ret: a fatal error, or a poll that is finished for good.
+func (f *FacebookAdapter) pollStep(ctx context.Context, id string, sink Sink, interval *time.Duration) (pause time.Duration, stop bool, ret error) {
+	_, err := f.poll(ctx, id, sink)
+	if err != nil {
+		done, fatal := f.classify(err)
+		if fatal != nil {
+			return 0, true, fatal
+		}
+		if done {
+			return 0, true, nil
+		}
+		return f.backoffAfterError(err, interval), false, nil
+	}
+	*interval = f.cfg.Interval
+	f.setHealth(StateLive, "")
+	f.pollReactions(ctx, id, sink)
+	return *interval, false, nil
+}
+
 // backoffAfterError doubles the poll interval (never past fbMaxPollInterval),
 // reports the degraded state the error calls for, and returns the jittered
 // pause before the next poll.
@@ -277,22 +297,9 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 			continue
 		}
 
-		var pause time.Duration
-		_, err := f.poll(ctx, id, sink)
-		if err != nil {
-			done, fatal := f.classify(err)
-			if fatal != nil {
-				return fatal
-			}
-			if done {
-				return nil
-			}
-			pause = f.backoffAfterError(err, &interval)
-		} else {
-			interval = f.cfg.Interval
-			pause = interval
-			f.setHealth(StateLive, "")
-			f.pollReactions(ctx, id, sink)
+		pause, stop, ret := f.pollStep(ctx, id, sink, &interval)
+		if stop {
+			return ret
 		}
 
 		if !f.cfg.Sleep(ctx, pause) {
