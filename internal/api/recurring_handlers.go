@@ -294,36 +294,12 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this show has already started, so its event is past retitling from here")
 		return
 	}
-	// Only a row that is gone is a conflict. Any other store error is the server's, and is answered as one rather
-	// than told to the operator as a deleted template or destination.
-	tpl, err := s.store.GetBroadcastTemplate(occ.ScheduleID)
-	if errors.Is(err, db.ErrNotFound) {
-		writeError(w, http.StatusConflict, "this occurrence's template was deleted, so its event is an orphan")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read this occurrence's template")
-		return
-	}
-	d, err := s.store.GetDestination(occ.DestinationID)
-	if errors.Is(err, db.ErrNotFound) {
-		writeError(w, http.StatusConflict, "this occurrence's destination no longer exists")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read this occurrence's destination")
-		return
-	}
-	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
-	if !ok || d.AccountID == nil {
-		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
-		return
-	}
-	ed, ok := sb.(oauth.ScheduledEditor)
+	tpl, d, ok := s.occurrenceRetitleTargets(w, occ)
 	if !ok {
-		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
 		return
 	}
-	if d.Enabled || s.destinationLive(d.ID) {
-		writeError(w, http.StatusConflict, "the destination is live, so its event may be on air; retitle it from the go-live composer")
+	ed, ok := s.retitleEditor(w, d)
+	if !ok {
 		return
 	}
 	// Bounded, and not tied to the browser: a disconnect mid-write must not leave the title half-applied, and a
@@ -353,4 +329,50 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "title": title, "warnings": warnings})
+}
+
+// occurrenceRetitleTargets loads the template and destination a scheduled
+// occurrence is published through. It answers the request itself and returns
+// false when either row is gone or cannot be read.
+func (s *Server) occurrenceRetitleTargets(w http.ResponseWriter, occ *scheduler.Occurrence) (*scheduler.BroadcastTemplate, *db.Destination, bool) {
+	// Only a row that is gone is a conflict. Any other store error is the server's, and is answered as one rather
+	// than told to the operator as a deleted template or destination.
+	tpl, err := s.store.GetBroadcastTemplate(occ.ScheduleID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusConflict, "this occurrence's template was deleted, so its event is an orphan")
+		return nil, nil, false
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read this occurrence's template")
+		return nil, nil, false
+	}
+	d, err := s.store.GetDestination(occ.DestinationID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusConflict, "this occurrence's destination no longer exists")
+		return nil, nil, false
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read this occurrence's destination")
+		return nil, nil, false
+	}
+	return tpl, d, true
+}
+
+// retitleEditor returns the platform's scheduled-event editor for a destination
+// that can be retitled from here. It answers the request itself and returns
+// false when the destination cannot be retitled or is live.
+func (s *Server) retitleEditor(w http.ResponseWriter, d *db.Destination) (oauth.ScheduledEditor, bool) {
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
+	if !ok || d.AccountID == nil {
+		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
+		return nil, false
+	}
+	ed, ok := sb.(oauth.ScheduledEditor)
+	if !ok {
+		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
+		return nil, false
+	}
+	if d.Enabled || s.destinationLive(d.ID) {
+		writeError(w, http.StatusConflict, "the destination is live, so its event may be on air; retitle it from the go-live composer")
+		return nil, false
+	}
+	return ed, true
 }
