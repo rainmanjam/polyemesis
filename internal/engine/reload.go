@@ -137,6 +137,15 @@ const (
 	applyMQTT = "main.mqttRunner.reconcile"
 )
 
+// The reasons repeated across the postProd and activity rules. Each is the
+// text a reader of the rule table sees for every field in its group.
+const (
+	// reasonPostProdLive is the reason for every postProd rule.
+	reasonPostProdLive = "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"
+	// reasonActivityLive is the reason for every activity rule.
+	reasonActivityLive = "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"
+)
+
 // settingsReload is keyed by the dotted json path of every leaf in db.Settings.
 // TestEverySettingsFieldHasAReloadRule fails when a field is added without one.
 var settingsReload = map[string]ReloadRule{
@@ -254,21 +263,21 @@ var settingsReload = map[string]ReloadRule{
 	"logging.maxFiles":           {ClassLive, "applyLogging", "re-opens the sink; no child is touched"},
 
 	// -------------------------------------------------------------- postProd
-	"postProd.enabled":               {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.concurrency":           {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.defaultMode":           {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.yieldToStream":         {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.cpuCeilingPercent":     {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.cpuResumePercent":      {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.cpuSustainedSeconds":   {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.cpuSettleSeconds":      {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.avoidGpuWhenStreaming": {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.gpuBusy":               {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.batteryFloorPercent":   {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.thermalCeilingC":       {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.niceLevel":             {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.idleIo":                {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
-	"postProd.ingestLingerSeconds":   {ClassLive, "handlePutJobPolicy", "pushed into the governor by the jobs policy endpoint, which is where postProd is edited; the governor then consults it per admission in MayStart"},
+	"postProd.enabled":               {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.concurrency":           {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.defaultMode":           {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.yieldToStream":         {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.cpuCeilingPercent":     {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.cpuResumePercent":      {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.cpuSustainedSeconds":   {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.cpuSettleSeconds":      {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.avoidGpuWhenStreaming": {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.gpuBusy":               {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.batteryFloorPercent":   {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.thermalCeilingC":       {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.niceLevel":             {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.idleIo":                {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
+	"postProd.ingestLingerSeconds":   {ClassLive, "handlePutJobPolicy", reasonPostProdLive},
 
 	// ------------------------------------------------------------------ mqtt
 	"mqtt.enabled":          {ClassLive, applyMQTT, "the MQTT runner polls settings and notices by hash; see handlePutMQTTPassword"},
@@ -373,14 +382,14 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.kinds.windows.tz":           {ClassLive, "handlePutJobPolicy", noteEvaluatedPerAdmission},
 
 	// ------------------------------------------------------------- chat + alerts
-	"activity.enabled":         {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.kinds":           {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.minTip.currency": {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.minTip.minor":    {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.minTip.unit":     {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.minTip.units":    {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.overlayMessages": {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
-	"activity.reactions":       {ClassLive, "handlePutSettings", "read by the activity hub for every event; handlePutSettings invalidates its two-second cache on a save, so the next event obeys it"},
+	"activity.enabled":         {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.kinds":           {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.minTip.currency": {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.minTip.minor":    {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.minTip.unit":     {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.minTip.units":    {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.overlayMessages": {ClassLive, "handlePutSettings", reasonActivityLive},
+	"activity.reactions":       {ClassLive, "handlePutSettings", reasonActivityLive},
 	"chat.historyMessages":     {ClassLive, applyChatRetention, "resizes the in-memory ring on the running Hub via SetHistory"},
 	"alerts.retryAttempts":     {ClassLive, applyAlertSettings, "pushed into every engine's Notifier, and remembered for engines created later"},
 
