@@ -387,6 +387,11 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 // TwitchHelixBase is Twitch's REST API. Overridden in tests.
 const TwitchHelixBase = platform.TwitchAPIRoot
 
+// twitchFollowersOnlyText is the user-facing reason for a followers-only
+// rejection. The three msg_followersonly* IRC NOTICE msg-ids share it, so it
+// lives here once.
+const twitchFollowersOnlyText = "the channel is in followers-only mode"
+
 // twitchClientIDHeader is required on every Helix request alongside the bearer
 // token. A request carrying a valid token and no Client-Id is rejected.
 const twitchClientIDHeader = "Client-Id"
@@ -807,9 +812,9 @@ var sendRefusals = map[string]string{
 	"msg_banned":                         "this account is banned from the channel",
 	"msg_timedout":                       "this account is timed out in the channel",
 	"msg_ratelimit":                      "Twitch is rate-limiting this account's messages",
-	"msg_followersonly":                  "the channel is in followers-only mode",
-	"msg_followersonly_zero":             "the channel is in followers-only mode",
-	"msg_followersonly_followed":         "the channel is in followers-only mode",
+	"msg_followersonly":                  twitchFollowersOnlyText,
+	"msg_followersonly_zero":             twitchFollowersOnlyText,
+	"msg_followersonly_followed":         twitchFollowersOnlyText,
 	"msg_subsonly":                       "the channel is in subscribers-only mode",
 	"msg_slowmode":                       "the channel is in slow mode",
 	"msg_emoteonly":                      "the channel is in emote-only mode",
