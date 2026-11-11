@@ -112,11 +112,7 @@ export function AutoStopControl({
       waitSeconds: parsed.seconds,
       acknowledged: enabled && ack,
     };
-    // Only what changed in this edit.
-    const patch: Partial<AutoStopSettings> = {};
-    if (enabled !== (value?.enabled ?? false)) patch.enabled = enabled;
-    if (parsed.seconds !== (value?.waitSeconds ?? 0)) patch.waitSeconds = parsed.seconds;
-    if (enabling && ackTicked) patch.acknowledged = true;
+    const patch = changedAutoStopFields(value, enabled, parsed.seconds, enabling, ackTicked);
     const body: Record<string, unknown> = { ingest: { autoStop: patch } };
     if (info?.version) body.autoStopVersion = info.version;
     setSaving(true);
@@ -231,4 +227,19 @@ function effectiveText(
   if (info.raisedBy === "failover") return t("autostop.effectiveFailover", { seconds: info.effectiveWaitSeconds });
   if (info.raisedBy === "pull") return t("autostop.effectivePull", { seconds: info.effectiveWaitSeconds });
   return t("autostop.effective", { seconds: info.effectiveWaitSeconds });
+}
+
+// Only what changed in this edit: the fields the save sends.
+function changedAutoStopFields(
+  value: AutoStopSettings | undefined,
+  enabled: boolean,
+  seconds: number,
+  enabling: boolean,
+  ackTicked: boolean,
+): Partial<AutoStopSettings> {
+  const patch: Partial<AutoStopSettings> = {};
+  if (enabled !== (value?.enabled ?? false)) patch.enabled = enabled;
+  if (seconds !== (value?.waitSeconds ?? 0)) patch.waitSeconds = seconds;
+  if (enabling && ackTicked) patch.acknowledged = true;
+  return patch;
 }
