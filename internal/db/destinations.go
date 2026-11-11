@@ -1743,122 +1743,25 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
-	// A retired platform's row stays saveable -- renaming it, or retyping it
-	// to a live platform, is the operator tidying up -- but it cannot be
-	// switched on through the back door, and nothing can be retyped TO it.
-	if dst.Platform.RetiredReason() != "" {
-		if dst.Enabled {
-			return nil, retiredError(dst.Platform, "this destination can no longer be started")
-		}
-		var was Platform
-		err := d.sql.QueryRow(`SELECT platform FROM destinations WHERE id=?`, dst.ID).Scan(&was)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		if was != dst.Platform {
-			return nil, retiredError(dst.Platform, "a destination can no longer be switched to it")
-		}
+	if err := d.checkRetiredPlatformSave(dst); err != nil {
+		return nil, err
 	}
-	// The caption go-live refusal (#8), on the off-to-on edge only: a save of a
-	// destination that is already running never stops it, and turning captions
-	// on while live is allowed (the URL is fetched by Refresh stream key, which
-	// needs the mode saved first).
-	if dst.Enabled && dst.Platform == PlatformYouTube {
-		var was bool
-		err := d.sql.QueryRow(`SELECT enabled FROM destinations WHERE id=?`, dst.ID).Scan(&was)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !was {
-			if rerr := d.captionIngestRefusal(dst.ID, dst.Platform, dst.CaptionMode, dst.StreamKey); rerr != nil {
-				return nil, rerr
-			}
-		}
+	if err := d.checkCaptionGoLive(dst); err != nil {
+		return nil, err
 	}
-	// The programme the rendition is held against, or nil for a pairing this
-	// write is not touching. See destinationKeepsItsRendition for why an
-	// inherited mismatch must not make the whole row unsaveable.
-	scope := dst.SourceID
-	kept, err := d.destinationKeepsItsRendition(dst)
+	if err := d.checkSaveRendition(dst); err != nil {
+		return nil, err
+	}
+	cols, err := marshalDestinationColumns(dst)
 	if err != nil {
 		return nil, err
 	}
-	if kept {
-		scope = nil
-	}
-	if err := d.checkRendition(dst.RenditionID, scope); err != nil {
-		return nil, err
-	}
-	profile, err := json.Marshal(dst.Profile)
+	args := destinationUpdateArgs(dst, cols)
+	query, keyArgs, err := d.sealUpdateKeys(dst)
 	if err != nil {
 		return nil, err
 	}
-	compliance, err := json.Marshal(dst.Compliance)
-	if err != nil {
-		return nil, err
-	}
-	facebook, err := json.Marshal(dst.Facebook)
-	if err != nil {
-		return nil, err
-	}
-	vodProfile, err := marshalVODProfile(dst.VODProfile)
-	if err != nil {
-		return nil, err
-	}
-	// The key columns first, so that the two statements below differ only by a
-	// prefix and the arguments line up with whichever one is used.
-	args := []any{
-		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
-		dst.BackupURL, dst.BackupIngestWanted,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
-		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
-		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
-		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
-		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
-		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
-		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
-		time.Now().Unix(), dst.ID,
-	}
-	// Four cases, because the two halves are decided separately.
-	keepPrimary, keepBackup := keepsSealedPrimaryKey(dst), keepsSealedBackupKey(dst)
-	var query string
-	switch {
-	case keepPrimary && keepBackup:
-		query = destUpdateKeepKeyQuery
-	case keepPrimary:
-		query = destUpdateKeepPrimaryQuery
-		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
-		if err != nil {
-			return nil, fmt.Errorf("seal backup stream key: %w", err)
-		}
-		args = append([]any{backupPlain, backupEnc}, args...)
-	case keepBackup:
-		query = destUpdateKeepBackupQuery
-		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
-		if err != nil {
-			return nil, fmt.Errorf("seal stream key: %w", err)
-		}
-		args = append([]any{keyPlain, keyEnc}, args...)
-	default:
-		query = destUpdateQuery
-		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
-		if err != nil {
-			return nil, fmt.Errorf("seal stream key: %w", err)
-		}
-		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
-		if err != nil {
-			return nil, fmt.Errorf("seal backup stream key: %w", err)
-		}
-		args = append([]any{keyPlain, keyEnc, backupPlain, backupEnc}, args...)
-	}
-	res, err := d.sql.Exec(query, args...)
+	res, err := d.sql.Exec(query, append(keyArgs, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -1873,6 +1776,144 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		}
 	}
 	return d.GetDestination(dst.ID)
+}
+
+// checkRetiredPlatformSave refuses a save that would start a retired platform or
+// retype a row to one. A retired platform's row stays saveable -- renaming it, or
+// retyping it to a live platform, is the operator tidying up -- but it cannot be
+// switched on through the back door, and nothing can be retyped TO it.
+func (d *DB) checkRetiredPlatformSave(dst *Destination) error {
+	if dst.Platform.RetiredReason() == "" {
+		return nil
+	}
+	if dst.Enabled {
+		return retiredError(dst.Platform, "this destination can no longer be started")
+	}
+	var was Platform
+	err := d.sql.QueryRow(`SELECT platform FROM destinations WHERE id=?`, dst.ID).Scan(&was)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if was != dst.Platform {
+		return retiredError(dst.Platform, "a destination can no longer be switched to it")
+	}
+	return nil
+}
+
+// checkCaptionGoLive applies the caption go-live refusal (#8), on the off-to-on
+// edge only: a save of a destination that is already running never stops it, and
+// turning captions on while live is allowed (the URL is fetched by Refresh stream
+// key, which needs the mode saved first).
+func (d *DB) checkCaptionGoLive(dst *Destination) error {
+	if !dst.Enabled || dst.Platform != PlatformYouTube {
+		return nil
+	}
+	var was bool
+	err := d.sql.QueryRow(`SELECT enabled FROM destinations WHERE id=?`, dst.ID).Scan(&was)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if was {
+		return nil
+	}
+	return d.captionIngestRefusal(dst.ID, dst.Platform, dst.CaptionMode, dst.StreamKey)
+}
+
+// checkSaveRendition checks the rendition a save names. The programme the
+// rendition is held against is nil for a pairing this write is not touching. See
+// destinationKeepsItsRendition for why an inherited mismatch must not make the
+// whole row unsaveable.
+func (d *DB) checkSaveRendition(dst *Destination) error {
+	scope := dst.SourceID
+	kept, err := d.destinationKeepsItsRendition(dst)
+	if err != nil {
+		return err
+	}
+	if kept {
+		scope = nil
+	}
+	return d.checkRendition(dst.RenditionID, scope)
+}
+
+// destinationColumnJSON is the JSON-encoded column values of a destination.
+type destinationColumnJSON struct {
+	profile, compliance, facebook []byte
+	vodProfile                    string
+}
+
+func marshalDestinationColumns(dst *Destination) (destinationColumnJSON, error) {
+	var cols destinationColumnJSON
+	var err error
+	if cols.profile, err = json.Marshal(dst.Profile); err != nil {
+		return cols, err
+	}
+	if cols.compliance, err = json.Marshal(dst.Compliance); err != nil {
+		return cols, err
+	}
+	if cols.facebook, err = json.Marshal(dst.Facebook); err != nil {
+		return cols, err
+	}
+	cols.vodProfile, err = marshalVODProfile(dst.VODProfile)
+	return cols, err
+}
+
+// destinationUpdateArgs lists the update statement's arguments after any sealed
+// key arguments. The key columns come first, so that the two statements below
+// differ only by a prefix and the arguments line up with whichever one is used.
+func destinationUpdateArgs(dst *Destination, cols destinationColumnJSON) []any {
+	return []any{
+		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
+		dst.BackupURL, dst.BackupIngestWanted,
+		dst.Enabled, dst.AudioBitrate, string(cols.profile), dst.RenditionID, dst.SourceID,
+		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
+		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
+		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
+		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(cols.compliance), string(cols.facebook),
+		dst.Multitrack, cols.vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet, presetIDStored(dst.PresetID),
+		time.Now().Unix(), dst.ID,
+	}
+}
+
+// sealUpdateKeys picks the update statement for the two stream keys, seals any
+// key that is being rewritten, and returns the arguments that go before the
+// common ones.
+func (d *DB) sealUpdateKeys(dst *Destination) (string, []any, error) {
+	// Four cases, because the two halves are decided separately.
+	keepPrimary, keepBackup := keepsSealedPrimaryKey(dst), keepsSealedBackupKey(dst)
+	switch {
+	case keepPrimary && keepBackup:
+		return destUpdateKeepKeyQuery, nil, nil
+	case keepPrimary:
+		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
+		if err != nil {
+			return "", nil, fmt.Errorf("seal backup stream key: %w", err)
+		}
+		return destUpdateKeepPrimaryQuery, []any{backupPlain, backupEnc}, nil
+	case keepBackup:
+		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
+		if err != nil {
+			return "", nil, fmt.Errorf("seal stream key: %w", err)
+		}
+		return destUpdateKeepBackupQuery, []any{keyPlain, keyEnc}, nil
+	default:
+		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
+		if err != nil {
+			return "", nil, fmt.Errorf("seal stream key: %w", err)
+		}
+		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
+		if err != nil {
+			return "", nil, fmt.Errorf("seal backup stream key: %w", err)
+		}
+		return destUpdateQuery, []any{keyPlain, keyEnc, backupPlain, backupEnc}, nil
+	}
 }
 
 // ErrAnnouncementSkipped is what UpdateAnnouncement returns when the callback
