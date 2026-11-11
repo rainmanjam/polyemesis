@@ -744,61 +744,14 @@ func (s *Server) playoutHandler() http.Handler {
 		// playoutVaryingResponse (#155).
 		playoutVaryingResponse(w)
 
-		// A preflight carries no credentials by definition, so it is held to the
-		// CONFIGURATION half of the gate and not to the credential half.
-		//
-		// The old comment here said it was answered "before the access check"
-		// and "reveals nothing", and both halves of that were wrong (#170).
-		// authorizePlayout is not only a credential check: its first two tests,
-		// Enabled and Public, are publication state, and they are exactly the
-		// facts a disabled server is trying not to disclose. Answering 204 above
-		// them told an anonymous caller that a playout origin is mounted on a
-		// server whose GET deliberately 404s -- and with AllowCrossOrigin on it
-		// also handed over the CORS headers, because internal/playout sets those
-		// above its own Enabled check.
-		//
-		// Denied answers the SAME 404 GET gives, so the two are consistent and a
-		// prober learns the same nothing from either.
-		//
-		// The credential half stays out of it deliberately: see
-		// playoutPreflightAllowed for why 401ing a preflight would break
-		// cross-origin playback of a token-protected public stream, which is a
-		// working flow this must not cost.
 		if r.Method == http.MethodOptions {
-			if !s.playoutPreflightAllowed(r) {
-				http.NotFound(w, r)
-				return
-			}
-			if h := resolve(); h != nil {
-				h.ServeHTTP(w, r)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
+			s.servePlayoutPreflight(w, r, resolve)
 			return
 		}
 
 		access := s.authorizePlayout(r)
-		switch access {
-		case playoutAllowToken:
-			cfg := s.playoutStore().load()
-			s.setPlayoutTokenCookie(w, cfg.Token, s.playoutSettings().AllowCrossOrigin)
-		case playoutDenyChallenge:
-			// Basic is named because it is the only one of the three channels a
-			// browser can satisfy on its own, which is what turns a bare
-			// /playout/ URL pasted into an address bar into a password prompt
-			// rather than a dead end.
-			w.Header().Set("WWW-Authenticate", `Basic realm="polyemesis playout", charset="UTF-8"`)
-			// Refusals are never stored: a CDN rule that makes /playout/
-			// cache-eligible must not hold a 401 or a pre-publish 404 at the edge.
-			w.Header().Set("Cache-Control", cacheNoStore) // NOSONAR: header names stay literal, shape_derivation_test scans for them
-			writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
+		if s.applyPlayoutAccess(w, r, access) {
 			return
-		default:
-			if !access.ok() {
-				w.Header().Set("Cache-Control", cacheNoStore)
-				http.NotFound(w, r)
-				return
-			}
 		}
 
 		h := resolve()
@@ -813,6 +766,69 @@ func (s *Server) playoutHandler() http.Handler {
 		// so Cache-Control is the one thing keeping a gated segment out of them.
 		h.ServeHTTP(w, r.WithContext(playout.WithSharedCache(r.Context(), access == playoutAllowOpen)))
 	})
+}
+
+// servePlayoutPreflight answers a CORS preflight on the playout mount.
+func (s *Server) servePlayoutPreflight(w http.ResponseWriter, r *http.Request, resolve func() http.Handler) {
+	// A preflight carries no credentials by definition, so it is held to the
+	// CONFIGURATION half of the gate and not to the credential half.
+	//
+	// The old comment here said it was answered "before the access check"
+	// and "reveals nothing", and both halves of that were wrong (#170).
+	// authorizePlayout is not only a credential check: its first two tests,
+	// Enabled and Public, are publication state, and they are exactly the
+	// facts a disabled server is trying not to disclose. Answering 204 above
+	// them told an anonymous caller that a playout origin is mounted on a
+	// server whose GET deliberately 404s -- and with AllowCrossOrigin on it
+	// also handed over the CORS headers, because internal/playout sets those
+	// above its own Enabled check.
+	//
+	// Denied answers the SAME 404 GET gives, so the two are consistent and a
+	// prober learns the same nothing from either.
+	//
+	// The credential half stays out of it deliberately: see
+	// playoutPreflightAllowed for why 401ing a preflight would break
+	// cross-origin playback of a token-protected public stream, which is a
+	// working flow this must not cost.
+	if !s.playoutPreflightAllowed(r) {
+		http.NotFound(w, r)
+		return
+	}
+	if h := resolve(); h != nil {
+		h.ServeHTTP(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// applyPlayoutAccess writes the response for an access decision that ends the
+// request (a challenge, or a refusal), and sets the token cookie on a token
+// grant. It reports true when the request is finished and nothing more may be
+// written.
+func (s *Server) applyPlayoutAccess(w http.ResponseWriter, r *http.Request, access playoutAccess) bool {
+	switch access {
+	case playoutAllowToken:
+		cfg := s.playoutStore().load()
+		s.setPlayoutTokenCookie(w, cfg.Token, s.playoutSettings().AllowCrossOrigin)
+	case playoutDenyChallenge:
+		// Basic is named because it is the only one of the three channels a
+		// browser can satisfy on its own, which is what turns a bare
+		// /playout/ URL pasted into an address bar into a password prompt
+		// rather than a dead end.
+		w.Header().Set("WWW-Authenticate", `Basic realm="polyemesis playout", charset="UTF-8"`)
+		// Refusals are never stored: a CDN rule that makes /playout/
+		// cache-eligible must not hold a 401 or a pre-publish 404 at the edge.
+		w.Header().Set("Cache-Control", cacheNoStore) // NOSONAR: header names stay literal, shape_derivation_test scans for them
+		writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
+		return true
+	default:
+		if !access.ok() {
+			w.Header().Set("Cache-Control", cacheNoStore)
+			http.NotFound(w, r)
+			return true
+		}
+	}
+	return false
 }
 
 // ------------------------------------------------------------- player page
@@ -1195,54 +1211,13 @@ func (s *Server) handlePutPlayoutPublish(w http.ResponseWriter, r *http.Request)
 
 	st := s.playoutStore()
 	cfg := st.load()
-	if req.Protection != nil {
-		switch *req.Protection {
-		case PlayoutProtectToken, PlayoutProtectOpen:
-			cfg.Protection = *req.Protection
-		default:
-			writeError(w, http.StatusBadRequest,
-				`protection must be "token" or "open"`)
-			return
-		}
+	if status, msg := applyPlayoutPublishText(&cfg, req); status != 0 {
+		writeError(w, status, msg)
+		return
 	}
-	if req.Title != nil {
-		cfg.Title = strings.TrimSpace(*req.Title)
-	}
-	if req.Description != nil {
-		cfg.Description = strings.TrimSpace(*req.Description)
-	}
-	if req.OfflineMessage != nil {
-		msg := strings.TrimSpace(*req.OfflineMessage)
-		if len([]rune(msg)) > maxOfflineMessage {
-			writeError(w, http.StatusBadRequest, "offlineMessage is limited to 500 characters")
-			return
-		}
-		cfg.OfflineMessage = msg
-	}
-	if req.VODURL != nil {
-		u := strings.TrimSpace(*req.VODURL)
-		if !validVODURL(u) {
-			writeError(w, http.StatusBadRequest, "vodUrl must be an absolute http or https URL")
-			return
-		}
-		cfg.VODURL = u
-	}
-	if req.OfflineClipJob != nil {
-		id := *req.OfflineClipJob
-		if id < 0 {
-			writeError(w, http.StatusBadRequest, "offlineClipJob must be a clip export job id, or 0 for none")
-			return
-		}
-		if id > 0 {
-			// Checked on save so the operator hears about a clip the page can
-			// never play now, not from a viewer later. Checked again on serve,
-			// because the export can be deleted in between.
-			if _, err := s.offlineClipPath(id); err != nil {
-				writeError(w, http.StatusBadRequest, "offlineClipJob: "+err.Error())
-				return
-			}
-		}
-		cfg.OfflineClipJob = id
+	if status, msg := s.applyPlayoutOfflineClip(&cfg, req); status != 0 {
+		writeError(w, status, msg)
+		return
 	}
 
 	saved, err := st.save(cfg)
@@ -1261,6 +1236,63 @@ func (s *Server) handlePutPlayoutPublish(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, saved)
+}
+
+// applyPlayoutPublishText copies the text, protection and VOD fields a PUT names
+// onto cfg. A refused field returns the status and message to answer with; a
+// zero status means every field was accepted.
+func applyPlayoutPublishText(cfg *playoutPublish, req playoutPublishRequest) (int, string) {
+	if req.Protection != nil {
+		switch *req.Protection {
+		case PlayoutProtectToken, PlayoutProtectOpen:
+			cfg.Protection = *req.Protection
+		default:
+			return http.StatusBadRequest, `protection must be "token" or "open"`
+		}
+	}
+	if req.Title != nil {
+		cfg.Title = strings.TrimSpace(*req.Title)
+	}
+	if req.Description != nil {
+		cfg.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.OfflineMessage != nil {
+		msg := strings.TrimSpace(*req.OfflineMessage)
+		if len([]rune(msg)) > maxOfflineMessage {
+			return http.StatusBadRequest, "offlineMessage is limited to 500 characters"
+		}
+		cfg.OfflineMessage = msg
+	}
+	if req.VODURL != nil {
+		u := strings.TrimSpace(*req.VODURL)
+		if !validVODURL(u) {
+			return http.StatusBadRequest, "vodUrl must be an absolute http or https URL"
+		}
+		cfg.VODURL = u
+	}
+	return 0, ""
+}
+
+// applyPlayoutOfflineClip copies the offline clip job a PUT names onto cfg, after
+// checking that the clip can still be played. Zero clears it.
+func (s *Server) applyPlayoutOfflineClip(cfg *playoutPublish, req playoutPublishRequest) (int, string) {
+	if req.OfflineClipJob == nil {
+		return 0, ""
+	}
+	id := *req.OfflineClipJob
+	if id < 0 {
+		return http.StatusBadRequest, "offlineClipJob must be a clip export job id, or 0 for none"
+	}
+	if id > 0 {
+		// Checked on save so the operator hears about a clip the page can
+		// never play now, not from a viewer later. Checked again on serve,
+		// because the export can be deleted in between.
+		if _, err := s.offlineClipPath(id); err != nil {
+			return http.StatusBadRequest, "offlineClipJob: " + err.Error()
+		}
+	}
+	cfg.OfflineClipJob = id
+	return 0, ""
 }
 
 // handleRotatePlayoutToken mints a new playback secret, which invalidates every
