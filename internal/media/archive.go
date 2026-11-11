@@ -631,29 +631,33 @@ func (v *Verification) checkAudio(src, out FileSummary, opt VerifyOptions) {
 		if i >= len(outAudio) {
 			break
 		}
-		got := outAudio[i]
-		if want.Channels > 0 && want.Channels != got.Channels {
-			v.fail("audio track %d has %d channel(s) in the original and %d in the archive copy",
-				want.Index, want.Channels, got.Channels)
-		}
-		if want.Codec != "" && got.Codec != "" && want.Codec != got.Codec {
-			// -c:a copy means this can never differ. When it does, something
-			// re-encoded the audio, which is a bug in the arguments and not a
-			// thing to shrug at on the delete path.
-			v.fail("audio track %d is %s in the original and %s in the archive copy; "+
-				"audio must be copied, never re-encoded", want.Index, want.Codec, got.Codec)
-		}
-		if opt.AllowMetadataLoss {
-			continue
-		}
-		if want.Language != "" && got.Language != want.Language {
-			v.fail("audio track %d lost its language tag (%q became %q)",
-				want.Index, want.Language, got.Language)
-		}
-		if want.Title != "" && got.Title != want.Title {
-			v.fail("audio track %d lost its title (%q became %q)",
-				want.Index, want.Title, got.Title)
-		}
+		v.checkAudioTrack(want, outAudio[i], opt)
+	}
+}
+
+// checkAudioTrack compares one original audio track with its archive copy.
+func (v *Verification) checkAudioTrack(want, got TrackSummary, opt VerifyOptions) {
+	if want.Channels > 0 && want.Channels != got.Channels {
+		v.fail("audio track %d has %d channel(s) in the original and %d in the archive copy",
+			want.Index, want.Channels, got.Channels)
+	}
+	if want.Codec != "" && got.Codec != "" && want.Codec != got.Codec {
+		// -c:a copy means this can never differ. When it does, something
+		// re-encoded the audio, which is a bug in the arguments and not a
+		// thing to shrug at on the delete path.
+		v.fail("audio track %d is %s in the original and %s in the archive copy; "+
+			"audio must be copied, never re-encoded", want.Index, want.Codec, got.Codec)
+	}
+	if opt.AllowMetadataLoss {
+		return
+	}
+	if want.Language != "" && got.Language != want.Language {
+		v.fail("audio track %d lost its language tag (%q became %q)",
+			want.Index, want.Language, got.Language)
+	}
+	if want.Title != "" && got.Title != want.Title {
+		v.fail("audio track %d lost its title (%q became %q)",
+			want.Index, want.Title, got.Title)
 	}
 }
 

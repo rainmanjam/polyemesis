@@ -155,7 +155,17 @@ func (w *BurnWriter) write(text string) error {
 // burnText is a caption as burned: control characters dropped, words wrapped
 // to burnLineRunes, and only the newest burnLines lines kept.
 func burnText(s string) string {
-	clean := strings.Map(func(r rune) rune {
+	lines := wrapBurnWords(stripBurnControls(s))
+	if len(lines) > burnLines {
+		lines = lines[len(lines)-burnLines:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// stripBurnControls turns newlines and tabs into spaces and drops every other
+// control character.
+func stripBurnControls(s string) string {
+	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			if r == '\n' || r == '\t' {
 				return ' '
@@ -164,16 +174,15 @@ func burnText(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// wrapBurnWords greedily packs the words of clean into lines of at most
+// burnLineRunes runes.
+func wrapBurnWords(clean string) []string {
 	var lines []string
 	cur := ""
 	for _, word := range strings.Fields(clean) {
-		for len([]rune(word)) > burnLineRunes {
-			rs := []rune(word)
-			if cur != "" {
-				lines, cur = append(lines, cur), ""
-			}
-			lines, word = append(lines, string(rs[:burnLineRunes])), string(rs[burnLineRunes:])
-		}
+		lines, cur, word = splitOverlongWord(lines, cur, word)
 		switch {
 		case cur == "":
 			cur = word
@@ -186,8 +195,18 @@ func burnText(s string) string {
 	if cur != "" {
 		lines = append(lines, cur)
 	}
-	if len(lines) > burnLines {
-		lines = lines[len(lines)-burnLines:]
+	return lines
+}
+
+// splitOverlongWord cuts a word longer than burnLineRunes into full-width lines,
+// flushing the pending line first, and returns the remainder still to place.
+func splitOverlongWord(lines []string, cur, word string) ([]string, string, string) {
+	for len([]rune(word)) > burnLineRunes {
+		rs := []rune(word)
+		if cur != "" {
+			lines, cur = append(lines, cur), ""
+		}
+		lines, word = append(lines, string(rs[:burnLineRunes])), string(rs[burnLineRunes:])
 	}
-	return strings.Join(lines, "\n")
+	return lines, cur, word
 }

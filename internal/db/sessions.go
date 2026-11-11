@@ -917,33 +917,56 @@ func (d *DB) AssignRecording(recordingID int64, rules SessionRules) (*Session, e
 		return nil, err
 	}
 	if prev != nil && rules.Chains(*prev, *rec) {
-		if s, err := d.SessionForRecording(prev.ID); err == nil {
-			if rules.MaxSpan == 0 || rec.StartedAt.Sub(s.StartedAt) <= rules.MaxSpan {
-				if assignBeforeClaim != nil {
-					assignBeforeClaim(rec.ID)
-				}
-				claimed, err := d.claimUngrouped(s.ID, rec.ID)
-				if err != nil {
-					return nil, err
-				}
-				if !claimed {
-					return d.SessionForRecording(rec.ID)
-				}
-				return d.GetSession(s.ID)
-			}
-		} else if !errors.Is(err, ErrNotFound) {
+		s, joined, err := d.joinPreviousSession(prev, rec, rules)
+		if err != nil {
 			return nil, err
 		}
+		if joined {
+			return s, nil
+		}
 	}
+	return d.newSessionFor(rec.ID)
+}
 
-	s, err := d.CreateSession(Metadata{}, true)
+// joinPreviousSession adds rec to the session its chained predecessor belongs
+// to, when that session is still within rules.MaxSpan. joined is false when
+// there is no such session to join, and the caller starts a new one.
+func (d *DB) joinPreviousSession(prev, rec *Recording, rules SessionRules) (s *Session, joined bool, err error) {
+	s, err = d.SessionForRecording(prev.ID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if rules.MaxSpan != 0 && rec.StartedAt.Sub(s.StartedAt) > rules.MaxSpan {
+		return nil, false, nil
 	}
 	if assignBeforeClaim != nil {
 		assignBeforeClaim(rec.ID)
 	}
 	claimed, err := d.claimUngrouped(s.ID, rec.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !claimed {
+		s, err = d.SessionForRecording(rec.ID)
+		return s, true, err
+	}
+	s, err = d.GetSession(s.ID)
+	return s, true, err
+}
+
+// newSessionFor starts a session for a recording nothing else has claimed.
+func (d *DB) newSessionFor(recordingID int64) (*Session, error) {
+	s, err := d.CreateSession(Metadata{}, true)
+	if err != nil {
+		return nil, err
+	}
+	if assignBeforeClaim != nil {
+		assignBeforeClaim(recordingID)
+	}
+	claimed, err := d.claimUngrouped(s.ID, recordingID)
 	if err != nil {
 		return nil, err
 	}
@@ -954,7 +977,7 @@ func (d *DB) AssignRecording(recordingID int64, rules SessionRules) (*Session, e
 		if err := d.DeleteSession(s.ID); err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
-		return d.SessionForRecording(rec.ID)
+		return d.SessionForRecording(recordingID)
 	}
 	return d.GetSession(s.ID)
 }

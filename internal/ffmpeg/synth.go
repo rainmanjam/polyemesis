@@ -217,40 +217,7 @@ type SlateSpec struct {
 // The output is a normal MPEG-TS hub feed with one video track and one silent
 // audio track, so a destination cannot tell a slate from an ingest.
 func SlateArgs(s SlateSpec) []string {
-	if s.Color == "" {
-		s.Color = defaultSlateColor
-	}
-	if s.Width <= 0 {
-		s.Width = defaultSlateWidth
-	}
-	if s.Height <= 0 {
-		s.Height = defaultSlateHeight
-	}
-	if s.FPS <= 0 {
-		s.FPS = defaultSlateFPS
-	}
-	if s.VideoKbps <= 0 {
-		s.VideoKbps = defaultSlateKbps
-	}
-	if s.MaxrateKbps <= 0 {
-		s.MaxrateKbps = s.VideoKbps
-	}
-	if s.BufsizeKbps <= 0 {
-		s.BufsizeKbps = s.MaxrateKbps * 2
-	}
-	if s.GOPSeconds <= 0 {
-		s.GOPSeconds = 2
-	}
-	s.AudioChannels = aacChannels(s.AudioChannels)
-	if s.SampleRate <= 0 {
-		s.SampleRate = defaultSynthSampleRate
-	}
-	if s.AudioKbps <= 0 {
-		s.AudioKbps = defaultSilenceKbps
-	}
-	if s.Encoder == "" {
-		s.Encoder = EncoderX264
-	}
+	s = withSlateDefaults(s)
 	// Same rule as renditions: an encoder we hold no profile for still runs,
 	// with only the flags every encoder understands. Refusing to build a
 	// command because the encoder is unfamiliar would leave the operator with
@@ -388,4 +355,43 @@ func slateVideoFilter(s SlateSpec, prof encoderProfile) string {
 // FFmpeg's duration parser rejects Go's default "1e+06" formatting.
 func formatSeconds(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// withSlateDefaults fills in every slate setting the caller left unset.
+func withSlateDefaults(s SlateSpec) SlateSpec {
+	if s.Color == "" {
+		s.Color = defaultSlateColor
+	}
+	if s.Width <= 0 {
+		s.Width = defaultSlateWidth
+	}
+	if s.Height <= 0 {
+		s.Height = defaultSlateHeight
+	}
+	if s.FPS <= 0 {
+		s.FPS = defaultSlateFPS
+	}
+	if s.VideoKbps <= 0 {
+		s.VideoKbps = defaultSlateKbps
+	}
+	if s.MaxrateKbps <= 0 {
+		s.MaxrateKbps = s.VideoKbps
+	}
+	if s.BufsizeKbps <= 0 {
+		s.BufsizeKbps = s.MaxrateKbps * 2
+	}
+	if s.GOPSeconds <= 0 {
+		s.GOPSeconds = 2
+	}
+	s.AudioChannels = aacChannels(s.AudioChannels)
+	if s.SampleRate <= 0 {
+		s.SampleRate = defaultSynthSampleRate
+	}
+	if s.AudioKbps <= 0 {
+		s.AudioKbps = defaultSilenceKbps
+	}
+	if s.Encoder == "" {
+		s.Encoder = EncoderX264
+	}
+	return s
 }

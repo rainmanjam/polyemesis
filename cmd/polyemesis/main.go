@@ -975,6 +975,59 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	reportUpgradeNotices(log, store)
+
+	// How many programmes this install has, which is a different question from
+	// what settings.ingest says. Nothing reads settings.ingest any more -- the
+	// engine takes its ingest from the source row -- so on an install with no
+	// source that block describes a listener nobody is behind. See the ingest
+	// line below.
+	sources, err := store.ListSources()
+	if err != nil {
+		return err
+	}
+
+	scheme, shown := webAddress(cfg, provider)
+	fmt.Printf("\n  polyemesis %s\n", version)
+	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
+	// NO SOURCE, NO INGEST, whatever settings.ingest happens to say -- and when
+	// there IS one, the ingest reported is the SOURCE's, not the singleton's.
+	//
+	// This line is the entire user interface of a headless first run: nobody has
+	// opened the web UI yet, and these eight lines are the only thing telling an
+	// operator where to point an encoder. `ingest srt (port 6000)` on a box with
+	// no source is a false statement of exactly the kind that costs an evening --
+	// the port really is bound (both listeners bind unconditionally), so nothing
+	// downstream contradicts it, and the encoder is simply refused by a server
+	// that has no programme to admit it to.
+	//
+	// The second half is what ingestLine now fixes, and this comment used to
+	// defer it: "deliberately NOT extended to naming the DEFAULT SOURCE's ingest
+	// when there is one ... a separate change with its own decision about which
+	// programme a banner speaks for". A deployment settled the decision. An
+	// upgraded box that had been streaming over SRT for weeks printed "ingest not
+	// chosen yet -- pick SRT, RTMP or pull in the web UI" on every boot, because
+	// its source carried the SRT block and the settings copy had never been
+	// written. The banner told a working install to reconfigure itself.
+	fmt.Printf("  ingest      %s\n", ingestLine(sources, settings))
+	fmt.Printf("  data dir    %s\n", cfg.DataDir)
+	fmt.Printf("  ffmpeg      %s\n", tools.Version)
+	reportTLS(cfg, provider, shown)
+	reportWarnings(log, cfg, tools)
+	if !hasUser {
+		fmt.Printf("\n  First run: open the web UI and create the admin account with the setup code below.\n")
+	}
+	if !api.UIBuilt() {
+		fmt.Printf("\n  WARNING: no web UI is embedded in this binary.\n")
+		fmt.Printf("           Run `make build` (which runs `npm --prefix ui run build` first).\n")
+	}
+	fmt.Println()
+	return nil
+}
+
+// reportUpgradeNotices logs, once and on the boot that made them, the changes an
+// upgrade made to the operator's data on its own.
+func reportUpgradeNotices(log *slog.Logger, store *db.DB) {
 	// THE BACKUP THAT SILENTLY STOPPED BEING ONE (#557).
 	//
 	// If this boot sealed stream keys, it just upgraded an install whose
@@ -1014,22 +1067,15 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 				"and were reachable only over SRT, so SRT is what they already were",
 			"action", "if one of them was meant for RTMP or pull, change its ingest on the Sources page")
 	}
+}
 
-	// How many programmes this install has, which is a different question from
-	// what settings.ingest says. Nothing reads settings.ingest any more -- the
-	// engine takes its ingest from the source row -- so on an install with no
-	// source that block describes a listener nobody is behind. See the ingest
-	// line below.
-	sources, err := store.ListSources()
-	if err != nil {
-		return err
-	}
-
-	scheme := "http"
+// webAddress returns the scheme and the host:port the web UI is reached at.
+func webAddress(cfg config.Config, provider *tlsx.Provider) (scheme, shown string) {
+	scheme = "http"
 	if provider.Enabled() {
 		scheme = "https"
 	}
-	shown := cfg.Addr
+	shown = cfg.Addr
 	if host := strings.TrimSpace(cfg.TLS.Hostname); host != "" && provider.Enabled() {
 		shown = host
 		if port := listenPort(cfg.Addr); port != "" && port != "443" {
@@ -1038,32 +1084,12 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	} else if strings.HasPrefix(shown, ":") {
 		shown = "localhost" + shown
 	}
+	return scheme, shown
+}
 
-	fmt.Printf("\n  polyemesis %s\n", version)
-	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
-	// NO SOURCE, NO INGEST, whatever settings.ingest happens to say -- and when
-	// there IS one, the ingest reported is the SOURCE's, not the singleton's.
-	//
-	// This line is the entire user interface of a headless first run: nobody has
-	// opened the web UI yet, and these eight lines are the only thing telling an
-	// operator where to point an encoder. `ingest srt (port 6000)` on a box with
-	// no source is a false statement of exactly the kind that costs an evening --
-	// the port really is bound (both listeners bind unconditionally), so nothing
-	// downstream contradicts it, and the encoder is simply refused by a server
-	// that has no programme to admit it to.
-	//
-	// The second half is what ingestLine now fixes, and this comment used to
-	// defer it: "deliberately NOT extended to naming the DEFAULT SOURCE's ingest
-	// when there is one ... a separate change with its own decision about which
-	// programme a banner speaks for". A deployment settled the decision. An
-	// upgraded box that had been streaming over SRT for weeks printed "ingest not
-	// chosen yet -- pick SRT, RTMP or pull in the web UI" on every boot, because
-	// its source carried the SRT block and the settings copy had never been
-	// written. The banner told a working install to reconfigure itself.
-	fmt.Printf("  ingest      %s\n", ingestLine(sources, settings))
-	fmt.Printf("  data dir    %s\n", cfg.DataDir)
-	fmt.Printf("  ffmpeg      %s\n", tools.Version)
-	reportTLS(cfg, provider, shown)
+// reportWarnings prints every configuration warning the startup banner carries,
+// and logs the ones that reach journald.
+func reportWarnings(log *slog.Logger, cfg config.Config, tools *ffmpeg.Tools) {
 	if warn := tools.SRTWarning(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
@@ -1095,15 +1121,6 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
-	if !hasUser {
-		fmt.Printf("\n  First run: open the web UI and create the admin account with the setup code below.\n")
-	}
-	if !api.UIBuilt() {
-		fmt.Printf("\n  WARNING: no web UI is embedded in this binary.\n")
-		fmt.Printf("           Run `make build` (which runs `npm --prefix ui run build` first).\n")
-	}
-	fmt.Println()
-	return nil
 }
 
 // reportTLS prints what a browser is about to see.

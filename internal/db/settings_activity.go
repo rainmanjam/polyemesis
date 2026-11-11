@@ -142,6 +142,12 @@ func pow10(n int) *big.Int {
 }
 
 func (a ActivitySettings) problems() []string {
+	probs := a.kindProblems()
+	return append(probs, a.minTipProblems()...)
+}
+
+// kindProblems checks the activity kinds each platform is listed for.
+func (a ActivitySettings) kindProblems() []string {
 	var probs []string
 	known := map[string]bool{}
 	for _, r := range platform.ChatOverlays() {
@@ -162,26 +168,24 @@ func (a ActivitySettings) problems() []string {
 			seen[k] = true
 		}
 	}
+	return probs
+}
+
+// minTipProblems checks the minimum-amount rows, their count and their
+// duplicates.
+func (a ActivitySettings) minTipProblems() []string {
+	var probs []string
 	if len(a.MinTip) > MaxActivityMinAmounts {
 		probs = append(probs, fmt.Sprintf("activity minimums: %d rows is more than %d", len(a.MinTip), MaxActivityMinAmounts))
 	}
 	seen := map[string]bool{}
 	for i, m := range a.MinTip {
-		money := m.Currency != ""
-		unit := m.Unit != "" || m.Units != 0
-		switch {
-		case money && unit:
-			probs = append(probs, fmt.Sprintf("activity minimum %d is money or a unit, not both", i+1))
+		problem, skipDup := minTipShapeProblem(i, m)
+		if problem != "" {
+			probs = append(probs, problem)
+		}
+		if skipDup {
 			continue
-		case !money && !unit:
-			probs = append(probs, fmt.Sprintf("activity minimum %d needs a currency or a unit", i+1))
-			continue
-		case money && (len(m.Currency) != 3 || m.Currency != strings.ToUpper(m.Currency)):
-			probs = append(probs, fmt.Sprintf("activity minimum %d: %q is not an upper-case ISO 4217 code", i+1, m.Currency))
-		case money && m.Minor < 0, !money && m.Units < 0:
-			probs = append(probs, fmt.Sprintf("activity minimum %d cannot be negative", i+1))
-		case !money && (m.Unit == "" || len([]rune(m.Unit)) > MaxActivityUnitRunes || m.Unit != strings.ToLower(m.Unit)):
-			probs = append(probs, fmt.Sprintf("activity minimum %d: the unit must be a lower-case name of at most %d characters", i+1, MaxActivityUnitRunes))
 		}
 		id := m.Currency + "|" + m.Unit
 		if seen[id] {
@@ -190,4 +194,25 @@ func (a ActivitySettings) problems() []string {
 		seen[id] = true
 	}
 	return probs
+}
+
+// minTipShapeProblem checks one minimum row on its own. It returns the problem
+// (empty when the row is fine) and whether the row is too malformed for a
+// duplicate check to mean anything.
+func minTipShapeProblem(i int, m MinAmount) (problem string, skipDup bool) {
+	money := m.Currency != ""
+	unit := m.Unit != "" || m.Units != 0
+	switch {
+	case money && unit:
+		return fmt.Sprintf("activity minimum %d is money or a unit, not both", i+1), true
+	case !money && !unit:
+		return fmt.Sprintf("activity minimum %d needs a currency or a unit", i+1), true
+	case money && (len(m.Currency) != 3 || m.Currency != strings.ToUpper(m.Currency)):
+		return fmt.Sprintf("activity minimum %d: %q is not an upper-case ISO 4217 code", i+1, m.Currency), false
+	case money && m.Minor < 0, !money && m.Units < 0:
+		return fmt.Sprintf("activity minimum %d cannot be negative", i+1), false
+	case !money && (m.Unit == "" || len([]rune(m.Unit)) > MaxActivityUnitRunes || m.Unit != strings.ToLower(m.Unit)):
+		return fmt.Sprintf("activity minimum %d: the unit must be a lower-case name of at most %d characters", i+1, MaxActivityUnitRunes), false
+	}
+	return "", false
 }

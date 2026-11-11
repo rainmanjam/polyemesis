@@ -125,39 +125,48 @@ func basicCode(r rune) (byte, bool) {
 func wrapLines(text string) []string {
 	var rows []string
 	for _, line := range strings.Split(text, "\n") {
-		words := strings.Fields(line)
-		if len(words) == 0 {
-			continue
-		}
-		cur := ""
-		for _, w := range words {
-			// Columns are runes, not bytes: a multi-byte character takes one column, and a cut must
-			// fall between characters.
-			wr := []rune(w)
-			for len(wr) > Columns {
-				if cur != "" {
-					rows = append(rows, cur)
-					cur = ""
-				}
-				rows = append(rows, string(wr[:Columns]))
-				wr = wr[Columns:]
-			}
-			w = string(wr)
-			switch {
-			case cur == "":
-				cur = w
-			case utf8.RuneCountInString(cur)+1+utf8.RuneCountInString(w) <= Columns:
-				cur += " " + w
-			default:
-				rows = append(rows, cur)
-				cur = w
-			}
-		}
-		if cur != "" {
-			rows = append(rows, cur)
-		}
+		rows = append(rows, wrapWords(strings.Fields(line))...)
 	}
 	return rows
+}
+
+// wrapWords packs one line's words into rows of at most Columns characters.
+func wrapWords(words []string) []string {
+	var rows []string
+	cur := ""
+	for _, w := range words {
+		rows, cur, w = splitWideWord(rows, cur, w)
+		switch {
+		case cur == "":
+			cur = w
+		case utf8.RuneCountInString(cur)+1+utf8.RuneCountInString(w) <= Columns:
+			cur += " " + w
+		default:
+			rows = append(rows, cur)
+			cur = w
+		}
+	}
+	if cur != "" {
+		rows = append(rows, cur)
+	}
+	return rows
+}
+
+// splitWideWord cuts a word wider than a row into full rows, flushing the
+// pending row first, and returns the remainder still to place.
+func splitWideWord(rows []string, cur, w string) ([]string, string, string) {
+	// Columns are runes, not bytes: a multi-byte character takes one column, and a cut must
+	// fall between characters.
+	wr := []rune(w)
+	for len(wr) > Columns {
+		if cur != "" {
+			rows = append(rows, cur)
+			cur = ""
+		}
+		rows = append(rows, string(wr[:Columns]))
+		wr = wr[Columns:]
+	}
+	return rows, cur, string(wr)
 }
 
 // lastRows keeps the newest n rows. A pop-on caption has at most MaxRows, and

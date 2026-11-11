@@ -313,71 +313,96 @@ func (e Event) Normalise(now func() time.Time) Event {
 	e.Viewers = clampInt(e.Viewers, 0, 100_000_000)
 	e.Level = clampInt(e.Level, 0, 1000)
 
-	if e.Amount != nil {
-		a := *e.Amount
-		a.Currency = strings.ToUpper(strings.TrimSpace(a.Currency))
-		a.Unit = strings.ToLower(strings.TrimSpace(a.Unit))
-		a.Display = clip(strings.TrimSpace(a.Display), MaxShortRunes)
-		if a.Display == "" {
-			a.Display = a.build()
-		}
-		e.Amount = &a
-	}
+	e = e.normaliseAmount()
+	e = e.normaliseRecipients()
+	e = e.normaliseProgress()
+	return e.normaliseBreakdown()
+}
 
-	if len(e.Recipients) > 0 {
-		rs := make([]Recipient, 0, min(len(e.Recipients), MaxRecipients))
-		for _, r := range e.Recipients {
-			if len(rs) == MaxRecipients {
-				break
-			}
-			r.ID = clip(strings.TrimSpace(r.ID), MaxShortRunes*2)
-			r.Name = clip(strings.TrimSpace(r.Name), MaxNameRunes)
-			if r.Name != "" {
-				rs = append(rs, r)
-			}
-		}
-		e.Recipients = rs
-		if len(rs) == 0 {
-			e.Recipients = nil
-		}
-		// A gift of one with a named recipient is a gift of one.
-		if e.Kind == KindGift && e.Count < len(e.Recipients) {
-			e.Count = len(e.Recipients)
-		}
+// normaliseAmount tidies a copy of the amount and fills its display text.
+func (e Event) normaliseAmount() Event {
+	if e.Amount == nil {
+		return e
 	}
+	a := *e.Amount
+	a.Currency = strings.ToUpper(strings.TrimSpace(a.Currency))
+	a.Unit = strings.ToLower(strings.TrimSpace(a.Unit))
+	a.Display = clip(strings.TrimSpace(a.Display), MaxShortRunes)
+	if a.Display == "" {
+		a.Display = a.build()
+	}
+	e.Amount = &a
+	return e
+}
 
-	if e.Progress != nil {
-		p := *e.Progress
-		if len(p.Options) > MaxOptions {
-			p.Options = p.Options[:MaxOptions]
-		}
-		opts := make([]ProgressOption, len(p.Options))
-		for i, o := range p.Options {
-			o.Label = clip(strings.TrimSpace(o.Label), MaxShortRunes*2)
-			opts[i] = o
-		}
-		p.Options = opts
-		if len(opts) == 0 {
-			p.Options = nil
-		}
-		e.Progress = &p
+// normaliseRecipients keeps the named recipients, up to MaxRecipients.
+func (e Event) normaliseRecipients() Event {
+	if len(e.Recipients) == 0 {
+		return e
 	}
+	rs := make([]Recipient, 0, min(len(e.Recipients), MaxRecipients))
+	for _, r := range e.Recipients {
+		if len(rs) == MaxRecipients {
+			break
+		}
+		r.ID = clip(strings.TrimSpace(r.ID), MaxShortRunes*2)
+		r.Name = clip(strings.TrimSpace(r.Name), MaxNameRunes)
+		if r.Name != "" {
+			rs = append(rs, r)
+		}
+	}
+	e.Recipients = rs
+	if len(rs) == 0 {
+		e.Recipients = nil
+	}
+	// A gift of one with a named recipient is a gift of one.
+	if e.Kind == KindGift && e.Count < len(e.Recipients) {
+		e.Count = len(e.Recipients)
+	}
+	return e
+}
 
-	if len(e.Breakdown) > 0 {
-		b := make(map[string]int, min(len(e.Breakdown), MaxBreakdown))
-		keys := make([]string, 0, len(e.Breakdown))
-		for k := range e.Breakdown {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-		for _, k := range keys {
-			if len(b) == MaxBreakdown {
-				break
-			}
-			b[clip(strings.TrimSpace(k), MaxShortRunes)] = clampInt(e.Breakdown[k], 0, MaxCount)
-		}
-		e.Breakdown = b
+// normaliseProgress tidies a copy of the progress block and caps its options.
+func (e Event) normaliseProgress() Event {
+	if e.Progress == nil {
+		return e
 	}
+	p := *e.Progress
+	if len(p.Options) > MaxOptions {
+		p.Options = p.Options[:MaxOptions]
+	}
+	opts := make([]ProgressOption, len(p.Options))
+	for i, o := range p.Options {
+		o.Label = clip(strings.TrimSpace(o.Label), MaxShortRunes*2)
+		opts[i] = o
+	}
+	p.Options = opts
+	if len(opts) == 0 {
+		p.Options = nil
+	}
+	e.Progress = &p
+	return e
+}
+
+// normaliseBreakdown rebuilds the breakdown map with trimmed keys, in sorted key
+// order, up to MaxBreakdown entries.
+func (e Event) normaliseBreakdown() Event {
+	if len(e.Breakdown) == 0 {
+		return e
+	}
+	b := make(map[string]int, min(len(e.Breakdown), MaxBreakdown))
+	keys := make([]string, 0, len(e.Breakdown))
+	for k := range e.Breakdown {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if len(b) == MaxBreakdown {
+			break
+		}
+		b[clip(strings.TrimSpace(k), MaxShortRunes)] = clampInt(e.Breakdown[k], 0, MaxCount)
+	}
+	e.Breakdown = b
 	return e
 }
 
@@ -425,6 +450,14 @@ func (a Amount) build() string {
 // a kind it does not know, an amount that is money AND a unit, a raid with no
 // other channel. Normalise first.
 func (e Event) Validate() error {
+	if err := e.validateCommon(); err != nil {
+		return err
+	}
+	return e.validateKindFields()
+}
+
+// validateCommon checks what every kind of event needs.
+func (e Event) validateCommon() error {
 	if !e.Kind.Valid() {
 		return fmt.Errorf("activity: unknown kind %q", e.Kind)
 	}
@@ -448,93 +481,141 @@ func (e Event) Validate() error {
 	if e.Actor != nil && e.Actor.Name == "" && !e.Actor.Anonymous {
 		return fmt.Errorf("activity: %s has an actor with no name", e.Kind)
 	}
+	return nil
+}
 
-	needActor := func() error {
-		if e.Actor == nil {
-			return fmt.Errorf("activity: %s needs an actor", e.Kind)
-		}
-		return nil
+func (e Event) needActor() error {
+	if e.Actor == nil {
+		return fmt.Errorf("activity: %s needs an actor", e.Kind)
 	}
-	needOther := func() error {
-		if e.Other == nil || e.Other.Name == "" {
-			return fmt.Errorf("activity: %s needs the other channel", e.Kind)
-		}
-		return nil
-	}
-	needPhase := func(allowed []string) error {
-		if !slices.Contains(allowed, e.Phase) {
-			return fmt.Errorf("activity: %s phase %q is not one of %s", e.Kind, e.Phase, strings.Join(allowed, ", "))
-		}
-		return nil
-	}
+	return nil
+}
 
+func (e Event) needOther() error {
+	if e.Other == nil || e.Other.Name == "" {
+		return fmt.Errorf("activity: %s needs the other channel", e.Kind)
+	}
+	return nil
+}
+
+func (e Event) needPhase(allowed []string) error {
+	if !slices.Contains(allowed, e.Phase) {
+		return fmt.Errorf("activity: %s phase %q is not one of %s", e.Kind, e.Phase, strings.Join(allowed, ", "))
+	}
+	return nil
+}
+
+// validateKindFields checks the fields that only some kinds carry.
+func (e Event) validateKindFields() error {
 	switch e.Kind {
-	case KindFollow:
-		return needActor()
-	case KindSubscribe:
-		return needActor()
+	case KindFollow, KindSubscribe:
+		return e.needActor()
 	case KindResub:
-		if err := needActor(); err != nil {
-			return err
-		}
-		if e.Months < 1 {
-			return fmt.Errorf("activity: resub needs the number of months")
-		}
+		return e.validateResub()
 	case KindGift:
-		if err := needActor(); err != nil {
-			return err
-		}
-		if e.Count < 1 {
-			return fmt.Errorf("activity: gift needs a count of at least 1")
-		}
+		return e.validateGift()
 	case KindTip:
-		if err := needActor(); err != nil {
-			return err
-		}
-		if e.Amount == nil {
-			return fmt.Errorf("activity: tip needs an amount")
-		}
+		return e.validateTip()
 	case KindRaid, KindShoutout:
-		if err := needOther(); err != nil {
-			return err
-		}
-		if e.Direction == "" {
-			return fmt.Errorf("activity: %s needs a direction", e.Kind)
-		}
+		return e.validateRaid()
 	case KindRedemption:
-		if err := needActor(); err != nil {
-			return err
-		}
-		if e.Title == "" {
-			return fmt.Errorf("activity: redemption needs the reward title")
-		}
+		return e.validateRedemption()
 	case KindHypeTrain:
-		return needPhase(hypePhases)
+		return e.needPhase(hypePhases)
 	case KindPoll:
-		if err := needPhase(pollPhases); err != nil {
-			return err
-		}
-		if e.Title == "" {
-			return fmt.Errorf("activity: poll needs a title")
-		}
+		return e.validatePoll()
 	case KindPrediction:
-		if err := needPhase(predictionPhases); err != nil {
-			return err
-		}
-		if e.Title == "" {
-			return fmt.Errorf("activity: prediction needs a title")
-		}
+		return e.validatePrediction()
 	case KindStream:
-		return needPhase(streamPhases)
+		return e.needPhase(streamPhases)
 	case KindModeration:
-		if !slices.Contains(moderationActs, e.Action) {
-			return fmt.Errorf("activity: moderation action %q is not one of %s", e.Action, strings.Join(moderationActs, ", "))
-		}
-		return needOther()
+		return e.validateModeration()
 	case KindReaction:
-		if e.Count < 1 {
-			return fmt.Errorf("activity: reaction needs a count of at least 1")
-		}
+		return e.validateReaction()
+	}
+	return nil
+}
+
+func (e Event) validateResub() error {
+	if err := e.needActor(); err != nil {
+		return err
+	}
+	if e.Months < 1 {
+		return fmt.Errorf("activity: resub needs the number of months")
+	}
+	return nil
+}
+
+func (e Event) validateGift() error {
+	if err := e.needActor(); err != nil {
+		return err
+	}
+	if e.Count < 1 {
+		return fmt.Errorf("activity: gift needs a count of at least 1")
+	}
+	return nil
+}
+
+func (e Event) validateTip() error {
+	if err := e.needActor(); err != nil {
+		return err
+	}
+	if e.Amount == nil {
+		return fmt.Errorf("activity: tip needs an amount")
+	}
+	return nil
+}
+
+func (e Event) validateRaid() error {
+	if err := e.needOther(); err != nil {
+		return err
+	}
+	if e.Direction == "" {
+		return fmt.Errorf("activity: %s needs a direction", e.Kind)
+	}
+	return nil
+}
+
+func (e Event) validateRedemption() error {
+	if err := e.needActor(); err != nil {
+		return err
+	}
+	if e.Title == "" {
+		return fmt.Errorf("activity: redemption needs the reward title")
+	}
+	return nil
+}
+
+func (e Event) validatePoll() error {
+	if err := e.needPhase(pollPhases); err != nil {
+		return err
+	}
+	if e.Title == "" {
+		return fmt.Errorf("activity: poll needs a title")
+	}
+	return nil
+}
+
+func (e Event) validatePrediction() error {
+	if err := e.needPhase(predictionPhases); err != nil {
+		return err
+	}
+	if e.Title == "" {
+		return fmt.Errorf("activity: prediction needs a title")
+	}
+	return nil
+}
+
+func (e Event) validateModeration() error {
+	if !slices.Contains(moderationActs, e.Action) {
+		return fmt.Errorf("activity: moderation action %q is not one of %s", e.Action, strings.Join(moderationActs, ", "))
+	}
+	return e.needOther()
+}
+
+func (e Event) validateReaction() error {
+	if e.Count < 1 {
+		return fmt.Errorf("activity: reaction needs a count of at least 1")
 	}
 	return nil
 }

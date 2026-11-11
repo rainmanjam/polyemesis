@@ -219,7 +219,7 @@ func plan(src Source, q db.ChatRange, startMS int64, withOffset bool, now time.T
 	if err != nil {
 		return Plan{}, err
 	}
-	oldest, any, err := src.ChatOldest()
+	oldest, hasRows, err := src.ChatOldest()
 	if err != nil {
 		return Plan{}, err
 	}
@@ -233,12 +233,12 @@ func plan(src Source, q db.ChatRange, startMS int64, withOffset bool, now time.T
 		Moderation: "as of generatedAt: messages a moderator deleted or the operator hid before then are excluded; later removals are not applied to a saved file",
 		// Retained chat is always a suffix of time (see db.ChatOldest), so a
 		// window that starts at or after the oldest row lost nothing to the purge.
-		Complete: any && !oldest.After(time.UnixMilli(q.FromMS)),
+		Complete: hasRows && !oldest.After(time.UnixMilli(q.FromMS)),
 	}
 	for _, p := range sum.Platforms {
 		h.Platforms = append(h.Platforms, string(p))
 	}
-	if !h.Complete && any {
+	if !h.Complete && hasRows {
 		o := oldest.UTC()
 		h.RetainedFrom = &o
 	}

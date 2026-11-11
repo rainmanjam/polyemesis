@@ -167,29 +167,45 @@ func ParseMomentary(r io.Reader, offsetMS int64) ([]Sample, error) {
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if i := strings.Index(line, "pts_time:"); i >= 0 {
-			f := strings.Fields(line[i+len("pts_time:"):])
-			at = -1
-			if len(f) > 0 {
-				// The timestamp comes out of a media file. Anything that is
-				// not a finite number inside one plausible recording is
-				// dropped BEFORE it is scaled: ParseFloat accepts "inf", and
-				// int64(+Inf) is whatever the platform makes of it.
-				if v, err := strconv.ParseFloat(f[0], 64); err == nil &&
-					!math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= maxPTSSeconds {
-					at = int64(math.Round(v * 1000))
-				}
-			}
+			at = ptsAtMS(line[i+len("pts_time:"):])
 			continue
 		}
 		if v, ok := strings.CutPrefix(line, "lavfi.r128.M="); ok && at >= 0 {
-			lufs, err := strconv.ParseFloat(v, 64)
-			if err == nil && !math.IsNaN(lufs) && !math.IsInf(lufs, 0) {
+			if lufs, valid := parseMomentaryLUFS(v); valid {
 				out = append(out, Sample{AtMS: offsetMS + at, LUFS: lufs})
 			}
 			at = -1
 		}
 	}
 	return out, sc.Err()
+}
+
+// ptsAtMS reads the timestamp that follows "pts_time:" in a frame line, in
+// milliseconds, or -1 when there is none that is usable.
+func ptsAtMS(rest string) int64 {
+	f := strings.Fields(rest)
+	if len(f) == 0 {
+		return -1
+	}
+	// The timestamp comes out of a media file. Anything that is
+	// not a finite number inside one plausible recording is
+	// dropped BEFORE it is scaled: ParseFloat accepts "inf", and
+	// int64(+Inf) is whatever the platform makes of it.
+	if v, err := strconv.ParseFloat(f[0], 64); err == nil &&
+		!math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= maxPTSSeconds {
+		return int64(math.Round(v * 1000))
+	}
+	return -1
+}
+
+// parseMomentaryLUFS reads a momentary loudness value, reporting false for one
+// that is not a finite number.
+func parseMomentaryLUFS(v string) (float64, bool) {
+	lufs, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(lufs) || math.IsInf(lufs, 0) {
+		return 0, false
+	}
+	return lufs, true
 }
 
 // LoudnessPeaks finds the bins at least DeltaLU above the recording's median
@@ -325,37 +341,58 @@ func DefaultBuildParams() BuildParams {
 // short's length, and each is scored by noisy-OR over the strongest signal of
 // each kind -- two detectors agreeing is worth more than either alone.
 func Build(signals []Signal, lines []Line, durMS int64, p BuildParams) []Suggestion {
-	type win struct {
-		start, end int64
-		sigs       []Signal
-	}
 	// Each signal's window is SHAPED first -- lead and tail, clamped to the
 	// recording, padded to the minimum, cut to a short's length -- and only
 	// then merged, so two windows that touch only once padded are one
 	// suggestion rather than two overlapping ones.
-	var wins []win
+	var wins []signalWindow
 	for _, s := range signals {
-		lead := p.LoudLeadMS
-		if s.Kind == KindChat {
-			lead = p.ChatLeadMS
-		}
-		start, end := max(0, s.StartMS-lead), min(durMS, s.EndMS+p.TailMS)
-		if end-start < p.MinMS {
-			end = min(durMS, start+p.MinMS)
-			start = max(0, end-p.MinMS)
-		}
-		if end-start > p.MaxMS {
-			// The lead is shorter than a short, so the cut keeps the signal.
-			end = start + p.MaxMS
-		}
-		wins = append(wins, win{start: start, end: end, sigs: []Signal{s}})
+		wins = append(wins, shapeWindow(s, durMS, p))
 	}
 	sort.Slice(wins, func(i, j int) bool { return wins[i].start < wins[j].start })
-	// A merge never grows past a short's length: a window that would push the
-	// union past it starts a suggestion of its own. Cutting the union instead
-	// left the later signal listed -- and scored -- on a span that no longer
-	// contained it.
-	var merged []win
+	merged := mergeWindows(wins, durMS, p)
+	out := make([]Suggestion, 0, len(merged))
+	for _, w := range merged {
+		out = append(out, suggestionOf(w, lines, p))
+	}
+	rank(out)
+	if p.Limit > 0 && len(out) > p.Limit {
+		out = out[:p.Limit]
+	}
+	return out
+}
+
+// signalWindow is a span of the recording and the signals that it holds.
+type signalWindow struct {
+	start, end int64
+	sigs       []Signal
+}
+
+// shapeWindow gives one signal its window: lead and tail, clamped to the
+// recording, padded to the minimum and cut to a short's length.
+func shapeWindow(s Signal, durMS int64, p BuildParams) signalWindow {
+	lead := p.LoudLeadMS
+	if s.Kind == KindChat {
+		lead = p.ChatLeadMS
+	}
+	start, end := max(0, s.StartMS-lead), min(durMS, s.EndMS+p.TailMS)
+	if end-start < p.MinMS {
+		end = min(durMS, start+p.MinMS)
+		start = max(0, end-p.MinMS)
+	}
+	if end-start > p.MaxMS {
+		// The lead is shorter than a short, so the cut keeps the signal.
+		end = start + p.MaxMS
+	}
+	return signalWindow{start: start, end: end, sigs: []Signal{s}}
+}
+
+// mergeWindows merges sorted windows that overlap. A merge never grows past a
+// short's length: a window that would push the union past it starts a suggestion
+// of its own. Cutting the union instead left the later signal listed -- and
+// scored -- on a span that no longer contained it.
+func mergeWindows(wins []signalWindow, durMS int64, p BuildParams) []signalWindow {
+	var merged []signalWindow
 	for _, w := range wins {
 		k := len(merged) - 1
 		if k < 0 || w.start >= merged[k].end {
@@ -382,21 +419,18 @@ func Build(signals []Signal, lines []Line, durMS int64, p BuildParams) []Suggest
 		}
 		merged = append(merged, w)
 	}
-	out := make([]Suggestion, 0, len(merged))
-	for _, w := range merged {
-		start, end := w.start, w.end
-		score := noisyOR(w.sigs)
-		sort.Slice(w.sigs, func(i, j int) bool { return w.sigs[i].StartMS < w.sigs[j].StartMS })
-		out = append(out, Suggestion{
-			StartMS: start, EndMS: end, Score: score, SignalScore: score,
-			Signals: w.sigs, Excerpt: Excerpt(lines, start, end, p.ExcerptRunes),
-		})
+	return merged
+}
+
+// suggestionOf turns one merged window into a suggestion, scored from its signals.
+func suggestionOf(w signalWindow, lines []Line, p BuildParams) Suggestion {
+	start, end := w.start, w.end
+	score := noisyOR(w.sigs)
+	sort.Slice(w.sigs, func(i, j int) bool { return w.sigs[i].StartMS < w.sigs[j].StartMS })
+	return Suggestion{
+		StartMS: start, EndMS: end, Score: score, SignalScore: score,
+		Signals: w.sigs, Excerpt: Excerpt(lines, start, end, p.ExcerptRunes),
 	}
-	rank(out)
-	if p.Limit > 0 && len(out) > p.Limit {
-		out = out[:p.Limit]
-	}
-	return out
 }
 
 func noisyOR(sigs []Signal) float64 {

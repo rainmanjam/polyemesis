@@ -47,21 +47,8 @@ func RenditionConcerns(r *Rendition, plat Platform, presetID string) []Rendition
 	if r == nil {
 		return nil
 	}
-	// The destination's own preset id comes first: it is what finds Instagram,
-	// LinkedIn, Dailymotion, Owncast and Rumble, whose destinations save as
-	// "custom". Failing that the platform string stands in for a preset id, which
-	// is how a destination with no stored preset finds its platform's figures,
-	// and how a query for "youtube-rtmps" finds its own figures and its own name.
-	// A preset that publishes none ("twitch-rtmps") falls through to the platform.
-	// The figures on the preset come from the platform registry.
-	preset, ok := DestinationPresetByID(presetID)
-	// A preset names guidance only for the platform it saves as: youtube with
-	// preset=instagram is a mismatch and is ignored, like an id the catalogue
-	// no longer has.
-	if !ok || preset.Video == nil || !presetFitsPlatform(preset, plat) {
-		preset, ok = DestinationPresetByID(string(plat))
-	}
-	if !ok || preset.Video == nil {
+	preset, ok := guidancePreset(presetID, plat)
+	if !ok {
 		return nil
 	}
 	g := preset.Video
@@ -84,11 +71,47 @@ func RenditionConcerns(r *Rendition, plat Platform, presetID string) []Rendition
 		add("fps", fmt.Sprintf("%s publishes %d fps; this rendition is %d",
 			preset.Name, g.FPS, r.FPS))
 	}
+	if detail, ok := bitrateConcern(r, g, preset.Name); ok {
+		add("bitrate", detail)
+	}
+	if g.GOPSeconds > 0 && r.GOPSeconds > 0 && r.GOPSeconds > g.GOPSeconds {
+		add("gop", fmt.Sprintf("%s asks for a %gs keyframe interval; this rendition uses %gs",
+			preset.Name, g.GOPSeconds, r.GOPSeconds))
+	}
+	return out
+}
 
-	// THE BITRATE, and the one place the catalogue's own shape matters. Equal
-	// Min and Max mean the platform publishes a SINGLE figure rather than a
-	// range, so "between 12000 and 12000" would read as a range that happens to
-	// be narrow. Said as the single figure it is.
+// guidancePreset finds the preset whose published figures apply to a destination.
+//
+// The destination's own preset id comes first: it is what finds Instagram,
+// LinkedIn, Dailymotion, Owncast and Rumble, whose destinations save as
+// "custom". Failing that the platform string stands in for a preset id, which
+// is how a destination with no stored preset finds its platform's figures,
+// and how a query for "youtube-rtmps" finds its own figures and its own name.
+// A preset that publishes none ("twitch-rtmps") falls through to the platform.
+// The figures on the preset come from the platform registry.
+func guidancePreset(presetID string, plat Platform) (DestinationPreset, bool) {
+	preset, ok := DestinationPresetByID(presetID)
+	// A preset names guidance only for the platform it saves as: youtube with
+	// preset=instagram is a mismatch and is ignored, like an id the catalogue
+	// no longer has.
+	if !ok || preset.Video == nil || !presetFitsPlatform(preset, plat) {
+		preset, ok = DestinationPresetByID(string(plat))
+	}
+	if !ok || preset.Video == nil {
+		return DestinationPreset{}, false
+	}
+	return preset, true
+}
+
+// bitrateConcern describes how the rendition's bitrate falls outside the
+// platform's published range, if it does.
+//
+// THE BITRATE, and the one place the catalogue's own shape matters. Equal
+// Min and Max mean the platform publishes a SINGLE figure rather than a
+// range, so "between 12000 and 12000" would read as a range that happens to
+// be narrow. Said as the single figure it is.
+func bitrateConcern(r *Rendition, g *VideoGuidance, name string) (string, bool) {
 	rate := r.VideoBitrate
 	if r.MaxrateKbps > rate {
 		rate = r.MaxrateKbps // the ceiling is what the platform will actually see
@@ -96,20 +119,14 @@ func RenditionConcerns(r *Rendition, plat Platform, presetID string) []Rendition
 	switch {
 	case g.KbpsMax > 0 && rate > g.KbpsMax:
 		if g.KbpsMin == g.KbpsMax {
-			add("bitrate", fmt.Sprintf("%s publishes %d kbps; this rendition peaks at %d",
-				preset.Name, g.KbpsMax, rate))
-		} else {
-			add("bitrate", fmt.Sprintf("%s publishes up to %d kbps; this rendition peaks at %d",
-				preset.Name, g.KbpsMax, rate))
+			return fmt.Sprintf("%s publishes %d kbps; this rendition peaks at %d",
+				name, g.KbpsMax, rate), true
 		}
+		return fmt.Sprintf("%s publishes up to %d kbps; this rendition peaks at %d",
+			name, g.KbpsMax, rate), true
 	case g.KbpsMin > 0 && r.VideoBitrate > 0 && r.VideoBitrate < g.KbpsMin:
-		add("bitrate", fmt.Sprintf("%s publishes at least %d kbps; this rendition is %d",
-			preset.Name, g.KbpsMin, r.VideoBitrate))
+		return fmt.Sprintf("%s publishes at least %d kbps; this rendition is %d",
+			name, g.KbpsMin, r.VideoBitrate), true
 	}
-
-	if g.GOPSeconds > 0 && r.GOPSeconds > 0 && r.GOPSeconds > g.GOPSeconds {
-		add("gop", fmt.Sprintf("%s asks for a %gs keyframe interval; this rendition uses %gs",
-			preset.Name, g.GOPSeconds, r.GOPSeconds))
-	}
-	return out
+	return "", false
 }

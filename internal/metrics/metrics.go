@@ -422,6 +422,15 @@ func renderDestinations(d *doc, dests []Destination) {
 		}
 	}
 
+	renderDestinationIdentity(d, sorted, ident)
+	renderDestinationStates(d, sorted, ident)
+	renderDestinationCounters(d, sorted, ident)
+	renderDestinationReasons(d, sorted, ident)
+}
+
+// renderDestinationIdentity renders the _info, _enabled, _up and _stalled
+// families.
+func renderDestinationIdentity(d *doc, sorted []Destination, ident func(Destination) []label) {
 	d.family("polyemesis_destination_info", "gauge",
 		"Destination labels; the value is always 1.")
 	for _, dest := range sorted {
@@ -465,7 +474,10 @@ func renderDestinations(d *doc, dests []Destination) {
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_stalled", boolValue(dest.State == stateRunning && dest.Stalled), ident(dest)...)
 	}
+}
 
+// renderDestinationStates renders the state family and the bitrate gauge.
+func renderDestinationStates(d *doc, sorted []Destination, ident func(Destination) []label) {
 	d.family("polyemesis_destination_state", "gauge",
 		"Destination process state; 1 for the state it is currently in.")
 	for _, dest := range sorted {
@@ -487,7 +499,11 @@ func renderDestinations(d *doc, dests []Destination) {
 		}
 		d.sample("polyemesis_destination_bitrate_bits_per_second", bps, ident(dest)...)
 	}
+}
 
+// renderDestinationCounters renders the run counters: media time, bytes,
+// restarts and dropped frames.
+func renderDestinationCounters(d *doc, sorted []Destination, ident func(Destination) []label) {
 	d.family("polyemesis_destination_output_seconds_total", "counter",
 		"Media time the destination's current run has delivered, in seconds. rate() is the delivery speed: about 1 while keeping up, 0 while stalled.")
 	for _, dest := range sorted {
@@ -511,8 +527,6 @@ func renderDestinations(d *doc, dests []Destination) {
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_dropped_frames_total", float64(dest.DropFrames), ident(dest)...)
 	}
-
-	renderDestinationReasons(d, sorted, ident)
 }
 
 // renderDestinationReasons emits why each destination is failing (#20).
@@ -668,7 +682,13 @@ func renderRelay(d *doc, ins []Ingest) {
 // absent until measured, because 0 ms RTT and 0% loss are claims about a link.
 func renderFailover(d *doc, ins []Ingest) {
 	sorted := sortedIngests(ins)
+	renderFailoverState(d, sorted)
+	renderIngestLinks(d, sorted)
+}
 
+// renderFailoverState renders whether each programme's failover is degraded and
+// which source is on air.
+func renderFailoverState(d *doc, sorted []Ingest) {
 	d.family("polyemesis_failover_degraded", "gauge",
 		"1 while the programme's primary link is judged degraded by degraded-link failover; 0 otherwise, including when failover is off.")
 	for _, in := range sorted {
@@ -686,7 +706,11 @@ func renderFailover(d *doc, ins []Ingest) {
 				append(ingestIdent(in), label{"source", src})...)
 		}
 	}
+}
 
+// renderIngestLinks renders the health of each programme's primary link: round
+// trip, bonded links and packet loss.
+func renderIngestLinks(d *doc, sorted []Ingest) {
 	d.family("polyemesis_ingest_link_rtt_seconds", "gauge",
 		"Smoothed SRT round-trip time of the programme's primary encoder. Absent unless the primary is SRT or SRTLA and degraded-link failover is on.")
 	for _, in := range sorted {

@@ -594,60 +594,74 @@ func ReadPowerState() PowerState { return readPowerState(systemPowerRoots) }
 
 func readPowerState(r powerRoots) PowerState {
 	st := UnknownPower()
-
-	if entries, err := os.ReadDir(r.supply); err == nil {
-		for _, e := range entries {
-			dir := filepath.Join(r.supply, e.Name())
-			switch strings.TrimSpace(readFileString(filepath.Join(dir, "type"))) {
-			case "Battery":
-				st.Known = true
-				// "Discharging" is the only status that means the wall is gone.
-				// "Not charging" is a full battery on mains, and treating it as
-				// battery would hold work back on a docked laptop forever.
-				if strings.EqualFold(strings.TrimSpace(readFileString(filepath.Join(dir, "status"))), "discharging") {
-					st.OnBattery = true
-				}
-				if n, ok := readFileInt(filepath.Join(dir, "capacity")); ok {
-					st.Percent = float64(n)
-				}
-			case "Mains", "USB", "USB_PD", "USB_PD_DRP":
-				if n, ok := readFileInt(filepath.Join(dir, "online")); ok && n == 1 {
-					st.Known = true
-					// A live mains supply overrides a battery that has not yet
-					// updated its status; the wall is the ground truth.
-					st.OnBattery = false
-				}
-			}
-		}
-	}
-
-	if entries, err := os.ReadDir(r.thermal); err == nil {
-		hottest := -1.0
-		for _, e := range entries {
-			if !strings.HasPrefix(e.Name(), "thermal_zone") {
-				continue
-			}
-			n, ok := readFileInt(filepath.Join(r.thermal, e.Name(), "temp"))
-			if !ok {
-				continue
-			}
-			// Millidegrees, by the sysfs contract. A zone reporting an absurd
-			// value is dropped rather than believed: a bogus 200°C would stop
-			// every job on the box.
-			c := float64(n) / 1000
-			if c <= 0 || c > 150 {
-				continue
-			}
-			if c > hottest {
-				hottest = c
-			}
-		}
-		if hottest > 0 {
-			st.Known = true
-			st.TempC = hottest
-		}
+	readSupplies(&st, r.supply)
+	if hottest := hottestThermalZoneC(r.thermal); hottest > 0 {
+		st.Known = true
+		st.TempC = hottest
 	}
 	return st
+}
+
+// readSupplies reads the battery and mains entries under the power-supply root
+// into st.
+func readSupplies(st *PowerState, supply string) {
+	entries, err := os.ReadDir(supply)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		dir := filepath.Join(supply, e.Name())
+		switch strings.TrimSpace(readFileString(filepath.Join(dir, "type"))) {
+		case "Battery":
+			st.Known = true
+			// "Discharging" is the only status that means the wall is gone.
+			// "Not charging" is a full battery on mains, and treating it as
+			// battery would hold work back on a docked laptop forever.
+			if strings.EqualFold(strings.TrimSpace(readFileString(filepath.Join(dir, "status"))), "discharging") {
+				st.OnBattery = true
+			}
+			if n, ok := readFileInt(filepath.Join(dir, "capacity")); ok {
+				st.Percent = float64(n)
+			}
+		case "Mains", "USB", "USB_PD", "USB_PD_DRP":
+			if n, ok := readFileInt(filepath.Join(dir, "online")); ok && n == 1 {
+				st.Known = true
+				// A live mains supply overrides a battery that has not yet
+				// updated its status; the wall is the ground truth.
+				st.OnBattery = false
+			}
+		}
+	}
+}
+
+// hottestThermalZoneC returns the hottest plausible thermal zone in degrees C, or
+// -1 when no zone can be read.
+func hottestThermalZoneC(thermal string) float64 {
+	entries, err := os.ReadDir(thermal)
+	if err != nil {
+		return -1
+	}
+	hottest := -1.0
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "thermal_zone") {
+			continue
+		}
+		n, ok := readFileInt(filepath.Join(thermal, e.Name(), "temp"))
+		if !ok {
+			continue
+		}
+		// Millidegrees, by the sysfs contract. A zone reporting an absurd
+		// value is dropped rather than believed: a bogus 200°C would stop
+		// every job on the box.
+		c := float64(n) / 1000
+		if c <= 0 || c > 150 {
+			continue
+		}
+		if c > hottest {
+			hottest = c
+		}
+	}
+	return hottest
 }
 
 func readFileString(path string) string {
@@ -1422,26 +1436,39 @@ func (g *Governor) sample(now time.Time, p Policy) Gates {
 		g.clearCPUGate()
 	}
 
-	if p.GPU.Busy {
-		gates.GPUBusy = true
-	} else if s.GPUBusy != nil {
-		gates.GPUBusy = s.GPUBusy()
-	}
+	gates.GPUBusy = gpuBusy(p, s)
 
 	if s.Power != nil {
 		st := s.Power()
 		gates.Power = st
-		if st.Known {
-			if p.Power.BatteryFloorPercent > 0 && st.OnBattery &&
-				st.Percent >= 0 && st.Percent < p.Power.BatteryFloorPercent {
-				gates.OnBattery = true
-			}
-			if p.Power.ThermalCeilingC > 0 && st.TempC > 0 && st.TempC >= p.Power.ThermalCeilingC {
-				gates.TooHot = true
-			}
-		}
+		gates.OnBattery, gates.TooHot = powerGates(st, p)
 	}
 	return gates
+}
+
+// gpuBusy reports whether the GPU gate is shut: the policy can pin it shut, or
+// the sensor reports the GPU busy.
+func gpuBusy(p Policy, s Sensors) bool {
+	if p.GPU.Busy {
+		return true
+	}
+	if s.GPUBusy != nil {
+		return s.GPUBusy()
+	}
+	return false
+}
+
+// powerGates reports whether the machine is running on battery below the floor,
+// and whether it is too hot, as the policy sets them. An unknown reading shuts
+// neither gate.
+func powerGates(st PowerState, p Policy) (onBattery, tooHot bool) {
+	if !st.Known {
+		return false, false
+	}
+	onBattery = p.Power.BatteryFloorPercent > 0 && st.OnBattery &&
+		st.Percent >= 0 && st.Percent < p.Power.BatteryFloorPercent
+	tooHot = p.Power.ThermalCeilingC > 0 && st.TempC > 0 && st.TempC >= p.Power.ThermalCeilingC
+	return onBattery, tooHot
 }
 
 // cpuGate applies the two-level CPU rule: over the ceiling stops new work at

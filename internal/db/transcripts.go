@@ -734,19 +734,29 @@ func (d *DB) contextSide(h TranscriptHit, n int, before bool) ([]string, error) 
 //
 // Everything else is a search term.
 func MatchQuery(s string, prefix bool) (string, error) {
-	toks := tokenizeQuery(s)
-	// Trailing and leading operators are a syntax error in FTS5 and are
-	// nearly always a half-typed query rather than an intent.
+	toks := trimEdgeOperators(tokenizeQuery(s))
+	if len(toks) == 0 {
+		return "", ErrEmptyQuery
+	}
+	return strings.Join(matchTerms(toks, prefix), " "), nil
+}
+
+// trimEdgeOperators drops the operators at either end of a query. Trailing and
+// leading operators are a syntax error in FTS5 and are nearly always a
+// half-typed query rather than an intent.
+func trimEdgeOperators(toks []queryToken) []queryToken {
 	for len(toks) > 0 && toks[0].operator {
 		toks = toks[1:]
 	}
 	for len(toks) > 0 && toks[len(toks)-1].operator {
 		toks = toks[:len(toks)-1]
 	}
-	if len(toks) == 0 {
-		return "", ErrEmptyQuery
-	}
+	return toks
+}
 
+// matchTerms renders each token as FTS5 syntax: terms quoted, operators as they
+// are, and a prefix star where the user asked for one.
+func matchTerms(toks []queryToken, prefix bool) []string {
 	var parts []string
 	for i, t := range toks {
 		if t.operator {
@@ -765,7 +775,7 @@ func MatchQuery(s string, prefix bool) (string, error) {
 		}
 		parts = append(parts, term)
 	}
-	return strings.Join(parts, " "), nil
+	return parts
 }
 
 type queryToken struct {
@@ -777,54 +787,60 @@ type queryToken struct {
 // tokenizeQuery splits on whitespace, keeps double-quoted runs together, and
 // drops anything that is only punctuation.
 func tokenizeQuery(s string) []queryToken {
-	var (
-		out   []queryToken
-		cur   strings.Builder
-		inStr bool
-	)
-	flush := func(quoted bool) {
-		text := cur.String()
-		cur.Reset()
-		if !quoted {
-			text = strings.TrimFunc(text, func(r rune) bool {
-				// A trailing * is the user asking for a prefix and is handled
-				// by the caller; everything else non-alphanumeric goes.
-				return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '*'
-			})
-		}
-		wantPrefix := strings.HasSuffix(text, "*")
-		text = strings.TrimRight(text, "*")
-		if strings.TrimSpace(text) == "" {
-			return
-		}
-		if !quoted {
-			switch text {
-			case "AND", "OR", "NOT":
-				out = append(out, queryToken{text: text, operator: true})
-				return
-			}
-		}
-		out = append(out, queryToken{text: text, prefix: wantPrefix})
-	}
-
+	var t queryTokenizer
+	inStr := false
 	for _, r := range s {
 		switch {
 		case r == '"':
 			if inStr {
-				flush(true)
+				t.flush(true)
 				inStr = false
 			} else {
-				flush(false)
+				t.flush(false)
 				inStr = true
 			}
 		case !inStr && unicode.IsSpace(r):
-			flush(false)
+			t.flush(false)
 		default:
-			cur.WriteRune(r)
+			t.cur.WriteRune(r)
 		}
 	}
-	flush(inStr)
-	return out
+	t.flush(inStr)
+	return t.out
+}
+
+// queryTokenizer accumulates the tokens of a query as tokenizeQuery reads it.
+type queryTokenizer struct {
+	out []queryToken
+	cur strings.Builder
+}
+
+// flush ends the pending word, adding it as a token unless it is empty. A word
+// that is not quoted is trimmed of punctuation, and AND, OR and NOT among
+// unquoted words are operators.
+func (t *queryTokenizer) flush(quoted bool) {
+	text := t.cur.String()
+	t.cur.Reset()
+	if !quoted {
+		text = strings.TrimFunc(text, func(r rune) bool {
+			// A trailing * is the user asking for a prefix and is handled
+			// by the caller; everything else non-alphanumeric goes.
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '*'
+		})
+	}
+	wantPrefix := strings.HasSuffix(text, "*")
+	text = strings.TrimRight(text, "*")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if !quoted {
+		switch text {
+		case "AND", "OR", "NOT":
+			t.out = append(t.out, queryToken{text: text, operator: true})
+			return
+		}
+	}
+	t.out = append(t.out, queryToken{text: text, prefix: wantPrefix})
 }
 
 // wrapFTSError turns SQLite's FTS5 parse failure into something a caller can
