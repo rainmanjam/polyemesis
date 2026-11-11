@@ -31,8 +31,9 @@ const mirrorLedgerCap = 256
 // the create failed.
 func (m *MirrorLedger) Begin() (done func(pollID string)) {
 	if m == nil {
-		// A nil ledger records nothing, so there is nothing to finish.
-		return func(string) {}
+		return func(string) {
+			// A nil ledger records nothing, so there is nothing to finish.
+		}
 	}
 	m.mu.Lock()
 	m.pending++
