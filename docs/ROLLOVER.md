@@ -156,5 +156,3 @@ title, category and thumbnail the second time.
 ## Not in this build
 
 - Twitch replacement by a second session, and Facebook or Kick rollover.
-- The YouTube ordering correction (create and bind the new broadcast before
-  ending the old one) is not yet in this build; the rollover still ends first.
