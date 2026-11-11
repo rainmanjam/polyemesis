@@ -513,4 +513,7 @@ describe("homepage claims match the code (T12)", () => {
     expect(problem).not.toMatch(/usually means a paid plan/);
     expect(problem).not.toMatch(/any mix you can script/);
   });
+  // Spec "Decided": competitors stay generic (not named). Sources live in the PR claims table.
+  it("names no competitor in the problem cards", () =>
+    expect(problem).not.toMatch(/Restream|Streamlabs|StreamElements|Castr|Aitum|obs-multi-rtmp|MistServer/i));
 });
