@@ -760,10 +760,20 @@ func TestWhenTheFeedStopsTheBufferKeepsReleasingForTheDelay(t *testing.T) {
 		t.Fatalf("startDest: %v", err)
 	}
 	d := destOf(e, row.ID)
+	began := time.Now()
 	feed(e.hub, 300) // ~0.3 s of feed, then the encoder is gone
 	stopped := time.Now()
-	if got := d.delay.hub.Stats().RxPackets; got != 0 {
-		t.Fatalf("%d datagrams released before the delay was up", got)
+	// feed sleeps 1 ms per datagram, and Windows rounds a 1 ms sleep up to its
+	// timer tick (up to ~15.6 ms), so 300 datagrams can take longer than the
+	// 2 s delay itself. The buffer is then right to have started releasing the
+	// oldest ones, so "nothing out yet" is only a claim while the feed finished
+	// comfortably inside the delay.
+	if fed := stopped.Sub(began); fed < 1500*time.Millisecond {
+		if got := d.delay.hub.Stats().RxPackets; got != 0 {
+			t.Fatalf("%d datagrams released %s into a 2 s delay", got, fed)
+		}
+	} else {
+		t.Logf("feeding took %s (coarse timer); not asserting an empty output", fed)
 	}
 	eventually(t, "the held programme to play out after the feed stopped", 6*time.Second, func() bool {
 		return d.delay.hub.Stats().RxPackets >= 300
