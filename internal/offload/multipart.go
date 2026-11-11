@@ -105,7 +105,7 @@ func (s *Service) sendMissingParts(ctx context.Context, t db.StorageTarget, c Cl
 		if err != nil {
 			return err
 		}
-		etag, err := s.uploadPart(ctx, c, *mp, i, sec, size, psh, pmb)
+		etag, err := s.uploadPart(ctx, c, *mp, partData{n: i, body: sec, size: size, sh: psh, mb: pmb})
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,17 @@ func (s *Service) sendMissingParts(ctx context.Context, t db.StorageTarget, c Cl
 }
 
 // uploadPart sends one part, retrying a retryable failure with backoff.
-func (s *Service) uploadPart(ctx context.Context, c Client, mp db.OffloadMultipart, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
+// partData is one part of a multipart upload: its number, bytes and digests.
+type partData struct {
+	n    int
+	body io.ReadSeeker
+	size int64
+	sh   string
+	mb   string
+}
+
+func (s *Service) uploadPart(ctx context.Context, c Client, mp db.OffloadMultipart, part partData) (string, error) {
+	n, body, size, sh, mb := part.n, part.body, part.size, part.sh, part.mb
 	wait := s.partBackoff
 	var err error
 	for try := 0; try < s.partTries; try++ {
