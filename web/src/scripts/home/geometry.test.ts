@@ -73,6 +73,44 @@ describe("split diagram geometry", () => {
     }
   });
 
+  it("puts each second-row line on its own x along the seam: video toward its card, audio away", () => {
+    const a = anchors("v", 4);
+    const lower = STORIES.streamer.dests.slice(2);
+    const seamX = new Map<string, number>();
+    for (const l of linesFor(STORIES.streamer, "v")) {
+      const j = lower.findIndex((d) => d.id === l.to);
+      if (j < 0 || l.from !== "hub") continue;
+      const nums = l.d.match(/-?\d+(\.\d)?/g)!.map(Number);
+      const [c1x, c1y, c2x, c2y, ex, ey] = nums.slice(2);
+      const card = a.dst[2 + j];
+      // ends on the card, arriving level with it (hooked in from the side)
+      expect([ex, ey]).toEqual([card.x, card.y]);
+      expect(c1y).toBe(card.y);
+      expect(c2y).toBe(card.y);
+      expect(c1x).toBe(c2x);
+      const toward = Math.sign(card.x - a.hub.x);
+      expect(Math.sign(c1x - a.hub.x)).toBe(l.kind === "video" ? toward : -toward);
+      seamX.set(`${l.to}/${l.kind}`, c1x);
+    }
+    const xs = [...seamX.values()];
+    expect(xs.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(xs).size).toBe(xs.length);
+  });
+
+  it("leaves the h layout on plain curves: level start and end tangents, no seam", () => {
+    const a = anchors("h", 4);
+    for (const story of STORY_ORDER) {
+      for (const l of linesFor(STORIES[story], "h")) {
+        const [sx, sy, c1x, c1y, c2x, c2y, ex, ey] = l.d.match(/-?\d+(\.\d)?/g)!.map(Number);
+        expect(c1y).toBe(sy);
+        expect(c2y).toBe(ey);
+        expect(c1x).toBeGreaterThan(sx);
+        expect(c2x).toBeLessThan(ex);
+        if (l.from === "hub") expect([sx, sy]).toEqual([a.hub.x, a.hub.y]);
+      }
+    }
+  });
+
   it("tags each line with the step table's data-on", () => {
     const ls = linesFor(STORIES.streamer, "h");
     expect(ls.find((l) => l.kind === "video" && l.to === "hub")!.on).toBe("1 2 5");

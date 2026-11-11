@@ -100,9 +100,14 @@ function curve(layout: Layout, a: Pt, b: Pt, pull: [number, number]): string {
  * and a curve straight to its centre would pass behind that card (the cards sit
  * above the lines). Its lines go down the seam between the two columns and hook
  * into the card from the side, under it: one cubic whose control points stay on
- * the seam. `off` nudges the audio line a little to the card's side of the seam
- * so it does not lie on the video line. */
-const SEAM_OFF = 2;
+ * the seam. The seam is only a few pixels wide, so each line sits a unit or
+ * two off it: the video line one unit toward its own card, the audio line two
+ * units away from it. No two of the four second-row lines then share an x, so
+ * the left and right cards' lines never lie on each other and a card's two
+ * lines read as two. (Further toward the card, a line runs behind the card
+ * above it; check-home I measures that.) */
+const SEAM_VIDEO_OFF = 1;
+const SEAM_AUDIO_OFF = -2;
 function seam(a: Pt, b: Pt, off: number): string {
   const x = a.x + off;
   return `M${a.x} ${a.y} C${r1(x)} ${b.y}, ${r1(x)} ${b.y}, ${b.x} ${b.y}`;
@@ -126,12 +131,12 @@ export function linesFor(story: Story, layout: Layout): Line[] {
   story.dests.forEach((dest, j) => {
     const to = a.dst[j];
     const lower = layout === "v" && to.y > a.dst[0].y;
-    const side = to.x < a.hub.x ? 1 : -1;
+    const side = to.x < a.hub.x ? -1 : 1; // toward the card
     if (dest.video) {
-      lines.push({ d: lower ? seam(a.hub, to, 0) : curve(layout, a.hub, to, VIDEO_PULL), kind: "video", from: "hub", to: dest.id, on: ON.dstVideo });
+      lines.push({ d: lower ? seam(a.hub, to, side * SEAM_VIDEO_OFF) : curve(layout, a.hub, to, VIDEO_PULL), kind: "video", from: "hub", to: dest.id, on: ON.dstVideo });
     }
     lines.push({
-      d: lower ? seam(a.hub, to, side * SEAM_OFF) : curve(layout, a.hub, to, AUDIO_PULL),
+      d: lower ? seam(a.hub, to, side * SEAM_AUDIO_OFF) : curve(layout, a.hub, to, AUDIO_PULL),
       kind: "audio",
       from: "hub",
       to: dest.id,
