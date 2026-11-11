@@ -895,6 +895,28 @@ func writeMessages(sc *gortmplib.ServerConn, msgs []message.Message) bool {
 	return true
 }
 
+// streamForKeyLocked returns the stream for key, creating an empty one when
+// there is none. The caller must hold s.mu.
+func (s *Server) streamForKeyLocked(key PublisherKey) *stream {
+	st := s.streams[key]
+	if st == nil {
+		// Subscribing before anything publishes is the NORMAL order: the engine
+		// starts FFmpeg when the source is enabled, which is usually well before
+		// the operator hits Start in OBS. The stream is created empty and waits.
+		st = &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
+		s.streams[key] = st
+	}
+	return st
+}
+
+// logSubscriberLoss reports a subscriber that fell behind and lost messages.
+func (s *Server) logSubscriberLoss(peer string, lost int) {
+	if lost > 0 {
+		s.log.Warn("rtmp subscriber fell behind and lost messages",
+			"component", logComponent, "peer", peer, "dropped", lost)
+	}
+}
+
 // serveSubscriber attaches a consumer to a stream and writes to it until it
 // goes away.
 func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer string) {
@@ -922,14 +944,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	sub.conn = rawConn(sc)
 
 	s.mu.Lock()
-	st := s.streams[key]
-	if st == nil {
-		// Subscribing before anything publishes is the NORMAL order: the engine
-		// starts FFmpeg when the source is enabled, which is usually well before
-		// the operator hits Start in OBS. The stream is created empty and waits.
-		st = &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
-		s.streams[key] = st
-	}
+	st := s.streamForKeyLocked(key)
 	st.mu.Lock()
 	st.subs[sub] = struct{}{}
 	replay := append([]message.Message(nil), st.setup...)
@@ -975,10 +990,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 		s.mu.Unlock()
 		// Logged outside both locks: it is I/O, and it does not belong under a
 		// mutex the publisher needs for every message.
-		if lost > 0 {
-			s.log.Warn("rtmp subscriber fell behind and lost messages",
-				"component", logComponent, "peer", peer, "dropped", lost)
-		}
+		s.logSubscriberLoss(peer, lost)
 	}()
 
 	// The select below can only notice a dead peer through a FAILED WRITE, and
