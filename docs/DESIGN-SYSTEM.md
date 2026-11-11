@@ -97,7 +97,8 @@ The rules that matter:
   its own `--tally-foreground` label (4.97:1), for ON AIR and REC and nothing
   else. As text it would be the on-air signal shrunk to a word, and at 3.47:1 on
   `--card` it fails AA besides. The lamp's L 56.5% is the lightest a white label
-  survives: at L 63.5% white measures 3.67.
+  survives: at L 63.5% white measures 3.67. (The home page has one marketing
+  exception, the bullet below.)
 - **Marketing exception, the home page only.** This is a deliberate exception
   to the rule above. The owner decided it on 2026-11-10 ("Keep the red"). The
   app's rule is unchanged, and the logo is unchanged.
@@ -112,6 +113,8 @@ The rules that matter:
   never a state, a chart series or decoration. `--primary` is **fill-only**
   (buttons, checked controls, a lit crosspoint); every blue that is text is
   `--primary-bright`, because `--primary` as text measures 4.49:1 on `--card`.
+  On the home page the primary CTA is the tally `.btn-onair` instead; see the
+  Marketing exception above.
 - **Amber means warn only.** It is not a meter stop and not a crosspoint. The
   meter is green, yellow and red; the website's lit crosspoint reads `--primary`.
 - **Identity colours are never status.** `--cat-cyan` tells one *thing* from
@@ -308,11 +311,12 @@ console on carries one.
 
 The website also carries **Space Grotesk** for marketing headlines. The console
 has no display type — its largest step is `--text-display`, a 28px page title —
-so it does not ship that third file.
+so it does not ship that file.
 
 The website also carries **IBM Plex Serif Italic** for the one emphasis word in
-the homepage headline. It is the unmodified OFL release, about 45 KB, served
-from `web/public/fonts/` only and not preloaded. Its fallback is the generic
+the homepage headline. It is the unmodified Latin-1 split file from the OFL
+release (`@ibm/plex-serif` 2.0.0), about 24 KB (24,512 bytes), served from
+`web/public/fonts/` only and not preloaded. Its fallback is the generic
 `serif`.
 
 This was the loudest half of the gap between this document and the code. The

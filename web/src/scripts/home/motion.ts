@@ -14,7 +14,11 @@ export interface MotionGate {
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
-export function createMotionGate(win: Window = window): MotionGate {
+/** The gate plus a disposer for its media-query listener (the page keeps one
+ * gate for its lifetime; tests and any future teardown use dispose). */
+export type OwnedMotionGate = MotionGate & { dispose(): void };
+
+export function createMotionGate(win: Window = window): OwnedMotionGate {
   const mq = win.matchMedia(REDUCED);
   const root = win.document.documentElement;
   const subs = new Set<(allowed: boolean) => void>();
@@ -28,7 +32,18 @@ export function createMotionGate(win: Window = window): MotionGate {
     root.classList.toggle("motion-on", now);
     if (now === last) return;
     last = now;
-    for (const fn of [...subs]) fn(now);
+    for (const fn of [...subs]) {
+      /* One failing subscriber must not leave the rest moving (or stopped).
+       * The error is still reported, so it is never silent. */
+      try {
+        fn(now);
+      } catch (err) {
+        if (typeof win.reportError === "function") win.reportError(err);
+        else setTimeout(() => {
+          throw err;
+        });
+      }
+    }
   };
 
   last = allowed();
@@ -47,6 +62,10 @@ export function createMotionGate(win: Window = window): MotionGate {
       return () => {
         subs.delete(fn);
       };
+    },
+    dispose() {
+      mq.removeEventListener("change", sync);
+      subs.clear();
     },
   };
 }

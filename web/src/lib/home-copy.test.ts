@@ -14,14 +14,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pages = (name: string) => readFileSync(join(here, "..", "pages", name), "utf8");
 
 describe("the features page's track layout (S7)", () => {
-  const home = pages("features.astro");
+  const features = pages("features.astro");
 
   /* The Proof capture numbers its tracks differently from the OBS layout in
    * the problem section. The fix is one layout per place it is used, with the
    * capture's own legend stated once in a single line rather than a paragraph
    * of disclaimer. */
   it("states the capture's track layout in one legend line", () => {
-    const legends = home.match(/Track layout in this capture/g) ?? [];
+    const legends = features.match(/Track layout in this capture/g) ?? [];
     expect(legends.length).toBe(1);
   });
 
@@ -32,12 +32,12 @@ describe("the features page's track layout (S7)", () => {
    * nothing on the page keeps its own copy, and the copy they share matches
    * what the capture actually photographed. */
   it("reads the track layout from the shared module everywhere it is used", () => {
-    expect(home).toMatch(/from "\.\.\/data\/tracks\.mjs"/);
+    expect(features).toMatch(/from "\.\.\/data\/tracks\.mjs"/);
     const matrix = readFileSync(join(here, "..", "components", "MixMatrix.astro"), "utf8");
     expect(matrix).toMatch(/const TRACKS = TRACK_LAYOUT;/);
     // The six-track layout this replaced, so it cannot come back by paste.
     expect(matrix).not.toMatch(/"Full mix"|"Clean mix"/);
-    expect(home).not.toMatch(/Track 1 is the full mix/i);
+    expect(features).not.toMatch(/Track 1 is the full mix/i);
   });
 
   it("matches the layout of the seeded install the screenshots come from", () => {
@@ -48,21 +48,21 @@ describe("the features page's track layout (S7)", () => {
     expect(
       TRACK_LAYOUT.map((t) => t.fixtureLabel),
       "src/data/tracks.mjs no longer matches the first programme in " +
-        "scripts/demo-seed.fixture.json, so the home page names tracks the " +
+        "scripts/demo-seed.fixture.json, so the features page names tracks the " +
         "routing and meters screenshots do not show",
     ).toEqual(captured);
     expect(TRACK_LAYOUT.find((t) => t.id === MUSIC_TRACK)?.fixtureLabel).toMatch(/music/i);
   });
 
   it("does not end the payoff paragraph with the Twitch GPU requirement", () => {
-    const payoff = home.slice(home.indexOf("polyemesis ingests once and lets you pick"));
+    const payoff = features.slice(features.indexOf("polyemesis ingests once and lets you pick"));
     const paragraph = payoff.slice(0, payoff.indexOf("</p>")).replace(/<[^>]+>/g, "");
     expect(paragraph).not.toMatch(/GPU/);
     expect(paragraph).not.toMatch(/Enhanced Broadcasting/);
   });
 
   it("links the Twitch GPU detail to the Twitch route page", () => {
-    expect(home).toMatch(/href="\/twitch-vod-track"/);
+    expect(features).toMatch(/href="\/twitch-vod-track"/);
   });
 });
 
@@ -102,6 +102,8 @@ describe("the home hero (2026-11 redesign)", () => {
     expect(hero).toContain("with the music on Twitch and off YouTube. Free, and it runs on your own server.");
     expect(markup).not.toMatch(/vMix/);
   });
+  it("keeps a space between the lede's two sentences (Astro drops a span's leading whitespace)", () =>
+    expect(markup).toContain('any SRT encoder.{" "}<span class="lede-more">polyemesis sends'));
   it("makes Install the on-air primary and How it works the ghost", () => {
     expect(hero).toMatch(/<a[^>]*class="btn btn-onair[^"]*"[^>]*href="#run"[^>]*>\s*Install polyemesis/);
     expect(hero).toMatch(/<a[^>]*class="btn btn-ghost[^"]*"[^>]*href="#how"[^>]*>\s*See how it works/);
@@ -278,8 +280,9 @@ describe("the features page's dashboard copy", () => {
 });
 
 /* THE FEATURES PAGE'S ORDER (2026-11 design review, moved from the home page
- * in the redesign). A visitor should meet the problem and try the patchbay
- * before the hosted-pricing comparison, so the price table answers "what does
+ * in the redesign). A visitor should meet the problem, try the patchbay and
+ * see the proof straight after the spec strip, before the screens, the rooms
+ * and the hosted-pricing comparison, so the price table answers "what does
  * this cost" for someone who already wants it. */
 describe("the features page order", () => {
   const features = pages("features.astro");
@@ -297,6 +300,19 @@ describe("the features page order", () => {
     expect(spec).toBeLessThan(problem);
     expect(problem).toBeLessThan(patchbay);
     expect(patchbay).toBeLessThan(prices);
+  });
+
+  it("reads problem, patchbay, proof before the screens and the rooms", () => {
+    const spec = at("<SpecStrip />");
+    const problem = at("You send four tracks. Every platform will take one stereo pair.");
+    const proof = at("Loudness measured per destination, after routing, from one ingest.");
+    const screens = at("sections.map((s, i) => (");
+    const rooms = at('<p class="eyebrow">Who it is for</p>');
+    // Nothing but the problem's own comment sits between the strip and the problem.
+    expect(features.slice(spec, problem)).not.toMatch(/<section[\s\S]*<section/);
+    expect(problem).toBeLessThan(proof);
+    expect(proof).toBeLessThan(screens);
+    expect(screens).toBeLessThan(rooms);
   });
 });
 
@@ -388,9 +404,9 @@ describe("the announcement bar", () => {
 describe("the features page sections", () => {
   const features = pages("features.astro");
 
-  it("eager-loads the first capture and paints a placeholder under the lazy ones", () => {
-    expect(features).toMatch(/loading=\{i === 0 \? "eager" : "lazy"\}/);
-    expect(features).toMatch(/style=\{i === 0 \? undefined : placeholder\.get\(s\.shot\)\}/);
+  it("lazy-loads every capture, none being near the fold, with a placeholder under each", () => {
+    expect(features).not.toMatch(/loading=\{i === 0|fetchpriority=\{i === 0|loading="eager"/);
+    expect(features).toMatch(/style=\{placeholder\.get\(s\.shot\)\}/);
     expect(features).toMatch(/style=\{placeholder\.get\(s\.setup\.shot\)\}/);
   });
 
@@ -441,7 +457,10 @@ describe("the run beat", () => {
     expect(run).toContain("-p 8080:8080 -p 6000:6000/udp -p 1935:1935");
     const install = readFileSync(join(here, "..", "..", "..", "docs", "INSTALL.md"), "utf8");
     const script = install.slice(install.indexOf("curl --proto"), install.indexOf("sudo bash install.sh") + "sudo bash install.sh".length);
-    expect(run).toContain(script.split("\n")[1].trim()); // the raw.githubusercontent URL line
+    // Every line of the script block, not just its URL: Run.astro's template
+    // literal escapes the line-continuation backslash, so unescape it first.
+    const shipped = run.match(/const script = `([\s\S]*?)`;/)?.[1].replace(/\\\\/g, "\\");
+    expect(shipped).toBe(script);
   });
   it("names no placeholder install", () => expect(run).not.toMatch(/polyemesis\.com\/install|polyemesis\/polyemesis\b|href="#"/));
   it("does not claim the console address is printed", () => expect(run).not.toMatch(/prints the address/));
@@ -488,4 +507,13 @@ describe("homepage claims match the code (T12)", () => {
   // Spec "Decided": competitors stay generic (not named). Sources live in the PR claims table.
   it("names no competitor in the problem cards", () =>
     expect(problem).not.toMatch(/Restream|Streamlabs|StreamElements|Castr|Aitum|obs-multi-rtmp|MistServer/i));
+  // upload-meter.test.ts builds its fixture by hand; these pin the hooks it
+  // relies on to the markup that ships.
+  it("renders the meter hooks upload-meter.ts reads", () => {
+    expect(problem).toMatch(/<span data-pcount>/);
+    expect(problem.match(/<i data-kind=\{/g)).toHaveLength(2); // the cards' map and the strip
+    expect(problem.match(/<span class="val" data-val=\{/g)).toHaveLength(2);
+  });
+  it("lets screen readers read the platform count the meters count against", () =>
+    expect(problem).toMatch(/<p class="pc">Platforms you stream to:/));
 });

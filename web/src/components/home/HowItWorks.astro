@@ -162,7 +162,7 @@ const STEPS = [
     background: var(--color-line-strong);
   }
   .prog button[aria-current="step"]::before {
-    background: var(--tally, var(--color-primary));
+    background: var(--tally);
   }
 
   /* Phones and tablets under 768px: nothing pins, and the hero already showed
@@ -195,7 +195,7 @@ const STEPS = [
       color: var(--color-subtle);
     }
     .how.is-enhanced .step.on {
-      border-left-color: var(--tally, var(--color-primary));
+      border-left-color: var(--tally);
     }
     .how.is-enhanced .step.on h3 {
       color: var(--color-fg);
@@ -210,23 +210,23 @@ const STEPS = [
     .how.is-enhanced .step.on .body {
       grid-template-rows: 1fr;
     }
-    .how-dg :global(.dg) {
-      column-gap: clamp(36px, 4.5vw, 64px);
-    }
   }
 
-  /* All motion sits behind .motion-on, which only the page's script sets, so
-   * reduced motion and the Pause control both get instant changes. */
-  :global(.motion-on) .how.is-enhanced .step {
-    transition: border-color 0.25s;
-  }
-  :global(.motion-on) .how.is-enhanced .step h3 {
-    transition: color 0.25s;
-  }
-  :global(.motion-on) .how.is-enhanced .body {
-    transition: grid-template-rows 0.35s var(--ease-out);
-  }
-  :global(.motion-on) .how.is-enhanced .prog button::before {
-    transition: background-color 0.25s;
+  /* All motion sits behind no-preference and .motion-on, which only the
+   * page's script sets, so reduced motion and the Pause control both get
+   * instant changes. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.motion-on) .how.is-enhanced .step {
+      transition: border-color 0.25s;
+    }
+    :global(.motion-on) .how.is-enhanced .step h3 {
+      transition: color 0.25s;
+    }
+    :global(.motion-on) .how.is-enhanced .body {
+      transition: grid-template-rows 0.35s var(--ease-out);
+    }
+    :global(.motion-on) .how.is-enhanced .prog button::before {
+      transition: background-color 0.25s;
+    }
   }
 </style>

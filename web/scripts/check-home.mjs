@@ -16,15 +16,19 @@
  *   A first screen: h1, the Install button and the diagram fit
  *   B console: no console error and no uncaught exception, in any context
  *   C keyboard: tabs (arrows, Home, End) and a destination (Enter, Escape)
- *   D reduced motion: nothing animates, the counter and the failover settle
- *   E Pause motion switches motion off
- *   F no script: everything script reveals stays hidden, the markup stands
+ *   D reduced motion: nothing animates, the counter and the failover settle,
+ *     and Pull the cable is one instant change to the slate
+ *   E Pause motion switches motion off: no .dest fade, no hero button
+ *     transition, no smooth scrolling
+ *   F no script: everything script reveals stays hidden (failover controls
+ *     too), the markup stands
  *   G a long Spanish label does not overflow a card (390, every story)
- *   H the pinned stage sticks under the nav and lights step 3 at 40%
+ *   H the pinned stage sticks under the nav and lights step 3 halfway through
  *   I every line ends inside the card it points at, and none hides behind
  *     another card on the way
  *   J contrast of the headline and the lede on the page ground
  *   K layout shift and the LCP element on a phone
+ *   L the failover autoplays on a short phone (375x667, its own context)
  *
  * GREEN OVER NOTHING. Every assertion reads an element it first requires, and
  * a missing element is a failure of its own letter, never a skipped check. A
@@ -205,18 +209,52 @@ async function checkD(page, c) {
   }));
   if (after.pcount !== "3") bad("D", c.name, `[data-pcount] reads "${after.pcount}" after 4s, expected "3"`);
   if (after.state !== "live") bad("D", c.name, `failover frame data-state is "${after.state}" after 4s, expected "live"`);
+  // With motion off, "Pull the cable" is one instant change to the slate, not a timed run.
+  await page.locator("[data-failover] [data-play]").scrollIntoViewIfNeeded();
+  await page.click("[data-failover] [data-play]");
+  const frameState = () => page.evaluate(() => document.querySelector("[data-failover] [data-frame]")?.dataset.state ?? null);
+  const now = await frameState();
+  if (now !== "slate") bad("D", c.name, `Pull the cable under reduced motion shows "${now}", expected "slate" at once`);
+  await page.waitForTimeout(2000);
+  const later = await frameState();
+  if (later !== "slate") bad("D", c.name, `Pull the cable under reduced motion moved on to "${later}" within 2s; nothing may be timed`);
 }
 
 /* ---------------------------------------------------------------- E */
 async function checkE(page, c) {
+  const read = () =>
+    page.evaluate((sel) => {
+      const b = document.querySelector("[data-pause]");
+      const dest = document.querySelector(`${sel} .dest`);
+      const dur = dest ? getComputedStyle(dest).transitionDuration : null;
+      const btn = document.querySelector("[data-hero] .btn-onair");
+      const longest = (d) => Math.max(...d.split(",").map((x) => parseFloat(x) * (x.trim().endsWith("ms") ? 1 : 1000)));
+      return {
+        pressed: b.getAttribute("aria-pressed"),
+        text: b.textContent.trim(),
+        motionOn: document.documentElement.classList.contains("motion-on"),
+        // The longest of a comma list; "0s" (or nothing) means no transition.
+        destMs: dur === null ? null : longest(dur),
+        btnMs: btn ? longest(getComputedStyle(btn).transitionDuration) : null,
+        scroll: getComputedStyle(document.documentElement).scrollBehavior,
+      };
+    }, HERO_DG);
+  // Before: motion is on and visibly so, or the after-checks pass over nothing.
+  const before = await read();
+  if (!before.motionOn) bad("E", c.name, "html.motion-on is not set before Pause");
+  if (before.destMs === null) bad("E", c.name, "no .dest in the visible hero diagram");
+  else if (!(before.destMs > 0)) bad("E", c.name, `a .dest has no transition before Pause (${before.destMs}ms)`);
+  if (before.btnMs === null) bad("E", c.name, "no .btn-onair in the hero");
+  else if (!(before.btnMs > 0)) bad("E", c.name, `the hero's Install button has no transition before Pause (${before.btnMs}ms)`);
+  if (before.scroll !== "smooth") bad("E", c.name, `scroll-behavior is "${before.scroll}" before Pause, expected "smooth"`);
   await page.click("[data-pause]");
-  const m = await page.evaluate(() => {
-    const b = document.querySelector("[data-pause]");
-    return { pressed: b.getAttribute("aria-pressed"), text: b.textContent.trim(), motionOn: document.documentElement.classList.contains("motion-on") };
-  });
+  const m = await read();
   if (m.pressed !== "true") bad("E", c.name, `aria-pressed is "${m.pressed}" after the click`);
   if (m.text !== "Resume motion") bad("E", c.name, `Pause reads "${m.text}", expected "Resume motion"`);
   if (m.motionOn) bad("E", c.name, "html.motion-on is still set after Pause");
+  if (m.destMs !== null && m.destMs > 0) bad("E", c.name, `a .dest still fades over ${m.destMs}ms after Pause`);
+  if (m.btnMs !== null && m.btnMs > 0) bad("E", c.name, `the hero's Install button still transitions over ${m.btnMs}ms after Pause`);
+  if (m.scroll !== "auto") bad("E", c.name, `scroll-behavior is "${m.scroll}" after Pause, expected "auto"`);
 }
 
 /* ---------------------------------------------------------------- F */
@@ -239,6 +277,8 @@ async function checkF(page, c) {
       steps: document.querySelectorAll(".step h3").length,
       pres: run ? run.querySelectorAll("pre").length : 0,
       motionOn: document.documentElement.classList.contains("motion-on"),
+      // Rendered at all? (A hidden ancestor leaves the buttons' own display alone.)
+      foControls: [...document.querySelectorAll("[data-failover] button[data-stage], [data-failover] [data-play]")].map((b) => b.getClientRects().length),
     };
   });
   for (const k of ["tablist", "pause", "sports", "worship"]) {
@@ -252,6 +292,8 @@ async function checkF(page, c) {
   if (m.steps !== 5) bad("F", c.name, `${m.steps} .step h3, expected 5`);
   if (m.pres !== 2) bad("F", c.name, `${m.pres} pre in #run, expected 2`);
   if (m.motionOn) bad("F", c.name, "html.motion-on is set with script off");
+  if (m.foControls.length !== 5) bad("F", c.name, `${m.foControls.length} failover controls, expected 4 stage buttons and Pull the cable`);
+  else if (m.foControls.some((n) => n > 0)) bad("F", c.name, "a failover control is rendered with script off, where it can do nothing");
 }
 
 /* ---------------------------------------------------------------- G and I */
@@ -364,8 +406,12 @@ async function checkH(page, c) {
       const track = document.querySelector(".how-track");
       const header = document.querySelector("header");
       const top = track.getBoundingClientRect().top + window.scrollY;
-      // The page smooth-scrolls; an instant jump is what two frames can wait for.
-      window.scrollTo({ top: top + 0.4 * (track.offsetHeight - window.innerHeight), behavior: "instant" });
+      // Halfway through the pinned run, the middle of step 3's band, measured
+      // as how-steps.ts measures it: from the nav's bottom, not the window's
+      // top. An instant jump is what two frames can wait for.
+      const navH = header.querySelector("nav")?.getBoundingClientRect().height ?? 0;
+      const range = track.offsetHeight - window.innerHeight + navH;
+      window.scrollTo({ top: top - navH + 0.5 * range, behavior: "instant" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const stage = document.querySelector(".how-stage").getBoundingClientRect();
       const inStage = (s) => {
@@ -385,7 +431,7 @@ async function checkH(page, c) {
     const at = `${c.name} ${w}x${h}`;
     if (!m.enhanced) bad("H", at, ".how is not .is-enhanced");
     if (Math.abs(m.stageTop - m.navBottom) > 2) bad("H", at, `.how-stage top ${m.stageTop.toFixed(1)} is not at the nav's bottom ${m.navBottom.toFixed(1)}`);
-    if (!m.on) bad("H", at, "step 3 is not .on at 40% of the track");
+    if (!m.on) bad("H", at, "step 3 is not .on halfway through the pinned run");
     for (const k of ["head", "steps", "dg"]) {
       if (!m[k]) bad("H", at, `no ${k} element in the stage`);
       else if (m[k].top < -1 || m[k].bottom < -1) bad("H", at, `${k} is clipped by the stage (${m[k].top.toFixed(0)}px from its top, ${m[k].bottom.toFixed(0)}px from its bottom)`);
@@ -434,6 +480,10 @@ async function checkK(browser, origin, c) {
   try {
     const page = await ctx.newPage();
     page.setDefaultTimeout(8000);
+    page.on("console", (msg) => {
+      if (msg.type() === "error") bad("B", `${c.name} K`, `console error: ${msg.text()}`);
+    });
+    page.on("pageerror", (err) => bad("B", `${c.name} K`, `uncaught: ${err.message}`));
     await page.addInitScript(() => {
       window.__shift = 0;
       window.__lcp = null;
@@ -453,6 +503,36 @@ async function checkK(browser, origin, c) {
     if (m.shift > MAX_SHIFT) bad("K", c.name, `cumulative layout shift ${m.shift.toFixed(3)} is over ${MAX_SHIFT}`);
     if (!m.lcp) bad("K", c.name, "no largest-contentful-paint entry");
     else if (!m.lcp.inHero) bad("K", c.name, `the LCP element (<${m.lcp.tag}>) is not inside [data-hero]`);
+  } finally {
+    await ctx.close();
+  }
+}
+
+/* ---------------------------------------------------------------- L */
+/** The failover autoplays on a short phone: its trigger is the frame, not the
+ * section, which is taller than two of these screens. */
+async function checkL(browser, origin) {
+  const name = "375x667 js";
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, reducedMotion: "no-preference" });
+  try {
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(8000);
+    page.on("console", (msg) => {
+      if (msg.type() === "error") bad("B", name, `console error: ${msg.text()}`);
+    });
+    page.on("pageerror", (err) => bad("B", name, `uncaught: ${err.message}`));
+    await page.goto(origin + "/", { waitUntil: "load" });
+    await settle(page);
+    await page.evaluate(() => {
+      const f = document.querySelector("[data-failover] [data-frame]");
+      const r = f.getBoundingClientRect();
+      window.scrollTo({ top: window.scrollY + r.top + r.height / 2 - window.innerHeight / 2, behavior: "instant" });
+    });
+    try {
+      await page.waitForFunction(() => document.querySelector("[data-failover] [data-frame]")?.dataset.state !== "live", null, { timeout: 8000 });
+    } catch {
+      bad("L", name, "the failover frame, centred on screen, never left \"live\" within 8s: autoplay did not start");
+    }
   } finally {
     await ctx.close();
   }
@@ -509,6 +589,7 @@ try {
   }
   const phone = CONTEXTS.find((c) => c.phone && c.js && !c.reduced);
   await check("K", phone.name, () => checkK(browser, origin, phone));
+  await check("L", "375x667 js", () => checkL(browser, origin));
 } finally {
   await browser?.close();
   srv.close();

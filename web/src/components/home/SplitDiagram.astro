@@ -38,6 +38,8 @@ interface Props {
   mode: "hero" | "steps";
 }
 
+// `mode` (the brief's F11 prop) is emitted as data-mode only: it names which
+// instance a test or a style is looking at; nothing in this file branches on it.
 const { story, mode } = Astro.props;
 const s = STORIES[story];
 const layouts: Layout[] = ["h", "v"];
@@ -283,6 +285,8 @@ const pct = (g: number) => `${g * 100}%`;
   .dg :global(button.dest) {
     cursor: pointer;
   }
+  /* A pinned card shows it: the pin is also aria-pressed, but state must not
+     live only in the accessibility tree. */
   .dg :global(.dest[aria-pressed="true"]) {
     border-color: var(--color-fg);
   }
@@ -334,12 +338,16 @@ const pct = (g: number) => `${g * 100}%`;
     background: var(--dg-video);
   }
 
-  /* States: opacity only. */
-  .si,
-  .hub,
-  .ln,
-  .dg :global(.dest) {
-    transition: opacity 220ms var(--ease-out);
+  /* States: opacity only. The fade is motion, so it runs only under
+     no-preference and the gate's class: Pause and reduced motion get an
+     instant change. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.motion-on) .si,
+    :global(.motion-on) .hub,
+    :global(.motion-on) .ln,
+    :global(.motion-on) .dg :global(.dest) {
+      transition: opacity 220ms var(--ease-out);
+    }
   }
   .dg :global(.dim) {
     opacity: 0.25;

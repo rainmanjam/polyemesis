@@ -8,7 +8,10 @@
  *
  * Rendered at its resting state (3 platforms, plugin bar 3x and over the
  * limit); upload-meter.ts animates it only while on screen and motion is
- * allowed. The bars move by transform: scaleX() alone. */
+ * allowed. The bars move by transform: scaleX() alone.
+ *
+ * The platform count is ordinary text for screen readers (not live): it is
+ * what the 1x / 3x values under each card are counted against. */
 import { MAX_PLATFORMS, START_PLATFORMS, UPLOAD_LIMIT, uploadFor, type MeterKind } from "../../scripts/home/upload-meter";
 
 const cards: Array<{ kind: MeterKind; title: string; body: string }> = [
@@ -42,7 +45,7 @@ const strip = meter("polyemesis");
     <h2 id="h-problem" class="text-balance font-display text-3xl font-bold leading-tight sm:text-4xl">
       The usual ways to multistream each ask you to give something up.
     </h2>
-    <p class="pc" aria-hidden="true">Platforms you stream to: <span data-pcount>{START_PLATFORMS}</span></p>
+    <p class="pc">Platforms you stream to: <span data-pcount>{START_PLATFORMS}</span></p>
 
     <div class="card-grid card-grid--3 mt-8" data-foot="required">
       {
@@ -59,7 +62,7 @@ const strip = meter("polyemesis");
                     <i data-kind={m.kind} class:list={{ over: m.over }} style={`--k:${m.scale}`} />
                     <b class="lim" title="your upload" style={`left:${limitPct}`} />
                   </div>
-                  <span class="val">{m.k}×</span>
+                  <span class="val" data-val={m.kind}>{m.k}×</span>
                 </div>
               </div>
             </article>
@@ -81,7 +84,7 @@ const strip = meter("polyemesis");
           <i data-kind={strip.kind} style={`--k:${strip.scale}`} />
           <b class="lim" title="your upload" style={`left:${limitPct}`} />
         </div>
-        <span class="val">{strip.k}×</span>
+        <span class="val" data-val={strip.kind}>{strip.k}×</span>
       </div>
     </div>
   </div>

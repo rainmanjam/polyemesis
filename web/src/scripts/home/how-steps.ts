@@ -13,12 +13,14 @@ const PIN_QUERY = "(min-width: 768px)";
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
-/** How far through the track the viewport has travelled, 0..1. `trackTop` is
- * the track's top edge relative to the viewport. */
-export function progressOf(trackTop: number, trackHeight: number, viewportH: number): number {
-  const range = trackHeight - viewportH;
+/** How far through its pinned run the stage is, 0..1. `trackTop` is the
+ * track's top edge relative to the viewport; `navH` is the sticky offset. The
+ * stage pins when the track's top reaches the nav's bottom (progress 0) and
+ * lets go when the track's bottom reaches the viewport's (progress 1). */
+export function progressOf(trackTop: number, trackHeight: number, viewportH: number, navH = 0): number {
+  const range = trackHeight - viewportH + navH;
   if (range <= 0) return 0;
-  return clamp01(-trackTop / range);
+  return clamp01((navH - trackTop) / range);
 }
 
 /** The step (1..count) that a progress value falls in. */
@@ -49,10 +51,13 @@ export function initHowSteps(root: HTMLElement, gate: MotionGate): () => void {
   let current = 0;
   let frame = 0;
   let enhanced = false;
+  let navH = 0;
 
   const measureNav = () => {
     const nav = doc.querySelector("header nav");
-    if (nav) root.style.setProperty("--nav-h", `${Math.round(nav.getBoundingClientRect().height)}px`);
+    if (!nav) return;
+    navH = Math.round(nav.getBoundingClientRect().height);
+    root.style.setProperty("--nav-h", `${navH}px`);
   };
 
   const apply = (step: number) => {
@@ -74,7 +79,7 @@ export function initHowSteps(root: HTMLElement, gate: MotionGate): () => void {
   const update = () => {
     frame = 0;
     const r = track.getBoundingClientRect();
-    apply(stepFor(progressOf(r.top, r.height, win.innerHeight)));
+    apply(stepFor(progressOf(r.top, r.height, win.innerHeight, navH)));
   };
 
   const onScroll = () => {
@@ -87,10 +92,13 @@ export function initHowSteps(root: HTMLElement, gate: MotionGate): () => void {
 
   const goto = (n: number) => {
     const r = track.getBoundingClientRect();
-    const range = r.height - win.innerHeight;
+    const range = r.height - win.innerHeight + navH;
     win.scrollTo({
-      top: win.scrollY + r.top + (range * (n - 0.5)) / STEP_COUNT,
-      // "instant", not "auto": html has scroll-behavior: smooth, so "auto" would still animate.
+      // The middle of step n's band: the inverse of progressOf.
+      top: win.scrollY + r.top - navH + (range * (n - 0.5)) / STEP_COUNT,
+      // "instant", not "auto": "auto" defers to the page's scroll-behavior, and
+      // the CSS and the gate are two answers that could drift; "instant" is
+      // instant whatever the stylesheet says.
       behavior: gate.allowed() ? "smooth" : "instant",
     });
   };

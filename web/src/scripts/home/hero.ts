@@ -4,7 +4,7 @@
  * the page reads without script. This upgrades it: it reveals the tablist and
  * Pause, swaps each destination div for a button, and wires the rest. Pause
  * itself is wired by boot() alone, so it is bound exactly once per page. */
-import { STORIES, STORY_ORDER, destLabel, statusFor, type StoryKey } from "./stories";
+import { STORIES, STORY_ORDER, statusFor, type StoryKey } from "./stories";
 import { whileVisible, type MotionGate } from "./motion";
 
 export interface HeroController {
@@ -63,6 +63,15 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
   let finishSwap: (() => void) | null = null;
 
   const panelOf = (k: StoryKey) => panels.get(k);
+
+  /** Selected state and roving tabindex follow `story`. */
+  function syncTabs() {
+    for (const key of keys) {
+      const t = tabs.get(key);
+      t?.setAttribute("aria-selected", String(key === story));
+      t?.setAttribute("tabindex", key === story ? "0" : "-1");
+    }
+  }
 
   function bindVisibility() {
     stopVisible?.();
@@ -125,25 +134,17 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
   }
 
   function setStory(k: StoryKey) {
-    if (!keys.includes(k)) return;
+    // Re-selecting the story on show changes nothing, so a pin survives it.
+    if (!keys.includes(k) || k === story) return;
     finishSwap?.();
     const prev = story;
     pinned = null;
     preview = null;
     story = k;
-    for (const key of keys) {
-      const t = tabs.get(key);
-      t?.setAttribute("aria-selected", String(key === k));
-      t?.setAttribute("tabindex", key === k ? "0" : "-1");
-    }
+    syncTabs();
     if (fineEl) fineEl.textContent = STORIES[k].fine;
     stopVisible?.();
     stopVisible = null;
-    if (prev === k) {
-      render();
-      bindVisibility();
-      return;
-    }
 
     const from = panelOf(prev);
     const to = panelOf(k);
@@ -153,6 +154,7 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
       finishSwap = null;
       if (from) {
         from.classList.remove("swap-out");
+        from.inert = false;
         from.hidden = true;
       }
       for (const key of keys) {
@@ -164,6 +166,9 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
       bindVisibility();
     };
     if (gate.allowed() && from) {
+      // The fading panel takes no clicks: its destinations share ids with the
+      // incoming story's, so a click there would pin one in the new story.
+      from.inert = true;
       from.classList.add("swap-out");
       finishSwap = done;
       swapTimer = setTimeout(done, SWAP_MS);
@@ -210,7 +215,7 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
     "pointerover",
     (e) => {
       const id = idOf(e.target);
-      if (id === undefined || (e as PointerEvent).pointerType !== "mouse" || pinned !== null) return;
+      if (id === undefined || id === preview || (e as PointerEvent).pointerType !== "mouse" || pinned !== null) return;
       preview = id;
       render();
     },
@@ -219,7 +224,9 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
   root.addEventListener(
     "pointerout",
     (e) => {
-      if (idOf(e.target) === undefined || preview === null) return;
+      // Moving within a card, or straight onto another card (whose pointerover
+      // takes over), is not leaving: rewriting the live status there is churn.
+      if (idOf(e.target) === undefined || preview === null || idOf((e as PointerEvent).relatedTarget) !== undefined) return;
       preview = null;
       render();
     },
@@ -260,10 +267,8 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
   );
 
   // Initial state.
+  syncTabs();
   for (const key of keys) {
-    const t = tabs.get(key);
-    t?.setAttribute("aria-selected", String(key === story));
-    t?.setAttribute("tabindex", key === story ? "0" : "-1");
     const p = panelOf(key);
     if (p) p.hidden = key !== story;
   }

@@ -8,7 +8,13 @@ import { STAGES } from "../../scripts/home/failover";
  * scripts/home/failover.ts, with no timestamps because nothing here is live.
  * Failover is opt-in, so the copy says "Turn on failover" rather than promising
  * the stream survives by default. The chat half is the real capture, not a
- * drawn feed. */
+ * drawn feed.
+ *
+ * The stage buttons and "Pull the cable" do nothing without script, so they
+ * ship hidden ([data-fo-controls]) and failover.ts shows them. .fo-head keeps
+ * their height meanwhile, so showing them moves nothing. The log is
+ * aria-live="off" here; failover.ts makes it polite only for runs the visitor
+ * starts. */
 const chatPlaceholder = await lqipStyle(chat);
 const DESTS = ["Twitch", "YouTube", "Kick"];
 const facts = [
@@ -29,17 +35,19 @@ const facts = [
 
   <div class="mt-10 grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-stretch">
     <div class="rounded-token border border-line bg-surface p-4">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <ol class="fo-steps flex flex-wrap gap-1" aria-label="Failover stages">
-          {
-            STAGES.map((s, i) => (
-              <li>
-                <button type="button" data-stage={i} class="fo-step">{s.label}</button>
-              </li>
-            ))
-          }
-        </ol>
-        <button type="button" data-play class="fo-play">Pull the cable</button>
+      <div class="fo-head mb-3">
+        <div class="grid gap-3 sm:flex sm:items-center sm:justify-between" data-fo-controls hidden>
+          <ol class="fo-steps grid grid-cols-2 gap-1 sm:flex sm:flex-wrap" aria-label="Failover stages">
+            {
+              STAGES.map((s, i) => (
+                <li>
+                  <button type="button" data-stage={i} class="fo-step w-full sm:w-auto">{s.label}</button>
+                </li>
+              ))
+            }
+          </ol>
+          <button type="button" data-play class="fo-play">Pull the cable</button>
+        </div>
       </div>
 
       <div class="fo-frame relative aspect-video overflow-hidden rounded-token border border-line bg-ink" data-frame data-state="live">
@@ -74,7 +82,7 @@ const facts = [
         }
       </ul>
 
-      <ol class="mt-3 flex min-h-[5.6em] flex-col gap-1 font-mono text-xs text-muted" data-log aria-live="polite" aria-label="Event log, illustrative">
+      <ol class="mt-3 flex min-h-[5.6em] flex-col gap-1 font-mono text-xs text-muted" data-log aria-live="off" aria-label="Event log, illustrative">
         <li>{STAGES[0].log}</li>
       </ol>
     </div>
@@ -110,9 +118,21 @@ const facts = [
 </section>
 
 <style>
+  /* Room for the controls before script shows them. Their layout is fixed so
+     the height is known: under 640px a 2x2 grid of stages over a full-width
+     button (40 + 4 + 40 + 12 + 40), from 640px one 40px row. */
+  .fo-head {
+    min-height: 136px;
+  }
+  @media (min-width: 640px) {
+    .fo-head {
+      min-height: 40px;
+    }
+  }
   .fo-step,
   .fo-play {
     min-height: 40px;
+    white-space: nowrap;
     padding: 0 12px;
     border: 1px solid var(--color-line);
     border-radius: 8px;

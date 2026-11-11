@@ -14,6 +14,12 @@ describe("progressOf", () => {
     expect(progressOf(-1550, TRACK_H, VH)).toBe(0.5);
     expect(progressOf(-9999, TRACK_H, VH)).toBe(1);
   });
+  it("starts when the track reaches the nav, not the viewport top", () => {
+    expect(progressOf(56, TRACK_H, VH, 56)).toBe(0);
+    expect(progressOf(30, TRACK_H, VH, 56)).toBeGreaterThan(0);
+    // ends when the track's bottom meets the viewport's bottom
+    expect(progressOf(VH - TRACK_H, TRACK_H, VH, 56)).toBe(1);
+  });
   it("does not divide by zero when the track is no taller than the viewport", () => {
     expect(progressOf(-10, 900, 900)).toBe(0);
   });
@@ -35,6 +41,8 @@ let gate: MotionGate;
 let trackTop: number;
 let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
 let wide: boolean;
+let mqListeners: Array<() => void>;
+let navHeight: number;
 let scrollTo: ReturnType<typeof vi.fn>;
 let teardown: (() => void) | null;
 
@@ -42,7 +50,7 @@ const STEPS = [1, 2, 3, 4, 5];
 
 function build(): HTMLElement {
   document.body.innerHTML = `
-    <header><nav style="height:56px"></nav></header>
+    <header><nav></nav></header>
     <section id="how">
       <div class="how-track">
         <div class="how-stage">
@@ -61,6 +69,7 @@ function build(): HTMLElement {
       </div>
     </section>`;
   const root = document.getElementById("how")!;
+  document.querySelector("header nav")!.getBoundingClientRect = () => ({ height: navHeight }) as DOMRect;
   root.querySelector<HTMLElement>(".how-track")!.getBoundingClientRect = () =>
     ({ top: trackTop, height: TRACK_H, bottom: trackTop + TRACK_H }) as DOMRect;
   return root;
@@ -86,6 +95,8 @@ beforeEach(() => {
   };
   trackTop = 0;
   wide = true;
+  mqListeners = [];
+  navHeight = 0;
   ioCallback = null;
   teardown = null;
   scrollTo = vi.fn();
@@ -101,8 +112,10 @@ beforeEach(() => {
     get matches() {
       return query.includes("min-width: 768px") ? wide : false;
     },
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (_: string, fn: () => void) => mqListeners.push(fn),
+    removeEventListener: (_: string, fn: () => void) => {
+      mqListeners = mqListeners.filter((f) => f !== fn);
+    },
   })) as unknown as typeof window.matchMedia;
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
     constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
@@ -134,14 +147,41 @@ describe("initHowSteps", () => {
   });
 
   it("enhances: adds .is-enhanced and measures --nav-h from header nav", () => {
+    navHeight = 62;
     const root = build();
-    document.querySelector("header nav")!.getBoundingClientRect = () => ({ height: 62 }) as DOMRect;
     teardown = initHowSteps(root, gate);
     expect(root.classList.contains("is-enhanced")).toBe(true);
     expect(root.style.getPropertyValue("--nav-h")).toBe("62px");
   });
 
-  it.each(STEPS)("pip %i scrolls to inside its step band", (n) => {
+  it("re-measures the nav on resize", () => {
+    navHeight = 62;
+    const root = build();
+    teardown = initHowSteps(root, gate);
+    navHeight = 48;
+    window.dispatchEvent(new Event("resize"));
+    expect(root.style.getPropertyValue("--nav-h")).toBe("48px");
+  });
+
+  it("follows the 768px query as it changes", () => {
+    const root = build();
+    trackTop = -0.5 * RANGE;
+    teardown = initHowSteps(root, gate);
+    expect(root.classList.contains("is-enhanced")).toBe(true);
+    expect(root.querySelector(".on")).not.toBeNull();
+    wide = false;
+    for (const fn of mqListeners) fn();
+    expect(root.classList.contains("is-enhanced")).toBe(false);
+    expect(root.querySelector(".on")).toBeNull();
+    expect(root.querySelector(".off")).toBeNull();
+    wide = true;
+    for (const fn of mqListeners) fn();
+    expect(root.classList.contains("is-enhanced")).toBe(true);
+    expect(root.querySelector('li.step[data-step="3"]')!.classList.contains("on")).toBe(true);
+  });
+
+  it.each(STEPS)("pip %i scrolls to inside its step band, under a 56px nav", (n) => {
+    navHeight = 56;
     const root = build();
     trackTop = -200;
     Object.defineProperty(window, "scrollY", { configurable: true, value: 1000 });
@@ -149,9 +189,9 @@ describe("initHowSteps", () => {
     root.querySelector<HTMLButtonElement>(`button[data-goto="${n}"]`)!.click();
     expect(scrollTo).toHaveBeenCalledTimes(1);
     const { top, behavior } = scrollTo.mock.calls[0]![0] as { top: number; behavior: string };
-    // Scroll position that puts the track at this progress.
-    const progress = (top - (1000 + trackTop)) / RANGE;
-    expect(stepFor(progress)).toBe(n);
+    // The track's top once scrolled there, read back through progressOf.
+    const landedTop = trackTop - (top - 1000);
+    expect(stepFor(progressOf(landedTop, TRACK_H, VH, 56))).toBe(n);
     expect(behavior).toBe("smooth");
   });
 
