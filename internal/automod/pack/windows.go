@@ -245,22 +245,39 @@ func (d *NearDup) groupLocked(entries []ndEntry) (count int, over bool) {
 		if e.gid == newest.gid {
 			continue
 		}
-		if (newest.digits != "" && newest.digits == e.digits) ||
-			sizeCompatible(len(newest.set), len(e.set), d.cfg.Similarity) && jaccard(newest.set, e.set) >= d.cfg.Similarity {
-			old := e.gid
-			for k := range entries {
-				if entries[k].gid == old {
-					entries[k].gid = newest.gid
-				}
-			}
+		if d.nearCopy(newest, e) {
+			joinGroup(entries, e.gid, newest.gid)
 		}
 	}
+	count = countGroup(entries, newest.gid)
+	return count, count > d.cfg.MaxRepeats
+}
+
+// nearCopy reports whether two entries are near copies: the same once digits
+// are removed, or most of their words match.
+func (d *NearDup) nearCopy(newest, e *ndEntry) bool {
+	return (newest.digits != "" && newest.digits == e.digits) ||
+		sizeCompatible(len(newest.set), len(e.set), d.cfg.Similarity) && jaccard(newest.set, e.set) >= d.cfg.Similarity
+}
+
+// joinGroup moves every entry of group old into group gid.
+func joinGroup(entries []ndEntry, old, gid int) {
+	for k := range entries {
+		if entries[k].gid == old {
+			entries[k].gid = gid
+		}
+	}
+}
+
+// countGroup is how many entries belong to group gid.
+func countGroup(entries []ndEntry, gid int) int {
+	count := 0
 	for _, e := range entries {
-		if e.gid == newest.gid {
+		if e.gid == gid {
 			count++
 		}
 	}
-	return count, count > d.cfg.MaxRepeats
+	return count
 }
 
 // Tracked reports how many authors are held.
@@ -435,23 +452,7 @@ func (r *Raid) Observe(at time.Time, author string, f Forms, platformEmotes int)
 	defer r.mu.Unlock()
 	r.pruneLocked(at)
 
-	var cl *raidCluster
-	for i := len(r.clusters) - 1; i >= 0; i-- {
-		c := r.clusters[i]
-		if sizeCompatible(len(set), c.n, r.cfg.Similarity) &&
-			mayMatch(sk, c.sketch, len(set), c.n, r.cfg.Similarity) &&
-			jaccard(set, c.set) >= r.cfg.Similarity {
-			cl = c
-			break
-		}
-	}
-	if cl == nil {
-		cl = &raidCluster{set: set, n: len(set), sketch: sk, last: at}
-		r.clusters = append(r.clusters, cl)
-		if len(r.clusters) > r.cfg.MaxClusters {
-			r.evictLocked()
-		}
-	}
+	cl := r.clusterFor(set, sk, at)
 	cl.last = at
 	if exp := at.Add(r.cfg.Window); exp.Before(r.pruneAt) {
 		r.pruneAt = exp // a message stamped earlier than the rest: keep the bound safe
@@ -462,7 +463,40 @@ func (r *Raid) Observe(at time.Time, author string, f Forms, platformEmotes int)
 		return RaidHit{Authors: distinct(cl.seen), Names: names(cl.seen), Continuing: true}, true
 	}
 	cl.firedAt = time.Time{}
+	return r.recordSeen(cl, at, author)
+}
 
+// clusterFor returns the cluster a message joins, creating one when no retained
+// text is a near copy of it. The caller holds r.mu.
+func (r *Raid) clusterFor(set tokenSet, sk sketch, at time.Time) *raidCluster {
+	if cl := r.findCluster(set, sk); cl != nil {
+		return cl
+	}
+	cl := &raidCluster{set: set, n: len(set), sketch: sk, last: at}
+	r.clusters = append(r.clusters, cl)
+	if len(r.clusters) > r.cfg.MaxClusters {
+		r.evictLocked()
+	}
+	return cl
+}
+
+// findCluster returns the newest retained cluster whose text is a near copy of
+// set, or nil. The caller holds r.mu.
+func (r *Raid) findCluster(set tokenSet, sk sketch) *raidCluster {
+	for i := len(r.clusters) - 1; i >= 0; i-- {
+		c := r.clusters[i]
+		if sizeCompatible(len(set), c.n, r.cfg.Similarity) &&
+			mayMatch(sk, c.sketch, len(set), c.n, r.cfg.Similarity) &&
+			jaccard(set, c.set) >= r.cfg.Similarity {
+			return c
+		}
+	}
+	return nil
+}
+
+// recordSeen adds author to the cluster's window, trims the window, and reports
+// a raid when enough distinct authors are in it. The caller holds r.mu.
+func (r *Raid) recordSeen(cl *raidCluster, at time.Time, author string) (RaidHit, bool) {
 	cl.seen = append(cl.seen, raidSeen{at: at, author: author})
 	cutoff := at.Add(-r.cfg.Window)
 	live := cl.seen[:0]
