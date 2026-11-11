@@ -218,20 +218,7 @@ func (c *classifier) feed(es []byte) bool {
 		if c.buf[i] != 0 || c.buf[i+1] != 0 || c.buf[i+2] != 1 {
 			continue
 		}
-		h := c.buf[i+3]
-		switch c.codec {
-		case codecH264:
-			if t := h & 0x1F; t >= 1 && t <= 5 {
-				c.done, c.key = true, t == 5
-				return true
-			}
-		case codecHEVC:
-			if t := (h >> 1) & 0x3F; t <= 31 {
-				c.done, c.key, c.irap = true, t == 19 || t == 20, t >= 16 && t <= 21
-				return true
-			}
-		default:
-			c.done = true
+		if c.decide(c.buf[i+3]) {
 			return true
 		}
 	}
@@ -239,6 +226,28 @@ func (c *classifier) feed(es []byte) bool {
 		c.done = true
 	}
 	return c.done
+}
+
+// decide reads the NAL header byte h after a start code. It reports true, and
+// sets done, when the classifier has its answer: a slice header for the codec,
+// or any NAL at all for a codec it does not know.
+func (c *classifier) decide(h byte) bool {
+	switch c.codec {
+	case codecH264:
+		if t := h & 0x1F; t >= 1 && t <= 5 {
+			c.done, c.key = true, t == 5
+			return true
+		}
+	case codecHEVC:
+		if t := (h >> 1) & 0x3F; t <= 31 {
+			c.done, c.key, c.irap = true, t == 19 || t == 20, t >= 16 && t <= 21
+			return true
+		}
+	default:
+		c.done = true
+		return true
+	}
+	return false
 }
 
 // pidRewrite is how one PID's packets are changed after a splice.
@@ -435,22 +444,33 @@ func (ts *tsState) observePSI(p []byte) {
 	pid := mpegts.PID(p)
 	switch {
 	case pid == mpegts.PIDPAT:
-		if sec := mpegts.SectionOf(p); sec != nil {
-			if pmt, ok := mpegts.PATProgram(sec); ok {
-				ts.pmtPID, ts.havePMT = pmt, true
-				ts.patPkt = append(ts.patPkt[:0], p...)
-			}
-		}
+		ts.observePAT(p)
 	case ts.havePMT && pid == ts.pmtPID:
-		if sec := mpegts.SectionOf(p); sec != nil {
-			if v, codec, all, ok := parsePMT(sec); ok {
-				ts.videoPID, ts.codec = v, codec
-				clear(ts.es)
-				for _, e := range all {
-					ts.es[e.PID] = e.Type
-				}
-				ts.pmtPkt = append(ts.pmtPkt[:0], p...)
+		ts.observePMT(p)
+	}
+}
+
+// observePAT takes the program's PMT PID from a PAT packet, and keeps the PAT.
+func (ts *tsState) observePAT(p []byte) {
+	if sec := mpegts.SectionOf(p); sec != nil {
+		if pmt, ok := mpegts.PATProgram(sec); ok {
+			ts.pmtPID, ts.havePMT = pmt, true
+			ts.patPkt = append(ts.patPkt[:0], p...)
+		}
+	}
+}
+
+// observePMT takes the video PID, codec and streams from a PMT packet, and
+// keeps the PMT.
+func (ts *tsState) observePMT(p []byte) {
+	if sec := mpegts.SectionOf(p); sec != nil {
+		if v, codec, all, ok := parsePMT(sec); ok {
+			ts.videoPID, ts.codec = v, codec
+			clear(ts.es)
+			for _, e := range all {
+				ts.es[e.PID] = e.Type
 			}
+			ts.pmtPkt = append(ts.pmtPkt[:0], p...)
 		}
 	}
 }
@@ -770,11 +790,30 @@ func releaseHeld(r *pidRewrite) []pkt {
 // trimEnd. All of it before: dropped, and trimming goes on. None: released
 // whole. Frames it cannot parse: the PES is kept if it starts within a frame
 // of trimEnd, and dropped otherwise.
-func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
+// heldPayload is the payload of every packet in hold, concatenated.
+func heldPayload(hold []byte) []byte {
 	var pes []byte
-	for off := 0; off+mpegts.PacketSize <= len(r.hold); off += mpegts.PacketSize {
-		pes = append(pes, payloadOf(r.hold[off:off+mpegts.PacketSize])...)
+	for off := 0; off+mpegts.PacketSize <= len(hold); off += mpegts.PacketSize {
+		pes = append(pes, payloadOf(hold[off:off+mpegts.PacketSize])...)
 	}
+	return pes
+}
+
+// keptFrames counts the audio frames that end before trimEnd: the first k
+// frames are dropped and the rest kept. at is the PTS of frame k.
+func keptFrames(frames []audioFrame, pts, trimEnd int64) (k int, at int64) {
+	k, at = 0, pts
+	for ; k < len(frames); k++ {
+		if ptsAfter(wrap(at+frames[k].ticks/2), trimEnd) {
+			break
+		}
+		at = wrap(at + frames[k].ticks)
+	}
+	return k, at
+}
+
+func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
+	pes := heldPayload(r.hold)
 	if len(pes) < 9 || len(pes) < 9+int(pes[8]) || pes[7]&0x80 == 0 || len(pes) < 14 {
 		r.trimming = false
 		return releaseHeld(r)
@@ -803,13 +842,7 @@ func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
 		r.hold = r.hold[:0]
 		return nil
 	}
-	k, at := 0, pts
-	for ; k < len(frames); k++ {
-		if ptsAfter(wrap(at+frames[k].ticks/2), r.trimEnd) {
-			break
-		}
-		at = wrap(at + frames[k].ticks)
-	}
+	k, at := keptFrames(frames, pts, r.trimEnd)
 	switch k {
 	case 0:
 		r.trimming = false
@@ -1148,6 +1181,15 @@ func (b *Buffer) addMarkLocked(c *mark) {
 		return
 	}
 	c.added = true
+	b.linkAudioEndsLocked(c)
+	b.retireMarksLocked()
+	b.marks = append(b.marks, c)
+	b.gopLocked()
+}
+
+// linkAudioEndsLocked records, for each audio PID in the cut point, where its
+// last PES before the cut ends. The caller holds b.mu.
+func (b *Buffer) linkAudioEndsLocked(c *mark) {
 	// Each audio PID's last PES before the cut point ends where the next one
 	// starts. If that has arrived already -- the picture was classified a few
 	// packets in -- it is the newest; otherwise it is filled in on arrival.
@@ -1167,6 +1209,12 @@ func (b *Buffer) addMarkLocked(c *mark) {
 		}
 		ts.pending[s.pid] = append(list, s)
 	}
+}
+
+// retireMarksLocked forgets the cut points already released, and evicts the
+// oldest when the list is full, so there is room for one more. The caller
+// holds b.mu.
+func (b *Buffer) retireMarksLocked() {
 	// Forget the cut points already released.
 	if len(b.queue) > 0 {
 		head := b.queue[0].first
@@ -1181,8 +1229,6 @@ func (b *Buffer) addMarkLocked(c *mark) {
 		b.forgetMarkLocked(b.marks[0])
 		b.marks = b.marks[1:]
 	}
-	b.marks = append(b.marks, c)
-	b.gopLocked()
 }
 
 // forgetMarkLocked takes a cut point that is going -- released, or evicted --
@@ -1360,14 +1406,54 @@ func (b *Buffer) firstLiveMarkLocked(floor int64) *mark {
 }
 
 // truncateLocked removes everything from m to the end of the buffer.
-func (b *Buffer) truncateLocked(m *mark) error {
-	idx := -1
+// queueIndexLocked is seg's position in the queue, or -1. The caller holds b.mu.
+func (b *Buffer) queueIndexLocked(seg *segment) int {
 	for i, s := range b.queue {
-		if s == m.seg {
-			idx = i
-			break
+		if s == seg {
+			return i
 		}
 	}
+	return -1
+}
+
+// unpushLocked takes back what the cut removed from the stream totals: the
+// packets and bytes pushed after m. The caller holds b.mu.
+func (b *Buffer) unpushLocked(s *segment, m *mark) {
+	removedP := s.pushedPackets - m.pushedPackets
+	removedB := s.pushedBytes - m.pushedBytes
+	s.packets -= removedP
+	s.bytes -= removedB
+	s.pushedPackets, s.pushedBytes = m.pushedPackets, m.pushedBytes
+	b.stats.Packets -= removedP
+	b.stats.Bytes -= removedB
+}
+
+// shrinkSegmentLocked cuts s to off bytes, in RAM or on disk, and counts the
+// disk bytes given back. The caller holds b.mu.
+func (b *Buffer) shrinkSegmentLocked(s *segment, off int) {
+	if s.data != nil {
+		s.data = s.data[:off]
+		s.size = int64(off)
+	} else {
+		b.stats.DiskBytes -= s.size - int64(off)
+		s.size = int64(off)
+	}
+}
+
+// keepAfterCutLocked is how many queue entries survive a cut of segment s at
+// index idx to off bytes: the segment itself, unless nothing of it is left, in
+// which case it is removed and the queue ends before it. The caller holds b.mu.
+func (b *Buffer) keepAfterCutLocked(s *segment, idx, off int) int {
+	if off == 0 || (s.data != nil && s.off >= len(s.data)) {
+		// Nothing of this segment is left to release.
+		b.removeSegmentLocked(s)
+		return idx
+	}
+	return idx + 1
+}
+
+func (b *Buffer) truncateLocked(m *mark) error {
+	idx := b.queueIndexLocked(m.seg)
 	if idx < 0 {
 		return ErrNoCutPoint
 	}
@@ -1389,27 +1475,10 @@ func (b *Buffer) truncateLocked(m *mark) error {
 	for _, later := range b.queue[idx+1:] {
 		b.removeSegmentLocked(later)
 	}
-	removedP := s.pushedPackets - m.pushedPackets
-	removedB := s.pushedBytes - m.pushedBytes
-	s.packets -= removedP
-	s.bytes -= removedB
-	s.pushedPackets, s.pushedBytes = m.pushedPackets, m.pushedBytes
-	b.stats.Packets -= removedP
-	b.stats.Bytes -= removedB
-	if s.data != nil {
-		s.data = s.data[:m.off]
-		s.size = int64(m.off)
-	} else {
-		b.stats.DiskBytes -= s.size - int64(m.off)
-		s.size = int64(m.off)
-	}
+	b.unpushLocked(s, m)
+	b.shrinkSegmentLocked(s, m.off)
 	s.last = m.prevAt
-	keep := idx + 1
-	if m.off == 0 || (s.data != nil && s.off >= len(s.data)) {
-		// Nothing of this segment is left to release.
-		b.removeSegmentLocked(s)
-		keep = idx
-	}
+	keep := b.keepAfterCutLocked(s, idx, m.off)
 	b.queue = b.queue[:keep]
 	// A segment still in RAM stays the tail and keeps filling, so the RAM
 	// bound counts it once; a fresh tail beside it would hold a second
