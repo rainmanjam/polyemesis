@@ -688,7 +688,7 @@ func (m *Manager) reconcileSharedIngest() {
 	rtmp, rtmpAddr := m.rtmp, m.rtmpAddr
 	m.mu.Unlock()
 
-	srt, srtAddr = reconcileListener(m.log, "srt", st.Listeners.SRTPort, true, srt, srtAddr,
+	srt, srtAddr = reconcileListener(listenerWant{log: m.log, proto: "srt", port: st.Listeners.SRTPort, wanted: true}, srt, srtAddr,
 		(*srtserver.Server).Stop,
 		func(addr string) (*srtserver.Server, error) {
 			s := srtserver.New(m.log, addr, m.lookupToken)
@@ -722,7 +722,7 @@ func (m *Manager) reconcileSharedIngest() {
 	//
 	// Port 0 remains the explicit off switch for either protocol.
 	rtmpPort := st.Listeners.RTMPPort
-	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, true, rtmp, rtmpAddr,
+	rtmp, rtmpAddr = reconcileListener(listenerWant{log: m.log, proto: "rtmp", port: rtmpPort, wanted: true}, rtmp, rtmpAddr,
 		(*rtmpserver.Server).Stop,
 		func(addr string) (*rtmpserver.Server, error) {
 			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
@@ -762,8 +762,8 @@ func (m *Manager) reconcileSharedIngest() {
 		m.log.Info("srtla receiver stopped", "reason", "the srt listener it forwards to moved")
 		bonded, bondedAddr = nil, ""
 	}
-	bonded, bondedAddr = reconcileListener(m.log, "srtla", st.Listeners.SRTLAPort,
-		st.Listeners.SRTLAPort != 0 && upstream != "", bonded, bondedAddr,
+	bonded, bondedAddr = reconcileListener(listenerWant{log: m.log, proto: "srtla", port: st.Listeners.SRTLAPort,
+		wanted: st.Listeners.SRTLAPort != 0 && upstream != ""}, bonded, bondedAddr,
 		(*srtla.Server).Stop,
 		func(addr string) (*srtla.Server, error) {
 			s := srtla.New(m.log, srtla.Config{Listen: addr, Upstream: upstream})
@@ -818,19 +818,26 @@ func (m *Manager) srtPeerHost(addr net.Addr) string {
 // be compared against nil: a nil *srtserver.Server placed in an interface is
 // not a nil interface, and that trap is exactly how a "no listener" state turns
 // into a nil dereference.
-func reconcileListener[T any](
-	log *slog.Logger,
-	proto string,
-	port int,
+// listenerWant is what one shared listener should be: the logger, the protocol
+// name for log lines, the configured port, and whether it is wanted at all.
+type listenerWant struct {
+	log   *slog.Logger
+	proto string
+	port  int
 	// wanted separates "this listener is deliberately off" from "this port is
 	// wrong". Overloading port 0 for both conflated a fresh install that simply
 	// has no RTMP source with a misconfiguration, and logged an ERROR about a
 	// port nobody set on every startup.
-	wanted bool,
+	wanted bool
+}
+
+func reconcileListener[T any](
+	want listenerWant,
 	cur *T, curAddr string,
 	stop func(*T),
 	start func(addr string) (*T, error),
 ) (*T, string) {
+	log, proto, port, wanted := want.log, want.proto, want.port, want.wanted
 	// The store does not validate -- Settings.Validate runs in the API handler
 	// -- so the manager is the last place between a stored value and a bound
 	// socket, and it has to check. Port 0 is the one that matters: it is not
@@ -947,36 +954,8 @@ func (m *Manager) lookupTokenE(token string) (srtserver.Target, bool, error) {
 		// primary's Sink above is: an RTMP standby's hub is fed by its RTMP
 		// backup child, and lookupStreamKey already gates it the same way.
 		if eng := m.Engine(s.ID); eng != nil && eng.Settings().Failover.Backup.Mode == db.IngestSRT {
-			if bh := eng.BackupHub(); bh != nil {
-				suffixed := make([]string, 0, len(valid))
-				for _, t := range valid {
-					suffixed = append(suffixed, t+backupTokenSuffix)
-				}
-				// THE BACKUP'S OWN PASSPHRASE, not the primary's.
-				//
-				// failover.backup.srt.passphrase is operator-settable and
-				// VALIDATED (db.Settings, the same 10..79 rule SRT imposes), so
-				// setting it looks exactly like configuring a distinct secret
-				// for the standby. Enforcing s.Ingest.SRT.Passphrase here meant
-				// it was stored, validated, reported applied -- and checked
-				// against the wrong secret. A backup encoder holding the
-				// passphrase the operator gave it was refused, and one holding
-				// the PRIMARY's was admitted.
-				//
-				// Falls back to the primary when unset, which is what an install
-				// that never configured a separate one already relies on.
-				pass := s.Ingest.SRT.Passphrase
-				if bp := eng.Settings().Failover.Backup.SRT.Passphrase; bp != "" {
-					pass = bp
-				}
-				targets = append(targets, srtserver.Target{
-					SourceID:   s.ID,
-					Name:       s.Name + " (backup)",
-					Enabled:    s.Enabled,
-					Passphrase: pass,
-					Sink:       bh,
-					Backup:     true,
-				})
+			if target, suffixed, ok := backupSRTTarget(s, eng, valid); ok {
+				targets = append(targets, target)
 				tokens[key{s.ID, true}] = suffixed
 			}
 		}
@@ -986,6 +965,45 @@ func (m *Manager) lookupTokenE(token string) (srtserver.Target, bool, error) {
 		func(t srtserver.Target) []string { return tokens[key{t.SourceID, t.Backup}] },
 	)(token)
 	return t, ok, nil
+}
+
+// backupSRTTarget is the SRT listener target for a source's failover standby,
+// and the standby's suffixed tokens. ok is false when the standby has no hub
+// yet, in which case nothing is added for it.
+func backupSRTTarget(s *db.Source, eng *Engine, valid []string) (srtserver.Target, []string, bool) {
+	bh := eng.BackupHub()
+	if bh == nil {
+		return srtserver.Target{}, nil, false
+	}
+	suffixed := make([]string, 0, len(valid))
+	for _, t := range valid {
+		suffixed = append(suffixed, t+backupTokenSuffix)
+	}
+	// THE BACKUP'S OWN PASSPHRASE, not the primary's.
+	//
+	// failover.backup.srt.passphrase is operator-settable and
+	// VALIDATED (db.Settings, the same 10..79 rule SRT imposes), so
+	// setting it looks exactly like configuring a distinct secret
+	// for the standby. Enforcing s.Ingest.SRT.Passphrase here meant
+	// it was stored, validated, reported applied -- and checked
+	// against the wrong secret. A backup encoder holding the
+	// passphrase the operator gave it was refused, and one holding
+	// the PRIMARY's was admitted.
+	//
+	// Falls back to the primary when unset, which is what an install
+	// that never configured a separate one already relies on.
+	pass := s.Ingest.SRT.Passphrase
+	if bp := eng.Settings().Failover.Backup.SRT.Passphrase; bp != "" {
+		pass = bp
+	}
+	return srtserver.Target{
+		SourceID:   s.ID,
+		Name:       s.Name + " (backup)",
+		Enabled:    s.Enabled,
+		Passphrase: pass,
+		Sink:       bh,
+		Backup:     true,
+	}, suffixed, true
 }
 
 // backupTokenSuffix turns a source's publish token into its standby's address.
@@ -1161,20 +1179,7 @@ func (m *Manager) lookupStreamKeyE(key string) (rtmpserver.Target, bool, error) 
 //     telling someone to use. Costs an upgrading install nothing: a 192-bit
 //     random string is not what anyone typed into a stream-key box.
 func legacyRTMPKeys(rows []*db.Source) map[int64]string {
-	claims := map[string]int{}
-	reserved := map[string]bool{}
-	for _, s := range rows {
-		if s.Ingest.Mode == db.IngestRTMP && s.Ingest.RTMP.StreamKey != "" {
-			claims[s.Ingest.RTMP.StreamKey]++
-		}
-		for _, t := range []string{s.Token, s.PrevToken} {
-			if t == "" {
-				continue
-			}
-			reserved[t] = true
-			reserved[t+backupTokenSuffix] = true
-		}
-	}
+	claims, reserved := rtmpKeyClaims(rows)
 	out := map[int64]string{}
 	for _, s := range rows {
 		key := s.Ingest.RTMP.StreamKey
@@ -1187,6 +1192,26 @@ func legacyRTMPKeys(rows []*db.Source) map[int64]string {
 		out[s.ID] = key
 	}
 	return out
+}
+
+// rtmpKeyClaims counts how many RTMP-mode sources claim each stream key, and
+// collects every token (live, lapsed, and their standby addresses) as reserved.
+func rtmpKeyClaims(rows []*db.Source) (claims map[string]int, reserved map[string]bool) {
+	claims = map[string]int{}
+	reserved = map[string]bool{}
+	for _, s := range rows {
+		if s.Ingest.Mode == db.IngestRTMP && s.Ingest.RTMP.StreamKey != "" {
+			claims[s.Ingest.RTMP.StreamKey]++
+		}
+		for _, t := range []string{s.Token, s.PrevToken} {
+			if t == "" {
+				continue
+			}
+			reserved[t] = true
+			reserved[t+backupTokenSuffix] = true
+		}
+	}
+	return claims, reserved
 }
 
 // LegacyRTMPKey reports the pre-one-port stream key that still reaches this
