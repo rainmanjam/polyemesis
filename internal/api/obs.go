@@ -439,12 +439,7 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 		return skip("this destination passes its audio through unchanged, so there is no track level for a scene to change")
 	}
 
-	src := routing.DefaultSource()
-	if s.sceneSource != nil {
-		src = s.sceneSource(row.SourceID)
-	} else if eng := s.engineForSource(row.SourceID); eng != nil {
-		src = eng.Source()
-	}
+	src := s.sceneLevelSource(row.SourceID)
 	opts := routing.DefaultPresetOptsFor(src)
 	if rule.Opts != nil {
 		opts = *rule.Opts
@@ -480,30 +475,7 @@ func (s *Server) applySceneLevels(id int64, rule obsbridge.SceneRule) obsbridge.
 		res.Outcome, res.Message = string(bulkFailed), updateErr.Error()
 		return res
 	}
-	msgs := []string{}
-	switch {
-	case lw.reconcileWarn != "":
-		res.Outcome = string(bulkWarned)
-		msgs = append(msgs, lw.reconcileWarn)
-	case lw.applied == engine.AppliedLive:
-		res.Outcome = outcomeApplied
-		msgs = append(msgs, "applied live")
-		if lw.reason != "" {
-			msgs[0] += ": " + lw.reason
-		}
-	default:
-		// "restart" with a reason. The common one is a destination that is
-		// not running, where the levels are stored for its next start and
-		// nothing was restarted; anything else is the engine falling back,
-		// which the operator should hear about.
-		res.Outcome = outcomeApplied
-		if a := s.engineForSource(row.SourceID); a != nil && a.DestinationRunning(row.ID) {
-			res.Outcome = string(bulkWarned)
-		}
-		msgs = append(msgs, "stored: "+lw.reason)
-	}
-	res.Message = strings.Join(append(msgs, notes...), "; ")
-	return res
+	return s.sceneLevelsResult(res, row, lw, notes)
 }
 
 // sceneLevels expresses a preset as mutes on the tracks already in cur's mix.
@@ -692,4 +664,44 @@ func pruneOBSConfig(cfg obsbridge.Config, liveDest, liveSource map[int64]bool) (
 	}
 	cfg.Scenes = rules
 	return cfg, strings.Join(notes, "; "), true
+}
+
+// sceneLevelSource is the source a scene's preset is computed against: the
+// test seam when one is set, else the source's live engine, else the default.
+func (s *Server) sceneLevelSource(sourceID *int64) routing.Source {
+	src := routing.DefaultSource()
+	if s.sceneSource != nil {
+		src = s.sceneSource(sourceID)
+	} else if eng := s.engineForSource(sourceID); eng != nil {
+		src = eng.Source()
+	}
+	return src
+}
+
+// sceneLevelsResult turns the stored track levels into the scene outcome.
+func (s *Server) sceneLevelsResult(res obsbridge.Outcome, row *db.Destination, lw levelWrite, notes []string) obsbridge.Outcome {
+	msgs := []string{}
+	switch {
+	case lw.reconcileWarn != "":
+		res.Outcome = string(bulkWarned)
+		msgs = append(msgs, lw.reconcileWarn)
+	case lw.applied == engine.AppliedLive:
+		res.Outcome = outcomeApplied
+		msgs = append(msgs, "applied live")
+		if lw.reason != "" {
+			msgs[0] += ": " + lw.reason
+		}
+	default:
+		// "restart" with a reason. The common one is a destination that is
+		// not running, where the levels are stored for its next start and
+		// nothing was restarted; anything else is the engine falling back,
+		// which the operator should hear about.
+		res.Outcome = outcomeApplied
+		if a := s.engineForSource(row.SourceID); a != nil && a.DestinationRunning(row.ID) {
+			res.Outcome = string(bulkWarned)
+		}
+		msgs = append(msgs, "stored: "+lw.reason)
+	}
+	res.Message = strings.Join(append(msgs, notes...), "; ")
+	return res
 }
