@@ -71,12 +71,7 @@ func (m *Manager) removeOwnStems(deleted string, survivors []string) {
 	if !ok {
 		return
 	}
-	var others []time.Time
-	for _, name := range survivors {
-		if p, at, ok := segname.SplitMaster(name); ok && p == prefix {
-			others = append(others, at)
-		}
-	}
+	others := programmeStarts(prefix, survivors)
 	dir := m.StemsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -86,19 +81,7 @@ func (m *Manager) removeOwnStems(deleted string, survivors []string) {
 		return
 	}
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		at, _, ok := ParseStemFilename(e.Name())
-		if !ok {
-			continue
-		}
-		base, _ := StemMasterBase(e.Name())
-		if p, _, ok := segname.SplitMaster(base); !ok || p != prefix {
-			continue
-		}
-		gap := absDuration(at.Sub(start))
-		if gap > stemSweepSlack || nearerOrAsNear(at, gap, others) {
+		if !isOwnedStem(e, prefix, start, others) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
@@ -107,6 +90,36 @@ func (m *Manager) removeOwnStems(deleted string, survivors []string) {
 		}
 		m.log.Info("deleted a stem with its recording", "file", e.Name())
 	}
+}
+
+// programmeStarts is the start of every survivor of the same programme prefix.
+func programmeStarts(prefix string, survivors []string) []time.Time {
+	var others []time.Time
+	for _, name := range survivors {
+		if p, at, ok := segname.SplitMaster(name); ok && p == prefix {
+			others = append(others, at)
+		}
+	}
+	return others
+}
+
+// isOwnedStem reports whether a stems-directory entry belongs to the deleted
+// recording: it is a stem of the same programme whose nearest master is the
+// deleted one, by a clear margin, within stemSweepSlack.
+func isOwnedStem(e os.DirEntry, prefix string, start time.Time, others []time.Time) bool {
+	if e.IsDir() {
+		return false
+	}
+	at, _, ok := ParseStemFilename(e.Name())
+	if !ok {
+		return false
+	}
+	base, _ := StemMasterBase(e.Name())
+	if p, _, ok := segname.SplitMaster(base); !ok || p != prefix {
+		return false
+	}
+	gap := absDuration(at.Sub(start))
+	return gap <= stemSweepSlack && !nearerOrAsNear(at, gap, others)
 }
 
 // nearerOrAsNear reports whether any of others is at least as close to at as
