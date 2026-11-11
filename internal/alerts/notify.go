@@ -327,28 +327,38 @@ func (n *Notifier) Run(ctx context.Context) {
 			close(n.done)
 			return
 		case ev := <-n.events:
-			rules := n.currentRules()
-			if n.co.Add(rules, ev, n.now()) > 0 {
-				n.bump(func(s *Stats) { s.Coalesced++ })
-			}
-			if n.recorder != nil && IsTimelineType(ev.Type) {
-				select {
-				case n.record <- ev:
-				default:
-					// A full queue loses a timeline row, which is counted
-					// as a dropped event, not a stall.
-					n.bump(func(s *Stats) { s.Dropped++ })
-				}
-			}
+			n.onEvent(ev)
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
 		case <-n.flushKick:
-			// Also serves any request queued before Run started: its kick
-			// is still in the buffer.
-			if at := n.takeFlush(); !at.IsZero() {
-				n.flush(n.currentRules(), at)
-			}
+			n.onFlushKick()
 		}
+	}
+}
+
+// onEvent coalesces one incoming event and offers timeline rows to the recorder.
+func (n *Notifier) onEvent(ev Event) {
+	rules := n.currentRules()
+	if n.co.Add(rules, ev, n.now()) > 0 {
+		n.bump(func(s *Stats) { s.Coalesced++ })
+	}
+	if n.recorder != nil && IsTimelineType(ev.Type) {
+		select {
+		case n.record <- ev:
+		default:
+			// A full queue loses a timeline row, which is counted
+			// as a dropped event, not a stall.
+			n.bump(func(s *Stats) { s.Dropped++ })
+		}
+	}
+}
+
+// onFlushKick flushes the rules whose requested flush time has come.
+func (n *Notifier) onFlushKick() {
+	// Also serves any request queued before Run started: its kick
+	// is still in the buffer.
+	if at := n.takeFlush(); !at.IsZero() {
+		n.flush(n.currentRules(), at)
 	}
 }
 

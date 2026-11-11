@@ -160,13 +160,7 @@ func (c *coalescer) evictIfFull(ruleID int64) {
 // pending and keep absorbing events, so the floor delays a message rather than
 // discarding what it would have said.
 func (c *coalescer) Due(rules []Rule, now time.Time) []Delivery {
-	byRule := map[int64][]*group{}
-	for k, g := range c.groups {
-		if now.Before(g.dueAt) {
-			continue
-		}
-		byRule[k.rule] = append(byRule[k.rule], g)
-	}
+	byRule := c.dueGroupsByRule(now)
 	if len(byRule) == 0 {
 		return nil
 	}
@@ -177,25 +171,48 @@ func (c *coalescer) Due(rules []Rule, now time.Time) []Delivery {
 		if len(pending) == 0 {
 			continue
 		}
-		if last, ok := c.lastSent[r.ID]; ok && now.Sub(last) < r.MinInterval() {
+		if c.inRateFloor(r, now) {
 			continue
 		}
 		sort.Slice(pending, func(i, j int) bool { return pending[i].seq < pending[j].seq })
-
-		d := Delivery{Rule: r}
-		d.prevSent, d.hadSent = c.lastSent[r.ID], hasKey(c.lastSent, r.ID)
-		for _, g := range pending {
-			if len(d.Items) < maxItemsPerDelivery {
-				d.Items = append(d.Items, g.item)
-			} else {
-				d.Overflow++
-			}
-			delete(c.groups, groupKey{rule: r.ID, key: g.item.Event.Key})
-		}
-		c.lastSent[r.ID] = now
-		out = append(out, d)
+		out = append(out, c.takeDelivery(r, pending, now))
 	}
 	return out
+}
+
+// dueGroupsByRule groups the pending groups whose send time has come by rule.
+func (c *coalescer) dueGroupsByRule(now time.Time) map[int64][]*group {
+	byRule := map[int64][]*group{}
+	for k, g := range c.groups {
+		if now.Before(g.dueAt) {
+			continue
+		}
+		byRule[k.rule] = append(byRule[k.rule], g)
+	}
+	return byRule
+}
+
+// inRateFloor reports whether the rule sent too recently to send again yet.
+func (c *coalescer) inRateFloor(r Rule, now time.Time) bool {
+	last, ok := c.lastSent[r.ID]
+	return ok && now.Sub(last) < r.MinInterval()
+}
+
+// takeDelivery builds the rule's delivery from its pending groups, removes those
+// groups from the queue and restarts the rate-limit clock.
+func (c *coalescer) takeDelivery(r Rule, pending []*group, now time.Time) Delivery {
+	d := Delivery{Rule: r}
+	d.prevSent, d.hadSent = c.lastSent[r.ID], hasKey(c.lastSent, r.ID)
+	for _, g := range pending {
+		if len(d.Items) < maxItemsPerDelivery {
+			d.Items = append(d.Items, g.item)
+		} else {
+			d.Overflow++
+		}
+		delete(c.groups, groupKey{rule: r.ID, key: g.item.Event.Key})
+	}
+	c.lastSent[r.ID] = now
+	return d
 }
 
 // Requeue puts a delivery back, for when the sender could not accept it. The
