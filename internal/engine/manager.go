@@ -1114,43 +1114,57 @@ func (m *Manager) lookupStreamKeyE(key string) (rtmpserver.Target, bool, error) 
 		if eng == nil {
 			continue
 		}
-		fo := eng.Settings().Failover
-		if !fo.Enabled || !fo.Backup.Enabled || fo.Backup.Mode != db.IngestRTMP {
-			continue
-		}
-		backup := rtmpserver.Target{
-			SourceID: s.ID,
-			Name:     s.Name + " (backup)",
-			Enabled:  s.Enabled,
-			Backup:   true,
-			// Asked of the listener, exactly as the primary above asks it. This
-			// was an unconditional `true` while the comment directly above
-			// described the opposite contract: the configuration says a backup
-			// subscriber SHOULD exist, never that one does. A backup ingest child
-			// that never spawned or is crash-looping left the standby address
-			// admitting publishers into a stream with no reader -- the same
-			// green-encoder-no-output failure Ready exists to prevent, fixed for
-			// the primary in this same change and missed here.
-			Ready: rtmp != nil && rtmp.HasSubscriber(s.ID, true),
-			// Reaching here already means the engine exists and failover is
-			// configured to use RTMP, which are exactly the conditions under
-			// which a backup subscriber gets spawned. The two `continue`s above
-			// are what would otherwise have made this false.
-			Pending: true,
-		}
-		for _, tok := range s.ValidTokens(now) {
-			targets[tok+backupTokenSuffix] = backup
+		if backup, tokens, ok := backupRTMPTarget(s, eng, rtmp, now); ok {
+			for _, tok := range tokens {
+				targets[tok+backupTokenSuffix] = backup
+			}
 		}
 	}
-	// Copied from the primary rather than rebuilt, so a source's two addresses
-	// cannot disagree about Enabled or Ready.
+	addLegacyKeys(targets, primaries, rows)
+	t, ok := rtmpserver.ConstantTimeLookup(targets)(key)
+	return t, ok, nil
+}
+
+// addLegacyKeys answers each source's pre-one-port stream key with that
+// source's primary target. Copied from the primary rather than rebuilt, so a
+// source's two addresses cannot disagree about Enabled or Ready.
+func addLegacyKeys(targets map[string]rtmpserver.Target, primaries map[int64]rtmpserver.Target, rows []*db.Source) {
 	for id, legacy := range legacyRTMPKeys(rows) {
 		if primary, ok := primaries[id]; ok {
 			targets[legacy] = primary
 		}
 	}
-	t, ok := rtmpserver.ConstantTimeLookup(targets)(key)
-	return t, ok, nil
+}
+
+// backupRTMPTarget is the RTMP listener target for a source's failover standby,
+// and the standby's tokens, which the caller suffixes. ok is false when failover
+// does not run the standby over RTMP.
+func backupRTMPTarget(s *db.Source, eng *Engine, rtmp *rtmpserver.Server, now time.Time) (rtmpserver.Target, []string, bool) {
+	fo := eng.Settings().Failover
+	if !fo.Enabled || !fo.Backup.Enabled || fo.Backup.Mode != db.IngestRTMP {
+		return rtmpserver.Target{}, nil, false
+	}
+	backup := rtmpserver.Target{
+		SourceID: s.ID,
+		Name:     s.Name + " (backup)",
+		Enabled:  s.Enabled,
+		Backup:   true,
+		// Asked of the listener, exactly as the primary in lookupStreamKeyE asks
+		// it. This was an unconditional `true` while the comment in
+		// lookupStreamKeyE described the opposite contract: the configuration says a backup
+		// subscriber SHOULD exist, never that one does. A backup ingest child
+		// that never spawned or is crash-looping left the standby address
+		// admitting publishers into a stream with no reader -- the same
+		// green-encoder-no-output failure Ready exists to prevent, fixed for
+		// the primary in this same change and missed here.
+		Ready: rtmp != nil && rtmp.HasSubscriber(s.ID, true),
+		// Reaching here already means the engine exists and failover is
+		// configured to use RTMP, which are exactly the conditions under
+		// which a backup subscriber gets spawned. The two early exits above
+		// are what would otherwise have made this false.
+		Pending: true,
+	}
+	return backup, s.ValidTokens(now), true
 }
 
 // legacyRTMPKeys maps each source that still answers to its pre-one-port stream
