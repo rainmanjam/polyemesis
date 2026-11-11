@@ -31,6 +31,7 @@ const mirrorLedgerCap = 256
 // the create failed.
 func (m *MirrorLedger) Begin() (done func(pollID string)) {
 	if m == nil {
+		// A nil ledger records nothing, so there is nothing to finish.
 		return func(string) {}
 	}
 	m.mu.Lock()
@@ -43,23 +44,29 @@ func (m *MirrorLedger) Begin() (done func(pollID string)) {
 			defer m.mu.Unlock()
 			m.pending--
 			if id != "" {
-				if m.ids == nil {
-					m.ids = map[string]struct{}{}
-				}
-				if _, ok := m.ids[id]; !ok {
-					m.ids[id] = struct{}{}
-					m.order = append(m.order, id)
-					if len(m.order) > mirrorLedgerCap {
-						delete(m.ids, m.order[0])
-						m.order = m.order[1:]
-					}
-				}
+				m.remember(id)
 			}
 			if m.changed != nil {
 				close(m.changed)
 				m.changed = nil
 			}
 		})
+	}
+}
+
+// remember adds id to the bounded set, evicting the oldest id past the cap.
+// The caller holds m.mu.
+func (m *MirrorLedger) remember(id string) {
+	if m.ids == nil {
+		m.ids = map[string]struct{}{}
+	}
+	if _, ok := m.ids[id]; !ok {
+		m.ids[id] = struct{}{}
+		m.order = append(m.order, id)
+		if len(m.order) > mirrorLedgerCap {
+			delete(m.ids, m.order[0])
+			m.order = m.order[1:]
+		}
 	}
 }
 

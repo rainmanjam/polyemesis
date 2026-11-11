@@ -960,7 +960,7 @@ type seenSet struct {
 	order []string
 }
 
-func newSeenSet(cap int) *seenSet { return &seenSet{cap: cap, set: map[string]struct{}{}} }
+func newSeenSet(capacity int) *seenSet { return &seenSet{cap: capacity, set: map[string]struct{}{}} }
 
 // add reports whether id was new.
 func (s *seenSet) add(id string) bool {
