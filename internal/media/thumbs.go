@@ -343,7 +343,7 @@ func (s SpriteSpec) Interval() float64 {
 		return s.IntervalSeconds
 	}
 	iv := s.IntervalSeconds
-	if n := math.Ceil(s.DurationSeconds / iv); n > MaxSpriteFrames {
+	if math.Ceil(s.DurationSeconds/iv) > MaxSpriteFrames {
 		iv = s.DurationSeconds / MaxSpriteFrames
 	}
 	return iv
