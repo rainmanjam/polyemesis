@@ -127,7 +127,9 @@ def script_update(settings):
     _send_scenes = obs.obs_data_get_bool(settings, "send_scenes")
 
 
-def script_load(settings):
+def script_load(_settings):
+    # OBS calls this positionally with the script's settings; the callback
+    # signature is fixed by OBS, so the parameter stays even though unused.
     global _worker
     _stop.clear()
     _worker = threading.Thread(target=_run, name="polyemesis-obs", daemon=True)
@@ -190,13 +192,15 @@ def _default_context():
         import certifi
 
         candidates.append(("certifi", certifi.where()))
-    except Exception:  # noqa: BLE001 -- certifi is optional
+    # certifi is optional, so its absence is not an error.
+    except Exception:  # noqa: BLE001
         pass
     candidates += [("system", p) for p in SYSTEM_CA_BUNDLES if os.path.isfile(p)]
     for kind, path in candidates:
         try:
             fallback = ssl.create_default_context(cafile=path)
-        except (OSError, ssl.SSLError):
+        # ssl.SSLError is a subclass of OSError, so OSError alone covers both.
+        except OSError:
             continue
         _log_bundle_once(kind, path)
         return fallback
@@ -231,11 +235,14 @@ def _send(body):
         detail = ""
         try:
             detail = json.loads(e.read().decode("utf-8")).get("error", "")
-        except Exception:  # noqa: BLE001 -- best effort, the status is the message
+        # Best effort: the status is the message, so a body we cannot parse is fine.
+        except Exception:  # noqa: BLE001
             pass
         print("polyemesis refused %s: HTTP %d %s" % (body.get("event"), e.code, detail))
         return e.code < 500
-    except (urllib.error.URLError, OSError) as e:
+    # URLError is a subclass of OSError (HTTPError was caught above), so OSError
+    # covers the connection failures.
+    except OSError as e:
         print("polyemesis unreachable for %s: %s" % (body.get("event"), getattr(e, "reason", e)))
         return False
 

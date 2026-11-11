@@ -176,14 +176,16 @@ ARG FFMPEG_VERSION=7:8.0.1-3ubuntu2
 #     Dockerfile for why DejaVu rather than Noto core.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
       "ffmpeg=${FFMPEG_VERSION}" \
-      intel-media-va-driver \
-      i965-va-driver \
-      mesa-va-drivers \
-      libva-drm2 \
-      vainfo \
       fontconfig fonts-dejavu-core \
-      ca-certificates tzdata wget \
+      i965-va-driver \
+      intel-media-va-driver \
+      libva-drm2 \
+      mesa-va-drivers \
+      tzdata \
+      vainfo \
+      wget \
  && rm -rf /var/lib/apt/lists/* \
  # `grep srt` would pass on every build, because `srtp` is always listed. -x
  # makes this a real check that multitrack SRT ingest can work.

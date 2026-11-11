@@ -438,7 +438,10 @@ jobs:
           # Same test metadata-action applies to :latest, applied to the same
           # question: is this ref a prerelease?
           floating=true
-          case "$GITHUB_REF" in *-*) floating=false ;; esac
+          # Only a hyphenated ref is a prerelease. Every other ref (tag push,
+          # workflow_dispatch, schedule) keeps floating=true, so the default is
+          # the success path and must not exit.
+          case "$GITHUB_REF" in *-*) floating=false ;; *) ;; esac
           echo "Floating GPU tags enabled: ${floating} (ref ${GITHUB_REF})"
 
           for variant in cuda vaapi; do
