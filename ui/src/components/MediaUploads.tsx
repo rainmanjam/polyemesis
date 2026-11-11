@@ -211,7 +211,11 @@ export function MediaUploads() {
       <CardContent className="grid gap-3">
         {/* The drop zone doubles as a button: drag-and-drop is undiscoverable
             on its own, and unreachable by keyboard. */}
-        <div
+        {/* A native button: Enter and Space open the picker by themselves, so
+            no key handler or tabIndex is needed. The text runs are spans so
+            the content is phrasing content, as a button requires. */}
+        <button
+          type="button"
           onDragOver={(e) => {
             e.preventDefault();
             setDragging(true);
@@ -219,28 +223,23 @@ export function MediaUploads() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           onClick={() => inputRef.current?.click()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-          }}
-          role="button"
-          tabIndex={0}
           aria-label={t("media.uploadAria")}
           className={[
-            "flex cursor-pointer flex-col items-center justify-center gap-2",
+            "flex w-full cursor-pointer flex-col items-center justify-center gap-2",
             "rounded-md border border-dashed p-6 text-center transition-colors",
             dragging ? "border-primary bg-primary/5" : "border-border",
           ].join(" ")}
         >
           <Upload className="size-5 opacity-70" aria-hidden />
-          <div className="text-sm">
+          <span className="block text-sm">
             {tn("media.dropOrChoose", {
               choose: <span className="underline">{t("media.chooseOne")}</span>,
             })}
-          </div>
-          <div className="text-xs text-muted-foreground">
+          </span>
+          <span className="block text-xs text-muted-foreground">
             {t("media.containerHint")}
-          </div>
-        </div>
+          </span>
+        </button>
         <input
           ref={inputRef}
           type="file"
