@@ -52,8 +52,11 @@ describe("ActivitySourceChips", () => {
     expect(chips[0].textContent).toContain("Token needs a refresh");
     expect(chips[0].textContent).toContain("7 events");
     expect(chips[1].getAttribute("data-source-state")).toBe("live");
-    // keyboard reachable
-    expect(chips.every((c) => c.getAttribute("tabindex") === "0")).toBe(true);
+    // The chips are read-only: every word (state, counts, detail) is visible
+    // text in reading order, asserted above, so a screen reader reaches it
+    // without hover or focus. A tab stop per chip would add stops that do
+    // nothing (Sonar typescript:S6845), so there is none.
+    expect(chips.some((c) => c.hasAttribute("tabindex"))).toBe(false);
   });
 
   it("renders nothing while loading and a note when the read failed", () => {

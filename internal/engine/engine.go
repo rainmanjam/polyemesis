@@ -5361,6 +5361,48 @@ func (e *Engine) LiveCaptions() CaptionStatus {
 	return st
 }
 
+// endedOnItsOwn reports whether the captioner still installed under the wanted
+// signature has stopped running by itself.
+func endedOnItsOwn(cur *transcribe.LiveCaptioner, sig, want string) bool {
+	return cur != nil && want != "" && sig == want && !cur.Running()
+}
+
+// openCaptionVTT opens the sidecar file for a captioner, or returns nil when it
+// cannot be opened.
+func (e *Engine) openCaptionVTT(cfg transcribe.LiveConfig) *transcribe.LiveVTT {
+	vttPath := cfg.VTTPath
+	if vttPath == "" {
+		vttPath = filepath.Join(e.play.Dir(), transcribe.LiveVTTName)
+	}
+	vtt, err := transcribe.OpenLiveVTT(vttPath)
+	if err != nil {
+		// Not fatal. Captions on the WebSocket are the feature; the file is a
+		// convenience, and losing it must not cost the dashboard its captions.
+		e.log.Warn("live captions: no sidecar file", "path", vttPath, "err", err)
+		return nil
+	}
+	return vtt
+}
+
+// attachCaptionRelay takes a relay port and subscribes the captioner to the
+// downstream hub on it. When that fails it has already released the port and
+// reported why, and ok is false.
+func (e *Engine) attachCaptionRelay() (port int, hub *relay.Hub, url string, ok bool) {
+	port, err := e.allocPort()
+	if err != nil {
+		e.captionsFailed(fmt.Sprintf("live captions could not get a relay port: %v", err))
+		return 0, nil, "", false
+	}
+	hub = e.downstreamHub()
+	url, err = hub.Subscribe(captSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		e.captionsFailed(fmt.Sprintf("live captions could not subscribe to the relay: %v", err))
+		return 0, nil, "", false
+	}
+	return port, hub, url, true
+}
+
 // captionerIsCurrent reports whether the captioner, if any, already matches what the intent wants, so a reconcile may
 // leave it alone. The signature alone is not enough: the audio tap or the transcription loop can exit on its own and
 // leave the pointer set, so a captioner that is no longer running is not current.
@@ -5466,7 +5508,7 @@ func (e *Engine) reconcileCaptions() {
 	// captioner's own clock so a reconcile that comes late does not make a quick
 	// death look like a long run.
 	giveUp := false
-	if cur != nil && want != "" && sig == want && !cur.Running() {
+	if endedOnItsOwn(cur, sig, want) {
 		ran, _ := cur.RanFor()
 		e.mu.Lock()
 		giveUp = e.captBudget.exited(ran)
@@ -5501,16 +5543,8 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 
-	port, err := e.allocPort()
-	if err != nil {
-		e.captionsFailed(fmt.Sprintf("live captions could not get a relay port: %v", err))
-		return
-	}
-	hub := e.downstreamHub()
-	url, err := hub.Subscribe(captSubName, port)
-	if err != nil {
-		e.releasePort(port)
-		e.captionsFailed(fmt.Sprintf("live captions could not subscribe to the relay: %v", err))
+	port, hub, url, ok := e.attachCaptionRelay()
+	if !ok {
 		return
 	}
 
@@ -5519,17 +5553,7 @@ func (e *Engine) reconcileCaptions() {
 	// conformant HLS subtitle rendition — see transcribe.LiveVTT. The playout
 	// handler serves it, and the public player polls it and places each cue on
 	// the picture through the epoch the file names.
-	vttPath := cfg.VTTPath
-	if vttPath == "" {
-		vttPath = filepath.Join(e.play.Dir(), transcribe.LiveVTTName)
-	}
-	vtt, err := transcribe.OpenLiveVTT(vttPath)
-	if err != nil {
-		// Not fatal. Captions on the WebSocket are the feature; the file is a
-		// convenience, and losing it must not cost the dashboard its captions.
-		e.log.Warn("live captions: no sidecar file", "path", vttPath, "err", err)
-		vtt = nil
-	}
+	vtt := e.openCaptionVTT(cfg)
 
 	// One route per captioner. It is closed on every path that does not hand it
 	// to e.captRoute, so a run that never starts leaves no timer behind.

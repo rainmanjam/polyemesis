@@ -2406,63 +2406,83 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 // different question asked in a different place.
 func (s *Server) requireScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFrom(r.Context())
-		// NO PRINCIPAL IS A REFUSAL, not a pass. #710.
-		//
-		// requireSession and requireCSRF both fail closed on !ok; this one
-		// passed, which made "mounted without requireAuth, or after it in the
-		// wrong order" a silent loss of scope enforcement rather than a 401.
-		// Every group carrying this today also carries requireAuth, so this
-		// changes no live behaviour -- it removes the affordance.
-		//
-		// The p.token == nil arm below is a DIFFERENT case and is deliberate:
-		// a session principal is not a scoped token, which is what the comment
-		// above this function says.
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "not signed in")
-			return
-		}
-		if p.token == nil || p.token.Scope == db.ScopeAdmin {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// THE OBS SCOPE IS DECIDED HERE AND NEVER FALLS THROUGH. Below this
-		// branch every non-admin scope is read, and read reaches every GET;
-		// an obs token must not, so it gets its own allowlist of one and a
-		// refusal for everything else, reads included.
-		if p.token.Scope == db.ScopeOBS {
-			if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().route(r.Method, rc.RoutePattern(), obsScope) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			writeError(w, http.StatusForbidden,
-				"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
-			return
-		}
-		// Anything that is not admin is treated as read-only, including a
-		// scope string this build does not recognise. A value that arrived
-		// from a newer schema or a hand-edited row should narrow what a
-		// credential can do, never widen it.
-		//
-		// The denials are checked BEFORE the method, because their whole point
-		// is that the method is the wrong question for them.
-		if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().pattern(rc.RoutePattern(), readDenied) {
-			writeError(w, http.StatusForbidden,
-				"this API token is read-only; this endpoint returns a credential or "+
-					"does real work, so it needs a token with the \"admin\" scope")
-			return
-		}
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if rc := chi.RouteContext(r.Context()); rc != nil && s.currentPolicy().pattern(rc.RoutePattern(), readWrite) {
+		s.gateScope(next, w, r)
+	})
+}
+
+// gateScope is requireScope's per-request decision. It is a method rather than
+// part of the closure so the branches are read as one function.
+func (s *Server) gateScope(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	p, ok := principalFrom(r.Context())
+	// NO PRINCIPAL IS A REFUSAL, not a pass. #710.
+	//
+	// requireSession and requireCSRF both fail closed on !ok; this one
+	// passed, which made "mounted without requireAuth, or after it in the
+	// wrong order" a silent loss of scope enforcement rather than a 401.
+	// Every group carrying this today also carries requireAuth, so this
+	// changes no live behaviour -- it removes the affordance.
+	//
+	// The p.token == nil arm below is a DIFFERENT case and is deliberate:
+	// a session principal is not a scoped token, which is what the comment
+	// above requireScope says.
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if p.token == nil || p.token.Scope == db.ScopeAdmin {
+		next.ServeHTTP(w, r)
+		return
+	}
+	// THE OBS SCOPE IS DECIDED HERE AND NEVER FALLS THROUGH. Below this
+	// branch every non-admin scope is read, and read reaches every GET;
+	// an obs token must not, so it gets its own allowlist of one and a
+	// refusal for everything else, reads included.
+	if p.token.Scope == db.ScopeOBS {
+		if s.obsRouteAllowed(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		writeError(w, http.StatusForbidden,
-			"this API token is read-only; mint a token with the \"admin\" scope to make changes")
+			"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
+		return
+	}
+	// Anything that is not admin is treated as read-only, including a
+	// scope string this build does not recognise. A value that arrived
+	// from a newer schema or a hand-edited row should narrow what a
+	// credential can do, never widen it.
+	//
+	// The denials are checked BEFORE the method, because their whole point
+	// is that the method is the wrong question for them.
+	if s.routeMatches(r, func(pattern string) bool { return s.currentPolicy().pattern(pattern, readDenied) }) {
+		writeError(w, http.StatusForbidden,
+			"this API token is read-only; this endpoint returns a credential or "+
+				"does real work, so it needs a token with the \"admin\" scope")
+		return
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		next.ServeHTTP(w, r)
+		return
+	}
+	if s.routeMatches(r, func(pattern string) bool { return s.currentPolicy().pattern(pattern, readWrite) }) {
+		next.ServeHTTP(w, r)
+		return
+	}
+	writeError(w, http.StatusForbidden,
+		"this API token is read-only; mint a token with the \"admin\" scope to make changes")
+}
+
+// obsRouteAllowed reports whether the request's route is on the obs allowlist.
+func (s *Server) obsRouteAllowed(r *http.Request) bool {
+	return s.routeMatches(r, func(pattern string) bool {
+		return s.currentPolicy().route(r.Method, pattern, obsScope)
 	})
+}
+
+// routeMatches asks match about the request's matched route pattern. A request
+// with no route context matches nothing, and match is not called.
+func (s *Server) routeMatches(r *http.Request, match func(pattern string) bool) bool {
+	rc := chi.RouteContext(r.Context())
+	return rc != nil && match(rc.RoutePattern())
 }
 
 func (s *Server) requireCSRF(next http.Handler) http.Handler {

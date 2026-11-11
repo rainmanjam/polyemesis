@@ -1,8 +1,10 @@
 package publish
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,5 +140,39 @@ func TestNormalizeRules(t *testing.T) {
 	}
 	if _, err := Normalize("myspace", Meta{Title: "x"}); err == nil {
 		t.Error("an unknown platform was accepted")
+	}
+}
+
+func TestXTextIsTitleDescriptionHashtags(t *testing.T) {
+	m := Meta{Title: "Title", Description: "Description", Tags: []string{"a", "b"}}
+	if got, want := xTextFor(m), "Title\nDescription\n#a #b"; got != want {
+		t.Fatalf("xTextFor = %q, want %q", got, want)
+	}
+}
+
+func TestXTextSkipsEmptyParts(t *testing.T) {
+	m := Meta{Title: "Title", Tags: []string{"a", "b"}}
+	if got, want := xTextFor(m), "Title\n#a #b"; got != want {
+		t.Fatalf("xTextFor without a description = %q, want %q", got, want)
+	}
+}
+
+func TestXRefusesAPostOverTwoHundredEightyUTF16Units(t *testing.T) {
+	// "T" + "\n" + description + "\n" + "#a" is 5 + len(description) units.
+	ascii := func(n int) string { return strings.Repeat("x", n) }
+	if _, err := Normalize(PlatformX, Meta{Title: "T", Tags: []string{"a"}, Description: ascii(276)}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a 281-unit X post was not refused with ErrInvalid: %v", err)
+	}
+	if _, err := Normalize(PlatformX, Meta{Title: "T", Tags: []string{"a"}, Description: ascii(275)}); err != nil {
+		t.Errorf("a 280-unit X post was refused: %v", err)
+	}
+	// Each emoji is two UTF-16 units, so 137 emoji and one letter is 275 units.
+	// Counting runes instead would accept the 281-unit case below.
+	emoji := strings.Repeat("\U0001F600", 137)
+	if _, err := Normalize(PlatformX, Meta{Title: "T", Tags: []string{"a"}, Description: emoji + "x"}); err != nil {
+		t.Errorf("a 280-unit X post with emoji was refused: %v", err)
+	}
+	if _, err := Normalize(PlatformX, Meta{Title: "T", Tags: []string{"a"}, Description: emoji + "xx"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a 281-unit X post with emoji was not refused with ErrInvalid: %v", err)
 	}
 }

@@ -61,7 +61,7 @@ export function useSaveModel<T>({
   onSave: (draft: T) => Promise<void>;
   equal?: (a: T, b: T) => boolean;
 }): SaveModel<T> {
-  const [draft, setDraftState] = useState<T>(stored);
+  const [draft, setDraft] = useState<T>(stored);
   // The last value the server confirmed: the stored value, or the draft that
   // a successful write just put there. "Dirty" means the draft differs from it.
   const [confirmed, setConfirmed] = useState<T>(stored);
@@ -77,11 +77,11 @@ export function useSaveModel<T>({
   // from a prop change, not in an effect.
   if (!equal(confirmed, stored)) {
     setConfirmed(stored);
-    if (!dirty) setDraftState(stored);
+    if (!dirty) setDraft(stored);
   }
 
-  const setDraft = useCallback((next: T) => {
-    setDraftState(next);
+  const updateDraft = useCallback((next: T) => {
+    setDraft(next);
     setFailed(false);
     setJustSaved(false);
   }, []);
@@ -104,14 +104,14 @@ export function useSaveModel<T>({
   }, [draft, onSave, saving]);
 
   const discard = useCallback(() => {
-    setDraftState(confirmed);
+    setDraft(confirmed);
     setFailed(false);
     setJustSaved(false);
   }, [confirmed]);
 
   return {
     draft,
-    setDraft,
+    setDraft: updateDraft,
     dirty,
     state: saveStateOf({ dirty, saving, failed, justSaved }),
     save,

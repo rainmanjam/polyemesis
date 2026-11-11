@@ -3457,9 +3457,6 @@ export const JOB_MODE_HINT: Record<JobMode, TranslationKey> = {
   manual: "jobs.modeManualHint",
 };
 
-/** Priority is stored as a number; these are the three the API mints. */
-export type JobPriority = number;
-
 export interface Job {
   id: number;
   kind: string;
@@ -3467,7 +3464,8 @@ export interface Job {
   target: string;
   params?: unknown;
   result?: unknown;
-  priority: JobPriority;
+  /** Priority is stored as a number; these are the three the API mints. */
+  priority: number;
   state: JobState;
   unique?: boolean;
   /** Counts STARTS, not failures. */

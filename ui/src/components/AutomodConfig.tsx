@@ -296,14 +296,13 @@ export function AutomodConfig({
             const named = problem("name");
 
             return (
-              <div
+              <fieldset
                 key={rule.id}
                 /* A group with a name, so a screen reader announces WHICH rule
                    these five fields belong to. Six rules on one card is six
                    fields called "Pattern" otherwise. */
-                role="group"
                 aria-label={name || t("automod.unnamedRule")}
-                className="grid gap-2 rounded-md border p-3"
+                className="grid min-w-0 gap-2 rounded-md border p-3"
               >
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="flex min-w-40 flex-1 flex-col gap-1">
@@ -427,7 +426,7 @@ export function AutomodConfig({
                     {t("automod.ruleHoldOverlayNote")}
                   </span>
                 </div>
-              </div>
+              </fieldset>
             );
           })}
 
@@ -480,10 +479,9 @@ export function AutomodConfig({
             </span>
           </div>
 
-          <section
-            role="group"
+          <fieldset
             aria-label={t("automod.primaryTitle")}
-            className="grid gap-2 rounded-md border p-3"
+            className="grid min-w-0 gap-2 rounded-md border p-3"
           >
             <h3 className="text-sm font-medium">{t("automod.primaryTitle")}</h3>
             <p className="text-xs text-muted-foreground">{t("automod.primaryDesc")}</p>
@@ -570,13 +568,12 @@ export function AutomodConfig({
                 </div>
               </div>
             )}
-          </section>
+          </fieldset>
 
           {secondary && (
-            <section
-              role="group"
+            <fieldset
               aria-label={t("automod.secondaryTitle")}
-              className="grid gap-2 rounded-md border p-3"
+              className="grid min-w-0 gap-2 rounded-md border p-3"
             >
               <h3 className="text-sm font-medium">{t("automod.secondaryTitle")}</h3>
               <p className="text-xs text-muted-foreground">{t("automod.secondaryDesc")}</p>
@@ -608,7 +605,7 @@ export function AutomodConfig({
                   </Button>
                 </div>
               )}
-            </section>
+            </fieldset>
           )}
 
           {/* WHICH CHECKER DECIDED, and how often the fallback had to. */}
@@ -628,10 +625,9 @@ export function AutomodConfig({
             </span>
           )}
 
-          <section
-            role="group"
+          <fieldset
             aria-label={t("automod.categoryTitle")}
-            className="grid gap-2 rounded-md border p-3"
+            className="grid min-w-0 gap-2 rounded-md border p-3"
           >
             <h3 className="text-sm font-medium">{t("automod.categoryTitle")}</h3>
             <p className="text-xs text-muted-foreground">{t("automod.categoryDesc")}</p>
@@ -712,7 +708,7 @@ export function AutomodConfig({
                 />
               </div>
             )}
-          </section>
+          </fieldset>
         </CardContent>
       </Card>
 

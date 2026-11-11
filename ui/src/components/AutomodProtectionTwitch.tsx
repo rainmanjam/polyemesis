@@ -54,20 +54,19 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
     };
   }, []);
 
-  // savedKey is read only to re-run the status read after a settings save.
   const refresh = useCallback(async () => {
-    void savedKey;
     if (account == null) return;
     try {
       setStatus(await api.twitchTool.read<TwitchPackStatus>("pack-terms", account || undefined));
     } catch {
       setStatus(null);
     }
-  }, [account, savedKey]);
+  }, [account]);
 
+  // savedKey is read only to re-run the status read after a settings save.
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+  }, [refresh, savedKey]);
 
   async function run(name: string, job: () => Promise<string | Note>) {
     setBusy(name);
@@ -143,14 +142,14 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
       </div>
 
       <div className="grid gap-1">
-        <div role="group" aria-label={t("automod.protTwLevelTitle")} className="flex flex-wrap items-center gap-2">
+        <fieldset aria-label={t("automod.protTwLevelTitle")} className="flex min-w-0 flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="secondary" disabled={busy !== ""} onClick={() => void level(1)}>
             {t("automod.protTwLevel1")}
           </Button>
           <Button type="button" size="sm" variant="secondary" disabled={busy !== ""} onClick={() => void level(2)}>
             {t("automod.protTwLevel2")}
           </Button>
-        </div>
+        </fieldset>
         <p className="text-sm text-muted-foreground">{t("automod.protTwLevelHelp")}</p>
       </div>
 
@@ -163,11 +162,12 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
         <p className="text-sm text-muted-foreground">{t("automod.protTwNamesHelp")}</p>
       </div>
 
-      {note && (
-        <p role={note.kind === "error" ? "alert" : "status"} className={note.kind === "error" ? "text-sm text-destructive" : "text-sm"}>
+      {note?.kind === "error" && (
+        <p role="alert" className="text-sm text-destructive">
           {note.text}
         </p>
       )}
+      {note && note.kind !== "error" && <output className="block text-sm">{note.text}</output>}
     </section>
   );
 }

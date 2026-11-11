@@ -356,7 +356,7 @@ export function ChatMessageMenu({
             title={del.reason || t("chatMenu.deleteTitle")}
             onSelect={() => {
               close();
-              void onDelete(message);
+              onDelete(message);
             }}
           >
             <Trash2 className="mr-2 h-3.5 w-3.5 text-down" />

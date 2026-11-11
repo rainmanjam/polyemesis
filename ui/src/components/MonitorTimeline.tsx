@@ -96,7 +96,7 @@ export function MonitorTimeline() {
             const present = FAMILIES.filter((f) => rows.some((r) => timelineFamily(r.type) === f));
             if (present.length < 2) return null;
             return (
-              <div role="group" aria-label={t("timeline.filterLabel")} className="flex flex-wrap gap-1">
+              <fieldset aria-label={t("timeline.filterLabel")} className="flex min-w-0 flex-wrap gap-1">
                 {[null, ...present].map((f) => (
                   <Button
                     key={f ?? "all"}
@@ -109,7 +109,7 @@ export function MonitorTimeline() {
                     {f === null ? t("timeline.filterAll") : t(FAMILY_LABEL[f])}
                   </Button>
                 ))}
-              </div>
+              </fieldset>
             );
           })()}
           <ol className="flex flex-col gap-1.5">

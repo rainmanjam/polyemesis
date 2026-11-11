@@ -191,15 +191,7 @@ func run(h *hooks) error {
 		cfg.AddrFromFlag = true
 		cfg.AddrDefaulted = false
 	}
-	if *dataDir != "" {
-		cfg.DataDir = *dataDir
-	}
-	if *ffmpegPath != "" {
-		cfg.FFmpeg.Binary = *ffmpegPath
-	}
-	if *ffprobePath != "" {
-		cfg.FFmpeg.Probe = *ffprobePath
-	}
+	applyPathFlags(&cfg, *dataDir, *ffmpegPath, *ffprobePath)
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -456,11 +448,7 @@ func run(h *hooks) error {
 	// gets, plus why each removed message went (chat.Tap), and publishes the
 	// poll events into the same hub. A poll open when the last process
 	// stopped lost its votes with it: marked interrupted, never a result.
-	if n, err := store.InterruptOpenPolls(time.Now()); err != nil {
-		log.Warn("polls: could not mark interrupted polls", "err", err)
-	} else if n > 0 {
-		log.Info("polls: a poll was open when the server stopped; marked interrupted", "count", n)
-	}
+	reportInterruptedPolls(log, store)
 	pollEngine := polls.New(store, streamHub, polls.WithSender(hub), polls.WithLogger(log))
 	hub.SetTap(pollEngine)
 	go pollEngine.Run(ctx)
@@ -592,22 +580,7 @@ func run(h *hooks) error {
 
 	// Only started when we are the ones terminating TLS; behind a proxy the
 	// proxy owns port 80.
-	var redirectServer *http.Server
-	if provider.Enabled() {
-		var bindErr error
-		redirectServer, bindErr = startHTTPHelper(log, cfg, provider)
-		// Told to the API as well as to the log, because the log is not where
-		// anyone is looking. "Nothing is listening on :80" is the single most
-		// common reason Let's Encrypt issuance never completes, and until now
-		// the only record of it was one line at startup — which the operator
-		// reading a certificate warning in a browser three weeks later has no
-		// reason to go back and find. See internal/api/acme_preflight.go.
-		if bindErr != nil {
-			srv.SetHTTPHelperStatus(false, bindErr.Error())
-		} else {
-			srv.SetHTTPHelperStatus(true, "")
-		}
-	}
+	redirectServer := startRedirectHelper(log, cfg, provider, srv)
 
 	if err := reportStartup(log, cfg, provider, store, settings, tools); err != nil {
 		return err
@@ -616,13 +589,7 @@ func run(h *hooks) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		if provider.Enabled() {
-			// Empty paths: the certificate comes from TLSConfig, which is
-			// either the loaded pair or ACME's GetCertificate callback.
-			errCh <- httpServer.ListenAndServeTLS("", "")
-			return
-		}
-		errCh <- httpServer.ListenAndServe()
+		errCh <- listenAndServe(httpServer, provider)
 	}()
 
 	// SIGINT/SIGTERM must tear the FFmpeg children down in order; leaving
@@ -701,6 +668,64 @@ func run(h *hooks) error {
 	reportSurvivingChildren(log, childcensus.Live())
 	log.Info("goodbye")
 	return nil
+}
+
+// applyPathFlags lets the path flags win over the file, so a systemd unit or a
+// container can override paths without rewriting config.yaml. An empty flag
+// leaves the file's value alone.
+func applyPathFlags(cfg *config.Config, dataDir, ffmpegPath, ffprobePath string) {
+	if dataDir != "" {
+		cfg.DataDir = dataDir
+	}
+	if ffmpegPath != "" {
+		cfg.FFmpeg.Binary = ffmpegPath
+	}
+	if ffprobePath != "" {
+		cfg.FFmpeg.Probe = ffprobePath
+	}
+}
+
+// startRedirectHelper starts the :80 redirect when this process terminates TLS,
+// and reports its bind to the API. Only started when we are the ones terminating
+// TLS; behind a proxy the proxy owns port 80.
+func startRedirectHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provider, srv *api.Server) *http.Server {
+	if !provider.Enabled() {
+		return nil
+	}
+	redirectServer, bindErr := startHTTPHelper(log, cfg, provider)
+	// Told to the API as well as to the log, because the log is not where
+	// anyone is looking. "Nothing is listening on :80" is the single most
+	// common reason Let's Encrypt issuance never completes, and until now
+	// the only record of it was one line at startup — which the operator
+	// reading a certificate warning in a browser three weeks later has no
+	// reason to go back and find. See internal/api/acme_preflight.go.
+	if bindErr != nil {
+		srv.SetHTTPHelperStatus(false, bindErr.Error())
+	} else {
+		srv.SetHTTPHelperStatus(true, "")
+	}
+	return redirectServer
+}
+
+// listenAndServe serves the API on the configured address, over TLS when this
+// process terminates it.
+func listenAndServe(httpServer *http.Server, provider *tlsx.Provider) error {
+	if provider.Enabled() {
+		// Empty paths: the certificate comes from TLSConfig, which is
+		// either the loaded pair or ACME's GetCertificate callback.
+		return httpServer.ListenAndServeTLS("", "")
+	}
+	return httpServer.ListenAndServe()
+}
+
+// reportInterruptedPolls marks any poll a previous process left open as
+// interrupted, and logs how many it marked.
+func reportInterruptedPolls(log *slog.Logger, store *db.DB) {
+	if n, err := store.InterruptOpenPolls(time.Now()); err != nil {
+		log.Warn("polls: could not mark interrupted polls", "err", err)
+	} else if n > 0 {
+		log.Info("polls: a poll was open when the server stopped; marked interrupted", "count", n)
+	}
 }
 
 // newTLSProvider turns the config into a certificate provider. Resolution is

@@ -191,21 +191,15 @@ function MessageRow({
   const t = useT();
   const accent = accentFor(m.platform);
   const Icon = accent.icon;
-  const [busy, setBusy] = useState(false);
 
   // Whether this platform can delete at all, asked the same way the context
   // menu asks it. Not `onDelete !== undefined`: the handler being wired says
   // the OPERATOR may delete, never that the PLATFORM can.
   const deletable = chatActionSupport(m.platform, "delete", t);
 
-  const del = async () => {
-    if (!onDelete) return;
-    setBusy(true);
-    try {
-      await onDelete(m);
-    } finally {
-      setBusy(false);
-    }
+  // onDelete only opens the confirm dialog; the delete and its progress happen there.
+  const del = () => {
+    onDelete?.(m);
   };
 
   // Right-click is the moderator's reflex from every other chat tool, and
@@ -330,13 +324,13 @@ function MessageRow({
       {onDelete && (
         <button
           type="button"
-          onClick={() => void del()}
-          disabled={busy || !deletable.ok}
+          onClick={del}
+          disabled={!deletable.ok}
           aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
           title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
           className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex group-focus-within:flex pointer-coarse:flex"
         >
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+          <Trash2 className="h-3 w-3" />
         </button>
       )}
     </>

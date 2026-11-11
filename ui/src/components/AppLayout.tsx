@@ -576,11 +576,10 @@ export function AppLayout({
                 it, so the rail keeps its icons and its grouping. On the mobile
                 drawer the headings always show. */}
             {NAV_SECTIONS.map((section, si) => (
-              <div
+              <fieldset
                 key={section.labelKey}
-                role="group"
                 aria-labelledby={`nav-section-${si}`}
-                className="flex flex-col gap-0.5"
+                className="flex min-w-0 flex-col gap-0.5"
               >
                 {si > 0 && (
                   <div
@@ -704,7 +703,7 @@ export function AppLayout({
                 </Tooltip>
               );
                 })}
-              </div>
+              </fieldset>
             ))}
 
             {/* The theme control on a phone, where the header has no room for it
