@@ -249,6 +249,10 @@ const (
 // and `ready` are excluded for the reason lifecycleTarget.Phase documents --
 // YouTube has no documented path from either to `complete`. X's `prepublished`
 // is included: it is recorded only after this process sent the PUBLISH.
+// lifecycleLogPrefix opens every broadcast lifecycle log line, so an operator
+// can filter the sweep's output with one string.
+const lifecycleLogPrefix = "broadcast lifecycle: "
+
 func endableFromPhase(phase string) bool {
 	switch {
 	case strings.EqualFold(phase, phaseTesting), strings.EqualFold(phase, phaseLive),
@@ -1310,7 +1314,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 		if !maybeLive {
 			c.forgetTarget(d.ID)
 		}
-		c.log.Warn("broadcast lifecycle: "+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+		c.log.Warn(lifecycleLogPrefix+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
 		c.raise(d, "", why)
 		return
 	}
@@ -2189,7 +2193,7 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 		if updated != nil {
 			switch n := updated.Lifecycle.Attempts; {
 			case n == 2:
-				c.log.Warn("broadcast lifecycle: "+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+				c.log.Warn(lifecycleLogPrefix+why, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
 				c.raise(d, broadcastID, why)
 			case n >= lifecycleGiveUpAfter:
 				c.noteRearm(d.ID)
@@ -2253,7 +2257,7 @@ func (c *lifecycleCoordinator) noteFailure(d *db.Destination, broadcastID, detai
 		n = updated.Lifecycle.Attempts
 	}
 	if n == 1 {
-		c.log.Warn("broadcast lifecycle: "+detail, "destination", d.Name,
+		c.log.Warn(lifecycleLogPrefix+detail, "destination", d.Name,
 			"platform", d.Platform, bcAttr(broadcastID))
 		c.raise(d, broadcastID, detail)
 		return
@@ -2285,7 +2289,7 @@ func (c *lifecycleCoordinator) noteReconnectNeeded(d *db.Destination, broadcastI
 	if updated == nil || !first {
 		return
 	}
-	c.log.Warn("broadcast lifecycle: "+detail, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
+	c.log.Warn(lifecycleLogPrefix+detail, "destination", d.Name, "platform", d.Platform, bcAttr(broadcastID))
 	c.raise(d, broadcastID, detail)
 }
 
