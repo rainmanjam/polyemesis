@@ -547,52 +547,56 @@ func ThumbnailArgs(s ThumbnailSpec) []string {
 	var chains []string
 	if wantPoster {
 		labels = append(labels, "[po]")
+		chains = append(chains, posterChain(s.Poster))
 	}
 	if wantContact {
 		labels = append(labels, "[co]")
-	}
-	if wantSprites {
-		labels = append(labels, "[so]")
-	}
-
-	var g strings.Builder
-	fmt.Fprintf(&g, "[0:v]split=%d%s;", len(labels), strings.Join(labels, ""))
-
-	if wantPoster {
-		var chain []string
-		at := s.Poster.PosterSeconds()
-		if at > 0 {
-			// setpts rebases the trimmed segment to zero. Without it the first
-			// frame carries the original timestamp and the image2 muxer, which
-			// takes the first frame it is handed, is unaffected — but the
-			// thumbnail filter's own frame counting is, and a graph that only
-			// works by accident is one that breaks on the next FFmpeg.
-			chain = append(chain, "trim=start="+formatSeconds(at), "setpts=PTS-STARTPTS")
-		}
-		if pf := posterFilter(s.Poster); pf != "" {
-			chain = append(chain, pf)
-		}
-		if len(chain) == 0 {
-			chain = append(chain, "null")
-		}
-		chains = append(chains, "[po]"+strings.Join(chain, ",")+"[pout]")
-	}
-	if wantContact {
 		chains = append(chains, "[co]"+contactFilter(contact, contact.Interval())+"[cout]")
 	}
 	if wantSprites {
+		labels = append(labels, "[so]")
 		color := filterColor(sprites.Color)
 		chains = append(chains, fmt.Sprintf("[so]fps=1/%s,%s,tile=%dx%d:margin=0:padding=0:color=%s[sout]",
 			formatSeconds(sprites.Interval()),
 			fitTileFilter(sprites.TileWidth, sprites.TileHeight, color),
 			sprites.Cols, sprites.Rows, color))
 	}
+
+	var g strings.Builder
+	fmt.Fprintf(&g, "[0:v]split=%d%s;", len(labels), strings.Join(labels, ""))
 	g.WriteString(strings.Join(chains, ";"))
 
 	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, true)
 	args = append(args, ffmpeg.ProgressArgs()...)
 	args = append(args, "-i", s.Input, "-filter_complex", g.String())
+	return append(args, thumbnailOutputArgs(s, contact, sprites, wantPoster, wantContact, wantSprites)...)
+}
 
+// posterChain is the poster's branch of the split graph: an optional trim to the
+// poster's time, then its filter.
+func posterChain(p PosterSpec) string {
+	var chain []string
+	at := p.PosterSeconds()
+	if at > 0 {
+		// setpts rebases the trimmed segment to zero. Without it the first
+		// frame carries the original timestamp and the image2 muxer, which
+		// takes the first frame it is handed, is unaffected — but the
+		// thumbnail filter's own frame counting is, and a graph that only
+		// works by accident is one that breaks on the next FFmpeg.
+		chain = append(chain, "trim=start="+formatSeconds(at), "setpts=PTS-STARTPTS")
+	}
+	if pf := posterFilter(p); pf != "" {
+		chain = append(chain, pf)
+	}
+	if len(chain) == 0 {
+		chain = append(chain, "null")
+	}
+	return "[po]" + strings.Join(chain, ",") + "[pout]"
+}
+
+// thumbnailOutputArgs maps each wanted output out of the split graph to its file.
+func thumbnailOutputArgs(s ThumbnailSpec, contact ContactSheetSpec, sprites SpriteSpec, wantPoster, wantContact, wantSprites bool) []string {
+	var args []string
 	if wantPoster {
 		args = append(args, "-map", "[pout]", flagFramesV, "1",
 			"-q:v", strconv.Itoa(jpegQuality(s.Poster.Quality)), "-f", "image2", s.Poster.Output)
