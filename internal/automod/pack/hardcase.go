@@ -2,6 +2,8 @@ package pack
 
 import (
 	"bytes"
+	// Blank import: the //go:embed directive below needs package embed linked in,
+	// but the file itself never refers to it by name.
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -230,15 +232,7 @@ func (h *HardCase) Signals(f Forms, in SignalInput) []Signal {
 	}
 	padded := " " + f.Pack + " "
 	at := strings.IndexByte(f.NFKC, '@') >= 0
-	addressed := in.Reply || at
-	if !addressed {
-		for _, t := range f.Tokens {
-			if _, ok := h.address[t]; ok {
-				addressed = true
-				break
-			}
-		}
-	}
+	addressed := h.addressedBy(in.Reply || at, f.Tokens)
 	if addressed && h.lex["violence"].has(f, padded) {
 		out = append(out, SignalThreat)
 	}
@@ -255,6 +249,20 @@ func (h *HardCase) Signals(f Forms, in SignalInput) []Signal {
 		out = append(out, SignalInsultReply)
 	}
 	return out
+}
+
+// addressedBy reports whether the message is aimed at someone: it is direct (a
+// reply or an '@'), or one of its tokens is a known address.
+func (h *HardCase) addressedBy(direct bool, tokens []string) bool {
+	if direct {
+		return true
+	}
+	for _, t := range tokens {
+		if _, ok := h.address[t]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // substitutions counts the characters the pack form had to rewrite to read the
@@ -305,6 +313,22 @@ func (h *HardCase) cutTerm(field string) bool {
 		return false
 	}
 	var buf [maxCutTerm]byte
+	n, ok := foldCutTerm(field, &buf)
+	if !ok {
+		return false
+	}
+	if n < h.minTerm || n > h.maxTerm {
+		return false
+	}
+	_, ok = h.terms[string(buf[:n])]
+	return ok
+}
+
+// foldCutTerm writes the leet-folded letters of field into buf, skipping its
+// '.' and '/' separators and any format characters. It reports how many bytes
+// it wrote, and false when field holds a rune that is not a leet letter or the
+// text outgrows buf. It allocates nothing: buf is the caller's stack array.
+func foldCutTerm(field string, buf *[maxCutTerm]byte) (int, bool) {
 	n := 0
 	for _, r := range field {
 		if r == '.' || r == '/' {
@@ -312,23 +336,23 @@ func (h *HardCase) cutTerm(field string) bool {
 		}
 		b, ok := leetByte(r)
 		if !ok {
-			if r >= utf8.RuneSelf && unicode.Is(unicode.Cf, r) {
+			if isFormatRune(r) {
 				continue
 			}
-			return false
+			return 0, false
 		}
 		if n == len(buf) {
-			return false
+			return 0, false
 		}
 		buf[n] = b
 		n++
 	}
-	if n < h.minTerm || n > h.maxTerm {
-		return false
-	}
-	_, ok := h.terms[string(buf[:n])]
-	return ok
+	return n, true
 }
+
+// isFormatRune reports whether r is a non-ASCII format character (Cf), such as
+// a zero-width joiner.
+func isFormatRune(r rune) bool { return r >= utf8.RuneSelf && unicode.Is(unicode.Cf, r) }
 
 // leetByte folds one rune to the lower-case ASCII letter it reads as, or
 // reports that it is not one: the non-allocating counterpart of Fold for the
@@ -416,50 +440,74 @@ func (h *HardCase) fieldSubstitutions(field string) int {
 	// Walk word by word: a word is a run of letters, digits, marks and the
 	// symbols leet uses, plus any format characters inside it.
 	rs := []rune(field)
-	isCf := func(r rune) bool { return r >= utf8.RuneSelf && unicode.Is(unicode.Cf, r) }
 	for i := 0; i < len(rs); {
 		if !isWordRune(rs, i) {
 			i++
 			continue
 		}
-		j := i
-		for j < len(rs) && (isWordRune(rs, j) || isCf(rs[j])) {
-			j++
-		}
-		word := rs[i:j]
-		letters, ascii := 0, false
-		for _, c := range word {
-			if unicode.IsLetter(c) {
-				letters++
-				if c < utf8.RuneSelf {
-					ascii = true
-				}
-			}
-		}
-		leets := leetRuns(word)
-		for _, c := range word {
-			switch {
-			case isCf(c):
-				// Inside a word only: a zero-width joiner between emoji is not
-				// a word, and is how every family emoji is built.
-				n++
-			case c >= utf8.RuneSelf:
-				// A look-alike counts only in a word that ALSO has an ASCII
-				// letter: mixed script is the tell. A plain Russian, Ukrainian
-				// or Greek sentence maps nearly every letter to a Latin one and
-				// is ordinary chat. A Latin letter with a mark (Turkish dotless
-				// i, Polish s with an acute, or l with a stroke) is spelling, not
-				// a disguise; a Latin-script CONFUSABLE (U+0251 for a, U+0261
-				// for g) is exactly the disguise.
-				if _, ok := skeletonOf(c); ok && ascii && !alphabetLetter(c) {
-					n++
-				}
-			}
-		}
-		if letters >= 2 && (leets.inside() || (leets.count > 0 && h.isTerm(word))) {
-			n += leets.count
-		}
+		j := wordEnd(rs, i)
+		n += h.wordSubstitutions(rs[i:j])
 		i = j
+	}
+	return n
+}
+
+// wordEnd returns the index just past the word that starts at i: a run of word
+// runes, with format characters allowed inside it.
+func wordEnd(rs []rune, i int) int {
+	j := i
+	for j < len(rs) && (isWordRune(rs, j) || isFormatRune(rs[j])) {
+		j++
+	}
+	return j
+}
+
+// wordSubstitutions counts the substitutions in one word.
+func (h *HardCase) wordSubstitutions(word []rune) int {
+	letters, ascii := letterStats(word)
+	leets := leetRuns(word)
+	n := lookalikeCount(word, ascii)
+	if letters >= 2 && (leets.inside() || (leets.count > 0 && h.isTerm(word))) {
+		n += leets.count
+	}
+	return n
+}
+
+// letterStats counts the letters in a word, and whether any is ASCII.
+func letterStats(word []rune) (letters int, ascii bool) {
+	for _, c := range word {
+		if unicode.IsLetter(c) {
+			letters++
+			if c < utf8.RuneSelf {
+				ascii = true
+			}
+		}
+	}
+	return letters, ascii
+}
+
+// lookalikeCount counts the format characters and confusable look-alikes in a
+// word. A look-alike counts only in a word that ALSO has an ASCII letter (ascii):
+// mixed script is the tell.
+func lookalikeCount(word []rune, ascii bool) int {
+	n := 0
+	for _, c := range word {
+		switch {
+		case isFormatRune(c):
+			// Inside a word only: a zero-width joiner between emoji is not
+			// a word, and is how every family emoji is built.
+			n++
+		case c >= utf8.RuneSelf:
+			// A plain Russian, Ukrainian
+			// or Greek sentence maps nearly every letter to a Latin one and
+			// is ordinary chat. A Latin letter with a mark (Turkish dotless
+			// i, Polish s with an acute, or l with a stroke) is spelling, not
+			// a disguise; a Latin-script CONFUSABLE (U+0251 for a, U+0261
+			// for g) is exactly the disguise.
+			if _, ok := skeletonOf(c); ok && ascii && !alphabetLetter(c) {
+				n++
+			}
+		}
 	}
 	return n
 }
@@ -505,21 +553,23 @@ func leetRuns(word []rune) leetShape {
 		// A run is every non-letter in a row, so "2024" is one run; only the
 		// characters leet actually uses are counted.
 		is := !unicode.IsLetter(c) && !unicode.IsMark(c)
-		if is {
-			if leet(c) != c {
-				s.count++
-			}
-			if !prev {
-				s.runs++
-				if k == 0 {
-					s.atEdge = true
-				}
-			}
-			if k == len(word)-1 {
+		if !is {
+			prev = false
+			continue
+		}
+		if leet(c) != c {
+			s.count++
+		}
+		if !prev {
+			s.runs++
+			if k == 0 {
 				s.atEdge = true
 			}
 		}
-		prev = is
+		if k == len(word)-1 {
+			s.atEdge = true
+		}
+		prev = true
 	}
 	return s
 }

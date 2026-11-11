@@ -276,43 +276,61 @@ func (c *Checker) inspect(m Message, f Forms) []Hit {
 
 func (c *Checker) doxx(hits []Hit, f Forms) []Hit {
 	s := f.NFKC
-	digits, hasAt, colons, dots, brackets := 0, false, 0, 0, false
-	for _, r := range s {
-		switch {
-		case unicode.IsDigit(r):
-			digits++
-		case r == '@':
-			hasAt = true
-		case r == ':':
-			colons++
-		case r == '.':
-			dots++
-		case r == ']' || r == ')':
-			brackets = true
-		}
-	}
+	t := tallyDoxx(s)
 	// Prechecks, so a plain line costs a pass over its runes and nothing more:
 	// an address needs digits and three dots, a v6 address two colons ("https:"
 	// has one), and a spelled-out email a closing bracket.
-	if c.on[GroupPhone] && digits >= 8 && hasPhone(s, c.cfg.PhoneMinSeps) {
+	if c.on[GroupPhone] && t.digits >= 8 && hasPhone(s, c.cfg.PhoneMinSeps) {
 		hits = c.add(hits, GroupPhone, "nfkc", "phone number")
 	}
-	if c.on[GroupEmail] && (hasAt || brackets && strings.Contains(strings.ToLower(s), "at")) {
-		for _, d := range emailDomains(s) {
-			if !domainAllowed(d, c.cfg.AllowDomains) {
-				hits = c.add(hits, GroupEmail, "nfkc", "email address")
-				break
-			}
-		}
-	}
-	if c.on[GroupIPv4] && digits >= 4 && dots >= 3 && hasIPv4(s, c.cfg.Reserved) {
+	hits = c.doxxEmail(hits, s, t)
+	if c.on[GroupIPv4] && t.digits >= 4 && t.dots >= 3 && hasIPv4(s, c.cfg.Reserved) {
 		hits = c.add(hits, GroupIPv4, "nfkc", "IP address")
 	}
-	if c.on[GroupIPv6] && colons >= 2 && hasIPv6(s, c.cfg.Reserved) {
+	if c.on[GroupIPv6] && t.colons >= 2 && hasIPv6(s, c.cfg.Reserved) {
 		hits = c.add(hits, GroupIPv6, "nfkc", "IP address")
 	}
-	if c.on[GroupAddress] && digits >= 1 && hasAddress(s) {
+	if c.on[GroupAddress] && t.digits >= 1 && hasAddress(s) {
 		hits = c.add(hits, GroupAddress, "nfkc", "street address")
+	}
+	return hits
+}
+
+// doxxTally is what one pass over a message counts for the doxx prechecks.
+type doxxTally struct {
+	digits, colons, dots int
+	hasAt, brackets      bool
+}
+
+// tallyDoxx counts the characters the doxx prechecks look at, in one pass.
+func tallyDoxx(s string) doxxTally {
+	var t doxxTally
+	for _, r := range s {
+		switch {
+		case unicode.IsDigit(r):
+			t.digits++
+		case r == '@':
+			t.hasAt = true
+		case r == ':':
+			t.colons++
+		case r == '.':
+			t.dots++
+		case r == ']' || r == ')':
+			t.brackets = true
+		}
+	}
+	return t
+}
+
+// doxxEmail adds an email hit when a domain in the message is not allowed.
+func (c *Checker) doxxEmail(hits []Hit, s string, t doxxTally) []Hit {
+	if !c.on[GroupEmail] || !(t.hasAt || t.brackets && strings.Contains(strings.ToLower(s), "at")) {
+		return hits
+	}
+	for _, d := range emailDomains(s) {
+		if !domainAllowed(d, c.cfg.AllowDomains) {
+			return c.add(hits, GroupEmail, "nfkc", "email address")
+		}
 	}
 	return hits
 }
@@ -350,15 +368,28 @@ func (c *Checker) shape(hits []Hit, m Message, f Forms) []Hit {
 	if c.on[GroupEmote] && EmoteWall(f.NFKC, m.EmoteCount, lim) {
 		hits = c.add(hits, GroupEmote, "raw", "emote wall")
 	}
+	hits = c.shapeCounts(hits, m, lim)
+	return c.shapeCaps(hits, m, f)
+}
+
+// shapeCounts reports mass mentions and too many links.
+func (c *Checker) shapeCounts(hits []Hit, m Message, lim ShapeLimits) []Hit {
 	if c.on[GroupMentions] && lim.MaxMentions > 0 && Mentions(m.Text) > lim.MaxMentions {
 		hits = c.add(hits, GroupMentions, "raw", "mass mentions")
 	}
 	if c.on[GroupLinks] && lim.MaxLinks > 0 && Links(m.Text) > lim.MaxLinks {
 		hits = c.add(hits, GroupLinks, "raw", "too many links")
 	}
-	// Shouting is not reported on a character flood (the flood is the finding)
-	// or on a message of nothing but emotes, whose names are capitalised by
-	// nature.
+	return hits
+}
+
+// shapeCaps reports shouting.
+//
+// Shouting is not reported on a character flood (the flood is the finding)
+// or on a message of nothing but emotes, whose names are capitalised by
+// nature.
+func (c *Checker) shapeCaps(hits []Hit, m Message, f Forms) []Hit {
+	lim := c.cfg.Shape
 	charHit := false
 	for _, h := range hits {
 		charHit = charHit || h.Group == GroupChar

@@ -208,7 +208,21 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) []Finding {
 	if strike > int(maxRung) {
 		strike = int(maxRung)
 	}
-	floor := -1 // actionRank of the worst armed action another checker already asks for
+	floor := e.armedFloor(p, fs)
+	best, bestRung := e.pickLadderRung(p, fs, strike, floor)
+	if best >= 0 {
+		fs[best].Action = bestRung.Action()
+		if bestRung == RungTimeout {
+			fs[best].TimeoutSeconds = e.ladder.timeoutSeconds()
+		}
+	}
+	return e.keepDelete(p, fs)
+}
+
+// armedFloor is the actionRank of the worst armed action another checker
+// already asks for, or -1 when none is armed.
+func (e *Engine) armedFloor(p db.Platform, fs []Finding) int {
+	floor := -1
 	for _, f := range fs {
 		if f.Checker == CheckerProtection {
 			continue
@@ -217,6 +231,13 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) []Finding {
 			floor = r
 		}
 	}
+	return floor
+}
+
+// pickLadderRung returns the index of the held protection finding that climbs,
+// and the rung it reaches. The index is -1 when no held finding can climb above
+// floor.
+func (e *Engine) pickLadderRung(p db.Platform, fs []Finding, strike, floor int) (int, Rung) {
 	best, bestRung := -1, RungHold
 	for i := range fs {
 		f := &fs[i]
@@ -227,22 +248,23 @@ func (e *Engine) climb(p db.Platform, fs []Finding, strike int) []Finding {
 		if c := e.ladder.ceilingOf(*f); c < want {
 			want = c
 		}
-		for r := want; r > RungHold; r-- {
-			if e.matrix.Allows(e.caps, Key{Platform: p, Action: r.Action(), Checker: CheckerProtection}) {
-				if r > bestRung && actionRank(r.Action()) > floor {
-					best, bestRung = i, r
-				}
-				break
-			}
+		if r, ok := e.highestAllowedRung(p, want); ok && r > bestRung && actionRank(r.Action()) > floor {
+			best, bestRung = i, r
 		}
 	}
-	if best >= 0 {
-		fs[best].Action = bestRung.Action()
-		if bestRung == RungTimeout {
-			fs[best].TimeoutSeconds = e.ladder.timeoutSeconds()
+	return best, bestRung
+}
+
+// highestAllowedRung walks down from want and returns the first rung above
+// RungHold that the matrix allows for the protection checker. ok is false when
+// none is allowed.
+func (e *Engine) highestAllowedRung(p db.Platform, want Rung) (Rung, bool) {
+	for r := want; r > RungHold; r-- {
+		if e.matrix.Allows(e.caps, Key{Platform: p, Action: r.Action(), Checker: CheckerProtection}) {
+			return r, true
 		}
 	}
-	return e.keepDelete(p, fs)
+	return RungHold, false
 }
 
 // keepDelete restores the message removal a sanction would otherwise cost.

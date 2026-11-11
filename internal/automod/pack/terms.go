@@ -38,48 +38,31 @@ type AddTerm struct {
 	Tier     string
 }
 
+// termBuilder fills a termIndex. put is the one place a term enters the index,
+// so the suppression and stronger-entry rules live in a single spot.
+type termBuilder struct {
+	ix         *termIndex
+	suppressed map[string]bool
+	categories map[string]bool
+}
+
 func buildTermIndex(p *Pack, add []AddTerm, allow []string, categories map[string]bool) *termIndex {
-	ix := &termIndex{
-		exact:    map[string]termRef{},
-		despaced: map[string]termRef{},
-		single:   map[string]termRef{},
-		grams:    1,
+	b := &termBuilder{
+		ix: &termIndex{
+			exact:    map[string]termRef{},
+			despaced: map[string]termRef{},
+			single:   map[string]termRef{},
+			grams:    1,
+		},
+		suppressed: map[string]bool{},
+		categories: categories,
 	}
-	suppressed := map[string]bool{}
 	for _, a := range allow {
-		suppressed[Fold(a)] = true
-	}
-	put := func(term, category, tier string, except []string) {
-		if term == "" || suppressed[term] || !categories[category] {
-			return
-		}
-		ref := termRef{category: category, tier: tier}
-		if len(except) > 0 {
-			ref.except = make(map[string]bool, len(except))
-			for _, x := range except {
-				ref.except[x] = true
-			}
-		}
-		if old, ok := ix.exact[term]; ok && !stronger(ref, old) {
-			return
-		}
-		ix.exact[term] = ref
-		if n := strings.Count(term, " ") + 1; n > ix.grams && n <= maxGram {
-			ix.grams = n
-		}
-		flat := collapse(strings.ReplaceAll(term, " ", ""))
-		if strings.ContainsRune(term, ' ') || utf8.RuneCountInString(flat) >= 4 {
-			ix.despaced[flat] = ref
-		}
-		if category == CategoryHate && tier == TierSevere && !strings.ContainsRune(term, ' ') {
-			if s := collapseToOne(term); utf8.RuneCountInString(s) >= 4 {
-				ix.single[s] = ref
-			}
-		}
+		b.suppressed[Fold(a)] = true
 	}
 	if p != nil {
 		for _, e := range p.Entries {
-			put(e.Term, e.Category, e.Tier, e.Except)
+			b.put(e.Term, e.Category, e.Tier, e.Except)
 		}
 	}
 	for _, a := range add {
@@ -91,9 +74,47 @@ func buildTermIndex(p *Pack, add []AddTerm, allow []string, categories map[strin
 		if cat == "" {
 			cat = CategoryHate
 		}
-		put(Fold(a.Term), cat, tier, nil)
+		b.put(Fold(a.Term), cat, tier, nil)
 	}
-	return ix
+	return b.ix
+}
+
+// put adds one term to the index, unless it is suppressed, its category is off,
+// or an existing entry for it is at least as strong.
+func (b *termBuilder) put(term, category, tier string, except []string) {
+	if term == "" || b.suppressed[term] || !b.categories[category] {
+		return
+	}
+	ix := b.ix
+	ref := termRef{category: category, tier: tier, except: exceptSet(except)}
+	if old, ok := ix.exact[term]; ok && !stronger(ref, old) {
+		return
+	}
+	ix.exact[term] = ref
+	if n := strings.Count(term, " ") + 1; n > ix.grams && n <= maxGram {
+		ix.grams = n
+	}
+	flat := collapse(strings.ReplaceAll(term, " ", ""))
+	if strings.ContainsRune(term, ' ') || utf8.RuneCountInString(flat) >= 4 {
+		ix.despaced[flat] = ref
+	}
+	if category == CategoryHate && tier == TierSevere && !strings.ContainsRune(term, ' ') {
+		if s := collapseToOne(term); utf8.RuneCountInString(s) >= 4 {
+			ix.single[s] = ref
+		}
+	}
+}
+
+// exceptSet is the set of except words, or nil when there are none.
+func exceptSet(except []string) map[string]bool {
+	if len(except) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(except))
+	for _, x := range except {
+		m[x] = true
+	}
+	return m
 }
 
 // stronger reports whether a outranks b: hate over profanity, severe over
@@ -141,51 +162,69 @@ type termHit struct {
 // letter. Each later form is a weaker claim, so each is tried only when the
 // earlier ones found nothing.
 func (ix *termIndex) lookup(f Forms) (termHit, bool) {
+	if hit, ok := ix.packHit(f); ok {
+		return hit, true
+	}
+	if hit, ok := ix.despacedHit(f); ok {
+		return hit, true
+	}
+	return ix.stretchedHit(f)
+}
+
+// packHit finds the strongest whole-token n-gram of the pack form.
+func (ix *termIndex) packHit(f Forms) (termHit, bool) {
 	var best termHit
 	found := false
-	consider := func(ref termRef, form string) {
-		if !found || stronger(ref, best.ref) {
-			best, found = termHit{ref: ref, form: form}, true
-		}
-	}
-
 	pack := f.Pack
 	pos := 0
 	for i := range f.Tokens {
-		end := pos
 		for n := 1; n <= ix.grams && i+n <= len(f.Tokens); n++ {
-			end = pos
-			for k := 0; k < n; k++ {
-				end += len(f.Tokens[i+k])
-				if k > 0 {
-					end++
-				}
-			}
-			if ref, ok := ix.exact[pack[pos:end]]; ok {
-				consider(ref, "pack")
+			end := ngramEnd(f.Tokens, i, n, pos)
+			if ref, ok := ix.exact[pack[pos:end]]; ok && (!found || stronger(ref, best.ref)) {
+				best, found = termHit{ref: ref, form: "pack"}, true
 			}
 		}
 		pos += len(f.Tokens[i]) + 1
 	}
-	if found {
-		return best, true
-	}
+	return best, found
+}
 
+// ngramEnd is the byte offset just past the n tokens from i in pack form, given
+// that token i starts at offset pos.
+func ngramEnd(tokens []string, i, n, pos int) int {
+	end := pos
+	for k := 0; k < n; k++ {
+		end += len(tokens[i+k])
+		if k > 0 {
+			end++
+		}
+	}
+	return end
+}
+
+// despacedHit finds a term with its spaces removed: the whole despaced form, or
+// a letter-spaced run inside the message.
+func (ix *termIndex) despacedHit(f Forms) (termHit, bool) {
 	if f.Despaced != "" {
 		if ref, ok := ix.despaced[f.Despaced]; ok {
 			return termHit{ref: ref, form: "despaced"}, true
 		}
 	}
-	// A letter-spaced stretch inside a longer message: "look at this s l u r".
-	for i := 0; i < len(f.Tokens); {
-		if utf8.RuneCountInString(f.Tokens[i]) != 1 {
+	return ix.letterSpacedHit(f.Tokens)
+}
+
+// letterSpacedHit looks for a letter-spaced stretch inside a longer message:
+// "look at this s l u r".
+func (ix *termIndex) letterSpacedHit(tokens []string) (termHit, bool) {
+	for i := 0; i < len(tokens); {
+		if utf8.RuneCountInString(tokens[i]) != 1 {
 			i++
 			continue
 		}
 		j := i
 		var b strings.Builder
-		for j < len(f.Tokens) && utf8.RuneCountInString(f.Tokens[j]) == 1 {
-			b.WriteString(f.Tokens[j])
+		for j < len(tokens) && utf8.RuneCountInString(tokens[j]) == 1 {
+			b.WriteString(tokens[j])
 			j++
 		}
 		if j-i >= 3 {
@@ -195,7 +234,12 @@ func (ix *termIndex) lookup(f Forms) (termHit, bool) {
 		}
 		i = j
 	}
+	return termHit{}, false
+}
 
+// stretchedHit finds, for severe single-token terms only, a stretched token
+// collapsed to one letter.
+func (ix *termIndex) stretchedHit(f Forms) (termHit, bool) {
 	for i, t := range f.Tokens {
 		if i >= len(f.Stretch) || !f.Stretch[i] {
 			continue

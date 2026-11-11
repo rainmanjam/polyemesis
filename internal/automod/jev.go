@@ -359,20 +359,9 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, j.cfg.Timeout)
 	defer cancel()
 
-	buf, err := json.Marshal(jevRequestBody(j.cfg.Model, j.cfg.Instruction, text, j.cfg.Compact, j.cfg.SelfHarm))
+	req, err := j.newRequest(ctx, text)
 	if err != nil {
 		return JevVerdict{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.cfg.Endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return JevVerdict{}, redactEndpoint(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if j.cfg.APIKey != "" {
-		if err := keyBound(j.cfg.Endpoint, j.cfg.KeyBinding); err != nil {
-			return JevVerdict{}, err
-		}
-		req.Header.Set("Authorization", "Bearer "+j.cfg.APIKey)
 	}
 	resp, err := j.client.Do(req)
 	if err != nil {
@@ -384,19 +373,52 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 		return JevVerdict{}, err
 	}
 
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 529 {
-		pause := jevDefaultPause
-		if s, perr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); perr == nil && s > 0 {
-			pause = min(time.Duration(s)*time.Second, jevMaxPause)
-		}
-		j.mu.Lock()
-		j.pausedUntil = j.now().Add(pause)
-		j.mu.Unlock()
-	}
+	j.notePause(resp)
 	if resp.StatusCode != http.StatusOK {
 		return JevVerdict{}, j.statusError(resp.StatusCode, raw)
 	}
+	return parseJevVerdict(raw)
+}
 
+// newRequest builds the POST for one message. The key is attached only when
+// one is configured, and only after keyBound has confirmed the endpoint may
+// receive it.
+func (j *Jev) newRequest(ctx context.Context, text string) (*http.Request, error) {
+	buf, err := json.Marshal(jevRequestBody(j.cfg.Model, j.cfg.Instruction, text, j.cfg.Compact, j.cfg.SelfHarm))
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.cfg.Endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return nil, redactEndpoint(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if j.cfg.APIKey != "" {
+		if err := keyBound(j.cfg.Endpoint, j.cfg.KeyBinding); err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+j.cfg.APIKey)
+	}
+	return req, nil
+}
+
+// notePause records a rate-limit pause when the far end asks for one: a 429
+// or the 529 overload status, honouring Retry-After up to jevMaxPause.
+func (j *Jev) notePause(resp *http.Response) {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != 529 {
+		return
+	}
+	pause := jevDefaultPause
+	if s, perr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); perr == nil && s > 0 {
+		pause = min(time.Duration(s)*time.Second, jevMaxPause)
+	}
+	j.mu.Lock()
+	j.pausedUntil = j.now().Add(pause)
+	j.mu.Unlock()
+}
+
+// parseJevVerdict reads a 200 reply into a verdict, or refuses it.
+func parseJevVerdict(raw []byte) (JevVerdict, error) {
 	var out struct {
 		Model   string `json:"model"`
 		Answers map[string]struct {
