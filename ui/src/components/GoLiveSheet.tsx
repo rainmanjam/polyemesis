@@ -71,6 +71,23 @@ function processIdentity(d: DestStatus | undefined): string {
   return `${p?.state ?? "none"}|${p?.startedAt ?? ""}|${p?.restarts ?? ""}`;
 }
 
+// Singular or plural message keys, chosen by count.
+function failedCountKey(failed: number) {
+  return failed === 1 ? "i18nSweep.failedCountOne" : "i18nSweep.failedCount";
+}
+
+function stillCountKey(still: number) {
+  return still === 1 ? "golive.stillStartingOne" : "golive.stillStarting";
+}
+
+function progressLineKey(phase: string | null) {
+  return phase === "done" ? "golive.progressDone" : "golive.progressStarting";
+}
+
+function goCountKey(readyCount: number) {
+  return readyCount === 1 ? "golive.goCountOne" : "golive.goCount";
+}
+
 const CHIP: Record<Progress, { key: TranslationKey; variant: "live" | "armed" | "down" | "warn" | "outline" }> = {
   live: { key: "golive.live", variant: "live" },
   starting: { key: "golive.starting", variant: "armed" },
@@ -273,13 +290,13 @@ export function GoLiveSheet({
     return () => clearTimeout(timer);
   }, [phase]);
 
-  const failedKey = tally.failed === 1 ? "i18nSweep.failedCountOne" : "i18nSweep.failedCount";
+  const failedKey = failedCountKey(tally.failed);
   const failedPart = tally.failed > 0 ? t(failedKey, { count: tally.failed }) : null;
   const still = tally.total - tally.settled;
-  const stillKey = still === 1 ? "golive.stillStartingOne" : "golive.stillStarting";
+  const stillKey = stillCountKey(still);
   const stillPart = run?.timedOut && still > 0 ? t(stillKey, { count: still }) : null;
-  const progressKey = phase === "done" ? "golive.progressDone" : "golive.progressStarting";
-  const goKey = readyNow.length === 1 ? "golive.goCountOne" : "golive.goCount";
+  const progressKey = progressLineKey(phase);
+  const goKey = goCountKey(readyNow.length);
   const progressLabel = run
     ? [
         t(progressKey, {
