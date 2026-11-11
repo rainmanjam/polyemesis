@@ -307,11 +307,11 @@ func (d *NearDup) capLocked() {
 // author paid a sort of all of it under the detector's mutex, on the adapter
 // goroutine, which is what a bot raid is. Trimming a tenth below the cap
 // spreads one sort over the next cap/10 arrivals instead.
-func LowWater(max int) int {
-	if max < 10 {
-		return max
+func LowWater(limit int) int {
+	if limit < 10 {
+		return limit
 	}
-	return max - max/10
+	return limit - limit/10
 }
 
 // ---------------------------------------------------------------------- raid
