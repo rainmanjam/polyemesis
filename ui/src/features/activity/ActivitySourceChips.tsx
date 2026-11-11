@@ -50,10 +50,9 @@ export function ActivitySourceChips({
             return (
               <li
                 key={`${s.platform}-${s.account ?? ""}`}
-                tabIndex={0}
                 title={s.detail || undefined}
                 data-source-state={s.state}
-                className="flex max-w-full flex-col gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex max-w-full flex-col gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-sm"
               >
                 <span className="flex flex-wrap items-center gap-1.5">
                   <StatusDot tone={TONE[s.state] ?? "idle"} />
