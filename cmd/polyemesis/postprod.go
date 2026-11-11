@@ -91,7 +91,21 @@ func (p postProd) waitWithin(ctx context.Context) bool {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, settings db.Settings, env startupenv.Env, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
+// postProdArgs is the input to startPostProd. The context stays a plain
+// parameter; everything else is grouped here.
+type postProdArgs struct {
+	log      *slog.Logger
+	cfg      config.Config
+	settings db.Settings
+	env      startupenv.Env
+	store    *db.DB
+	box      *secrets.Box
+	eng      *engine.Manager
+	tools    *ffmpeg.Tools
+}
+
+func startPostProd(ctx context.Context, a postProdArgs) postProd {
+	log, cfg, settings, env, store, box, eng, tools := a.log, a.cfg, a.settings, a.env, a.store, a.box, a.eng, a.tools
 
 	// Whisper is detected once, at startup, and a machine without it is an
 	// ordinary machine. Every method on *Tools is nil-receiver safe precisely so
@@ -132,7 +146,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, set
 	// be applied to work that had already started.
 	q.SetAdmit(gov.MayStart)
 
-	registerProcessors(log, cfg, store, box, gov, q, tools, whisper, settings.PostProd)
+	registerProcessors(processorArgs{log: log, cfg: cfg, store: store, box: box, gov: gov, q: q, tools: tools, whisper: whisper, pp: settings.PostProd})
 	// Clip publishing (Wave 4 #5c). The token source is filled in by main once
 	// the API server exists: the refresh path lives on it.
 	publishTokens := &publish.TokenGate{}
@@ -194,7 +208,21 @@ func jobRetentionSettings(log *slog.Logger, store *db.DB) func() db.PostProdSett
 // missing. A processor that fails a job with "whisper.cpp is not installed"
 // tells an operator what to do; a button that silently does not exist tells
 // them the feature is broken. This is the fail-open rule applied to a queue.
-func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
+// processorArgs is the input to registerProcessors.
+type processorArgs struct {
+	log     *slog.Logger
+	cfg     config.Config
+	store   *db.DB
+	box     *secrets.Box
+	gov     *jobs.Governor
+	q       *jobs.Queue
+	tools   *ffmpeg.Tools
+	whisper *transcribe.Tools
+	pp      db.PostProdSettings
+}
+
+func registerProcessors(a processorArgs) {
+	log, cfg, store, box, gov, q, tools, whisper, pp := a.log, a.cfg, a.store, a.box, a.gov, a.q, a.tools, a.whisper, a.pp
 	reg := func(kind jobs.Kind, err error) {
 		if err != nil {
 			log.Error("cannot register a job kind", "kind", kind, "error", err)
