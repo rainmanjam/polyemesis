@@ -249,8 +249,20 @@ func (c *Client) CreateMultipart(ctx context.Context, key string, meta map[strin
 	return x.UploadID, nil
 }
 
+// UploadPartInput is one part of a multipart upload, as UploadPart takes it.
+type UploadPartInput struct {
+	Key       string
+	UploadID  string
+	N         int
+	Body      io.ReadSeeker
+	Size      int64
+	SHA256Hex string
+	MD5B64    string
+}
+
 // UploadPart sends one part. Like Put, the service recomputes both digests.
-func (c *Client) UploadPart(ctx context.Context, key, uploadID string, n int, body io.ReadSeeker, size int64, sha256Hex, md5B64 string) (string, error) {
+func (c *Client) UploadPart(ctx context.Context, in UploadPartInput) (string, error) {
+	key, uploadID, n, body, size, sha256Hex, md5B64 := in.Key, in.UploadID, in.N, in.Body, in.Size, in.SHA256Hex, in.MD5B64
 	h := http.Header{}
 	h.Set("Content-MD5", md5B64)
 	q := url.Values{"partNumber": {strconv.Itoa(n)}, "uploadId": {uploadID}}

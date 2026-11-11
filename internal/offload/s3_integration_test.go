@@ -118,12 +118,12 @@ type partFailer struct {
 	done bool
 }
 
-func (p *partFailer) UploadPart(ctx context.Context, key, id string, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
-	if n == p.fail && !p.done {
+func (p *partFailer) UploadPart(ctx context.Context, in objstore.UploadPartInput) (string, error) {
+	if in.N == p.fail && !p.done {
 		p.done = true
 		return "", &objstore.Error{Op: "UploadPart", StatusCode: 503}
 	}
-	return p.Client.UploadPart(ctx, key, id, n, body, size, sh, mb)
+	return p.Client.UploadPart(ctx, in)
 }
 
 func TestLiveMultipartResumesAcrossARestartAndVerifies(t *testing.T) {

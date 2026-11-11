@@ -34,7 +34,7 @@ func TestMultipartOverTheWire(t *testing.T) {
 	var parts []Part
 	for i, b := range [][]byte{bytes.Repeat([]byte("a"), 50), []byte("tail")} {
 		sh, mb := digests(b)
-		etag, err := c.UploadPart(ctx, key, id, i+1, bytes.NewReader(b), int64(len(b)), sh, mb)
+		etag, err := c.UploadPart(ctx, UploadPartInput{Key: key, UploadID: id, N: i + 1, Body: bytes.NewReader(b), Size: int64(len(b)), SHA256Hex: sh, MD5B64: mb})
 		if err != nil {
 			t.Fatalf("part %d: %v", i+1, err)
 		}
@@ -79,7 +79,7 @@ func TestACompleteThatAnswersAnErrorBodyFails(t *testing.T) {
 	ctx := context.Background()
 	id, _ := c.CreateMultipart(ctx, "k", nil)
 	sh, mb := digests([]byte("x"))
-	etag, _ := c.UploadPart(ctx, "k", id, 1, bytes.NewReader([]byte("x")), 1, sh, mb)
+	etag, _ := c.UploadPart(ctx, UploadPartInput{Key: "k", UploadID: id, N: 1, Body: bytes.NewReader([]byte("x")), Size: 1, SHA256Hex: sh, MD5B64: mb})
 	_, err := c.CompleteMultipart(ctx, "k", id, []Part{{Number: 1, ETag: etag, MD5: mb}})
 	var se *Error
 	if !errors.As(err, &se) || se.Code != "InternalError" {
@@ -101,7 +101,7 @@ func TestAbortIsIdempotentAndAPartForAGoneUploadIsRefused(t *testing.T) {
 		t.Fatalf("second abort: %v", err)
 	}
 	sh, mb := digests([]byte("x"))
-	_, err := c.UploadPart(ctx, "k", id, 1, bytes.NewReader([]byte("x")), 1, sh, mb)
+	_, err := c.UploadPart(ctx, UploadPartInput{Key: "k", UploadID: id, N: 1, Body: bytes.NewReader([]byte("x")), Size: 1, SHA256Hex: sh, MD5B64: mb})
 	var se *Error
 	if !errors.As(err, &se) || se.Code != "NoSuchUpload" {
 		t.Fatalf("part for a gone upload: %v", err)

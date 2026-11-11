@@ -146,8 +146,8 @@ type partRebinder struct {
 	once  sync.Once
 }
 
-func (p *partRebinder) UploadPart(ctx context.Context, key, id string, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
-	etag, err := p.memStore.UploadPart(ctx, key, id, n, body, size, sh, mb)
+func (p *partRebinder) UploadPart(ctx context.Context, in objstore.UploadPartInput) (string, error) {
+	etag, err := p.memStore.UploadPart(ctx, in)
 	p.once.Do(p.after)
 	return etag, err
 }
