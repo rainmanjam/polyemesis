@@ -100,7 +100,7 @@ export const STORIES: Record<StoryKey, Story> = {
 /** "a", "a and b", "a, b and c". */
 function join(items: string[]): string {
   if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 function cap(s: string): string {
