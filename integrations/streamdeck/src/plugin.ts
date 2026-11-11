@@ -15,7 +15,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 import type { JsonObject, JsonValue } from "@elgato/utils";
 import { ApiError, PolyemesisClient } from "./api.js";
-import { ConfigError, keySettings, parseServerUrl, type GlobalSettings, type KeySettings } from "./config.js";
+import { ConfigError, keySettings, type GlobalSettings, type KeySettings } from "./config.js";
 import { localeFor } from "./i18n.js";
 import { imagePainter } from "./keyImage.js";
 import type { StreamDeckKey } from "./keys.js";
@@ -28,7 +28,7 @@ import { nodeTransport } from "./transport.js";
 
 const PLUGIN = "com.polyemesis.streamdeck";
 /** The actions whose inspector picks a destination and one of its tracks. */
-const TRACK_ACTIONS = [`${PLUGIN}.track-mute`, `${PLUGIN}.track-gain`];
+const TRACK_ACTIONS = new Set<string>([`${PLUGIN}.track-mute`, `${PLUGIN}.track-gain`]);
 // Status refreshes every couple of seconds; dials poll /levels five times a second.
 // The server answers levels with its own freshness verdict, so the dial needs no
 // faster clock than this to show NO FEED within about a window of silence.
@@ -62,7 +62,7 @@ function applyGlobals(raw: Record<string, unknown>): void {
   }
   // The same for a track picker, which lists the destinations of the programme the key is bound to.
   const open = streamDeck.ui.action;
-  if (open && TRACK_ACTIONS.includes(open.manifestId)) {
+  if (open && TRACK_ACTIONS.has(open.manifestId)) {
     void open
       .getSettings()
       .then((settings) => destinationList(keySettings(settings as Record<string, unknown>).sourceId))

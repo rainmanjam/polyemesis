@@ -165,7 +165,7 @@ const MARK_IS_NAME = new Set(["x"]);
 export function nameRepeatsMark(mark: DestinationMark, text: string): boolean {
   if (!MARK_IS_NAME.has(mark.platform)) return false;
   const own = PLATFORM_NAME[mark.platform];
-  return own !== undefined && text.toLocaleLowerCase() === own.toLocaleLowerCase();
+  return text.toLocaleLowerCase() === own?.toLocaleLowerCase();
 }
 
 /** The layout of a destination key's image for a state, its destination and its title's line count. */
