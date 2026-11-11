@@ -46,9 +46,9 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, guides)
 }
 
-// livestreamGated is a provider whose live API the operator switches on, X's
+// livestreamGater is a provider whose live API the operator switches on, X's
 // Livestream family today.
-type livestreamGated interface {
+type livestreamGater interface {
 	LivestreamAccess() bool
 }
 
@@ -65,7 +65,7 @@ func (s *Server) livestreamGate(platform db.Platform) string {
 	if err != nil {
 		return ""
 	}
-	g, ok := p.(livestreamGated)
+	g, ok := p.(livestreamGater)
 	if !ok {
 		return ""
 	}
