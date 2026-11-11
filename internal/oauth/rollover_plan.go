@@ -98,6 +98,22 @@ func PlanRollover(in RolloverInput) RolloverDecision {
 		}
 	}
 
+	cands := rolloverCandidates(in)
+	dec := decideFromCandidates(cands, in.Now)
+	if dec.Due {
+		dec.Reason = ""
+		return dec
+	}
+	if len(cands) == 0 {
+		dec.Reason = "no trigger is configured: set a quiet window, an OBS scene or a safety margin against a stated limit"
+	} else {
+		dec.Reason = "no trigger has come due yet"
+	}
+	return dec
+}
+
+// rolloverCandidates lists every trigger that is configured for this input.
+func rolloverCandidates(in RolloverInput) []candidate {
 	var cands []candidate
 	if c, ok := marginCandidate(in); ok {
 		cands = append(cands, c)
@@ -108,10 +124,15 @@ func PlanRollover(in RolloverInput) RolloverDecision {
 	if c, ok := sceneCandidate(in); ok {
 		cands = append(cands, c)
 	}
+	return cands
+}
 
+// decideFromCandidates picks the earliest due trigger, or else the next one to
+// come due.
+func decideFromCandidates(cands []candidate, now time.Time) RolloverDecision {
 	var dec RolloverDecision
 	for _, c := range cands {
-		if !c.at.After(in.Now) {
+		if !c.at.After(now) {
 			// Among the triggers that are due, the earliest moment wins, so the timeline names the cue that
 			// really came first.
 			if !dec.Due || c.at.Before(dec.At) {
@@ -122,15 +143,6 @@ func PlanRollover(in RolloverInput) RolloverDecision {
 		if dec.Next.IsZero() || c.at.Before(dec.Next) {
 			dec.Next = c.at
 		}
-	}
-	if dec.Due {
-		dec.Reason = ""
-		return dec
-	}
-	if len(cands) == 0 {
-		dec.Reason = "no trigger is configured: set a quiet window, an OBS scene or a safety margin against a stated limit"
-	} else {
-		dec.Reason = "no trigger has come due yet"
 	}
 	return dec
 }
@@ -256,26 +268,35 @@ const maxOBSSceneLength = 200
 
 // Validate refuses a configuration the planner could only act on by guessing. The errors name the field, so the
 // settings screen can say what to change.
+// validateQuietWindow checks the quiet window, if the operator set any of it.
+func (c RolloverConfig) validateQuietWindow() error {
+	anyWindow := c.QuietStart != "" || c.QuietEnd != "" || c.QuietZone != ""
+	if !anyWindow {
+		return nil
+	}
+	if c.QuietStart == "" || c.QuietEnd == "" || c.QuietZone == "" {
+		return fmt.Errorf("a quiet window needs a start, an end and a time zone, or none of them")
+	}
+	start, okS := parseClock(c.QuietStart)
+	end, okE := parseClock(c.QuietEnd)
+	if !okS || !okE {
+		return fmt.Errorf("the quiet window times must be HH:MM in 24-hour time")
+	}
+	if start == end {
+		return fmt.Errorf("the quiet window cannot start and end at the same time")
+	}
+	if _, err := time.LoadLocation(c.QuietZone); err != nil {
+		return fmt.Errorf("the quiet window time zone %q is not a known IANA zone", c.QuietZone)
+	}
+	return nil
+}
+
 func (c RolloverConfig) Validate() error {
 	if c.MarginMinutes < MinRolloverMarginMinutes || c.MarginMinutes > MaxRolloverMarginMinutes {
 		return fmt.Errorf("the safety margin must be between %d and %d minutes", MinRolloverMarginMinutes, MaxRolloverMarginMinutes)
 	}
-	anyWindow := c.QuietStart != "" || c.QuietEnd != "" || c.QuietZone != ""
-	if anyWindow {
-		if c.QuietStart == "" || c.QuietEnd == "" || c.QuietZone == "" {
-			return fmt.Errorf("a quiet window needs a start, an end and a time zone, or none of them")
-		}
-		start, okS := parseClock(c.QuietStart)
-		end, okE := parseClock(c.QuietEnd)
-		if !okS || !okE {
-			return fmt.Errorf("the quiet window times must be HH:MM in 24-hour time")
-		}
-		if start == end {
-			return fmt.Errorf("the quiet window cannot start and end at the same time")
-		}
-		if _, err := time.LoadLocation(c.QuietZone); err != nil {
-			return fmt.Errorf("the quiet window time zone %q is not a known IANA zone", c.QuietZone)
-		}
+	if err := c.validateQuietWindow(); err != nil {
+		return err
 	}
 	if len(c.OBSScene) > maxOBSSceneLength || strings.ContainsAny(c.OBSScene, "\x00\n\r\t") {
 		return fmt.Errorf("the OBS scene name must be at most %d characters with no control characters", maxOBSSceneLength)

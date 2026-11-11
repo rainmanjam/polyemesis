@@ -545,20 +545,7 @@ func (p *Profile) ApplyDefaults() {
 		p.SampleRate = 48000
 	}
 	if p.Mode == ModeSimple {
-		// Guarantee a full set of rows so the UI always renders 6 checkboxes.
-		seen := map[int]bool{}
-		for i := range p.Tracks {
-			seen[p.Tracks[i].Track] = true
-			if p.Tracks[i].Gain == 0 && !p.Tracks[i].Enabled {
-				p.Tracks[i].Gain = 1.0
-			}
-		}
-		for i := 0; i < MaxTracks; i++ {
-			if !seen[i] {
-				p.Tracks = append(p.Tracks, TrackSel{Track: i, Gain: 1.0})
-			}
-		}
-		sort.Slice(p.Tracks, func(a, b int) bool { return p.Tracks[a].Track < p.Tracks[b].Track })
+		p.fillSimpleTracks()
 	}
 
 	// The optional stages are only ever defaulted *within* themselves. A nil
@@ -570,6 +557,24 @@ func (p *Profile) ApplyDefaults() {
 	if p.Ducking != nil {
 		p.Ducking.applyDefaults()
 	}
+}
+
+// fillSimpleTracks guarantees a full set of rows so the UI always renders 6
+// checkboxes, and orders them by track.
+func (p *Profile) fillSimpleTracks() {
+	seen := map[int]bool{}
+	for i := range p.Tracks {
+		seen[p.Tracks[i].Track] = true
+		if p.Tracks[i].Gain == 0 && !p.Tracks[i].Enabled {
+			p.Tracks[i].Gain = 1.0
+		}
+	}
+	for i := 0; i < MaxTracks; i++ {
+		if !seen[i] {
+			p.Tracks = append(p.Tracks, TrackSel{Track: i, Gain: 1.0})
+		}
+	}
+	sort.Slice(p.Tracks, func(a, b int) bool { return p.Tracks[a].Track < p.Tracks[b].Track })
 }
 
 func (l *Loudness) applyDefaults() {
@@ -785,18 +790,34 @@ func (p Profile) validateOptional() []string {
 	}
 
 	if l := p.Loudness; l != nil {
-		if l.TargetLUFS < MinTargetLUFS || l.TargetLUFS > MaxTargetLUFS {
-			probs = append(probs, fmt.Sprintf("loudness target %.1f LUFS out of range (%.0f..%.0f)", l.TargetLUFS, MinTargetLUFS, MaxTargetLUFS))
-		}
-		if l.TruePeakDB < MinTruePeakDB || l.TruePeakDB > MaxTruePeakDB {
-			probs = append(probs, fmt.Sprintf("true-peak ceiling %.1f dBTP out of range (%.0f..%.0f)", l.TruePeakDB, MinTruePeakDB, MaxTruePeakDB))
-		}
-		if l.RangeLU != 0 && (l.RangeLU < MinLoudnessLRA || l.RangeLU > MaxLoudnessLRA) {
-			probs = append(probs, fmt.Sprintf("loudness range %.1f LU out of range (%.0f..%.0f)", l.RangeLU, MinLoudnessLRA, MaxLoudnessLRA))
-		}
+		probs = append(probs, validateLoudness(l)...)
 	}
 
-	for _, r := range p.ExcludeRoles {
+	probs = append(probs, validateExcludeRoles(p.ExcludeRoles)...)
+
+	probs = append(probs, p.Ducking.validate()...)
+	return probs
+}
+
+// validateLoudness checks the loudness target, true-peak ceiling and range.
+func validateLoudness(l *Loudness) []string {
+	var probs []string
+	if l.TargetLUFS < MinTargetLUFS || l.TargetLUFS > MaxTargetLUFS {
+		probs = append(probs, fmt.Sprintf("loudness target %.1f LUFS out of range (%.0f..%.0f)", l.TargetLUFS, MinTargetLUFS, MaxTargetLUFS))
+	}
+	if l.TruePeakDB < MinTruePeakDB || l.TruePeakDB > MaxTruePeakDB {
+		probs = append(probs, fmt.Sprintf("true-peak ceiling %.1f dBTP out of range (%.0f..%.0f)", l.TruePeakDB, MinTruePeakDB, MaxTruePeakDB))
+	}
+	if l.RangeLU != 0 && (l.RangeLU < MinLoudnessLRA || l.RangeLU > MaxLoudnessLRA) {
+		probs = append(probs, fmt.Sprintf("loudness range %.1f LU out of range (%.0f..%.0f)", l.RangeLU, MinLoudnessLRA, MaxLoudnessLRA))
+	}
+	return probs
+}
+
+// validateExcludeRoles checks every excluded role is a real, non-empty role.
+func validateExcludeRoles(roles []TrackRole) []string {
+	var probs []string
+	for _, r := range roles {
 		switch {
 		case r == RoleUnset:
 			// Excluding "no role" would drop every track nobody has described
@@ -806,8 +827,6 @@ func (p Profile) validateOptional() []string {
 			probs = append(probs, fmt.Sprintf("unknown track role %q in excludeRoles", r))
 		}
 	}
-
-	probs = append(probs, p.Ducking.validate()...)
 	return probs
 }
 

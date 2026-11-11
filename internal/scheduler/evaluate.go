@@ -48,37 +48,45 @@ func Previous(s Schedule, now time.Time) (time.Time, bool) {
 		return s.RunAt.UTC(), true
 
 	case KindDaily:
-		local := now.In(loc)
-		for back := 0; back <= 1; back++ {
-			d := local.AddDate(0, 0, -back)
-			at := atMinutes(d, s.AtMinutes, loc)
-			if !at.After(now) {
-				return at.UTC(), true
-			}
-		}
-		return time.Time{}, false
+		return previousDaily(s, loc, now)
 
 	case KindWeekly:
-		if len(s.Days) == 0 {
-			return time.Time{}, false
-		}
-		want := map[time.Weekday]bool{}
-		for _, d := range s.Days {
-			want[d] = true
-		}
-		local := now.In(loc)
-		// Eight days back, not seven: the local weekday of an occurrence is
-		// read from the candidate day itself, and a zone change across the
-		// boundary can otherwise put the only match one day out of reach.
-		for back := 0; back <= 8; back++ {
-			d := local.AddDate(0, 0, -back)
-			at := atMinutes(d, s.AtMinutes, loc)
-			if !want[at.In(loc).Weekday()] || at.After(now) {
-				continue
-			}
+		return previousWeekly(s, loc, now)
+	}
+	return time.Time{}, false
+}
+
+// previousDaily is the latest daily occurrence at or before now.
+func previousDaily(s Schedule, loc *time.Location, now time.Time) (time.Time, bool) {
+	local := now.In(loc)
+	for back := 0; back <= 1; back++ {
+		d := local.AddDate(0, 0, -back)
+		at := atMinutes(d, s.AtMinutes, loc)
+		if !at.After(now) {
 			return at.UTC(), true
 		}
+	}
+	return time.Time{}, false
+}
+
+// previousWeekly is the latest weekly occurrence on one of the schedule's days
+// at or before now.
+func previousWeekly(s Schedule, loc *time.Location, now time.Time) (time.Time, bool) {
+	if len(s.Days) == 0 {
 		return time.Time{}, false
+	}
+	want := weekdaySet(s.Days)
+	local := now.In(loc)
+	// Eight days back, not seven: the local weekday of an occurrence is
+	// read from the candidate day itself, and a zone change across the
+	// boundary can otherwise put the only match one day out of reach.
+	for back := 0; back <= 8; back++ {
+		d := local.AddDate(0, 0, -back)
+		at := atMinutes(d, s.AtMinutes, loc)
+		if !want[at.In(loc).Weekday()] || at.After(now) {
+			continue
+		}
+		return at.UTC(), true
 	}
 	return time.Time{}, false
 }
@@ -101,34 +109,51 @@ func Next(s Schedule, now time.Time) (time.Time, bool) {
 		return s.RunAt.UTC(), true
 
 	case KindDaily:
-		local := now.In(loc)
-		for fwd := 0; fwd <= 1; fwd++ {
-			at := atMinutes(local.AddDate(0, 0, fwd), s.AtMinutes, loc)
-			if at.After(now) {
-				return at.UTC(), true
-			}
-		}
-		return time.Time{}, false
+		return nextDaily(s, loc, now)
 
 	case KindWeekly:
-		if len(s.Days) == 0 {
-			return time.Time{}, false
-		}
-		want := map[time.Weekday]bool{}
-		for _, d := range s.Days {
-			want[d] = true
-		}
-		local := now.In(loc)
-		for fwd := 0; fwd <= 8; fwd++ {
-			at := atMinutes(local.AddDate(0, 0, fwd), s.AtMinutes, loc)
-			if !want[at.In(loc).Weekday()] || !at.After(now) {
-				continue
-			}
-			return at.UTC(), true
-		}
-		return time.Time{}, false
+		return nextWeekly(s, loc, now)
 	}
 	return time.Time{}, false
+}
+
+// nextDaily is the first daily occurrence strictly after now.
+func nextDaily(s Schedule, loc *time.Location, now time.Time) (time.Time, bool) {
+	local := now.In(loc)
+	for fwd := 0; fwd <= 1; fwd++ {
+		at := atMinutes(local.AddDate(0, 0, fwd), s.AtMinutes, loc)
+		if at.After(now) {
+			return at.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+// nextWeekly is the first weekly occurrence on one of the schedule's days
+// strictly after now.
+func nextWeekly(s Schedule, loc *time.Location, now time.Time) (time.Time, bool) {
+	if len(s.Days) == 0 {
+		return time.Time{}, false
+	}
+	want := weekdaySet(s.Days)
+	local := now.In(loc)
+	for fwd := 0; fwd <= 8; fwd++ {
+		at := atMinutes(local.AddDate(0, 0, fwd), s.AtMinutes, loc)
+		if !want[at.In(loc).Weekday()] || !at.After(now) {
+			continue
+		}
+		return at.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+// weekdaySet turns a schedule's day list into a lookup set.
+func weekdaySet(days []time.Weekday) map[time.Weekday]bool {
+	want := map[time.Weekday]bool{}
+	for _, d := range days {
+		want[d] = true
+	}
+	return want
 }
 
 // atMinutes builds the instant for a local day at minutes past midnight.

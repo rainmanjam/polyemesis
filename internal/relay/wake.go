@@ -31,34 +31,40 @@ func (t *pesStarts) learn(dgram []byte) {
 		if p[0] != mpegts.SyncByte {
 			return
 		}
-		// payload_unit_start_indicator, with a payload present.
-		if p[1]&0x40 == 0 || p[3]&0x10 == 0 {
-			continue
-		}
-		start := 4
-		if p[3]&0x20 != 0 {
-			start += 1 + int(p[4])
-		}
-		// A PES begins with the 00 00 01 start code. PSI sections -- the PAT and
-		// PMT -- set the same bit and do not, and opening a "PES" on one would
-		// hand the section parser garbage.
-		if start+4 > mpegts.PacketSize || p[start] != 0 || p[start+1] != 0 || p[start+2] != 1 {
-			continue
-		}
-		pid := uint16(p[1]&0x1F)<<8 | uint16(p[2])
-		id := p[start+3]
-		if t.streamID[pid] == id {
-			continue
-		}
-		if t.streamID[pid] == 0 {
-			if len(t.pids) == maxPESPIDs {
-				t.streamID[t.pids[0]] = 0
-				t.pids = t.pids[1:]
-			}
-			t.pids = append(t.pids, pid)
-		}
-		t.streamID[pid] = id
+		t.learnPacket(p)
 	}
+}
+
+// learnPacket records the PES start on one 188-byte packet, if it carries one
+// whose PID or stream_id is new.
+func (t *pesStarts) learnPacket(p []byte) {
+	// payload_unit_start_indicator, with a payload present.
+	if p[1]&0x40 == 0 || p[3]&0x10 == 0 {
+		return
+	}
+	start := 4
+	if p[3]&0x20 != 0 {
+		start += 1 + int(p[4])
+	}
+	// A PES begins with the 00 00 01 start code. PSI sections -- the PAT and
+	// PMT -- set the same bit and do not, and opening a "PES" on one would
+	// hand the section parser garbage.
+	if start+4 > mpegts.PacketSize || p[start] != 0 || p[start+1] != 0 || p[start+2] != 1 {
+		return
+	}
+	pid := uint16(p[1]&0x1F)<<8 | uint16(p[2])
+	id := p[start+3]
+	if t.streamID[pid] == id {
+		return
+	}
+	if t.streamID[pid] == 0 {
+		if len(t.pids) == maxPESPIDs {
+			t.streamID[t.pids[0]] = 0
+			t.pids = t.pids[1:]
+		}
+		t.pids = append(t.pids, pid)
+	}
+	t.streamID[pid] = id
 }
 
 // wake builds the datagrams Hub.Wake sends: an empty PES start on every known

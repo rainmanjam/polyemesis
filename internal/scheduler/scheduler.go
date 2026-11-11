@@ -195,6 +195,36 @@ func (s Schedule) TargetsPlaylist() bool {
 	return s.Action == ActionPlaylistStart || s.Action == ActionPlaylistStop
 }
 
+// normalizeGrace applies the default and clamps the grace window to its range.
+func normalizeGrace(g int) int {
+	if g <= 0 {
+		g = DefaultGraceSeconds
+	}
+	if g < MinGraceSeconds {
+		g = MinGraceSeconds
+	}
+	if g > MaxGraceSeconds {
+		g = MaxGraceSeconds
+	}
+	return g
+}
+
+// normalizeDestinationIDs drops non-positive and duplicate destination ids and
+// returns the rest sorted.
+func normalizeDestinationIDs(in []int64) []int64 {
+	seenID := map[int64]bool{}
+	ids := make([]int64, 0, len(in))
+	for _, id := range in {
+		if id <= 0 || seenID[id] {
+			continue
+		}
+		seenID[id] = true
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
 // Normalized fills the defaults and puts the collections in a stable order, so
 // two schedules that mean the same thing store the same bytes.
 func (s Schedule) Normalized() Schedule {
@@ -206,15 +236,7 @@ func (s Schedule) Normalized() Schedule {
 	if s.Action == "" {
 		s.Action = ActionStart
 	}
-	if s.GraceSeconds <= 0 {
-		s.GraceSeconds = DefaultGraceSeconds
-	}
-	if s.GraceSeconds < MinGraceSeconds {
-		s.GraceSeconds = MinGraceSeconds
-	}
-	if s.GraceSeconds > MaxGraceSeconds {
-		s.GraceSeconds = MaxGraceSeconds
-	}
+	s.GraceSeconds = normalizeGrace(s.GraceSeconds)
 	if !s.RunAt.IsZero() {
 		// Stored UTC, always. A one-shot that round-tripped through a zone
 		// would be a different instant on the way back.
@@ -224,17 +246,7 @@ func (s Schedule) Normalized() Schedule {
 		s.LastRunAt = s.LastRunAt.UTC().Truncate(time.Second)
 	}
 
-	seenID := map[int64]bool{}
-	ids := make([]int64, 0, len(s.DestinationIDs))
-	for _, id := range s.DestinationIDs {
-		if id <= 0 || seenID[id] {
-			continue
-		}
-		seenID[id] = true
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	s.DestinationIDs = ids
+	s.DestinationIDs = normalizeDestinationIDs(s.DestinationIDs)
 	// A playlist schedule acts on no destination, so "every destination" means
 	// nothing there. Cleared rather than refused: it changes nothing the row
 	// does, and two playlist rows that mean the same thing store the same bytes.

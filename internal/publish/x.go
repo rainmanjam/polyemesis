@@ -131,45 +131,22 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 	// phase it did not finish.
 	mediaID, finalized := strings.CutSuffix(r.Sess.Remote, ":f")
 	if mediaID == "" {
-		var ini struct {
-			Data struct {
-				ID string `json:"id"`
-			} `json:"data"`
+		id, err := x.initMedia(ctx, r, total)
+		if err != nil {
+			return Done{}, err
 		}
-		if f := x.do(ctx, http.MethodPost, "/2/media/upload/initialize", r.Cred.AccessToken, map[string]any{
-			"media_type": "video/mp4", "total_bytes": total, "media_category": "tweet_video",
-		}, &ini); f != nil {
-			return Done{}, f
-		}
-		if ini.Data.ID == "" {
-			return Done{}, fail(CauseUnavailable, true, "X did not return a media id")
-		}
-		mediaID = ini.Data.ID
+		mediaID = id
 		if err := r.Sess.SaveRemote(mediaID); err != nil {
 			return Done{}, fail(CauseUnknown, true, "could not record the X media id, so nothing was sent")
 		}
 	}
 	processing := ""
 	if !finalized {
-		if f := x.append(ctx, r, mediaID, total); f != nil {
-			return Done{}, x.forgetIfDead(r, f)
+		p, err := x.appendAndFinalize(ctx, r, mediaID, total)
+		if err != nil {
+			return Done{}, err
 		}
-		var fin struct {
-			Data struct {
-				Processing *struct {
-					State string `json:"state"`
-				} `json:"processing_info"`
-			} `json:"data"`
-		}
-		if f := x.do(ctx, http.MethodPost, "/2/media/upload/"+mediaID+"/finalize", r.Cred.AccessToken, nil, &fin); f != nil {
-			return Done{}, x.forgetIfDead(r, f)
-		}
-		if err := r.Sess.SaveRemote(mediaID + ":f"); err != nil {
-			return Done{}, fail(CauseUnknown, true, "could not record the finalized X media, so nothing more was sent")
-		}
-		if fin.Data.Processing != nil {
-			processing = fin.Data.Processing.State
-		}
+		processing = p
 	}
 	// A finalize that reports no processing_info means the media is ready; a
 	// STATUS read that reports none does not, and is waited on.
@@ -179,6 +156,53 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 		}
 	}
 
+	return x.postTweet(ctx, r, mediaID)
+}
+
+// appendAndFinalize sends every segment of the video and finalizes the upload.
+// It returns the processing state X reported at finalize, if any.
+func (x *X) appendAndFinalize(ctx context.Context, r Run, mediaID string, total int64) (string, error) {
+	if f := x.append(ctx, r, mediaID, total); f != nil {
+		return "", x.forgetIfDead(r, f)
+	}
+	var fin struct {
+		Data struct {
+			Processing *xProcessingInfo `json:"processing_info"`
+		} `json:"data"`
+	}
+	if f := x.do(ctx, http.MethodPost, "/2/media/upload/"+mediaID+"/finalize", r.Cred.AccessToken, nil, &fin); f != nil {
+		return "", x.forgetIfDead(r, f)
+	}
+	if err := r.Sess.SaveRemote(mediaID + ":f"); err != nil {
+		return "", fail(CauseUnknown, true, "could not record the finalized X media, so nothing more was sent")
+	}
+	if fin.Data.Processing != nil {
+		return fin.Data.Processing.State, nil
+	}
+	return "", nil
+}
+
+// initMedia asks X for a media id for a new video upload of total bytes.
+func (x *X) initMedia(ctx context.Context, r Run, total int64) (string, error) {
+	var ini struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if f := x.do(ctx, http.MethodPost, "/2/media/upload/initialize", r.Cred.AccessToken, map[string]any{
+		"media_type": "video/mp4", "total_bytes": total, "media_category": "tweet_video",
+	}, &ini); f != nil {
+		return "", f
+	}
+	if ini.Data.ID == "" {
+		return "", fail(CauseUnavailable, true, "X did not return a media id")
+	}
+	return ini.Data.ID, nil
+}
+
+// postTweet creates the post once the media is ready. The intent to post is
+// stamped first, so an attempt that might already have posted is never sent again.
+func (x *X) postTweet(ctx context.Context, r Run, mediaID string) (Done, error) {
 	first, err := r.Sess.StampFinalizing()
 	if err != nil {
 		return Done{}, fail(CauseUnknown, true, "could not record the intent to post, so nothing was sent")
@@ -234,6 +258,11 @@ func (x *X) append(ctx context.Context, r Run, mediaID string, total int64) *Fai
 	return nil
 }
 
+// xProcessingInfo is the processing_info block of an X media upload status.
+type xProcessingInfo struct {
+	State string `json:"state"`
+}
+
 func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 	every := x.PollEvery
 	if every <= 0 {
@@ -242,9 +271,7 @@ func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 	for i := 0; i < 90; i++ {
 		var st struct {
 			Data struct {
-				Processing *struct {
-					State string `json:"state"`
-				} `json:"processing_info"`
+				Processing *xProcessingInfo `json:"processing_info"`
 			} `json:"data"`
 		}
 		if f := x.do(ctx, http.MethodGet, "/2/media/upload?command=STATUS&media_id="+mediaID, r.Cred.AccessToken, nil, &st); f != nil {

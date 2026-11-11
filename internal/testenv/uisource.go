@@ -107,30 +107,52 @@ func StripJSComments(src string) string {
 	b.Grow(len(src))
 	for i := 0; i < len(src); {
 		if strings.HasPrefix(src[i:], "/*") {
-			end := strings.Index(src[i+2:], "*/")
-			if end < 0 {
+			next, ok := skipBlockComment(src, i, &b)
+			if !ok {
 				break // unterminated; the rest is comment
 			}
-			for _, r := range src[i : i+2+end+2] {
-				if r == '\n' {
-					b.WriteByte('\n')
-				}
-			}
-			i += 2 + end + 2
+			i = next
 			continue
 		}
 		if strings.HasPrefix(src[i:], "//") && !quotedBefore(src, i) {
-			end := strings.IndexByte(src[i:], '\n')
-			if end < 0 {
+			next, ok := skipLineComment(src, i)
+			if !ok {
 				break
 			}
-			i += end // leave the newline for the next iteration
+			i = next
 			continue
 		}
 		b.WriteByte(src[i])
 		i++
 	}
 	return b.String()
+}
+
+// skipBlockComment steps over the /* */ comment starting at i, keeping its
+// newlines so line numbers survive. It returns false when the comment is
+// unterminated.
+func skipBlockComment(src string, i int, b *strings.Builder) (int, bool) {
+	end := strings.Index(src[i+2:], "*/")
+	if end < 0 {
+		return i, false
+	}
+	for _, r := range src[i : i+2+end+2] {
+		if r == '\n' {
+			b.WriteByte('\n')
+		}
+	}
+	return i + 2 + end + 2, true
+}
+
+// skipLineComment steps to the newline that ends the // comment starting at i,
+// leaving the newline for the next iteration. It returns false when there is no
+// newline left.
+func skipLineComment(src string, i int) (int, bool) {
+	end := strings.IndexByte(src[i:], '\n')
+	if end < 0 {
+		return i, false
+	}
+	return i + end, true // leave the newline for the next iteration
 }
 
 // quotedBefore reports whether a quote character appears between the start of

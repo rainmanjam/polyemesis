@@ -94,32 +94,47 @@ func NewSecretSet(log *slog.Logger, values ...string) *SecretSet {
 		if v == "" || seen[v] {
 			continue
 		}
-		if len(v) < MinSecretLen {
-			if log != nil {
-				log.Debug("secret literal refused: shorter than the exact-match floor, "+
-					"so only the residual redact.Redact pass covers it",
-					"length", len(v), "floor", MinSecretLen)
-			}
-			continue
-		}
-		if ffmpegCommonWord[strings.ToLower(v)] {
-			if log != nil {
-				log.Debug("secret literal refused: it is ordinary FFmpeg vocabulary and "+
-					"masking it would blind the log rather than clean it",
-					"value", v)
-			}
+		if refuseLiteral(log, v) {
 			continue
 		}
 		seen[v] = true
 		s.lits = append(s.lits, v)
 	}
 	sort.Slice(s.lits, func(i, j int) bool {
-		if len(s.lits[i]) != len(s.lits[j]) {
-			return len(s.lits[i]) > len(s.lits[j])
-		}
-		return s.lits[i] < s.lits[j]
+		return longerThenLexical(s.lits[i], s.lits[j])
 	})
 	return s
+}
+
+// refuseLiteral reports whether v is too short or too common to be an exact
+// literal, logging each refusal when a logger is supplied.
+func refuseLiteral(log *slog.Logger, v string) bool {
+	if len(v) < MinSecretLen {
+		if log != nil {
+			log.Debug("secret literal refused: shorter than the exact-match floor, "+
+				"so only the residual redact.Redact pass covers it",
+				"length", len(v), "floor", MinSecretLen)
+		}
+		return true
+	}
+	if ffmpegCommonWord[strings.ToLower(v)] {
+		if log != nil {
+			log.Debug("secret literal refused: it is ordinary FFmpeg vocabulary and "+
+				"masking it would blind the log rather than clean it",
+				"value", v)
+		}
+		return true
+	}
+	return false
+}
+
+// longerThenLexical orders literals longest first, then lexically, so the
+// longest match wins when one literal contains another.
+func longerThenLexical(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a < b
 }
 
 // Len reports how many literals survived construction, so a guard can tell an

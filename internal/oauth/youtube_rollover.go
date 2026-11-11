@@ -108,20 +108,7 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 	if err != nil {
 		return nil, &RolloverError{Stage: "read", OldStillLive: true, err: err}
 	}
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		title = src.Title
-	}
-	description := firstNonEmptyString(req.Description, src.Description)
-	privacy := strings.ToLower(strings.TrimSpace(req.Privacy))
-	if privacy == "" {
-		privacy = src.Privacy
-	}
-	if privacy == "" {
-		// Fail closed. A source whose privacy cannot be read must not widen to public, so the
-		// replacement starts private and a person sets it deliberately.
-		privacy = "private"
-	}
+	title, description, privacy := rolloverFields(req, src)
 
 	// A broadcast taking captions by HTTP POST passes them on (#8). closedCaptionsType can be set only while the
 	// replacement is created or ready (docs-youtube B13), so it is born with them, with the monitor stream on and the
@@ -151,7 +138,6 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 		return abandon("bind", err)
 	}
 
-	gap := false
 	newState, err := y.BroadcastState(ctx, accessToken, newID)
 	if err != nil {
 		return abandon("start", err)
@@ -167,43 +153,79 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 		if terr != nil {
 			var refused *TransitionRefused
 			if !errors.As(terr, &refused) || !channelCannotCarryTwo(refused.Refusal) {
-				// A failed answer does not prove the transition did not happen: a 500 can follow a transition
-				// YouTube carried out, and auto-start can take the replacement live in the meantime. Deleting a
-				// broadcast that is on air would break the rule this file keeps, so the state is read again first.
-				again, rerr := y.BroadcastState(ctx, accessToken, newID)
-				if rerr != nil {
-					// Nothing here knows whether the replacement is on air, so it is kept and named.
-					return nil, &RolloverError{Stage: "start", OldStillLive: true, NewBroadcastID: newID,
-						err: fmt.Errorf("%w; the replacement %s could not be read again, so it was kept rather than deleted; check it in YouTube Studio: %v", terr, newID, rerr)}
+				onAir, err := y.confirmStartAfterFailure(ctx, accessToken, newID, terr)
+				if err != nil {
+					return nil, err
 				}
-				if !broadcastIsOnAir(again.Status) {
+				if !onAir {
 					return abandon("start", terr)
 				}
 				// The replacement is on air after all, so the rollover carries on below and ends the old one.
 			} else {
-				// The channel will not carry two live broadcasts at once. End the old one, then take the new one live.
-				gap = true
-				if _, endErr := y.TransitionBroadcast(ctx, accessToken, oldID, PhaseComplete); endErr != nil {
-					return abandon("end", endErr)
-				}
-				if _, startErr := y.TransitionBroadcast(ctx, accessToken, newID, PhaseLive); startErr != nil {
-					// The gap is now real and the new broadcast will not start. Keep it, so the coordinator can take
-					// it live once the stream is delivering, and report that the old one is ended.
-					return nil, &RolloverError{Stage: "start", OldStillLive: false, NewBroadcastID: newID,
-						err: fmt.Errorf("the old broadcast was ended to make room, but the replacement %s would not go live: %w", newID, startErr)}
-				}
-				return &RolloverOutcome{NewBroadcastID: newID, OldEnded: true, Gap: true}, nil
+				return y.endOldThenStartNew(ctx, accessToken, oldID, newID, abandon)
 			}
 		}
 	}
 
-	out := &RolloverOutcome{NewBroadcastID: newID, Gap: gap}
+	// Gap is only ever set on the path above that returns: a fall-through rollover has none.
+	out := &RolloverOutcome{NewBroadcastID: newID}
 	if _, err := y.TransitionBroadcast(ctx, accessToken, oldID, PhaseComplete); err != nil {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("the replacement %s is live, but the old broadcast %s could not be ended and is still on air; end it in YouTube Studio: %v", newID, oldID, err))
 		return out, nil
 	}
 	out.OldEnded = true
 	return out, nil
+}
+
+// rolloverFields takes the replacement's title, description and privacy from the
+// request, falling back to the old broadcast's own values.
+func rolloverFields(req RolloverRequest, src rolloverSource) (title, description, privacy string) {
+	title = strings.TrimSpace(req.Title)
+	if title == "" {
+		title = src.Title
+	}
+	description = firstNonEmptyString(req.Description, src.Description)
+	privacy = strings.ToLower(strings.TrimSpace(req.Privacy))
+	if privacy == "" {
+		privacy = src.Privacy
+	}
+	if privacy == "" {
+		// Fail closed. A source whose privacy cannot be read must not widen to public, so the
+		// replacement starts private and a person sets it deliberately.
+		privacy = "private"
+	}
+	return title, description, privacy
+}
+
+// confirmStartAfterFailure reads the replacement again after a failed go-live.
+// A failed answer does not prove the transition did not happen: a 500 can follow
+// a transition YouTube carried out, and auto-start can take the replacement live
+// in the meantime. Deleting a broadcast that is on air would break the rule this
+// file keeps, so the state is read again first.
+func (y *YouTube) confirmStartAfterFailure(ctx context.Context, accessToken, newID string, terr error) (bool, error) {
+	again, rerr := y.BroadcastState(ctx, accessToken, newID)
+	if rerr != nil {
+		// Nothing here knows whether the replacement is on air, so it is kept and named.
+		return false, &RolloverError{Stage: "start", OldStillLive: true, NewBroadcastID: newID,
+			err: fmt.Errorf("%w; the replacement %s could not be read again, so it was kept rather than deleted; check it in YouTube Studio: %v", terr, newID, rerr)}
+	}
+	return broadcastIsOnAir(again.Status), nil
+}
+
+// endOldThenStartNew is the gap path, taken when the channel will not carry two
+// live broadcasts at once: end the old one, then take the new one live.
+func (y *YouTube) endOldThenStartNew(ctx context.Context, accessToken, oldID, newID string,
+	abandon func(stage string, cause error) (*RolloverOutcome, error)) (*RolloverOutcome, error) {
+	if _, endErr := y.TransitionBroadcast(ctx, accessToken, oldID, PhaseComplete); endErr != nil {
+		return abandon("end", endErr)
+	}
+	if _, startErr := y.TransitionBroadcast(ctx, accessToken, newID, PhaseLive); startErr != nil {
+		// The gap is now real and the new broadcast will not start. Keep it, so the coordinator can take
+		// it live once the stream is delivering, and report that the old one is ended.
+		return nil, &RolloverError{Stage: "start", OldStillLive: false, NewBroadcastID: newID,
+			err: fmt.Errorf("the old broadcast was ended to make room, but the replacement %s would not go live: %w", newID, startErr)}
+	}
+	return &RolloverOutcome{NewBroadcastID: newID, OldEnded: true, Gap: true}, nil
 }
 
 // broadcastIsOnAir reports whether a YouTube lifeCycleStatus means the broadcast is already carrying the feed to

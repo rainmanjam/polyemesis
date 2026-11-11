@@ -37,19 +37,7 @@ func PresetOptsFromRoles(base PresetOpts, src Source) PresetOpts {
 		present[t.Index] = true
 	}
 	first := func(roles ...TrackRole) (int, bool) {
-		for _, role := range roles {
-			var hits []int
-			for _, a := range src.Annotations {
-				if a.Role == role && present[a.Track] {
-					hits = append(hits, a.Track)
-				}
-			}
-			if len(hits) > 0 {
-				sort.Ints(hits)
-				return hits[0], true
-			}
-		}
-		return 0, false
+		return firstAnnotatedTrack(src, present, roles...)
 	}
 	out := base
 	if i, ok := first(RoleMusic); ok {
@@ -62,6 +50,24 @@ func PresetOptsFromRoles(base PresetOpts, src Source) PresetOpts {
 		out.CleanTrack = i
 	}
 	return out
+}
+
+// firstAnnotatedTrack returns the lowest track index annotated with the first
+// role in roles that any present track carries, if there is one.
+func firstAnnotatedTrack(src Source, present map[int]bool, roles ...TrackRole) (int, bool) {
+	for _, role := range roles {
+		var hits []int
+		for _, a := range src.Annotations {
+			if a.Role == role && present[a.Track] {
+				hits = append(hits, a.Track)
+			}
+		}
+		if len(hits) > 0 {
+			sort.Ints(hits)
+			return hits[0], true
+		}
+	}
+	return 0, false
 }
 
 // DefaultPresetOptsFor is the options a preset is applied with when the caller

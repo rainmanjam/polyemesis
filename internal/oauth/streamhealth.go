@@ -36,19 +36,37 @@ type StreamHealthReader interface {
 // ytHealthStream is the part of a liveStream resource the health read uses.
 type ytHealthStream struct {
 	CDN struct {
-		IngestionInfo struct {
-			StreamName string `json:"streamName"`
-		} `json:"ingestionInfo"`
+		IngestionInfo ytHealthIngestionInfo `json:"ingestionInfo"`
 	} `json:"cdn"`
 	Status struct {
-		HealthStatus struct {
-			Status              string `json:"status"`
-			ConfigurationIssues []struct {
-				Type     string `json:"type"`
-				Severity string `json:"severity"`
-			} `json:"configurationIssues"`
-		} `json:"healthStatus"`
+		HealthStatus ytHealthStatus `json:"healthStatus"`
 	} `json:"status"`
+}
+
+// ytHealthIngestionInfo is the ingestionInfo part of a liveStream's cdn block.
+type ytHealthIngestionInfo struct {
+	StreamName string `json:"streamName"`
+}
+
+// ytHealthStatus is the healthStatus part of a liveStream's status block.
+type ytHealthStatus struct {
+	Status              string `json:"status"`
+	ConfigurationIssues []struct {
+		Type     string `json:"type"`
+		Severity string `json:"severity"`
+	} `json:"configurationIssues"`
+}
+
+// healthVerdict turns a liveStream's health block into a verdict, keeping only
+// the configuration issues YouTube reports as errors.
+func healthVerdict(hs ytHealthStatus) StreamHealthVerdict {
+	h := StreamHealthVerdict{Status: hs.Status}
+	for _, is := range hs.ConfigurationIssues {
+		if is.Severity == "error" && is.Type != "" {
+			h.Issues = append(h.Issues, is.Type)
+		}
+	}
+	return h
 }
 
 // StreamHealths lists the channel's liveStreams with part=cdn,status: every
@@ -77,13 +95,7 @@ func (y *YouTube) StreamHealths(ctx context.Context, _, accessToken string) (map
 			if k == "" {
 				continue
 			}
-			h := StreamHealthVerdict{Status: s.Status.HealthStatus.Status}
-			for _, is := range s.Status.HealthStatus.ConfigurationIssues {
-				if is.Severity == "error" && is.Type != "" {
-					h.Issues = append(h.Issues, is.Type)
-				}
-			}
-			out[sha256.Sum256([]byte(k))] = h
+			out[sha256.Sum256([]byte(k))] = healthVerdict(s.Status.HealthStatus)
 		}
 		if list.NextPageToken == "" {
 			return out, nil

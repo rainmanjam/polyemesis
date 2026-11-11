@@ -419,34 +419,42 @@ func WaitUDPPortBound(port int, within time.Duration) bool {
 // prints every UDP row and the matching happens in Go, where it can be exact
 // about the field it matches rather than substring-matching a whole line.
 func udpPortHeld(port int) bool {
-	suffix := ":" + strconv.Itoa(port)
-
 	if runtime.GOOS == "windows" {
-		// SystemRoot rather than a literal C:\Windows: the drive is not
-		// guaranteed, and this is the variable Windows itself uses.
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			root = `C:\Windows`
-		}
-		// -ano: numeric addresses, all sockets, owning PID. Numeric matters --
-		// name resolution on a runner with no DNS is where a bounded check
-		// becomes a hang.
-		out, err := exec.Command(filepath.Join(root, "System32", "netstat.exe"), "-ano", "-p", "UDP").Output()
-		if err != nil && len(out) == 0 {
-			return false
-		}
-		for _, line := range strings.Split(string(out), "\n") {
-			// Fields: Proto, LocalAddress, ForeignAddress, PID. The local
-			// address is the only one that says what is BOUND here, and it is
-			// matched as a whole field: a substring match on the line would
-			// also hit a foreign address or a PID containing those digits.
-			if f := strings.Fields(line); len(f) >= 2 && strings.HasSuffix(f[1], suffix) {
-				return true
-			}
-		}
+		return udpPortHeldWindows(":" + strconv.Itoa(port))
+	}
+	return udpPortHeldLsof(port)
+}
+
+// udpPortHeldWindows reads netstat's UDP table and looks for a local address
+// ending in suffix.
+func udpPortHeldWindows(suffix string) bool {
+	// SystemRoot rather than a literal C:\Windows: the drive is not
+	// guaranteed, and this is the variable Windows itself uses.
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	// -ano: numeric addresses, all sockets, owning PID. Numeric matters --
+	// name resolution on a runner with no DNS is where a bounded check
+	// becomes a hang.
+	out, err := exec.Command(filepath.Join(root, "System32", "netstat.exe"), "-ano", "-p", "UDP").Output()
+	if err != nil && len(out) == 0 {
 		return false
 	}
+	for _, line := range strings.Split(string(out), "\n") {
+		// Fields: Proto, LocalAddress, ForeignAddress, PID. The local
+		// address is the only one that says what is BOUND here, and it is
+		// matched as a whole field: a substring match on the line would
+		// also hit a foreign address or a PID containing those digits.
+		if f := strings.Fields(line); len(f) >= 2 && strings.HasSuffix(f[1], suffix) {
+			return true
+		}
+	}
+	return false
+}
 
+// udpPortHeldLsof asks lsof whether anything holds the UDP port.
+func udpPortHeldLsof(port int) bool {
 	// lsof moves between /usr/sbin and /usr/bin across distributions, so the
 	// candidates are tried in order rather than assumed. An absent lsof yields
 	// "not held", the same safe direction as an empty result.

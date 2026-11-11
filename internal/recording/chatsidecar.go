@@ -69,15 +69,7 @@ func ChatWindow(rec db.Recording, all []db.Recording, mtime time.Time) (startMS,
 	if endMS <= startMS {
 		return 0, 0, "", false
 	}
-	var next int64
-	for _, o := range all {
-		if o.ID == rec.ID || !sameProgramme(o.SourceID, rec.SourceID) {
-			continue
-		}
-		if s := o.StartedAt.UnixMilli(); s > startMS && (next == 0 || s < next) {
-			next = s
-		}
-	}
+	next := nextProgrammeStart(rec, all, startMS)
 	if next != 0 {
 		d := next - endMS
 		if d < 0 {
@@ -88,6 +80,21 @@ func ChatWindow(rec db.Recording, all []db.Recording, mtime time.Time) (startMS,
 		}
 	}
 	return startMS, endMS, endSource, true
+}
+
+// nextProgrammeStart is the earliest start, after startMS, of another recording
+// of the same programme, or 0 when there is none.
+func nextProgrammeStart(rec db.Recording, all []db.Recording, startMS int64) int64 {
+	var next int64
+	for _, o := range all {
+		if o.ID == rec.ID || !sameProgramme(o.SourceID, rec.SourceID) {
+			continue
+		}
+		if s := o.StartedAt.UnixMilli(); s > startMS && (next == 0 || s < next) {
+			next = s
+		}
+	}
+	return next
 }
 
 func sameProgramme(a, b *int64) bool {
@@ -379,6 +386,28 @@ func (m *Manager) sweepChatSidecars(known map[string]bool) int {
 	if err != nil {
 		return 0
 	}
+	bases := chatSidecarBases(known, entries)
+	removed := 0
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !orphanChatFile(e, bases) {
+			continue
+		}
+		name := e.Name()
+		if err := os.Remove(filepath.Join(m.dir, name)); err != nil {
+			m.log.Warn("cannot remove an orphaned chat file", "file", name, "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		m.log.Info("removed chat files for recordings that are gone", "count", removed)
+	}
+	return removed
+}
+
+// chatSidecarBases is the set of recording stems whose chat is still wanted:
+// every indexed recording, and every master on disk.
+func chatSidecarBases(known map[string]bool, entries []os.DirEntry) map[string]bool {
 	bases := make(map[string]bool, len(known))
 	for name := range known {
 		bases[stemOf(name)] = true
@@ -390,33 +419,20 @@ func (m *Manager) sweepChatSidecars(known map[string]bool) int {
 			bases[stemOf(e.Name())] = true
 		}
 	}
-	removed := 0
-	for _, e := range entries {
-		if !e.Type().IsRegular() {
-			continue
-		}
-		name := e.Name()
-		switch {
-		case chatTempName.MatchString(name):
-			if info, err := e.Info(); err != nil || time.Since(info.ModTime()) < staleChatTemp {
-				continue
-			}
-		default:
-			base, ok := chatexport.SidecarBase(name)
-			if !ok || bases[base] {
-				continue
-			}
-		}
-		if err := os.Remove(filepath.Join(m.dir, name)); err != nil {
-			m.log.Warn("cannot remove an orphaned chat file", "file", name, "err", err)
-			continue
-		}
-		removed++
+	return bases
+}
+
+// orphanChatFile reports whether a regular file in the recordings directory is
+// chat that nothing wants: a temporary left by a crashed write that is stale, or
+// a sidecar whose recording is gone.
+func orphanChatFile(e os.DirEntry, bases map[string]bool) bool {
+	name := e.Name()
+	if chatTempName.MatchString(name) {
+		info, err := e.Info()
+		return err == nil && time.Since(info.ModTime()) >= staleChatTemp
 	}
-	if removed > 0 {
-		m.log.Info("removed chat files for recordings that are gone", "count", removed)
-	}
-	return removed
+	base, ok := chatexport.SidecarBase(name)
+	return ok && !bases[base]
 }
 
 // chatHoldSlack is how long after its last write a recording's chat is still

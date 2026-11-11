@@ -190,7 +190,7 @@ func (c *Client) Put(ctx context.Context, key string, body io.ReadSeeker, size i
 	for k, v := range meta {
 		h.Set("X-Amz-Meta-"+k, v)
 	}
-	resp, err := c.do(ctx, "PutObject", http.MethodPut, key, h, body, size, sha256Hex)
+	resp, err := c.do(ctx, "PutObject", http.MethodPut, key, objRequest{hdr: h, body: body, size: size, payloadSHA: sha256Hex})
 	if err != nil {
 		return "", err
 	}
@@ -200,7 +200,7 @@ func (c *Client) Put(ctx context.Context, key string, body io.ReadSeeker, size i
 
 // Head reports size, ETag and user metadata without fetching the body.
 func (c *Client) Head(ctx context.Context, key string) (ObjectInfo, error) {
-	resp, err := c.do(ctx, "HeadObject", http.MethodHead, key, nil, nil, 0, emptySHA256)
+	resp, err := c.do(ctx, "HeadObject", http.MethodHead, key, objRequest{payloadSHA: emptySHA256})
 	if err != nil {
 		return ObjectInfo{}, err
 	}
@@ -210,7 +210,7 @@ func (c *Client) Head(ctx context.Context, key string) (ObjectInfo, error) {
 
 // Get opens the object for reading. The caller closes the body.
 func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
-	resp, err := c.do(ctx, "GetObject", http.MethodGet, key, nil, nil, 0, emptySHA256)
+	resp, err := c.do(ctx, "GetObject", http.MethodGet, key, objRequest{payloadSHA: emptySHA256})
 	if err != nil {
 		return nil, ObjectInfo{}, err
 	}
@@ -234,7 +234,7 @@ func (c *Client) CreateMultipart(ctx context.Context, key string, meta map[strin
 	for k, v := range meta {
 		h.Set("X-Amz-Meta-"+k, v)
 	}
-	resp, err := c.doQ(ctx, "CreateMultipartUpload", http.MethodPost, key, url.Values{"uploads": {""}}, h, nil, 0, emptySHA256)
+	resp, err := c.doQ(ctx, "CreateMultipartUpload", http.MethodPost, key, url.Values{"uploads": {""}}, objRequest{hdr: h, payloadSHA: emptySHA256})
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +254,7 @@ func (c *Client) UploadPart(ctx context.Context, key, uploadID string, n int, bo
 	h := http.Header{}
 	h.Set("Content-MD5", md5B64)
 	q := url.Values{"partNumber": {strconv.Itoa(n)}, "uploadId": {uploadID}}
-	resp, err := c.doQ(ctx, "UploadPart", http.MethodPut, key, q, h, body, size, sha256Hex)
+	resp, err := c.doQ(ctx, "UploadPart", http.MethodPut, key, q, objRequest{hdr: h, body: body, size: size, payloadSHA: sha256Hex})
 	if err != nil {
 		return "", err
 	}
@@ -275,8 +275,8 @@ func (c *Client) CompleteMultipart(ctx context.Context, key, uploadID string, pa
 	sum := sha256.Sum256(body)
 	h := http.Header{}
 	h.Set(headerContentType, "application/xml")
-	resp, err := c.doQ(ctx, "CompleteMultipartUpload", http.MethodPost, key, url.Values{"uploadId": {uploadID}}, h,
-		bytes.NewReader(body), int64(len(body)), hex.EncodeToString(sum[:]))
+	resp, err := c.doQ(ctx, "CompleteMultipartUpload", http.MethodPost, key, url.Values{"uploadId": {uploadID}},
+		objRequest{hdr: h, body: bytes.NewReader(body), size: int64(len(body)), payloadSHA: hex.EncodeToString(sum[:])})
 	if err != nil {
 		return "", err
 	}
@@ -300,7 +300,7 @@ func (c *Client) CompleteMultipart(ctx context.Context, key, uploadID string, pa
 // AbortMultipart discards an unfinished upload and its parts. An upload the
 // service no longer knows is already gone, which is the goal: not an error.
 func (c *Client) AbortMultipart(ctx context.Context, key, uploadID string) error {
-	resp, err := c.doQ(ctx, "AbortMultipartUpload", http.MethodDelete, key, url.Values{"uploadId": {uploadID}}, nil, nil, 0, emptySHA256)
+	resp, err := c.doQ(ctx, "AbortMultipartUpload", http.MethodDelete, key, url.Values{"uploadId": {uploadID}}, objRequest{payloadSHA: emptySHA256})
 	if err != nil {
 		var se *Error
 		if errors.As(err, &se) && (se.StatusCode == http.StatusNotFound || se.Code == "NoSuchUpload") {
@@ -328,7 +328,7 @@ func CompositeETag(parts []Part) (string, error) {
 
 // Delete removes the object. S3 answers 204 whether or not it existed.
 func (c *Client) Delete(ctx context.Context, key string) error {
-	resp, err := c.do(ctx, "DeleteObject", http.MethodDelete, key, nil, nil, 0, emptySHA256)
+	resp, err := c.do(ctx, "DeleteObject", http.MethodDelete, key, objRequest{payloadSHA: emptySHA256})
 	if err != nil {
 		return err
 	}
@@ -410,11 +410,21 @@ func (c *Client) objectURL(key string) (*url.URL, string) {
 	return out, path
 }
 
-func (c *Client) do(ctx context.Context, op, method, key string, hdr http.Header, body io.ReadSeeker, size int64, payloadSHA string) (*http.Response, error) {
-	return c.doQ(ctx, op, method, key, nil, hdr, body, size, payloadSHA)
+// objRequest is the request-side part of one S3 call: its headers, its body, and
+// the digest the service is asked to verify.
+type objRequest struct {
+	hdr        http.Header
+	body       io.ReadSeeker
+	size       int64
+	payloadSHA string
 }
 
-func (c *Client) doQ(ctx context.Context, op, method, key string, query url.Values, hdr http.Header, body io.ReadSeeker, size int64, payloadSHA string) (*http.Response, error) {
+func (c *Client) do(ctx context.Context, op, method, key string, r objRequest) (*http.Response, error) {
+	return c.doQ(ctx, op, method, key, nil, r)
+}
+
+func (c *Client) doQ(ctx context.Context, op, method, key string, query url.Values, r objRequest) (*http.Response, error) {
+	hdr, body, size, payloadSHA := r.hdr, r.body, r.size, r.payloadSHA
 	if key == "" || strings.HasPrefix(key, "/") {
 		return nil, fmt.Errorf("objstore: %s: key must be non-empty and relative", op)
 	}

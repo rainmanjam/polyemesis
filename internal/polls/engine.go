@@ -386,12 +386,24 @@ func (e *Engine) Tick() {
 			return
 		}
 	}
+	e.maybeReadMirrorsLocked(a, now)
+	e.flushDueLocked(a, now)
+}
+
+// maybeReadMirrorsLocked starts a periodic read of the native mirrors when one
+// is due and none is already in flight. Caller holds e.mu.
+func (e *Engine) maybeReadMirrorsLocked(a *active, now time.Time) {
 	if a.res.State == StateOpen && len(a.mirrors) > 0 && !a.mirrorReading && !now.Before(a.nextMirror) {
 		a.mirrorReading = true
 		a.nextMirror = now.Add(mirrorEvery)
 		mirrors := append([]Mirrored(nil), a.mirrors...)
 		e.goAsync(func(ctx context.Context) { e.readMirrors(ctx, a, mirrors, false) })
 	}
+}
+
+// flushDueLocked publishes a recounted vote when one is due, otherwise a display
+// refresh when that is due. Caller holds e.mu.
+func (e *Engine) flushDueLocked(a *active, now time.Time) {
 	if a.dirty && now.Sub(a.lastVote) >= voteEvery {
 		a.dirty = false
 		a.lastVote, a.lastDisplay = now, now
@@ -472,8 +484,17 @@ func recount(a *active) {
 	for i, l := range a.spec.Options {
 		opts[i] = OptionResult{Label: l, ByPlatform: map[string]int{}}
 	}
-	total := 0
 	by := map[string]int{}
+	total := countChatVotes(a, opts, by)
+	total += countMirrorVotes(a, n, opts, by)
+	a.res.Options, a.res.Total, a.res.ByPlatform = opts, total, by
+	a.res.Native = nativeResults(a)
+}
+
+// countChatVotes tallies the chat votes into opts and by, returning how many
+// were counted.
+func countChatVotes(a *active, opts []OptionResult, by map[string]int) int {
+	total := 0
 	for v, b := range a.votes {
 		if b.native && !a.fallback[chatKey{b.msg.platform, b.msg.account}] {
 			continue
@@ -484,6 +505,13 @@ func recount(a *active) {
 		by[p]++
 		total++
 	}
+	return total
+}
+
+// countMirrorVotes tallies each counted native mirror's own votes into opts and
+// by, returning how many were counted.
+func countMirrorVotes(a *active, n int, opts []OptionResult, by map[string]int) int {
+	total := 0
 	for i, m := range a.mirrors {
 		counted := m.Result.Status == NativeMirrored || m.Result.Status == NativeStopped
 		if !counted || i >= len(a.mirrorVotes) || len(a.mirrorVotes[i]) != n {
@@ -500,15 +528,20 @@ func recount(a *active) {
 			total += c
 		}
 	}
-	a.res.Options, a.res.Total, a.res.ByPlatform = opts, total, by
-	a.res.Native = nil
+	return total
+}
+
+// nativeResults is the per-mirror result list, each carrying its own votes.
+func nativeResults(a *active) []NativeResult {
+	var native []NativeResult
 	for i, m := range a.mirrors {
 		r := m.Result
 		if i < len(a.mirrorVotes) {
 			r.Votes = append([]int(nil), a.mirrorVotes[i]...)
 		}
-		a.res.Native = append(a.res.Native, r)
+		native = append(native, r)
 	}
+	return native
 }
 
 // snapshot is a deep copy of the result, safe to hand outside the lock.
@@ -585,26 +618,7 @@ func (e *Engine) startMirror(ctx context.Context, a *active) {
 		a.mirrorVotes = make([][]int, len(ms))
 		a.mirrorFinal = len(live(ms)) == 0
 		a.nextMirror = e.now()
-		for _, m := range live(ms) {
-			k := chatKey{db.Platform(m.Result.Platform), m.Account}
-			a.native[k] = true
-			// A vote typed in this chat before its native poll existed is
-			// moved to the native side too: from now on this chat's viewers
-			// vote in the platform's poll, and counting both would be the
-			// double count the mirror is built to avoid.
-			for who, v := range a.votes {
-				if v.msg.platform == k.platform && v.msg.account == k.account {
-					v.native = true
-					a.votes[who] = v
-				}
-			}
-			for ref, h := range a.pending {
-				if ref.platform == k.platform && ref.account == k.account {
-					h.native = true
-					a.pending[ref] = h
-				}
-			}
-		}
+		markNativeChats(a, live(ms))
 		recount(a)
 		a.dirty = true
 	} else {
@@ -616,6 +630,32 @@ func (e *Engine) startMirror(ctx context.Context, a *active) {
 	e.mu.Unlock()
 	if !open {
 		e.readMirrors(ctx, a, ms, true)
+	}
+}
+
+// markNativeChats moves each live native poll's chat onto the native side: the
+// votes and pending holds already typed there are re-flagged so they stop
+// counting as chat votes. Caller holds e.mu.
+func markNativeChats(a *active, ms []Mirrored) {
+	for _, m := range ms {
+		k := chatKey{db.Platform(m.Result.Platform), m.Account}
+		a.native[k] = true
+		// A vote typed in this chat before its native poll existed is
+		// moved to the native side too: from now on this chat's viewers
+		// vote in the platform's poll, and counting both would be the
+		// double count the mirror is built to avoid.
+		for who, v := range a.votes {
+			if v.msg.platform == k.platform && v.msg.account == k.account {
+				v.native = true
+				a.votes[who] = v
+			}
+		}
+		for ref, h := range a.pending {
+			if ref.platform == k.platform && ref.account == k.account {
+				h.native = true
+				a.pending[ref] = h
+			}
+		}
 	}
 }
 
@@ -641,14 +681,17 @@ func live(ms []Mirrored) []Mirrored {
 //     ran are counted instead: the only count there is.
 //
 // A failed read while the poll runs changes nothing: the next one retries.
+// mirrorReadResult is one native poll's read: its counts, whether it is still
+// running, and the read error if there was one.
+type mirrorReadResult struct {
+	counts []int
+	live   bool
+	err    error
+	read   bool
+}
+
 func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end bool) {
-	type got struct {
-		counts []int
-		live   bool
-		err    error
-		read   bool
-	}
-	res := make([]got, len(ms))
+	res := make([]mirrorReadResult, len(ms))
 	for i, m := range ms {
 		if m.Result.Status != NativeMirrored {
 			continue
@@ -657,7 +700,7 @@ func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end 
 		if err != nil {
 			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", redact.Redact(err.Error()))
 		}
-		res[i] = got{counts: c, live: live, err: err, read: true}
+		res[i] = mirrorReadResult{counts: c, live: live, err: err, read: true}
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -665,32 +708,7 @@ func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end 
 		if !r.read || i >= len(a.mirrors) || a.mirrors[i].Result.Status != NativeMirrored {
 			continue
 		}
-		m := &a.mirrors[i]
-		k := chatKey{db.Platform(m.Result.Platform), m.Account}
-		switch {
-		case end && r.err != nil:
-			m.Result.Status = NativeFailed
-			m.Result.Reason = "the final count could not be read, so this chat's own votes are counted instead"
-			a.mirrorVotes[i] = nil
-			a.fallback[k] = true
-			delete(a.native, k)
-		case end:
-			if r.counts != nil {
-				a.mirrorVotes[i] = r.counts
-			}
-			m.Result.Reason = ""
-		case r.err != nil:
-			// Retried on the next read.
-		case !r.live:
-			if r.counts != nil {
-				a.mirrorVotes[i] = r.counts
-			}
-			m.Result.Status = NativeStopped
-			m.Result.Reason = "the platform's poll ended early; its votes so far stand and chat votes count again"
-			delete(a.native, k)
-		case r.counts != nil:
-			a.mirrorVotes[i] = r.counts
-		}
+		applyMirrorRead(a, i, r, end)
 	}
 	a.mirrorReading = false
 	if end {
@@ -699,6 +717,37 @@ func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end 
 	if e.cur == a {
 		recount(a)
 		a.dirty = true
+	}
+}
+
+// applyMirrorRead applies one native poll's read to the mirror at index i. Caller
+// holds e.mu.
+func applyMirrorRead(a *active, i int, r mirrorReadResult, end bool) {
+	m := &a.mirrors[i]
+	k := chatKey{db.Platform(m.Result.Platform), m.Account}
+	switch {
+	case end && r.err != nil:
+		m.Result.Status = NativeFailed
+		m.Result.Reason = "the final count could not be read, so this chat's own votes are counted instead"
+		a.mirrorVotes[i] = nil
+		a.fallback[k] = true
+		delete(a.native, k)
+	case end:
+		if r.counts != nil {
+			a.mirrorVotes[i] = r.counts
+		}
+		m.Result.Reason = ""
+	case r.err != nil:
+		// Retried on the next read.
+	case !r.live:
+		if r.counts != nil {
+			a.mirrorVotes[i] = r.counts
+		}
+		m.Result.Status = NativeStopped
+		m.Result.Reason = "the platform's poll ended early; its votes so far stand and chat votes count again"
+		delete(a.native, k)
+	case r.counts != nil:
+		a.mirrorVotes[i] = r.counts
 	}
 }
 

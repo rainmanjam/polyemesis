@@ -633,26 +633,41 @@ func (b *Bridge) runJob(j job) {
 		}
 		rec.Results = a.Stop(j.ctx, cfg)
 	case jobScene:
-		rec.Scene, rec.Preset = j.scene, j.rule.Preset
-		// The rule as it stands now, if the scene still has one; the queued
-		// copy otherwise is stale configuration.
-		rule, ok := cfg.Rule(j.scene)
-		if !ok {
+		if !runScene(j, a, cfg, &rec) {
 			return
 		}
-		rec.Preset = rule.Preset
-		rec.Results = a.ApplyScene(j.ctx, cfg, rule)
 	}
 	if rec.Results == nil {
 		rec.Results = []Outcome{}
 	}
-	if j.kind == jobStop && len(rec.Results) > 0 && !acted(rec.Results) {
-		// Every destination was already stopped -- by the ingest-loss fallback,
-		// or by hand: this stop did nothing, so it records nothing.
-		b.log.Debug("OBS bridge: a stop found every destination already stopped")
+	if b.stopDidNothing(j, rec) {
 		return
 	}
 	b.record(rec)
+}
+
+// stopDidNothing reports whether a stop found every destination already stopped
+// -- by the ingest-loss fallback, or by hand -- so it records nothing.
+func (b *Bridge) stopDidNothing(j job, rec ActionRecord) bool {
+	if j.kind == jobStop && len(rec.Results) > 0 && !acted(rec.Results) {
+		b.log.Debug("OBS bridge: a stop found every destination already stopped")
+		return true
+	}
+	return false
+}
+
+// runScene applies the scene's rule as it stands now, if the scene still has
+// one; the queued copy otherwise is stale configuration. It reports false when
+// the scene no longer has a rule.
+func runScene(j job, a Actions, cfg Config, rec *ActionRecord) bool {
+	rec.Scene, rec.Preset = j.scene, j.rule.Preset
+	rule, ok := cfg.Rule(j.scene)
+	if !ok {
+		return false
+	}
+	rec.Preset = rule.Preset
+	rec.Results = a.ApplyScene(j.ctx, cfg, rule)
+	return true
 }
 
 // runIngestJob runs a fallback stop and records it if it stopped anything.
