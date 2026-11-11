@@ -49,15 +49,21 @@ var _ ChannelModeratorManager = (*YouTubeAdapter)(nil)
 const ytModeratorsPath = "/liveChat/moderators"
 
 type ytModeratorItem struct {
-	ID      string `json:"id"`
-	Snippet struct {
-		ModeratorDetails struct {
-			ChannelID       string `json:"channelId"`
-			ChannelURL      string `json:"channelUrl"`
-			DisplayName     string `json:"displayName"`
-			ProfileImageURL string `json:"profileImageUrl"`
-		} `json:"moderatorDetails"`
-	} `json:"snippet"`
+	ID      string             `json:"id"`
+	Snippet ytModeratorSnippet `json:"snippet"`
+}
+
+// ytModeratorSnippet is the snippet block of a moderator resource.
+type ytModeratorSnippet struct {
+	ModeratorDetails ytModeratorDetails `json:"moderatorDetails"`
+}
+
+// ytModeratorDetails is the moderator's channel identity.
+type ytModeratorDetails struct {
+	ChannelID       string `json:"channelId"`
+	ChannelURL      string `json:"channelUrl"`
+	DisplayName     string `json:"displayName"`
+	ProfileImageURL string `json:"profileImageUrl"`
 }
 
 func (it ytModeratorItem) moderator() ChatModerator {
