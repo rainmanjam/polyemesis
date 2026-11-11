@@ -7,6 +7,11 @@ type MQL = { matches: boolean; listeners: Array<(e: { matches: boolean }) => voi
 let mql: MQL;
 let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
 let ioDisconnect: () => void;
+const original = {
+  matchMedia: window.matchMedia,
+  IntersectionObserver: (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver,
+  visibility: Object.getOwnPropertyDescriptor(document, "visibilityState"),
+};
 
 function setReduced(matches: boolean) {
   mql.matches = matches;
@@ -50,6 +55,12 @@ beforeEach(() => {
 
 afterEach(() => {
   document.documentElement.classList.remove("motion-on");
+  window.matchMedia = original.matchMedia;
+  (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = original.IntersectionObserver;
+  if (original.visibility) Object.defineProperty(document, "visibilityState", original.visibility);
+  else delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("createMotionGate", () => {
@@ -78,6 +89,54 @@ describe("createMotionGate", () => {
     expect(gate.allowed()).toBe(false);
     expect(fn).toHaveBeenCalledWith(false);
     expect(document.documentElement.classList.contains("motion-on")).toBe(false);
+  });
+
+  it("resuming puts motion-on back and notifies true", () => {
+    const gate = createMotionGate(window);
+    const fn = vi.fn();
+    gate.subscribe(fn);
+    gate.setUserPaused(true);
+    gate.setUserPaused(false);
+    expect(gate.allowed()).toBe(true);
+    expect(fn).toHaveBeenLastCalledWith(true);
+    expect(document.documentElement.classList.contains("motion-on")).toBe(true);
+  });
+
+  it("a reduced-motion flip notifies subscribers both ways, and pause still wins after it", () => {
+    const gate = createMotionGate(window);
+    const fn = vi.fn();
+    gate.subscribe(fn);
+    setReduced(true);
+    expect(fn).toHaveBeenLastCalledWith(false);
+    setReduced(false);
+    expect(fn).toHaveBeenLastCalledWith(true);
+    gate.setUserPaused(true);
+    setReduced(true);
+    setReduced(false);
+    expect(gate.allowed()).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it("a throwing subscriber does not stop the rest, and its error is reported", () => {
+    const reported = vi.fn();
+    vi.stubGlobal("reportError", reported);
+    const gate = createMotionGate(window);
+    const after = vi.fn();
+    gate.subscribe(() => {
+      throw new Error("boom");
+    });
+    gate.subscribe(after);
+    gate.setUserPaused(true);
+    expect(after).toHaveBeenCalledWith(false);
+    expect(reported).toHaveBeenCalledTimes(1);
+    expect((reported.mock.calls[0]![0] as Error).message).toBe("boom");
+  });
+
+  it("dispose removes the media-query listener", () => {
+    const gate = createMotionGate(window);
+    expect(mql.listeners).toHaveLength(1);
+    gate.dispose();
+    expect(mql.listeners).toHaveLength(0);
   });
 
   it("unsubscribe stops notifications", () => {
