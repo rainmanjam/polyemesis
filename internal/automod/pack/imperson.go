@@ -222,17 +222,37 @@ func (n *NameSet) match(author string, signal func() bool) (detector, who string
 	}
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	// The operator's own names first, then the learned ones, as before.
-	for _, idx := range []*nameIndex{&n.static, &n.lidx} {
-		for _, p := range idx.byFold[f] {
-			if p.raw != raw { // the real account, or the same name on another platform
-				return "fold", p.raw, true
-			}
-		}
+	if w, found := n.foldWho(f, raw); found {
+		return "fold", w, true
 	}
 	if len(fr) < minEditRunes {
 		return "", "", false
 	}
+	if editWho := n.editWho(fr, raw); editWho != "" && signal() {
+		return "edit1", editWho, true
+	}
+	return "", "", false
+}
+
+// foldWho finds a protected name whose folded form is f. The operator's own
+// names are searched first, then the learned ones, as before. It skips the
+// author's own raw name (the real account, or the same name on another
+// platform). The caller holds n.mu.
+func (n *NameSet) foldWho(f, raw string) (string, bool) {
+	for _, idx := range []*nameIndex{&n.static, &n.lidx} {
+		for _, p := range idx.byFold[f] {
+			if p.raw != raw { // the real account, or the same name on another platform
+				return p.raw, true
+			}
+		}
+	}
+	return "", false
+}
+
+// editWho returns the protected name one edit from fr, scanning only names of a
+// length one edit could reach, or "" when there is none. When several match,
+// the last one scanned wins. The caller holds n.mu.
+func (n *NameSet) editWho(fr []rune, raw string) string {
 	editWho := ""
 	for _, idx := range []*nameIndex{&n.static, &n.lidx} {
 		for l := len(fr) - 1; l <= len(fr)+1; l++ {
@@ -243,8 +263,5 @@ func (n *NameSet) match(author string, signal func() bool) (detector, who string
 			}
 		}
 	}
-	if editWho != "" && signal() {
-		return "edit1", editWho, true
-	}
-	return "", "", false
+	return editWho
 }
