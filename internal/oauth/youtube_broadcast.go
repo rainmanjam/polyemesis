@@ -113,23 +113,8 @@ func (s BroadcastSettings) withDefaults(b *ytBroadcast, res *MetadataResult) Bro
 	if d == nil {
 		return s
 	}
-	cd := b.ContentDetails
 	if contentDetailsFrozen(b.Status.LifeCycleStatus) {
-		differs := false
-		boolDiff := func(want *bool, cur bool) { differs = differs || (want != nil && *want != cur) }
-		boolDiff(d.EnableDvr, cd.EnableDvr)
-		boolDiff(d.EnableAutoStart, cd.EnableAutoStart)
-		boolDiff(d.EnableAutoStop, cd.EnableAutoStop)
-		if d.RecordFromStart != nil && cd.RecordFromStart != nil {
-			boolDiff(d.RecordFromStart, *cd.RecordFromStart)
-		}
-		if d.LatencyPreference != nil && cd.LatencyPreference != "" && *d.LatencyPreference != cd.LatencyPreference {
-			differs = true
-		}
-		if d.ClosedCaptionsType != nil && cd.ClosedCaptionsType != "" && *d.ClosedCaptionsType != cd.ClosedCaptionsType {
-			differs = true
-		}
-		if differs {
+		if frozenControlsDiffer(d, b) {
 			res.Skipped = append(res.Skipped, FieldContentDetails)
 			res.Warnings = append(res.Warnings, fmt.Sprintf(
 				"broadcast controls: this broadcast is %q, and the stored controls apply only before going live, so they were not sent",
@@ -137,6 +122,32 @@ func (s BroadcastSettings) withDefaults(b *ytBroadcast, res *MetadataResult) Bro
 		}
 		return s
 	}
+	return s.fillFrom(d)
+}
+
+// frozenControlsDiffer reports whether any stored control differs from what a
+// frozen broadcast already has.
+func frozenControlsDiffer(d *BroadcastSettings, b *ytBroadcast) bool {
+	cd := b.ContentDetails
+	differs := false
+	boolDiff := func(want *bool, cur bool) { differs = differs || (want != nil && *want != cur) }
+	boolDiff(d.EnableDvr, cd.EnableDvr)
+	boolDiff(d.EnableAutoStart, cd.EnableAutoStart)
+	boolDiff(d.EnableAutoStop, cd.EnableAutoStop)
+	if d.RecordFromStart != nil && cd.RecordFromStart != nil {
+		boolDiff(d.RecordFromStart, *cd.RecordFromStart)
+	}
+	if d.LatencyPreference != nil && cd.LatencyPreference != "" && *d.LatencyPreference != cd.LatencyPreference {
+		differs = true
+	}
+	if d.ClosedCaptionsType != nil && cd.ClosedCaptionsType != "" && *d.ClosedCaptionsType != cd.ClosedCaptionsType {
+		differs = true
+	}
+	return differs
+}
+
+// fillFrom fills every control the composer left unset from the stored defaults.
+func (s BroadcastSettings) fillFrom(d *BroadcastSettings) BroadcastSettings {
 	fill := func(dst **bool, src *bool) {
 		if *dst == nil {
 			*dst = src

@@ -762,20 +762,7 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 
 	users, userErr := k.livestreams(ctx, accessToken, kickUserLivestreamsPath)
 	if userErr == nil && len(users) > 0 {
-		l := users[0]
-		// Presence in the token's own livestream list is the liveness signal.
-		// It used to be joined by "and the count is above zero", which made a
-		// streamer who hides their viewer count read as offline.
-		stats.Live = true
-		if v, ok := l.viewers(); ok {
-			stats.ViewerCount = &v
-		}
-		stats.Title = l.StreamTitle
-		stats.Category = l.Category.Name
-		stats.Language = l.Language
-		stats.Slug = l.Slug
-		stats.StartedAt = parseKickTime(l.StartedAt)
-		stats.Source = kickUserLivestreamsPath
+		applyKickLivestream(stats, users[0])
 	}
 
 	// The second call is skipped once the first one has both a live channel and
@@ -790,11 +777,8 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 	// A token Kick rejects, or a rate limit, answers the second call the same
 	// way: asking again only doubles the traffic against a dead token or a
 	// limit, on every sampler tick.
-	if userErr != nil {
-		var se *StatusError
-		if errors.As(userErr, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusTooManyRequests) {
-			return nil, userErr
-		}
+	if userErr != nil && isKickRejection(userErr) {
+		return nil, userErr
 	}
 
 	ch, chErr := k.channel(ctx, accessToken)
@@ -807,6 +791,37 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 		return stats, nil
 	}
 
+	fillFromKickChannel(stats, ch)
+	return stats, nil
+}
+
+// applyKickLivestream copies the token's own livestream into stats. Presence in
+// the token's livestream list is the liveness signal.
+func applyKickLivestream(stats *LiveStats, l kickLivestream) {
+	// Presence in the token's own livestream list is the liveness signal.
+	// It used to be joined by "and the count is above zero", which made a
+	// streamer who hides their viewer count read as offline.
+	stats.Live = true
+	if v, ok := l.viewers(); ok {
+		stats.ViewerCount = &v
+	}
+	stats.Title = l.StreamTitle
+	stats.Category = l.Category.Name
+	stats.Language = l.Language
+	stats.Slug = l.Slug
+	stats.StartedAt = parseKickTime(l.StartedAt)
+	stats.Source = kickUserLivestreamsPath
+}
+
+// isKickRejection reports whether the user-list failure is one the second call
+// cannot cure: a rejected token or a rate limit.
+func isKickRejection(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusTooManyRequests)
+}
+
+// fillFromKickChannel fills the gaps in stats from the channel resource.
+func fillFromKickChannel(stats *LiveStats, ch *kickChannel) {
 	// is_live is the platform's own answer and outranks an inference, so it
 	// may promote a channel the first call missed. It may NOT demote one the
 	// first call found: the two reads are seconds apart and a stream that just
@@ -836,7 +851,6 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 	if stats.Source == "" {
 		stats.Source = kickChannelsPath
 	}
-	return stats, nil
 }
 
 // parseKickTime is deliberately forgiving: an unparseable timestamp costs the

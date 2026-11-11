@@ -57,6 +57,18 @@ type ytHealthStatus struct {
 	} `json:"configurationIssues"`
 }
 
+// healthVerdict turns a liveStream's health block into a verdict, keeping only
+// the configuration issues YouTube reports as errors.
+func healthVerdict(hs ytHealthStatus) StreamHealthVerdict {
+	h := StreamHealthVerdict{Status: hs.Status}
+	for _, is := range hs.ConfigurationIssues {
+		if is.Severity == "error" && is.Type != "" {
+			h.Issues = append(h.Issues, is.Type)
+		}
+	}
+	return h
+}
+
 // StreamHealths lists the channel's liveStreams with part=cdn,status: every
 // page, bounded by ytKeyPagesMax, for StreamKeys' reason -- a destination whose
 // stream is on page two must not read as unjudged. Each page is one list call,
@@ -83,13 +95,7 @@ func (y *YouTube) StreamHealths(ctx context.Context, _, accessToken string) (map
 			if k == "" {
 				continue
 			}
-			h := StreamHealthVerdict{Status: s.Status.HealthStatus.Status}
-			for _, is := range s.Status.HealthStatus.ConfigurationIssues {
-				if is.Severity == "error" && is.Type != "" {
-					h.Issues = append(h.Issues, is.Type)
-				}
-			}
-			out[sha256.Sum256([]byte(k))] = h
+			out[sha256.Sum256([]byte(k))] = healthVerdict(s.Status.HealthStatus)
 		}
 		if list.NextPageToken == "" {
 			return out, nil
