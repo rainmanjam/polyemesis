@@ -372,33 +372,31 @@ export function DestinationCard({
     </>
   );
   const renderCounters = () => (
-    <>
-        <div
-          data-testid="card-secondary-stats"
-          className="grid grid-cols-4 gap-2 border-t border-border pt-2"
-        >
-          <Stat
-            labelKey="dest.restarts"
-            value={dest.process ? (dest.process.restarts ?? 0) : "—"}
-            tone={dest.process && (dest.process.restarts ?? 0) > 0 ? "warn" : "muted"}
-          />
-          <Stat
-            labelKey="dest.dropped"
-            value={running && progress ? (progress.dropFrames ?? 0) : "—"}
-            tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
-          />
-          <Stat
-            labelKey="dest.duplicated"
-            value={running && progress ? (progress.dupFrames ?? 0) : "—"}
-            tone={running && (progress?.dupFrames ?? 0) > 0 ? "warn" : "muted"}
-          />
-          <Stat
-            labelKey="dest.speed"
-            value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
-            tone={speedTone(running, progress?.speed ?? 0)}
-          />
-        </div>
-    </>
+    <div
+      data-testid="card-secondary-stats"
+      className="grid grid-cols-4 gap-2 border-t border-border pt-2"
+    >
+      <Stat
+        labelKey="dest.restarts"
+        value={dest.process ? (dest.process.restarts ?? 0) : "—"}
+        tone={dest.process && (dest.process.restarts ?? 0) > 0 ? "warn" : "muted"}
+      />
+      <Stat
+        labelKey="dest.dropped"
+        value={running && progress ? (progress.dropFrames ?? 0) : "—"}
+        tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
+      />
+      <Stat
+        labelKey="dest.duplicated"
+        value={running && progress ? (progress.dupFrames ?? 0) : "—"}
+        tone={running && (progress?.dupFrames ?? 0) > 0 ? "warn" : "muted"}
+      />
+      <Stat
+        labelKey="dest.speed"
+        value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
+        tone={speedTone(running, progress?.speed ?? 0)}
+        />
+      </div>
   );
 
   const renderProblems = () => (
