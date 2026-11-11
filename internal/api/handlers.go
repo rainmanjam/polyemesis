@@ -2244,7 +2244,7 @@ func (s *Server) ApplySettings(settings db.Settings) {
 	// sample skip the initial delay. handlePutSettings wakes it after a save.
 	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
 	// Rebuilding the automod engine is also what recompiles a changed rule.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
+	ApplyAutomod(AutomodApply{Hub: s.chat, Store: s.store, Box: s.box, Log: s.log, Settings: settings.Automod, Budget: s.automodBudget, SecondaryBudget: s.automodSecondaryBudget, Persist: s.automodState})
 	ApplyAlertSettings(s.mgr, settings.Alerts)
 }
 

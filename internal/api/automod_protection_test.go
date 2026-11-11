@@ -362,7 +362,7 @@ func TestApplyAutomodAttachesThePackOnlyWhenOnAndKeepsStrikesAcrossSaves(t *test
 	hub := newTestHub(t)
 	und := a
 	und.Protection.State = ""
-	ApplyAutomod(hub, store, nil, log, und, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: und, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	if v := hub.Moderator().CheckFast(db.PlatformTwitch, automod.Subject{AuthorID: "u1", AuthorName: "v", Text: slur}); v.Flagged() || v.Hold {
 		t.Fatalf("an undecided install ran the pack: %+v", v)
 	}
@@ -371,7 +371,7 @@ func TestApplyAutomodAttachesThePackOnlyWhenOnAndKeepsStrikesAcrossSaves(t *test
 	}
 
 	// On: the first hit is a delete (strike 1).
-	ApplyAutomod(hub, store, nil, log, a, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: a, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	check := func() automod.Finding {
 		v := hub.Moderator().CheckFast(db.PlatformTwitch, automod.Subject{AuthorID: "u1", AuthorName: "v", Text: slur})
 		if !v.Hold || len(v.Findings) == 0 {
@@ -383,14 +383,14 @@ func TestApplyAutomodAttachesThePackOnlyWhenOnAndKeepsStrikesAcrossSaves(t *test
 		t.Fatalf("strike 1: %q", f.Action)
 	}
 	// A settings save in the middle: a new engine, the same strikes.
-	ApplyAutomod(hub, store, nil, log, a, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: a, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	if f := check(); f.Action != automod.ActionTimeout || f.TimeoutSeconds != 600 {
 		t.Fatalf("strike 2 after a save: %q/%d, want timeout/600", f.Action, f.TimeoutSeconds)
 	}
 	// Arming a rung is a different matter: it starts the count again.
 	b := a
 	b.On = map[string]bool{"twitch/ban/protection": true}
-	ApplyAutomod(hub, store, nil, log, b, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: b, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	if f := check(); f.Action != automod.ActionFlag {
 		t.Fatalf("first hit after the armed set changed: %q, want flag", f.Action)
 	}
@@ -399,7 +399,7 @@ func TestApplyAutomodAttachesThePackOnlyWhenOnAndKeepsStrikesAcrossSaves(t *test
 	ps.Names.Learn("zorblax_main")
 	c := b
 	c.Protection.Impersonation.Protect = []string{"qwertyuiop"}
-	ApplyAutomod(hub, store, nil, log, c, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: c, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	if got := ps.Names.Len(); got < 2 {
 		t.Fatalf("learned names were dropped by a save: %d held", got)
 	}

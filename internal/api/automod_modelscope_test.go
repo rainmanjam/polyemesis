@@ -52,8 +52,8 @@ func applyJev(t *testing.T, a db.AutomodSettings) (*automod.Engine, *automod.Per
 	}
 	hub := newTestHub(t)
 	ps := automod.NewPersistent()
-	ApplyAutomod(hub, store, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), a,
-		automod.NewBudget(), automod.NewBudget(), ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Settings: a,
+		Budget: automod.NewBudget(), SecondaryBudget: automod.NewBudget(), Persist: ps})
 	e, ok := hub.Moderator().(*automod.Engine)
 	if !ok {
 		t.Fatalf("the moderator is %T", hub.Moderator())

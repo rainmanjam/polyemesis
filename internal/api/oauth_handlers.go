@@ -183,8 +183,9 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 // dropped rather than written onto the new one. That is the expected outcome
 // of a race the operator caused, not a fault, so it is logged at Info.
 func (s *Server) recordCredCheck(platform db.Platform, clientID, secret string, check oauth.CheckResult) {
-	err := s.store.RecordPlatformCredsCheck(s.box, platform, clientID, secret, string(check.State),
-		string(check.Method), scrubSecret(check.Detail, secret), time.Now())
+	err := s.store.RecordPlatformCredsCheck(db.PlatformCredsCheckInput{Box: s.box, Platform: platform, ClientID: clientID,
+		ClientSecret: secret, State: string(check.State), Method: string(check.Method),
+		Detail: scrubSecret(check.Detail, secret), At: time.Now()})
 	switch {
 	case err == nil:
 	case errors.Is(err, db.ErrStaleCredsCheck):
