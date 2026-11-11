@@ -1,0 +1,129 @@
+---
+/* THE HOME HERO: one headline, one lede, two actions and the split diagram
+ * with its story tabs. Everything is server-rendered so the page reads with no
+ * script; scripts/home/hero.ts (loaded lazily by the page) un-hides the tablist
+ * and Pause, swaps the destination divs for buttons and drives the status line.
+ *
+ * DOM CONTRACT (hero.ts reads exactly this): section[data-hero], a hidden
+ * [role=tablist][data-story-tabs] holding #tab-<k> buttons, #panel-<k>
+ * tabpanels (hidden except Streamer), [data-status][aria-live=polite],
+ * [data-fine] and a hidden [data-pause].
+ *
+ * NO LAYOUT SHIFT. The tab row's height is reserved while the tablist is still
+ * hidden, Pause is absolutely positioned inside space the stage already keeps,
+ * and the status line reserves three lines. The server prints the Streamer
+ * story's status caption and fine print, the same text hero.ts starts from. */
+import SplitDiagram from "./SplitDiagram.astro";
+import { STORIES, STORY_ORDER, statusFor } from "../../scripts/home/stories";
+
+const first = STORY_ORDER[0];
+const status = statusFor(STORIES[first], null, false);
+---
+
+<section class="hero relative overflow-hidden border-b border-line" data-hero>
+  <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
+  <div class="wrap relative py-12 lg:py-16">
+    <h1 class="rise rise-1 hero-h1">One video. A <em class="it">different</em> sound for every audience.</h1>
+    <p class="rise rise-2 hero-lede">
+      Upload once from OBS, an IRL backpack or any SRT encoder.<span class="lede-more">
+        polyemesis sends your video to Twitch, YouTube and Kick untouched, with the music on Twitch and off YouTube. Free, and it runs on your own server.</span>
+    </p>
+    <div class="rise rise-3 hero-cta">
+      <a class="btn btn-onair" href="#run">Install polyemesis</a>
+      <a class="btn btn-ghost" href="#how">See how it works</a>
+    </div>
+
+    <div class="rise rise-4 stage">
+      <div class="tabrow">
+        <div role="tablist" aria-label="Example setups" data-story-tabs hidden class="tabs">
+          {
+            STORY_ORDER.map((k) => (
+              <button
+                type="button"
+                role="tab"
+                class="tab"
+                id={`tab-${k}`}
+                aria-controls={`panel-${k}`}
+                aria-selected={k === first ? "true" : "false"}
+                tabindex={k === first ? 0 : -1}
+              >
+                {STORIES[k].tab}
+              </button>
+            ))
+          }
+        </div>
+      </div>
+
+      {
+        STORY_ORDER.map((k) => (
+          <div class="panel" role="tabpanel" id={`panel-${k}`} aria-labelledby={`tab-${k}`} hidden={k !== "streamer"}>
+            <SplitDiagram story={k} mode="hero" />
+          </div>
+        ))
+      }
+
+      <p class="status" data-status aria-live="polite">{status.text}</p>
+      <p class="fine" data-fine>{STORIES[first].fine}</p>
+      <button type="button" class="pause btn btn-ghost" data-pause aria-pressed="false" hidden>Pause motion</button>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero-h1 {
+    font-family: var(--font-display);
+    font-size: clamp(30px, 4.6vw, 65px);
+    line-height: 1.06;
+    font-weight: 700;
+    text-wrap: balance;
+    max-width: 22ch;
+  }
+  .hero-lede {
+    margin-top: 1.5rem;
+    max-width: 40rem;
+    font-size: 1.125rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+    color: var(--color-muted);
+  }
+  .hero-cta { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+
+  .stage { position: relative; margin-top: 2.5rem; padding-bottom: 3.25rem; }
+  /* The row keeps the tablist's 44px while the tablist is hidden (no script). */
+  .tabrow { min-height: 44px; margin-bottom: 1rem; }
+  .tabs { display: flex; gap: 0.5rem; }
+  .tabs[hidden] { display: none; }
+  .tab {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding-inline: 0.75rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 0.9375rem;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] { color: var(--color-fg); border-color: var(--color-fg); background: var(--color-primary-dim); }
+  @media (min-width: 640px) {
+    .tab { flex: 0 0 auto; min-width: 7.5rem; }
+  }
+
+  .status { margin-top: 1rem; min-height: 3lh; max-width: 44rem; color: var(--color-muted); }
+  .status :global(b) { font-weight: 600; color: var(--color-fg); }
+  .fine { margin-top: 0.5rem; max-width: 44rem; font-size: 13px; color: var(--color-subtle); }
+  /* Out of flow: the stage already keeps the room Pause takes. */
+  .pause { position: absolute; right: 0; bottom: 0; min-height: 44px; }
+
+  @media (max-width: 639px) {
+    .lede-more { display: none; }
+  }
+
+  /* The outgoing panel fades for 150ms during a story switch (hero.ts adds
+     .swap-out). Only while motion is on, which is off for reduced-motion
+     visitors and while the page's Pause is pressed. */
+  @media (prefers-reduced-motion: no-preference) {
+    .motion-on .panel { transition: opacity 150ms ease-out; }
+    .motion-on .panel.swap-out { opacity: 0; }
+  }
+</style>

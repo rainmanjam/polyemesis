@@ -35,7 +35,7 @@ export const STORY_ORDER: readonly StoryKey[] = ["streamer", "sports", "worship"
 
 const LICENCE = "Use tracks you have the rights to.";
 const TRANSLATION =
-  "Translation comes from your own interpreters or AI provider; polyemesis routes each language.";
+  "Translation comes from your own interpreters or translation service, as a track you send; polyemesis routes each language.";
 
 export const STORIES: Record<StoryKey, Story> = {
   streamer: {

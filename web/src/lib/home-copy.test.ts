@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -90,144 +90,79 @@ describe("time-to-first-stream copy (S2)", () => {
   });
 });
 
-/* THE HERO (S1). The hero is the one place a reader decides whether to keep
- * reading, so its shape is pinned here: one outcome headline, one subhead
- * sentence, one copy-able install action that is the primary control, the
- * quickstart as a text link, the calculator below the actions, and the real
- * routing product in the first screen. */
-describe("the home hero (S1)", () => {
-  const home = pages("index.astro");
-  const hero = home.slice(home.indexOf("<section class=\"relative overflow-hidden"));
-  const heroBody = hero.slice(0, hero.indexOf("</section>"));
-  const h1 = heroBody.slice(heroBody.indexOf("<h1"), heroBody.indexOf("</h1>"));
-  const sub = heroBody.slice(heroBody.indexOf("rise rise-2"), heroBody.indexOf("</p>", heroBody.indexOf("rise rise-2")));
-
-  it("sets the headline with at most one forced line break", () => {
-    expect((h1.match(/<br/g) ?? []).length).toBeLessThanOrEqual(1);
+/* THE HERO (2026-11 redesign). One headline with one italic word, a lede,
+ * Install as the on-air primary, and the split diagram with its story tabs. */
+describe("the home hero (2026-11 redesign)", () => {
+  const hero = readFileSync(join(here, "..", "components", "home", "Hero.astro"), "utf8");
+  const markup = hero.slice(0, hero.indexOf("<style>"));
+  it("states the decided headline with one italic word", () =>
+    expect(hero).toMatch(/<h1[^>]*>\s*One video\. A <em class="it">different<\/em> sound for every audience\.\s*<\/h1>/));
+  it("states the decided lede", () => {
+    expect(hero).toContain("Upload once from OBS, an IRL backpack or any SRT encoder.");
+    expect(hero).toContain("with the music on Twitch and off YouTube. Free, and it runs on your own server.");
+    expect(markup).not.toMatch(/vMix/);
   });
-
-  it("states the subhead in one sentence", () => {
-    const text = sub.replace(/<[^>]+>/g, " ");
-    const sentences = text.split(/[.!?](\s|$)/).filter((s) => s.trim().length > 0);
-    expect(sentences.length).toBe(1);
+  it("makes Install the on-air primary and How it works the ghost", () => {
+    expect(hero).toMatch(/<a[^>]*class="btn btn-onair[^"]*"[^>]*href="#run"[^>]*>\s*Install polyemesis/);
+    expect(hero).toMatch(/<a[^>]*class="btn btn-ghost[^"]*"[^>]*href="#how"[^>]*>\s*See how it works/);
   });
-
-  it("makes copying the install command the primary action", () => {
-    expect(heroBody).toMatch(/btn btn-primary[^>]*data-copy-target="install-command"/);
-    expect(heroBody).toMatch(/Copy install command/);
+  it("renders a diagram panel per story, only Streamer visible", () => {
+    expect(hero.match(/<SplitDiagram\b/g)).toHaveLength(1); // inside STORY_ORDER.map
+    expect(hero).toMatch(/STORY_ORDER\.map/);
+    expect(hero).toMatch(/role="tabpanel"[^>]*hidden=\{k !== "streamer"\}/);
+    expect(hero).toMatch(/aria-labelledby=\{`tab-\$\{k\}`\}/);
   });
-
-  it("names the install command's code element for that copy action", () => {
-    expect(heroBody).toMatch(/codeId="install-command"/);
+  it("hides the controls that need JS until JS un-hides them", () => {
+    expect(hero).toMatch(/role="tablist"[^>]*hidden/);
+    expect(hero).toMatch(/data-pause[^>]*hidden|hidden[^>]*data-pause/);
   });
-
-  /* ONE COPY ACTION (2026-11 design review). The hero had two controls that
-   * copied the same string: a small Copy in the code block's bar and the
-   * primary button under it. The block now renders none of its own
-   * (externalCopy) and the primary button is the only copy control, carrying
-   * data-code-copy so check-build still pairs the <pre> with exactly one. */
-  it("has exactly one copy control for the install command, and it is the primary button", () => {
-    expect(heroBody).toMatch(/<CodeBlock[^>]*codeId="install-command"[^>]*externalCopy/);
-    const buttons = heroBody.match(/<button[\s\S]*?<\/button>/g) ?? [];
-    expect(buttons.length).toBe(1);
-    expect(buttons[0]).toMatch(/class="btn btn-primary"/);
-    expect(buttons[0]).toMatch(/data-code-copy/);
-    expect(buttons[0]).toMatch(/data-copy-target="install-command"/);
+  it("has a polite live status line and a fine print line rendered from the stories", () => {
+    expect(hero).toMatch(/data-status[^>]*aria-live="polite"/);
+    expect(hero).toMatch(/data-fine>\{STORIES\[first\]\.fine\}/);
+    expect(hero).toMatch(/statusFor\(STORIES\[first\], null, false\)/);
   });
-
-  it("puts no pill or chip above the headline", () => {
-    expect(heroBody.slice(0, heroBody.indexOf("<h1"))).not.toMatch(/class="chip/);
+  it("reserves the layout so nothing shifts when script runs (F9)", () => {
+    expect(hero).toMatch(/\.tabrow \{ min-height: 44px/);
+    expect(hero).toMatch(/\.pause \{ position: absolute/);
+    expect(hero).toMatch(/\.status \{[^}]*min-height: 3lh/);
   });
-
-  it("keeps the interaction colour off the headline", () => {
-    // Written without the literal class name: ui/src/lib/palette-contrast.test.ts
-    // scans web/ sources for it and would read this assertion as a use.
-    expect(h1).not.toMatch(/\bprimary\b|<span\b/);
+  it("fades the outgoing panel only while motion is on", () => {
+    expect(hero).toMatch(/prefers-reduced-motion: no-preference\) \{[^@]*\.motion-on \.panel\.swap-out \{ opacity: 0/);
+    expect(hero).not.toMatch(/prefers-reduced-motion: reduce/);
   });
-
-  it("keeps the quickstart as a text link, not a second button", () => {
-    const anchor = /<a\s+href="\/docs\/quickstart"[^>]*>/.exec(heroBody);
-    expect(anchor).not.toBeNull();
-    expect(anchor![0]).not.toMatch(/btn-primary|btn-ghost/);
+  it("puts no pill above the headline and no interaction colour in it", () => {
+    expect(hero.slice(0, hero.indexOf("<h1"))).not.toMatch(/class="chip/);
+    expect(hero.slice(hero.indexOf("<h1"), hero.indexOf("</h1>"))).not.toMatch(/\bprimary\b|<span\b/);
   });
-
-  it("puts the calculator link below the primary action", () => {
-    expect(heroBody.indexOf("Copy install command")).toBeGreaterThan(-1);
-    expect(heroBody.indexOf('href="/calculator"')).toBeGreaterThan(heroBody.indexOf("Copy install command"));
+  it("loads the behaviour lazily from the page", () => {
+    expect(pages("index.astro")).toMatch(/requestIdleCallback\(go/);
+    expect(pages("index.astro")).toMatch(/import\("\.\.\/scripts\/home\/boot"\)/);
   });
-
-  it("cuts the install caveat out of the hero, leaving the quickstart to carry it", () => {
-    // The docker command itself legitimately contains /udp; the caveat prose
-    // about it does not belong in the hero any more.
-    expect(heroBody).not.toMatch(/SRT is UDP/);
-    expect(heroBody).not.toMatch(/1935 is published/);
+  it("keeps the italic serif off the preload list and swaps it", () => {
+    const base = readFileSync(join(here, "..", "layouts", "Base.astro"), "utf8");
+    expect(base).not.toMatch(/rel="preload"[^>]*ibm-plex-serif-italic/);
+    expect(base).toMatch(/font-family: "IBM Plex Serif";[^}]*font-style: italic;[^}]*ibm-plex-serif-italic\.woff2|font-family: "IBM Plex Serif";[^}]*ibm-plex-serif-italic\.woff2[^}]*font-style: italic;[^}]*font-display: swap/);
   });
-
-  /* THE HERO PICTURE IS THE SIGNAL PATH (2026-11). It replaced the routing
-   * screenshot (02-routing-hero.png, a clip of the real routing screen). The
-   * equivalent promise is kept: the first screen shows the routing idea, not a
-   * decoration. The hero renders the SignalPath component, that component's
-   * own source carries the crawlable destination text and per-destination mix
-   * (so it reads without JavaScript), and the old screenshot import is gone
-   * from the page rather than left to rot. */
-  it("shows the signal path, an interactive diagram of the routing, in the first screen", () => {
-    expect(heroBody).toMatch(/<SignalPath\s*\/>/);
-    expect(home).toMatch(/import SignalPath from "\.\.\/components\/SignalPath\.astro"/);
-    expect(home).not.toMatch(/routingHero/);
-    expect(home).not.toMatch(/02-routing-hero/);
+  it("declares the bone ink on the .home wrapper only and the accent font without system serifs", () => {
+    const css = readFileSync(join(here, "..", "styles", "global.css"), "utf8");
+    expect(css).toMatch(/\.home \{\s*--home-bone: oklch\(93% 0\.014 85\);\s*color: var\(--home-bone\);/);
+    expect(css).not.toMatch(/\.home h1|\.home p/);
+    expect(css).toContain('--font-accent: "IBM Plex Serif", serif;');
+    expect(pages("index.astro")).toMatch(/<div class="home">/);
   });
-
-  it("renders the diagram's destinations and mixes as real HTML, not only in script", () => {
-    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
-    const from = sp.indexOf("<div class=\"sp\"");
-    const to = sp.indexOf("<style");
-    // A reordered or renamed marker would slice the wrong range and make every
-    // assertion below pass or fail for the wrong reason.
-    expect(from).toBeGreaterThan(-1);
-    expect(to).toBeGreaterThan(from);
-    const markup = sp.slice(from, to);
-    for (const text of ["Twitch", "YouTube", "Local archive", "Mics + music + game", "Mics + game · no music", "Original audio tracks, kept separately"]) {
-      expect(markup, text).toContain(text);
-    }
+  it("refreshes the description and keeps the title", () => {
+    expect(pages("index.astro")).toContain('title="Multistream, a different mix per platform — polyemesis"');
+    expect(pages("index.astro")).toContain(
+      'description="Multistream to Twitch, YouTube and Kick from one upload, with a different audio mix per platform and the video untouched. Free, on your own server."',
+    );
   });
-
-  it("states the headline and lede of the signal path", () => {
-    expect(h1).toMatch(/One stream in\./);
-    expect(h1).toMatch(/Your mix, everywhere\./);
-    expect(sub).toMatch(/different audio mix for each destination/);
-  });
-
-  /* The hero picture used to be the full 1440px routing screen scaled into a
-   * ~560px column with CSS offsets -- legible to nobody, and tuned to one
-   * capture's pixels. No arbitrary-offset crop classes belong in the hero. */
-  it("does not crop the hero picture with CSS offsets", () => {
-    expect(heroBody).not.toMatch(/left-\[-\d+%\]|top-\[-[\d.]+%\]/);
-  });
-
-  /* THE DIAGRAM'S KEYBOARD AND LOAD CONTRACT (hero items 2 and 3). */
-  it("makes each destination card a named focus stop that previews its mix", () => {
-    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
-    const cards = sp.match(/<div class="destination node[^>]*>/g) ?? [];
-    expect(cards.length).toBe(3);
-    for (const card of cards) {
-      expect(card).toMatch(/tabindex="0"/);
-      expect(card).toMatch(/role="group"/);
-      expect(card).toMatch(/aria-label="[A-Za-z ]+ mix: /);
-    }
-    expect(sp).toMatch(/\.destination:focus-visible \{ outline: 2px solid var\(--color-primary-bright\); outline-offset: 2px; \}/);
-    const controller = readFileSync(join(here, "..", "scripts", "signal-path", "controller.js"), "utf8");
-    expect(controller).toMatch(/addEventListener\('focusin'/);
-    expect(controller).toMatch(/addEventListener\('focusout'/);
-  });
-
-  it("loads the animation lazily and keeps the videos from preloading", () => {
-    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
-    expect(sp).toMatch(/import\("\.\.\/scripts\/signal-path\/controller\.js"\)/);
-    expect(sp).toMatch(/new IntersectionObserver/);
-    const videos = sp.match(/<video\b[^>]*>/g) ?? [];
-    expect(videos.length).toBe(4);
-    for (const v of videos) expect(v).toMatch(/preload="none"/);
-    expect(sp).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
+  it("ships the italic serif under 45 KB with its licence recorded at the top", () => {
+    const font = join(here, "..", "..", "public", "fonts", "ibm-plex-serif-italic.woff2");
+    expect(statSync(font).size).toBeLessThanOrEqual(45_000);
+    const lic = readFileSync(join(here, "..", "..", "public", "third-party-licenses.txt"), "utf8");
+    expect(lic).toContain("IBM Plex Serif");
+    expect(lic).toContain("SIL OPEN FONT LICENSE Version 1.1");
+    expect(lic.indexOf("IBM Plex Serif")).toBeLessThan(lic.indexOf("Data shipped inside the polyemesis server binary"));
   });
 });
 
@@ -314,24 +249,6 @@ describe("the features page rooms (S6)", () => {
     expect(features).toMatch(/Home and away/);
     expect(features).toMatch(/Esports|esports/);
   });
-});
-
-describe("the hero's link sentences keep their spaces (S1)", () => {
-  /* Astro drops the newline between a line of text and an element that opens
-   * the next line, so "are in the" + <a>quickstart</a> rendered as
-   * "are in thequickstart" and "Planning bandwidth first?Bandwidth
-   * calculator". The rest of the site already spells the space as {" "} for
-   * this reason (see the plan strip further down this page). */
-  const home = pages("index.astro");
-
-  it.each(["are in the", "Planning bandwidth first?"])(
-    "%s is followed by a space",
-    (lead) => {
-      const at = home.indexOf(lead);
-      expect(at, lead).toBeGreaterThan(-1);
-      expect(home.slice(at + lead.length, at + lead.length + 5)).toBe('{" "}');
-    },
-  );
 });
 
 /* THE DASHBOARD'S INGEST UPTIME. #924 took "uptime" out of the features copy

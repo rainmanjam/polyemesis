@@ -4,7 +4,7 @@ import CodeBlock from "../components/CodeBlock.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
-import SignalPath from "../components/SignalPath.astro";
+import Hero from "../components/home/Hero.astro";
 import Problem from "../components/home/Problem.astro";
 import HowItWorks from "../components/home/HowItWorks.astro";
 import Recovery from "../components/home/Recovery.astro";
@@ -90,101 +90,12 @@ const features = [
     that the person with this problem searches for the problem. */}
 <Base
   title="Multistream, a different mix per platform — polyemesis"
-  description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest carries OBS's split tracks — send the clean feed where music gets muted."
+  description="Multistream to Twitch, YouTube and Kick from one upload, with a different audio mix per platform and the video untouched. Free, on your own server."
   path="/"
   announce={{ release: repo?.release ?? null }}
 >
-  {/* ---------------------------------------------------------------- hero */}
-  {/* THE HERO IS SHAPED AROUND ONE ACTION AND ONE PICTURE (S1, approved).
-      Outcome headline, one-sentence subhead, then the install command with a
-      primary Copy button. The quickstart is a text link, not a second button,
-      because a hero with two equal buttons has no primary action. The
-      calculator sits BELOW the actions: it answers "what will this cost my
-      uplink" after the reader has decided to install, so it no longer sits
-      between the subhead and the command. The first screen shows the real
-      routing UI, not a CSS drawing of it.
-
-      The install caveat (password, /udp, port 1935) is cut to one sentence
-      here. The quickstart carries the full version, and the port reasons are
-      written out there with the commands that need them. */}
-  <section class="relative overflow-hidden border-b border-line">
-    <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
-    <div class="wrap relative py-12 lg:py-16">
-      <div class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
-        <div>
-          {/* THE HEADLINE AND LEDE ARE THE SIGNAL PATH'S (2026-11 hero). One
-              outcome line with one composed break, no pill above it and no
-              colour in it. The lede is ONE sentence on purpose (home-copy.test
-              holds that): the prototype's two sentences became one. */}
-          <h1 class="rise rise-1 text-balance text-4xl font-bold leading-[1.06] sm:text-5xl lg:text-[3.4rem]">
-            One stream in.<br />
-            Your mix, everywhere.
-          </h1>
-          <p class="rise rise-2 mt-6 max-w-lg text-pretty text-lg leading-relaxed text-muted">
-            One upload from OBS goes out as the same video everywhere, with a different audio mix for each destination.
-          </p>
-        </div>
-
-        <div class="rise rise-3">
-          <CodeBlock
-            label="docker"
-            codeId="install-command"
-            externalCopy
-            code={`docker run -d --name polyemesis \\
-  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
-  -v polyemesis-data:/data \\
-  rainmanjam/polyemesis:latest`}
-          />
-
-          {/* ONE COPY ACTION, and it is the primary control (2026-11 design
-              review). The block above renders no Copy of its own
-              (`externalCopy`), so this button is the only thing on the hero
-              that copies the command. It carries `data-code-copy`, which is
-              how check-build pairs the block's <pre> with one copy control,
-              and `data-copy-target`, which is how the script finds the text
-              from outside the box. */}
-          <div class="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <button
-              type="button"
-              class="btn btn-primary"
-              data-code-copy
-              data-copy-target="install-command"
-            >
-              Copy install command
-            </button>
-            <a
-              href="/docs/quickstart"
-              class="tap text-sm text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
-            >
-              Read the quickstart
-            </a>
-          </div>
-
-          <p class="mt-4 text-sm text-subtle">
-            Needs Docker. The ports and the first-run admin password are in the{" "}
-            <a href="/docs/quickstart" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">quickstart</a>.
-          </p>
-
-          <p class="mt-4 text-sm text-subtle">
-            Planning bandwidth first?{" "}
-            <a
-              href="/calculator"
-              class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
-            >
-              Bandwidth calculator
-            </a>
-          </p>
-        </div>
-      </div>
-
-      {/* THE PICTURE IS THE INTERACTIVE SIGNAL PATH (replaces the routing
-          screenshot of #963). Real HTML first, so it reads without JS; its
-          animation loads lazily. See SignalPath.astro. */}
-      <div class="rise rise-4 mt-10 lg:mt-12">
-        <SignalPath />
-      </div>
-    </div>
-  </section>
+<div class="home">
+  <Hero />
 
   <Problem />
 
@@ -520,6 +431,7 @@ const features = [
     </div>
   </section>
 
+</div>
   <script>
     const go = () => import("../scripts/home/boot").then((m) => m.boot(document));
     "requestIdleCallback" in window ? requestIdleCallback(go, { timeout: 2000 }) : setTimeout(go, 200);
