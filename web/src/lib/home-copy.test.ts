@@ -499,4 +499,18 @@ describe("homepage claims match the code (T12)", () => {
   it("sends server newcomers to the install guide", () => expect(run).toMatch(/Never run a server before\?[^<]*<a href="\/docs\/install">/));
   // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
   it("points script users at the setup code", () => expect(run).toMatch(/closing summary/));
+  // docs/FAQ.md:103-104: failover is off by default, so the heading must be conditional.
+  it("makes the recovery heading conditional on failover", () =>
+    expect(recovery).toMatch(/With failover on, your stream stays up when your encoder drops\./));
+  // docs/STORAGE.md:3-10, docs/MQTT.md, docs/HOOKS.md send data out when configured.
+  it("does not claim all data stays on the server", () => expect(run).not.toMatch(/keys and data stay/));
+  // docs/PLATFORMS.md:42-50: many platforms are unverified.
+  it("does not promise every platform in How it works", () => expect(how).not.toMatch(/to every platform/));
+  // Problem: competitor claims scoped to what docs/COMPARISON.md and the facts file show.
+  const problem = home("Problem.astro");
+  it("makes no universal competitor claims", () => {
+    expect(problem).not.toMatch(/Every way to multistream/);
+    expect(problem).not.toMatch(/usually means a paid plan/);
+    expect(problem).not.toMatch(/any mix you can script/);
+  });
 });
