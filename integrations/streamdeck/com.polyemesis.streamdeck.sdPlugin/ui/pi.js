@@ -18,8 +18,8 @@
   let destinationList = null;
 
   // The actions whose inspector picks a destination from a list and one of its tracks.
-  const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
-  const isTrackAction = () => TRACK_ACTIONS.includes(actionType);
+  const TRACK_ACTIONS = new Set(["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"]);
+  const isTrackAction = () => TRACK_ACTIONS.has(actionType);
   const isPollAction = () => actionType === "com.polyemesis.streamdeck.poll";
   const isDumpAction = () => actionType === "com.polyemesis.streamdeck.delay-dump";
   const isStopOneAction = () => actionType === "com.polyemesis.streamdeck.stop-destination";
@@ -38,7 +38,7 @@
 
   function loadStrings(sdkLanguage) {
     const all = window.POLYEMESIS_STRINGS || {};
-    strings = { ...(all.en || {}), ...(all[localeFrom(sdkLanguage)] || {}) };
+    strings = { ...all.en, ...all[localeFrom(sdkLanguage)] };
     applyStrings();
   }
   const fields = ["url", "token", "caPem"];

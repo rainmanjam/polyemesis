@@ -161,7 +161,7 @@ export function ActivityFeed({
 
       {events.length > 0 && (
         <div className="flex shrink-0 flex-col gap-1.5 border-b border-border px-2 py-1.5">
-          <div role="group" aria-label={t("activity.filterPlatforms")} className="flex flex-wrap items-center gap-1">
+          <fieldset aria-label={t("activity.filterPlatforms")} className="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0">
             {platforms.map((p) => {
               const accent = accentFor(p as ChatPlatform);
               const Icon = accent.icon;
@@ -182,8 +182,8 @@ export function ActivityFeed({
                 </button>
               );
             })}
-          </div>
-          <div role="group" aria-label={t("activity.filterKinds")} className="flex flex-wrap items-center gap-1">
+          </fieldset>
+          <fieldset aria-label={t("activity.filterKinds")} className="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0">
             {kinds.map((k) => {
               const Icon = KIND_ICON[k] ?? ActivityIcon;
               const on = !hiddenKinds.has(k);
@@ -203,7 +203,7 @@ export function ActivityFeed({
                 </button>
               );
             })}
-          </div>
+          </fieldset>
           {codes.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <label htmlFor="activity-hide-code" className="text-muted-foreground">

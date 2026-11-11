@@ -1104,13 +1104,9 @@ export class Runtime {
     this.flashes.delete(id);
     if (!(await this.requireAdmin(s))) return;
     const { destinationId, sourceId, dumpSeconds } = s.settings;
-    if (!dumpSecondsValid(dumpSeconds)) {
-      await s.setTitle(t(this.locale, "streamdeck.dump.badSeconds"));
-      await s.showAlert();
-      return;
-    }
-    if (destinationId !== undefined && !this.ownsDestination(s, destinationId)) {
-      await s.setTitle(t(this.locale, "streamdeck.state.missing"));
+    const refusal = this.dumpPressRefusal(s, destinationId, dumpSeconds);
+    if (refusal !== undefined) {
+      await s.setTitle(refusal);
       await s.showAlert();
       return;
     }
@@ -1128,6 +1124,16 @@ export class Runtime {
     const face = this.dumpHeldFace(all, dumpSeconds, result.impact?.destinations ?? 0);
     await s.setState(KEY_STATE.held);
     await s.setTitle(titleFor(face, this.locale));
+  }
+
+  /**
+   * The title a dump press is refused with before anything is armed, or undefined when it may arm.
+   * A seconds value that is not 1 to 900 is refused first, then a destination the programme does not own.
+   */
+  private dumpPressRefusal(s: Surface, destinationId: number | undefined, dumpSeconds: number | undefined): string | undefined {
+    if (!dumpSecondsValid(dumpSeconds)) return t(this.locale, "streamdeck.dump.badSeconds");
+    if (destinationId !== undefined && !this.ownsDestination(s, destinationId)) return t(this.locale, "streamdeck.state.missing");
+    return undefined;
   }
 
   /** The title a refused dump hold shows: why the dump cannot run, as the operator can act on it. */
