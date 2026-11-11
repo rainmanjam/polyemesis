@@ -21,7 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { countdownFor, formatRemaining } from "@/features/recurring/rolloverCountdown";
 import { classifyRun } from "@/lib/recurringOutcome";
 import { getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import type { DestStatus, RolloverSettings, RolloverView } from "@/lib/types";
 
 /** How often the card re-reads the server. The countdown itself ticks on the same beat. */
@@ -98,9 +98,9 @@ export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
   if (!view) {
     return notice ? (
       <section className="grid gap-2 rounded border border-border p-2 text-sm" aria-label={t("wave3.rollover.countdownTitle")}>
-        <p role="status" className="text-xs text-down">
+        <output className="block text-pretty text-xs text-down">
           {notice.text}
-        </p>
+        </output>
       </section>
     ) : null;
   }
@@ -166,16 +166,7 @@ export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
         </span>
       </div>
 
-      {countdown.kind === "running" ? (
-        <p className="tabular-nums">{t("wave3.rollover.remaining", { time: formatRemaining(countdown.remainingMs) })}</p>
-      ) : null}
-      {countdown.kind === "waiting" ? <p>{t("wave3.rollover.waiting")}</p> : null}
-      {countdown.kind === "none" && countdown.reason === "unverified" ? (
-        <p>{t("wave3.rollover.noCountdownUnverified")}</p>
-      ) : null}
-      {countdown.kind === "none" && countdown.reason === "not-delivering" ? (
-        <p>{t("wave3.rollover.noCountdownNotDelivering")}</p>
-      ) : null}
+      {countdownLines(countdown, t)}
 
       {view.limit.status === "reported" ? (
         <p className="text-xs text-warn">{t("wave3.rollover.reported")}</p>
@@ -276,5 +267,23 @@ export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
         }}
       />
     </section>
+  );
+}
+
+// The countdown under the limit: the time left while it runs, or why there is none.
+function countdownLines(countdown: ReturnType<typeof countdownFor>, t: Translator) {
+  return (
+    <>
+      {countdown.kind === "running" ? (
+        <p className="tabular-nums">{t("wave3.rollover.remaining", { time: formatRemaining(countdown.remainingMs) })}</p>
+      ) : null}
+      {countdown.kind === "waiting" ? <p>{t("wave3.rollover.waiting")}</p> : null}
+      {countdown.kind === "none" && countdown.reason === "unverified" ? (
+        <p>{t("wave3.rollover.noCountdownUnverified")}</p>
+      ) : null}
+      {countdown.kind === "none" && countdown.reason === "not-delivering" ? (
+        <p>{t("wave3.rollover.noCountdownNotDelivering")}</p>
+      ) : null}
+    </>
   );
 }

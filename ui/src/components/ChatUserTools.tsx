@@ -75,7 +75,9 @@ export function ChatUserTools({
     const mine = ++generation.current;
     if (!authorId) return;
     const next: Record<Role, Status> = { vip: null, moderator: null };
-    const roles: Role[] = platform === "twitch" ? ["moderator", "vip"] : platform === "x" ? ["moderator"] : [];
+    let roles: Role[] = [];
+    if (platform === "twitch") roles = ["moderator", "vip"];
+    else if (platform === "x") roles = ["moderator"];
     await Promise.all(
       roles.map(async (r) => {
         try {
@@ -128,8 +130,10 @@ export function ChatUserTools({
   };
 
   const roleName = (r: Role) => (r === "vip" ? t("viewerCard.roleVip") : t("viewerCard.roleModerator"));
-  const statusWord = (s: Status) =>
-    s === null ? t("viewerCard.statusUnknown") : s ? t("viewerCard.statusYes") : t("viewerCard.statusNo");
+  const statusWord = (s: Status) => {
+    if (s === null) return t("viewerCard.statusUnknown");
+    return s ? t("viewerCard.statusYes") : t("viewerCard.statusNo");
+  };
 
   /* One change that asks again: a button that, pressed, becomes a confirm/cancel
      pair. Role changes and the warning share it. */
@@ -180,14 +184,10 @@ export function ChatUserTools({
   // an unknown one (the list could not be read) both are offered.
   const roleButtons = (role: Role, add: () => Promise<unknown>, remove: () => Promise<unknown>) => {
     const s = status[role];
-    const label = (adding: boolean) =>
-      role === "vip"
-        ? adding
-          ? t("viewerCard.makeVip")
-          : t("viewerCard.removeVip")
-        : adding
-          ? t("viewerCard.makeModerator")
-          : t("viewerCard.removeModerator");
+    const label = (adding: boolean) => {
+      if (role === "vip") return adding ? t("viewerCard.makeVip") : t("viewerCard.removeVip");
+      return adding ? t("viewerCard.makeModerator") : t("viewerCard.removeModerator");
+    };
     return (
       <>
         {s !== true && roleControl(`add-${role}`, label(true), false, add)}

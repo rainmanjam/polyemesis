@@ -163,22 +163,25 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   /** Writes a cell through to settings. Off DELETES the key rather than storing
    *  false, so the persisted form stays sparse and "absent means off" remains
    *  the only rule a reader needs. */
+  // One toggle per cell, built here so the switch's handler is not a function
+  // nested inside the row and column loops that render it.
+  const cellToggle = (key: string) => (v: boolean) => setCell(key, v);
   function setCell(key: string, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     if (auto) on[key] = true;
     else delete on[key];
     onChange({ ...settings, automod: { ...automod!, on } });
   }
 
   function setPlatformEnabled(platform: string, enabled: boolean) {
-    const pe = { ...(automod!.platformEnabled ?? {}) };
+    const pe = { ...automod!.platformEnabled };
     pe[platform] = enabled;
     onChange({ ...settings, automod: { ...automod!, platformEnabled: pe } });
   }
 
   /** Bulk: every checker for one action on one platform. */
   function setRow(platform: string, action: AutomodAction, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     for (const checker of columns) {
       const key = `${platform}/${action}/${checker}`;
       if (auto && armable(key)) on[key] = true;
@@ -189,7 +192,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
 
   /** Bulk: every action for one checker on one platform. */
   function setColumn(platform: string, checker: AutomodChecker, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     for (const action of view!.actions) {
       const key = `${platform}/${action}/${checker}`;
       if (auto && armable(key)) on[key] = true;
@@ -205,6 +208,113 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     on: automod.on,
     available: armable,
   });
+
+  // One cell of the matrix: the switch, or the inert reason it is not one.
+  const renderMatrixCell = (platform: string, action: AutomodAction, checker: AutomodChecker) => {
+    const key = `${platform}/${action}/${checker}`;
+    const cell = byKey.get(key);
+    const available = cell?.available ?? false;
+    const ready = readiness.get(checker);
+    const renderCell = () => {
+      if (!isOperable(action)) {
+        return (
+          /* FIXED TEXT, NOT A SWITCH — a CONTROL, and
+             the same one this file already applies to
+             an unavailable cell twelve lines down.
+
+             Flagging is recorded before the matrix is
+             consulted (chat/automod.go's recordAutomod
+             logs every finding in the verdict) and the
+             worker returns immediately for the flag
+             action, so these twelve switches had one
+             possible outcome each. Rendering them
+             disabled would be no better: a greyed
+             switch still says "this could be turned
+             on", and an operator who turns flagging
+             "off" to quieten a raid and sees the row
+             go dark believes something changed.
+
+             The server agrees, which is where the
+             inconsistency showed: Summary excludes
+             this action from the armed count
+             (automod/matrix.go:220), so the collapsed
+             line and these switches were already
+             disagreeing about what "armed" means. */
+          <span
+            className="cursor-help text-sm text-muted-foreground"
+            title={t("automod.alwaysOnTitle")}
+          >
+            {t("automod.alwaysOn")}
+          </span>
+        );
+      }
+      if (available && ready && !ready.ready) {
+        return (
+          /* INERT WITH THE REASON, exactly as an
+             unavailable platform's cell is, and for
+             the same reason spelled out below it: a
+             switch that silently does nothing leaves
+             the operator believing this channel is
+             protected.
+
+             What it protects against here is worse
+             than that. `automod.New` takes each
+             checker as a pointer and a nil one
+             "contributes nothing" -- and nil is the
+             DEFAULT for two of the three columns, so
+             "Ban / Model" was a live switch on a
+             fresh install with no model configured
+             and no field anywhere to configure one.
+             Arming it granted permission to
+             permanently remove a viewer to something
+             that did not exist, and the collapsed
+             line counted it as armed.
+
+             The platform gate is checked FIRST: when
+             a platform cannot perform the action at
+             all, configuring the checker would change
+             nothing, and "not configured" would send
+             an operator to fix the wrong thing. */
+          <span
+            className="cursor-help text-sm text-muted-foreground"
+            title={t(ready.reason)}
+          >
+            {t("automod.notConfigured")}
+          </span>
+        );
+      }
+      if (available) {
+        return (
+          <Switch
+            checked={Boolean(automod.on?.[key])}
+            onCheckedChange={cellToggle(key)}
+            aria-label={t("automod.cellLabel", {
+              checker: t(CHECKER_KEYS[checker]),
+              action: t(ACTION_KEYS[action]),
+              platform,
+            })}
+          />
+        );
+      }
+      return (
+        /* Inert WITH a reason, never an unticked box.
+           A switch that silently does nothing leaves
+           the operator believing this channel is
+           protected. */
+        <span
+          className="cursor-help text-sm text-muted-foreground"
+          title={cell?.reason ?? t("automod.notSupportedHere")}
+        >
+          {t("automod.notApplicable")}
+        </span>
+      );
+    };
+    return (
+      <td key={checker} className="px-2 py-2 text-center">
+        {renderCell()}
+      </td>
+    );
+  };
 
   return (
     <Card>
@@ -374,111 +484,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                               </div>
                             )}
                           </td>
-                          {columns.map((checker) => {
-                            const key = `${platform}/${action}/${checker}`;
-                            const cell = byKey.get(key);
-                            const available = cell?.available ?? false;
-                            const ready = readiness.get(checker);
-                            const renderCell = () => {
-                              if (!isOperable(action)) {
-                                return (
-                                  /* FIXED TEXT, NOT A SWITCH — a CONTROL, and
-                                     the same one this file already applies to
-                                     an unavailable cell twelve lines down.
-
-                                     Flagging is recorded before the matrix is
-                                     consulted (chat/automod.go's recordAutomod
-                                     logs every finding in the verdict) and the
-                                     worker returns immediately for the flag
-                                     action, so these twelve switches had one
-                                     possible outcome each. Rendering them
-                                     disabled would be no better: a greyed
-                                     switch still says "this could be turned
-                                     on", and an operator who turns flagging
-                                     "off" to quieten a raid and sees the row
-                                     go dark believes something changed.
-
-                                     The server agrees, which is where the
-                                     inconsistency showed: Summary excludes
-                                     this action from the armed count
-                                     (automod/matrix.go:220), so the collapsed
-                                     line and these switches were already
-                                     disagreeing about what "armed" means. */
-                                  <span
-                                    className="cursor-help text-sm text-muted-foreground"
-                                    title={t("automod.alwaysOnTitle")}
-                                  >
-                                    {t("automod.alwaysOn")}
-                                  </span>
-                                );
-                              }
-                              if (available && ready && !ready.ready) {
-                                return (
-                                  /* INERT WITH THE REASON, exactly as an
-                                     unavailable platform's cell is, and for
-                                     the same reason spelled out below it: a
-                                     switch that silently does nothing leaves
-                                     the operator believing this channel is
-                                     protected.
-
-                                     What it protects against here is worse
-                                     than that. `automod.New` takes each
-                                     checker as a pointer and a nil one
-                                     "contributes nothing" -- and nil is the
-                                     DEFAULT for two of the three columns, so
-                                     "Ban / Model" was a live switch on a
-                                     fresh install with no model configured
-                                     and no field anywhere to configure one.
-                                     Arming it granted permission to
-                                     permanently remove a viewer to something
-                                     that did not exist, and the collapsed
-                                     line counted it as armed.
-
-                                     The platform gate is checked FIRST: when
-                                     a platform cannot perform the action at
-                                     all, configuring the checker would change
-                                     nothing, and "not configured" would send
-                                     an operator to fix the wrong thing. */
-                                  <span
-                                    className="cursor-help text-sm text-muted-foreground"
-                                    title={t(ready.reason)}
-                                  >
-                                    {t("automod.notConfigured")}
-                                  </span>
-                                );
-                              }
-                              if (available) {
-                                return (
-                                  <Switch
-                                    checked={Boolean(automod.on?.[key])}
-                                    onCheckedChange={(v) => setCell(key, v)}
-                                    aria-label={t("automod.cellLabel", {
-                                      checker: t(CHECKER_KEYS[checker]),
-                                      action: t(ACTION_KEYS[action]),
-                                      platform,
-                                    })}
-                                  />
-                                );
-                              }
-                              return (
-                                /* Inert WITH a reason, never an unticked box.
-                                   A switch that silently does nothing leaves
-                                   the operator believing this channel is
-                                   protected. */
-                                <span
-                                  className="cursor-help text-sm text-muted-foreground"
-                                  title={cell?.reason ?? t("automod.notSupportedHere")}
-                                >
-                                  {t("automod.notApplicable")}
-                                </span>
-                              );
-                            };
-                            return (
-                              <td key={checker} className="px-2 py-2 text-center">
-                                {renderCell()}
-                              </td>
-                            );
-                          })}
+                          {columns.map((checker) => renderMatrixCell(platform, action, checker))}
                         </tr>
                       ))}
                     </tbody>

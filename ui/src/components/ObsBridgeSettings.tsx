@@ -55,12 +55,10 @@ function streamingText(streaming: boolean | null | undefined, t: Translator): st
 }
 
 function actionText(a: ObsActionRecord, t: Translator): string {
-  const what =
-    a.action === "scene"
-      ? t("obs.actionScene", { scene: a.scene ?? "" })
-      : a.action === "start"
-        ? t("obs.actionStart")
-        : t("obs.actionStop");
+  let what: string;
+  if (a.action === "scene") what = t("obs.actionScene", { scene: a.scene ?? "" });
+  else if (a.action === "start") what = t("obs.actionStart");
+  else what = t("obs.actionStop");
   // A stop the ingest-loss fallback made, not OBS: say so.
   return a.via === "ingest" ? `${what} (${t("obs.viaIngest")})` : what;
 }

@@ -198,8 +198,9 @@ export function UpdateBanner({ onInfo }: Readonly<{ onInfo?: (v: VersionInfo) =>
    * dismissal removes the node before any CSS transition could run. Both halves
    * need JavaScript; neither is decoration.
    *
-   * THE WRAPPER IS GEOMETRY, THE INNER DIV IS THE BANNER. role="status" stays
-   * on the element that holds the text, so the live region announces the
+   * THE WRAPPER IS GEOMETRY, THE INNER DIV IS THE BANNER. The live region (now
+   * an output element, which implies role="status") stays on the element that
+   * holds the text, so the live region announces the
    * sentence rather than an empty box that later grows. overflow-hidden on the
    * wrapper is what makes the collapse a wipe instead of squashed text --
    * padding and line-height do not scale with a height animation, so without it
@@ -219,8 +220,7 @@ export function UpdateBanner({ onInfo }: Readonly<{ onInfo?: (v: VersionInfo) =>
           transition={settle}
           className="overflow-hidden"
         >
-          <div
-            role="status"
+          <output
             className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/50 px-3 py-1.5 text-sm"
           >
             <span className="min-w-0 flex-1 truncate">
@@ -330,7 +330,7 @@ export function UpdateBanner({ onInfo }: Readonly<{ onInfo?: (v: VersionInfo) =>
             >
               <X className="size-3.5" aria-hidden />
             </button>
-          </div>
+          </output>
         </motion.div>
       )}
     </AnimatePresence>

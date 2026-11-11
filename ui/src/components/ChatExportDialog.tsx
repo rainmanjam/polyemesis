@@ -54,7 +54,7 @@ export function ChatExportDialog({ platforms }: Readonly<{ platforms: readonly s
     if (next) {
       // The last two hours, which is what the history keeps by default.
       const now = new Date();
-      setFrom(toLocalInput(new Date(now.getTime() - 2 * 3600_000)));
+      setFrom(toLocalInput(new Date(now.getTime() - 2 * 3_600_000)));
       setTo(toLocalInput(now));
       setTried(false);
     }

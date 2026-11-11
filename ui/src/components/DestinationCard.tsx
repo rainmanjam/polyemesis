@@ -310,106 +310,8 @@ export function DestinationCard({
     );
   };
 
-  return (
-    <Card
-      id={domId}
-      // -1, not 0: reachable by the summary above and by nothing else.
-      // `focus:` rather than `focus-visible:` on purpose — this focus arrives
-      // from a mouse click on another element, which is exactly the case
-      // focus-visible suppresses, and a jump that lands with no ring is a jump
-      // that does not say where it landed.
-      // The one exception to index.css's single :focus-visible rule, for that
-      // reason: [data-jump-target] draws the same 2px --ring outline on :focus.
-      tabIndex={domId ? -1 : undefined}
-      data-jump-target=""
-      className="overflow-hidden"
-    >
-      <CardContent className="flex flex-col gap-2.5 p-3">
-        {/* --- identity + state --- */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* The badge beside this names the state in words and carries the same
-                tone, so the dot repeated it. Kept only for a stopped card, where the
-                badge is an outline and the dot is the one mark of its tone. */}
-            {!dest.enabled && (
-              <span data-testid="card-status-dot">
-                <StatusDot tone={tone} />
-              </span>
-            )}
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-semibold leading-tight">{dest.name}</div>
-              <div className="font-mono text-[10px] leading-tight text-muted-foreground">
-                {platformName(dest.platform)} · {dest.kind.toUpperCase()}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1">
-            {/* app-council A2: a switched-off card says Off, not Stopped, so it
-                is not read as a broadcast that ended. app-council A89: a
-                running card's badge carries a glyph, so live does not rest on
-                the fill colour alone. */}
-            {/* On air is the tally lamp (2026-11 review): solid --tally under its
-                own label, not the green that also means running and healthy. */}
-            <Badge
-              data-testid="card-state-badge"
-              variant={inPlay ? toneBadge[tone] : "outline"}
-              className={cn(
-                destinationStatus(inPlay, shownState, dest.delay?.phase).lamp &&
-                  "border-transparent bg-tally text-tally-foreground",
-              )}
-            >
-              {destinationOnAir(dest) && (
-                <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
-              )}
-              {t(destinationStatus(inPlay, shownState, dest.delay?.phase).labelKey)}
-            </Badge>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={t("i18nSweep.actionsFor", { name: dest.name })}>
-                  <MoreVertical />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={onEdit}>
-                  <Pencil /> {t("common.edit")}
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`/routing/${dest.id}`}>
-                    <KeyRound /> {t("i18nSweep.editRouting")}
-                  </Link>
-                </DropdownMenuItem>
-                {dest.enabled && (
-                  <DropdownMenuItem onSelect={onRestart}>
-                    <RefreshCw /> {t("common.restart")}
-                  </DropdownMenuItem>
-                )}
-                {canRefreshKey && !retiredKey && (
-                  <DropdownMenuItem onSelect={onRefreshKey}>
-                    <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
-                  </DropdownMenuItem>
-                )}
-                {/* Below the separator, with Delete, because this reaches the
-                    platform and the rest of this menu does not. Everything
-                    above changes what polyemesis sends; this ends a public
-                    broadcast that other people are watching. */}
-                {canEndBroadcast && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem destructive onSelect={() => setEndOpen(true)}>
-                      <CircleStop /> {t("dash.endBroadcast")}
-                    </DropdownMenuItem>
-                  </>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={onDelete}>
-                  <Trash2 /> {t("common.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
+  const renderHeadline = () => (
+    <>
         {/* --- what does this platform get? the headline fact --- */}
         <div className="rounded-md border border-border bg-background">
           {/* Both rows link to the page that edits them, so the fact you are
@@ -441,6 +343,10 @@ export function DestinationCard({
           </Link>
         </div>
 
+    </>
+  );
+  const renderPerformance = () => (
+    <>
         {/* --- performance --- */}
         {/* Bitrate and uptime lead. They are the two figures an operator reads to
             know a destination is up and moving.
@@ -463,6 +369,10 @@ export function DestinationCard({
             tone={running ? "default" : "muted"}
           />
         </div>
+    </>
+  );
+  const renderCounters = () => (
+    <>
         <div
           data-testid="card-secondary-stats"
           className="grid grid-cols-4 gap-2 border-t border-border pt-2"
@@ -488,7 +398,11 @@ export function DestinationCard({
             tone={speedTone(running, progress?.speed ?? 0)}
           />
         </div>
+    </>
+  );
 
+  const renderProblems = () => (
+    <>
         {/* --- problems --- */}
         {/* B1: every problem row names its reason, the failing step and the
             as-of time. dest.error is shared by a routing compile failure, a
@@ -601,26 +515,10 @@ export function DestinationCard({
             <StatusReason reason={dest.stopWarning} step={t("foundation.status.step.stop")} asOf={null} />
           </div>
         )}
-        {retiredKey && (
-          <div
-            className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
-            role="status"
-            data-testid="dest-retired"
-          >
-            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <div>
-              <div className="font-medium">{t(retiredKey)}</div>
-              <div className="text-xs">{t("dash.platformRetiredCannotStart")}</div>
-            </div>
-          </div>
-        )}
-        {warnings.map((w) => (
-          <div key={w} className="flex items-start gap-1.5 text-sm text-warn">
-            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span>{w}</span>
-          </div>
-        ))}
-
+    </>
+  );
+  const renderNotes = () => (
+    <>
         {/* What Enhanced Broadcasting decided for THIS run.
             MUTED, NOT AMBER, and never behind an alert triangle. Twitch grants
             it only to a client with a supported GPU and a rented server has
@@ -733,6 +631,134 @@ export function DestinationCard({
             so a pane on its card would be a control that cannot do anything and
             an implication that Twitch is failing to answer. */}
         {hasFacebookBroadcast && <FacebookStreamHealthPanel state={health} />}
+    </>
+  );
+
+  return (
+    <Card
+      id={domId}
+      // -1, not 0: reachable by the summary above and by nothing else.
+      // `focus:` rather than `focus-visible:` on purpose — this focus arrives
+      // from a mouse click on another element, which is exactly the case
+      // focus-visible suppresses, and a jump that lands with no ring is a jump
+      // that does not say where it landed.
+      // The one exception to index.css's single :focus-visible rule, for that
+      // reason: [data-jump-target] draws the same 2px --ring outline on :focus.
+      tabIndex={domId ? -1 : undefined}
+      data-jump-target=""
+      className="overflow-hidden"
+    >
+      <CardContent className="flex flex-col gap-2.5 p-3">
+        {/* --- identity + state --- */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* The badge beside this names the state in words and carries the same
+                tone, so the dot repeated it. Kept only for a stopped card, where the
+                badge is an outline and the dot is the one mark of its tone. */}
+            {!dest.enabled && (
+              <span data-testid="card-status-dot">
+                <StatusDot tone={tone} />
+              </span>
+            )}
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold leading-tight">{dest.name}</div>
+              <div className="font-mono text-[10px] leading-tight text-muted-foreground">
+                {platformName(dest.platform)} · {dest.kind.toUpperCase()}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
+            {/* app-council A2: a switched-off card says Off, not Stopped, so it
+                is not read as a broadcast that ended. app-council A89: a
+                running card's badge carries a glyph, so live does not rest on
+                the fill colour alone. */}
+            {/* On air is the tally lamp (2026-11 review): solid --tally under its
+                own label, not the green that also means running and healthy. */}
+            <Badge
+              data-testid="card-state-badge"
+              variant={inPlay ? toneBadge[tone] : "outline"}
+              className={cn(
+                destinationStatus(inPlay, shownState, dest.delay?.phase).lamp &&
+                  "border-transparent bg-tally text-tally-foreground",
+              )}
+            >
+              {destinationOnAir(dest) && (
+                <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
+              )}
+              {t(destinationStatus(inPlay, shownState, dest.delay?.phase).labelKey)}
+            </Badge>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label={t("i18nSweep.actionsFor", { name: dest.name })}>
+                  <MoreVertical />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={onEdit}>
+                  <Pencil /> {t("common.edit")}
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to={`/routing/${dest.id}`}>
+                    <KeyRound /> {t("i18nSweep.editRouting")}
+                  </Link>
+                </DropdownMenuItem>
+                {dest.enabled && (
+                  <DropdownMenuItem onSelect={onRestart}>
+                    <RefreshCw /> {t("common.restart")}
+                  </DropdownMenuItem>
+                )}
+                {canRefreshKey && !retiredKey && (
+                  <DropdownMenuItem onSelect={onRefreshKey}>
+                    <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
+                  </DropdownMenuItem>
+                )}
+                {/* Below the separator, with Delete, because this reaches the
+                    platform and the rest of this menu does not. Everything
+                    above changes what polyemesis sends; this ends a public
+                    broadcast that other people are watching. */}
+                {canEndBroadcast && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem destructive onSelect={() => setEndOpen(true)}>
+                      <CircleStop /> {t("dash.endBroadcast")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={onDelete}>
+                  <Trash2 /> {t("common.delete")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {renderHeadline()}
+        {renderPerformance()}
+        {renderCounters()}
+
+        {renderProblems()}
+        {retiredKey && (
+          <output
+            className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
+            data-testid="dest-retired"
+          >
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <div>
+              <div className="font-medium">{t(retiredKey)}</div>
+              <div className="text-xs">{t("dash.platformRetiredCannotStart")}</div>
+            </div>
+          </output>
+        )}
+        {warnings.map((w) => (
+          <div key={w} className="flex items-start gap-1.5 text-sm text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{w}</span>
+          </div>
+        ))}
+
+        {renderNotes()}
 
         {/* --- the one action that matters, plus display order --- */}
         <div className="flex gap-1.5">

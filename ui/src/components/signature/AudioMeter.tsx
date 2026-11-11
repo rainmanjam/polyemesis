@@ -189,6 +189,123 @@ interface ChannelState {
   clipAt: number;
 }
 
+// Peak hold: jump up instantly, fall back on a timer.
+function advancePeakHold(st: ChannelState, peakDb: number, now: number, dt: number, r: DbRange): void {
+  if (peakDb >= st.holdDb) {
+    st.holdDb = peakDb;
+    st.holdSetAt = now;
+  } else if (now - st.holdSetAt > PEAK_HOLD_MS) {
+    st.holdDb = Math.max(r.minDb, st.holdDb - PEAK_FALL_DB_PER_SEC * dt);
+  }
+  if (peakDb >= CLIP_DB) st.clipAt = now;
+}
+
+// A16: the held peak as a number, beside the bar, so the level can be
+// read without estimating it off the geometry.
+function writeReadout(readout: HTMLButtonElement | null | undefined, holdDb: number): void {
+  if (!readout) return;
+  const txt = formatPeakDb(holdDb);
+  if (readout.textContent !== txt) readout.textContent = txt;
+}
+
+function ensureChannelStates(states: ChannelState[], channels: number, minDb: number): void {
+  while (states.length < channels) {
+    states.push({ holdDb: minDb, holdSetAt: 0, clipAt: NEVER });
+  }
+}
+
+function applyHoldReset(resetRef: { current: boolean }, states: ChannelState[], minDb: number): void {
+  if (!resetRef.current) return;
+  resetRef.current = false;
+  for (const st of states) {
+    st.holdDb = minDb;
+    st.holdSetAt = 0;
+  }
+}
+
+function fitCanvas(canvas: HTMLCanvasElement, cssWidth: number, cssHeight: number, dpr: number): void {
+  if (canvas.width !== Math.round(cssWidth * dpr) || canvas.height !== Math.round(cssHeight * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    canvas.style.height = `${cssHeight}px`;
+  }
+}
+
+function drawScaleTicks(
+  ctx: CanvasRenderingContext2D,
+  y: number,
+  barHeight: number,
+  cssWidth: number,
+  r: DbRange,
+): void {
+  for (const mark of [-50, -40, -30, -20, -12, -6, -3].filter((m) => m > r.minDb)) {
+    const x = Math.round(dbToFraction(mark, r) * cssWidth);
+    ctx.fillRect(x, y, 1, barHeight);
+  }
+}
+
+function drawRmsBar(
+  ctx: CanvasRenderingContext2D,
+  zones: { x0: number; x1: number; fill: string }[],
+  y: number,
+  w: number,
+  hotX: number,
+  barHeight: number,
+  p: Palette,
+): void {
+  fillZones(ctx, zones, y, w, barHeight);
+  // TEXTURE, above the -6 mark. The hot end of the bar is now a
+  // different surface as well as a different hue, so "too hot" reads
+  // in greyscale.
+  if (w > hotX) hatchHot(ctx, hotX, y, w - hotX, barHeight, p);
+}
+
+function drawZoneBreaks(
+  ctx: CanvasRenderingContext2D,
+  y: number,
+  barHeight: number,
+  cssWidth: number,
+  r: DbRange,
+  w: number,
+): void {
+  for (const mark of ZONE_BREAKS) {
+    const x = Math.round(dbToFraction(mark, r) * cssWidth);
+    // Faint over the empty trough, firm over the lit bar. A mark that is
+    // equally loud everywhere is four permanent white lines across a
+    // meter that is usually quiet, which is the sort of decoration an eye
+    // learns to filter out — and it would be filtering out the thing this
+    // is here to say.
+    ctx.globalAlpha = x < w ? 0.6 : 0.22;
+    ctx.fillRect(x, y, 1, barHeight);
+  }
+}
+
+// peak-hold tick. Wider once it is at or past clip: at that point the
+// tick is the thing being read, and thickness says so without relying
+// on it having gone red.
+function drawPeakTick(
+  ctx: CanvasRenderingContext2D,
+  holdDb: number,
+  y: number,
+  barHeight: number,
+  cssWidth: number,
+  r: DbRange,
+  p: Palette,
+): void {
+  const clipped = holdDb >= CLIP_DB;
+  const tickW = clipped ? 3 : 2;
+  const px = Math.min(cssWidth - tickW, dbToFraction(holdDb, r) * cssWidth);
+  ctx.fillStyle = clipped ? p.peak : p.hold;
+  ctx.fillRect(px, y, tickW, barHeight);
+}
+
+function syncClipFlag(flag: HTMLSpanElement | null, clipping: boolean): void {
+  if (flag && flag.dataset.on !== String(clipping)) {
+    flag.dataset.on = String(clipping);
+    flag.style.visibility = clipping ? "visible" : "hidden";
+  }
+}
+
 export function AudioMeter({
   rms,
   peak,
@@ -243,26 +360,13 @@ export function AudioMeter({
       const cssHeight = channels * barHeight + Math.max(0, channels - 1) * barGap;
       const cssWidth = canvas.clientWidth || 200;
 
-      if (canvas.width !== Math.round(cssWidth * dpr) || canvas.height !== Math.round(cssHeight * dpr)) {
-        canvas.width = Math.round(cssWidth * dpr);
-        canvas.height = Math.round(cssHeight * dpr);
-        canvas.style.height = `${cssHeight}px`;
-      }
+      fitCanvas(canvas, cssWidth, cssHeight, dpr);
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-      while (stateRef.current.length < channels) {
-        stateRef.current.push({ holdDb: r.minDb, holdSetAt: 0, clipAt: NEVER });
-      }
-
-      if (resetRef.current) {
-        resetRef.current = false;
-        for (const st of stateRef.current) {
-          st.holdDb = r.minDb;
-          st.holdSetAt = 0;
-        }
-      }
+      ensureChannelStates(stateRef.current, channels, r.minDb);
+      applyHoldReset(resetRef, stateRef.current, r.minDb);
 
       const zones = meterZones(cssWidth, p, r);
 
@@ -272,22 +376,11 @@ export function AudioMeter({
         const peakDb = dataRef.current.peak[ch] ?? r.minDb;
         const st = stateRef.current[ch];
 
-        // Peak hold: jump up instantly, fall back on a timer.
-        if (peakDb >= st.holdDb) {
-          st.holdDb = peakDb;
-          st.holdSetAt = now;
-        } else if (now - st.holdSetAt > PEAK_HOLD_MS) {
-          st.holdDb = Math.max(r.minDb, st.holdDb - PEAK_FALL_DB_PER_SEC * dt);
-        }
-        if (peakDb >= CLIP_DB) st.clipAt = now;
+        advancePeakHold(st, peakDb, now, dt, r);
 
         // A16: the held peak as a number, beside the bar, so the level can be
         // read without estimating it off the geometry.
-        const readout = peakRefs.current[ch];
-        if (readout) {
-          const txt = formatPeakDb(st.holdDb);
-          if (readout.textContent !== txt) readout.textContent = txt;
-        }
+        writeReadout(peakRefs.current[ch], st.holdDb);
 
         // trough
         ctx.fillStyle = p.bg;
@@ -295,21 +388,12 @@ export function AudioMeter({
 
         // scale ticks, drawn under the bar so a hot signal covers them
         ctx.fillStyle = p.grid;
-        for (const mark of [-50, -40, -30, -20, -12, -6, -3].filter((m) => m > r.minDb)) {
-          const x = Math.round(dbToFraction(mark, r) * cssWidth);
-          ctx.fillRect(x, y, 1, barHeight);
-        }
+        drawScaleTicks(ctx, y, barHeight, cssWidth, r);
 
         // RMS bar
         const w = dbToFraction(rmsDb, r) * cssWidth;
-        if (w > 0) {
-          fillZones(ctx, zones, y, w, barHeight);
-          // TEXTURE, above the -6 mark. The hot end of the bar is now a
-          // different surface as well as a different hue, so "too hot" reads
-          // in greyscale.
-          const hotX = dbToFraction(HOT_DB, r) * cssWidth;
-          if (w > hotX) hatchHot(ctx, hotX, y, w - hotX, barHeight, p);
-        }
+        const hotX = dbToFraction(HOT_DB, r) * cssWidth;
+        if (w > 0) drawRmsBar(ctx, zones, y, w, hotX, barHeight, p);
 
         // POSITION, and it is drawn OVER the bar on purpose. The scale ticks
         // above sit under it, which is right for a ruler and useless for a
@@ -318,16 +402,7 @@ export function AudioMeter({
         // break points, so an operator reads level against geometry instead of
         // against hue.
         ctx.fillStyle = p.hold;
-        for (const mark of ZONE_BREAKS) {
-          const x = Math.round(dbToFraction(mark, r) * cssWidth);
-          // Faint over the empty trough, firm over the lit bar. A mark that is
-          // equally loud everywhere is four permanent white lines across a
-          // meter that is usually quiet, which is the sort of decoration an eye
-          // learns to filter out — and it would be filtering out the thing this
-          // is here to say.
-          ctx.globalAlpha = x < w ? 0.6 : 0.22;
-          ctx.fillRect(x, y, 1, barHeight);
-        }
+        drawZoneBreaks(ctx, y, barHeight, cssWidth, r, w);
         // A16: the -14 streaming reference, drawn faint so it reads as a mark on
         // the bar rather than a fifth zone break.
         ctx.fillStyle = p.hold;
@@ -338,13 +413,7 @@ export function AudioMeter({
         // peak-hold tick. Wider once it is at or past clip: at that point the
         // tick is the thing being read, and thickness says so without relying
         // on it having gone red.
-        if (st.holdDb > r.minDb) {
-          const clipped = st.holdDb >= CLIP_DB;
-          const tickW = clipped ? 3 : 2;
-          const px = Math.min(cssWidth - tickW, dbToFraction(st.holdDb, r) * cssWidth);
-          ctx.fillStyle = clipped ? p.peak : p.hold;
-          ctx.fillRect(px, y, tickW, barHeight);
-        }
+        if (st.holdDb > r.minDb) drawPeakTick(ctx, st.holdDb, y, barHeight, cssWidth, r, p);
 
         // clip latch: a bright block at full scale that lingers, because a
         // clip you did not see is a clip you cannot fix.
@@ -359,11 +428,7 @@ export function AudioMeter({
       // too small to read. Toggled imperatively rather than through state: this
       // runs at animation frame rate across up to 36 channels, and a setState
       // here would re-render the page every time a peak brushed 0 dBFS.
-      const flag = clipRef.current;
-      if (flag && flag.dataset.on !== String(clipping)) {
-        flag.dataset.on = String(clipping);
-        flag.style.visibility = clipping ? "visible" : "hidden";
-      }
+      syncClipFlag(clipRef.current, clipping);
 
       raf = requestAnimationFrame(draw);
     };

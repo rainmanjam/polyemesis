@@ -1,6 +1,6 @@
 import { useViewerTags } from "@/hooks/useViewerTags";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { toast } from "sonner";
 import {
   Check,
@@ -243,34 +243,8 @@ function MessageRow({
   // The operator's tags on this viewer, from one list-wide lookup.
   const viewerTags = useViewerTags(m.platform, m.account, m.author.id);
 
-  return (
-    <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
-      role="group"
-      aria-roledescription={t("chatpage.messageRole")}
-      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message must be focusable for a keyboard moderator to reach its context menu
-      onKeyDown={openMenuFromKeyboard}
-      onContextMenu={openMenu}
-      onDoubleClick={openMenu}
-      className={cn(
-        // A two-column grid is the hanging indent: the glyph (and the clock,
-        // off the dock) sit in the first column and every wrapped line of the
-        // message stays in the second, under the name, instead of running back
-        // beneath the icon.
-        "group relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-        accent.rule,
-        m.echo && "bg-primary-dim/40",
-      )}
-    >
-      <span className="inline-flex h-lh items-center gap-1">
-        <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
-        {!compact && (
-          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
-            {clockTime(m.at)}
-          </span>
-        )}
-      </span>
-
-      <div className="min-w-0 [overflow-wrap:anywhere]">
+  const renderBodyText = () => (
+    <>
       {m.echo && (
         <span className="mr-1 inline-flex align-text-bottom" title={t("chatpage.echoLabel")}>
           <Megaphone className="h-3 w-3 text-primary-bright" aria-label={t("chatpage.echoLabel")} />
@@ -337,19 +311,10 @@ function MessageRow({
       >
         <MessageBody m={m} />
       </span>
-      </div>
-
-      {/* The dock drops the clock column to keep lines wide; it comes back on
-          hover or keyboard focus, laid over the gutter beside the delete icon. */}
-      {compact && (
-        <span
-          className="tnum pointer-events-none absolute right-6 top-0.5 hidden rounded bg-card-raised px-1 font-mono text-sm text-muted-foreground group-hover:block group-focus-visible:block group-focus-within:block"
-          title={timestamp(m.at)}
-        >
-          {clockTime(m.at)}
-        </span>
-      )}
-
+    </>
+  );
+  const renderDeleteControl = () => (
+    <>
       {/* THE SAME GATE THE MENU USES, on the icon that does the same thing.
           
           `{onDelete && …}` alone was the defect fixed in ChatMessageMenu, and
@@ -374,6 +339,52 @@ function MessageRow({
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
       )}
+    </>
+  );
+
+  return (
+    <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
+      role="group"
+      aria-roledescription={t("chatpage.messageRole")}
+      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message must be focusable for a keyboard moderator to reach its context menu
+      onKeyDown={openMenuFromKeyboard}
+      onContextMenu={openMenu}
+      onDoubleClick={openMenu}
+      className={cn(
+        // A two-column grid is the hanging indent: the glyph (and the clock,
+        // off the dock) sit in the first column and every wrapped line of the
+        // message stays in the second, under the name, instead of running back
+        // beneath the icon.
+        "group relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        accent.rule,
+        m.echo && "bg-primary-dim/40",
+      )}
+    >
+      <span className="inline-flex h-lh items-center gap-1">
+        <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
+        {!compact && (
+          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
+            {clockTime(m.at)}
+          </span>
+        )}
+      </span>
+
+      <div className="min-w-0 [overflow-wrap:anywhere]">
+        {renderBodyText()}
+      </div>
+
+      {/* The dock drops the clock column to keep lines wide; it comes back on
+          hover or keyboard focus, laid over the gutter beside the delete icon. */}
+      {compact && (
+        <span
+          className="tnum pointer-events-none absolute right-6 top-0.5 hidden rounded bg-card-raised px-1 font-mono text-sm text-muted-foreground group-hover:block group-focus-visible:block group-focus-within:block"
+          title={timestamp(m.at)}
+        >
+          {clockTime(m.at)}
+        </span>
+      )}
+
+      {renderDeleteControl()}
     </div>
   );
 }
@@ -646,29 +657,21 @@ export function ChatComposer({
   // A reply goes to the one platform it answers, so only that platform's limit applies.
   // Liveness is per account, so the chips are too: one chip per connected chat
   // that can send. A platform with two accounts shows the channel on each chip.
-  const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
   const connected = useMemo(
     () => allSenders.map((s) => ({ key: chatKeyOf(s.platform, s.account), status: s })),
     [allSenders],
   );
   const connectedKeys = useMemo(() => connected.map((c) => c.key), [connected]);
-  const liveKeys = useMemo(
-    () =>
-      connected
-        .filter((c) =>
-          live?.targets.some(
-            (x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live,
-          ),
-        )
-        .map((c) => c.key),
-    [connected, live],
-  );
+  const liveKeys = useMemo(() => liveChatKeys(connected, live), [connected, live]);
   // What this message will reach. Without a reading it is every sender.
   const selected = chosen ?? (live ? liveKeys : connectedKeys);
-  const noneLive = !replyTo && !!live && chosen === null && !live.anyLive;
-  const nothingChosen = !replyTo && chosen !== null && chosen.length === 0;
-  const showTargets = !replyTo && !!live && connected.length > 0;
-  const liveUnknown = !replyTo && liveFailed && connected.length > 0;
+  const { noneLive, nothingChosen, showTargets, liveUnknown } = targetNotices(
+    replyTo,
+    live,
+    liveFailed,
+    connected.length,
+    chosen,
+  );
   // Two accounts on one platform: the chip says which channel it is.
   const perPlatform = (p: ChatPlatform) => connected.filter((c) => c.status.platform === p).length;
   const toggleTarget = (key: string) => {
@@ -751,16 +754,11 @@ export function ChatComposer({
         if (target) onCancelReply?.(target.id);
       }
       setUnsent(!replyTo && res.sent > 0 && res.failed > 0 ? body : "");
-      if (res.failed > 0) {
-        toast.error(
-          res.sent > 0
-            ? t("chatpage.sentPartial", { sent: res.sent, failed: res.failed })
-            : t("chatpage.noneAccepted"),
-        );
-      }
+      const partial = partialSendText(res, t);
+      if (partial !== null) toast.error(partial);
     } catch (err) {
       setResults(null);
-      if (err instanceof ApiError && err.code === "no_platform_live") {
+      if (isNoPlatformLive(err)) {
         // The server's sentence is English and names JSON fields; the composer
         // says it in the operator's language and the chips are the way out.
         toast.error(t("chatpage.sendRefusedNoneLive"));
@@ -881,14 +879,14 @@ export function ChatComposer({
         </div>
       )}
       {liveUnknown && (
-        <p role="status" className="mb-1.5 text-[11px] text-muted-foreground">
+        <output className="block text-pretty mb-1.5 text-[11px] text-muted-foreground">
           {t("chatpage.liveUnknown")}
-        </p>
+        </output>
       )}
       {(noneLive || nothingChosen) && (
-        <p role="status" className="mb-1.5 text-[11px] text-warn">
+        <output className="block text-pretty mb-1.5 text-[11px] text-warn">
           {t(noneLive ? "chatpage.targetsNoneLive" : "chatpage.targetsPick")}
-        </p>
+        </output>
       )}
       <div className="flex items-end gap-1.5">
         <Textarea
@@ -908,19 +906,7 @@ export function ChatComposer({
           }}
           rows={compact ? 1 : 2}
           placeholder={
-            replyTo
-              ? t("chatpage.replyPlaceholder", { name: replyTo.author.name })
-              : // The field says the state in two words. The reason is text under
-            // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
-            allSenders.length === 0
-              ? t("chatpage.notConnected")
-              : senders.length === 0
-                ? t("chatpage.targetsPick")
-                : !replyTo && !live
-                  ? t("chatpage.sendLiveDefault")
-                  : t("chatpage.sendTo", {
-                  platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
-                })
+            composerPlaceholder(t, replyTo, allSenders, senders, live)
           }
           className="min-h-0 resize-none text-[12px]"
           aria-label={
@@ -1449,4 +1435,60 @@ export function ChatEmpty({
       <EmptyState icon={MessagesSquare} title={t(title)} body={body} action={action} />
     </div>
   );
+}
+
+// The field says the state in two words. The reason is text under
+// it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
+function composerPlaceholder(
+  t: Translator,
+  replyTo: { author: { name: string } } | null | undefined,
+  allSenders: readonly unknown[],
+  senders: ReadonlyArray<{ platform: Parameters<typeof accentFor>[0] }>,
+  live: unknown,
+): string {
+  if (replyTo) return t("chatpage.replyPlaceholder", { name: replyTo.author.name });
+  if (allSenders.length === 0) return t("chatpage.notConnected");
+  if (senders.length === 0) return t("chatpage.targetsPick");
+  if (!live) return t("chatpage.sendLiveDefault");
+  return t("chatpage.sendTo", { platforms: senders.map((s) => accentFor(s.platform).label).join(", ") });
+}
+
+// One key per connected chat: a platform with two accounts has two keys.
+const chatKeyOf = (platform: ChatPlatform, account?: string) => `${platform}\u0000${account ?? ""}`;
+
+// The connected chats the live reading marks as able to send and live right now.
+function liveChatKeys<T extends { key: string }>(connected: readonly T[], live: ChatLiveView | null): string[] {
+  return connected
+    .filter((c) => live?.targets.some((x) => chatKeyOf(x.platform, x.account) === c.key && x.canSend && x.live))
+    .map((c) => c.key);
+}
+
+// Which target notices the composer shows, from the reply being answered, the
+// live reading, and the chats the user has picked (null means "follow live").
+function targetNotices(
+  replyTo: unknown,
+  live: ChatLiveView | null,
+  liveFailed: boolean,
+  connectedCount: number,
+  chosen: readonly string[] | null,
+) {
+  return {
+    noneLive: !replyTo && !!live && chosen === null && !live.anyLive,
+    nothingChosen: !replyTo && chosen !== null && chosen.length === 0,
+    showTargets: !replyTo && !!live && connectedCount > 0,
+    liveUnknown: !replyTo && liveFailed && connectedCount > 0,
+  };
+}
+
+// The warning for a send that some platforms refused: null when every one went out.
+function partialSendText(res: { sent: number; failed: number }, t: Translator): string | null {
+  if (res.failed <= 0) return null;
+  return res.sent > 0
+    ? t("chatpage.sentPartial", { sent: res.sent, failed: res.failed })
+    : t("chatpage.noneAccepted");
+}
+
+// The server refuses a send with this code when no platform is live.
+function isNoPlatformLive(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "no_platform_live";
 }

@@ -142,7 +142,7 @@ export function PlaylistEditor({ items, onChange }: Readonly<PlaylistEditorProps
     // Settings page the first time this ran against a backend that had not
     // deployed GET /failover/playlist yet.
     const at = status?.items?.[index];
-    return at && at.upload === upload ? at : undefined;
+    return at?.upload === upload ? at : undefined;
   }
 
   function add() {

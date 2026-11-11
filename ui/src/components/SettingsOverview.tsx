@@ -126,8 +126,7 @@ export function SettingsOverview({
   return (
     <div className="flex flex-col gap-3" data-testid="settings-overview">
       {/* THE READINESS STRIP: one sentence, and the one next action. */}
-      <div
-        role="status"
+      <output
         className={cn(
           "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2",
           ready ? "border-ok/40 bg-ok-dim" : "border-border bg-card",
@@ -139,14 +138,14 @@ export function SettingsOverview({
         <span className="mr-auto text-sm">
           {readiness}
         </span>
-      </div>
+      </output>
 
       {checklist && (
         <SetupChecklist
           checklist={checklist}
           ingestUrl={system?.ingestUrl ?? ""}
           onCopyIngest={() => {
-            if (system?.ingestUrl) void copyToClipboard(t, system.ingestUrl, t("firstRun.ingestHeading"));
+            if (system?.ingestUrl) copyToClipboard(t, system.ingestUrl, t("firstRun.ingestHeading"));
           }}
           // The destination dialog lives on the Dashboard, where this same
           // checklist opens it in place. Sending the operator there is one

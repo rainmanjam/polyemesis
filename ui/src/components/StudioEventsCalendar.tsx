@@ -67,7 +67,7 @@ export function StudioEventsCalendar({ ownEventIds }: Readonly<{ ownEventIds: Re
       // rebindEvent is sent false, not left out: the server merges a save over the stored row, so leaving it out
       // would keep an earlier event's confirmation and move this one off its stream unasked.
       await api.updateDestination(d.id, {
-        compliance: { ...d.compliance, youtube: { ...(d.compliance?.youtube ?? {}), eventId: e.id, rebindEvent: false } },
+        compliance: { ...d.compliance, youtube: { ...d.compliance?.youtube, eventId: e.id, rebindEvent: false } },
       });
       toast.success(t("studioEvents.used", { title: e.title, destination: d.name }));
     } catch (err) {

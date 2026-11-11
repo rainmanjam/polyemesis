@@ -110,7 +110,7 @@ export function AutomodProtectionCard({ settings, onChange, saved }: Readonly<Au
   function answer(a: ProtectionAnswer) {
     // Turning it off disarms its rungs in the same save: the server refuses a
     // protection cell while the pack is off.
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     if (a !== "on") {
       // Only the ladder's rungs: the fresh-install flag cells are not the pack's
       // to remove, and a pack switched off and on again must leave the matrix

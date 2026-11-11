@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,70 @@ import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/
 /** Concurrent hides per batch. Enough to stop a 200-line card taking 200 round
  *  trips, few enough not to flood the platform's moderation API. */
 const HIDE_CONCURRENCY = 5;
+
+function sanctionDetailFor(
+  sanction: CardData["sanction"],
+  hasCard: boolean,
+  banOk: boolean,
+  t: Translator,
+): string {
+  const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
+  if (sanction?.action === "timeout" && sanction.until) {
+    return t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel });
+  }
+  if (sanction?.action === "ban") {
+    return t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel });
+  }
+  if (hasCard && !sanction) {
+    // "so Lift ban stays available" is false where the platform
+    // cannot ban, so that half is said only where it is true.
+    return banOk ? t("chatCard.sanctionUnknownDetail") : t("chatCard.sanctionUnknownNoBan");
+  }
+  return "";
+}
+
+function nothingToHideFor(messageCount: number, failed: boolean, t: Translator): string {
+  if (messageCount !== 0) return "";
+  return failed ? t("chatCard.nothingToHideFailed") : t("chatCard.nothingToHideEmpty");
+}
+
+function describeRead(
+  loading: boolean,
+  failed: boolean,
+  messageCount: number,
+  truncated: boolean | undefined,
+  t: Translator,
+): string {
+  if (loading) return t("chatCard.reading");
+  if (failed) return t("chatCard.readFailed");
+  return t(messageCount === 1 ? "chatCard.onRecordOne" : "chatCard.onRecordMany", {
+    count: `${messageCount}${truncated ? "+" : ""}`,
+  });
+}
+
+function hideResultDetail(
+  scope: "local" | "platform",
+  hidden: boolean,
+  count: number,
+  platform: ChatPlatform,
+  platformLabel: string,
+  t: Translator,
+): string {
+  const one = count === 1;
+  if (scope === "local") {
+    return t(one ? "chatCard.hiddenLocalOne" : "chatCard.hiddenLocalMany", { count, platform });
+  }
+  if (hidden) {
+    return t(one ? "chatCard.hiddenUpstreamOne" : "chatCard.hiddenUpstreamMany", {
+      count,
+      platform: platformLabel,
+    });
+  }
+  return t(one ? "chatCard.shownUpstreamOne" : "chatCard.shownUpstreamMany", {
+    count,
+    platform: platformLabel,
+  });
+}
 
 export function ChatUserCard({
   platform,
@@ -134,17 +198,7 @@ export function ChatUserCard({
   // decision. The button is disabled only where it is certain there is nothing
   // to lift: the platform cannot ban at all, which `ban.reason` already says.
   const sanction = card?.sanction;
-  const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
-  let sanctionDetail = "";
-  if (sanction?.action === "timeout" && sanction.until) {
-    sanctionDetail = t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel });
-  } else if (sanction?.action === "ban") {
-    sanctionDetail = t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel });
-  } else if (card && !sanction) {
-    // "so Lift ban stays available" is false where the platform
-    // cannot ban, so that half is said only where it is true.
-    sanctionDetail = ban.ok ? t("chatCard.sanctionUnknownDetail") : t("chatCard.sanctionUnknownNoBan");
-  }
+  const sanctionDetail = sanctionDetailFor(sanction, card !== null, ban.ok, t);
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -174,10 +228,7 @@ export function ChatUserCard({
   // all of them share one precondition and one sentence for failing it. Said
   // once here rather than three times below, because three copies is how two
   // of them end up wrong.
-  let nothingToHide = "";
-  if (messages.length === 0) {
-    nothingToHide = failed ? t("chatCard.nothingToHideFailed") : t("chatCard.nothingToHideEmpty");
-  }
+  const nothingToHide = nothingToHideFor(messages.length, failed, t);
 
   /** Hides every message the card is holding, at one scope or the other.
    *
@@ -211,38 +262,10 @@ export function ChatUserCard({
     // The COUNT, not just the fact. "Hidden" over a loop that ran zero times
     // was the original defect; a number the moderator can check against what
     // they were looking at is what makes the report falsifiable.
-    const one = count === 1;
-    if (scope === "local") {
-      return {
-        detail: t(one ? "chatCard.hiddenLocalOne" : "chatCard.hiddenLocalMany", { count, platform }),
-      };
-    }
-    if (hidden) {
-      return {
-        detail: t(one ? "chatCard.hiddenUpstreamOne" : "chatCard.hiddenUpstreamMany", {
-          count,
-          platform: accent.label,
-        }),
-      };
-    }
-    return {
-      detail: t(one ? "chatCard.shownUpstreamOne" : "chatCard.shownUpstreamMany", {
-        count,
-        platform: accent.label,
-      }),
-    };
+    return { detail: hideResultDetail(scope, hidden, count, platform, accent.label, t) };
   };
 
-  let description: string;
-  if (loading) {
-    description = t("chatCard.reading");
-  } else if (failed) {
-    description = t("chatCard.readFailed");
-  } else {
-    description = t(messages.length === 1 ? "chatCard.onRecordOne" : "chatCard.onRecordMany", {
-      count: `${messages.length}${card?.truncated ? "+" : ""}`,
-    });
-  }
+  const description = describeRead(loading, failed, messages.length, card?.truncated, t);
 
   const renderBody = () => {
     if (loading && messages.length === 0) {

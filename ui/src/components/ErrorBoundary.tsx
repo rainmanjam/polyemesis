@@ -76,9 +76,19 @@ function CrashNotice({ error, fullScreen }: Readonly<{ error: unknown; fullScree
  *  Together on purpose: a <Suspense> for a lazy chunk with no boundary around
  *  it is the blank page this file exists to prevent, and lib/chunkReload.test.ts
  *  refuses a bare <Suspense> anywhere in src/ outside this file. */
+// Module-level so the boundary's fallback is not a component defined inside the
+// component that renders it.
+function inlineCrashNotice(error: unknown): ReactNode {
+  return <CrashNotice error={error} />;
+}
+
+function fullScreenCrashNotice(error: unknown): ReactNode {
+  return <CrashNotice error={error} fullScreen />;
+}
+
 export function LazyBoundary({ children, fallback }: Readonly<{ children: ReactNode; fallback: ReactNode }>) {
   return (
-    <ErrorBoundary fallback={(error) => <CrashNotice error={error} />}>
+    <ErrorBoundary fallback={inlineCrashNotice}>
       <Suspense fallback={fallback}>{children}</Suspense>
     </ErrorBoundary>
   );
@@ -87,7 +97,7 @@ export function LazyBoundary({ children, fallback }: Readonly<{ children: ReactN
 /** The outermost boundary, for an error no route caught. */
 export function AppBoundary({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <ErrorBoundary fallback={(error) => <CrashNotice error={error} fullScreen />}>
+    <ErrorBoundary fallback={fullScreenCrashNotice}>
       {children}
     </ErrorBoundary>
   );
