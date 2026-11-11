@@ -108,7 +108,7 @@ function buildPrompt(lang, values) {
   );
 }
 
-const placeholders = (s) => (s.match(/\{[a-zA-Z0-9_]+\}/g) ?? []).sort().join(",");
+const placeholders = (s) => (s.match(/\{\w+\}/g) ?? []).sort().join(",");
 
 /** Rejects a translation that would be worse than falling back to English. */
 function reject(source, translated) {
