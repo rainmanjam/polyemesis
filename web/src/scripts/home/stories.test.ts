@@ -23,6 +23,12 @@ describe("story data", () => {
     expect(STORIES.streamer.fine).not.toMatch(/Translation/);
     for (const k of ["sports", "worship"] as const) expect(STORIES[k].fine).toMatch(/^Translation comes from your own interpreters/);
   });
+  it("states the translation sentence as the owner approved it", () => {
+    for (const k of ["sports", "worship"] as const)
+      expect(STORIES[k].fine).toContain(
+        "Translation comes from your own interpreters or translation service, as a track you send; polyemesis routes each language.",
+      );
+  });
   it("is mutable enough for a test to change a name and restore it (F23)", () => {
     const d = STORIES.streamer.dests[0];
     const old = d.name;
