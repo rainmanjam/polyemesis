@@ -16,17 +16,19 @@ function parseHex(color: string): Rgb | null {
   const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color);
   if (!m) return null;
   const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
-  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb;
+  return [0, 2, 4].map((i) => Number.parseInt(h.slice(i, i + 2), 16)) as Rgb;
 }
 
 /** rgb()/rgba() and hsl()/hsla(), comma or space separated; alpha is ignored
  *  (a name is read over a card, and the hue is what matters). */
 function parseFunctional(color: string): Rgb | null {
-  const m = /^(rgba?|hsla?)\(\s*([^)]*)\)$/i.exec(color.trim());
+  // No \s* before the group: [^)]* already takes leading whitespace, and the
+  // overlap made the regex super-linear on a long run of spaces (S8786).
+  const m = /^(rgba?|hsla?)\(([^)]*)\)$/i.exec(color.trim());
   if (!m) return null;
   const parts = m[2].split(/[\s,/]+/).filter(Boolean).slice(0, 3);
   if (parts.length < 3) return null;
-  const nums = parts.map((p) => parseFloat(p));
+  const nums = parts.map((p) => Number.parseFloat(p));
   if (nums.some(Number.isNaN)) return null;
   if (m[1].toLowerCase().startsWith("rgb")) {
     const ch = parts.map((p, i) => Math.min(255, Math.max(0, p.endsWith("%") ? (nums[i] / 100) * 255 : nums[i])));
