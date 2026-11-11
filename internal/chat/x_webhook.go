@@ -285,45 +285,59 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 	now := x.cfg.Now()
 	hosts := map[string]string{} // webhook id -> host, read lazily and only when a replacement needs it
 	for _, event := range []string{xEventChat, xEventChatRemove} {
-		reuse := false
-		for _, s := range existing {
-			if s.EventType != event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
-				continue
-			}
-			if s.WebhookID == webhookID {
-				reuse = true
-				break
-			}
-			if s.Tag == xSubTag {
-				// X allows one subscription per event and user. This one is ours by tag but on another webhook, which
-				// is either our own old address or ANOTHER polyemesis install sharing this X app. Either way it
-				// would keep ours from being made; replacing it is the only option, and the operator is told.
-				x.noteReplaced(ctx, s.WebhookID, hosts)
-				x.removeSubscription(s.ID)
-			}
-		}
-		if reuse {
+		if x.reuseOrReplaceChat(ctx, event, existing, userID, webhookID, now, hosts) {
 			continue
 		}
-		var sub xSubscribeResponse
-		if err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
-			"event_type": event,
-			"filter":     map[string]string{"user_id": userID},
-			"webhook_id": webhookID,
-			"tag":        xSubTag,
-		}, &sub); err != nil {
-			return xFail("X refused the "+event+" subscription", err)
-		}
-		if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
-			// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
-			// only create, and leak, another one.
-			return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
-				"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
+		if err := x.createChatSubscription(ctx, event, userID, webhookID); err != nil {
+			return err
 		}
 	}
 	// The viewer-activity events come after chat, so a refusal of one can never keep chat from registering.
 	if x.act.want() {
 		return x.ensureActivity(ctx, userID, webhookID, existing)
+	}
+	return nil
+}
+
+// reuseOrReplaceChat reports whether a live chat subscription for event already
+// sits on webhookID. Along the way it replaces the polyemesis-tagged copies on
+// any other webhook, since X allows one subscription per event and user.
+func (x *XAdapter) reuseOrReplaceChat(ctx context.Context, event string, existing []xSubRec, userID, webhookID string, now time.Time, hosts map[string]string) bool {
+	for _, s := range existing {
+		if s.EventType != event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
+			continue
+		}
+		if s.WebhookID == webhookID {
+			return true
+		}
+		if s.Tag == xSubTag {
+			// X allows one subscription per event and user. This one is ours by tag but on another webhook, which
+			// is either our own old address or ANOTHER polyemesis install sharing this X app. Either way it
+			// would keep ours from being made; replacing it is the only option, and the operator is told.
+			x.noteReplaced(ctx, s.WebhookID, hosts)
+			x.removeSubscription(s.ID)
+		}
+	}
+	return false
+}
+
+// createChatSubscription subscribes event on webhookID. A subscription X does
+// not name is fatal, because a retry would only create, and leak, another one.
+func (x *XAdapter) createChatSubscription(ctx context.Context, event, userID, webhookID string) error {
+	var sub xSubscribeResponse
+	if err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
+		"event_type": event,
+		"filter":     map[string]string{"user_id": userID},
+		"webhook_id": webhookID,
+		"tag":        xSubTag,
+	}, &sub); err != nil {
+		return xFail("X refused the "+event+" subscription", err)
+	}
+	if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
+		// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
+		// only create, and leak, another one.
+		return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
+			"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
 	}
 	return nil
 }
