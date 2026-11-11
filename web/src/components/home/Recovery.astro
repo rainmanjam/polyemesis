@@ -12,9 +12,9 @@ import { STAGES } from "../../scripts/home/failover";
 const chatPlaceholder = await lqipStyle(chat);
 const DESTS = ["Twitch", "YouTube", "Kick"];
 const facts = [
-  { t: "Slate on drop", d: "Destinations never see a gap while your encoder reconnects." },
+  { t: "Slate on drop", d: "A slate goes out while your encoder reconnects, so no destination restarts." },
   { t: "Backup ingest", d: "A second path in, ready if the first one fails." },
-  { t: "IRL link failover", d: "Bonded backpacks keep going when one link degrades." },
+  { t: "IRL over SRTLA", d: "A bonded backpack keeps streaming when one of its links drops." },
   { t: "Stop on ingest loss", d: "Opt in, and the live destinations stop if no encoder comes back within the wait you set." },
 ];
 ---
@@ -24,7 +24,7 @@ const facts = [
     When your encoder drops, your stream stays up.
   </h2>
   <p class="mt-4 max-w-2xl text-muted">
-    Turn on failover and a slate holds every destination while the encoder reconnects, and chat from every platform stays in one place.
+    Turn on failover and a slate holds every destination while the encoder reconnects, and chat from Twitch, YouTube and Kick stays in one place.
   </p>
 
   <div class="mt-10 grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-stretch">
@@ -80,8 +80,8 @@ const facts = [
     </div>
 
     <div class="flex flex-col rounded-token border border-line bg-surface p-4">
-      <h3 class="font-display text-xl font-medium tracking-tight">One chat for every platform</h3>
-      <p class="mb-3 mt-1 text-[15px] text-muted">Read, reply and moderate Twitch, YouTube and Kick from one window.</p>
+      <h3 class="font-display text-xl font-medium tracking-tight">One chat for Twitch, YouTube and Kick</h3>
+      <p class="mb-3 mt-1 text-[15px] text-muted">Read, send and moderate all three from one window.</p>
       <Picture
         src={chat}
         formats={["avif", "webp"]}

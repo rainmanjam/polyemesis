@@ -474,3 +474,27 @@ describe("the run beat", () => {
   it("names no placeholder install", () => expect(run).not.toMatch(/polyemesis\.com\/install|polyemesis\/polyemesis\b|href="#"/));
   it("does not claim the console address is printed", () => expect(run).not.toMatch(/prints the address/));
 });
+
+/* Task 12: homepage claims checked against the code and docs. Each guard keeps
+ * a claim that the docs do not support from coming back. */
+describe("homepage claims match the code (T12)", () => {
+  const home = (name: string) => readFileSync(join(here, "..", "components", "home", name), "utf8");
+  const how = home("HowItWorks.astro");
+  const recovery = home("Recovery.astro");
+  const run = home("Run.astro");
+
+  // docs/OBS.md:130-132: classic RTMP carries one audio track. Only SRT/SRTLA carry every track.
+  it("does not promise every track over RTMP", () => expect(how).not.toMatch(/RTMP, SRT or SRTLA/));
+  // README.md:104 and docs/API.md:893 name vMix only for stop-on-ingest-loss; no multitrack doc.
+  it("names no vMix multitrack path in the steps", () => expect(how).not.toMatch(/vMix/));
+  // docs/ARCHITECTURE.md:234-236: the outage before the slate stays a timestamp gap.
+  it("does not promise a gapless failover", () => expect(recovery).not.toMatch(/never see a gap/));
+  // docs/CONNECTING-PLATFORMS.md:294: reply-to-a-message is unknown on Twitch and YouTube.
+  it("does not claim chat replies", () => expect(recovery).not.toMatch(/\breply\b/i));
+  // docs/PLATFORMS.md:42-48: chat on several platforms is unverified.
+  it("does not claim chat for every platform", () => expect(recovery).not.toMatch(/chat (for|from) every platform/i));
+  // docs/QUICKSTART.md:3-4 starts from installing, not from renting a server.
+  it("does not claim the quickstart covers renting a VPS", () => expect(run).not.toMatch(/renting/));
+  // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
+  it("points script users at the setup code", () => expect(run).toMatch(/closing summary/));
+});
