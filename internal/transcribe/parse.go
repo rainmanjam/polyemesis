@@ -56,11 +56,7 @@ func ParseJSON(raw []byte, lang *string) ([]Segment, error) {
 		return nil, fmt.Errorf("parse whisper json: %w", err)
 	}
 	if lang != nil {
-		if doc.Result.Language != "" {
-			*lang = doc.Result.Language
-		} else if doc.Params.Language != "" && doc.Params.Language != "auto" {
-			*lang = doc.Params.Language
-		}
+		setLanguage(doc, lang)
 	}
 	out := make([]Segment, 0, len(doc.Transcription))
 	for _, t := range doc.Transcription {
@@ -69,20 +65,36 @@ func ParseJSON(raw []byte, lang *string) ([]Segment, error) {
 			EndMS:   t.Offsets.To,
 			Text:    strings.TrimSpace(t.Text),
 		}
-		if seg.StartMS == 0 && seg.EndMS == 0 && t.Timestamps.From != "" {
-			if ms, ok := ParseTimestamp(t.Timestamps.From); ok {
-				seg.StartMS = ms
-			}
-			if ms, ok := ParseTimestamp(t.Timestamps.To); ok {
-				seg.EndMS = ms
-			}
-		}
+		applyTimestampFallback(&seg, t.Timestamps.From, t.Timestamps.To)
 		if c, ok := meanTokenProbability(t.Tokens); ok {
 			seg.Confidence, seg.ConfidenceKnown = c, true
 		}
 		out = append(out, seg)
 	}
 	return NormalizeSegments(out), nil
+}
+
+// setLanguage reports the language whisper detected, or the one it was asked
+// for when that is not "auto".
+func setLanguage(doc whisperJSON, lang *string) {
+	if doc.Result.Language != "" {
+		*lang = doc.Result.Language
+	} else if doc.Params.Language != "" && doc.Params.Language != "auto" {
+		*lang = doc.Params.Language
+	}
+}
+
+// applyTimestampFallback reads the formatted timestamps into seg, but only when
+// the integer offsets were absent.
+func applyTimestampFallback(seg *Segment, from, to string) {
+	if seg.StartMS == 0 && seg.EndMS == 0 && from != "" {
+		if ms, ok := ParseTimestamp(from); ok {
+			seg.StartMS = ms
+		}
+		if ms, ok := ParseTimestamp(to); ok {
+			seg.EndMS = ms
+		}
+	}
 }
 
 // meanTokenProbability averages the token probabilities into a segment
