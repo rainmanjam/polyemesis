@@ -296,6 +296,8 @@ func tallySend(results []chat.SendResult) chatSendResponse {
 
 // handleChatSend posts one message, by default only to the platforms that are
 // live. "to":"all" or a "platforms" list override that.
+const chatPlatformAndIDRequired = "platform and id are required"
+
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if !s.requireChat(w) {
 		return
@@ -480,7 +482,7 @@ func (s *Server) handleChatDeleteMessage(w http.ResponseWriter, r *http.Request)
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 
@@ -525,7 +527,7 @@ func (s *Server) handleChatHideMessage(w http.ResponseWriter, r *http.Request) {
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 
@@ -869,7 +871,7 @@ func (s *Server) handleChatFlagRelease(w http.ResponseWriter, r *http.Request) {
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 	// Refused while the model is still being asked: releasing a line it is
