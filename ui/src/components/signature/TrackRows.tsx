@@ -153,6 +153,38 @@ export function RoleBadge({
   );
 }
 
+function trackLabel(label: string | undefined, title: string | undefined): string {
+  return label || title || "";
+}
+
+function rowToneFor(excluded: boolean, sending: boolean): string {
+  if (excluded) return "border-warn/35 bg-warn-dim/25";
+  if (sending) return "border-primary/35 bg-primary-dim/30";
+  return "border-border bg-card opacity-55 hover:opacity-80";
+}
+
+function trackGridColumns(muteColumn: boolean): string {
+  return muteColumn
+    ? "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem_auto]"
+    : "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem]";
+}
+
+function pctTone(enabled: boolean): string {
+  return enabled ? "text-foreground" : "text-muted-foreground";
+}
+
+function muteAriaKey(muted: boolean | undefined) {
+  return muted ? "route.live.unmuteTrack" : "route.live.muteTrack";
+}
+
+function muteTextKey(muted: boolean | undefined) {
+  return muted ? "route.live.unmute" : "route.live.mute";
+}
+
+function muteIcon(muted: boolean | undefined) {
+  return muted ? <VolumeX /> : <Volume2 />;
+}
+
 export function TrackRows({
   idPrefix,
   tracks,
@@ -304,16 +336,14 @@ export function TrackRows({
         // has to read as "not sent" rather than as "sent".
         const excluded = role !== "" && excludeRoles.includes(role);
         const sending = sel.enabled && !excluded;
-        const label = ann.label || t.title || "";
+        const label = trackLabel(ann.label, t.title);
         const last = lastRef.current.get(lastKey(t.index));
         const block = live ? live.blocked(t.index) : null;
         const liveOk = !!live && !block;
         const rowBusy = busy[t.index] === true;
         const shownGain = drag[t.index] ?? sel.gain;
         const muteColumn = !!live || !!draftMute;
-        let rowTone = "border-border bg-card opacity-55 hover:opacity-80";
-        if (excluded) rowTone = "border-warn/35 bg-warn-dim/25";
-        else if (sending) rowTone = "border-primary/35 bg-primary-dim/30";
+        const rowTone = rowToneFor(excluded, sending);
 
         return (
           <div
@@ -335,9 +365,7 @@ export function TrackRows({
               data-part="track-grid"
               className={cn(
                 "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 @2xl:gap-y-0",
-                muteColumn
-                  ? "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem_auto]"
-                  : "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem]",
+                trackGridColumns(muteColumn),
               )}
             >
               <Checkbox
@@ -461,7 +489,7 @@ export function TrackRows({
                   data-part="pct"
                   className={cn(
                     "tnum w-10 shrink-0 text-right font-mono text-sm",
-                    sel.enabled ? "text-foreground" : "text-muted-foreground",
+                    pctTone(sel.enabled),
                     // Boost above unity is where clipping starts; flag it.
                     sel.enabled && sel.gain > 1 && "text-warn",
                   )}
@@ -476,10 +504,7 @@ export function TrackRows({
                   variant={sel.muted ? "secondary" : "ghost"}
                   size="sm"
                   aria-pressed={sel.muted === true}
-                  aria-label={translate(
-                    sel.muted ? "route.live.unmuteTrack" : "route.live.muteTrack",
-                    { n: t.index + 1 },
-                  )}
+                  aria-label={translate(muteAriaKey(sel.muted), { n: t.index + 1 })}
                   title={block?.reason}
                   disabled={!!block}
                   // Busy is announced, not enforced by `disabled`, which would
@@ -494,8 +519,8 @@ export function TrackRows({
                     pressMute(t.index, () => live.onMute(t.index, muted));
                   }}
                 >
-                  {sel.muted ? <VolumeX /> : <Volume2 />}
-                  {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
+                  {muteIcon(sel.muted)}
+                  {translate(muteTextKey(sel.muted))}
                 </Button>
               )}
               {!live && draftMute && (
@@ -504,18 +529,15 @@ export function TrackRows({
                   variant={sel.muted ? "secondary" : "ghost"}
                   size="sm"
                   aria-pressed={sel.muted === true}
-                  aria-label={translate(
-                    sel.muted ? "route.live.unmuteTrack" : "route.live.muteTrack",
-                    { n: t.index + 1 },
-                  )}
+                  aria-label={translate(muteAriaKey(sel.muted), { n: t.index + 1 })}
                   title={draftMute.disabledReason ?? undefined}
                   disabled={!!draftMute.disabledReason}
                   data-part="mute"
                   className={cn(sel.muted && "text-warn")}
                   onClick={() => update(t.index, { muted: !sel.muted })}
                 >
-                  {sel.muted ? <VolumeX /> : <Volume2 />}
-                  {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
+                  {muteIcon(sel.muted)}
+                  {translate(muteTextKey(sel.muted))}
                 </Button>
               )}
               </div>
