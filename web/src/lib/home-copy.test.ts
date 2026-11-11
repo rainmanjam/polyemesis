@@ -426,3 +426,18 @@ describe("the features page sections", () => {
     expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
   });
 });
+
+/* THE SPLIT DIAGRAM (homepage redesign, Task 3). It renders four times on the
+ * home page (three hero panels and how-it-works), so any id would repeat, and
+ * its destination cards stay generic divs until the hero script upgrades them
+ * to buttons: a label on a div is announced inconsistently, so the name lives
+ * in data-label until then. */
+describe("the split diagram", () => {
+  const diagram = () => readFileSync(join(here, "..", "components", "home", "SplitDiagram.astro"), "utf8");
+
+  it("SplitDiagram emits no ids and no aria-label on generic divs", () => {
+    const src = diagram();
+    expect(src).not.toMatch(/\sid=/);
+    expect(src).not.toMatch(/<div[^>]*aria-label/);
+  });
+});
