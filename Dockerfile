@@ -171,11 +171,12 @@ ARG FFMPEG_VERSION=8.1.3-r0
 # or drop a .ttf/.otf into <data>/fonts. An empty value builds an image with no
 # fallback fonts, whose captions are Latin, Greek and Cyrillic only.
 ARG CAPTION_FONTS="fontconfig font-dejavu"
-RUN if ! apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata ${CAPTION_FONTS}; then \
+RUN if ! apk add --no-cache ca-certificates "ffmpeg=${FFMPEG_VERSION}" tzdata ${CAPTION_FONTS}; then \
       echo "FFMPEG_VERSION=${FFMPEG_VERSION} is not in this Alpine branch any more." >&2; \
       echo "It now serves:" >&2; \
       apk --no-cache policy ffmpeg >&2 || true; \
-      echo "Set ARG FFMPEG_VERSION in the Dockerfile to that version (see the comment above it), or pass --build-arg FFMPEG_VERSION=<it>." >&2; \
+      echo "Set ARG FFMPEG_VERSION in the Dockerfile to that version (see the comment above it)," \
+           "or pass --build-arg FFMPEG_VERSION=<it>." >&2; \
       exit 1; \
     fi \
  && adduser -D -u 10001 polyemesis \
