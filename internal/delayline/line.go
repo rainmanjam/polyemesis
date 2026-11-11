@@ -466,6 +466,24 @@ func (l *Line) Dump(want time.Duration, done func(DumpResult)) (DumpResult, erro
 	return t.Result(), nil
 }
 
+// fillFraction is the Fill of a status whose Effective delay is positive: the
+// span over the effective delay, clamped to 1. A draining line measures its own
+// span, so it is never pinned full by Releasing; any other line that is
+// releasing reads full.
+func fillFraction(st Status) float64 {
+	fill := float64(st.Span) / float64(st.Effective)
+	if st.Draining {
+		if fill > 1 {
+			return 1
+		}
+		return fill
+	}
+	if st.Releasing || fill > 1 {
+		return 1
+	}
+	return fill
+}
+
 // Status is a snapshot.
 func (l *Line) Status() Status {
 	st := Status{
@@ -478,16 +496,7 @@ func (l *Line) Status() Status {
 	// that is releasing still reads full.
 	st.Effective = l.cfg.Delay - st.Dumped
 	if st.Effective > 0 {
-		st.Fill = float64(st.Span) / float64(st.Effective)
-		if st.Releasing || st.Fill > 1 {
-			st.Fill = 1
-		}
-		if st.Draining {
-			st.Fill = float64(st.Span) / float64(st.Effective)
-			if st.Fill > 1 {
-				st.Fill = 1
-			}
-		}
+		st.Fill = fillFraction(st)
 	}
 	if st.Draining {
 		if newest, ok := l.buf.Newest(); ok {

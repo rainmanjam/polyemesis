@@ -489,21 +489,32 @@ func (ts *tsState) snapshot() []pidSnap {
 			add(pid)
 		}
 	}
+	add2(ts.esPIDs())
+	if len(out) < maxSnapPIDs {
+		add2(ts.restPIDs(seen))
+	}
+	return out
+}
+
+// esPIDs is the elementary-stream PIDs, unsorted.
+func (ts *tsState) esPIDs() []uint16 {
 	es := make([]uint16, 0, len(ts.es))
 	for pid := range ts.es {
 		es = append(es, pid)
 	}
-	add2(es)
-	if len(out) < maxSnapPIDs {
-		rest := make([]uint16, 0, len(ts.out))
-		for pid := range ts.out {
-			if !seen[pid] && pid != mpegts.NullPID {
-				rest = append(rest, pid)
-			}
+	return es
+}
+
+// restPIDs is every carried PID that is not already in seen and is not the
+// null PID, unsorted.
+func (ts *tsState) restPIDs(seen map[uint16]bool) []uint16 {
+	rest := make([]uint16, 0, len(ts.out))
+	for pid := range ts.out {
+		if !seen[pid] && pid != mpegts.NullPID {
+			rest = append(rest, pid)
 		}
-		add2(rest)
 	}
-	return out
+	return rest
 }
 
 // audioComplete reports that no bounded audio PES is part-way through.
