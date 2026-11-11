@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
   FLIP_GUARD_MS,
@@ -27,7 +27,7 @@ export function useSettledAction(enabled: boolean): {
   const action = actionFor(enabled);
   const flippedAt = useRef<number>(0);
   const previous = useRef<DestAction | null>(null);
-  const [, force] = useState(0);
+  const [, force] = useReducer((n: number) => n + 1, 0);
 
   if (previous.current !== action) {
     previous.current = action;
@@ -58,7 +58,7 @@ export function useSettledAction(enabled: boolean): {
   useEffect(() => {
     if (!unsettled) return;
     const left = FLIP_GUARD_MS - (Date.now() - flippedAt.current);
-    const t = setTimeout(() => force((n) => n + 1), Math.max(left, 0));
+    const t = setTimeout(() => force(), Math.max(left, 0));
     return () => clearTimeout(t);
   });
 
