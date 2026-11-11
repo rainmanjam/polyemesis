@@ -338,10 +338,12 @@ for (const name of new Set(sections.flatMap((s) => [s.shot, ...("setup" in s && 
  * reader scrolling ahead of the network sees the screen's layout rather than an
  * empty frame. See lib/lqip.ts. */
 const placeholder = new Map<string, string>();
-// Only the captures that load lazily: the first section's loads eagerly and
-// needs none, so generating one for it would ship an unreferenced file.
+// Every capture loads lazily: the spec strip, the four-track problem, the
+// patchbay and the proof sit above the rooms, so not even the first room's
+// screenshot is near the fold, and an eager high-priority fetch there would
+// compete with the page's real LCP for nothing.
 const lazyShots = new Set(
-  sections.flatMap((s, i) => [...(i > 0 ? [s.shot] : []), ...("setup" in s && s.setup ? [s.setup.shot] : [])]),
+  sections.flatMap((s) => [s.shot, ...("setup" in s && s.setup ? [s.setup.shot] : [])]),
 );
 for (const name of lazyShots) {
   placeholder.set(name, await lqipStyle(shotOf(name)));
@@ -601,11 +603,10 @@ const rooms = [
                 widths={SHOT_WIDTHS}
                 sizes={SHOT_SIZES}
                 alt={s.alt}
-                loading={i === 0 ? "eager" : "lazy"}
-                fetchpriority={i === 0 ? "high" : undefined}
+                loading="lazy"
                 decoding="async"
                 class="w-full rounded-token border border-line"
-                style={i === 0 ? undefined : placeholder.get(s.shot)}
+                style={placeholder.get(s.shot)}
                 pictureAttributes={{ class: "block" }}
               />
             </button>

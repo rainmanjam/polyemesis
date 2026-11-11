@@ -404,9 +404,9 @@ describe("the announcement bar", () => {
 describe("the features page sections", () => {
   const features = pages("features.astro");
 
-  it("eager-loads the first capture and paints a placeholder under the lazy ones", () => {
-    expect(features).toMatch(/loading=\{i === 0 \? "eager" : "lazy"\}/);
-    expect(features).toMatch(/style=\{i === 0 \? undefined : placeholder\.get\(s\.shot\)\}/);
+  it("lazy-loads every capture, none being near the fold, with a placeholder under each", () => {
+    expect(features).not.toMatch(/loading=\{i === 0|fetchpriority=\{i === 0|loading="eager"/);
+    expect(features).toMatch(/style=\{placeholder\.get\(s\.shot\)\}/);
     expect(features).toMatch(/style=\{placeholder\.get\(s\.setup\.shot\)\}/);
   });
 
