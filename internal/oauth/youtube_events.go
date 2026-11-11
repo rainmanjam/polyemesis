@@ -50,18 +50,11 @@ func (y *YouTube) ListEvents(ctx context.Context, accessToken string, heldKeys [
 	var out []EventSummary
 	seen := map[string]bool{}
 	for _, status := range []string{"upcoming", "active"} {
-		q := url.Values{}
-		q.Set("part", "id,snippet,status,contentDetails")
-		q.Set("broadcastStatus", status)
-		q.Set("broadcastType", "all")
-		q.Set("maxResults", "50")
-		var list struct {
-			Items []ytBroadcast `json:"items"`
-		}
-		if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+		items, err := y.listBroadcastsByStatus(ctx, accessToken, status)
+		if err != nil {
 			return nil, err
 		}
-		for _, b := range list.Items {
+		for _, b := range items {
 			if seen[b.ID] {
 				continue
 			}
@@ -70,28 +63,56 @@ func (y *YouTube) ListEvents(ctx context.Context, accessToken string, heldKeys [
 			case "complete", "revoked":
 				continue
 			}
-			ev := EventSummary{
-				ID: b.ID, Title: b.Snippet.Title, ScheduledStart: b.Snippet.ScheduledStartTime,
-				Privacy: b.Status.PrivacyStatus, Status: b.Status.LifeCycleStatus,
-				EnableAutoStart: b.ContentDetails.EnableAutoStart, EnableAutoStop: b.ContentDetails.EnableAutoStop,
-				BoundStreamID: b.ContentDetails.BoundStreamID,
-			}
-			for i := range streams {
-				if streams[i].ID != ev.BoundStreamID || ev.BoundStreamID == "" {
-					continue
-				}
-				active := strings.EqualFold(streams[i].Status.StreamStatus, "active")
-				ev.StreamActive = &active
-				for k, key := range heldKeys {
-					if key != "" && key == streams[i].CDN.IngestionInfo.StreamName {
-						ev.BoundToHeld = append(ev.BoundToHeld, k)
-					}
-				}
-			}
+			ev := eventSummaryOf(b)
+			bindEventToStreams(&ev, streams, heldKeys)
 			out = append(out, ev)
 		}
 	}
 	return out, nil
+}
+
+// listBroadcastsByStatus reads one page of the channel's broadcasts in a
+// lifecycle bucket ("upcoming" or "active").
+func (y *YouTube) listBroadcastsByStatus(ctx context.Context, accessToken, status string) ([]ytBroadcast, error) {
+	q := url.Values{}
+	q.Set("part", "id,snippet,status,contentDetails")
+	q.Set("broadcastStatus", status)
+	q.Set("broadcastType", "all")
+	q.Set("maxResults", "50")
+	var list struct {
+		Items []ytBroadcast `json:"items"`
+	}
+	if err := y.getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// eventSummaryOf is the summary the event picker shows for one broadcast.
+func eventSummaryOf(b ytBroadcast) EventSummary {
+	return EventSummary{
+		ID: b.ID, Title: b.Snippet.Title, ScheduledStart: b.Snippet.ScheduledStartTime,
+		Privacy: b.Status.PrivacyStatus, Status: b.Status.LifeCycleStatus,
+		EnableAutoStart: b.ContentDetails.EnableAutoStart, EnableAutoStop: b.ContentDetails.EnableAutoStop,
+		BoundStreamID: b.ContentDetails.BoundStreamID,
+	}
+}
+
+// bindEventToStreams records, on the summary, whether the stream the event is
+// bound to is receiving video and which held destination keys point at it.
+func bindEventToStreams(ev *EventSummary, streams []ytLiveStream, heldKeys []string) {
+	for i := range streams {
+		if streams[i].ID != ev.BoundStreamID || ev.BoundStreamID == "" {
+			continue
+		}
+		active := strings.EqualFold(streams[i].Status.StreamStatus, "active")
+		ev.StreamActive = &active
+		for k, key := range heldKeys {
+			if key != "" && key == streams[i].CDN.IngestionInfo.StreamName {
+				ev.BoundToHeld = append(ev.BoundToHeld, k)
+			}
+		}
+	}
 }
 
 // SetEventAutoStart implements EventManager. It reads the event, refuses one on another channel or past

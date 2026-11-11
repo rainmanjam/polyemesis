@@ -284,6 +284,73 @@ func (y *YouTube) PushBroadcastSettings(ctx context.Context, clientID, accessTok
 // required properties, and always carries every field of a part it sends --
 // including ones the operator did not touch, read back from the broadcast --
 // because omitting a field from a part reverts that field to its default.
+// carryContentDetails overlays the operator's choices on the contentDetails
+// values carried from the broadcast.
+func carryContentDetails(cd map[string]any, b *ytBroadcast, s BroadcastSettings) {
+	// The freezing toggles, carried through from the broadcast when untouched
+	// for the same reason as everything else in this function.
+	cd["enableDvr"] = pickBool(s.EnableDvr, b.ContentDetails.EnableDvr)
+	cd["enableAutoStart"] = pickBool(s.EnableAutoStart, b.ContentDetails.EnableAutoStart)
+	cd["enableAutoStop"] = pickBool(s.EnableAutoStop, b.ContentDetails.EnableAutoStop)
+	// Carried, never chosen, and only when YouTube reported them: sending an
+	// empty value would be an invalid one. Without the carry, every metadata push
+	// and reschedule of a captioned broadcast reset it to captions off.
+	if v := b.ContentDetails.ClosedCaptionsType; v != "" {
+		cd["closedCaptionsType"] = v
+	}
+	if v := b.ContentDetails.LatencyPreference; v != "" {
+		cd["latencyPreference"] = v
+	}
+	// enableEmbed and recordFromStart are required on every contentDetails
+	// update (liveBroadcasts reference), so they are carried when YouTube
+	// reported them, and overridden by the operator's choice.
+	if v := b.ContentDetails.EnableEmbed; v != nil {
+		cd["enableEmbed"] = *v
+	}
+	if v := pickBoolPtr(s.RecordFromStart, b.ContentDetails.RecordFromStart); v != nil {
+		cd["recordFromStart"] = *v
+	}
+	if s.LatencyPreference != nil {
+		cd["latencyPreference"] = *s.LatencyPreference
+	}
+	if s.ClosedCaptionsType != nil {
+		cd["closedCaptionsType"] = *s.ClosedCaptionsType
+	}
+}
+
+// verifyControlsReadBack reads the broadcast back to confirm latency and captions
+// changed, since YouTube's 2xx proves nothing about them. It reports which of the
+// two did not change and writes the warnings for them.
+func (y *YouTube) verifyControlsReadBack(ctx context.Context, accessToken string, b *ytBroadcast, s BroadcastSettings, res *MetadataResult) (latencyBad, captionsBad bool) {
+	var unapplied []string
+	verified := true
+	if s.LatencyPreference != nil || s.ClosedCaptionsType != nil {
+		nb, rerr := y.liveBroadcast(ctx, accessToken)
+		if rerr != nil || nb.ID != b.ID {
+			verified = false
+		} else {
+			if s.LatencyPreference != nil && nb.ContentDetails.LatencyPreference != *s.LatencyPreference {
+				latencyBad = true
+				unapplied = append(unapplied, fmt.Sprintf("latency (wanted %q, YouTube has %q)",
+					*s.LatencyPreference, nb.ContentDetails.LatencyPreference))
+			}
+			if s.ClosedCaptionsType != nil && nb.ContentDetails.ClosedCaptionsType != *s.ClosedCaptionsType {
+				captionsBad = true
+				unapplied = append(unapplied, fmt.Sprintf("closed captions (wanted %q, YouTube has %q)",
+					*s.ClosedCaptionsType, nb.ContentDetails.ClosedCaptionsType))
+			}
+		}
+	}
+	if !verified {
+		res.Warnings = append(res.Warnings, "broadcast controls: YouTube accepted the update but the broadcast could not be read back to confirm latency or captions changed")
+	}
+	if len(unapplied) > 0 {
+		res.Warnings = append(res.Warnings,
+			"broadcast controls: YouTube accepted the update but did not apply "+strings.Join(unapplied, " or "))
+	}
+	return latencyBad, captionsBad
+}
+
 func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b *ytBroadcast, s BroadcastSettings, res *MetadataResult) error {
 	// Start from what the broadcast currently is, then overlay the operator's
 	// changes. Never the other way round.
@@ -339,35 +406,7 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 	parts := "snippet,contentDetails"
 
 	cd := body["contentDetails"].(map[string]any)
-	// The freezing toggles, carried through from the broadcast when untouched
-	// for the same reason as everything else in this function.
-	cd["enableDvr"] = pickBool(s.EnableDvr, b.ContentDetails.EnableDvr)
-	cd["enableAutoStart"] = pickBool(s.EnableAutoStart, b.ContentDetails.EnableAutoStart)
-	cd["enableAutoStop"] = pickBool(s.EnableAutoStop, b.ContentDetails.EnableAutoStop)
-	// Carried, never chosen, and only when YouTube reported them: sending an
-	// empty value would be an invalid one. Without the carry, every metadata push
-	// and reschedule of a captioned broadcast reset it to captions off.
-	if v := b.ContentDetails.ClosedCaptionsType; v != "" {
-		cd["closedCaptionsType"] = v
-	}
-	if v := b.ContentDetails.LatencyPreference; v != "" {
-		cd["latencyPreference"] = v
-	}
-	// enableEmbed and recordFromStart are required on every contentDetails
-	// update (liveBroadcasts reference), so they are carried when YouTube
-	// reported them, and overridden by the operator's choice.
-	if v := b.ContentDetails.EnableEmbed; v != nil {
-		cd["enableEmbed"] = *v
-	}
-	if v := pickBoolPtr(s.RecordFromStart, b.ContentDetails.RecordFromStart); v != nil {
-		cd["recordFromStart"] = *v
-	}
-	if s.LatencyPreference != nil {
-		cd["latencyPreference"] = *s.LatencyPreference
-	}
-	if s.ClosedCaptionsType != nil {
-		cd["closedCaptionsType"] = *s.ClosedCaptionsType
-	}
+	carryContentDetails(cd, b, s)
 
 	if err := y.requestJSON(ctx, http.MethodPut,
 		y.apiEndpoint()+"/liveBroadcasts?part="+parts, accessToken, body, nil, nil); err != nil {
@@ -384,33 +423,7 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 	// broadcast back (1 unit) and report what did not change, as the Facebook
 	// privacy read-back does. Everything else in the part is documented as
 	// settable and stays trusted on 2xx.
-	var unapplied []string
-	var latencyBad, captionsBad bool
-	verified := true
-	if s.LatencyPreference != nil || s.ClosedCaptionsType != nil {
-		nb, rerr := y.liveBroadcast(ctx, accessToken)
-		if rerr != nil || nb.ID != b.ID {
-			verified = false
-		} else {
-			if s.LatencyPreference != nil && nb.ContentDetails.LatencyPreference != *s.LatencyPreference {
-				latencyBad = true
-				unapplied = append(unapplied, fmt.Sprintf("latency (wanted %q, YouTube has %q)",
-					*s.LatencyPreference, nb.ContentDetails.LatencyPreference))
-			}
-			if s.ClosedCaptionsType != nil && nb.ContentDetails.ClosedCaptionsType != *s.ClosedCaptionsType {
-				captionsBad = true
-				unapplied = append(unapplied, fmt.Sprintf("closed captions (wanted %q, YouTube has %q)",
-					*s.ClosedCaptionsType, nb.ContentDetails.ClosedCaptionsType))
-			}
-		}
-	}
-	if !verified {
-		res.Warnings = append(res.Warnings, "broadcast controls: YouTube accepted the update but the broadcast could not be read back to confirm latency or captions changed")
-	}
-	if len(unapplied) > 0 {
-		res.Warnings = append(res.Warnings,
-			"broadcast controls: YouTube accepted the update but did not apply "+strings.Join(unapplied, " or "))
-	}
+	latencyBad, captionsBad := y.verifyControlsReadBack(ctx, accessToken, b, s, res)
 	other := s.EnableDvr != nil || s.EnableAutoStart != nil || s.EnableAutoStop != nil ||
 		s.RecordFromStart != nil || s.EnableMonitorStream != nil || s.StreamDelayMs != nil
 	latencyOK := s.LatencyPreference != nil && !latencyBad
