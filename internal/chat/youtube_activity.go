@@ -218,52 +218,73 @@ func ytActor(it ytChatItem) *activity.Actor {
 
 // ytActivityEvent maps one item. false means it is malformed, or a receipt.
 func ytActivityEvent(it ytChatItem, at time.Time) (activity.Event, bool) {
-	sn := it.Snippet
-	ev := activity.Event{At: at, Actor: ytActor(it), Source: activity.Source{Type: sn.Type, ID: it.ID}}
-	switch sn.Type {
+	ev := activity.Event{At: at, Actor: ytActor(it), Source: activity.Source{Type: it.Snippet.Type, ID: it.ID}}
+	var ok bool
+	switch it.Snippet.Type {
 	case "superChatEvent", "superStickerEvent":
-		d := sn.SuperChatDetails
-		if sn.Type == "superStickerEvent" {
-			d = sn.SuperStickerDetails
-		}
-		if d == nil || !d.AmountMicros.OK {
-			return ev, false
-		}
-		amt, ok := ytMoney(d.AmountMicros.V, d.Currency, strings.TrimSpace(d.AmountDisplayString))
-		if !ok {
-			return ev, false
-		}
-		ev.Kind, ev.Amount, ev.Message = activity.KindTip, amt, d.UserComment
-		if d.StickerMetadata != nil && ev.Message == "" {
-			ev.Message = d.StickerMetadata.AltText
-		}
-		if d.Tier.OK {
-			ev.Tier = strconv.FormatUint(d.Tier.V, 10)
-		}
+		ok = ytPaidActivity(it, &ev)
 	case "newSponsorEvent":
-		d := sn.NewSponsorDetails
-		if d == nil {
-			return ev, false
-		}
-		ev.Kind, ev.Product, ev.Tier = activity.KindSubscribe, "membership", d.MemberLevelName
+		ok = ytSponsorActivity(it, &ev)
 	case "memberMilestoneChatEvent":
-		d := sn.MemberMilestoneChatDetails
-		if d == nil || !d.MemberMonth.OK || d.MemberMonth.V < 1 || d.MemberMonth.V > 1_000_000 {
-			return ev, false
-		}
-		ev.Kind, ev.Product, ev.Tier = activity.KindResub, "membership", d.MemberLevelName
-		ev.Months, ev.Message = int(d.MemberMonth.V), d.UserComment
+		ok = ytMilestoneActivity(it, &ev)
 	case "membershipGiftingEvent":
-		d := sn.MembershipGiftingDetails
-		if d == nil || !d.GiftMembershipsCount.OK || d.GiftMembershipsCount.V < 1 || d.GiftMembershipsCount.V > activity.MaxCount {
-			return ev, false
-		}
-		ev.Kind, ev.Product, ev.Tier = activity.KindGift, "membership", d.GiftMembershipsLevelName
-		ev.Count = int(d.GiftMembershipsCount.V)
-	default:
-		return ev, false
+		ok = ytGiftingActivity(it, &ev)
 	}
-	return ev, true
+	return ev, ok
+}
+
+// ytPaidActivity fills a super chat or super sticker. The event is only changed
+// once the amount is known to be valid.
+func ytPaidActivity(it ytChatItem, ev *activity.Event) bool {
+	sn := it.Snippet
+	d := sn.SuperChatDetails
+	if sn.Type == "superStickerEvent" {
+		d = sn.SuperStickerDetails
+	}
+	if d == nil || !d.AmountMicros.OK {
+		return false
+	}
+	amt, ok := ytMoney(d.AmountMicros.V, d.Currency, strings.TrimSpace(d.AmountDisplayString))
+	if !ok {
+		return false
+	}
+	ev.Kind, ev.Amount, ev.Message = activity.KindTip, amt, d.UserComment
+	if d.StickerMetadata != nil && ev.Message == "" {
+		ev.Message = d.StickerMetadata.AltText
+	}
+	if d.Tier.OK {
+		ev.Tier = strconv.FormatUint(d.Tier.V, 10)
+	}
+	return true
+}
+
+func ytSponsorActivity(it ytChatItem, ev *activity.Event) bool {
+	d := it.Snippet.NewSponsorDetails
+	if d == nil {
+		return false
+	}
+	ev.Kind, ev.Product, ev.Tier = activity.KindSubscribe, "membership", d.MemberLevelName
+	return true
+}
+
+func ytMilestoneActivity(it ytChatItem, ev *activity.Event) bool {
+	d := it.Snippet.MemberMilestoneChatDetails
+	if d == nil || !d.MemberMonth.OK || d.MemberMonth.V < 1 || d.MemberMonth.V > 1_000_000 {
+		return false
+	}
+	ev.Kind, ev.Product, ev.Tier = activity.KindResub, "membership", d.MemberLevelName
+	ev.Months, ev.Message = int(d.MemberMonth.V), d.UserComment
+	return true
+}
+
+func ytGiftingActivity(it ytChatItem, ev *activity.Event) bool {
+	d := it.Snippet.MembershipGiftingDetails
+	if d == nil || !d.GiftMembershipsCount.OK || d.GiftMembershipsCount.V < 1 || d.GiftMembershipsCount.V > activity.MaxCount {
+		return false
+	}
+	ev.Kind, ev.Product, ev.Tier = activity.KindGift, "membership", d.GiftMembershipsLevelName
+	ev.Count = int(d.GiftMembershipsCount.V)
+	return true
 }
 
 // ActivityCounters reports what the decoder has seen.
