@@ -136,7 +136,9 @@ const pct = (g: number) => `${g * 100}%`;
     grid-template-rows:
       minmax(0, 20fr) minmax(0, 12fr) minmax(0, 16fr) minmax(0, 8fr)
       minmax(0, 44fr);
-    min-height: 36rem;
+    /* Sources, hub and a 2 x 2 of cards: about 100px per card row at 390px, so
+       the first card clears the fold of a 844px phone (check-home A). */
+    min-height: 28rem;
   }
   /* Language lanes: each story maps its four lanes one-to-one onto the four
      track tokens. Never --color-muted: that is --dg-mix, the hub-to-destination
@@ -359,7 +361,7 @@ const pct = (g: number) => `${g * 100}%`;
         minmax(0, 18fr) minmax(0, 22fr) minmax(0, 20fr) minmax(0, 22fr)
         minmax(0, 18fr);
       grid-template-rows: minmax(0, 1fr);
-      min-height: 22rem;
+      min-height: 20.5rem;
     }
     .dg-lines[data-layout="h"] {
       display: block;

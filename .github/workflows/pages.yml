@@ -328,6 +328,10 @@ jobs:
         timeout-minutes: 5
         run: npm run check:layout
 
+      - name: Home page (browser)
+        timeout-minutes: 5
+        run: npm run check:home
+
       - name: Publish to Cloudflare Pages
         # Both halves are load-bearing. The gate is the credential. refs/heads/
         # main is what keeps a pull_request run — including one from a fork,

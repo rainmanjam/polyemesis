@@ -88,9 +88,8 @@ empty form beneath it as the one-time setup.
 
 `02-routing-hero.png` is a clip of the routing screen, the track rows and the
 music-rights switch for the selected destination, cropped so it stays legible
-at a small size. It was taken for the home page hero, which the animated
-SignalPath component replaces ([#971](https://github.com/rainmanjam/polyemesis/pull/971));
-the clip is kept for any page that needs the routing screen at that size. It is
+at a small size. It was taken for the home page hero, which is now the split diagram (the
+earlier animated hero, #971, was retired); the clip is kept for any page that needs the routing screen at that size. It is
 taken at 1024×1800, because the music-rights card sits below the four track
 rows and a clip is cut from the viewport: at 900px tall it ended on Track 4 and
 the switch was not in it. On the demo's three programmes the level frames name

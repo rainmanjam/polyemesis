@@ -22,7 +22,7 @@ const status = statusFor(STORIES[first], null, false);
 
 <section class="hero relative overflow-hidden border-b border-line" data-hero>
   <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
-  <div class="wrap relative py-12 lg:py-16">
+  <div class="wrap relative py-12 lg:py-10">
     <h1 class="rise rise-1 hero-h1">One video. A <em class="it">different</em> sound for every audience.</h1>
     <p class="rise rise-2 hero-lede">
       Upload once from OBS, an IRL backpack or any SRT encoder.<span class="lede-more">
@@ -70,7 +70,16 @@ const status = statusFor(STORIES[first], null, false);
 </section>
 
 <style>
+  /* The headline slides in but never starts transparent. A text block painted
+     at opacity 0 is not a largest-contentful-paint candidate, and its entry
+     animation runs on the compositor, so it is never re-measured: with the
+     global opacity rise the announcement bar's line was the page's LCP. */
+  @keyframes hero-rise {
+    from { transform: translateY(14px); }
+    to { transform: none; }
+  }
   .hero-h1 {
+    animation-name: hero-rise;
     font-family: var(--font-display);
     font-size: clamp(30px, 4.6vw, 65px);
     line-height: 1.06;
@@ -84,13 +93,15 @@ const status = statusFor(STORIES[first], null, false);
     font-size: 1.125rem;
     line-height: 1.6;
     text-wrap: pretty;
-    color: var(--color-muted);
+    /* --color-muted is 6.4:1 on the page ground; the home pins body text at
+       7:1 (check-home J), so the lede reads a step toward the home bone. */
+    color: color-mix(in oklab, var(--color-muted) 50%, var(--home-bone));
   }
   .hero-cta { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
 
-  .stage { position: relative; margin-top: 2.5rem; padding-bottom: 3.25rem; }
+  .stage { position: relative; margin-top: 1.75rem; padding-bottom: 3.25rem; }
   /* The row keeps the tablist's 44px while the tablist is hidden (no script). */
-  .tabrow { min-height: 44px; margin-bottom: 1rem; }
+  .tabrow { min-height: 44px; margin-bottom: 0.75rem; }
   .tabs { display: flex; gap: 0.5rem; }
   .tabs[hidden] { display: none; }
   .tab {
