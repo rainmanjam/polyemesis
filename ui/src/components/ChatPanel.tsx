@@ -881,14 +881,14 @@ export function ChatComposer({
         </div>
       )}
       {liveUnknown && (
-        <p role="status" className="mb-1.5 text-[11px] text-muted-foreground">
+        <output className="block mb-1.5 text-[11px] text-muted-foreground">
           {t("chatpage.liveUnknown")}
-        </p>
+        </output>
       )}
       {(noneLive || nothingChosen) && (
-        <p role="status" className="mb-1.5 text-[11px] text-warn">
+        <output className="block mb-1.5 text-[11px] text-warn">
           {t(noneLive ? "chatpage.targetsNoneLive" : "chatpage.targetsPick")}
-        </p>
+        </output>
       )}
       <div className="flex items-end gap-1.5">
         <Textarea

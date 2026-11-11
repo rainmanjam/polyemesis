@@ -27,8 +27,7 @@ export function WaitingForEncoder() {
   }, []);
 
   return (
-    <div
-      role="status"
+    <output
       className="flex items-start gap-3 rounded-md border border-dashed border-idle/40 bg-idle-dim/20 px-3 py-2"
     >
       <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-idle motion-safe:animate-pulse" />
@@ -50,6 +49,6 @@ export function WaitingForEncoder() {
           </p>
         )}
       </div>
-    </div>
+    </output>
   );
 }

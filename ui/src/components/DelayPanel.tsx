@@ -59,9 +59,8 @@ export function DelayPanel({
 
   if (d?.phase === "draining") {
     return (
-      <div
+      <output
         data-testid="delay-draining"
-        role="status"
         className="flex items-center gap-2 rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down"
       >
         <Timer className="h-3 w-3 shrink-0" />
@@ -79,7 +78,7 @@ export function DelayPanel({
             <Scissors /> {t("delay.cutNow")}
           </Button>
         )}
-      </div>
+      </output>
     );
   }
 

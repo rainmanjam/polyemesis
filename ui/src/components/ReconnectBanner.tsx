@@ -48,7 +48,7 @@ export function ReconnectBanner() {
   };
 
   return (
-    <div className="flex flex-col border-b border-border bg-warn/10" role="status" data-testid="reconnect-banner">
+    <output className="flex flex-col border-b border-border bg-warn/10" data-testid="reconnect-banner">
       {rows.map((a) => {
         const platform = platformName(a.platform);
         const unlocks = (a.scopeUnlocks ?? []).map((k) => t(k as TranslationKey)).join("; ");
@@ -73,6 +73,6 @@ export function ReconnectBanner() {
           </div>
         );
       })}
-    </div>
+    </output>
   );
 }

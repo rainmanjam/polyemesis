@@ -28,7 +28,7 @@ export function ProtectionOfferBanner({
     }
   };
   return (
-    <div role="region" aria-label={t("automod.protOfferTitle")} className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-3">
+    <section aria-label={t("automod.protOfferTitle")} className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-3">
       <ShieldCheck className="size-5 shrink-0 text-primary-bright" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{t("automod.protOfferTitle")}</p>
@@ -42,6 +42,6 @@ export function ProtectionOfferBanner({
           {t("automod.protOfferNotNow")}
         </Button>
       </div>
-    </div>
+    </section>
   );
 }

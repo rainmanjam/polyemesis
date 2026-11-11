@@ -163,9 +163,9 @@ export function SettingsSectionSearch({
           className="absolute top-full right-0 left-0 z-20 mt-1 max-h-80 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
         >
           {results.length === 0 ? (
-            <p role="status" className="px-2 py-3 text-center text-sm text-muted-foreground">
+            <output className="block px-2 py-3 text-center text-sm text-muted-foreground">
               {t("settings.noMatches")}
-            </p>
+            </output>
           ) : (
             <ul id={listId} role="listbox" aria-label={t("settings.search")}>
               {results.map((r, i) => {

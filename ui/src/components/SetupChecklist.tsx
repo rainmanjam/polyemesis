@@ -307,12 +307,11 @@ function IngestAddresses({
           );
         })}
 
-        <div
+        <output
           className={cn(
             "flex items-start gap-3 rounded-md border px-3 py-2.5",
             signal ? "border-ok/40 bg-ok-dim" : "border-dashed border-border-strong",
           )}
-          role="status"
         >
           <span className="relative mt-1.5 flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
             {!signal && (
@@ -326,7 +325,7 @@ function IngestAddresses({
             </span>
             {!signal && <span className="text-sm text-muted-foreground">{t("firstRun.waitingBody")}</span>}
           </div>
-        </div>
+        </output>
       </CardContent>
     </Card>
   );

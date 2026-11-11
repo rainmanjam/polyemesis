@@ -78,14 +78,13 @@ export function OutputStrip({
         </div>
       </div>
       {dropped && (
-        <div
+        <output
           className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
-          role="status"
           data-testid="strip-dropped"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>{t("route.strip.dropped")}</span>
-        </div>
+        </output>
       )}
     </div>
   );

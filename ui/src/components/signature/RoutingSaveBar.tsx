@@ -108,7 +108,7 @@ export function RoutingSaveBar({
         warnRestart ? "border-warn bg-warn-dim" : "border-border bg-card",
       )}
     >
-      <div role="status" className="flex min-w-0 flex-1 flex-col gap-1">
+      <output className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="text-sm">
           {summary}
         </p>
@@ -136,7 +136,7 @@ export function RoutingSaveBar({
             )}
           </ul>
         )}
-      </div>
+      </output>
       {/* min-w-0, not shrink-0: at 390px the reason, Discard and Save are
           wider than the bar, and a group that may not shrink pushed Save
           off the right edge instead of wrapping it. */}

@@ -98,9 +98,9 @@ export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
   if (!view) {
     return notice ? (
       <section className="grid gap-2 rounded border border-border p-2 text-sm" aria-label={t("wave3.rollover.countdownTitle")}>
-        <p role="status" className="text-xs text-down">
+        <output className="block text-xs text-down">
           {notice.text}
-        </p>
+        </output>
       </section>
     ) : null;
   }

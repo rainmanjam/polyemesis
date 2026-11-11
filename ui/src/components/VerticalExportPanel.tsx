@@ -155,9 +155,9 @@ export function VerticalExportPanel({
         {enabled && (
           <>
             {tooLong && (
-              <p role="status" className="text-tiny text-warn">
+              <output className="block text-tiny text-warn">
                 {t("clipedit.vertical.tooLong", { seconds: Math.round(durationMs / 100) / 10 })}
-              </p>
+              </output>
             )}
 
             {options && options.templates.length > 0 && (
@@ -302,7 +302,7 @@ export function VerticalExportPanel({
                 </span>
               </Label>
               {spec.captions.enabled && options && !options.burnCaptions && (
-                <p role="status" className="text-tiny text-warn">{t("clipedit.vertical.noLibass")}</p>
+                <output className="block text-tiny text-warn">{t("clipedit.vertical.noLibass")}</output>
               )}
               {spec.captions.enabled && (
                 <div className="grid grid-cols-2 gap-2">

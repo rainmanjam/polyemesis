@@ -602,9 +602,8 @@ export function DestinationCard({
           </div>
         )}
         {retiredKey && (
-          <div
+          <output
             className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
-            role="status"
             data-testid="dest-retired"
           >
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -612,7 +611,7 @@ export function DestinationCard({
               <div className="font-medium">{t(retiredKey)}</div>
               <div className="text-xs">{t("dash.platformRetiredCannotStart")}</div>
             </div>
-          </div>
+          </output>
         )}
         {warnings.map((w) => (
           <div key={w} className="flex items-start gap-1.5 text-sm text-warn">

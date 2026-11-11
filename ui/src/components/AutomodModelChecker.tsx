@@ -449,14 +449,14 @@ export function AutomodModelChecker({
           <Problem>{t("automod.keyBoundNote")}</Problem>
         )}
         {keyPending && (
-          <span className="text-sm text-muted-foreground" role="status">
+          <output className="text-sm text-muted-foreground">
             {t("automod.keyPending")}
-          </span>
+          </output>
         )}
         {keyNote && (
-          <span className="text-sm text-muted-foreground" role="status">
+          <output className="text-sm text-muted-foreground">
             {keyNote}
-          </span>
+          </output>
         )}
         {keyError && <Problem>{keyError}</Problem>}
       </div>
@@ -476,7 +476,7 @@ export function AutomodModelChecker({
         </div>
         {testError && <Problem>{testError}</Problem>}
         {testResult && (
-          <div className="flex flex-col gap-0.5" role="status">
+          <output className="flex flex-col gap-0.5">
             {testResult.passed ? (
               <span className="text-sm">{t(testVerdictKey(testResult))}</span>
             ) : (
@@ -499,7 +499,7 @@ export function AutomodModelChecker({
                 </span>
               );
             })}
-          </div>
+          </output>
         )}
       </div>
     </div>

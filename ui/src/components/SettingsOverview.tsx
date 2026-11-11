@@ -126,8 +126,7 @@ export function SettingsOverview({
   return (
     <div className="flex flex-col gap-3" data-testid="settings-overview">
       {/* THE READINESS STRIP: one sentence, and the one next action. */}
-      <div
-        role="status"
+      <output
         className={cn(
           "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2",
           ready ? "border-ok/40 bg-ok-dim" : "border-border bg-card",
@@ -139,7 +138,7 @@ export function SettingsOverview({
         <span className="mr-auto text-sm">
           {readiness}
         </span>
-      </div>
+      </output>
 
       {checklist && (
         <SetupChecklist
