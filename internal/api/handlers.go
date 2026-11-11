@@ -35,6 +35,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/srtla"
+	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -1290,40 +1292,7 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 	out := make([]metrics.Ingest, 0, len(engines))
 	srtLinks, groups := s.mgr.SRTLinks(), s.mgr.SRTLAGroups()
 	for _, e := range engines {
-		st := e.Status()
-		in := metrics.Ingest{
-			// A programme with no ingest child is REPORTED AS STOPPED rather
-			// than omitted, the same rule the destination series follow: an
-			// absent series and a stopped one are indistinguishable to an
-			// alert, and only one of them is true.
-			Process: metrics.Process{State: string(supervisor.StateStopped)},
-			ID:      e.SourceID(),
-			Name:    e.SourceName(),
-			Relay: metrics.Relay{
-				Subscribers: len(st.Relay.Subscribers),
-				RxPackets:   st.Relay.RxPackets,
-				RxBytes:     st.Relay.RxBytes,
-				TxPackets:   st.Relay.TxPackets,
-				Dropped:     st.Relay.Dropped,
-			},
-		}
-		in.State = string(s.mgr.IngestState(e, st.Ingest))
-		if st.Ingest != nil {
-			in.Restarts = st.Ingest.Restarts
-		}
-		if b := e.Monitor().Bitrate(); len(b) > 0 {
-			in.BitrateKbps = b[len(b)-1].Kbps
-		}
-		if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
-			in.BondedLinks = len(g.Links)
-		}
-		if fo := st.Failover; fo != nil {
-			in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
-			if l := fo.PrimaryLink; l != nil {
-				in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
-			}
-		}
-		out = append(out, in)
+		out = append(out, s.engineIngest(e, srtLinks, groups))
 	}
 
 	// AND EVERY PROGRAMME WITH NO ENGINE, as stopped. Sync logs and carries on
@@ -1356,6 +1325,44 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		})
 	}
 	return out
+}
+
+// engineIngest builds the ingest row for one engine that is running.
+func (s *Server) engineIngest(e *engine.Engine, srtLinks []srtserver.LinkStats, groups []srtla.GroupStats) metrics.Ingest {
+	st := e.Status()
+	in := metrics.Ingest{
+		// A programme with no ingest child is REPORTED AS STOPPED rather
+		// than omitted, the same rule the destination series follow: an
+		// absent series and a stopped one are indistinguishable to an
+		// alert, and only one of them is true.
+		Process: metrics.Process{State: string(supervisor.StateStopped)},
+		ID:      e.SourceID(),
+		Name:    e.SourceName(),
+		Relay: metrics.Relay{
+			Subscribers: len(st.Relay.Subscribers),
+			RxPackets:   st.Relay.RxPackets,
+			RxBytes:     st.Relay.RxBytes,
+			TxPackets:   st.Relay.TxPackets,
+			Dropped:     st.Relay.Dropped,
+		},
+	}
+	in.State = string(s.mgr.IngestState(e, st.Ingest))
+	if st.Ingest != nil {
+		in.Restarts = st.Ingest.Restarts
+	}
+	if b := e.Monitor().Bitrate(); len(b) > 0 {
+		in.BitrateKbps = b[len(b)-1].Kbps
+	}
+	if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
+		in.BondedLinks = len(g.Links)
+	}
+	if fo := st.Failover; fo != nil {
+		in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
+		if l := fo.PrimaryLink; l != nil {
+			in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
+		}
+	}
+	return in
 }
 
 // ----------------------------------------------------------------- settings
@@ -3607,27 +3614,34 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 	if ctl.KeyWarning != "" {
 		resp["warnings"] = []string{ctl.KeyWarning}
 	}
-	if ctl.Effect.Found {
-		if ctl.Effect.HasProcess {
-			resp["state"] = ctl.Effect.State
-		}
-		if ctl.Effect.Error != "" {
-			resp["error"] = ctl.Effect.Error
-		}
-		if !enabled {
-			resp["reaped"] = ctl.Effect.Warning == ""
-			if ctl.Effect.Warning != "" {
-				resp["warning"] = ctl.Effect.Warning
-			}
-			if ctl.Effect.DrainingSeconds > 0 {
-				resp["drainingSeconds"] = ctl.Effect.DrainingSeconds
-			}
-		}
-	}
+	addDestinationEffect(resp, enabled, ctl.Effect)
 	if ctl.Effect.Cut {
 		resp["cut"] = true
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// addDestinationEffect copies what the toggle did to the running process into
+// the response, when the destination had one.
+func addDestinationEffect(resp map[string]any, enabled bool, eff destEffect) {
+	if !eff.Found {
+		return
+	}
+	if eff.HasProcess {
+		resp["state"] = eff.State
+	}
+	if eff.Error != "" {
+		resp["error"] = eff.Error
+	}
+	if !enabled {
+		resp["reaped"] = eff.Warning == ""
+		if eff.Warning != "" {
+			resp["warning"] = eff.Warning
+		}
+		if eff.DrainingSeconds > 0 {
+			resp["drainingSeconds"] = eff.DrainingSeconds
+		}
+	}
 }
 
 func (s *Server) handleStartDestination(w http.ResponseWriter, r *http.Request) {
