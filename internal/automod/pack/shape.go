@@ -89,35 +89,46 @@ func CharFlood(s string, lim ShapeLimits) bool {
 	if lim.CharRun <= 0 && lim.CharSpamRunes <= 0 {
 		return false
 	}
-	var (
-		last   rune
-		run    int
-		total  int
-		seen   [8]rune
-		nseen  int
-		overfl bool
-	)
+	return charRunFlood(s, lim.CharRun) || charSpamFlood(s, lim)
+}
+
+// charRunFlood reports whether one non-space rune repeats minRun times in a row.
+// It is off when minRun is zero or less.
+func charRunFlood(s string, minRun int) bool {
+	if minRun <= 0 {
+		return false
+	}
+	var last rune
+	run := 0
 	for _, r := range s {
-		total++
 		if r == last && !unicode.IsSpace(r) {
 			run++
-			if lim.CharRun > 0 && run >= lim.CharRun {
+			if run >= minRun {
 				return true
 			}
 		} else {
 			last, run = r, 1
 		}
-		if overfl || lim.CharSpamRunes <= 0 {
+	}
+	return false
+}
+
+// charSpamFlood reports a long message made of almost nothing: at least
+// CharSpamRunes runes drawn from fewer than CharSpamDistinct distinct ones.
+func charSpamFlood(s string, lim ShapeLimits) bool {
+	if lim.CharSpamRunes <= 0 {
+		return false
+	}
+	total := 0
+	var seen [8]rune
+	nseen := 0
+	overfl := false
+	for _, r := range s {
+		total++
+		if overfl {
 			continue
 		}
-		found := false
-		for i := 0; i < nseen; i++ {
-			if seen[i] == r {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !containsSeen(&seen, nseen, r) {
 			if nseen < len(seen) {
 				seen[nseen] = r
 				nseen++
@@ -127,7 +138,17 @@ func CharFlood(s string, lim ShapeLimits) bool {
 			}
 		}
 	}
-	return lim.CharSpamRunes > 0 && total >= lim.CharSpamRunes && nseen < lim.CharSpamDistinct
+	return total >= lim.CharSpamRunes && nseen < lim.CharSpamDistinct
+}
+
+// containsSeen reports whether r is among the first n runes of seen.
+func containsSeen(seen *[8]rune, n int, r rune) bool {
+	for i := 0; i < n; i++ {
+		if seen[i] == r {
+			return true
+		}
+	}
+	return false
 }
 
 // Zalgo reports whether any whitespace-separated run of s carries combining
