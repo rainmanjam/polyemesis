@@ -1,5 +1,5 @@
 import { DEFAULT_LISTENERS, WIRE } from "@/lib/contract/wire";
-import { createContext, useContext, useEffect, useId, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -382,6 +382,14 @@ export function SettingsPage() {
     }
   };
 
+  // The advanced-cards context value. Memoised so the provider does not hand
+  // every consumer a new object on each render (Sonar S6481). Above the early
+  // returns below so the hook order never depends on the load state.
+  const advancedContext = useMemo(
+    () => ({ show: showAdvanced, revealed, setShow: setShowAdvanced }),
+    [showAdvanced, revealed, setShowAdvanced],
+  );
+
   // The old Debug tab's address, kept working (A17).
   if (requested === "debug") return <Navigate to="/system" replace />;
 
@@ -445,7 +453,7 @@ export function SettingsPage() {
           heading, so the headings and the switch are never children of a
           tablist -- a screen reader hears "Stream out, tab list, 3 items"
           rather than a heading announced as a tab. */}
-      <AdvancedContext.Provider value={{ show: showAdvanced, revealed, setShow: setShowAdvanced }}>
+      <AdvancedContext.Provider value={advancedContext}>
       <Tabs
         value={tab}
         orientation="vertical"
