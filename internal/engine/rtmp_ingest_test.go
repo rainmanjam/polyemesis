@@ -729,6 +729,13 @@ func TestAnIdleButAlreadyMeasuredLayoutStillPlansDestinations(t *testing.T) {
 	e := failoverEngine(t)
 	e.settings = failoverOnSettings()
 	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+	// The reconcile below STARTS a destination, and with it a supervisor that
+	// keeps retrying the missing FFmpeg. Returning with it and the other tiers
+	// alive left test.db open when TempDir's cleanup ran, and Windows refuses
+	// to unlink an open file ("being used by another process", seen on #1085).
+	// Registered after failoverEngine's own cleanups, so it runs before the
+	// store is closed.
+	t.Cleanup(e.Stop)
 
 	dest, err := e.store.CreateDestination(&db.Destination{
 		Name: "mismatch", Kind: db.DestRTMP, Platform: db.PlatformCustom,

@@ -485,8 +485,17 @@ func plantRecordingOnDisk(t *testing.T, store *db.DB, dir string, rec db.Recordi
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create the recordings dir for recording %d: %v", n, err)
 	}
+	// The file is sized and dated under a name the recording scanner ignores,
+	// then renamed into place. The engine's recording manager sweeps this
+	// directory as soon as the server starts, and a sweep that caught the file
+	// between its creation and the Chtimes indexed it with started_at = now.
+	// UpsertRecording never overwrites started_at, so the row below kept "now"
+	// and a recording planted an hour ago read as starting in the present: the
+	// live caption export then found no cues in its window and answered 404
+	// (seen once on windows-latest).
 	path := filepath.Join(dir, rec.Filename)
-	f, err := os.Create(path)
+	staged := path + ".planting"
+	f, err := os.Create(staged)
 	if err != nil {
 		t.Fatalf("plant recording %d's file: %v", n, err)
 	}
@@ -497,8 +506,11 @@ func plantRecordingOnDisk(t *testing.T, store *db.DB, dir string, rec db.Recordi
 	if err := f.Close(); err != nil {
 		t.Fatalf("close recording %d's file: %v", n, err)
 	}
-	if err := os.Chtimes(path, rec.StartedAt, rec.StartedAt); err != nil {
+	if err := os.Chtimes(staged, rec.StartedAt, rec.StartedAt); err != nil {
 		t.Fatalf("date recording %d's file: %v", n, err)
+	}
+	if err := os.Rename(staged, path); err != nil {
+		t.Fatalf("move recording %d's file into place: %v", n, err)
 	}
 	if err := store.UpsertRecording(&rec); err != nil {
 		t.Fatalf("plant recording %d: %v", n, err)
