@@ -265,17 +265,9 @@ func relayMCP(parent context.Context, endpoint string, client *http.Client, stdi
 			break
 		}
 		if err := remote.Write(ctx, msg); err != nil {
-			if resp, refuse := refusalFor(msg, err); refuse {
-				// Written on parent, not ctx. A refusal the SDK treats as fatal
-				// (a 401, say) fails the remote connection inside the Write
-				// above, which wakes the server -> stdout goroutine's Read and
-				// it cancels ctx -- usually before this line runs. On ctx the
-				// answer would be dropped and the client would read EOF instead
-				// of the error. parent still stops it on a real shutdown.
-				if werr := local.Write(parent, resp); werr != nil {
-					readErr = werr
-					break
-				}
+			if werr := answerRefusal(parent, local, msg, err); werr != nil {
+				readErr = werr
+				break
 			}
 		}
 	}
@@ -297,6 +289,24 @@ func oneLine(s string) string {
 		s = s[:500]
 	}
 	return s
+}
+
+// answerRefusal writes the JSON-RPC refusal for a request the server could not
+// be reached for, when there is one to give. It returns the error from writing
+// that refusal to the client, and nil when there is nothing to write or the
+// write succeeded.
+//
+// Written on parent, not ctx. A refusal the SDK treats as fatal (a 401, say)
+// fails the remote connection inside the remote Write, which wakes the
+// server -> stdout goroutine's Read and it cancels ctx -- usually before the
+// caller runs. On ctx the answer would be dropped and the client would read EOF
+// instead of the error. parent still stops it on a real shutdown.
+func answerRefusal(parent context.Context, local mcp.Connection, msg jsonrpc.Message, err error) error {
+	resp, refuse := refusalFor(msg, err)
+	if !refuse {
+		return nil
+	}
+	return local.Write(parent, resp)
 }
 
 // refusalFor answers a request the server could not be reached for with a

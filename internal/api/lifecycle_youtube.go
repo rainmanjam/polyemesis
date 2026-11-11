@@ -79,6 +79,78 @@ func (c *lifecycleCoordinator) holdQuiet(d *db.Destination, broadcastID, text st
 	})
 }
 
+// openRequest builds the YouTube open request for d and returns the destination
+// the open runs against: d itself, or the copy the open attempt was re-recorded
+// on. ok is false when the attempt could not be recorded, and nothing opens.
+func (c *lifecycleCoordinator) openRequest(d *db.Destination, failID string) (oauth.LiveNowRequest, *db.Destination, bool) {
+	req := oauth.LiveNowRequest{
+		StreamKey: d.StreamKey,
+		Title:     c.ytTitleFor(d),
+		Privacy:   string(d.Compliance.Privacy),
+	}
+	req.MadeForKids = d.Compliance.MadeForKids
+	if y := d.Compliance.YouTube; y != nil {
+		req.StreamID, req.EventID, req.RebindEvent = y.StreamID, y.EventID, y.RebindEvent
+		req.Description, req.Category, req.Projection360 = y.Description, y.Category, y.Projection360
+		req.Latency, req.EnableDvr = y.LatencyPreference, y.EnableDvr
+	}
+	if sendsCaptionPOST(d) {
+		req.CaptionPOST, req.CaptionDelay = true, time.Duration(d.DelaySeconds)*time.Second
+	}
+	// THE ATTEMPT MARKER proves a broadcast is ours, so it is stamped immediately before EACH insert (never by an
+	// attempt that stops earlier), is believed for twelve minutes only, and lets the open reuse only a broadcast whose
+	// start time is where that insert would have put it. See oauth.LiveNowRequest.AttemptAt.
+	if ms := d.Lifecycle.OpenAttemptMS; ms != 0 {
+		if at := time.UnixMilli(ms); c.clock().Sub(at) > oauth.LiveNowAttemptMaxAge {
+			if d = c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = 0 }); d == nil {
+				return req, nil, false
+			}
+		} else {
+			req.AttemptAt = at
+		}
+	}
+	return req, d, true
+}
+
+// failUnrecordedOpen runs when the open happened but its record could not be
+// written: the broadcast YouTube created is deleted again where the platform
+// allows it, so it is not left behind unrecorded.
+func (c *lifecycleCoordinator) failUnrecordedOpen(ctx context.Context, op oauth.LiveNowOpener,
+	acct *db.PlatformAccount, d *db.Destination, res *oauth.LiveNowResult) {
+	// THE RECORD COULD NOT BE WRITTEN (the row was reset, or the store failed), so nothing here would ever find
+	// this broadcast again and the next sweep would make another. One polyemesis created is deleted; a picked
+	// event is left as it was.
+	if !res.Existing {
+		if del, ok := op.(oauth.UnairedDeleter); ok {
+			dctx, dcancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+			defer dcancel()
+			if err := del.DeleteUnairedBroadcast(dctx, acct.AccessToken, res.BroadcastID, phaseCreated); err != nil {
+				c.log.Warn("broadcast lifecycle: could not record the broadcast it opened, and could not delete it; "+
+					"delete it in YouTube Studio", "destination", d.Name, bcAttr(res.BroadcastID),
+					"detail", scrubSourceKey(err.Error(), d.StreamKey))
+			}
+		}
+	}
+}
+
+// reportOpened logs an open that recorded: the chat it points at, any part of the
+// broadcast that did not apply, and what happened.
+func (c *lifecycleCoordinator) reportOpened(d *db.Destination, res *oauth.LiveNowResult) {
+	if res.LiveChatID != "" && c.pointYouTubeChat != nil {
+		c.pointYouTubeChat(*d.AccountID, res.LiveChatID)
+	}
+	for _, w := range res.Warnings {
+		c.log.Warn("broadcast lifecycle: a part of the YouTube broadcast did not apply",
+			"destination", d.Name, bcAttr(res.BroadcastID), "detail", scrubSourceKey(w, d.StreamKey))
+	}
+	what := "opened a YouTube broadcast for this destination"
+	if res.Existing {
+		what = "took over the YouTube event picked for this destination"
+	}
+	c.log.Info("broadcast lifecycle: "+what+"; it goes live when video arrives",
+		"destination", d.Name, "platform", d.Platform, bcAttr(res.BroadcastID))
+}
+
 // openYouTube opens one live-now broadcast for d and records it.
 func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destination, op oauth.LiveNowOpener) {
 	// ONE OPEN AT A TIME PER DESTINATION. The start path opens the broadcast before video is allowed to flow and the
@@ -110,31 +182,9 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err), d.StreamKey), err)
 		return
 	}
-	req := oauth.LiveNowRequest{
-		StreamKey: d.StreamKey,
-		Title:     c.ytTitleFor(d),
-		Privacy:   string(d.Compliance.Privacy),
-	}
-	req.MadeForKids = d.Compliance.MadeForKids
-	if y := d.Compliance.YouTube; y != nil {
-		req.StreamID, req.EventID, req.RebindEvent = y.StreamID, y.EventID, y.RebindEvent
-		req.Description, req.Category, req.Projection360 = y.Description, y.Category, y.Projection360
-		req.Latency, req.EnableDvr = y.LatencyPreference, y.EnableDvr
-	}
-	if sendsCaptionPOST(d) {
-		req.CaptionPOST, req.CaptionDelay = true, time.Duration(d.DelaySeconds)*time.Second
-	}
-	// THE ATTEMPT MARKER proves a broadcast is ours, so it is stamped immediately before EACH insert (never by an
-	// attempt that stops earlier), is believed for twelve minutes only, and lets the open reuse only a broadcast whose
-	// start time is where that insert would have put it. See oauth.LiveNowRequest.AttemptAt.
-	if ms := d.Lifecycle.OpenAttemptMS; ms != 0 {
-		if at := time.UnixMilli(ms); c.clock().Sub(at) > oauth.LiveNowAttemptMaxAge {
-			if d = c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = 0 }); d == nil {
-				return
-			}
-		} else {
-			req.AttemptAt = at
-		}
+	req, d, ok := c.openRequest(d, failID)
+	if !ok {
+		return
 	}
 	req.BeforeInsert = func() error {
 		if c.recordControl(d, failID, func(b *db.BroadcastControl) { b.OpenAttemptMS = c.clock().UnixMilli() }) == nil {
@@ -159,35 +209,10 @@ func (c *lifecycleCoordinator) openYouTube(ctx context.Context, d *db.Destinatio
 		c.trackAs(recorded, res.BroadcastID, phaseCreated)
 	}
 	if recorded == nil {
-		// THE RECORD COULD NOT BE WRITTEN (the row was reset, or the store failed), so nothing here would ever find
-		// this broadcast again and the next sweep would make another. One polyemesis created is deleted; a picked
-		// event is left as it was.
-		if !res.Existing {
-			if del, ok := op.(oauth.UnairedDeleter); ok {
-				dctx, dcancel := context.WithTimeout(ctx, lifecycleCallTimeout)
-				defer dcancel()
-				if err := del.DeleteUnairedBroadcast(dctx, acct.AccessToken, res.BroadcastID, phaseCreated); err != nil {
-					c.log.Warn("broadcast lifecycle: could not record the broadcast it opened, and could not delete it; "+
-						"delete it in YouTube Studio", "destination", d.Name, bcAttr(res.BroadcastID),
-						"detail", scrubSourceKey(err.Error(), d.StreamKey))
-				}
-			}
-		}
+		c.failUnrecordedOpen(ctx, op, acct, d, res)
 		return
 	}
-	if res.LiveChatID != "" && c.pointYouTubeChat != nil {
-		c.pointYouTubeChat(*d.AccountID, res.LiveChatID)
-	}
-	for _, w := range res.Warnings {
-		c.log.Warn("broadcast lifecycle: a part of the YouTube broadcast did not apply",
-			"destination", d.Name, bcAttr(res.BroadcastID), "detail", scrubSourceKey(w, d.StreamKey))
-	}
-	what := "opened a YouTube broadcast for this destination"
-	if res.Existing {
-		what = "took over the YouTube event picked for this destination"
-	}
-	c.log.Info("broadcast lifecycle: "+what+"; it goes live when video arrives",
-		"destination", d.Name, "platform", d.Platform, bcAttr(res.BroadcastID))
+	c.reportOpened(d, res)
 }
 
 // openYouTubeFailed sorts a failed open into the three ways it can fail.

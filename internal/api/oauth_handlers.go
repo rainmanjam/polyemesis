@@ -1367,7 +1367,7 @@ func (s *Server) needsOwnIngestStream(dest *db.Destination) bool {
 // ------------------------------------------------- the streams left behind
 //
 // WHY DELETING A DESTINATION DOES NOT DELETE ITS YouTube liveStream, AND WHY
-// THAT IS THE ANSWER RATHER THAN A TODO.
+// THAT IS THE ANSWER RATHER THAN AN OPEN ITEM.
 //
 // The leak is real and is stated plainly so nobody has to rediscover it: every
 // destination beyond the first on an account gets a liveStream of its own

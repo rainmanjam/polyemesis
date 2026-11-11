@@ -296,10 +296,19 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 // the worker's "no upload store is configured" guard would never fire and it
 // would panic on the first Resolve instead.
 func verifyStore(s *uploads.Store) uploadverify.Store {
+	return storeAs(s, func(v *uploads.Store) uploadverify.Store { return v })
+}
+
+// storeAs is the one nil guard both wrappers above share. The interface it
+// returns is the zero value -- an untyped nil -- when s is nil, and otherwise
+// whatever conv makes of the non-nil store, so the interface type is chosen by
+// the caller and no typed nil ever reaches it.
+func storeAs[I any](s *uploads.Store, conv func(*uploads.Store) I) I {
+	var none I
 	if s == nil {
-		return nil
+		return none
 	}
-	return s
+	return conv(s)
 }
 
 // uploadResolver hands the processor its resolver, or nothing at all.
@@ -308,10 +317,7 @@ func verifyStore(s *uploads.Store) uploadverify.Store {
 // as an interface and the worker's "no upload store is configured" guard would
 // never fire -- it would panic on the first Resolve instead.
 func uploadResolver(s *uploads.Store) playlistmedia.Resolver {
-	if s == nil {
-		return nil
-	}
-	return s
+	return storeAs(s, func(v *uploads.Store) playlistmedia.Resolver { return v })
 }
 
 // newJobQueue builds the queue this tier runs on.
