@@ -102,6 +102,8 @@ describe("the home hero (2026-11 redesign)", () => {
     expect(hero).toContain("with the music on Twitch and off YouTube. Free, and it runs on your own server.");
     expect(markup).not.toMatch(/vMix/);
   });
+  it("keeps a space between the lede's two sentences (Astro drops a span's leading whitespace)", () =>
+    expect(markup).toContain('any SRT encoder.{" "}<span class="lede-more">polyemesis sends'));
   it("makes Install the on-air primary and How it works the ghost", () => {
     expect(hero).toMatch(/<a[^>]*class="btn btn-onair[^"]*"[^>]*href="#run"[^>]*>\s*Install polyemesis/);
     expect(hero).toMatch(/<a[^>]*class="btn btn-ghost[^"]*"[^>]*href="#how"[^>]*>\s*See how it works/);

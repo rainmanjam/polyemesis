@@ -441,7 +441,7 @@
   /* EVERY wide table, not just the comparison ones.
    *
    * This started as a fix for /comparison and was measured afterwards on the
-   * other two: the routing matrix on the home page hides 403px of 736 (55%) at
+   * other two: the routing matrix (on the home page then, on /features now) hides 403px of 736 (55%) at
    * a 390px viewport, and it is the worse case of the two. That table is
    * INTERACTIVE -- you scroll right to reach a destination column and click a
    * crosspoint -- so losing the track label means clicking a cell without

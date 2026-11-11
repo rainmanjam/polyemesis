@@ -254,7 +254,7 @@ test("meters — loudness measured after routing", async ({ page }) => {
   await expect(
     page.getByText("NOT UPDATING"),
     "the loudness analyser never reported, so this shot has no per-destination " +
-      "figures and the front page's proof section quotes numbers that are not in it",
+      "figures and the /features proof section quotes numbers that are not in it",
   ).toHaveCount(0, { timeout: 90_000 });
   // AND EVERY TRACK IS METERING.
   //

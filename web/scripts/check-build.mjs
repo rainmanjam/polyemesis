@@ -143,7 +143,7 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
     fail.push("sticky column uses `--color-bg`, which this theme does not define — it resolves to transparent and cells scroll under the label");
   }
   /* BOTH class names, because the fix was applied to one and not the other.
-     .cmp got it; .patch -- the interactive routing matrix on the home page, the
+     .cmp got it; .patch -- the interactive routing matrix (then on the home page, now on /features), the
      worse case at 403px of 736 hidden -- was missed for a full commit. A check
      naming only the class that was fixed would have passed throughout. */
   for (const cls of ["cmp", "patch"]) {
@@ -1281,6 +1281,13 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * so only the built HTML shows it. The fix is an explicit {" "} at the end of
  * the line, as the home page already does.
  *
+ * A sentence end is the same bug one character later: "any SRT encoder." then
+ * <span class="lede-more"> on the next line shipped as "encoder.polyemesis",
+ * because the span's leading whitespace was dropped too. A period, ! or ? is
+ * not a word, so it is only glued when the element's text starts with a letter
+ * right after the tag; "polyemesis.com", "0.17.0", "index.html" and "e.g. "
+ * have no tag at that point and are never read.
+ *
  * Checked on the copy this repository writes in .astro files. The rendered
  * Markdown bodies (article.doc-prose) are left out: there `<code>GET</code>s` is
  * the author's choice, and Markdown does not collapse whitespace this way.
@@ -1289,6 +1296,7 @@ for (const { rel, page, factsDate } of sourcedPages) {
   const INLINE = "a|em|strong|code|span|kbd|abbr|b|i";
   const glueBefore = new RegExp(`([A-Za-z0-9,;:)])<(${INLINE})\\b[^>]*>`, "g");
   const glueAfter = new RegExp(`</(${INLINE})>([A-Za-z0-9(])`, "g");
+  const glueSentence = new RegExp(`[.!?]((?:<(?:${INLINE})\\b[^>]*>)+)[A-Za-z]`, "g");
   const text = (s) => s.replace(/<[^>]*>/g, "");
   for (const page of pages) {
     const html = readFileSync(join(DIST, page), "utf8")
@@ -1298,6 +1306,9 @@ for (const { rel, page, factsDate } of sourcedPages) {
     const glued = [];
     for (const m of html.matchAll(glueBefore)) {
       glued.push(`"${text(html.slice(Math.max(0, m.index - 40), m.index + 1)).slice(-24)}<${m[2]}>"`);
+    }
+    for (const m of html.matchAll(glueSentence)) {
+      glued.push(`"${text(html.slice(Math.max(0, m.index - 24), m.index + m[0].length + 16))}"`);
     }
     for (const m of html.matchAll(glueAfter)) {
       glued.push(`"</${m[1]}>${text(html.slice(m.index + m[0].length - 1, m.index + m[0].length + 24))}"`);
