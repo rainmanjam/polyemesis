@@ -163,6 +163,9 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   /** Writes a cell through to settings. Off DELETES the key rather than storing
    *  false, so the persisted form stays sparse and "absent means off" remains
    *  the only rule a reader needs. */
+  // One toggle per cell, built here so the switch's handler is not a function
+  // nested inside the row and column loops that render it.
+  const cellToggle = (key: string) => (v: boolean) => setCell(key, v);
   function setCell(key: string, auto: boolean) {
     const on = { ...automod!.on };
     if (auto) on[key] = true;
@@ -451,7 +454,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                 return (
                                   <Switch
                                     checked={Boolean(automod.on?.[key])}
-                                    onCheckedChange={(v) => setCell(key, v)}
+                                    onCheckedChange={cellToggle(key)}
                                     aria-label={t("automod.cellLabel", {
                                       checker: t(CHECKER_KEYS[checker]),
                                       action: t(ACTION_KEYS[action]),
