@@ -305,13 +305,7 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 		if reuse {
 			continue
 		}
-		var sub struct {
-			Data struct {
-				Subscription struct {
-					ID string `json:"subscription_id"`
-				} `json:"subscription"`
-			} `json:"data"`
-		}
+		var sub xSubscribeResponse
 		if err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
 			"event_type": event,
 			"filter":     map[string]string{"user_id": userID},
@@ -741,16 +735,38 @@ type xWebhookEvent struct {
 	Payload   json.RawMessage
 }
 
+// xSubscribeResponse is the reply to POST /2/activity/subscriptions: the new
+// subscription's id sits under data.subscription.
+type xSubscribeResponse struct {
+	Data xSubscribeData `json:"data"`
+}
+
+// xSubscribeData is the data block of a subscribe reply.
+type xSubscribeData struct {
+	Subscription xSubscription `json:"subscription"`
+}
+
+// xSubscription names the subscription the reply created.
+type xSubscription struct {
+	ID string `json:"subscription_id"`
+}
+
+// xEnvelopeData is the data block of an X activity webhook envelope.
+type xEnvelopeData struct {
+	EventUUID string          `json:"event_uuid"`
+	CreatedAt string          `json:"created_at"`
+	EventType string          `json:"event_type"`
+	Filter    xEnvelopeFilter `json:"filter"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+// xEnvelopeFilter names the user whose activity the envelope carries.
+type xEnvelopeFilter struct {
+	UserID string `json:"user_id"`
+}
+
 type xEnvelope struct {
-	Data *struct {
-		EventUUID string `json:"event_uuid"`
-		CreatedAt string `json:"created_at"`
-		EventType string `json:"event_type"`
-		Filter    struct {
-			UserID string `json:"user_id"`
-		} `json:"filter"`
-		Payload json.RawMessage `json:"payload"`
-	} `json:"data"`
+	Data *xEnvelopeData `json:"data"`
 }
 
 func parseXEnvelope(body []byte) (xWebhookEvent, bool) {
@@ -856,20 +872,26 @@ func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) er
 	return first
 }
 
+// xChatAuthor is the author block of a broadcast.chat payload.
+type xChatAuthor struct {
+	Data xChatAuthorData `json:"data"`
+}
+
+// xChatAuthorData is the author's identity inside xChatAuthor.
+type xChatAuthorData struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
 // xChatPayload is the broadcast.chat payload as docs.x.com/x-api/activity/event-payloads documents it: the text is in
 // message, the message id is message_id, and the author sits under author.data.
 type xChatPayload struct {
-	MessageID   string `json:"message_id"`
-	BroadcastID string `json:"broadcast_id"`
-	Message     string `json:"message"`
-	ReplyTo     string `json:"reply_to"`
-	Author      struct {
-		Data struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-			Name     string `json:"name"`
-		} `json:"data"`
-	} `json:"author"`
+	MessageID   string      `json:"message_id"`
+	BroadcastID string      `json:"broadcast_id"`
+	Message     string      `json:"message"`
+	ReplyTo     string      `json:"reply_to"`
+	Author      xChatAuthor `json:"author"`
 }
 
 // deliver turns one queued event into a Message or a retraction. The event_uuid is recorded only once the event has
@@ -941,8 +963,8 @@ type xSeen struct {
 	m   map[string]*list.Element
 }
 
-func newXSeen(max int) *xSeen {
-	return &xSeen{max: max, ll: list.New(), m: make(map[string]*list.Element, max)}
+func newXSeen(size int) *xSeen {
+	return &xSeen{max: size, ll: list.New(), m: make(map[string]*list.Element, size)}
 }
 
 // has reports whether id was recorded, and counts the lookup as a use.

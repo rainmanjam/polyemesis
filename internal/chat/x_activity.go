@@ -261,13 +261,7 @@ func (x *XAdapter) ensureActivity(ctx context.Context, userID, webhookID string,
 		if sp.direction != "" {
 			filter["direction"] = sp.direction
 		}
-		var sub struct {
-			Data struct {
-				Subscription struct {
-					ID string `json:"subscription_id"`
-				} `json:"subscription"`
-			} `json:"data"`
-		}
+		var sub xSubscribeResponse
 		err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
 			"event_type": sp.event,
 			"filter":     filter,
