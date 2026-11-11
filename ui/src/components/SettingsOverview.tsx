@@ -145,7 +145,7 @@ export function SettingsOverview({
           checklist={checklist}
           ingestUrl={system?.ingestUrl ?? ""}
           onCopyIngest={() => {
-            if (system?.ingestUrl) void copyToClipboard(t, system.ingestUrl, t("firstRun.ingestHeading"));
+            if (system?.ingestUrl) copyToClipboard(t, system.ingestUrl, t("firstRun.ingestHeading"));
           }}
           // The destination dialog lives on the Dashboard, where this same
           // checklist opens it in place. Sending the operator there is one
