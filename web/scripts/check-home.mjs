@@ -18,11 +18,11 @@
  *   C keyboard: tabs (arrows, Home, End) and a destination (Enter, Escape)
  *   D reduced motion: nothing animates, the counter and the failover settle,
  *     and Pull the cable is one instant change to the slate
- *   E Pause motion switches motion off
+ *   E Pause motion switches motion off: no .dest fade, no smooth scrolling
  *   F no script: everything script reveals stays hidden (failover controls
  *     too), the markup stands
  *   G a long Spanish label does not overflow a card (390, every story)
- *   H the pinned stage sticks under the nav and lights step 3 at 40%
+ *   H the pinned stage sticks under the nav and lights step 3 halfway through
  *   I every line ends inside the card it points at, and none hides behind
  *     another card on the way
  *   J contrast of the headline and the lede on the page ground
@@ -221,14 +221,33 @@ async function checkD(page, c) {
 
 /* ---------------------------------------------------------------- E */
 async function checkE(page, c) {
+  const read = () =>
+    page.evaluate((sel) => {
+      const b = document.querySelector("[data-pause]");
+      const dest = document.querySelector(`${sel} .dest`);
+      const dur = dest ? getComputedStyle(dest).transitionDuration : null;
+      return {
+        pressed: b.getAttribute("aria-pressed"),
+        text: b.textContent.trim(),
+        motionOn: document.documentElement.classList.contains("motion-on"),
+        // The longest of a comma list; "0s" (or nothing) means no transition.
+        destMs: dur === null ? null : Math.max(...dur.split(",").map((d) => parseFloat(d) * (d.trim().endsWith("ms") ? 1 : 1000))),
+        scroll: getComputedStyle(document.documentElement).scrollBehavior,
+      };
+    }, HERO_DG);
+  // Before: motion is on and visibly so, or the after-checks pass over nothing.
+  const before = await read();
+  if (!before.motionOn) bad("E", c.name, "html.motion-on is not set before Pause");
+  if (before.destMs === null) bad("E", c.name, "no .dest in the visible hero diagram");
+  else if (!(before.destMs > 0)) bad("E", c.name, `a .dest has no transition before Pause (${before.destMs}ms)`);
+  if (before.scroll !== "smooth") bad("E", c.name, `scroll-behavior is "${before.scroll}" before Pause, expected "smooth"`);
   await page.click("[data-pause]");
-  const m = await page.evaluate(() => {
-    const b = document.querySelector("[data-pause]");
-    return { pressed: b.getAttribute("aria-pressed"), text: b.textContent.trim(), motionOn: document.documentElement.classList.contains("motion-on") };
-  });
+  const m = await read();
   if (m.pressed !== "true") bad("E", c.name, `aria-pressed is "${m.pressed}" after the click`);
   if (m.text !== "Resume motion") bad("E", c.name, `Pause reads "${m.text}", expected "Resume motion"`);
   if (m.motionOn) bad("E", c.name, "html.motion-on is still set after Pause");
+  if (m.destMs !== null && m.destMs > 0) bad("E", c.name, `a .dest still fades over ${m.destMs}ms after Pause`);
+  if (m.scroll !== "auto") bad("E", c.name, `scroll-behavior is "${m.scroll}" after Pause, expected "auto"`);
 }
 
 /* ---------------------------------------------------------------- F */
@@ -380,8 +399,12 @@ async function checkH(page, c) {
       const track = document.querySelector(".how-track");
       const header = document.querySelector("header");
       const top = track.getBoundingClientRect().top + window.scrollY;
-      // The page smooth-scrolls; an instant jump is what two frames can wait for.
-      window.scrollTo({ top: top + 0.4 * (track.offsetHeight - window.innerHeight), behavior: "instant" });
+      // Halfway through the pinned run, the middle of step 3's band, measured
+      // as how-steps.ts measures it: from the nav's bottom, not the window's
+      // top. An instant jump is what two frames can wait for.
+      const navH = header.querySelector("nav")?.getBoundingClientRect().height ?? 0;
+      const range = track.offsetHeight - window.innerHeight + navH;
+      window.scrollTo({ top: top - navH + 0.5 * range, behavior: "instant" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const stage = document.querySelector(".how-stage").getBoundingClientRect();
       const inStage = (s) => {
@@ -401,7 +424,7 @@ async function checkH(page, c) {
     const at = `${c.name} ${w}x${h}`;
     if (!m.enhanced) bad("H", at, ".how is not .is-enhanced");
     if (Math.abs(m.stageTop - m.navBottom) > 2) bad("H", at, `.how-stage top ${m.stageTop.toFixed(1)} is not at the nav's bottom ${m.navBottom.toFixed(1)}`);
-    if (!m.on) bad("H", at, "step 3 is not .on at 40% of the track");
+    if (!m.on) bad("H", at, "step 3 is not .on halfway through the pinned run");
     for (const k of ["head", "steps", "dg"]) {
       if (!m[k]) bad("H", at, `no ${k} element in the stage`);
       else if (m[k].top < -1 || m[k].bottom < -1) bad("H", at, `${k} is clipped by the stage (${m[k].top.toFixed(0)}px from its top, ${m[k].bottom.toFixed(0)}px from its bottom)`);

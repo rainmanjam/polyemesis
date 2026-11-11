@@ -224,6 +224,15 @@
     background-color: var(--color-ink);
     color-scheme: dark;
   }
+  /* The home page has a motion gate (scripts/home/motion.ts) that sets
+     html.motion-on only while motion is allowed: not under reduced motion,
+     not while its Pause control is pressed, not before its script runs.
+     There, smooth scrolling is motion like any other and follows the gate.
+     Every other page keeps smooth scrolling (reduced motion still turns it
+     off in the block at the end of this file). */
+  html:has(.home):not(.motion-on) {
+    scroll-behavior: auto;
+  }
   body {
     background-color: var(--color-ink);
     color: var(--color-fg);
