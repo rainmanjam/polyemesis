@@ -1348,35 +1348,11 @@ func (s *Store) Sweep(olderThan time.Duration) (SweepResult, error) {
 	}
 	cutoff := time.Now().Add(-olderThan)
 	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() {
+		staged, info, ok := sweepCandidate(e, present, cutoff)
+		if !ok {
 			continue
 		}
-		staged := strings.HasPrefix(name, partialPrefix)
-		sidecar := strings.HasPrefix(name, sidecarPrefix) && strings.HasSuffix(name, ".json")
-		if !staged && !sidecar {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		// AGE FIRST, for both. A staged file younger than the cutoff may be an
-		// upload still arriving; a sidecar younger than it may be the one
-		// Pending.Commit has just written and not yet renamed a file in beside
-		// -- and removing that one would turn a verified upload into an
-		// unrecorded one, which is a downgrade this package exists to prevent.
-		if info.ModTime().After(cutoff) {
-			continue
-		}
-		if sidecar {
-			// The name the sidecar describes: ".probe-" + stored + ".json".
-			stored := strings.TrimSuffix(strings.TrimPrefix(name, sidecarPrefix), ".json")
-			if stored == "" || present[stored] || present[claimName(stored)] {
-				continue
-			}
-		}
-		if err := os.Remove(filepath.Join(s.dir, name)); err != nil {
+		if err := os.Remove(filepath.Join(s.dir, e.Name())); err != nil {
 			continue
 		}
 		if staged {
@@ -1387,6 +1363,44 @@ func (s *Store) Sweep(olderThan time.Duration) (SweepResult, error) {
 		}
 	}
 	return res, nil
+}
+
+// sweepCandidate reports whether a directory entry is a staged upload or a
+// sidecar that Sweep may remove, and returns its info when it is.
+func sweepCandidate(e os.DirEntry, present map[string]bool, cutoff time.Time) (bool, os.FileInfo, bool) {
+	if e.IsDir() {
+		return false, nil, false
+	}
+	name := e.Name()
+	staged := strings.HasPrefix(name, partialPrefix)
+	sidecar := strings.HasPrefix(name, sidecarPrefix) && strings.HasSuffix(name, ".json")
+	if !staged && !sidecar {
+		return false, nil, false
+	}
+	info, err := e.Info()
+	if err != nil {
+		return false, nil, false
+	}
+	// AGE FIRST, for both. A staged file younger than the cutoff may be an
+	// upload still arriving; a sidecar younger than it may be the one
+	// Pending.Commit has just written and not yet renamed a file in beside
+	// -- and removing that one would turn a verified upload into an
+	// unrecorded one, which is a downgrade this package exists to prevent.
+	if info.ModTime().After(cutoff) {
+		return false, nil, false
+	}
+	if sidecar && !orphanSidecar(name, present) {
+		return false, nil, false
+	}
+	return staged, info, true
+}
+
+// orphanSidecar reports whether a probe sidecar describes an upload that is no
+// longer present, under either its stored name or its claimed name.
+func orphanSidecar(name string, present map[string]bool) bool {
+	// The name the sidecar describes: ".probe-" + stored + ".json".
+	stored := strings.TrimSuffix(strings.TrimPrefix(name, sidecarPrefix), ".json")
+	return stored != "" && !present[stored] && !present[claimName(stored)]
 }
 
 func (s *Store) Delete(name string) error {
