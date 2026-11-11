@@ -2395,8 +2395,13 @@ jobs:
         run: |
           npm ci --ignore-scripts
           # install-deps runs UNCONDITIONALLY: it is apt writing to /usr, which
-          # the cache above does not cover, so a cache hit still needs it.
-          npx --no-install playwright install-deps chromium
+          # the cache above does not cover, so a cache hit still needs it. A
+          # failure is a warning, not a stop: apt went down on its own on
+          # 2026-11-11 (every *.ubuntu.com host failed DNS on the runners), the
+          # image already carries Chrome's libraries, and a library that really
+          # is missing still fails the suite at browser launch, by name.
+          timeout 360 npx --no-install playwright install-deps chromium ||
+            echo "::warning::playwright install-deps failed (apt unreachable?); relying on the image's libraries"
           # install runs unconditionally TOO, and is not gated on cache-hit on
           # purpose. It checks the local browser registry first and skips the
           # download when the revision is already there, so a cache hit costs
