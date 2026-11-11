@@ -177,26 +177,7 @@ func (in *Injector) bufferedBytes() int {
 // window sees every picture before any of them is emitted.
 func (in *Injector) video(p []byte, pusi bool) []byte {
 	if pusi {
-		in.releaseHeld()
-		au := &accessUnit{pkts: [][]byte{append([]byte(nil), p...)}}
-		au.pts, au.hasPTS = pesPTSOf(p)
-		var out []byte
-		if au.hasPTS && in.sched.Claim(au.pts) {
-			// The clock jumped. Units queued from before the jump belong to the old
-			// timeline, so they go out unchanged rather than waiting on slots that
-			// the new timeline will never finalise.
-			out = in.releaseReady()
-			in.hasLastPTS = false
-		}
-		// lastPTS is the newest presentation time, not the last one decoded: a
-		// B-frame decoded after its P-frame is earlier on screen, and keying a
-		// caption to it would stamp it before the caption before it, which then
-		// overwrites it. Across a clock jump the running maximum starts again.
-		if au.hasPTS && (!in.hasLastPTS || au.pts > in.lastPTS) {
-			in.lastPTS, in.hasLastPTS = au.pts, true
-		}
-		in.held = au
-		return append(out, in.drain(false)...)
+		return in.startAccessUnit(p)
 	}
 	if in.held == nil {
 		// Continuation before any start: it cannot be rebuilt, so it goes out as
@@ -205,22 +186,52 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 	}
 	in.held.pkts = append(in.held.pkts, append([]byte(nil), p...))
 	if len(in.held.pkts) > maxHeldPackets {
-		// The unit is too long to keep collecting. Everything queued is sent now,
-		// in stream order, with the unit's head ahead of the packets that follow.
-		// Those packets then pass through unchanged, as continuations with no start
-		// do above. Sending the queue here keeps the picture's head from being
-		// overtaken by its own tail.
-		in.releaseHeld()
-		// Same timeline, so the claims these units hold are given back: their
-		// pairs wait for the pictures after them instead of being spent here.
-		for _, au := range in.ready {
-			if !au.unchanged && au.hasPTS {
-				in.sched.Unclaim(au.pts)
-			}
-		}
-		return in.releaseReady()
+		return in.releaseOversized()
 	}
 	return nil
+}
+
+// startAccessUnit opens a new access unit on a PES start packet, claiming its
+// schedule slot and returning whatever the release of the previous unit emits.
+func (in *Injector) startAccessUnit(p []byte) []byte {
+	in.releaseHeld()
+	au := &accessUnit{pkts: [][]byte{append([]byte(nil), p...)}}
+	au.pts, au.hasPTS = pesPTSOf(p)
+	var out []byte
+	if au.hasPTS && in.sched.Claim(au.pts) {
+		// The clock jumped. Units queued from before the jump belong to the old
+		// timeline, so they go out unchanged rather than waiting on slots that
+		// the new timeline will never finalise.
+		out = in.releaseReady()
+		in.hasLastPTS = false
+	}
+	// lastPTS is the newest presentation time, not the last one decoded: a
+	// B-frame decoded after its P-frame is earlier on screen, and keying a
+	// caption to it would stamp it before the caption before it, which then
+	// overwrites it. Across a clock jump the running maximum starts again.
+	if au.hasPTS && (!in.hasLastPTS || au.pts > in.lastPTS) {
+		in.lastPTS, in.hasLastPTS = au.pts, true
+	}
+	in.held = au
+	return append(out, in.drain(false)...)
+}
+
+// releaseOversized handles a held unit that grew past maxHeldPackets.
+func (in *Injector) releaseOversized() []byte {
+	// The unit is too long to keep collecting. Everything queued is sent now,
+	// in stream order, with the unit's head ahead of the packets that follow.
+	// Those packets then pass through unchanged, as continuations with no start
+	// do above. Sending the queue here keeps the picture's head from being
+	// overtaken by its own tail.
+	in.releaseHeld()
+	// Same timeline, so the claims these units hold are given back: their
+	// pairs wait for the pictures after them instead of being spent here.
+	for _, au := range in.ready {
+		if !au.unchanged && au.hasPTS {
+			in.sched.Unclaim(au.pts)
+		}
+	}
+	return in.releaseReady()
 }
 
 // releaseReady sends every queued unit unchanged and empties the queue. It is
