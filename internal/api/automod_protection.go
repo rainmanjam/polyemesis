@@ -183,30 +183,7 @@ func packConfigFromSettings(p db.AutomodProtection) (pack.Config, map[string]boo
 		cfg.AllowIDs[id] = true
 	}
 	for cat, c := range p.Categories {
-		off := c.Enabled != nil && !*c.Enabled
-		// The two term categories are switched as categories; every other
-		// category is its groups. A disabled category switches all of them off,
-		// and wins over a detector inside it.
-		if cat == pack.CategoryHate || cat == pack.CategoryProfanity {
-			if c.Enabled != nil {
-				cfg.Categories[cat] = *c.Enabled
-			}
-		}
-		for _, g := range pack.Groups() {
-			if groupCategory(g) != cat {
-				continue
-			}
-			if off {
-				cfg.Detectors[g] = false
-			} else if v, ok := c.Detectors[groupShort(g)]; ok {
-				cfg.Detectors[g] = v
-			}
-		}
-		// A profanity group follows its category, not a detector entry.
-		if cat == pack.CategoryProfanity {
-			delete(cfg.Detectors, pack.GroupProfanityMild)
-			delete(cfg.Detectors, pack.GroupProfanityStrong)
-		}
+		applyProtectionCategory(&cfg, cat, c)
 	}
 	hold := map[string]bool{}
 	for k, v := range p.HoldDetectors {
@@ -215,6 +192,36 @@ func packConfigFromSettings(p db.AutomodProtection) (pack.Config, map[string]boo
 		}
 	}
 	return cfg, hold
+}
+
+// applyProtectionCategory writes one protection category into the pack config:
+// the term categories are switched as categories, every other category through
+// its groups.
+func applyProtectionCategory(cfg *pack.Config, cat string, c db.ProtectionCategory) {
+	off := c.Enabled != nil && !*c.Enabled
+	// The two term categories are switched as categories; every other
+	// category is its groups. A disabled category switches all of them off,
+	// and wins over a detector inside it.
+	if cat == pack.CategoryHate || cat == pack.CategoryProfanity {
+		if c.Enabled != nil {
+			cfg.Categories[cat] = *c.Enabled
+		}
+	}
+	for _, g := range pack.Groups() {
+		if groupCategory(g) != cat {
+			continue
+		}
+		if off {
+			cfg.Detectors[g] = false
+		} else if v, ok := c.Detectors[groupShort(g)]; ok {
+			cfg.Detectors[g] = v
+		}
+	}
+	// A profanity group follows its category, not a detector entry.
+	if cat == pack.CategoryProfanity {
+		delete(cfg.Detectors, pack.GroupProfanityMild)
+		delete(cfg.Detectors, pack.GroupProfanityStrong)
+	}
 }
 
 // ladderFromSettings is the strike ladder for a stored block.
