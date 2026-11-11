@@ -643,6 +643,24 @@ function renditionSpec(r: Rendition, t: Translator): string {
  *  stream key onto the publish URL. */
 const kindCarriesStreamKey = (k: DestKind) => k === "rtmp";
 
+// Only X sends the chat access mode and language; any other platform
+// clears them (null), as the server would, so a stale block from a
+// platform switch is never saved.
+function complianceForSave(platform: Platform, compliance: Compliance) {
+  return platform === "x" ? compliance : { ...compliance, x: null };
+}
+
+// Only X sends a go-live title; every other platform clears it, as the server would.
+function goLiveTitleForSave(platform: Platform, goLiveTitle: string) {
+  return platform === "x" || platform === "youtube" ? goLiveTitle : "";
+}
+
+// Only X reads the announcement setting; any other platform clears it,
+// as the server would.
+function xGoLiveTweetForSave(platform: Platform, xGoLiveTweet: XGoLiveTweet) {
+  return platform === "x" ? xGoLiveTweet : "";
+}
+
 /**
  * keyAfterKindChange is what the stream key becomes when the transport changes.
  *
@@ -1233,10 +1251,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // drop the flag here, or the operator gets a save error about a control
         // that is no longer on screen to turn off.
         audio: { ...audio, copy: copyOn },
-        // Only X sends the chat access mode and language; any other platform
-        // clears them (null), as the server would, so a stale block from a
-        // platform switch is never saved.
-        compliance: platform === "x" ? compliance : { ...compliance, x: null },
+        compliance: complianceForSave(platform, compliance),
         facebook,
         backupIngestWanted,
         // The bare boolean, for the reason spelled out at the backup toggle
@@ -1248,11 +1263,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // row, so a missing key would keep the old route. Changing it on a
         // delivering destination is refused by the server with a 409.
         captionMode: captionModeToSend(kind, platform, captionMode),
-        // Only X sends a go-live title; every other platform clears it, as the server would.
-        goLiveTitle: platform === "x" || platform === "youtube" ? goLiveTitle : "",
-        // Only X reads the announcement setting; any other platform clears it,
-        // as the server would.
-        xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
+        goLiveTitle: goLiveTitleForSave(platform, goLiveTitle),
+        xGoLiveTweet: xGoLiveTweetForSave(platform, xGoLiveTweet),
         // The preset the operator picked in this dialog, so platforms that save as
         // "custom" can still be found for their own encoder guidance. Omitted
         // when none was picked (never a guess): the server decodes over the
@@ -1324,27 +1336,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Wider than the old max-w-md: the sections below (platform grid,
-          audio, video) need the room, and a narrow column is what made the
-          form read as one long scroll. The lead sentence says what the form is
-          for before any term of art appears. Terms (routing profile,
-          rendition) are explained where they are used, not here. */}
-      {/* A full-screen sheet below sm (A6): four steps of fields in a centred
-          box on a phone left a strip of page around a form too narrow to read. */}
-      <DialogContent
-        {...dismissGuard.contentProps}
-        className="max-h-[90vh] max-w-2xl overflow-y-auto max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
-      >
-        <DialogHeader>
-          <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
-          <DialogDescription>{t("addDest.description")}</DialogDescription>
-        </DialogHeader>
+  // Picks a preset from the dialog's search list.
+  const presetPick = (p: DestPreset) => () => applyPreset(p);
 
-        <DestinationSteps step={step} onStep={setStep} />
+  // Drops one Facebook cross-post row by its index.
+  const removeCrosspostAt = (i: number) => () => {
+    const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
+    setFacebook({ ...facebook, crosspost: next });
+  };
 
-        <div className="flex flex-col gap-3">
+  const renderStepOne = () => (
           <StepPanel n={1} step={step}>
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-name">{t("dest.name")}</Label>
@@ -1438,7 +1439,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                           <button
                             key={p.id}
                             type="button"
-                            onClick={() => applyPreset(p)}
+                            onClick={presetPick(p)}
                             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
                           >
                             <span
@@ -1551,7 +1552,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           )}
 
           </StepPanel>
+  );
 
+  const renderStepTwo = () => (
           <StepPanel n={2} step={step}>
           <div className="flex flex-col gap-1">
             <Label>{t("dest.transport")}</Label>
@@ -1771,11 +1774,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           )}
 
           </StepPanel>
+  );
 
-          {/* Video and audio sit together on purpose: what a platform receives
-              is one answer with two halves, and the pairing is the feature.
-              Since A6 they are two steps of the same dialog, Audio before
-              Video and advanced, and every value still saves together. */}
+  const renderStepFour = () => (
           <StepPanel n={4} step={step}>
           {/* Two cards, not a <Select>.
               A dropdown presents copying and encoding as the same kind of
@@ -2129,7 +2130,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
             )}
           </fieldset>
           </StepPanel>
+  );
 
+  const renderStepThree = () => (
           <StepPanel n={3} step={step}>
           {/* Which ingest tracks reach this destination is the routing profile,
               set on the Routing page; this step is the audio encode. */}
@@ -2247,7 +2250,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           </div>
 
           </StepPanel>
+  );
 
+  const renderStepFourRoutes = () => (
           <StepPanel n={4} step={step}>
           {platform === "youtube" && editing && destination && (
             <YouTubeVerticalPanel destinationId={destination.id} />
@@ -2626,10 +2631,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                       variant="ghost"
                       size="icon"
                       aria-label={t("dest.fbCrosspostRemove")}
-                      onClick={() => {
-                        const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
-                        setFacebook({ ...facebook, crosspost: next });
-                      }}
+                      onClick={removeCrosspostAt(i)}
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
@@ -2849,7 +2851,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           </details>
 
           </StepPanel>
+  );
 
+  const renderStepTwoSetup = () => (
           <StepPanel n={2} step={step}>
           {/* The platform's long setup prose sits behind a disclosure, so the
               form shows the fields first. Facebook's notes alone run to about a
@@ -2876,6 +2880,44 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
             </details>
           )}
           </StepPanel>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Wider than the old max-w-md: the sections below (platform grid,
+          audio, video) need the room, and a narrow column is what made the
+          form read as one long scroll. The lead sentence says what the form is
+          for before any term of art appears. Terms (routing profile,
+          rendition) are explained where they are used, not here. */}
+      {/* A full-screen sheet below sm (A6): four steps of fields in a centred
+          box on a phone left a strip of page around a form too narrow to read. */}
+      <DialogContent
+        {...dismissGuard.contentProps}
+        className="max-h-[90vh] max-w-2xl overflow-y-auto max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
+      >
+        <DialogHeader>
+          <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
+          <DialogDescription>{t("addDest.description")}</DialogDescription>
+        </DialogHeader>
+
+        <DestinationSteps step={step} onStep={setStep} />
+
+        <div className="flex flex-col gap-3">
+          {renderStepOne()}
+
+          {renderStepTwo()}
+
+          {/* Video and audio sit together on purpose: what a platform receives
+              is one answer with two halves, and the pairing is the feature.
+              Since A6 they are two steps of the same dialog, Audio before
+              Video and advanced, and every value still saves together. */}
+          {renderStepFour()}
+
+          {renderStepThree()}
+
+          {renderStepFourRoutes()}
+
+          {renderStepTwoSetup()}
         </div>
 
         {stepError && (
