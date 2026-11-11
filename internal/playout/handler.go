@@ -57,76 +57,81 @@ func (m *Manager) Handler(prefix string) http.Handler {
 		prefix += "/"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s := m.Settings()
-		if s.AllowCrossOrigin {
-			setCORS(w)
-		}
-		if r.Method == http.MethodOptions {
-			// Answered unconditionally HERE, and that is no longer the whole
-			// story: this handler is not reached at all unless the caller has
-			// already passed the API's configuration gate.
-			//
-			// This comment used to say "answered even when playout is off",
-			// justified by a CORS error reading as a bug rather than as a
-			// disabled feature. That justification was for a browser embedding a
-			// stream the operator DID publish -- and it was being applied to a
-			// server with playout switched off, where there is nothing to embed
-			// and the 204 (plus, with AllowCrossOrigin, the CORS headers set
-			// above this branch, above the Enabled check) disclosed the server's
-			// configuration to anyone who asked. See
-			// api.(*Server).playoutPreflightAllowed, which now answers 404 for
-			// that case, matching what GET already did.
-			//
-			// The unconditional answer is kept here because by this point the
-			// only remaining reasons to refuse would be credential ones, and a
-			// preflight carries no credentials. A caller reaching this line has
-			// already been established as looking at an ENABLED and PUBLISHED
-			// stream, or as the operator previewing a private one.
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD, OPTIONS")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !s.Enabled {
-			notFound(w, r)
-			return
-		}
-
-		rel := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, prefix)), "/")
-		ext := strings.ToLower(path.Ext(rel))
-		ctype, ok := servedTypes[ext]
-		if !ok {
-			notFound(w, r)
-			return
-		}
-		// ONE confined open, used for everything after it. The file is opened
-		// through an os.Root on the playout directory, which refuses a path
-		// that leaves it -- "..", an absolute path, a symlink pointing out --
-		// and the same open handle is what is stat'ed, hashed for the ETag and
-		// served. Any failure, missing or refused alike, is the same 404 with
-		// no-store, so the answer says nothing about what exists outside.
-		f, fi, ok := m.openServed(rel)
-		if !ok {
-			notFound(w, r)
-			return
-		}
-		defer f.Close()
-
-		w.Header().Set("Content-Type", ctype)
-		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
-		if !m.setETag(w, f, ext, fi) {
-			notFound(w, r)
-			return
-		}
-
-		m.observe(r, rel, ext)
-		// ServeContent, not FileServer: it serves the handle already opened
-		// and confined above, and still answers Range and If-None-Match.
-		http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+		m.serveHandler(w, r, prefix)
 	})
+}
+
+// serveHandler answers one playout request for the handler mounted at prefix.
+func (m *Manager) serveHandler(w http.ResponseWriter, r *http.Request, prefix string) {
+	s := m.Settings()
+	if s.AllowCrossOrigin {
+		setCORS(w)
+	}
+	if r.Method == http.MethodOptions {
+		// Answered unconditionally HERE, and that is no longer the whole
+		// story: this handler is not reached at all unless the caller has
+		// already passed the API's configuration gate.
+		//
+		// This comment used to say "answered even when playout is off",
+		// justified by a CORS error reading as a bug rather than as a
+		// disabled feature. That justification was for a browser embedding a
+		// stream the operator DID publish -- and it was being applied to a
+		// server with playout switched off, where there is nothing to embed
+		// and the 204 (plus, with AllowCrossOrigin, the CORS headers set
+		// above this branch, above the Enabled check) disclosed the server's
+		// configuration to anyone who asked. See
+		// api.(*Server).playoutPreflightAllowed, which now answers 404 for
+		// that case, matching what GET already did.
+		//
+		// The unconditional answer is kept here because by this point the
+		// only remaining reasons to refuse would be credential ones, and a
+		// preflight carries no credentials. A caller reaching this line has
+		// already been established as looking at an ENABLED and PUBLISHED
+		// stream, or as the operator previewing a private one.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.Enabled {
+		notFound(w, r)
+		return
+	}
+
+	rel := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, prefix)), "/")
+	ext := strings.ToLower(path.Ext(rel))
+	ctype, ok := servedTypes[ext]
+	if !ok {
+		notFound(w, r)
+		return
+	}
+	// ONE confined open, used for everything after it. The file is opened
+	// through an os.Root on the playout directory, which refuses a path
+	// that leaves it -- "..", an absolute path, a symlink pointing out --
+	// and the same open handle is what is stat'ed, hashed for the ETag and
+	// served. Any failure, missing or refused alike, is the same 404 with
+	// no-store, so the answer says nothing about what exists outside.
+	f, fi, ok := m.openServed(rel)
+	if !ok {
+		notFound(w, r)
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
+	if !m.setETag(w, f, ext, fi) {
+		notFound(w, r)
+		return
+	}
+
+	m.observe(r, rel, ext)
+	// ServeContent, not FileServer: it serves the handle already opened
+	// and confined above, and still answers Range and If-None-Match.
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
 }
 
 // openServed opens rel under the playout directory through an os.Root, so it

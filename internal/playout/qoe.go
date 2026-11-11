@@ -150,6 +150,12 @@ func ValidateBeaconSchema(b Beacon) error {
 	default:
 		return invalid("kind must be start, heartbeat or end")
 	}
+	return validateBeaconBounds(b)
+}
+
+// validateBeaconBounds is the numeric, length and enum-membership half of the
+// schema check, run after the version, session id, sequence and kind.
+func validateBeaconBounds(b Beacon) error {
 	// startupMs out of range is NOT a refusal: the page repeats it on every
 	// beacon, so refusing would lose the whole session over one bad number.
 	// Record ignores it instead; see validStartup.
