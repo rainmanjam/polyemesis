@@ -83,27 +83,6 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
     }
   }
 
-  // Posts (or deletes) until the server says it is done, or the remaining
-  // count stops falling (a pass whose adds all came back "present" still makes
-  // progress, so adds and removals are not the measure), adding the passes'
-  // counts together. A stop short of done is reported by the caller.
-  async function loop(call: () => Promise<TwitchPackSync>): Promise<TwitchPackSync> {
-    const sum: TwitchPackSync = { added: 0, present: 0, removed: 0, skipped: 0, remaining: 0, done: false };
-    let prev = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < MAX_PASSES; i++) {
-      const r = await call();
-      sum.added += r.added;
-      sum.removed += r.removed;
-      sum.present = r.present;
-      sum.skipped = r.skipped;
-      sum.remaining = r.remaining;
-      sum.done = r.done;
-      if (r.done || r.remaining >= prev) break;
-      prev = r.remaining;
-    }
-    return sum;
-  }
-
   if (!account && account !== "") return null;
   const acct = account || undefined;
 
@@ -191,4 +170,25 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
       )}
     </section>
   );
+}
+
+// Posts (or deletes) until the server says it is done, or the remaining
+// count stops falling (a pass whose adds all came back "present" still makes
+// progress, so adds and removals are not the measure), adding the passes'
+// counts together. A stop short of done is reported by the caller.
+async function loop(call: () => Promise<TwitchPackSync>): Promise<TwitchPackSync> {
+  const sum: TwitchPackSync = { added: 0, present: 0, removed: 0, skipped: 0, remaining: 0, done: false };
+  let prev = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < MAX_PASSES; i++) {
+    const r = await call();
+    sum.added += r.added;
+    sum.removed += r.removed;
+    sum.present = r.present;
+    sum.skipped = r.skipped;
+    sum.remaining = r.remaining;
+    sum.done = r.done;
+    if (r.done || r.remaining >= prev) break;
+    prev = r.remaining;
+  }
+  return sum;
 }
