@@ -136,46 +136,64 @@ func (s *Server) cancelDestinationEvents(ctx context.Context, ds []*db.Destinati
 	var warnings []string
 	for _, d := range ds {
 		covered := map[string]bool{}
-		for _, o := range open {
-			if o.DestinationID != d.ID || o.PlatformEventID == "" {
-				continue
-			}
-			if o.State != scheduler.OccurrenceUpcoming && o.State != scheduler.OccurrenceStranded {
-				continue
-			}
-			// Covered before the time check, so a pre-announce marker for the
-			// same event is never taken up by the loop below either.
-			covered[o.PlatformEventID] = true
-			// A show that already aired is left alone, as its marker is below.
-			// Its row stays `upcoming` until the sweep ages it out, 30 days
-			// after the show (occurrenceRetention), and cancelOccurrence would
-			// only refuse it: every recent show would be reported "left on the
-			// platform", and turn a clean programme delete from 204 into 200.
-			if !o.At.After(now) {
-				continue
-			}
-			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
-				s.log.Warn("destination delete: a scheduled event was left on the platform",
-					"destination", d.Name, "event", o.PlatformEventID, "err", redactErr(err))
-				warnings = append(warnings, eventLeftWarning(d, o.PlatformEventID, redactErr(err)))
-				continue
-			}
-			s.log.Info("destination delete: cancelled a scheduled event", "destination", d.Name,
-				"event", o.PlatformEventID)
+		warnings = append(warnings, s.cancelDestinationOccurrences(ctx, d, open, covered, now)...)
+		warnings = append(warnings, s.cancelDestinationMarkers(ctx, d, covered, now)...)
+	}
+	return warnings
+}
+
+// cancelDestinationOccurrences cancels the destination's upcoming scheduled
+// events, and returns a warning for each one the platform would not let go.
+func (s *Server) cancelDestinationOccurrences(ctx context.Context, d *db.Destination, open []scheduler.Occurrence,
+	covered map[string]bool, now time.Time) []string {
+	var warnings []string
+	for _, o := range open {
+		if o.DestinationID != d.ID || o.PlatformEventID == "" {
+			continue
 		}
-		for _, a := range d.Facebook.Broadcasts() {
-			if covered[a.BroadcastID] || !a.Occurrence.After(now) {
-				continue
-			}
-			if err := s.cancelMarker(ctx, d, a.BroadcastID); err != nil {
-				s.log.Warn("destination delete: a pre-announced event was left on the platform",
-					"destination", d.Name, "event", a.BroadcastID, "err", redactErr(err))
-				warnings = append(warnings, eventLeftWarning(d, a.BroadcastID, redactErr(err)))
-				continue
-			}
-			s.log.Info("destination delete: cancelled a pre-announced event", "destination", d.Name,
-				"event", a.BroadcastID)
+		if o.State != scheduler.OccurrenceUpcoming && o.State != scheduler.OccurrenceStranded {
+			continue
 		}
+		// Covered before the time check, so a pre-announce marker for the
+		// same event is never taken up by the loop below either.
+		covered[o.PlatformEventID] = true
+		// A show that already aired is left alone, as its marker is below.
+		// Its row stays `upcoming` until the sweep ages it out, 30 days
+		// after the show (occurrenceRetention), and cancelOccurrence would
+		// only refuse it: every recent show would be reported "left on the
+		// platform", and turn a clean programme delete from 204 into 200.
+		if !o.At.After(now) {
+			continue
+		}
+		if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
+			s.log.Warn("destination delete: a scheduled event was left on the platform",
+				"destination", d.Name, "event", o.PlatformEventID, "err", redactErr(err))
+			warnings = append(warnings, eventLeftWarning(d, o.PlatformEventID, redactErr(err)))
+			continue
+		}
+		s.log.Info("destination delete: cancelled a scheduled event", "destination", d.Name,
+			"event", o.PlatformEventID)
+	}
+	return warnings
+}
+
+// cancelDestinationMarkers cancels the destination's pre-announced events that no
+// occurrence row covers, and returns a warning for each one left on the platform.
+func (s *Server) cancelDestinationMarkers(ctx context.Context, d *db.Destination, covered map[string]bool,
+	now time.Time) []string {
+	var warnings []string
+	for _, a := range d.Facebook.Broadcasts() {
+		if covered[a.BroadcastID] || !a.Occurrence.After(now) {
+			continue
+		}
+		if err := s.cancelMarker(ctx, d, a.BroadcastID); err != nil {
+			s.log.Warn("destination delete: a pre-announced event was left on the platform",
+				"destination", d.Name, "event", a.BroadcastID, "err", redactErr(err))
+			warnings = append(warnings, eventLeftWarning(d, a.BroadcastID, redactErr(err)))
+			continue
+		}
+		s.log.Info("destination delete: cancelled a pre-announced event", "destination", d.Name,
+			"event", a.BroadcastID)
 	}
 	return warnings
 }
