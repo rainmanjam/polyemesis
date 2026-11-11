@@ -5955,7 +5955,9 @@ func (a scheduleActuator) PrepareStarts(ids []int64) (release func()) {
 	if prep := a.m.startPrep.Load(); prep != nil {
 		return (*prep)(ids)
 	}
-	return func() {}
+	return func() {
+		// No prep hook is installed, so there is nothing to release.
+	}
 }
 
 func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
