@@ -6,6 +6,23 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/activity"
 )
 
+// Twitch scopes the catalogue names. Each is one scope string, spelled as the
+// Twitch reference spells it; a token must hold one of them for the type.
+const (
+	scopeReadFollowers     = "moderator:read:followers"
+	scopeReadSubscriptions = "channel:read:subscriptions"
+	scopeBitsRead          = "bits:read"
+	scopeReadRedemptions   = "channel:read:redemptions"
+	scopeManageRedemptions = "channel:manage:redemptions"
+	scopeReadHypeTrain     = "channel:read:hype_train"
+	scopeReadPolls         = "channel:read:polls"
+	scopeManagePolls       = "channel:manage:polls"
+	scopeReadPredictions   = "channel:read:predictions"
+	scopeManagePredictions = "channel:manage:predictions"
+	scopeReadShoutouts     = "moderator:read:shoutouts"
+	scopeManageShoutouts   = "moderator:manage:shoutouts"
+)
+
 // Spec is one EventSub subscription type polyemesis asks for, with what Twitch
 // requires of the account for it. The table is Catalogue; it was checked
 // against the subscription-types reference.
@@ -64,17 +81,17 @@ func broadcasterAndModerator(id string) map[string]string {
 func Catalogue() []Spec {
 	return []Spec{
 		{Kind: activity.KindFollow, Type: "channel.follow", Version: "2",
-			Scopes: []string{"moderator:read:followers"}, cond: broadcasterAndModerator},
+			Scopes: []string{scopeReadFollowers}, cond: broadcasterAndModerator},
 
 		{Kind: activity.KindSubscribe, Type: "channel.subscribe", Version: "1",
-			Scopes: []string{"channel:read:subscriptions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadSubscriptions}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindResub, Type: "channel.subscription.message", Version: "1",
-			Scopes: []string{"channel:read:subscriptions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadSubscriptions}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindGift, Type: "channel.subscription.gift", Version: "1",
-			Scopes: []string{"channel:read:subscriptions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadSubscriptions}, NeedsTier: true, cond: broadcaster},
 
 		{Kind: activity.KindTip, Type: "channel.cheer", Version: "1",
-			Scopes: []string{"bits:read"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeBitsRead}, NeedsTier: true, cond: broadcaster},
 
 		{Kind: activity.KindRaid, Type: "channel.raid", Version: "1", Direction: "in",
 			cond: func(id string) map[string]string { return map[string]string{"to_broadcaster_user_id": id} }},
@@ -82,41 +99,41 @@ func Catalogue() []Spec {
 			cond: func(id string) map[string]string { return map[string]string{"from_broadcaster_user_id": id} }},
 
 		{Kind: activity.KindRedemption, Type: "channel.channel_points_custom_reward_redemption.add", Version: "1",
-			Scopes: []string{"channel:read:redemptions", "channel:manage:redemptions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadRedemptions, scopeManageRedemptions}, NeedsTier: true, cond: broadcaster},
 
 		// Whether a hype train is Affiliate/Partner-only is not in the API
 		// reference, so NeedsTier is NOT set: the create answer decides.
 		{Kind: activity.KindHypeTrain, Type: "channel.hype_train.begin", Version: "2",
-			Scopes: []string{"channel:read:hype_train"}, cond: broadcaster},
+			Scopes: []string{scopeReadHypeTrain}, cond: broadcaster},
 		{Kind: activity.KindHypeTrain, Type: "channel.hype_train.progress", Version: "2",
-			Scopes: []string{"channel:read:hype_train"}, cond: broadcaster},
+			Scopes: []string{scopeReadHypeTrain}, cond: broadcaster},
 		{Kind: activity.KindHypeTrain, Type: "channel.hype_train.end", Version: "2",
-			Scopes: []string{"channel:read:hype_train"}, cond: broadcaster},
+			Scopes: []string{scopeReadHypeTrain}, cond: broadcaster},
 
 		{Kind: activity.KindPoll, Type: "channel.poll.begin", Version: "1",
-			Scopes: []string{"channel:read:polls", "channel:manage:polls"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPolls, scopeManagePolls}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindPoll, Type: "channel.poll.progress", Version: "1",
-			Scopes: []string{"channel:read:polls", "channel:manage:polls"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPolls, scopeManagePolls}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindPoll, Type: "channel.poll.end", Version: "1",
-			Scopes: []string{"channel:read:polls", "channel:manage:polls"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPolls, scopeManagePolls}, NeedsTier: true, cond: broadcaster},
 
 		{Kind: activity.KindPrediction, Type: "channel.prediction.begin", Version: "1",
-			Scopes: []string{"channel:read:predictions", "channel:manage:predictions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPredictions, scopeManagePredictions}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindPrediction, Type: "channel.prediction.progress", Version: "1",
-			Scopes: []string{"channel:read:predictions", "channel:manage:predictions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPredictions, scopeManagePredictions}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindPrediction, Type: "channel.prediction.lock", Version: "1",
-			Scopes: []string{"channel:read:predictions", "channel:manage:predictions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPredictions, scopeManagePredictions}, NeedsTier: true, cond: broadcaster},
 		{Kind: activity.KindPrediction, Type: "channel.prediction.end", Version: "1",
-			Scopes: []string{"channel:read:predictions", "channel:manage:predictions"}, NeedsTier: true, cond: broadcaster},
+			Scopes: []string{scopeReadPredictions, scopeManagePredictions}, NeedsTier: true, cond: broadcaster},
 
 		{Kind: activity.KindStream, Type: "stream.online", Version: "1", cond: broadcaster},
 		{Kind: activity.KindStream, Type: "stream.offline", Version: "1", cond: broadcaster},
 		{Kind: activity.KindStream, Type: "channel.update", Version: "2", cond: broadcaster},
 
 		{Kind: activity.KindShoutout, Type: "channel.shoutout.create", Version: "1", Direction: "out",
-			Scopes: []string{"moderator:read:shoutouts", "moderator:manage:shoutouts"}, cond: broadcasterAndModerator},
+			Scopes: []string{scopeReadShoutouts, scopeManageShoutouts}, cond: broadcasterAndModerator},
 		{Kind: activity.KindShoutout, Type: "channel.shoutout.receive", Version: "1", Direction: "in",
-			Scopes: []string{"moderator:read:shoutouts", "moderator:manage:shoutouts"}, cond: broadcasterAndModerator},
+			Scopes: []string{scopeReadShoutouts, scopeManageShoutouts}, cond: broadcasterAndModerator},
 	}
 }
 
