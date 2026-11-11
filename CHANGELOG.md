@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.18.0] — 2026-11-11
+
 ### Added
 
 - **An optional alert when stop on ingest loss fires: `ingest.autostopped`.** Stopping ends YouTube broadcasts for good, so
@@ -7767,7 +7771,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/rainmanjam/polyemesis/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/rainmanjam/polyemesis/compare/v0.14.0...v0.15.0

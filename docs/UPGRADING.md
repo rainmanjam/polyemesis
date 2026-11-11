@@ -252,6 +252,19 @@ switch it back on. The older binary's API rejects a request that sends the key
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.18.0
+
+**Nothing to do.** No default changes: the new `ingest.autostopped` alert is
+raised only on a programme where stop on ingest loss is on, and a rule that
+names its `events` hears it only if you add it to the list. The binary and the
+Docker images are built with Go 1.27.4, which fixes GO-2026-6859.
+
+**No schema change, and a 0.17.0 binary opens a 0.18.0 database.** The schema
+version stays 1. A rule that subscribes to `ingest.autostopped` still loads and
+alerts under 0.17.0, but 0.17.0 refuses to save that rule until the event is
+taken out of its list, because it does not raise that event. For a clean
+rollback, restore the backup you took before upgrading.
+
 ### Upgrading to 0.17.0
 
 **Chat send now goes only to platforms that are live.** `POST /api/v1/chat/send`
