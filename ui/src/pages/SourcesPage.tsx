@@ -87,6 +87,21 @@ const PreviewPlayer = lazy(() =>
    =========================================================================== */
 
 
+/** The local result of an auto-stop save: the new setting and the info the
+ *  server returned, written into that one source. Others pass through. */
+function withAutoStop(
+  all: SourceView[],
+  sourceId: SourceView["id"],
+  next: AutoStopSettings,
+  info: AutoStopInfo | undefined,
+): SourceView[] {
+  return all.map((x) =>
+    x.id === sourceId
+      ? { ...x, ingest: { ...x.ingest, autoStop: next }, autoStopInfo: info ?? x.autoStopInfo }
+      : x,
+  );
+}
+
 export function SourcesPage() {
   const t = useT();
   const { refreshSources } = useLiveData();
@@ -278,13 +293,7 @@ export function SourcesPage() {
             onAutoStopSaved={(next, info) =>
               // Local state, not load(): a re-read would hand every card a new
               // `source` and throw away what is typed in it but not yet applied.
-              setSources((all) =>
-                all.map((x) =>
-                  x.id === s.id
-                    ? { ...x, ingest: { ...x.ingest, autoStop: next }, autoStopInfo: info ?? x.autoStopInfo }
-                    : x,
-                ),
-              )
+              setSources((all) => withAutoStop(all, s.id, next, info))
             }
             previewOn={previewOn}
           />
