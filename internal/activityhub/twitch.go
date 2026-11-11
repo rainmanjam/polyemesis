@@ -357,10 +357,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 		return err
 	}
 
-	wsURL := t.cfg.WSURL
-	if wsURL == "" {
-		wsURL = eventsub.DefaultWSURL
-	}
+	wsURL := t.wsEndpoint()
 	conn, err := eventsub.Dial(ctx, fmt.Sprintf("%s?keepalive_timeout_seconds=%d", wsURL, eventsub.KeepaliveSeconds), t.cfg.Dialer)
 	if err != nil {
 		return err
@@ -388,11 +385,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 		return err
 	}
 	if !ok {
-		// Nothing could be turned on, so Twitch would close the socket as
-		// unused (4003) after its welcome window. Health is cleared when Run
-		// returns, so the reason travels in the error, which the supervisor
-		// shows as the source's detail.
-		return fmt.Errorf("none of the alert types could be turned on (%s)", strings.TrimSuffix(t.summary(tier), "."))
+		return t.noAlertsError(tier)
 	}
 	t.setHealth(chat.StateLive, t.summary(tier))
 
@@ -471,15 +464,8 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			return errors.New("the Twitch reconnect did not finish in time")
 
 		case <-tierTick.C:
-			now, terr := t.api.BroadcasterType(ctx, t.cfg.AccountRef)
-			if terr != nil {
-				if deadGrant(terr) {
-					return t.parkUntilReconnected(ctx)
-				}
-				continue // read again at the next tick; the socket is fine
-			}
-			if now != tier {
-				return errors.New("the channel's Twitch account type changed; subscribing again")
+			if done, err := t.recheckTier(ctx, tier); done {
+				return err
 			}
 
 		case f, open := <-pendingC:
@@ -563,6 +549,40 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 			}
 		}
 	}
+}
+
+// wsEndpoint is the EventSub socket address: the configured one, or Twitch's.
+func (t *Twitch) wsEndpoint() string {
+	if t.cfg.WSURL == "" {
+		return eventsub.DefaultWSURL
+	}
+	return t.cfg.WSURL
+}
+
+// noAlertsError is run's error when none of the alert types could be turned on.
+func (t *Twitch) noAlertsError(tier string) error {
+	// Nothing could be turned on, so Twitch would close the socket as
+	// unused (4003) after its welcome window. Health is cleared when Run
+	// returns, so the reason travels in the error, which the supervisor
+	// shows as the source's detail.
+	return fmt.Errorf("none of the alert types could be turned on (%s)", strings.TrimSuffix(t.summary(tier), "."))
+}
+
+// recheckTier reads the account type again on the tier ticker. done means run
+// must return err: the grant is dead (park until it is reconnected), or the
+// account type has moved and the subscriptions must be made again.
+func (t *Twitch) recheckTier(ctx context.Context, tier string) (done bool, err error) {
+	now, terr := t.api.BroadcasterType(ctx, t.cfg.AccountRef)
+	if terr != nil {
+		if deadGrant(terr) {
+			return true, t.parkUntilReconnected(ctx)
+		}
+		return false, nil // read again at the next tick; the socket is fine
+	}
+	if now != tier {
+		return true, errors.New("the channel's Twitch account type changed; subscribing again")
+	}
+	return false, nil
 }
 
 // drainWindow is the configured drain window, or twitchDrainWindow when unset.
@@ -755,64 +775,12 @@ func (t *Twitch) createOne(ctx context.Context, sessionID string, s eventsub.Spe
 	for attempt := 0; attempt < 3; attempt++ {
 		res, err := t.api.Subscribe(ctx, sessionID, s, t.cfg.AccountRef)
 		if err == nil {
-			if res.Cost > 0 {
-				t.log.Info("twitch eventsub: a subscription has a cost",
-					"type", s.Type, "cost", res.Cost, "total", res.TotalCost, "max", res.MaxTotalCost)
-			}
+			t.noteSubCost(s, res)
 			o.state = activity.KindOn
 			return o
 		}
-		// A dead grant surfaces from Token/Refresh as a plain error, not an
-		// APIError, so it is judged before the status switch.
-		if deadGrant(err) {
-			o.fatal = err
-			return o
-		}
-		var ae *eventsub.APIError
-		if !errors.As(err, &ae) {
-			// A transport failure: try again briefly, then give up on this one.
-			if !sleep(ctx, 500*time.Millisecond) {
-				return o
-			}
-			continue
-		}
-		switch {
-		case ae.Status == http.StatusForbidden:
-			// The scope is held (checked above), so this is the tier or the
-			// account: not a failure.
-			o.state, o.why = activity.KindUnavailable, detailRefused
-			return o
-		case ae.Status == http.StatusGone:
-			o.state, o.why = activity.KindUnavailable, detailGone
-			return o
-		case ae.Status == http.StatusConflict:
-			// Another session of this account still holds the type; it frees
-			// itself when that socket closes. Retry shortly, then say so.
-			o.state, o.why = activity.KindUnknown, detailAnotherSes
-			if !sleep(ctx, time.Second) {
-				return o
-			}
-			continue
-		case ae.Status == http.StatusTooManyRequests:
-			// Either Helix's rate limit (Ratelimit-Reset says when) or the
-			// subscription cost/count limit. A reset within the window is waited
-			// out once; otherwise the kind is unavailable, not the source failed.
-			if wait := time.Until(ae.RetryAt); attempt == 0 && wait > 0 && wait <= 5*time.Second {
-				if !sleep(ctx, wait) {
-					return o
-				}
-				continue
-			}
-			o.state, o.why = activity.KindUnavailable, detailLimit
-			return o
-		case ae.Status >= 500:
-			if !sleep(ctx, 500*time.Millisecond) {
-				return o
-			}
-			continue
-		default: // 400 and the rest: Twitch will not take it as asked
-			t.log.Warn("twitch eventsub: a subscription was refused", "type", s.Type, "status", ae.Status)
-			o.state, o.why = activity.KindUnavailable, detailRefused
+		wait, retry := t.judgeSubscribeError(s, err, attempt, &o)
+		if !retry || !sleep(ctx, wait) {
 			return o
 		}
 	}
@@ -820,6 +788,68 @@ func (t *Twitch) createOne(ctx context.Context, sessionID string, s eventsub.Spe
 		o.state, o.why = activity.KindUnknown, detailTransient
 	}
 	return o
+}
+
+// noteSubCost logs a subscription Twitch charges for, so an operator can see
+// what the account's cost limit is being spent on.
+func (t *Twitch) noteSubCost(s eventsub.Spec, res eventsub.SubResult) {
+	if res.Cost > 0 {
+		t.log.Info("twitch eventsub: a subscription has a cost",
+			"type", s.Type, "cost", res.Cost, "total", res.TotalCost, "max", res.MaxTotalCost)
+	}
+}
+
+// judgeSubscribeError records what a failed subscribe attempt means in o. It
+// returns how long to wait before the next attempt and whether to make one; a
+// false retry means o is final (or fatal, when o.fatal is set).
+func (t *Twitch) judgeSubscribeError(s eventsub.Spec, err error, attempt int, o *subOutcome) (time.Duration, bool) {
+	// A dead grant surfaces from Token/Refresh as a plain error, not an
+	// APIError, so it is judged before the status switch.
+	if deadGrant(err) {
+		o.fatal = err
+		return 0, false
+	}
+	var ae *eventsub.APIError
+	if !errors.As(err, &ae) {
+		// A transport failure: try again briefly, then give up on this one.
+		return 500 * time.Millisecond, true
+	}
+	return t.judgeAPIStatus(s, ae, attempt, o)
+}
+
+// judgeAPIStatus is the status half of judgeSubscribeError: Twitch's answer to
+// a subscribe call that it refused, as a kind state and a retry decision.
+func (t *Twitch) judgeAPIStatus(s eventsub.Spec, ae *eventsub.APIError, attempt int, o *subOutcome) (time.Duration, bool) {
+	switch {
+	case ae.Status == http.StatusForbidden:
+		// The scope is held (checked above), so this is the tier or the
+		// account: not a failure.
+		o.state, o.why = activity.KindUnavailable, detailRefused
+		return 0, false
+	case ae.Status == http.StatusGone:
+		o.state, o.why = activity.KindUnavailable, detailGone
+		return 0, false
+	case ae.Status == http.StatusConflict:
+		// Another session of this account still holds the type; it frees
+		// itself when that socket closes. Retry shortly, then say so.
+		o.state, o.why = activity.KindUnknown, detailAnotherSes
+		return time.Second, true
+	case ae.Status == http.StatusTooManyRequests:
+		// Either Helix's rate limit (Ratelimit-Reset says when) or the
+		// subscription cost/count limit. A reset within the window is waited
+		// out once; otherwise the kind is unavailable, not the source failed.
+		if wait := time.Until(ae.RetryAt); attempt == 0 && wait > 0 && wait <= 5*time.Second {
+			return wait, true
+		}
+		o.state, o.why = activity.KindUnavailable, detailLimit
+		return 0, false
+	case ae.Status >= 500:
+		return 500 * time.Millisecond, true
+	default: // 400 and the rest: Twitch will not take it as asked
+		t.log.Warn("twitch eventsub: a subscription was refused", "type", s.Type, "status", ae.Status)
+		o.state, o.why = activity.KindUnavailable, detailRefused
+		return 0, false
+	}
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

@@ -875,6 +875,26 @@ func isLoopback(a net.Addr) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// rawConn is the net.Conn under a server connection, or nil when the transport
+// is not one. A subscriber's watchPeer reads from it and Stop closes it, and a
+// nil one is skipped by both.
+func rawConn(sc *gortmplib.ServerConn) net.Conn {
+	if c, isConn := sc.RW.(net.Conn); isConn {
+		return c
+	}
+	return nil
+}
+
+// writeMessages writes msgs in order and reports whether every one went out.
+func writeMessages(sc *gortmplib.ServerConn, msgs []message.Message) bool {
+	for _, msg := range msgs {
+		if err := sc.Write(msg); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // serveSubscriber attaches a consumer to a stream and writes to it until it
 // goes away.
 func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer string) {
@@ -899,9 +919,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	// help, because the write it needs to order was outside it. Everything
 	// mutable on a subscriber after this point lives behind s.mu or is owned
 	// by the single goroutine below.
-	if c, isConn := sc.RW.(net.Conn); isConn {
-		sub.conn = c
-	}
+	sub.conn = rawConn(sc)
 
 	s.mu.Lock()
 	st := s.streams[key]
@@ -969,10 +987,8 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 
 	// Catch the late joiner up before anything live: metadata and sequence
 	// headers first, in the order the publisher sent them.
-	for _, msg := range replay {
-		if err := sc.Write(msg); err != nil {
-			return
-		}
+	if !writeMessages(sc, replay) {
+		return
 	}
 	for {
 		select {

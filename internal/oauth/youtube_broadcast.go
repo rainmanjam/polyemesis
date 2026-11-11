@@ -318,6 +318,23 @@ func carryContentDetails(cd map[string]any, b *ytBroadcast, s BroadcastSettings)
 	}
 }
 
+// unappliedControls compares the operator's latency and captions choices with
+// what YouTube reports on the read-back broadcast. It names each one that did
+// not take, for the warning, and says which of the two it was.
+func unappliedControls(s BroadcastSettings, nb *ytBroadcast) (latencyBad, captionsBad bool, unapplied []string) {
+	if s.LatencyPreference != nil && nb.ContentDetails.LatencyPreference != *s.LatencyPreference {
+		latencyBad = true
+		unapplied = append(unapplied, fmt.Sprintf("latency (wanted %q, YouTube has %q)",
+			*s.LatencyPreference, nb.ContentDetails.LatencyPreference))
+	}
+	if s.ClosedCaptionsType != nil && nb.ContentDetails.ClosedCaptionsType != *s.ClosedCaptionsType {
+		captionsBad = true
+		unapplied = append(unapplied, fmt.Sprintf("closed captions (wanted %q, YouTube has %q)",
+			*s.ClosedCaptionsType, nb.ContentDetails.ClosedCaptionsType))
+	}
+	return latencyBad, captionsBad, unapplied
+}
+
 // verifyControlsReadBack reads the broadcast back to confirm latency and captions
 // changed, since YouTube's 2xx proves nothing about them. It reports which of the
 // two did not change and writes the warnings for them.
@@ -329,16 +346,7 @@ func (y *YouTube) verifyControlsReadBack(ctx context.Context, accessToken string
 		if rerr != nil || nb.ID != b.ID {
 			verified = false
 		} else {
-			if s.LatencyPreference != nil && nb.ContentDetails.LatencyPreference != *s.LatencyPreference {
-				latencyBad = true
-				unapplied = append(unapplied, fmt.Sprintf("latency (wanted %q, YouTube has %q)",
-					*s.LatencyPreference, nb.ContentDetails.LatencyPreference))
-			}
-			if s.ClosedCaptionsType != nil && nb.ContentDetails.ClosedCaptionsType != *s.ClosedCaptionsType {
-				captionsBad = true
-				unapplied = append(unapplied, fmt.Sprintf("closed captions (wanted %q, YouTube has %q)",
-					*s.ClosedCaptionsType, nb.ContentDetails.ClosedCaptionsType))
-			}
+			latencyBad, captionsBad, unapplied = unappliedControls(s, nb)
 		}
 	}
 	if !verified {
