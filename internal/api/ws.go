@@ -121,15 +121,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// looked up and deleted, and that is all -- so there is no downgrade to
 	// catch. If one is added, this is where it goes, and the set below is the
 	// structure it layers onto.
-	var tokenID int64
-	var sessionUser, sessionEpoch int64
-	if p, ok := principalFrom(r.Context()); ok {
-		if p.token != nil {
-			tokenID = p.token.ID
-		} else {
-			sessionUser, sessionEpoch = p.userID, p.epoch
-		}
-	}
+	tokenID, sessionUser, sessionEpoch := socketPrincipalRevocationKeys(r)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -201,50 +193,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ping.C:
-			// Revocation, on the tick that already exists (#159).
-			//
-			// BEFORE the ping write, not after: the point is to stop talking to
-			// this client, and pinging a socket that is about to be closed for
-			// policy reasons is one more frame than it should get.
-			//
-			// One read-locked map lookup, no database, no allocation, per socket
-			// per ping period. The exposure window is therefore ONE PING PERIOD
-			// -- 25 seconds -- where it used to be the lifetime of the
-			// connection. That is a bound rather than an elimination and it is
-			// the honest description of what this buys.
-			//
-			// The close frame is sent and its error ignored on purpose. A client
-			// that has already gone away cannot be told why, and the return
-			// below closes the connection either way; treating the write failure
-			// as a reason not to return would keep the socket that this branch
-			// exists to end.
-			if s.tokenRevoked(tokenID) {
-				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-				_ = conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
-						"the API token this socket was opened with has been revoked"))
-				return
-			}
-			// The session half of the same lever (#159).
-			//
-			// One indexed read of users.token_epoch per socket per ping period.
-			// That is a database round trip where the token check above is a map
-			// lookup, and it is the price of the only revocation a cookie
-			// principal has: the epoch is not published anywhere in process, and
-			// caching it here would reintroduce exactly the staleness this
-			// closes.
-			//
-			// FAIL CLOSED on a read error, which is what auth.checkEpoch already
-			// does for requests: an unreachable store is not a reason to keep
-			// streaming to a client we can no longer check. The blast radius is
-			// bounded by the fact that a store this socket cannot read is a
-			// store requireAuth cannot read either, so the dashboard behind it
-			// is already 401ing on every request.
-			if sessionUser != 0 && s.sessionEpochChanged(sessionUser, sessionEpoch) {
-				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-				_ = conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
-						"this session has been revoked"))
+			if s.closeIfSocketRevoked(conn, tokenID, sessionUser, sessionEpoch) {
 				return
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
@@ -253,6 +202,72 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// socketPrincipalRevocationKeys returns what an open socket must answer to on
+// revocation: the API token it was opened with (0 for a session), or the
+// session user and the epoch its cookie was signed with.
+func socketPrincipalRevocationKeys(r *http.Request) (tokenID, sessionUser, sessionEpoch int64) {
+	if p, ok := principalFrom(r.Context()); ok {
+		if p.token != nil {
+			tokenID = p.token.ID
+		} else {
+			sessionUser, sessionEpoch = p.userID, p.epoch
+		}
+	}
+	return tokenID, sessionUser, sessionEpoch
+}
+
+// closeIfSocketRevoked closes an open socket with a policy frame when the token
+// or session it was opened with has been revoked, and reports true when it did.
+func (s *Server) closeIfSocketRevoked(conn *websocket.Conn, tokenID, sessionUser, sessionEpoch int64) bool {
+	// Revocation, on the tick that already exists (#159).
+	//
+	// BEFORE the ping write, not after: the point is to stop talking to
+	// this client, and pinging a socket that is about to be closed for
+	// policy reasons is one more frame than it should get.
+	//
+	// One read-locked map lookup, no database, no allocation, per socket
+	// per ping period. The exposure window is therefore ONE PING PERIOD
+	// -- 25 seconds -- where it used to be the lifetime of the
+	// connection. That is a bound rather than an elimination and it is
+	// the honest description of what this buys.
+	//
+	// The close frame is sent and its error ignored on purpose. A client
+	// that has already gone away cannot be told why, and the return
+	// below closes the connection either way; treating the write failure
+	// as a reason not to return would keep the socket that this branch
+	// exists to end.
+	if s.tokenRevoked(tokenID) {
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		_ = conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
+				"the API token this socket was opened with has been revoked"))
+		return true
+	}
+	// The session half of the same lever (#159).
+	//
+	// One indexed read of users.token_epoch per socket per ping period.
+	// That is a database round trip where the token check above is a map
+	// lookup, and it is the price of the only revocation a cookie
+	// principal has: the epoch is not published anywhere in process, and
+	// caching it here would reintroduce exactly the staleness this
+	// closes.
+	//
+	// FAIL CLOSED on a read error, which is what auth.checkEpoch already
+	// does for requests: an unreachable store is not a reason to keep
+	// streaming to a client we can no longer check. The blast radius is
+	// bounded by the fact that a store this socket cannot read is a
+	// store requireAuth cannot read either, so the dashboard behind it
+	// is already 401ing on every request.
+	if sessionUser != 0 && s.sessionEpochChanged(sessionUser, sessionEpoch) {
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		_ = conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
+				"this session has been revoked"))
+		return true
+	}
+	return false
 }
 
 // writeEvent renders one event for this socket's principal and sends it.
