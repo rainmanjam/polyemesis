@@ -858,29 +858,9 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 		// Only a broadcast polyemesis started may be adopted. With no go-live attempt on record nothing of ours can
 		// exist, so the list is not even read. With one, a broadcast on the source counts only if X created it at or
 		// after the attempt (in X's time, inside xInGoLiveWindow); anything outside it is somebody else's and is left alone.
-		adopted := false
-		if attemptMS > 0 {
-			bs, err := x.Broadcasts(ctx, "", accessToken)
-			if err != nil {
-				return nil, err
-			}
-			for _, b := range bs {
-				if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
-					continue
-				}
-				if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
-					continue
-				}
-				id := b.ID
-				if id == "" {
-					id = b.BroadcastID
-				}
-				if id != "" {
-					st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
-					adopted = true
-					break
-				}
-			}
+		adopted, err := x.adoptOwnBroadcast(ctx, accessToken, st, sourceID, attemptMS)
+		if err != nil {
+			return nil, err
 		}
 		// A source missing from the list is an error only when there is no broadcast to return: if the listing found
 		// ours RUNNING, it is returned (StreamActive unknown) so it can be ended.
@@ -898,6 +878,36 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 		return nil, err
 	}
 	return st, nil
+}
+
+// adoptOwnBroadcast looks for a broadcast on the source that X created at or
+// after the go-live attempt, and fills st from it. It reports whether one was
+// found; without an attempt on record nothing of ours can exist.
+func (x *X) adoptOwnBroadcast(ctx context.Context, accessToken string, st *BroadcastLifecycleState, sourceID string, attemptMS int64) (bool, error) {
+	if attemptMS <= 0 {
+		return false, nil
+	}
+	bs, err := x.Broadcasts(ctx, "", accessToken)
+	if err != nil {
+		return false, err
+	}
+	for _, b := range bs {
+		if b.SourceID != sourceID || (b.State != XStateRunning && b.State != XStatePrePublished) {
+			continue
+		}
+		if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
+			continue
+		}
+		id := b.ID
+		if id == "" {
+			id = b.BroadcastID
+		}
+		if id != "" {
+			st.BroadcastID, st.Status, st.Title = id, b.State, b.Title
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // fillStreamActive sets StreamActive and StreamStatus from the source st is bound to. A source that is not in the list
@@ -1194,21 +1204,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if strings.TrimSpace(broadcastID) == "" {
 		return nil, errors.New("no broadcast id given to publish")
 	}
-	body := map[string]any{}
-	if title := strings.TrimSpace(p.Title); title != "" {
-		body["title"] = title
-	}
-	if loc := strings.TrimSpace(p.Locale); loc != "" {
-		body["locale"] = loc
-	}
-	if p.ChatOption != nil {
-		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {
-			return nil, fmt.Errorf("chat option must be 0 to %d, which X documents", xChatOptionMax)
-		}
-		body["chat_option"] = *p.ChatOption
-	}
-	if p.ShouldNotTweet {
-		body["should_not_tweet"] = true
+	body, err := xPublishBody(p)
+	if err != nil {
+		return nil, err
 	}
 	sourceID, attemptMS, pending := xPendingParts(broadcastID)
 	if !pending {
@@ -1246,19 +1244,8 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	}
 	existing := status == http.StatusOK
 	if existing && pending {
-		// 200: the source already had a live broadcast. It is adopted only if polyemesis started it, which the handle's
-		// recorded go-live attempt and the broadcast's created_at_ms decide. Otherwise it is somebody else's show:
-		// refused in words, never adopted, and so never ended by a later switch-off.
-		b, err := x.BroadcastByID(ctx, "", accessToken, id)
-		if err != nil || attemptMS <= 0 {
-			return nil, &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "unconfirmedBroadcast",
-				Platform: "X", err: errors.New("could not confirm the broadcast on this source was started by " +
-					"polyemesis (X's clock could not be read), so polyemesis will not take it over or end it")}
-		}
-		if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
-			return nil, &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "foreignBroadcast",
-				Platform: "X", err: errors.New("a broadcast not started by polyemesis is live on this source; " +
-					"polyemesis will not take it over or end it")}
+		if err := x.confirmOwnExisting(ctx, accessToken, id, attemptMS); err != nil {
+			return nil, err
 		}
 	}
 	res := &XPublishResult{ID: id, State: out.Data.State, Existing: existing}
@@ -1266,6 +1253,48 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 		res.Warnings = append(res.Warnings, "X took the source live but reported: "+xProblems(out.Errors))
 	}
 	return res, nil
+}
+
+// xPublishBody is the go-live request body for the operator's title, locale,
+// chat option and tweet choice. Only the fields the operator set are sent.
+func xPublishBody(p XPublish) (map[string]any, error) {
+	body := map[string]any{}
+	if title := strings.TrimSpace(p.Title); title != "" {
+		body["title"] = title
+	}
+	if loc := strings.TrimSpace(p.Locale); loc != "" {
+		body["locale"] = loc
+	}
+	if p.ChatOption != nil {
+		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {
+			return nil, fmt.Errorf("chat option must be 0 to %d, which X documents", xChatOptionMax)
+		}
+		body["chat_option"] = *p.ChatOption
+	}
+	if p.ShouldNotTweet {
+		body["should_not_tweet"] = true
+	}
+	return body, nil
+}
+
+// confirmOwnExisting is the check for a go-live that X answered with an already
+// live broadcast on the source. That broadcast is adopted only if polyemesis
+// started it, which the handle's recorded go-live attempt and the broadcast's
+// created_at_ms decide. Otherwise it is somebody else's show: refused in words,
+// never adopted, and so never ended by a later switch-off.
+func (x *X) confirmOwnExisting(ctx context.Context, accessToken, id string, attemptMS int64) error {
+	b, err := x.BroadcastByID(ctx, "", accessToken, id)
+	if err != nil || attemptMS <= 0 {
+		return &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "unconfirmedBroadcast",
+			Platform: "X", err: errors.New("could not confirm the broadcast on this source was started by " +
+				"polyemesis (X's clock could not be read), so polyemesis will not take it over or end it")}
+	}
+	if !xInGoLiveWindow(b.CreatedAtMS, attemptMS) {
+		return &TransitionRefused{Requested: PhaseLive, Refusal: RefusalSourceBusy, Reason: "foreignBroadcast",
+			Platform: "X", err: errors.New("a broadcast not started by polyemesis is live on this source; " +
+				"polyemesis will not take it over or end it")}
+	}
+	return nil
 }
 
 // --------------------------------------------------------------- lifecycle
