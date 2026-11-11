@@ -495,11 +495,7 @@ export class PolyemesisClient {
     if (route.scope === "admin" && !route.readTokenSends && this.scope === "read") {
       throw new ApiError("forbidden", undefined, `${method} ${route.path} needs an admin token; a read token sends nothing`);
     }
-    const url = new URL(this.base.toString());
-    url.pathname = `${this.base.pathname.replace(/\/$/, "")}/api/v1${path}`;
-    url.search = "";
-    if (sourceId !== undefined) url.searchParams.set("source", String(sourceId));
-    for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, value);
+    const url = this.requestUrl(path, sourceId, query);
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.token}`,
@@ -508,32 +504,55 @@ export class PolyemesisClient {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (payload !== undefined) headers["Content-Type"] = "application/json";
 
-    let res: TransportResponse;
+    const req: TransportRequest = { method, url, headers, body: payload };
+    if (timeoutMs !== undefined) req.timeoutMs = timeoutMs;
+    const res = await this.sendRequest(req);
+    throwForStatus(res);
+    return parseBody<T>(res);
+  }
+
+  /** The URL for one call: the install's base, the /api/v1 path, the programme and any query. */
+  private requestUrl(path: string, sourceId: number | undefined, query: Record<string, string> | undefined): URL {
+    const url = new URL(this.base.toString());
+    url.pathname = `${this.base.pathname.replace(/\/$/, "")}/api/v1${path}`;
+    url.search = "";
+    if (sourceId !== undefined) url.searchParams.set("source", String(sourceId));
+    for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, value);
+    return url;
+  }
+
+  /** Sends one request. A transport failure is rethrown as the ApiError the callers read, never as a raw error. */
+  private async sendRequest(req: TransportRequest): Promise<TransportResponse> {
     try {
-      const req: TransportRequest = { method, url, headers, body: payload };
-      if (timeoutMs !== undefined) req.timeoutMs = timeoutMs;
-      res = await this.transport.send(req);
+      return await this.transport.send(req);
     } catch (err) {
       if (err instanceof TransportError) {
         throw new ApiError(err.kind, undefined, err.message);
       }
       throw new ApiError("unreachable", undefined, err instanceof Error ? err.message : String(err));
     }
+  }
+}
 
-    if (res.status === 401) throw new ApiError("unauthorized", 401, serverMessage(res.body, "unauthorized"));
-    if (res.status === 403) throw new ApiError("forbidden", 403, serverMessage(res.body, "forbidden"));
-    if (res.status === 503 && errorCode(res.body) === "no_source") {
-      throw new ApiError("noSource", 503, serverMessage(res.body, "no source"));
-    }
-    if (res.status < 200 || res.status >= 300) {
-      throw new ApiError("http", res.status, serverMessage(res.body, `HTTP ${res.status}`));
-    }
-    if (res.body.trim() === "") return undefined as T;
-    try {
-      return JSON.parse(res.body) as T;
-    } catch {
-      throw new ApiError("malformed", res.status, "the response was not JSON");
-    }
+/** Throws the ApiError for an answer that is not a success, naming the two answers the callers act on by code. */
+function throwForStatus(res: TransportResponse): void {
+  if (res.status === 401) throw new ApiError("unauthorized", 401, serverMessage(res.body, "unauthorized"));
+  if (res.status === 403) throw new ApiError("forbidden", 403, serverMessage(res.body, "forbidden"));
+  if (res.status === 503 && errorCode(res.body) === "no_source") {
+    throw new ApiError("noSource", 503, serverMessage(res.body, "no source"));
+  }
+  if (res.status < 200 || res.status >= 300) {
+    throw new ApiError("http", res.status, serverMessage(res.body, `HTTP ${res.status}`));
+  }
+}
+
+/** A success's body as JSON. An empty body is undefined, which is an answer too (a call with nothing to say). */
+function parseBody<T>(res: TransportResponse): T {
+  if (res.body.trim() === "") return undefined as T;
+  try {
+    return JSON.parse(res.body) as T;
+  } catch {
+    throw new ApiError("malformed", res.status, "the response was not JSON");
   }
 }
 
