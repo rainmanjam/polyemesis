@@ -116,7 +116,6 @@ beforeEach(() => {
 afterEach(() => {
   teardown?.();
   document.body.innerHTML = "";
-  document.documentElement.style.removeProperty("--nav-h");
 });
 
 describe("initHowSteps", () => {
@@ -156,12 +155,12 @@ describe("initHowSteps", () => {
     expect(behavior).toBe("smooth");
   });
 
-  it("scrolls with behavior auto when the gate does not allow motion", () => {
+  it("scrolls with behavior instant when the gate does not allow motion", () => {
     const root = build();
     allowed = false;
     teardown = initHowSteps(root, gate);
     root.querySelector<HTMLButtonElement>('button[data-goto="4"]')!.click();
-    expect(scrollTo.mock.calls[0]![0].behavior).toBe("auto");
+    expect(scrollTo.mock.calls[0]![0].behavior).toBe("instant");
   });
 
   it("plays the steps diagram only while visible", () => {

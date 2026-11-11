@@ -90,7 +90,8 @@ export function initHowSteps(root: HTMLElement, gate: MotionGate): () => void {
     const range = r.height - win.innerHeight;
     win.scrollTo({
       top: win.scrollY + r.top + (range * (n - 0.5)) / STEP_COUNT,
-      behavior: gate.allowed() ? "smooth" : "auto",
+      // "instant", not "auto": html has scroll-behavior: smooth, so "auto" would still animate.
+      behavior: gate.allowed() ? "smooth" : "instant",
     });
   };
   const pipHandlers = pips.map((el) => {
