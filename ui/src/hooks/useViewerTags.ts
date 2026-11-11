@@ -21,7 +21,7 @@ let inflight = false;
 let pending = false;
 const listeners = new Set<() => void>();
 
-export const viewerTagKey = (platform: ChatPlatform | string, account: string | undefined, authorId: string) =>
+export const viewerTagKey = (platform: string, account: string | undefined, authorId: string) =>
   `${platform}|${account ?? ""}|${authorId}`;
 
 function emit() {

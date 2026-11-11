@@ -121,7 +121,7 @@ export function parseSpriteVTT(text: string, base: string, offsetMs = 0): Sprite
 }
 
 function parseVTTTime(s: string): number | null {
-  const m = s.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{1,3})$/);
+  const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{1,3})$/.exec(s.trim());
   if (!m) return null;
   const h = m[1] ? Number.parseInt(m[1], 10) : 0;
   return (

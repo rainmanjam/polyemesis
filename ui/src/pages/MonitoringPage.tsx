@@ -526,6 +526,23 @@ const VERDICT_TONE_CLASS: Record<MonitorVerdictTone, string> = {
   idle: "text-muted-foreground",
 };
 
+/** A reading, or the dash while its source has not answered. */
+function orDash<T>(source: T | null | undefined, read: (s: T) => string): string {
+  return source ? read(source) : "—";
+}
+
+/** `yes` while `on` holds, `no` otherwise. Both arms are plain literals, so
+ *  choosing between them evaluates nothing extra. */
+function pickIf<T>(on: boolean, yes: T, no: T): T {
+  return on ? yes : no;
+}
+
+/** Whether the held verdict must be replaced: the counts behind it changed, or
+ *  the percentage it quotes moved 5 points or more. */
+function heldVerdictStale(held: { sig: string; pct: number }, countsSig: string, verdictPct: number | undefined): boolean {
+  return held.sig !== countsSig || (verdictPct !== undefined && Math.abs(verdictPct - held.pct) >= 5);
+}
+
 export function MonitoringPage() {
   const t = useT();
   const {
@@ -797,7 +814,7 @@ export function MonitoringPage() {
   const { pct: verdictPct, ...verdictCounts } = pageVerdict.params;
   const countsSig = `${pageVerdict.key}:${JSON.stringify(verdictCounts)}`;
   const [held, setHeld] = useState({ sig: "", pct: 0 });
-  if (held.sig !== countsSig || (verdictPct !== undefined && Math.abs(verdictPct - held.pct) >= 5)) {
+  if (heldVerdictStale(held, countsSig, verdictPct)) {
     setHeld({ sig: countsSig, pct: verdictPct ?? 0 });
   }
   // Translated at render, so a change of language re-words it at once.
@@ -876,11 +893,11 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.hostCpu"
-              value={system ? pct(system.cpuPercent) : "—"}
-              tone={cpuHigh ? "warn" : "default"}
+              value={orDash(system, (s) => pct(s.cpuPercent))}
+              tone={pickIf(cpuHigh, "warn", "default")}
             />
             <div className="mt-1 text-sm text-muted-foreground">
-              {t((system?.numCpu ?? 0) === 1 ? "i18nSweep.monCoresOne" : "i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
+              {t(pickIf((system?.numCpu ?? 0) === 1, "i18nSweep.monCoresOne", "i18nSweep.monCores"), { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
             <div className="mt-1 text-tiny text-muted-foreground">
@@ -895,8 +912,8 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.memory"
-              value={system ? pct(system.memPercent) : "—"}
-              tone={memHigh ? "warn" : "default"}
+              value={orDash(system, (s) => pct(s.memPercent))}
+              tone={pickIf(memHigh, "warn", "default")}
             />
             <div className="mt-1 text-sm text-muted-foreground">
               {/* app-council A93: the words around the figures are translated;
@@ -915,9 +932,9 @@ export function MonitoringPage() {
         </Card>
         <Card>
           <CardContent className="pt-3">
-            <Stat labelKey="mon.relayIn" value={status ? bytes(status.relay.rxBytes) : "—"} />
+            <Stat labelKey="mon.relayIn" value={orDash(status, (s) => bytes(s.relay.rxBytes))} />
             <div className="mt-1 text-sm text-muted-foreground">
-              {t((status?.relay.subscribers?.length ?? 0) === 1 ? "i18nSweep.monSubscribersOne" : "i18nSweep.monSubscribers", {
+              {t(pickIf((status?.relay.subscribers?.length ?? 0) === 1, "i18nSweep.monSubscribersOne", "i18nSweep.monSubscribers"), {
                 count: status?.relay.subscribers?.length ?? 0,
                 port: status?.relay.port ?? "—",
               })}
@@ -930,7 +947,7 @@ export function MonitoringPage() {
             <Stat
               labelKey="mon.relayDrops"
               value={status ? status.relay.dropped : "—"}
-              tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
+              tone={pickIf((status?.relay.dropped ?? 0) > 0, "warn", "muted")}
             />
             <div className="mt-1 text-sm text-muted-foreground">
               {t("mon.relayDropsNote")}
@@ -949,8 +966,8 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.ingestLoss"
-              value={status ? `${status.relay.lossPercent.toFixed(2)}%` : "—"}
-              tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
+              value={orDash(status, (s) => `${s.relay.lossPercent.toFixed(2)}%`)}
+              tone={pickIf((status?.relay.lossPercent ?? 0) > 0, "warn", "muted")}
             />
             <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monTsMissing", {
@@ -1129,9 +1146,9 @@ export function MonitoringPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
-            <p role="status" className="text-tiny text-muted-foreground">
+            <output className="block text-tiny text-muted-foreground">
               {logVerdictText(t, verdictState)}
-            </p>
+            </output>
             {/* A9: the verdict names a process, so it offers that process's
                 log -- outside the status line, which is read as one sentence. */}
             {verdictState.kind === "errors" && filter !== verdictState.process && (
@@ -1185,7 +1202,7 @@ export function MonitoringPage() {
                 aria-expanded={showRaw}
                 onClick={() => setShowRaw((v) => !v)}
               >
-                {showRaw ? t("monitor.hideRaw") : t("monitor.showRaw")}
+                {t(pickIf(showRaw, "monitor.hideRaw", "monitor.showRaw"))}
               </Button>
               {showRaw && (
                 <div className="mt-2 h-48 overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed">
@@ -1222,7 +1239,7 @@ export function MonitoringPage() {
           aria-expanded={expertOpen}
           onClick={() => setExpertOpen((v) => !v)}
         >
-          {expertOpen ? t("mon.expertHide") : t("mon.expertShow")}
+          {t(pickIf(expertOpen, "mon.expertHide", "mon.expertShow"))}
         </Button>
         {!expertOpen && (
           <p className="mt-1 text-tiny text-muted-foreground">{t("mon.expertClosedHint")}</p>

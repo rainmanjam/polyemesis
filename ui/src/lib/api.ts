@@ -297,7 +297,7 @@ const CSRF_HEADER = WIRE.auth.csrfHeader;
 
 /** Read the double-submit CSRF token the server set as a readable cookie. */
 function csrfToken(): string {
-  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
+  const match = new RegExp(String.raw`(?:^|;\s*)${CSRF_COOKIE}=([^;]+)`).exec(document.cookie);
   return match ? decodeURIComponent(match[1]) : "";
 }
 
@@ -415,7 +415,7 @@ function reportReconcileFailure(body: unknown): void {
   const lines = Array.isArray(b.warnings) ? b.warnings.filter((w) => typeof w === "string") : [];
   const msg =
     lines.length > 0
-      ? (lines[lines.length - 1] as string)
+      ? (lines.at(-1) as string)
       : "The change was saved but the running pipeline could not be updated to match it.";
   // Long, because this one is not a status update: nothing retries the
   // reconcile, so an operator who misses it is looking at a console that
@@ -1590,7 +1590,8 @@ export const api = {
     if (m.platform) q.set("platform", m.platform);
     if (m.limit) q.set("limit", String(m.limit));
     const qs = q.toString();
-    return get<ChatFlagsResult>(`/chat/flags${qs ? `?${qs}` : ""}`);
+    const query = qs ? `?${qs}` : "";
+    return get<ChatFlagsResult>(`/chat/flags${query}`);
   },
 
   /** Channel-wide chat rules. Only Twitch publishes an API for these, and an
@@ -1616,7 +1617,8 @@ export const api = {
     if (opts.platform) q.set("platform", opts.platform);
     if (opts.kind) q.set("kind", opts.kind);
     const qs = q.toString();
-    return get<ActivityFeedResponse>(`/activity${qs ? `?${qs}` : ""}`);
+    const query = qs ? `?${qs}` : "";
+    return get<ActivityFeedResponse>(`/activity${query}`);
   },
   getActivitySources: () => get<ActivitySourcesResponse>("/activity/sources"),
   /** Sends a synthetic event through the same path a real one takes. 429 when
@@ -1726,11 +1728,10 @@ export const api = {
     update: (id: number, body: Partial<Hook> & { secret?: string }) =>
       put<Hook>(`/hooks/${id}`, body),
     remove: (id: number) => del<{ status: string }>(`/hooks/${id}`),
-    test: (id: number, trigger?: HookTrigger) =>
-      post<HookTestResult>(
-        `/hooks/${id}/test${trigger ? `?trigger=${trigger}` : ""}`,
-        {},
-      ),
+    test: (id: number, trigger?: HookTrigger) => {
+      const query = trigger ? `?trigger=${trigger}` : "";
+      return post<HookTestResult>(`/hooks/${id}/test${query}`, {});
+    },
     deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
   },
 

@@ -22,7 +22,7 @@ export interface PollAnnouncement {
 
 export interface PollNative {
   platform: string;
-  status: "mirrored" | "stopped" | "skipped" | "failed" | string;
+  status: string;
   reason?: string;
   votes?: number[];
 }

@@ -1087,6 +1087,17 @@ function SpeakerField({
  *  not to render a <video> that will sit there black forever.
  *
  *  Exported for its test, like ShareCard and VariantsCard are for PlayoutPage's. */
+/** The poster frame's address, when the recording has one. */
+function posterUrl(id: number, hasPoster: boolean): string | undefined {
+  return hasPoster ? api.libraryMediaUrl(id, "poster.jpg") : undefined;
+}
+
+/** The captions track: the stored transcript when there is one, else the
+ *  captions viewers saw live (#8). */
+function captionTrackUrl(id: number, hasTranscript: boolean): string {
+  return api.captionExportUrl(id, "vtt", hasTranscript ? "recording" : "live");
+}
+
 export function PlayerDialog({
   target,
   onClose,
@@ -1238,11 +1249,7 @@ export function PlayerDialog({
                   className="w-full rounded border border-border bg-black"
                   controls
                   preload="metadata"
-                  poster={
-                    rec.assets.poster
-                      ? api.libraryMediaUrl(rec.id, "poster.jpg")
-                      : undefined
-                  }
+                  poster={posterUrl(rec.id, rec.assets.poster)}
                   src={`${api.libraryMediaUrl(rec.id, "proxy.mp4")}#t=${(atMs / 1000).toFixed(2)}`}
                   onLoadedMetadata={(e) => {
                     if (atMs > 0) e.currentTarget.currentTime = atMs / 1000;
@@ -1254,7 +1261,7 @@ export function PlayerDialog({
                   <track
                     kind="captions"
                     label={t("wave3.captions.playerTrack")}
-                    src={api.captionExportUrl(rec.id, "vtt", rec.hasTranscript ? "recording" : "live")}
+                    src={captionTrackUrl(rec.id, rec.hasTranscript)}
                   />
                 </video>
               ) : (

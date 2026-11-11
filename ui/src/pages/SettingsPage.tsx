@@ -1,5 +1,5 @@
 import { DEFAULT_LISTENERS, WIRE } from "@/lib/contract/wire";
-import { createContext, useContext, useEffect, useId, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useCopy } from "@/hooks/useCopy";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -382,6 +382,14 @@ export function SettingsPage() {
     }
   };
 
+  // The advanced-cards context value. Memoised so the provider does not hand
+  // every consumer a new object on each render (Sonar S6481). Above the early
+  // returns below so the hook order never depends on the load state.
+  const advancedContext = useMemo(
+    () => ({ show: showAdvanced, revealed, setShow: setShowAdvanced }),
+    [showAdvanced, revealed, setShowAdvanced],
+  );
+
   // The old Debug tab's address, kept working (A17).
   if (requested === "debug") return <Navigate to="/system" replace />;
 
@@ -445,7 +453,7 @@ export function SettingsPage() {
           heading, so the headings and the switch are never children of a
           tablist -- a screen reader hears "Stream out, tab list, 3 items"
           rather than a heading announced as a tab. */}
-      <AdvancedContext.Provider value={{ show: showAdvanced, revealed, setShow: setShowAdvanced }}>
+      <AdvancedContext.Provider value={advancedContext}>
       <Tabs
         value={tab}
         orientation="vertical"
@@ -2803,6 +2811,17 @@ function PlatformCapabilityMatrix() {
  *  card rather than through the whole settings page, which would have to stand
  *  up TLS status, system info and the API-token list to ask a question about
  *  one button. */
+/** Why the save button is off: a client id or secret is missing. Nothing is
+ *  said while a save is already in flight. */
+function credsSaveReason(busy: boolean, clientId: string, clientSecret: string, t: Translator): string | null {
+  return !busy && (!clientId.trim() || !clientSecret.trim()) ? t("settingsUx.saveCredsNeedsBoth") : null;
+}
+
+/** The standing note, when it is not the one card warning already shown. */
+function otherNote(guide: SetupGuide, warning: string): string[] {
+  return guide.note && guide.note !== warning ? [guide.note] : [];
+}
+
 export function PlatformCredCard({
   guide,
   creds,
@@ -2851,11 +2870,10 @@ export function PlatformCredCard({
   // is in the setup guide below, not lost.
   const warning = guide.redirectWarnings?.[0] ?? guide.note ?? "";
   const saveReasonId = useId();
-  const saveReason =
-    !busy && (!clientId.trim() || !clientSecret.trim()) ? t("settingsUx.saveCredsNeedsBoth") : null;
+  const saveReason = credsSaveReason(busy, clientId, clientSecret, t);
   const otherWarnings = [
     ...(guide.redirectWarnings ?? []).filter((w) => w !== warning),
-    ...(guide.note && guide.note !== warning ? [guide.note] : []),
+    ...otherNote(guide, warning),
   ];
 
   // Confirmed by the SaveStatus beside the button, like every other form on

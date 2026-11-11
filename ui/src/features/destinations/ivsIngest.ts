@@ -38,5 +38,6 @@ export function ivsAppPathFix(raw: string): string | null {
   const first = trimSlashes(m[3]).split("/")[0];
   if (first === IVS_APP) return null;
   const port = hostPort[2] ?? (scheme === "rtmps" ? "443" : "");
-  return `${scheme}://${hostPort[1]}${port ? `:${port}` : ""}/${IVS_APP}`;
+  const portSuffix = port ? `:${port}` : "";
+  return `${scheme}://${hostPort[1]}${portSuffix}/${IVS_APP}`;
 }

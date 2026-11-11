@@ -174,7 +174,18 @@ function windowSummary(t: Translator, w: JobWindow): string {
   const days = w.days?.length
     ? w.days.map((d) => (DAY_SHORT[d] ? t(DAY_SHORT[d]) : String(d))).join(", ")
     : t("jobs.everyDayLower");
-  return `${start}–${end}${wraps ? ` ${t("jobs.nextDay")}` : ""}, ${days} ${w.tz || "UTC"}`;
+  const nextDay = wraps ? ` ${t("jobs.nextDay")}` : "";
+  return `${start}–${end}${nextDay}, ${days} ${w.tz || "UTC"}`;
+}
+
+/** The name a confirm dialog gives a job: its label, or its kind when unlabelled. */
+function jobSubject(job: JobView | null): string {
+  return job ? (job.label ?? job.kind) : "";
+}
+
+/** The delete dialog's body: a clip export says what it leaves behind. */
+function deleteJobDescription(t: Translator, job: JobView | null): string {
+  return job?.kind === CLIP_EXPORT_KIND ? t("jobs.deleteExportDescription") : t("jobs.deleteDescription");
 }
 
 export function JobsPage() {
@@ -329,9 +340,9 @@ export function JobsPage() {
     return (
       <div className="p-3">
         <PageHeader title={t("jobs.title")} subtitle={t("jobs.subtitle")} />
-        <p role="status" className="text-sm text-warn">
+        <output className="block text-sm text-warn">
           {t("jobs.connectionLostRetrying")}
-        </p>
+        </output>
       </div>
     );
   }
@@ -393,9 +404,9 @@ export function JobsPage() {
       />
 
       {connectionLost && (
-        <p role="status" className="mt-2 text-sm text-warn">
+        <output className="mt-2 block text-sm text-warn">
           {t("jobs.connectionLostRetrying")}
-        </p>
+        </output>
       )}
 
       {/* ---- the gates: what the machine is asserting right now ---- */}
@@ -526,7 +537,7 @@ export function JobsPage() {
         onOpenChange={(open) => {
           if (!open) setPendingCancel(null);
         }}
-        subject={pendingCancel ? (pendingCancel.label ?? pendingCancel.kind) : ""}
+        subject={jobSubject(pendingCancel)}
         title={t("jobs.cancelRunningTitle")}
         description={t("jobs.cancelRunningDescription")}
         confirmLabel={t("jobs.cancelRunningConfirm")}
@@ -568,13 +579,9 @@ export function JobsPage() {
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
-        subject={pendingDelete ? (pendingDelete.label ?? pendingDelete.kind) : ""}
+        subject={jobSubject(pendingDelete)}
         title={t("jobs.deleteTitle")}
-        description={
-          pendingDelete?.kind === CLIP_EXPORT_KIND
-            ? t("jobs.deleteExportDescription")
-            : t("jobs.deleteDescription")
-        }
+        description={deleteJobDescription(t, pendingDelete)}
         confirmLabel={t("jobs.deleteConfirm")}
         onConfirm={() =>
           pendingDelete

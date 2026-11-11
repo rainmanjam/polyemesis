@@ -997,6 +997,106 @@ function sizeKeyFor(width: number, height: number): string {
 
 /* Exported for its test: the editor renders one hint per control, and one of
  * them was rendering its own translation key. */
+function hasHardwareEncoder(caps: { hardware?: readonly unknown[] | null } | null | undefined): boolean {
+  return caps ? (caps.hardware?.length ?? 0) > 0 : true;
+}
+
+/** How many enabled destinations a save restarts. Zero for a consequence that
+ *  does not name a count. */
+function enabledUsersOf(consequence: DeleteConsequence): number {
+  return consequence.kind === "named" || consequence.kind === "counted" ? consequence.enabled : 0;
+}
+
+/** An aspect conversion is defined by the target shape, so it needs both axes. */
+function hasBothAxes(form: ReturnType<typeof emptyForm>): boolean {
+  return form.width > 0 && form.height > 0;
+}
+
+/** An overlay needs both axes and an image. */
+function overlayFits(form: ReturnType<typeof emptyForm>): boolean {
+  return hasBothAxes(form) && form.overlayImage.trim() !== "";
+}
+
+/** Text needs both axes and its own content. */
+function textFits(form: ReturnType<typeof emptyForm>): boolean {
+  return hasBothAxes(form) && form.textContent.trim() !== "";
+}
+
+/** A hint's colour: muted while its value is in range, red once it is not. */
+function rangeTone(ok: boolean): string {
+  return ok ? "text-muted-foreground" : "text-down";
+}
+
+function titleText(t: Translator, editing: boolean): string {
+  return editing ? t("rend.editRendition") : t("rend.newRendition");
+}
+
+function submitText(t: Translator, editing: boolean): string {
+  return editing ? t("common.save") : t("hooks.create");
+}
+
+/** The body a save sends. The three `applies` flags say which optional blocks
+ *  the form currently shows; a block the form does not show is cleared. */
+function renditionPayload(
+  form: ReturnType<typeof emptyForm>,
+  applies: { aspect: boolean; overlay: boolean; text: boolean },
+): Partial<Rendition> {
+  return {
+    name: form.name.trim(),
+    width: form.width,
+    height: form.height,
+    fps: form.fps,
+    videoBitrate: form.videoBitrate,
+    maxrateKbps: form.maxrateKbps,
+    bufsizeKbps: form.bufsizeKbps,
+    encoder: form.encoder,
+    preset: form.preset.trim(),
+    gopSeconds: form.gopSeconds,
+    // The server refuses an aspect mode when either axis is free, because
+    // there is no target shape to convert to. Sending one anyway would turn
+    // a disabled control into a save error the user cannot connect to
+    // anything they touched, so it is cleared here to match what the form
+    // shows.
+    aspectMode: applies.aspect ? fromAspectKey(form.aspectMode) : "",
+    padColor: applies.aspect && form.aspectMode === "pad" ? form.padColor.trim() : "",
+    deinterlace: fromDeinterlaceKey(form.deinterlace),
+    // Cleared on a free axis, for the reason overlay is: the server
+    // refuses burned-in captions it could not size.
+    captionBurn: applies.aspect && form.captionBurn !== "off" ? form.captionBurn : "",
+    // The server refuses an overlay on a rendition with a free axis,
+    // because the image is sized as a percentage of the output and that has
+    // to resolve to a number. Cleared here rather than sent and rejected,
+    // for the same reason aspectMode is: a save error the operator cannot
+    // connect to anything they touched is worse than a disabled control.
+    overlay: applies.overlay
+      ? {
+          image: form.overlayImage.trim(),
+          anchor: form.overlayAnchor,
+          widthPct: form.overlayWidth / 100,
+          marginXPct: form.overlayMarginX / 100,
+          marginYPct: form.overlayMarginY / 100,
+          opacity: form.overlayOpacity / 100,
+        }
+      : { image: "" },
+    // Cleared rather than sent and rejected, for the reason overlay is.
+    text: applies.text
+      ? {
+          content: form.textContent.trim(),
+          font: form.textFont.trim(),
+          anchor: form.textAnchor,
+          sizePct: form.textSize / 100,
+          color: form.textColor.trim(),
+          marginXPct: form.textMarginX / 100,
+          marginYPct: form.textMarginY / 100,
+          box: form.textBox,
+          boxColor: form.textBoxColor.trim(),
+          boxOpacity: form.textBoxOpacity / 100,
+        }
+      : { content: "" },
+    note: form.note.trim(),
+  };
+}
+
 export function RenditionDialog({
   open,
   onOpenChange,
@@ -1041,7 +1141,7 @@ export function RenditionDialog({
   const editing = rendition !== null;
   const encoders = useMemo(() => caps?.encoders ?? [], [caps]);
   const defaultEncoder = caps?.default ?? "libx264";
-  const hardwareExists = caps ? (caps.hardware?.length ?? 0) > 0 : true;
+  const hardwareExists = hasHardwareEncoder(caps);
   const [form, setForm] = useState(() => emptyForm(defaultEncoder));
   const [sizeKey, setSizeKey] = useState("1920x1080");
   const [busy, setBusy] = useState(false);
@@ -1161,8 +1261,7 @@ export function RenditionDialog({
   const consequence = deleteConsequence(users, counts);
   // How many enabled destinations a save restarts. Zero when that is not known,
   // so the toast says "saved." rather than naming a count nobody measured.
-  const enabledUsers =
-    consequence.kind === "named" || consequence.kind === "counted" ? consequence.enabled : 0;
+  const enabledUsers = enabledUsersOf(consequence);
   const diagnostics = useMemo(
     () => hardwareDiagnostics(caps?.gpu ?? null, encoders),
     [caps, encoders],
@@ -1185,74 +1284,25 @@ export function RenditionDialog({
   // With one free, the plain scale already preserves the aspect ratio and the
   // mode would be inert -- the server refuses the pair rather than storing a
   // control that quietly does nothing, and the form says so before the save.
-  const aspectApplies = form.width > 0 && form.height > 0;
+  const aspectApplies = hasBothAxes(form);
   // An overlay needs both axes for the same reason and one more: the image is
   // scaled to a percentage of the OUTPUT width, so that width has to be a
   // number when the arguments are built. It also needs an image -- the geometry
   // fields alone are not an overlay.
-  const overlayApplies = aspectApplies && form.overlayImage.trim() !== "";
+  const overlayApplies = overlayFits(form);
   // Text needs both axes for the same reason, plus its own content: the type is
   // sized as a percentage of the output HEIGHT, so that height has to be a
   // number when the arguments are built.
-  const textApplies = aspectApplies && form.textContent.trim() !== "";
+  const textApplies = textFits(form);
 
   const save = async () => {
     setBusy(true);
     try {
-      const payload: Partial<Rendition> = {
-        name: form.name.trim(),
-        width: form.width,
-        height: form.height,
-        fps: form.fps,
-        videoBitrate: form.videoBitrate,
-        maxrateKbps: form.maxrateKbps,
-        bufsizeKbps: form.bufsizeKbps,
-        encoder: form.encoder,
-        preset: form.preset.trim(),
-        gopSeconds: form.gopSeconds,
-        // The server refuses an aspect mode when either axis is free, because
-        // there is no target shape to convert to. Sending one anyway would turn
-        // a disabled control into a save error the user cannot connect to
-        // anything they touched, so it is cleared here to match what the form
-        // shows.
-        aspectMode: aspectApplies ? fromAspectKey(form.aspectMode) : "",
-        padColor: aspectApplies && form.aspectMode === "pad" ? form.padColor.trim() : "",
-        deinterlace: fromDeinterlaceKey(form.deinterlace),
-        // Cleared on a free axis, for the reason overlay is: the server
-        // refuses burned-in captions it could not size.
-        captionBurn: aspectApplies && form.captionBurn !== "off" ? form.captionBurn : "",
-        // The server refuses an overlay on a rendition with a free axis,
-        // because the image is sized as a percentage of the output and that has
-        // to resolve to a number. Cleared here rather than sent and rejected,
-        // for the same reason aspectMode is: a save error the operator cannot
-        // connect to anything they touched is worse than a disabled control.
-        overlay: overlayApplies
-          ? {
-              image: form.overlayImage.trim(),
-              anchor: form.overlayAnchor,
-              widthPct: form.overlayWidth / 100,
-              marginXPct: form.overlayMarginX / 100,
-              marginYPct: form.overlayMarginY / 100,
-              opacity: form.overlayOpacity / 100,
-            }
-          : { image: "" },
-        // Cleared rather than sent and rejected, for the reason overlay is.
-        text: textApplies
-          ? {
-              content: form.textContent.trim(),
-              font: form.textFont.trim(),
-              anchor: form.textAnchor,
-              sizePct: form.textSize / 100,
-              color: form.textColor.trim(),
-              marginXPct: form.textMarginX / 100,
-              marginYPct: form.textMarginY / 100,
-              box: form.textBox,
-              boxColor: form.textBoxColor.trim(),
-              boxOpacity: form.textBoxOpacity / 100,
-            }
-          : { content: "" },
-        note: form.note.trim(),
-      };
+      const payload = renditionPayload(form, {
+        aspect: aspectApplies,
+        overlay: overlayApplies,
+        text: textApplies,
+      });
       if (rendition) {
         await api.updateRendition(rendition.id, payload);
         const savedName = payload.name ?? "";
@@ -1280,7 +1330,7 @@ export function RenditionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? t("rend.editRendition") : t("rend.newRendition")}</DialogTitle>
+          <DialogTitle>{titleText(t, editing)}</DialogTitle>
           <DialogDescription>{t("rend.dialogDescription")}</DialogDescription>
         </DialogHeader>
 
@@ -1402,7 +1452,7 @@ export function RenditionDialog({
                 value={form.videoBitrate}
                 onChange={(e) => set("videoBitrate", Number(e.target.value))}
               />
-              <span className={`text-sm ${bitrateOk ? "text-muted-foreground" : "text-down"}`}>
+              <span className={`text-sm ${rangeTone(bitrateOk)}`}>
                 {t("rend.bitrateHint")}
               </span>
             </div>
@@ -1440,7 +1490,7 @@ export function RenditionDialog({
                 value={form.maxrateKbps}
                 onChange={(e) => set("maxrateKbps", Number(e.target.value))}
               />
-              <span className={`text-sm ${maxrateOk ? "text-muted-foreground" : "text-down"}`}>
+              <span className={`text-sm ${rangeTone(maxrateOk)}`}>
                 {maxrateOk
                   ? t("rend.maxrateHint")
                   : t("rend.maxrateInvalid")}
@@ -1897,7 +1947,7 @@ export function RenditionDialog({
               <ShieldAlert
                 className={cn(
                   "mt-0.5 h-3.5 w-3.5 shrink-0",
-                  permissionBlocked ? "text-down" : "text-muted-foreground",
+                  rangeTone(!permissionBlocked),
                 )}
               />
               <div className="flex min-w-0 flex-col gap-0.5">
@@ -2003,7 +2053,7 @@ export function RenditionDialog({
           </Button>
           <Button onClick={save} disabled={busy || !nameOk || !bitrateOk || !maxrateOk}>
             {busy && <Loader2 className="animate-spin" />}
-            {editing ? t("common.save") : t("hooks.create")}
+            {submitText(t, editing)}
           </Button>
         </DialogFooter>
       </DialogContent>

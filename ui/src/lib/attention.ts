@@ -107,75 +107,92 @@ export function attention(status: Status | null | undefined): AttentionItem[] {
   // The ingest first, and it is first in the list as well as in the code: every
   // destination below it is carrying the same feed, so an ingest that is down
   // explains the whole panel rather than being one more row in it.
-  const ingest = status.ingest;
-  if (ingest && !ingestProcessUp(ingest) && ingest.state !== "stopped") {
-    items.push({
-      key: "ingest",
-      tone: ingest.state === "failed" ? "down" : "warn",
-      subject: "Ingest",
-      state: ingest.state,
-      detail: ingest.lastError,
-    });
-  }
+  const ingestItem = ingestAttention(status.ingest);
+  if (ingestItem) items.push(ingestItem);
 
   for (const d of status.destinations ?? []) {
     if (!d.enabled) continue;
-    // The same reading onAir counts by, so a destination the bar calls
-    // degraded always has a row here to say why.
-    const state = destinationShownState(d.process);
-    if (state === "failed") {
-      items.push({
-        key: `dest-${d.id}`,
-        tone: "down",
-        subject: d.name,
-        state,
-        detail: d.process?.lastError ?? d.error,
-        cause: d.reason?.cause,
-        destinationId: d.id,
-      });
-    } else if (state === "reconnecting" || state === "starting") {
-      items.push({
-        key: `dest-${d.id}`,
-        tone: "warn",
-        subject: d.name,
-        state,
-        detail: d.process?.lastError,
-        cause: d.reason?.cause,
-        destinationId: d.id,
-      });
-    }
-    // A stop that was never confirmed is its own row, not a footnote on the one
-    // above: the child may still be running and still publishing, and the state
-    // reads "stopped" on both arms of Stop, so nothing else on the page can say
-    // it. See DestStatus.stopWarning.
-    if (d.stopWarning) {
-      items.push({
-        key: `stop-${d.id}`,
-        tone: "warn",
-        subject: d.name,
-        detail: d.stopWarning,
-        destinationId: d.id,
-      });
-    }
+    items.push(...destinationAttention(d));
   }
 
   // A rendition only matters here while something is drawing on it. One that
   // failed with no consumers costs nobody a broadcast, and putting it in front
   // of an operator mid-show is asking them to triage a spare part.
   for (const r of status.renditions ?? []) {
-    if (r.consumers <= 0) continue;
-    if (r.process?.state === "failed" || r.error) {
-      items.push({
-        key: `rendition-${r.id}`,
-        tone: "down",
-        subject: renditionSubject(r),
-        state: r.process?.state,
-        detail: r.error ?? r.process?.lastError,
-      });
-    }
+    const item = renditionAttention(r);
+    if (item) items.push(item);
   }
 
   return items.sort((a, b) => (TONE_RANK[a.tone] ?? 9) - (TONE_RANK[b.tone] ?? 9));
+}
+
+/** The ingest row, when the ingest is down and was meant to be up. */
+function ingestAttention(ingest: Status["ingest"] | undefined): AttentionItem | null {
+  if (!ingest || ingestProcessUp(ingest) || ingest.state === "stopped") return null;
+  return {
+    key: "ingest",
+    tone: ingest.state === "failed" ? "down" : "warn",
+    subject: "Ingest",
+    state: ingest.state,
+    detail: ingest.lastError,
+  };
+}
+
+/** The rows one enabled destination contributes: its process problem, and a
+ *  stop the server could not confirm. */
+function destinationAttention(d: DestStatus): AttentionItem[] {
+  const rows: AttentionItem[] = [];
+  // The same reading onAir counts by, so a destination the bar calls
+  // degraded always has a row here to say why.
+  const state = destinationShownState(d.process);
+  if (state === "failed") {
+    rows.push({
+      key: `dest-${d.id}`,
+      tone: "down",
+      subject: d.name,
+      state,
+      detail: d.process?.lastError ?? d.error,
+      cause: d.reason?.cause,
+      destinationId: d.id,
+    });
+  } else if (state === "reconnecting" || state === "starting") {
+    rows.push({
+      key: `dest-${d.id}`,
+      tone: "warn",
+      subject: d.name,
+      state,
+      detail: d.process?.lastError,
+      cause: d.reason?.cause,
+      destinationId: d.id,
+    });
+  }
+  // A stop that was never confirmed is its own row, not a footnote on the one
+  // above: the child may still be running and still publishing, and the state
+  // reads "stopped" on both arms of Stop, so nothing else on the page can say
+  // it. See DestStatus.stopWarning.
+  if (d.stopWarning) {
+    rows.push({
+      key: `stop-${d.id}`,
+      tone: "warn",
+      subject: d.name,
+      detail: d.stopWarning,
+      destinationId: d.id,
+    });
+  }
+  return rows;
+}
+
+/** The row for a rendition that has failed while someone is still drawing on it. */
+function renditionAttention(r: RenditionStatus): AttentionItem | null {
+  if (r.consumers <= 0) return null;
+  if (r.process?.state !== "failed" && !r.error) return null;
+  return {
+    key: `rendition-${r.id}`,
+    tone: "down",
+    subject: renditionSubject(r),
+    state: r.process?.state,
+    detail: r.error ?? r.process?.lastError,
+  };
 }
 
 /** Names the rendition as the encode tier it is, so a row reading "720p" is not

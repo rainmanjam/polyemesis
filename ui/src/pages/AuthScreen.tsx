@@ -27,7 +27,7 @@ const MIN_PASSWORD = 8;
  * spends on any other single concern. This is a hint. The server enforces the
  * minimum, and the server is what decides.
  */
-const PW_CLASSES = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/];
+const PW_CLASSES = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/];
 
 function strengthSegmentClass(score: number, seg: number): string {
   if (score < seg) return "bg-border";

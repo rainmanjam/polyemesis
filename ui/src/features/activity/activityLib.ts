@@ -59,9 +59,10 @@ export function amountValue(a: ActivityAmount | undefined): { code: string; valu
  *  an amount in anything else, or no amount at all, is never hidden. Nothing is
  *  converted -- a euro is not "worth" so many bits. */
 export function belowMinimum(e: ActivityEvent, filter: { code: string; min: number } | null): boolean {
-  if (!filter || !(filter.min > 0)) return false;
+  // NaN is "not greater than zero" too, so it is spelled out rather than negated.
+  if (!filter || Number.isNaN(filter.min) || filter.min <= 0) return false;
   const v = amountValue(e.amount);
-  if (!v || v.code !== filter.code) return false;
+  if (v?.code !== filter.code) return false;
   return v.value < filter.min;
 }
 

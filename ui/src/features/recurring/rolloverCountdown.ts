@@ -34,7 +34,7 @@ export type CountdownState =
 export function countdownFor(view: RolloverView, now: Date): CountdownState {
   const limit = view.limit;
   if (!limit) return { kind: "none", reason: "no-limit" };
-  if (limit.status === "unverified" || !(limit.hours > 0)) {
+  if (limit.status === "unverified" || Number.isNaN(limit.hours) || limit.hours <= 0) {
     return { kind: "none", reason: "unverified" };
   }
   if (!view.delivering) return { kind: "none", reason: "not-delivering" };

@@ -399,9 +399,7 @@ export function GoLiveComposer() {
                 <Label htmlFor="golive-title">{t("dash.metaTitle")}</Label>
                 {titleMax > 0 && (
                   <span
-                    className={`tnum font-mono text-micro ${
-                      overLimit.length > 0 ? "text-down" : "text-muted-foreground"
-                    }`}
+                    className={`tnum font-mono text-micro ${limitTone(overLimit)}`}
                   >
                     {title.length}/{titleMax}
                   </span>
@@ -425,9 +423,7 @@ export function GoLiveComposer() {
                 <Label htmlFor="golive-description">{t("dash.metaDescription")}</Label>
                 {descriptionMax > 0 && (
                   <span
-                    className={`tnum font-mono text-[10px] ${
-                      descriptionOverLimit.length > 0 ? "text-down" : "text-muted-foreground"
-                    }`}
+                    className={`tnum font-mono text-[10px] ${limitTone(descriptionOverLimit)}`}
                   >
                     {description.length}/{descriptionMax}
                   </span>
@@ -579,9 +575,9 @@ export function GoLiveComposer() {
                   may not have reached the platform, and only the platform can
                   say which now. */}
               {jobLost && (
-                <p role="status" className="text-sm text-warn">
+                <output className="block text-sm text-warn">
                   {t("dash.pushStatusLost")}
-                </p>
+                </output>
               )}
               {job.results.map((res) => {
                 // A row still "pending" on a lost job is not pushing any more:
@@ -1219,6 +1215,21 @@ function orderSections(
   s: { top: ReactNode; composer: ReactNode; destinations: ReactNode; exposure: ReactNode },
 ): ReactNode[] {
   return narrow ? [s.destinations, s.top, s.exposure, s.composer] : [s.top, s.composer, s.destinations];
+}
+
+/** The colour of a character counter: red once any limit is exceeded. */
+function limitTone(over: readonly unknown[]): string {
+  return over.length > 0 ? "text-down" : "text-muted-foreground";
+}
+
+/** The relay subscriber count on the Pipeline card. Not `?? 0`: before the
+ *  first snapshot there is no subscriber count, and zero subscribers is a
+ *  meaningful, alarming number to show someone who is broadcasting. #663. */
+function relaySubscriberText(
+  snapshotKnown: boolean,
+  programmeStatus: { relay?: { subscribers?: readonly unknown[] | null } } | null | undefined,
+): number | string {
+  return snapshotKnown && programmeStatus ? (programmeStatus.relay?.subscribers?.length ?? 0) : "—";
 }
 
 export function Dashboard() {
@@ -2054,7 +2065,7 @@ export function Dashboard() {
                   {/* Not `?? 0`: before the first snapshot there is no
                       subscriber count, and zero subscribers is a meaningful,
                       alarming number to show someone who is broadcasting. #663. */}
-                  {snapshotKnown && programmeStatus ? (programmeStatus.relay?.subscribers?.length ?? 0) : "—"}
+                  {relaySubscriberText(snapshotKnown, programmeStatus)}
                 </span>
               </div>
 

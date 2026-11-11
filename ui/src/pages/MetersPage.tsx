@@ -299,8 +299,7 @@ export function MetersPage() {
           out of internal/ffmpeg until now. Zero for any ingest anyone is likely
           to send, so this row is normally absent rather than reassuring. */}
       {(source?.metersDropped ?? 0) > 0 && (
-        <div
-          role="status"
+        <output
           className="flex items-start gap-2 rounded-md border border-warn/50 bg-warn/5 px-3 py-2 text-[11px]"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
@@ -315,7 +314,7 @@ export function MetersPage() {
               em: <em>{t("meters.droppedBodyEmph")}</em>,
             })}
           </span>
-        </div>
+        </output>
       )}
 
       <div className="mb-2 flex justify-end">
@@ -476,6 +475,24 @@ export function MetersPage() {
   );
 }
 
+/** The verdict word for the row: the analyser's failure, or "Not set" when no
+ *  target exists, else the verdict itself. */
+function verdictLabelOf(t: ReturnType<typeof useT>, report: LoudnessReport, notSet: boolean): string {
+  if (report.error) return t("meters.analyserFailed");
+  if (notSet) return t("routing.meters.notSet");
+  return report.verdict;
+}
+
+/** The integrated loudness, or the dash until it is measured. */
+function integratedText(report: LoudnessReport, measured: boolean): string {
+  return measured && report.integrated ? lufs(report.integratedLufs) : "—";
+}
+
+/** The deviation from target, or the dash until it is measured against one. */
+function deviationText(report: LoudnessReport, measured: boolean, targeted: boolean): string {
+  return measured && targeted && report.integrated ? signed(report.deviationLu) : "—";
+}
+
 /** One destination's compliance readout.
  *
  *  Its own component because the numbers are only half the story: which of them
@@ -504,9 +521,7 @@ export function ComplianceRow({
     measured &&
     targeted &&
     report.truePeakDbtp > report.target.truePeakDbtp + truePeakFailOverDb;
-  let verdictLabel: string = report.verdict;
-  if (report.error) verdictLabel = t("meters.analyserFailed");
-  else if (notSet) verdictLabel = t("routing.meters.notSet");
+  const verdictLabel = verdictLabelOf(t, report, notSet);
 
   return (
     <div className="flex flex-col gap-1.5 border-b border-border pb-2 last:border-0 last:pb-0">
@@ -564,13 +579,13 @@ export function ComplianceRow({
                 verdict's colour and the others stay neutral. */}
             <Stat
               labelKey="meters.integrated"
-              value={measured && report.integrated ? lufs(report.integratedLufs) : "—"}
+              value={integratedText(report, measured)}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
               labelKey="meters.deviation"
-              value={measured && targeted && report.integrated ? signed(report.deviationLu) : "—"}
+              value={deviationText(report, measured, targeted)}
               unit="LU"
               tone="muted"
             />

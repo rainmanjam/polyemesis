@@ -189,6 +189,26 @@ const DEFAULT_ZOOM_INDEX = 4;
 /** Shuttle speeds L and J walk through, the way a deck does. */
 const SHUTTLE_SPEEDS = [1, 2, 4, 8];
 
+/** The snap point while a drift is known and differs from the requested in-point. */
+function snapInMsOf(plan: { driftKnown: boolean; inMs: number; requestedInMs: number } | null | undefined): number | null {
+  return plan && plan.driftKnown && plan.inMs !== plan.requestedInMs ? plan.inMs : null;
+}
+
+/** A shuttle button is the primary one while its direction is active. */
+function shuttleVariant(active: boolean): "default" | "secondary" {
+  return active ? "default" : "secondary";
+}
+
+function shuttleLabel(shuttle: number): string {
+  return shuttle > 0 ? `+${shuttle}x` : `${shuttle}x`;
+}
+
+/** The captions track: the stored transcript when there is one, else the
+ *  captions viewers saw live (#8). */
+function captionTrackUrl(id: number, hasTranscript: boolean): string {
+  return api.captionExportUrl(id, "vtt", hasTranscript ? "recording" : "live");
+}
+
 export function ClipEditor() {
   const t = useT();
   const params = useParams();
@@ -678,7 +698,7 @@ export function ClipEditor() {
     name: s.name,
     missing: s.missing,
   }));
-  const snapInMs = plan && plan.driftKnown && plan.inMs !== plan.requestedInMs ? plan.inMs : null;
+  const snapInMs = snapInMsOf(plan);
   const tooLong = (outMs - inMs) / 1000 > source.maxClipSeconds;
 
   return (
@@ -732,7 +752,7 @@ export function ClipEditor() {
                       <track
                         kind="captions"
                         label={t("wave3.captions.playerTrack")}
-                        src={api.captionExportUrl(source.recordingId, "vtt", source.hasTranscript ? "recording" : "live")}
+                        src={captionTrackUrl(source.recordingId, source.hasTranscript)}
                       />
                     )}
                   </video>
@@ -752,7 +772,7 @@ export function ClipEditor() {
               <div className="flex flex-wrap items-center gap-1.5 border-t border-border p-2">
                 <Button
                   size="sm"
-                  variant={shuttle < 0 ? "default" : "secondary"}
+                  variant={shuttleVariant(shuttle < 0)}
                   onClick={shuttleBack}
                   title={t("clipedit.shuttleBack")}
                 >
@@ -760,7 +780,7 @@ export function ClipEditor() {
                 </Button>
                 <Button
                   size="sm"
-                  variant={shuttle === 0 ? "default" : "secondary"}
+                  variant={shuttleVariant(shuttle === 0)}
                   onClick={() => setShuttle(0)}
                   title={t("clipedit.stop")}
                 >
@@ -768,7 +788,7 @@ export function ClipEditor() {
                 </Button>
                 <Button
                   size="sm"
-                  variant={shuttle > 0 ? "default" : "secondary"}
+                  variant={shuttleVariant(shuttle > 0)}
                   onClick={shuttleForward}
                   title={t("clipedit.playFaster")}
                 >
@@ -783,7 +803,7 @@ export function ClipEditor() {
                         pause state would show if it were rendered. Shuttle runs
                         both ways and the direction is the thing the badge is
                         for. */}
-                    {shuttle > 0 ? `+${shuttle}x` : `${shuttle}x`}
+                    {shuttleLabel(shuttle)}
                   </Badge>
                 )}
 

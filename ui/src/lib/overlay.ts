@@ -297,7 +297,7 @@ export interface PollDisplay {
   question: string;
   options: { label: string; votes: number }[];
   total: number;
-  state: "open" | "closing" | "ended" | string;
+  state: string;
   endsAt: string;
   endedAt?: string;
 }
@@ -369,24 +369,35 @@ export class SSEParser {
     while ((at = this.buf.indexOf("\n\n")) >= 0) {
       const block = this.buf.slice(0, at);
       this.buf = this.buf.slice(at + 2);
-      const f: SSEFrame = { data: "" };
-      const data: string[] = [];
-      for (const line of block.split("\n")) {
-        if (line === "" || line.startsWith(":")) continue;
-        const colon = line.indexOf(":");
-        const field = colon < 0 ? line : line.slice(0, colon);
-        let value = colon < 0 ? "" : line.slice(colon + 1);
-        if (value.startsWith(" ")) value = value.slice(1);
-        if (field === "id") f.id = value;
-        else if (field === "event") f.event = value;
-        else if (field === "data") data.push(value);
-      }
-      if (data.length === 0) continue;
-      f.data = data.join("\n");
-      out.push(f);
+      const f = parseFrame(block);
+      if (f) out.push(f);
     }
     return out;
   }
+}
+
+/** One blank-line-terminated block. Null when it carries no data field, which
+ *  is how a comment-only or keep-alive block is skipped. */
+function parseFrame(block: string): SSEFrame | null {
+  const f: SSEFrame = { data: "" };
+  const data: string[] = [];
+  for (const line of block.split("\n")) applySseLine(line, f, data);
+  if (data.length === 0) return null;
+  f.data = data.join("\n");
+  return f;
+}
+
+/** Applies one `field: value` line. Comments (leading colon) and blank lines
+ *  are ignored, and one space after the colon is dropped, per the SSE spec. */
+function applySseLine(line: string, f: SSEFrame, data: string[]): void {
+  if (line === "" || line.startsWith(":")) return;
+  const colon = line.indexOf(":");
+  const field = colon < 0 ? line : line.slice(0, colon);
+  let value = colon < 0 ? "" : line.slice(colon + 1);
+  if (value.startsWith(" ")) value = value.slice(1);
+  if (field === "id") f.id = value;
+  else if (field === "event") f.event = value;
+  else if (field === "data") data.push(value);
 }
 
 export interface StreamHandlers {
@@ -436,47 +447,73 @@ export async function runOverlayStream(
   fetchImpl: typeof fetch = fetch,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<void> {
-  let lastId = "";
-  let attempt = 0;
+  const cursor: StreamCursor = { lastId: "", attempt: 0 };
   while (!signal.aborted) {
-    try {
-      const headers: Record<string, string> = { [OVERLAY_KEY_HEADER]: key };
-      if (lastId) headers["Last-Event-ID"] = lastId;
-      const res = await fetchImpl("/api/v1/overlay/events", {
-        headers,
-        signal,
-        cache: "no-store",
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
-      });
-      if (res.status === 401) {
-        h.onDenied();
-        return;
-      }
-      if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
-      h.onState?.(true);
-      attempt = 0;
-      await h.onConnect?.();
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      const parser = new SSEParser();
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        for (const f of parser.push(dec.decode(value, { stream: true }))) {
-          if (f.id) lastId = f.id;
-          dispatch(f, h);
-        }
-      }
-    } catch {
-      if (signal.aborted) return;
-    }
+    const outcome = await connectOnce(key, h, signal, fetchImpl, cursor);
+    if (outcome !== "down") return;
     h.onState?.(false);
     if (signal.aborted) return;
     // A stream that ends is normal (a key rotation ends it on purpose, and the
     // next attempt then gets its 401); back off gently, capped at 10 s.
-    attempt++;
-    await wait(Math.min(10_000, 500 * 2 ** Math.min(attempt, 5)));
+    cursor.attempt++;
+    await wait(Math.min(10_000, 500 * 2 ** Math.min(cursor.attempt, 5)));
+  }
+}
+
+/** What survives between connection attempts. `lastId` is the resume point
+ *  sent as Last-Event-ID; `attempt` drives the back-off. */
+interface StreamCursor {
+  lastId: string;
+  attempt: number;
+}
+
+/** One connection. "denied" (401) and "aborted" end the whole run; "down"
+ *  means the stream ended or failed and the caller should back off and retry. */
+async function connectOnce(
+  key: string,
+  h: StreamHandlers,
+  signal: AbortSignal,
+  fetchImpl: typeof fetch,
+  cursor: StreamCursor,
+): Promise<"denied" | "aborted" | "down"> {
+  try {
+    const headers: Record<string, string> = { [OVERLAY_KEY_HEADER]: key };
+    if (cursor.lastId) headers["Last-Event-ID"] = cursor.lastId;
+    const res = await fetchImpl("/api/v1/overlay/events", {
+      headers,
+      signal,
+      cache: "no-store",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+    });
+    if (res.status === 401) {
+      h.onDenied();
+      return "denied";
+    }
+    if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+    h.onState?.(true);
+    cursor.attempt = 0;
+    await h.onConnect?.();
+    await readFrames(res.body, h, cursor);
+  } catch {
+    if (signal.aborted) return "aborted";
+  }
+  return "down";
+}
+
+/** Reads an open stream to its end, dispatching each frame and advancing the
+ *  resume point as ids arrive. */
+async function readFrames(body: ReadableStream<Uint8Array>, h: StreamHandlers, cursor: StreamCursor): Promise<void> {
+  const reader = body.getReader();
+  const dec = new TextDecoder();
+  const parser = new SSEParser();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    for (const f of parser.push(dec.decode(value, { stream: true }))) {
+      if (f.id) cursor.lastId = f.id;
+      dispatch(f, h);
+    }
   }
 }
 

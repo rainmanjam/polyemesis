@@ -139,7 +139,7 @@ const LOUDNESS_CUSTOM = "__custom__";
  *  `limiter` are decisions the operator already made, and routing never
  *  overrides them — so a target set alongside one is inert, and the editor has
  *  to say so rather than imply a compliance it is not delivering. */
-const LOUDNESS_ARMS: NormalizeMode[] = ["auto", "loudnorm"];
+const LOUDNESS_ARMS: ReadonlySet<NormalizeMode> = new Set<NormalizeMode>(["auto", "loudnorm"]);
 
 /** `delayMs` is signed and a signed number alone is ambiguous, so the editor
  *  splits it into a direction and a magnitude. */
@@ -1041,13 +1041,7 @@ export function RoutingPage() {
               onCompileError={setLiveError}
               onCompiledGraph={noteLiveGraph}
               allowAnnotating
-              footer={(compiled) => (
-                <>
-                  {t("route.copyFooter")}
-                  {(compiled?.videoDelayMs ?? 0) > 0 &&
-                    ` ${t("route.videoHeldBack", { ms: compiled?.videoDelayMs ?? 0 })}`}
-                </>
-              )}
+              footer={(compiled) => liveFooter(t, compiled)}
               // A27: the second mix is an advanced decision, so it sits at the
               // end of the live editor's collapsed Advanced section. Mounted
               // while collapsed: its compile error must keep blocking Save.
@@ -1092,35 +1086,14 @@ export function RoutingPage() {
                     // — contradicting the hedge SecondMixCard prints two cards
                     // above. The unconditional sentence is reserved for the case
                     // where nothing is conditional: a probed ingest, off Twitch.
-                    footer={() => {
-                      const base = (() => {
-                        if (vodBlockedByToggle) {
-                          return t("route.vodFooterBlocked");
-                        }
-                        // engine/destinations.go refuses the pair on the provisional
-                        // path for EVERY platform, not just Twitch: a provisional
-                        // compile already runs on a guessed channel layout, and a
-                        // second guessed mix on top of it doubles what is approximate.
-                        if (!ctx.probed) {
-                          return t("route.vodFooterUnprobed");
-                        }
-                        if (twitchRtmp) {
-                          return t("route.vodFooterTwitch");
-                        }
-                        return t("route.vodFooterSecond");
-                      })();
-                      // A MATRIX VOD mix takes its gain per cell, and a cell change is
-                      // structural: the destination restarts, which interrupts both
-                      // mixes for a moment. Said here, where the cells are edited.
-                      if (vodProfile?.mode === "matrix") {
-                        return (
-                          <>
-                            {t("wave3.vod.matrixRestart")} {base}
-                          </>
-                        );
-                      }
-                      return <>{base}</>;
-                    }}
+                    footer={() =>
+                      vodFooter(t, {
+                        blocked: vodBlockedByToggle,
+                        probed: ctx.probed,
+                        twitchRtmp,
+                        matrix: vodProfile?.mode === "matrix",
+                      })
+                    }
                   />
                 )}
                 </>
@@ -1224,6 +1197,54 @@ interface EditorContext {
 function overviewKind(isSel: boolean, mode: RoutingProfile["mode"]): OverviewRow["kind"] {
   if (!isSel) return "select";
   return mode === "matrix" ? "matrix" : "editable";
+}
+
+/** The live editor's footer under the mix: the copy note, plus the video
+ *  hold-back when the compile adds one. Called as a function by ProfileEditor,
+ *  so it is a plain helper rather than a component. */
+function liveFooter(t: Translator, compiled: RoutingResult | null): ReactNode {
+  return (
+    <>
+      {t("route.copyFooter")}
+      {(compiled?.videoDelayMs ?? 0) > 0 &&
+        ` ${t("route.videoHeldBack", { ms: compiled?.videoDelayMs ?? 0 })}`}
+    </>
+  );
+}
+
+/** The second mix's footer. The base sentence says why the pair is blocked,
+ *  unprobed, or what Twitch decides; a matrix mix adds the restart note. */
+function vodFooter(
+  t: Translator,
+  o: { blocked: boolean; probed: boolean; twitchRtmp: boolean; matrix: boolean },
+): ReactNode {
+  const base = (() => {
+    if (o.blocked) {
+      return t("route.vodFooterBlocked");
+    }
+    // engine/destinations.go refuses the pair on the provisional
+    // path for EVERY platform, not just Twitch: a provisional
+    // compile already runs on a guessed channel layout, and a
+    // second guessed mix on top of it doubles what is approximate.
+    if (!o.probed) {
+      return t("route.vodFooterUnprobed");
+    }
+    if (o.twitchRtmp) {
+      return t("route.vodFooterTwitch");
+    }
+    return t("route.vodFooterSecond");
+  })();
+  // A MATRIX VOD mix takes its gain per cell, and a cell change is
+  // structural: the destination restarts, which interrupts both
+  // mixes for a moment. Said here, where the cells are edited.
+  if (o.matrix) {
+    return (
+      <>
+        {t("wave3.vod.matrixRestart")} {base}
+      </>
+    );
+  }
+  return <>{base}</>;
 }
 
 function ProfileEditor({
@@ -2155,7 +2176,7 @@ export function LoudnessCard({
   else if (named) value = String(loudness.targetLufs);
   // A target under `off` or `limiter` is stored but inert — routing never
   // overrides a clip-protection mode the operator chose by hand.
-  const inert = loudness !== null && !LOUDNESS_ARMS.includes(normalize);
+  const inert = loudness !== null && !LOUDNESS_ARMS.has(normalize);
   let loudnessNote: ReactNode;
   if (loudness) {
     loudnessNote = t("route.measuredOverTheWholeProgramme");

@@ -18,6 +18,49 @@ export function alertName(t: Translator, d: Pick<ActivityDisplay, "name">): stri
   return d.name.trim() === "" ? t("activity.someone") : d.name;
 }
 
+function subscribeText(t: Translator, d: ActivityDisplay, name: string): string {
+  return d.tier
+    ? t("activity.say.subscribeTier", { name, tier: tierLabel(d.tier) })
+    : t("activity.say.subscribe", { name });
+}
+
+function resubText(t: Translator, d: ActivityDisplay, name: string): string {
+  if (!d.months) return t("activity.say.resubPlain", { name });
+  return d.months === 1
+    ? t("activity.say.resubOne", { name })
+    : t("activity.say.resub", { name, months: d.months });
+}
+
+function giftText(t: Translator, d: ActivityDisplay, name: string): string {
+  return d.count && d.count > 1
+    ? t("activity.say.gift", { name, count: d.count })
+    : t("activity.say.giftOne", { name });
+}
+
+function tipText(t: Translator, d: ActivityDisplay, name: string, showAmount: boolean): string {
+  const amount = d.amount?.display;
+  return showAmount && amount
+    ? t("activity.say.tip", { name, amount })
+    : t("activity.say.tipPlain", { name });
+}
+
+function raidText(t: Translator, d: ActivityDisplay, name: string): string {
+  if (!d.viewers) return t("activity.say.raidPlain", { name });
+  return d.viewers === 1
+    ? t("activity.say.raidOne", { name })
+    : t("activity.say.raid", { name, viewers: d.viewers });
+}
+
+function redemptionText(t: Translator, d: ActivityDisplay, name: string): string {
+  return d.title
+    ? t("activity.say.redemption", { name, title: d.title })
+    : t("activity.say.redemptionPlain", { name });
+}
+
+function hypetrainText(t: Translator, d: ActivityDisplay): string {
+  return d.level ? t("activity.say.hypetrain", { level: d.level }) : t("activity.say.hypetrainPlain");
+}
+
 /** The headline. `showAmount` false drops the figure but keeps the sentence,
  *  so a tip still reads as a tip. */
 export function alertHeadline(t: Translator, s: AlertSubject, showAmount = true): string {
@@ -28,35 +71,19 @@ export function alertHeadline(t: Translator, s: AlertSubject, showAmount = true)
     case "follow":
       return t("activity.say.follow", { name });
     case "subscribe":
-      return d.tier
-        ? t("activity.say.subscribeTier", { name, tier: tierLabel(d.tier) })
-        : t("activity.say.subscribe", { name });
+      return subscribeText(t, d, name);
     case "resub":
-      if (!d.months) return t("activity.say.resubPlain", { name });
-      return d.months === 1
-        ? t("activity.say.resubOne", { name })
-        : t("activity.say.resub", { name, months: d.months });
+      return resubText(t, d, name);
     case "gift":
-      return d.count && d.count > 1
-        ? t("activity.say.gift", { name, count: d.count })
-        : t("activity.say.giftOne", { name });
-    case "tip": {
-      const amount = d.amount?.display;
-      return showAmount && amount
-        ? t("activity.say.tip", { name, amount })
-        : t("activity.say.tipPlain", { name });
-    }
+      return giftText(t, d, name);
+    case "tip":
+      return tipText(t, d, name, showAmount);
     case "raid":
-      if (!d.viewers) return t("activity.say.raidPlain", { name });
-      return d.viewers === 1
-        ? t("activity.say.raidOne", { name })
-        : t("activity.say.raid", { name, viewers: d.viewers });
+      return raidText(t, d, name);
     case "redemption":
-      return d.title
-        ? t("activity.say.redemption", { name, title: d.title })
-        : t("activity.say.redemptionPlain", { name });
+      return redemptionText(t, d, name);
     case "hypetrain":
-      return d.level ? t("activity.say.hypetrain", { level: d.level }) : t("activity.say.hypetrainPlain");
+      return hypetrainText(t, d);
     case "shoutout":
       return t("activity.say.shoutout", { name });
     default:

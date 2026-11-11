@@ -256,7 +256,7 @@ export function withCategoryEnabled(
   def: ProtectionCategoryDef,
   on: boolean,
 ): AutomodProtection {
-  const categories = { ...(p.categories ?? {}) };
+  const categories = { ...p.categories };
   const next = pruneCategory({
     ...categories[def.id],
     enabled: on === def.defaultOn ? undefined : on,
@@ -272,8 +272,8 @@ export function withDetectorEnabled(
   d: ProtectionDetectorDef,
   on: boolean,
 ): AutomodProtection {
-  const categories = { ...(p.categories ?? {}) };
-  const detectors = { ...(categories[cat.id]?.detectors ?? {}) };
+  const categories = { ...p.categories };
+  const detectors = { ...categories[cat.id]?.detectors };
   if (on === d.defaultOn) delete detectors[d.id];
   else detectors[d.id] = on;
   const next = pruneCategory({ ...categories[cat.id], detectors });
@@ -287,7 +287,7 @@ export function withDetectorHold(
   d: ProtectionDetectorDef,
   hold: boolean,
 ): AutomodProtection {
-  const holdDetectors = { ...(p.holdDetectors ?? {}) };
+  const holdDetectors = { ...p.holdDetectors };
   if (hold === d.defaultHold) delete holdDetectors[d.group];
   else holdDetectors[d.group] = hold;
   return { ...p, holdDetectors };
@@ -298,7 +298,7 @@ export function withCeiling(
   cat: ProtectionCategoryDef,
   ceiling: AutomodCeiling,
 ): AutomodProtection {
-  const ceilings = { ...(p.ceilings ?? {}) };
+  const ceilings = { ...p.ceilings };
   if (ceiling === cat.ceiling) delete ceilings[cat.id];
   else ceilings[cat.id] = ceiling;
   return { ...p, ceilings };
