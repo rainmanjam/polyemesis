@@ -1123,6 +1123,53 @@ func (c *lifecycleCoordinator) resetOnUpEdge(d *db.Destination, broadcastID stri
 // skipStateRead reports whether this sweep leaves the row alone without
 // reading its broadcast's state, applying the untracking or reset each
 // skipping case calls for.
+// clearFinishedX forgets a finished X broadcast's record, so switching the
+// destination on again opens a new one. It writes only when there is a record to
+// clear.
+func (c *lifecycleCoordinator) clearFinishedX(d *db.Destination) {
+	if lifecycleBroadcastID(d) != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 {
+		c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+	}
+}
+
+// clearFinishedYouTube forgets a finished YouTube broadcast's record, the same
+// release clearFinishedX makes for X, and also clears the opened marker.
+func (c *lifecycleCoordinator) clearFinishedYouTube(d *db.Destination) {
+	if d.Lifecycle.BroadcastID != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 || d.Lifecycle.Opened {
+		c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+	}
+}
+
+// quietUnairedX is the X case of skipStateRead: a broadcast that never aired, on
+// a switched-off destination, already read once since. Each clause is the same
+// clause, in the same order, as the case it replaces.
+func (c *lifecycleCoordinator) quietUnairedX(d *db.Destination, broadcastID string) bool {
+	return !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated) &&
+		c.quietXAt(d.ID) == broadcastID && !c.goLiveUnresolved(d.Lifecycle.GoLiveSentMS)
+}
+
+// quietUnairedYouTube is the YouTube case of skipStateRead: a broadcast polyemesis
+// opened that never aired, on a switched-off destination, already read once since.
+func (c *lifecycleCoordinator) quietUnairedYouTube(d *db.Destination, broadcastID string) bool {
+	return !d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && c.quietXAt(d.ID) == broadcastID &&
+		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady))
+}
+
+// settledYouTubeWait is the enabled YouTube case of skipStateRead: a created or
+// ready broadcast that nothing is flowing into and that is not due a live recheck.
+func (c *lifecycleCoordinator) settledYouTubeWait(d *db.Destination) bool {
+	return d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" && !c.isFlowing(d.ID) &&
+		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
+		!c.dueForLiveRecheck(d.ID)
+}
+
+// giveUpEnabled is the enabled case of skipStateRead that stops reading a row
+// which has failed too often, unless it is an X broadcast whose rearm is due.
+func (c *lifecycleCoordinator) giveUpEnabled(d *db.Destination) bool {
+	return d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter &&
+		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID))
+}
+
 func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID string, mode sweepMode) bool {
 	switch {
 	case !d.Enabled && d.Lifecycle.Phase == "":
@@ -1132,8 +1179,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// phase has never been confirmed on air by this process, so there is
 		// nothing here that could justify sending `complete` to it.
 		return true
-	case !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated) &&
-		c.quietXAt(d.ID) == broadcastID && !c.goLiveUnresolved(d.Lifecycle.GoLiveSentMS):
+	case c.quietUnairedX(d, broadcastID):
 		// AN X BROADCAST THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF, AND
 		// ALREADY READ ONCE SINCE. open() records one for every enabled X
 		// destination before any bytes arrive, and only this coordinator's
@@ -1151,8 +1197,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		}
 		c.untrack(d.ID)
 		return true
-	case !d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Opened && c.quietXAt(d.ID) == broadcastID &&
-		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)):
+	case c.quietUnairedYouTube(d, broadcastID):
 		// A BROADCAST POLYEMESIS OPENED THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF, AND READ ONCE SINCE. Nothing
 		// can end it (YouTube documents no created-to-complete), so reading it every sweep would spend two units
 		// each, for the life of the daemon. The one read after the switch-off is kept; re-enabling reads it again and
@@ -1163,18 +1208,14 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// Finished, as below, and the finished broadcast is forgotten as well, so
 		// switching the destination on again opens a new one. This is the release
 		// the CANCELED fault names.
-		if lifecycleBroadcastID(d) != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 {
-			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
-		}
+		c.clearFinishedX(d)
 		c.untrack(d.ID)
 		return true
 	case !d.Enabled && d.Platform == db.PlatformYouTube && isTerminalPhase(d.Lifecycle.Phase):
 		// Finished, and the finished broadcast is forgotten too, as X's is above: the recorded id would otherwise
 		// stand between the next SCHEDULED show's announcement (ActiveBroadcastID prefers the recorded id) and the
 		// coordinator, and an ad-hoc go-live would open nothing.
-		if d.Lifecycle.BroadcastID != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 || d.Lifecycle.Opened {
-			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
-		}
+		c.clearFinishedYouTube(d)
 		c.forgetTarget(d.ID)
 		c.untrack(d.ID)
 		return true
@@ -1236,13 +1277,10 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// for the full arithmetic, and forgetLiveRecheck for why the case that
 		// actually happens is noticed in one sweep rather than forty.
 		return true
-	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" && !c.isFlowing(d.ID) &&
-		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
-		!c.dueForLiveRecheck(d.ID):
+	case c.settledYouTubeWait(d):
 		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
 		return true
-	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter &&
-		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID)):
+	case c.giveUpEnabled(d):
 		// Held. (An X destination whose fault is not terminal is let through once every lifecycleRearmEvery: the
 		// read says whether the source has bytes, and if it does one go-live is tried. The first success clears it.) See lifecycleGiveUpAfter -- the fault stands, the stream keeps
 		// going out, and nothing here calls the platform again until an UP edge
@@ -1273,6 +1311,69 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 	return false
 }
 
+// skipEnabledRead is skipStateRead for a destination that is switched on.
+func (c *lifecycleCoordinator) skipEnabledRead(d *db.Destination, mode sweepMode) bool {
+	switch {
+	case d.Enabled && mode == sweepEndsOnly:
+		// Shutting down. Never go live on the way out.
+		return true
+	case d.Enabled && strings.EqualFold(d.Lifecycle.Phase, phaseLive) && d.Lifecycle.Fault == "" &&
+		!c.dueForLiveRecheck(d.ID):
+		// SETTLED, SO ASKED RARELY -- NOT NEVER. A confirmed-live broadcast on an
+		// enabled destination usually has nothing left to be done to it, and
+		// BroadcastState is TWO API calls: the broadcast, then its bound stream.
+		//
+		// THIS BRANCH USED TO RETURN FOR EVER, on the claim that "nothing is lost
+		// by not asking: the next thing that can matter is the operator disabling
+		// or deleting the row, and both change the row". THAT SENTENCE WAS FALSE.
+		// A broadcast can END WITH THE ROW UNTOUCHED, and at least three routine
+		// things do it:
+		//
+		//   - YouTube's own enableAutoStop (oauth.BroadcastSettings.EnableAutoStop)
+		//     completes the broadcast when the ingest stops. THE END POLICY ABOVE
+		//     LEANS ON IT BY NAME as the backstop for a crash -- so the coordinator
+		//     was depending on a mechanism whose result it then refused to look at.
+		//   - The operator ends the broadcast in YouTube Studio, or an
+		//     administrator removes it (phase `revoked`).
+		//   - The token is revoked, so nothing here can confirm anything again.
+		//
+		// A permanent skip makes all three invisible and the skip is permanent:
+		// the row says `live` for the rest of the daemon's life, on the card the
+		// design tells operators to read and in the phase the END policy consults.
+		//
+		// RE-READING EVERY SWEEP IS NOT THE FIX EITHER. 5,760 sweeps a day times
+		// two calls is 11,520 per destination per day against Google's published
+		// default project allocation of 10,000 units a day, SHARED with metadata
+		// pushes, chat and stats -- one destination would exhaust the install by
+		// mid-afternoon, and an install out of quota cannot END anything, which is
+		// strictly worse than a stale label.
+		//
+		// So it is a cadence: one read every fortieth sweep, 144 reads x 2 calls =
+		// 288 a day per destination, under 3% of the allocation, with a wrong
+		// label standing for at most ten minutes. See lifecycleLiveRecheckEvery
+		// for the full arithmetic, and forgetLiveRecheck for why the case that
+		// actually happens is noticed in one sweep rather than forty.
+		return true
+	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" && !c.isFlowing(d.ID) &&
+		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
+		!c.dueForLiveRecheck(d.ID):
+		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
+		return true
+	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter &&
+		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID)):
+		// Held. (An X destination whose fault is not terminal is let through once every lifecycleRearmEvery: the
+		// read says whether the source has bytes, and if it does one go-live is tried. The first success clears it.) See lifecycleGiveUpAfter -- the fault stands, the stream keeps
+		// going out, and nothing here calls the platform again until an UP edge
+		// says the world changed.
+		//
+		// The hold is deliberately NOT applied to the disabled branch below: an
+		// operator who gives up on going live and switches the destination off
+		// must still have their broadcast ended.
+		return true
+	}
+	return false
+}
+
 // readAndAct reads the broadcast's state from the platform and acts on the
 // plan derived from it.
 func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.BroadcastLifecycler,
@@ -1291,6 +1392,51 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	st, acct, err := withRetoken(ctx, c, *d.AccountID, acct, func(a *db.PlatformAccount) (*oauth.BroadcastLifecycleState, error) {
 		return prov.BroadcastState(cctx, a.AccessToken, broadcastID)
 	})
+	if err != nil {
+		c.readFailed(d, broadcastID, err)
+		return
+	}
+	if d.Platform == db.PlatformX && st.BroadcastID != "" && st.BroadcastID != broadcastID {
+		// The handle stood for a broadcast that is already on air: a go-live whose answer was lost, or whose id
+		// could not be recorded. Adopt the real one, and track it as what it is so a deleted row still ends it.
+		c.log.Info("broadcast lifecycle: adopted the live X broadcast behind a pending destination",
+			"destination", d.Name, bcAttr(st.BroadcastID), "state", st.Status)
+		broadcastID = st.BroadcastID
+		c.trackAs(d, broadcastID, xLifecyclePhase(st.Status))
+	}
+
+	if !d.Enabled && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
+		return
+	}
+	c.pointChatFromState(d, st)
+	plan := c.planForRead(d, broadcastID, st, cleared)
+	switch {
+	case plan.Renew:
+		// Second show: the recorded broadcast is finished and the destination is
+		// still on air. Forget it and open the next one.
+		if creator, ok := prov.(oauth.BroadcastCreator); ok {
+			c.renew(ctx, creator, d)
+		}
+		return
+	case plan.Fault != "":
+		// Terminal: no number of retries changes it. Recorded at the give-up
+		// count so nothing calls again, and escalated so somebody is told.
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+			b.Phase, b.Attempts, b.Fault, b.Terminal = plan.Phase, lifecycleGiveUpAfter, plan.Fault, true
+		})
+		c.raise(d, broadcastID, plan.Fault)
+		return
+	case plan.Send == "":
+		c.settleUnsent(d, broadcastID, plan)
+		return
+	}
+	c.sendPlan(cctx, prov, acct, d, broadcastID, st, plan)
+}
+
+// readFailed handles a failed read of a broadcast's state: a source that is gone,
+// a YouTube broadcast that is no longer listed, and anything else, which is
+// noted as a failure. It always returns; the caller has nothing more to do.
+func (c *lifecycleCoordinator) readFailed(d *db.Destination, broadcastID string, err error) {
 	if err != nil && errors.Is(err, oauth.ErrXSourceGone) {
 		// THE SOURCE IS GONE FROM X, SO NOTHING CAN EVER GO LIVE ON IT. Forget it, and its go-live markers, so the next
 		// sweep opens the destination again instead of asking about a dead id for ever; keep the fault visible and
@@ -1329,19 +1475,12 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 			"%s would not say what state %s is in: %v", d.Platform, describeBroadcast(broadcastID), err), err)
 		return
 	}
-	if d.Platform == db.PlatformX && st.BroadcastID != "" && st.BroadcastID != broadcastID {
-		// The handle stood for a broadcast that is already on air: a go-live whose answer was lost, or whose id
-		// could not be recorded. Adopt the real one, and track it as what it is so a deleted row still ends it.
-		c.log.Info("broadcast lifecycle: adopted the live X broadcast behind a pending destination",
-			"destination", d.Name, bcAttr(st.BroadcastID), "state", st.Status)
-		broadcastID = st.BroadcastID
-		c.trackAs(d, broadcastID, xLifecyclePhase(st.Status))
-	}
+}
 
-	if !d.Enabled && c.deleteIfNeverAired(ctx, prov, acct, d, broadcastID, st.Status) {
-		return
-	}
-	c.pointChatFromState(d, st)
+// planForRead works out what a successful state read asks for: the plan, with
+// the adjustments a read can justify, and the live-read note the sweep records.
+func (c *lifecycleCoordinator) planForRead(d *db.Destination, broadcastID string,
+	st *oauth.BroadcastLifecycleState, cleared bool) lifecyclePlan {
 	plan := planLifecycle(d.Enabled, st)
 	if d.Platform == db.PlatformYouTube && plan.Fault != "" && d.Enabled && d.YouTubeLiveNow() &&
 		strings.EqualFold(strings.TrimSpace(st.Status), phaseComplete) &&
@@ -1370,27 +1509,7 @@ func (c *lifecycleCoordinator) readAndAct(ctx context.Context, prov oauth.Broadc
 	waiting := d.Platform == db.PlatformYouTube && d.Enabled && !c.isFlowing(d.ID) && plan.Send == "" && !plan.Renew && plan.Fault == "" &&
 		(strings.EqualFold(plan.Phase, phaseCreated) || strings.EqualFold(plan.Phase, phaseReady))
 	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive) || waiting)
-	switch {
-	case plan.Renew:
-		// Second show: the recorded broadcast is finished and the destination is
-		// still on air. Forget it and open the next one.
-		if creator, ok := prov.(oauth.BroadcastCreator); ok {
-			c.renew(ctx, creator, d)
-		}
-		return
-	case plan.Fault != "":
-		// Terminal: no number of retries changes it. Recorded at the give-up
-		// count so nothing calls again, and escalated so somebody is told.
-		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
-			b.Phase, b.Attempts, b.Fault, b.Terminal = plan.Phase, lifecycleGiveUpAfter, plan.Fault, true
-		})
-		c.raise(d, broadcastID, plan.Fault)
-		return
-	case plan.Send == "":
-		c.settleUnsent(d, broadcastID, plan)
-		return
-	}
-	c.sendPlan(cctx, prov, acct, d, broadcastID, st, plan)
+	return plan
 }
 
 // settleUnsent records a plan with nothing to send: the phase the platform
@@ -1580,6 +1699,46 @@ func scrubSourceKey(detail, key string) string {
 	return redact.Redact(detail)
 }
 
+// refuseTransition handles a failed transition. A DEFINITE REFUSAL created
+// nothing, so the markers are cleared with it. Any other failure (a timeout, a
+// 5xx) might have created a broadcast, so they are kept.
+func (c *lifecycleCoordinator) refuseTransition(d *db.Destination, broadcastID, sendID string, plan lifecyclePlan, err error) {
+	var refused *oauth.TransitionRefused
+	if errors.As(err, &refused) {
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.GoLiveAttemptMS, b.GoLiveSentMS = 0, 0 })
+	}
+	c.handleRefusal(d, sendID, plan.Send, err)
+}
+
+// xAttemptMS is the stamp, on X's own clock, of a go-live attempt: now, moved by
+// the offset X's last answer implied. It is zero when no offset is known, which
+// is the fail-safe advance describes below.
+func xAttemptMS(prov oauth.BroadcastLifecycler, acct *db.PlatformAccount, now time.Time) int64 {
+	var attemptX int64
+	if cr, ok := prov.(interface {
+		XClockOffsetMS(accessToken string) (int64, bool)
+	}); ok {
+		if off, ok := cr.XClockOffsetMS(acct.AccessToken); ok {
+			attemptX = now.UnixMilli() + off
+		}
+	}
+	return attemptX
+}
+
+// announceLive tells chat a broadcast is on air and points the chat reader at
+// its live chat id once the platform has it.
+func (c *lifecycleCoordinator) announceLive(ctx context.Context, prov oauth.BroadcastLifecycler,
+	acct *db.PlatformAccount, d *db.Destination, broadcastID string) {
+	c.tellChat(d.Platform, d.AccountID, broadcastID)
+	if d.Platform == db.PlatformYouTube {
+		// The transition just made it live. Read it once more for its liveChatId (the insert may not have carried
+		// one) rather than leave chat waiting until the settled-live cadence next asks.
+		if st, serr := prov.BroadcastState(ctx, acct.AccessToken, broadcastID); serr == nil {
+			c.pointChatFromState(d, st)
+		}
+	}
+}
+
 // advance sends a transition that can only ever START something: testing or
 // live. It is the branch every ENABLED destination takes, and it has no path to
 // oauth.PhaseComplete at all.
@@ -1594,14 +1753,7 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	if plan.Send == oauth.PhaseLive && d.Platform == db.PlatformX {
 		if src, _, ok := oauth.XPendingParts(broadcastID); ok && d.Lifecycle.GoLiveSentMS == 0 {
 			now := c.clock()
-			var attemptX int64
-			if cr, ok := prov.(interface {
-				XClockOffsetMS(accessToken string) (int64, bool)
-			}); ok {
-				if off, ok := cr.XClockOffsetMS(acct.AccessToken); ok {
-					attemptX = now.UnixMilli() + off
-				}
-			}
+			attemptX := xAttemptMS(prov, acct, now)
 			sendID = oauth.XPendingHandle(src, attemptX)
 			if _, err := c.recordControlErr(d, sendID, func(b *db.BroadcastControl) {
 				b.GoLiveAttemptMS, b.GoLiveSentMS = attemptX, now.UnixMilli()
@@ -1623,13 +1775,7 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	}
 	res, err := c.transition(ctx, prov, acct, d, sendID, plan.Send)
 	if err != nil {
-		// A DEFINITE REFUSAL created nothing, so the markers are cleared with it. Any other failure (a timeout, a 5xx)
-		// might have created a broadcast, so they are kept.
-		var refused *oauth.TransitionRefused
-		if errors.As(err, &refused) {
-			c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.GoLiveAttemptMS, b.GoLiveSentMS = 0, 0 })
-		}
-		c.handleRefusal(d, sendID, plan.Send, err)
+		c.refuseTransition(d, broadcastID, sendID, plan, err)
 		return
 	}
 	// A go-live can answer with a different id than the one it was asked about: X creates the broadcast at go-live,
@@ -1638,14 +1784,7 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 		broadcastID = id
 	}
 	if plan.Send == oauth.PhaseLive {
-		c.tellChat(d.Platform, d.AccountID, broadcastID)
-		if d.Platform == db.PlatformYouTube {
-			// The transition just made it live. Read it once more for its liveChatId (the insert may not have carried
-			// one) rather than leave chat waiting until the settled-live cadence next asks.
-			if st, serr := prov.BroadcastState(ctx, acct.AccessToken, broadcastID); serr == nil {
-				c.pointChatFromState(d, st)
-			}
-		}
+		c.announceLive(ctx, prov, acct, d, broadcastID)
 	}
 	// TRACKED BEFORE THE RECORD IS WRITTEN. The broadcast is on air from here, and the tracked target is what
 	// endOrphan ends if the row is deleted before the next sweep. Tracking it only after a successful write
@@ -1777,70 +1916,14 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		return
 	}
 
-	// A BROADCAST THIS PROCESS NEVER PUT ON AIR IS NOT ITS BUSINESS TO END.
-	//
-	// lifecycleTarget.Phase was added for exactly this and nothing ever read it.
-	// Its own doc says so: "A target whose broadcast never aired must not be
-	// ended when its row disappears -- there is nothing to end, and sending
-	// `complete` to a `created` broadcast is a transition YouTube documents no
-	// path for."
-	//
-	// considerRow already refuses on the same ground for a disabled row with no
-	// recorded phase, and calls that "the entire upgrade story and the entire
-	// somebody-else's-broadcast story at once". endOrphan reaches the same
-	// broadcasts by a different route -- the row vanished rather than being
-	// disabled -- and applied no such rule, so deleting a destination that had
-	// been created but never went live sent `complete` to it anyway.
-	//
-	// The asymmetry this file states everywhere decides the direction: declining
-	// to end a broadcast that should have ended costs a watch page that stays
-	// open; ending one that should not costs the show, because on YouTube
-	// complete is terminal.
-	if !endableFromPhase(t.Phase) && !(t.maybeLive && c.goLiveUnresolved(t.sentMS)) {
-		if t.maybeLive {
-			c.raiseLeftLiveTarget(t)
-		}
-		c.untrack(t.destinationID)
-		c.log.Info("broadcast lifecycle: a deleted destination's broadcast was never "+
-			"confirmed on air by this process, so it was left alone rather than ended",
-			"destination", t.Name, "platform", t.Platform,
-			bcAttr(t.BroadcastID), "phase", firstNonBlank(t.Phase, "(none)"))
+	if c.leaveUnconfirmedOrphan(t) {
 		return
 	}
 
-	// CONFIRM THE DELETION BEFORE ACTING ON IT. The caller reached here because
-	// the row was absent from ListDestinations, which is an inference about a
-	// query rather than a fact about a row. Ask directly.
-	//
-	// Anything other than a clean "not found" means DO NOTHING: a store error
-	// is not evidence of a deletion, and the next sweep will ask again. The
-	// asymmetry is deliberate and matches every other decision in this file --
-	// declining to end a broadcast that should have ended costs a watch page
-	// that stays open, and ending one that should not costs the show, because
-	// on YouTube complete is terminal.
-	if _, err := c.store.GetDestination(t.destinationID); !errors.Is(err, db.ErrNotFound) {
-		if err != nil {
-			c.log.Warn("broadcast lifecycle: could not confirm a destination was deleted, "+
-				"so its broadcast is left alone",
-				"destination", t.Name, bcAttr(t.BroadcastID), "err", err)
-			return
-		}
-		// The row is there after all. The listing was incomplete, not the
-		// world -- which is exactly the case this check exists for.
-		c.log.Warn("broadcast lifecycle: a destination was missing from the listing but "+
-			"still exists, so its broadcast was NOT ended",
-			"destination", t.Name, bcAttr(t.BroadcastID))
+	if c.orphanStillListed(t) {
 		return
 	}
-	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {
-		if t.maybeLive {
-			c.raiseLeftLiveTarget(t)
-		}
-		c.untrack(t.destinationID)
-		c.log.Warn("broadcast lifecycle: giving up on ending a deleted destination's broadcast; "+
-			"end it in the platform's own console, or let the platform's automatic stop close it "+
-			"when the ingest goes quiet",
-			"destination", t.Name, "platform", t.Platform, bcAttr(t.BroadcastID))
+	if c.giveUpOrphan(t) {
 		return
 	}
 
@@ -1888,9 +1971,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		return
 	}
 	// A pending handle names no broadcast: what is ended is the real one the read adopted from it.
-	if st.BroadcastID != "" && st.BroadcastID != t.BroadcastID {
-		t.BroadcastID = st.BroadcastID
-	}
+	t = adoptStateBroadcastID(t, st)
 	endID := t.BroadcastID
 	if _, _, err := withRetoken(ctx, c, t.AccountID, acct, func(a *db.PlatformAccount) (*oauth.TransitionResult, error) {
 		return prov.TransitionBroadcast(cctx, a.AccessToken, endID, oauth.PhaseComplete)
@@ -1906,6 +1987,95 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		DestinationID: t.destinationID, SourceID: t.SourceID, Destination: t.Name,
 		Platform: string(t.Platform), BroadcastID: publicBroadcastID(t.BroadcastID), Phase: phaseComplete, Ended: true,
 	})
+}
+
+// adoptStateBroadcastID returns t holding the broadcast id the platform's own
+// state answer named, when that answer names a different one.
+func adoptStateBroadcastID(t lifecycleTarget, st *oauth.BroadcastLifecycleState) lifecycleTarget {
+	if st.BroadcastID != "" && st.BroadcastID != t.BroadcastID {
+		t.BroadcastID = st.BroadcastID
+	}
+	return t
+}
+
+// leaveUnconfirmedOrphan reports whether endOrphan leaves a deleted destination's broadcast alone rather than ending it, because this process never confirmed it on air. It untracks the target when it does.
+func (c *lifecycleCoordinator) leaveUnconfirmedOrphan(t lifecycleTarget) bool {
+	// A BROADCAST THIS PROCESS NEVER PUT ON AIR IS NOT ITS BUSINESS TO END.
+	//
+	// lifecycleTarget.Phase was added for exactly this and nothing ever read it.
+	// Its own doc says so: "A target whose broadcast never aired must not be
+	// ended when its row disappears -- there is nothing to end, and sending
+	// `complete` to a `created` broadcast is a transition YouTube documents no
+	// path for."
+	//
+	// considerRow already refuses on the same ground for a disabled row with no
+	// recorded phase, and calls that "the entire upgrade story and the entire
+	// somebody-else's-broadcast story at once". endOrphan reaches the same
+	// broadcasts by a different route -- the row vanished rather than being
+	// disabled -- and applied no such rule, so deleting a destination that had
+	// been created but never went live sent `complete` to it anyway.
+	//
+	// The asymmetry this file states everywhere decides the direction: declining
+	// to end a broadcast that should have ended costs a watch page that stays
+	// open; ending one that should not costs the show, because on YouTube
+	// complete is terminal.
+	if !endableFromPhase(t.Phase) && !(t.maybeLive && c.goLiveUnresolved(t.sentMS)) {
+		if t.maybeLive {
+			c.raiseLeftLiveTarget(t)
+		}
+		c.untrack(t.destinationID)
+		c.log.Info("broadcast lifecycle: a deleted destination's broadcast was never "+
+			"confirmed on air by this process, so it was left alone rather than ended",
+			"destination", t.Name, "platform", t.Platform,
+			bcAttr(t.BroadcastID), "phase", firstNonBlank(t.Phase, "(none)"))
+		return true
+	}
+	return false
+}
+
+// orphanStillListed reports whether the store still holds a destination the listing had dropped. Only a clean not-found says the row is gone; anything else is not evidence of a deletion, and the next sweep asks again.
+func (c *lifecycleCoordinator) orphanStillListed(t lifecycleTarget) bool {
+	// CONFIRM THE DELETION BEFORE ACTING ON IT. The caller reached here because
+	// the row was absent from ListDestinations, which is an inference about a
+	// query rather than a fact about a row. Ask directly.
+	//
+	// Anything other than a clean "not found" means DO NOTHING: a store error
+	// is not evidence of a deletion, and the next sweep will ask again. The
+	// asymmetry is deliberate and matches every other decision in this file --
+	// declining to end a broadcast that should have ended costs a watch page
+	// that stays open, and ending one that should not costs the show, because
+	// on YouTube complete is terminal.
+	if _, err := c.store.GetDestination(t.destinationID); !errors.Is(err, db.ErrNotFound) {
+		if err != nil {
+			c.log.Warn("broadcast lifecycle: could not confirm a destination was deleted, "+
+				"so its broadcast is left alone",
+				"destination", t.Name, bcAttr(t.BroadcastID), "err", err)
+			return true
+		}
+		// The row is there after all. The listing was incomplete, not the
+		// world -- which is exactly the case this check exists for.
+		c.log.Warn("broadcast lifecycle: a destination was missing from the listing but "+
+			"still exists, so its broadcast was NOT ended",
+			"destination", t.Name, bcAttr(t.BroadcastID))
+		return true
+	}
+	return false
+}
+
+// giveUpOrphan reports whether endOrphan has tried to end this deleted destination's broadcast often enough to stop, and stops it when it has.
+func (c *lifecycleCoordinator) giveUpOrphan(t lifecycleTarget) bool {
+	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {
+		if t.maybeLive {
+			c.raiseLeftLiveTarget(t)
+		}
+		c.untrack(t.destinationID)
+		c.log.Warn("broadcast lifecycle: giving up on ending a deleted destination's broadcast; "+
+			"end it in the platform's own console, or let the platform's automatic stop close it "+
+			"when the ingest goes quiet",
+			"destination", t.Name, "platform", t.Platform, bcAttr(t.BroadcastID))
+		return true
+	}
+	return false
 }
 
 // ------------------------------------------------------------------- the plan
