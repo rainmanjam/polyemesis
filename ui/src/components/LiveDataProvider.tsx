@@ -335,7 +335,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
         // Re-resolving from scratch every time would drag a two-programme
         // install back to the first source whenever any source was touched.
         const remembered =
-          current != null && ids.some((id) => id === current) ? current : rememberedProgramme();
+          current != null && (ids as number[]).includes(current) ? current : rememberedProgramme();
         const picked = resolveProgramme(ids, remembered);
         rememberProgramme(picked);
         return picked;
