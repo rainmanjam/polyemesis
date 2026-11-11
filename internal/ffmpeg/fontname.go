@@ -102,11 +102,7 @@ func nameRecord(t []byte, id uint16) string {
 		raw := t[off : off+ln]
 		switch platform {
 		case 3, 0:
-			u := make([]uint16, len(raw)/2)
-			for j := range u {
-				u[j] = binary.BigEndian.Uint16(raw[2*j:])
-			}
-			if s := strings.TrimSpace(string(utf16.Decode(u))); s != "" {
+			if s := utf16NameString(raw); s != "" {
 				return s
 			}
 		case 1:
@@ -116,4 +112,13 @@ func nameRecord(t []byte, id uint16) string {
 		}
 	}
 	return mac
+}
+
+// utf16NameString decodes a big-endian UTF-16 name record, trimmed of spaces.
+func utf16NameString(raw []byte) string {
+	u := make([]uint16, len(raw)/2)
+	for j := range u {
+		u[j] = binary.BigEndian.Uint16(raw[2*j:])
+	}
+	return strings.TrimSpace(string(utf16.Decode(u)))
 }
