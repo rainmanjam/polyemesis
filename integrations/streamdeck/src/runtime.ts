@@ -727,10 +727,8 @@ export class Runtime {
     const gated = this.adminGated("streamdeck.dump.hold");
     if (gated.tone !== "idle") return gated;
     const delay = dest.delay;
-    // Not "seconds <= 0": that would let a NaN through, and `!(seconds > 0)` refuses it.
-    if (!delay || delay.seconds <= 0 || Number.isNaN(delay.seconds)) {
-      return { tone: "unavailable", label: "streamdeck.dump.noDelay", detail: dest.name };
-    }
+    const hasDelay = !!delay && delay.seconds > 0;
+    if (!hasDelay) return { tone: "unavailable", label: "streamdeck.dump.noDelay", detail: dest.name };
     const marker = {
       delaySeconds: Math.round(delay.seconds),
       delayEffectiveSeconds: Math.round(delay.effectiveSeconds ?? delay.seconds),
