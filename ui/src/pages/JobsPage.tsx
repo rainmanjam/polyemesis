@@ -178,6 +178,16 @@ function windowSummary(t: Translator, w: JobWindow): string {
   return `${start}–${end}${nextDay}, ${days} ${w.tz || "UTC"}`;
 }
 
+/** The name a confirm dialog gives a job: its label, or its kind when unlabelled. */
+function jobSubject(job: JobView | null): string {
+  return job ? (job.label ?? job.kind) : "";
+}
+
+/** The delete dialog's body: a clip export says what it leaves behind. */
+function deleteJobDescription(t: Translator, job: JobView | null): string {
+  return job?.kind === CLIP_EXPORT_KIND ? t("jobs.deleteExportDescription") : t("jobs.deleteDescription");
+}
+
 export function JobsPage() {
   const t = useT();
   const [view, setView] = useState<JobsOverview | null>(null);
@@ -527,7 +537,7 @@ export function JobsPage() {
         onOpenChange={(open) => {
           if (!open) setPendingCancel(null);
         }}
-        subject={pendingCancel ? (pendingCancel.label ?? pendingCancel.kind) : ""}
+        subject={jobSubject(pendingCancel)}
         title={t("jobs.cancelRunningTitle")}
         description={t("jobs.cancelRunningDescription")}
         confirmLabel={t("jobs.cancelRunningConfirm")}
@@ -569,13 +579,9 @@ export function JobsPage() {
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
-        subject={pendingDelete ? (pendingDelete.label ?? pendingDelete.kind) : ""}
+        subject={jobSubject(pendingDelete)}
         title={t("jobs.deleteTitle")}
-        description={
-          pendingDelete?.kind === CLIP_EXPORT_KIND
-            ? t("jobs.deleteExportDescription")
-            : t("jobs.deleteDescription")
-        }
+        description={deleteJobDescription(t, pendingDelete)}
         confirmLabel={t("jobs.deleteConfirm")}
         onConfirm={() =>
           pendingDelete
