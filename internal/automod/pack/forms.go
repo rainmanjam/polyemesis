@@ -196,6 +196,48 @@ func fold(s string) (string, []string, []bool) {
 	if s == "" {
 		return "", nil, nil
 	}
+	rs := foldRunes(s)
+	fb := foldBuilder{tok: -1}
+	fb.b.Grow(len(rs))
+
+	for i := 0; i < len(rs); {
+		// A word is a maximal run of word characters: letters, digits, marks,
+		// and the symbols that stand in for a letter when they sit inside one.
+		if !isWordRune(rs, i) {
+			fb.flush()
+			i++
+			continue
+		}
+		j := i
+		for j < len(rs) && isWordRune(rs, j) {
+			j++
+		}
+		fb.word(rs[i:j])
+		i = j
+	}
+
+	out := fb.b.String()
+	if len(fb.offs) == 0 {
+		return "", nil, nil
+	}
+	toks, stretch := tokensOf(out, fb.offs)
+	return out, toks, stretch
+}
+
+// tokensOf slices the tokens of out at offs, and reports which are stretched.
+func tokensOf(out string, offs [][3]int) ([]string, []bool) {
+	toks := make([]string, len(offs))
+	stretch := make([]bool, len(offs))
+	for k, o := range offs {
+		toks[k] = out[o[0]:o[1]]
+		stretch[k] = o[2] == 1
+	}
+	return toks, stretch
+}
+
+// foldRunes lower-cases s and expands its look-alike letters to their ASCII
+// skeletons, one rune per letter.
+func foldRunes(s string) []rune {
 	rs := make([]rune, 0, len(s))
 	for _, r := range s {
 		if r < utf8.RuneSelf {
@@ -213,89 +255,83 @@ func fold(s string) (string, []string, []bool) {
 		}
 		rs = append(rs, unicode.ToLower(r))
 	}
+	return rs
+}
 
-	var (
-		b    strings.Builder
-		offs [][3]int // start, end, stretched
-		last rune
-		run  int
-		tok  = -1 // start offset of the token being written, or -1
-		long bool // the token being written had a letter repeated past maxRun
-	)
-	b.Grow(len(rs))
-	flush := func() {
-		if tok >= 0 && b.Len() > tok {
-			st := 0
-			if long {
-				st = 1
-			}
-			offs = append(offs, [3]int{tok, b.Len(), st})
+// word writes one word of rs. Its stand-in symbols read as letters when the
+// word has a letter, and a symbol that is not a letter ends the token.
+func (f *foldBuilder) word(word []rune) {
+	hasLetter := wordHasLetter(word)
+	for _, r := range word {
+		if hasLetter {
+			r = leet(r)
 		}
-		tok = -1
-		long = false
-		last, run = 0, 0
-	}
-
-	for i := 0; i < len(rs); {
-		// A word is a maximal run of word characters: letters, digits, marks,
-		// and the symbols that stand in for a letter when they sit inside one.
-		if !isWordRune(rs, i) {
-			flush()
-			i++
+		if !isLetterish(r) {
+			f.flush()
 			continue
 		}
-		j := i
-		for j < len(rs) && isWordRune(rs, j) {
-			j++
-		}
-		hasLetter := false
-		for _, r := range rs[i:j] {
-			if unicode.IsLetter(r) {
-				hasLetter = true
-				break
-			}
-		}
-		for _, r := range rs[i:j] {
-			if hasLetter {
-				r = leet(r)
-			}
-			if !isLetterish(r) {
-				flush()
-				continue
-			}
-			if tok < 0 {
-				// Separate tokens with one space; offsets exclude it.
-				if b.Len() > 0 {
-					b.WriteByte(' ')
-				}
-				tok = b.Len()
-			}
-			if r == last {
-				run++
-				if run > maxRun {
-					long = true
-					continue
-				}
-			} else {
-				last, run = r, 1
-			}
-			b.WriteRune(r)
-		}
-		flush()
-		i = j
+		f.write(r)
 	}
+	f.flush()
+}
 
-	out := b.String()
-	if len(offs) == 0 {
-		return "", nil, nil
+// wordHasLetter reports whether a word holds a letter, which is what makes its
+// stand-in symbols leet rather than literal.
+func wordHasLetter(word []rune) bool {
+	for _, r := range word {
+		if unicode.IsLetter(r) {
+			return true
+		}
 	}
-	toks := make([]string, len(offs))
-	stretch := make([]bool, len(offs))
-	for k, o := range offs {
-		toks[k] = out[o[0]:o[1]]
-		stretch[k] = o[2] == 1
+	return false
+}
+
+// foldBuilder is the state fold carries across the runes of one string: the
+// pack form written so far, the offsets of each token in it, and the run of the
+// letter being written.
+type foldBuilder struct {
+	b    strings.Builder
+	offs [][3]int // start, end, stretched
+	last rune
+	run  int
+	tok  int  // start offset of the token being written, or -1
+	long bool // the token being written had a letter repeated past maxRun
+}
+
+// flush ends the token being written, if it has any text.
+func (f *foldBuilder) flush() {
+	if f.tok >= 0 && f.b.Len() > f.tok {
+		st := 0
+		if f.long {
+			st = 1
+		}
+		f.offs = append(f.offs, [3]int{f.tok, f.b.Len(), st})
 	}
-	return out, toks, stretch
+	f.tok = -1
+	f.long = false
+	f.last, f.run = 0, 0
+}
+
+// write appends one letter to the current token. A run of one letter is written
+// at most maxRun times; a token that runs past it is marked stretched.
+func (f *foldBuilder) write(r rune) {
+	if f.tok < 0 {
+		// Separate tokens with one space; offsets exclude it.
+		if f.b.Len() > 0 {
+			f.b.WriteByte(' ')
+		}
+		f.tok = f.b.Len()
+	}
+	if r == f.last {
+		f.run++
+		if f.run > maxRun {
+			f.long = true
+			return
+		}
+	} else {
+		f.last, f.run = r, 1
+	}
+	f.b.WriteRune(r)
 }
 
 // isWordRune reports whether rs[i] is part of a word. Symbols that can stand in
