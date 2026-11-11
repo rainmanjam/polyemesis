@@ -124,6 +124,38 @@ describe("initFailover", () => {
     f.destroy();
   });
 
+  it("an interrupted autoplay resumes from the top and completes", () => {
+    const f = initFailover(fixture(), makeGate(true));
+    // leaves view during the lead-in: autoplay must not be lost
+    ioCallback!([{ isIntersecting: true }]);
+    vi.advanceTimersByTime(300);
+    ioCallback!([{ isIntersecting: false }]);
+    vi.advanceTimersByTime(20000);
+    expect(state()).toBe("live");
+    // leaves view mid-run: must not freeze on a failure stage
+    ioCallback!([{ isIntersecting: true }]);
+    vi.advanceTimersByTime(700 + STAGES[0].ms + STAGES[1].ms);
+    expect(state()).toBe("slate");
+    ioCallback!([{ isIntersecting: false }]);
+    vi.advanceTimersByTime(20000);
+    expect(state()).toBe("slate");
+    ioCallback!([{ isIntersecting: true }]);
+    vi.advanceTimersByTime(700);
+    expect(state()).toBe("live");
+    vi.advanceTimersByTime(STAGES[0].ms + STAGES[1].ms + STAGES[2].ms);
+    expect(state()).toBe("recovered");
+    f.destroy();
+  });
+
+  it("appends a log line on forward steps without rebuilding the list", () => {
+    const f = initFailover(fixture(), makeGate(false));
+    const first = document.querySelector("[data-log] li");
+    f.show(1);
+    expect(document.querySelector("[data-log] li")).toBe(first);
+    expect(logLines()).toHaveLength(2);
+    f.destroy();
+  });
+
   it("a manual jump stops a running autoplay", () => {
     const f = initFailover(fixture(), makeGate(true));
     ioCallback!([{ isIntersecting: true }]);

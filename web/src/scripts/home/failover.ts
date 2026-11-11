@@ -42,7 +42,11 @@ export function initFailover(root: HTMLElement, gate: MotionGate): { play(): voi
   const doc = root.ownerDocument;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /* True once a run reached "recovered" or the visitor took over by hand. An
+   * interrupted autoplay (scrolled away, tab hidden, motion paused) is not
+   * done, so the next start replays it from the top. */
   let autoplayed = false;
+  let shown = -1;
 
   const stopTimer = () => {
     clearTimeout(timer);
@@ -60,14 +64,17 @@ export function initFailover(root: HTMLElement, gate: MotionGate): { play(): voi
       else b.removeAttribute("aria-current");
     });
     if (log) {
-      log.replaceChildren(
-        ...STAGES.slice(0, i + 1).map((st) => {
-          const li = doc.createElement("li");
-          li.textContent = st.log;
-          return li;
-        }),
-      );
+      /* Append on a forward step so a live region announces only the new line;
+       * rebuild on anything else (first show, same stage, backward, a jump). */
+      const line = (st: Stage) => {
+        const li = doc.createElement("li");
+        li.textContent = st.log;
+        return li;
+      };
+      if (i === shown + 1 && shown >= 0) log.append(line(s));
+      else log.replaceChildren(...STAGES.slice(0, i + 1).map(line));
     }
+    shown = i;
   }
 
   function run(from: number): void {
@@ -75,7 +82,10 @@ export function initFailover(root: HTMLElement, gate: MotionGate): { play(): voi
     let i = from;
     const step = () => {
       show(i);
-      if (i >= STAGES.length - 1) return;
+      if (i >= STAGES.length - 1) {
+        autoplayed = true;
+        return;
+      }
       timer = setTimeout(() => {
         i++;
         step();
@@ -86,9 +96,13 @@ export function initFailover(root: HTMLElement, gate: MotionGate): { play(): voi
 
   const onStep = (e: Event) => {
     stopTimer();
+    autoplayed = true;
     show(Number((e.currentTarget as HTMLElement).dataset.stage));
   };
-  const onPlay = () => run(1);
+  const onPlay = () => {
+    autoplayed = true;
+    run(1);
+  };
 
   for (const b of steps) b.addEventListener("click", onStep);
   playBtn?.addEventListener("click", onPlay);
@@ -100,7 +114,6 @@ export function initFailover(root: HTMLElement, gate: MotionGate): { play(): voi
     gate,
     () => {
       if (autoplayed) return;
-      autoplayed = true;
       timer = setTimeout(() => run(0), LEAD_IN_MS);
     },
     stopTimer,
