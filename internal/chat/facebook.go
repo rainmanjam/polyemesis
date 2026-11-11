@@ -232,6 +232,29 @@ func (f *FacebookAdapter) liveVideoID() string {
 }
 
 // Run polls the comment thread until ctx ends.
+// backoffAfterError doubles the poll interval (never past fbMaxPollInterval),
+// reports the degraded state the error calls for, and returns the jittered
+// pause before the next poll.
+func (f *FacebookAdapter) backoffAfterError(err error, interval *time.Duration) time.Duration {
+	// Back off on error, but never past the point where a recovered
+	// API takes two minutes to be noticed.
+	*interval = min(*interval*2, fbMaxPollInterval)
+	pause := *interval - time.Duration(f.cfg.Rand()*fbJitter*float64(*interval))
+	if wait, limited := fbRateLimited(err); limited {
+		// A real rate-limit signal is a floor under the backoff.
+		pause = max(pause, min(wait, fbMaxRateWait))
+		f.setHealth(StateDegraded, fmt.Sprintf("Facebook is rate-limiting polyemesis; retrying in %s",
+			pause.Round(time.Second)))
+	} else if statusOf(err) == http.StatusForbidden {
+		f.setHealth(StateDegraded, fbForbiddenDetail)
+	} else if fbNotFound(err) {
+		f.setHealth(StateDegraded, fbGoneOrNoAccessDetail)
+	} else {
+		f.setHealth(StateDegraded, "Facebook comments are not being read right now: "+fbSummary(err))
+	}
+	return pause
+}
+
 func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 	f.mu.Lock()
 	f.lastSeen = f.cfg.Now().Add(-fbDefaultBackfill)
@@ -264,22 +287,7 @@ func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
 			if done {
 				return nil
 			}
-			// Back off on error, but never past the point where a recovered
-			// API takes two minutes to be noticed.
-			interval = min(interval*2, fbMaxPollInterval)
-			pause = interval - time.Duration(f.cfg.Rand()*fbJitter*float64(interval))
-			if wait, limited := fbRateLimited(err); limited {
-				// A real rate-limit signal is a floor under the backoff.
-				pause = max(pause, min(wait, fbMaxRateWait))
-				f.setHealth(StateDegraded, fmt.Sprintf("Facebook is rate-limiting polyemesis; retrying in %s",
-					pause.Round(time.Second)))
-			} else if statusOf(err) == http.StatusForbidden {
-				f.setHealth(StateDegraded, fbForbiddenDetail)
-			} else if fbNotFound(err) {
-				f.setHealth(StateDegraded, fbGoneOrNoAccessDetail)
-			} else {
-				f.setHealth(StateDegraded, "Facebook comments are not being read right now: "+fbSummary(err))
-			}
+			pause = f.backoffAfterError(err, &interval)
 		} else {
 			interval = f.cfg.Interval
 			pause = interval
