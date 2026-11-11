@@ -41,21 +41,31 @@ function quotedBefore(src: string, i: number): boolean {
 
 /** Blanks out comments so a marker left behind in one cannot satisfy a guard
  *  that is asking whether a control is wired. */
+/** The comment that starts at `i`, if one does: where scanning resumes, and what
+ *  is kept of it. An unterminated comment runs to the end of the source, which
+ *  is what the loop's `break` used to do. */
+function commentAt(src: string, i: number): { next: number; keep: string } | null {
+  if (src.startsWith("/*", i)) {
+    const end = src.indexOf("*/", i + 2);
+    if (end < 0) return { next: src.length, keep: "" }; // unterminated; the rest is comment
+    return { next: end + 2, keep: src.slice(i, end + 2).replace(/[^\n]/g, "") };
+  }
+  if (src.startsWith("//", i) && !quotedBefore(src, i)) {
+    const end = src.indexOf("\n", i);
+    if (end < 0) return { next: src.length, keep: "" };
+    return { next: end, keep: "" }; // leave the newline for the next iteration
+  }
+  return null;
+}
+
 export function stripJSComments(src: string): string {
   let out = "";
   let i = 0;
   while (i < src.length) {
-    if (src.startsWith("/*", i)) {
-      const end = src.indexOf("*/", i + 2);
-      if (end < 0) break; // unterminated; the rest is comment
-      for (const ch of src.slice(i, end + 2)) if (ch === "\n") out += "\n";
-      i = end + 2;
-      continue;
-    }
-    if (src.startsWith("//", i) && !quotedBefore(src, i)) {
-      const end = src.indexOf("\n", i);
-      if (end < 0) break;
-      i = end; // leave the newline for the next iteration
+    const comment = commentAt(src, i);
+    if (comment) {
+      out += comment.keep;
+      i = comment.next;
       continue;
     }
     out += src[i];
