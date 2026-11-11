@@ -892,6 +892,13 @@ func playlistUploadProblem(upload string) error {
 // Ranges are checked whether or not the feature is enabled, so a half-filled
 // form is caught when it is saved.
 func (f FailoverSettings) problems(primary IngestSettings) []string {
+	probs := f.timingProblems()
+	probs = append(probs, backupIngestProblems(f.Backup)...)
+	return append(probs, f.outputProblems()...)
+}
+
+// timingProblems checks the grace period, the return mode and the return delay.
+func (f FailoverSettings) timingProblems() []string {
 	var probs []string
 	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
 
@@ -906,8 +913,21 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	if t := f.ReturnStableSeconds; t < 0 || t > MaxFailoverReturnStable {
 		add("failover return delay %ds out of range (0-%d)", t, MaxFailoverReturnStable)
 	}
+	return probs
+}
 
-	b := f.Backup
+// backupIngestProblems checks the standby ingest: its mode, pull URL, SRT and
+// RTMP settings.
+func backupIngestProblems(b BackupIngestSettings) []string {
+	probs := b.modeProblems()
+	return append(probs, b.srtProblems()...)
+}
+
+// modeProblems checks the standby's ingest mode and its pull URL.
+func (b BackupIngestSettings) modeProblems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+
 	switch b.Mode {
 	case IngestSRT, IngestRTMP:
 	case IngestPull:
@@ -922,6 +942,15 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	for _, p := range b.Pull.problems() {
 		add("backup ingest: %s", p)
 	}
+	return probs
+}
+
+// srtProblems checks the standby's SRT passphrase and latency, and its RTMP app
+// name, which is the one thing RTMP needs set.
+func (b BackupIngestSettings) srtProblems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+
 	if p := b.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
 		add("backup srt passphrase must be 10-79 characters (got %d)", len(p))
 	}
@@ -941,6 +970,14 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	// longer a question that can have a wrong answer. RTMP used to be the
 	// exception, because there was one RTMP listener and the primary held it;
 	// there is still one listener, and it now carries both.
+	return probs
+}
+
+// outputProblems checks the slate and the playlist file the failover plays.
+func (f FailoverSettings) outputProblems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+
 	if err := f.Slate.SlateImageProblem(); err != nil {
 		add("%v", err)
 	}
@@ -2996,6 +3033,14 @@ var protectionRungs = map[string]bool{"hold": true, "delete": true, "timeout": t
 // detector names, tiers) live in internal/automod, which db cannot import, and
 // are checked by internal/api beside automodProviderProblems.
 func (p AutomodProtection) problems(add problemAdder) {
+	p.stateProblems(add)
+	p.timeoutProblems(add)
+	p.ceilingProblems(add)
+	p.termProblems(add)
+}
+
+// stateProblems checks the protection state and the model scope.
+func (p AutomodProtection) stateProblems(add problemAdder) {
 	switch p.State {
 	case "", ProtectionOn, ProtectionOff:
 	default:
@@ -3006,6 +3051,10 @@ func (p AutomodProtection) problems(add problemAdder) {
 	default:
 		add("automod protection modelScope %q is not all or hard", p.ModelScope)
 	}
+}
+
+// timeoutProblems checks the strike window and the ladder timeout.
+func (p AutomodProtection) timeoutProblems(add problemAdder) {
 	// Zero is refused once the pack is on: a zero timeout is a PERMANENT ban
 	// on some platforms, and a zero window never counts a strike. A blob that
 	// predates the block decodes over non-zero defaults, so this only catches a
@@ -3018,6 +3067,10 @@ func (p AutomodProtection) problems(add problemAdder) {
 			add("automod protection %s %ds out of range (1-%d)", f.name, f.v, protectionMaxTimeout)
 		}
 	}
+}
+
+// ceilingProblems checks the action each category may be escalated to.
+func (p AutomodProtection) ceilingProblems(add problemAdder) {
 	for k, v := range p.Ceilings {
 		if !protectionRungs[v] {
 			add("automod protection ceiling for %q is %q: use hold, delete, timeout or ban", k, v)
@@ -3027,6 +3080,11 @@ func (p AutomodProtection) problems(add problemAdder) {
 			add("automod protection ceiling for self_harm cannot be raised above hold")
 		}
 	}
+}
+
+// termProblems checks the added terms, the native pack and the allow and
+// protect lists.
+func (p AutomodProtection) termProblems(add problemAdder) {
 	if len(p.AddTerms) > protectionMaxTerms {
 		add("automod protection has more than %d added terms", protectionMaxTerms)
 	}
@@ -3037,22 +3095,25 @@ func (p AutomodProtection) problems(add problemAdder) {
 			break
 		}
 	}
-	checkList := func(what string, maxCount int, list []string, minLen int) {
-		if len(list) > maxCount {
-			add("automod protection has more than %d %s", maxCount, what)
+	checkProtectionList(add, "allowed terms", protectionMaxTerms, p.AllowTerms, 2)
+	checkProtectionList(add, "allowed domains", protectionMaxDomains, p.AllowDomains, 1)
+	checkProtectionList(add, "protected names", protectionMaxNames, p.Impersonation.Protect, 1)
+	checkProtectionList(add, "allowed author ids", protectionMaxIDs, p.Impersonation.AllowIDs, 1)
+}
+
+// checkProtectionList reports a list that has too many entries, or an entry
+// outside the allowed length, reporting at most one problem per list.
+func checkProtectionList(add problemAdder, what string, maxCount int, list []string, minLen int) {
+	if len(list) > maxCount {
+		add("automod protection has more than %d %s", maxCount, what)
+		return
+	}
+	for _, v := range list {
+		if n := utf8.RuneCountInString(strings.TrimSpace(v)); n < minLen || n > protectionMaxEntry {
+			add("an automod protection entry in %s must be %d-%d characters", what, minLen, protectionMaxEntry)
 			return
 		}
-		for _, v := range list {
-			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n < minLen || n > protectionMaxEntry {
-				add("an automod protection entry in %s must be %d-%d characters", what, minLen, protectionMaxEntry)
-				return
-			}
-		}
 	}
-	checkList("allowed terms", protectionMaxTerms, p.AllowTerms, 2)
-	checkList("allowed domains", protectionMaxDomains, p.AllowDomains, 1)
-	checkList("protected names", protectionMaxNames, p.Impersonation.Protect, 1)
-	checkList("allowed author ids", protectionMaxIDs, p.Impersonation.AllowIDs, 1)
 }
 
 // problems checks the display time zone resolves.
