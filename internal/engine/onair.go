@@ -95,35 +95,40 @@ func joinAnd(parts []string) string {
 // database's view of what is enabled. A destination that is enabled and failing
 // to start is not on air, and refusing an upgrade because of one would make the
 // gate impossible to get past exactly when an operator most needs to.
+// tallyLive adds one engine's live publisher, destinations and recorder to o,
+// and reports whether any of them is carrying media.
+func (m *Manager) tallyLive(o *OnAir, eng *Engine, st Status) bool {
+	live := false
+	if m.SharedIngestPublishing(eng.SourceID()) {
+		o.Publishers++
+		live = true
+	}
+	for _, d := range st.Destinations {
+		if processCarrying(d.Process) {
+			o.Destinations++
+			live = true
+		}
+		// The redundant output counts too: it is a second connection to a
+		// platform, and dropping it is the same event to whoever is watching.
+		if processCarrying(d.BackupProcess) {
+			o.Destinations++
+			live = true
+		}
+	}
+	if processCarrying(st.Recorder) {
+		o.Recording = true
+		live = true
+	}
+	return live
+}
+
 func (m *Manager) OnAir() OnAir {
 	var o OnAir
 	seen := map[string]bool{}
 
 	for _, eng := range m.Engines() {
 		st := eng.Status()
-
-		live := false
-		if m.SharedIngestPublishing(eng.SourceID()) {
-			o.Publishers++
-			live = true
-		}
-		for _, d := range st.Destinations {
-			if processCarrying(d.Process) {
-				o.Destinations++
-				live = true
-			}
-			// The redundant output counts too: it is a second connection to a
-			// platform, and dropping it is the same event to whoever is watching.
-			if processCarrying(d.BackupProcess) {
-				o.Destinations++
-				live = true
-			}
-		}
-		if processCarrying(st.Recorder) {
-			o.Recording = true
-			live = true
-		}
-
+		live := m.tallyLive(&o, eng, st)
 		if live && st.Source.Name != "" && !seen[st.Source.Name] {
 			seen[st.Source.Name] = true
 			// Four names, then stop. A list long enough to scroll is a list
