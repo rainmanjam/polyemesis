@@ -184,18 +184,42 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 	for _, d := range dests {
 		byID[d.ID] = d
 	}
+	horizontalOf := s.youtubeHorizontalOf()
+	linked := map[int64]bool{}
+	// Platforms with a running destination that has no account row: a pasted
+	// key, or Rumble, whose chat hangs off no account. Their chat is whatever
+	// adapter is attached for that platform (final pass, F1).
+	pasted := map[db.Platform]bool{}
+	out := s.runningDestinationTargets(dests, running, byID, horizontalOf, linked, pasted)
+	out = append(out, s.attachedChatTargets(pasted)...)
+	if len(linked) == 0 {
+		return out, nil
+	}
+	accountTargets, err := s.linkedAccountTargets(linked)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, accountTargets...), nil
+}
+
+// youtubeHorizontalOf maps each YouTube vertical destination to its horizontal
+// partner, where one is paired.
+func (s *Server) youtubeHorizontalOf() map[int64]int64 {
 	horizontalOf := map[int64]int64{}
 	if pairs, err := s.store.ListYouTubeVerticalPairs(); err == nil {
 		for _, p := range pairs {
 			horizontalOf[p.VerticalID] = p.HorizontalID
 		}
 	}
-	linked := map[int64]bool{}
+	return horizontalOf
+}
+
+// runningDestinationTargets classifies each running destination: one with an
+// account is recorded in linked; one without is recorded in pasted, and gets an
+// unlinked target when its platform can report live status.
+func (s *Server) runningDestinationTargets(dests []*db.Destination, running map[int64]bool, byID map[int64]*db.Destination,
+	horizontalOf map[int64]int64, linked map[int64]bool, pasted map[db.Platform]bool) []analytics.Target {
 	out := []analytics.Target{}
-	// Platforms with a running destination that has no account row: a pasted
-	// key, or Rumble, whose chat hangs off no account. Their chat is whatever
-	// adapter is attached for that platform (final pass, F1).
-	pasted := map[db.Platform]bool{}
 	for _, d := range dests {
 		if !running[d.ID] {
 			continue
@@ -220,14 +244,16 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 			out = append(out, analytics.Target{Platform: string(d.Platform), Name: d.Name, Unlinked: true})
 		}
 	}
-	out = append(out, s.attachedChatTargets(pasted)...)
-	if len(linked) == 0 {
-		return out, nil
-	}
+	return out
+}
+
+// linkedAccountTargets returns a target for each linked account.
+func (s *Server) linkedAccountTargets(linked map[int64]bool) ([]analytics.Target, error) {
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		return nil, err
 	}
+	var out []analytics.Target
 	for _, acct := range accts {
 		if !linked[acct.ID] {
 			continue
