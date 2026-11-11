@@ -3037,14 +3037,14 @@ func (p AutomodProtection) problems(add problemAdder) {
 			break
 		}
 	}
-	checkList := func(what string, max int, list []string, min int) {
-		if len(list) > max {
-			add("automod protection has more than %d %s", max, what)
+	checkList := func(what string, maxCount int, list []string, minLen int) {
+		if len(list) > maxCount {
+			add("automod protection has more than %d %s", maxCount, what)
 			return
 		}
 		for _, v := range list {
-			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n < min || n > protectionMaxEntry {
-				add("an automod protection entry in %s must be %d-%d characters", what, min, protectionMaxEntry)
+			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n < minLen || n > protectionMaxEntry {
+				add("an automod protection entry in %s must be %d-%d characters", what, minLen, protectionMaxEntry)
 				return
 			}
 		}
@@ -3140,6 +3140,20 @@ func (d *DB) GetSettings() (Settings, error) {
 	return s, nil
 }
 
+// legacyPlaylistDoc is the loose shape of the pre-migration settings blob, just
+// deep enough to reach failover.playlist.filePath.
+type legacyPlaylistDoc struct {
+	Failover legacyFailoverDoc `json:"failover"`
+}
+
+type legacyFailoverDoc struct {
+	Playlist legacyPlaylistEntry `json:"playlist"`
+}
+
+type legacyPlaylistEntry struct {
+	FilePath string `json:"filePath"`
+}
+
 // LegacyPlaylistFilePath reports the playlist FilePath recorded before it
 // became Items (DESIGN 2026-08-01-playlist-items), or "" if there is none.
 //
@@ -3163,13 +3177,7 @@ func (d *DB) LegacyPlaylistFilePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var legacy struct {
-		Failover struct {
-			Playlist struct {
-				FilePath string `json:"filePath"`
-			} `json:"playlist"`
-		} `json:"failover"`
-	}
+	var legacy legacyPlaylistDoc
 	// Best-effort: a blob that fails even this loose a decode is not one this
 	// migration can act on either way.
 	_ = json.Unmarshal([]byte(raw), &legacy)
