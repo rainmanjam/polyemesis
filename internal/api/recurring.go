@@ -706,13 +706,9 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if err := occurrenceCancelRefusal(o, now, s.destinationLive(o.DestinationID)); err != nil {
 			return err
 		}
-		d, err := s.store.GetDestination(o.DestinationID)
-		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: %w: its event %s cannot be removed from here; delete it in the "+
-				"platform's own studio", oauth.ErrScheduledNotCancellable, errDestinationGone, o.PlatformEventID)
-		}
+		d, err := s.cancelDestinationFor(o)
 		if err != nil {
-			return fmt.Errorf("cannot read the destination for event %s: %w", o.PlatformEventID, err)
+			return err
 		}
 		// The operator's skip checked Enabled before it got here, and the scheduler can switch the destination on
 		// in between to take this very show live. The row just read is the latest word, so the skip is refused again
@@ -721,13 +717,9 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if !removeRow && d.Enabled {
 			return fmt.Errorf("%w: the destination was switched on, so its event may be about to go on air", errOccurrenceRefused)
 		}
-		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
-		if !ok {
-			return fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, o.PlatformEventID)
-		}
-		ed, ok := sb.(oauth.ScheduledEditor)
-		if !ok || d.AccountID == nil {
-			return fmt.Errorf("%s cannot cancel scheduled events from here, or the destination has no account", d.Platform)
+		ed, err := s.cancelEditorFor(d, o.PlatformEventID)
+		if err != nil {
+			return err
 		}
 		acct, err := s.tokenFor(ctx, *d.AccountID)
 		if err != nil {
@@ -740,16 +732,51 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		}
 		// The mirror named this event, so it must not keep pointing at it. Forget removes only the
 		// entry for this schedule and this broadcast, and leaves every other show alone.
-		_ = s.recordErr(d, func(cur *db.Destination) bool {
-			if prev, ok := cur.Facebook.AnnouncementFor(o.ScheduleID); ok && prev.BroadcastID == o.PlatformEventID {
-				cur.Facebook.Forget(o.ScheduleID, o.PlatformEventID)
-				return true
-			}
-			return false
-		})
+		s.forgetMirroredAnnouncement(d, o)
 	}
 	if removeRow {
 		return s.store.DeleteOccurrence(o.ID)
 	}
 	return s.store.SetOccurrenceState(o.ID, scheduler.OccurrenceSkipped)
+}
+
+// cancelDestinationFor reads the destination an event was published through.
+// A deleted destination is refused with a message that says where to delete
+// the event instead.
+func (s *Server) cancelDestinationFor(o scheduler.Occurrence) (*db.Destination, error) {
+	d, err := s.store.GetDestination(o.DestinationID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %w: its event %s cannot be removed from here; delete it in the "+
+			"platform's own studio", oauth.ErrScheduledNotCancellable, errDestinationGone, o.PlatformEventID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the destination for event %s: %w", o.PlatformEventID, err)
+	}
+	return d, nil
+}
+
+// cancelEditorFor returns the platform's scheduled-event editor for a
+// destination, or the refusal that says why its events cannot be cancelled here.
+func (s *Server) cancelEditorFor(d *db.Destination, eventID string) (oauth.ScheduledEditor, error) {
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
+	if !ok {
+		return nil, fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, eventID)
+	}
+	ed, ok := sb.(oauth.ScheduledEditor)
+	if !ok || d.AccountID == nil {
+		return nil, fmt.Errorf("%s cannot cancel scheduled events from here, or the destination has no account", d.Platform)
+	}
+	return ed, nil
+}
+
+// forgetMirroredAnnouncement drops the mirror's entry for this schedule and
+// this broadcast, once the event is gone, so it no longer points at it.
+func (s *Server) forgetMirroredAnnouncement(d *db.Destination, o scheduler.Occurrence) {
+	_ = s.recordErr(d, func(cur *db.Destination) bool {
+		if prev, ok := cur.Facebook.AnnouncementFor(o.ScheduleID); ok && prev.BroadcastID == o.PlatformEventID {
+			cur.Facebook.Forget(o.ScheduleID, o.PlatformEventID)
+			return true
+		}
+		return false
+	})
 }
