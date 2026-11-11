@@ -2,6 +2,7 @@
  * hands it to that beat's init. Each init*(root, gate) calls whileVisible
  * itself, so this file only locates roots. */
 import { initFailover } from "./failover";
+import { initHero } from "./hero";
 import { initHowSteps } from "./how-steps";
 import { createMotionGate, type MotionGate } from "./motion";
 import { initUploadMeter } from "./upload-meter";
@@ -11,8 +12,19 @@ export function boot(doc: Document): MotionGate | undefined {
   if (!win) return undefined;
   const gate = createMotionGate(win);
 
-  // TODO(task 4): hero init and the Pause control wiring go here, before the
-  // beats, so they share `gate`.
+  for (const root of doc.querySelectorAll<HTMLElement>("[data-hero]")) {
+    initHero(root, gate);
+  }
+  // Pause is wired here and only here (initHero un-hides it): one listener per
+  // button, so one click is one setUserPaused call.
+  for (const btn of doc.querySelectorAll<HTMLElement>("[data-pause]")) {
+    btn.addEventListener("click", () => {
+      const paused = !gate.userPaused();
+      gate.setUserPaused(paused);
+      btn.setAttribute("aria-pressed", String(paused));
+      btn.textContent = paused ? "Resume motion" : "Pause motion";
+    });
+  }
 
   for (const root of doc.querySelectorAll<HTMLElement>("[data-upload-meter]")) {
     initUploadMeter(root, gate);
