@@ -158,28 +158,40 @@ func (h *Handler) Handle(ctx context.Context, m chat.Message) {
 	case "bitrate":
 		h.reply(ctx, m, bitrateLine(prog.Report()))
 	case "switch":
-		if arg == "" {
-			h.reply(ctx, m, "Usage: !switch primary | backup | playlist | slate | auto")
-			return
-		}
-		h.audit(m, cmd, arg)
-		if err := prog.SwitchSource(arg); err != nil {
-			h.reply(ctx, m, "Could not switch: "+err.Error())
-			return
-		}
-		if arg == "auto" {
-			h.reply(ctx, m, "Source selection is automatic again.")
-			return
-		}
-		h.reply(ctx, m, "Switched to "+arg+".")
+		h.handleSwitch(ctx, m, prog, cmd, arg)
 	case "fix":
-		h.audit(m, cmd, "")
-		if err := prog.FixSource(); err != nil {
-			h.reply(ctx, m, "Could not refresh the feed: "+err.Error())
-			return
-		}
-		h.reply(ctx, m, "Refreshing the feed; source selection is automatic again.")
+		h.handleFix(ctx, m, prog, cmd)
 	}
+}
+
+// handleSwitch runs !switch <source>, replying with the usage line when no
+// source was named.
+func (h *Handler) handleSwitch(ctx context.Context, m chat.Message, prog Programme, cmd, arg string) {
+	if arg == "" {
+		h.reply(ctx, m, "Usage: !switch primary | backup | playlist | slate | auto")
+		return
+	}
+	h.audit(m, cmd, arg)
+	if err := prog.SwitchSource(arg); err != nil {
+		h.reply(ctx, m, "Could not switch: "+err.Error())
+		return
+	}
+	if arg == "auto" {
+		h.reply(ctx, m, "Source selection is automatic again.")
+		return
+	}
+	h.reply(ctx, m, "Switched to "+arg+".")
+}
+
+// handleFix runs !fix, which refreshes the feed and returns source selection to
+// automatic.
+func (h *Handler) handleFix(ctx context.Context, m chat.Message, prog Programme, cmd string) {
+	h.audit(m, cmd, "")
+	if err := prog.FixSource(); err != nil {
+		h.reply(ctx, m, "Could not refresh the feed: "+err.Error())
+		return
+	}
+	h.reply(ctx, m, "Refreshing the feed; source selection is automatic again.")
 }
 
 // parse recognises exactly the three commands, case-insensitively, as the
