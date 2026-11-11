@@ -162,7 +162,7 @@ export function AutomodProtectionTwitch({ unsaved = false, savedKey = "" }: Read
         <p className="text-sm text-muted-foreground">{t("automod.protTwNamesHelp")}</p>
       </div>
 
-      {note && note.kind === "error" && (
+      {note?.kind === "error" && (
         <p role="alert" className="text-sm text-destructive">
           {note.text}
         </p>
