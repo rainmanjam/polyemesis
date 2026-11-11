@@ -224,9 +224,9 @@ func ptsTime(line string) float64 {
 
 // DBTP converts ebur128's linear true-peak amplitude to dBTP.
 func DBTP(linear float64) float64 {
-	// Written as !(linear > 0) so NaN floors too; an infinite amplitude is not
-	// a peak anyone measured either.
-	if !(linear > 0) || math.IsInf(linear, 1) {
+	// The explicit IsNaN check is what floors NaN (a plain linear <= 0 would let
+	// it through); an infinite amplitude is not a peak anyone measured either.
+	if linear <= 0 || math.IsNaN(linear) || math.IsInf(linear, 1) {
 		return TruePeakFloor
 	}
 	db := 20 * math.Log10(linear)
