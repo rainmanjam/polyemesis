@@ -297,7 +297,7 @@ export interface PollDisplay {
   question: string;
   options: { label: string; votes: number }[];
   total: number;
-  state: "open" | "closing" | "ended" | string;
+  state: string;
   endsAt: string;
   endedAt?: string;
 }

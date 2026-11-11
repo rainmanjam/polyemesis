@@ -158,8 +158,8 @@ export function overviewTiles(
   }
   securityLines.push(
     mayClaim(reads.tokens) ? t("settingsUx.tileTokens", { n: reads.tokens.value }) : pending(reads.tokens),
+    secretKeyBackedUp ? t("settingsUx.tileBackedUp") : t("settingsUx.tileNotBackedUp"),
   );
-  securityLines.push(secretKeyBackedUp ? t("settingsUx.tileBackedUp") : t("settingsUx.tileNotBackedUp"));
   const security: OverviewTile = {
     tab: "security",
     title: "set.tabSecurity",

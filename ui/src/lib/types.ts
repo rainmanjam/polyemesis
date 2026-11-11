@@ -2564,7 +2564,7 @@ export interface TimelineRow {
   id: number;
   at: string;
   type: string;
-  severity: "critical" | "warning" | "info" | string;
+  severity: string;
   title: string;
   detail?: string;
   /** The process whose log holds this row's detail ("dest:3", "ingest"), when
@@ -3572,7 +3572,7 @@ export interface GovernorVerdict {
   start: boolean;
   /** May one that is ALREADY running keep the machine. */
   continue: boolean;
-  suspension: "stop" | "finish-then-yield" | string;
+  suspension: string;
   reason: string;
 }
 

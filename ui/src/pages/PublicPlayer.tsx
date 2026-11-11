@@ -175,10 +175,10 @@ function LivePlayer({
   onPlayingChange: (playing: boolean) => void;
 }>) {
   const t = useT();
-  const [playing, setPlayingState] = useState(false);
-  const setPlaying = useCallback(
+  const [playing, setPlaying] = useState(false);
+  const updatePlaying = useCallback(
     (p: boolean) => {
-      setPlayingState(p);
+      setPlaying(p);
       onPlayingChange(p);
     },
     [onPlayingChange],
@@ -344,7 +344,7 @@ function LivePlayer({
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
           trackerRef.current?.error(classifyHlsError({ type: data.type, details: data.details }));
-          setPlaying(false);
+          updatePlaying(false);
           hls?.destroy();
           hls = null;
           hlsRef.current = null;
@@ -373,7 +373,7 @@ function LivePlayer({
     };
     // ladderKey stands for `variants`; see its comment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, token, ladderKey, setPlaying, applyLadder]);
+  }, [master, token, ladderKey, updatePlaying, applyLadder]);
 
   // A rung's codec became known after the player started (#8). hls.js drops
   // the rung in place; native HLS, which cannot be told to skip one, is moved
@@ -462,12 +462,12 @@ function LivePlayer({
               const tracker = trackerRef.current;
               const first = !!tracker && !tracker.started;
               tracker?.playing();
-              setPlaying(true);
+              updatePlaying(true);
               if (first) sendBeacon("start");
             }}
             onWaiting={() => {
               trackerRef.current?.waiting();
-              setPlaying(false);
+              updatePlaying(false);
             }}
             onSeeking={() => trackerRef.current?.seekStarted()}
             onSeeked={() => trackerRef.current?.seekEnded()}

@@ -139,7 +139,7 @@ const LOUDNESS_CUSTOM = "__custom__";
  *  `limiter` are decisions the operator already made, and routing never
  *  overrides them — so a target set alongside one is inert, and the editor has
  *  to say so rather than imply a compliance it is not delivering. */
-const LOUDNESS_ARMS: NormalizeMode[] = ["auto", "loudnorm"];
+const LOUDNESS_ARMS: ReadonlySet<NormalizeMode> = new Set<NormalizeMode>(["auto", "loudnorm"]);
 
 /** `delayMs` is signed and a signed number alone is ambiguous, so the editor
  *  splits it into a direction and a magnitude. */
@@ -2155,7 +2155,7 @@ export function LoudnessCard({
   else if (named) value = String(loudness.targetLufs);
   // A target under `off` or `limiter` is stored but inert — routing never
   // overrides a clip-protection mode the operator chose by hand.
-  const inert = loudness !== null && !LOUDNESS_ARMS.includes(normalize);
+  const inert = loudness !== null && !LOUDNESS_ARMS.has(normalize);
   let loudnessNote: ReactNode;
   if (loudness) {
     loudnessNote = t("route.measuredOverTheWholeProgramme");

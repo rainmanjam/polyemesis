@@ -324,7 +324,7 @@ export function categoryActionOf(
 export function anyTimeout(m: AutomodModel): boolean {
   return (
     m.action === "timeout" ||
-    Object.values(m.categoryActions ?? {}).some((a) => a === "timeout")
+    Object.values(m.categoryActions ?? {}).includes("timeout")
   );
 }
 

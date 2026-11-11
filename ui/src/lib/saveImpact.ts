@@ -43,7 +43,7 @@ import { WIRE, type Member } from "@/lib/contract/wire";
 
 /** The spelling routing emits for a named volume stage, the same pattern
  *  internal/ffmpeg/live_volume.go's liveVolumeRE recognises. */
-const LIVE_VOLUME = /volume@([A-Za-z0-9_]+)=volume=([0-9.]+)/g;
+const LIVE_VOLUME = /volume@(\w+)=volume=([0-9.]+)/g;
 
 /** The graph with every named volume level blanked, as the server masks it. */
 export function maskLiveVolumes(graph: string): string {

@@ -29,7 +29,8 @@ export type SettingsAnchor = keyof typeof SETTINGS_ANCHORS;
  *  a settings link is spelled, so a typo is a compile error rather than a link
  *  that silently opens the Overview (settingsTabFor). */
 export function settingsHref(tab: Exclude<SettingsTab, "debug">, anchor?: SettingsAnchor): `/settings?${string}` {
-  return `/settings?tab=${tab}${anchor ? `#${SETTINGS_ANCHORS[anchor]}` : ""}`;
+  const hash = anchor ? `#${SETTINGS_ANCHORS[anchor]}` : "";
+  return `/settings?tab=${tab}${hash}`;
 }
 
 /** The rail's groups, in rail order (settings-council R6). Overview sits above
@@ -304,7 +305,7 @@ export function revealSettingsHit(
     d.open = true;
   }
   // A short highlight so the eye lands on the right row after the scroll.
-  target.setAttribute("data-search-hit", "");
+  target.dataset.searchHit = "";
   window.setTimeout(() => target?.removeAttribute("data-search-hit"), 1600);
   return true;
 }
