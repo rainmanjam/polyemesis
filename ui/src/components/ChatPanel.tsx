@@ -243,34 +243,8 @@ function MessageRow({
   // The operator's tags on this viewer, from one list-wide lookup.
   const viewerTags = useViewerTags(m.platform, m.account, m.author.id);
 
-  return (
-    <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
-      role="group"
-      aria-roledescription={t("chatpage.messageRole")}
-      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message must be focusable for a keyboard moderator to reach its context menu
-      onKeyDown={openMenuFromKeyboard}
-      onContextMenu={openMenu}
-      onDoubleClick={openMenu}
-      className={cn(
-        // A two-column grid is the hanging indent: the glyph (and the clock,
-        // off the dock) sit in the first column and every wrapped line of the
-        // message stays in the second, under the name, instead of running back
-        // beneath the icon.
-        "group relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-        accent.rule,
-        m.echo && "bg-primary-dim/40",
-      )}
-    >
-      <span className="inline-flex h-lh items-center gap-1">
-        <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
-        {!compact && (
-          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
-            {clockTime(m.at)}
-          </span>
-        )}
-      </span>
-
-      <div className="min-w-0 [overflow-wrap:anywhere]">
+  const renderBodyText = () => (
+    <>
       {m.echo && (
         <span className="mr-1 inline-flex align-text-bottom" title={t("chatpage.echoLabel")}>
           <Megaphone className="h-3 w-3 text-primary-bright" aria-label={t("chatpage.echoLabel")} />
@@ -337,19 +311,10 @@ function MessageRow({
       >
         <MessageBody m={m} />
       </span>
-      </div>
-
-      {/* The dock drops the clock column to keep lines wide; it comes back on
-          hover or keyboard focus, laid over the gutter beside the delete icon. */}
-      {compact && (
-        <span
-          className="tnum pointer-events-none absolute right-6 top-0.5 hidden rounded bg-card-raised px-1 font-mono text-sm text-muted-foreground group-hover:block group-focus-visible:block group-focus-within:block"
-          title={timestamp(m.at)}
-        >
-          {clockTime(m.at)}
-        </span>
-      )}
-
+    </>
+  );
+  const renderDeleteControl = () => (
+    <>
       {/* THE SAME GATE THE MENU USES, on the icon that does the same thing.
           
           `{onDelete && …}` alone was the defect fixed in ChatMessageMenu, and
@@ -374,6 +339,52 @@ function MessageRow({
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
       )}
+    </>
+  );
+
+  return (
+    <div // NOSONAR S6847: a message is a keyboard stop inside the role="log" chat list so Enter / Shift+F10 / the Menu key can open its moderation context menu, the keyboard twin of right-click; no native element offers that
+      role="group"
+      aria-roledescription={t("chatpage.messageRole")}
+      tabIndex={onMenu ? 0 : undefined} // NOSONAR S6845: each message must be focusable for a keyboard moderator to reach its context menu
+      onKeyDown={openMenuFromKeyboard}
+      onContextMenu={openMenu}
+      onDoubleClick={openMenu}
+      className={cn(
+        // A two-column grid is the hanging indent: the glyph (and the clock,
+        // off the dock) sit in the first column and every wrapped line of the
+        // message stays in the second, under the name, instead of running back
+        // beneath the icon.
+        "group relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        accent.rule,
+        m.echo && "bg-primary-dim/40",
+      )}
+    >
+      <span className="inline-flex h-lh items-center gap-1">
+        <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
+        {!compact && (
+          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
+            {clockTime(m.at)}
+          </span>
+        )}
+      </span>
+
+      <div className="min-w-0 [overflow-wrap:anywhere]">
+        {renderBodyText()}
+      </div>
+
+      {/* The dock drops the clock column to keep lines wide; it comes back on
+          hover or keyboard focus, laid over the gutter beside the delete icon. */}
+      {compact && (
+        <span
+          className="tnum pointer-events-none absolute right-6 top-0.5 hidden rounded bg-card-raised px-1 font-mono text-sm text-muted-foreground group-hover:block group-focus-visible:block group-focus-within:block"
+          title={timestamp(m.at)}
+        >
+          {clockTime(m.at)}
+        </span>
+      )}
+
+      {renderDeleteControl()}
     </div>
   );
 }
