@@ -693,7 +693,8 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 		seen = append(seen, env)
 	}
 	expect(DelayBuffering)
-	go feed(e.hub, 200)
+	fed := make(chan struct{})
+	go func() { feed(e.hub, 200); close(fed) }()
 	expect(DelayOnAir)
 	time.Sleep(300 * time.Millisecond)
 	row.Enabled = false
@@ -703,6 +704,22 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 	e.stopDestinations(map[int64]destPlan{})
 	expect(DelayDraining)
 	expect(delayEventDrained)
+	// "drained" is announced before teardownDest has finished (it still stops
+	// the process and deletes the spill), and on Windows the feed's 1 ms sleeps
+	// round up to the timer tick, so both can outlive the assertions. Returning
+	// then left polyemesis.db open when TempDir's cleanup ran, and Windows
+	// refuses to unlink an open file. Wait for the whole teardown -- retiring
+	// is cleared only after teardownDest returns, as in the drain test above --
+	// and for the feed, before the test ends.
+	eventually(t, "the drain's teardown to finish", 9*time.Second, func() bool {
+		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
+			retiringOf(e, row.ID) == nil
+	})
+	select {
+	case <-fed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the background feed never finished")
+	}
 
 	for _, env := range seen {
 		raw, err := json.Marshal(env)
