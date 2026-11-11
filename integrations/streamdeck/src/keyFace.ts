@@ -140,10 +140,11 @@ export function destinationFace(
     return { tone: "unbound", label: "streamdeck.state.otherProgramme" };
   }
   const state = stateFace(dest, hold);
+  const vIssue = verticalIssue(dest, vertical);
   const issues = [
     ...(state.issue ? [state.issue] : []),
     ...signalIssues(dest, source, state.stormOnFace),
-    ...(verticalIssue(dest, vertical) ? [verticalIssue(dest, vertical) as KeyIssue] : []),
+    ...(vIssue ? [vIssue] : []),
   ];
   issues.sort((a, b) => ISSUE_RANK.indexOf(a.kind) - ISSUE_RANK.indexOf(b.kind));
 
@@ -153,20 +154,29 @@ export function destinationFace(
   // reason line and the colour.
   const top = issues[0];
   let face: KeyFace = state.face;
-  if (top && top !== state.issue) {
-    face = {
-      tone: top.tone,
-      label: state.face.label,
-      ...(state.face.labelVars ? { labelVars: state.face.labelVars } : {}),
-      reason: top.key,
-      ...(top.vars ? { reasonVars: top.vars } : {}),
-      ...(top.detail ? { detail: top.detail } : {}),
-    };
-  }
+  if (top && top !== state.issue) face = issueFace(state.face, top);
   face = withWarning(face, warningFor(dest));
   if (issues.length > 0) face.issues = issues;
   if (issues.length > 1) face.more = issues.length - 1;
   face.mark = { platform: dest.platform, name: dest.name };
+  applyDelayMarker(face, dest);
+  return face;
+}
+
+/** The face of an open issue that is worse than the state's own: the issue's colour and reason, the state's label. */
+function issueFace(stateFace: KeyFace, top: KeyIssue): KeyFace {
+  return {
+    tone: top.tone,
+    label: stateFace.label,
+    ...(stateFace.labelVars ? { labelVars: stateFace.labelVars } : {}),
+    reason: top.key,
+    ...(top.vars ? { reasonVars: top.vars } : {}),
+    ...(top.detail ? { detail: top.detail } : {}),
+  };
+}
+
+/** Adds the broadcast delay's marker to a destination face, in place. */
+function applyDelayMarker(face: KeyFace, dest: DestStatus): void {
   // The broadcast delay's marker line (#11): a delayed key must not look like
   // the live platform, whatever the face above it says.
   const seconds = dest.delay?.seconds ?? dest.delaySeconds ?? 0;
@@ -177,7 +187,6 @@ export function destinationFace(
     face.delaySeconds = Math.round(seconds);
     face.delayEffectiveSeconds = Math.round(effective);
   }
-  return face;
 }
 
 /** The vertical half's issue on its horizontal key (#7).
@@ -248,15 +257,7 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
   }
   const proc = dest.process ?? null;
 
-  if (!proc) {
-    if (!dest.enabled) return { face: { tone: "idle", label: "streamdeck.state.off" } };
-    if (hold) {
-      const face: KeyFace = { tone: "held", label: "streamdeck.state.held", detail: hold.reason };
-      return { face, issue: asIssue("held", face) };
-    }
-    // Enabled with no process: the server is between states, not off.
-    return { face: { tone: "warn", label: "streamdeck.state.starting" } };
-  }
+  if (!proc) return noProcessFace(dest, hold);
 
   // The server's classified cause (#20). A key known to this plugin replaces
   // the raw FFmpeg tail, which on 72 px is a clipped exit status; an unknown
@@ -264,51 +265,14 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
   const why = reasonFor(dest);
 
   switch (proc.state) {
-    case "running": {
-      if (dest.stalled) {
-        const face: KeyFace = { tone: "warn", label: "streamdeck.state.stalled" };
-        return { face, issue: asIssue("cycling", face) };
-      }
-      // A slow upload does not exit, so it is the one cause shown on a running
-      // destination. Live, in the warn colour: it IS on air, badly.
-      if (why.reason === "streamdeck.reason.upload_too_slow") {
-        const face: KeyFace = { tone: "warn", label: "streamdeck.state.live", reason: why.reason };
-        return { face, issue: asIssue("uploadSlow", face) };
-      }
-      return { face: { tone: "live", label: "streamdeck.state.live" } };
-    }
+    case "running":
+      return runningFace(dest, why);
     case "starting":
       return { face: { tone: "warn", label: "streamdeck.state.starting" } };
-    case "reconnecting": {
-      // A restart storm is what reconnecting looks like when it keeps
-      // happening: one issue, so the count goes on the label and the cause
-      // stays on the line beneath, rather than the two being counted twice.
-      const storm = stormCount(dest);
-      const face: KeyFace = {
-        tone: "warn",
-        label: storm ? "streamdeck.issue.restartStorm" : "streamdeck.state.reconnecting",
-        ...(storm ? { labelVars: { count: storm } } : {}),
-        ...(why.known ? withoutKnown(why) : withDetail(why.detail ?? proc.lastError)),
-      };
-      // Retrying is transient ("cycling"), unless the platform says the key
-      // changed: that is a real failure with a named fix, and outranks the account.
-      const kind = why.reason === "streamdeck.reason.keyChanged" ? "failed" : "cycling";
-      return { face, issue: asIssue(kind, face), stormOnFace: storm > 0 };
-    }
-    case "failed": {
-      // Held is its own tile: the server has stopped retrying, and only a
-      // Retry (the console's, or a tap on this key) will change what it shows.
-      if (dest.reason?.held) {
-        const face: KeyFace = { tone: "held", label: "streamdeck.state.held", ...withoutKnown(why) };
-        return { face, issue: asIssue("held", face) };
-      }
-      const face: KeyFace = {
-        tone: "error",
-        label: "streamdeck.state.failed",
-        ...(why.known ? withoutKnown(why) : withDetail(why.detail ?? (proc.lastError || dest.error))),
-      };
-      return { face, issue: asIssue("failed", face) };
-    }
+    case "reconnecting":
+      return reconnectingFace(dest, proc, why);
+    case "failed":
+      return failedFace(dest, proc, why);
     case "stopped":
     default:
       if (dest.enabled && dest.transitioning) {
@@ -316,6 +280,63 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
       }
       return { face: { tone: "idle", label: "streamdeck.state.off" } };
   }
+}
+
+/** A destination with no process: off, held by the server, or between states. */
+function noProcessFace(dest: DestStatus, hold: HoldStatus | null | undefined): StateFace {
+  if (!dest.enabled) return { face: { tone: "idle", label: "streamdeck.state.off" } };
+  if (hold) {
+    const face: KeyFace = { tone: "held", label: "streamdeck.state.held", detail: hold.reason };
+    return { face, issue: asIssue("held", face) };
+  }
+  // Enabled with no process: the server is between states, not off.
+  return { face: { tone: "warn", label: "streamdeck.state.starting" } };
+}
+
+function runningFace(dest: DestStatus, why: Why): StateFace {
+  if (dest.stalled) {
+    const face: KeyFace = { tone: "warn", label: "streamdeck.state.stalled" };
+    return { face, issue: asIssue("cycling", face) };
+  }
+  // A slow upload does not exit, so it is the one cause shown on a running
+  // destination. Live, in the warn colour: it IS on air, badly.
+  if (why.reason === "streamdeck.reason.upload_too_slow") {
+    const face: KeyFace = { tone: "warn", label: "streamdeck.state.live", reason: why.reason };
+    return { face, issue: asIssue("uploadSlow", face) };
+  }
+  return { face: { tone: "live", label: "streamdeck.state.live" } };
+}
+
+function reconnectingFace(dest: DestStatus, proc: NonNullable<DestStatus["process"]>, why: Why): StateFace {
+  // A restart storm is what reconnecting looks like when it keeps
+  // happening: one issue, so the count goes on the label and the cause
+  // stays on the line beneath, rather than the two being counted twice.
+  const storm = stormCount(dest);
+  const face: KeyFace = {
+    tone: "warn",
+    label: storm ? "streamdeck.issue.restartStorm" : "streamdeck.state.reconnecting",
+    ...(storm ? { labelVars: { count: storm } } : {}),
+    ...(why.known ? withoutKnown(why) : withDetail(why.detail ?? proc.lastError)),
+  };
+  // Retrying is transient ("cycling"), unless the platform says the key
+  // changed: that is a real failure with a named fix, and outranks the account.
+  const kind = why.reason === "streamdeck.reason.keyChanged" ? "failed" : "cycling";
+  return { face, issue: asIssue(kind, face), stormOnFace: storm > 0 };
+}
+
+function failedFace(dest: DestStatus, proc: NonNullable<DestStatus["process"]>, why: Why): StateFace {
+  // Held is its own tile: the server has stopped retrying, and only a
+  // Retry (the console's, or a tap on this key) will change what it shows.
+  if (dest.reason?.held) {
+    const face: KeyFace = { tone: "held", label: "streamdeck.state.held", ...withoutKnown(why) };
+    return { face, issue: asIssue("held", face) };
+  }
+  const face: KeyFace = {
+    tone: "error",
+    label: "streamdeck.state.failed",
+    ...(why.known ? withoutKnown(why) : withDetail(why.detail ?? (proc.lastError || dest.error))),
+  };
+  return { face, issue: asIssue("failed", face) };
 }
 
 function withDetail(detail: string | undefined): Pick<KeyFace, "detail"> {
