@@ -76,45 +76,66 @@ func baitHit(f Forms) bool {
 func bioHit(f Forms) bool {
 	t := f.Tokens
 	for i := range t {
-		switch t[i] {
-		case "check":
-			// check my|out my  bio|profile|channel|page
-			j := i + 1
-			if j < len(t) && t[j] == "out" {
-				j++
-			}
-			if j+1 < len(t) && t[j] == "my" && pitchObject(t[j+1]) {
-				return true
-			}
-		case "link":
-			// link in (my) bio
-			if i+2 < len(t) && t[i+1] == "in" {
-				if t[i+2] == "bio" || t[i+2] == "my" && i+3 < len(t) && t[i+3] == "bio" {
-					return true
-				}
-			}
-		case "dm":
-			// dm me for <something a lure offers>
-			if i+3 < len(t) && t[i+1] == "me" && t[i+2] == "for" {
-				j := i + 3
-				for j < len(t)-1 && (t[j] == "a" || t[j] == "the") {
-					j++
-				}
-				if lureObject(t[j]) {
-					return true
-				}
-				if (t[j] == "the" || t[j] == "a") && j+1 < len(t) && lureObject(t[j+1]) {
-					return true
-				}
-			}
-		case "add":
-			if i+3 < len(t) && t[i+1] == "me" && t[i+2] == "on" &&
-				(strings.HasPrefix(t[i+3], "snap") || strings.HasPrefix(t[i+3], "tele")) {
-				return true
-			}
+		if bioPitchAt(t, i) {
+			return true
 		}
 	}
 	return false
+}
+
+// bioPitchAt reports a check-my-bio pitch that starts at token i.
+func bioPitchAt(t []string, i int) bool {
+	switch t[i] {
+	case "check":
+		return checkMyBio(t, i)
+	case "link":
+		return linkInBio(t, i)
+	case "dm":
+		return dmLure(t, i)
+	case "add":
+		return addOnSnap(t, i)
+	}
+	return false
+}
+
+// checkMyBio matches "check my|out my bio|profile|channel|page".
+func checkMyBio(t []string, i int) bool {
+	j := i + 1
+	if j < len(t) && t[j] == "out" {
+		j++
+	}
+	return j+1 < len(t) && t[j] == "my" && pitchObject(t[j+1])
+}
+
+// linkInBio matches "link in (my) bio".
+func linkInBio(t []string, i int) bool {
+	if i+2 < len(t) && t[i+1] == "in" {
+		if t[i+2] == "bio" || t[i+2] == "my" && i+3 < len(t) && t[i+3] == "bio" {
+			return true
+		}
+	}
+	return false
+}
+
+// dmLure matches "dm me for <something a lure offers>".
+func dmLure(t []string, i int) bool {
+	if !(i+3 < len(t) && t[i+1] == "me" && t[i+2] == "for") {
+		return false
+	}
+	j := i + 3
+	for j < len(t)-1 && (t[j] == "a" || t[j] == "the") {
+		j++
+	}
+	if lureObject(t[j]) {
+		return true
+	}
+	return (t[j] == "the" || t[j] == "a") && j+1 < len(t) && lureObject(t[j+1])
+}
+
+// addOnSnap matches "add me on snap..." or "add me on tele...".
+func addOnSnap(t []string, i int) bool {
+	return i+3 < len(t) && t[i+1] == "me" && t[i+2] == "on" &&
+		(strings.HasPrefix(t[i+3], "snap") || strings.HasPrefix(t[i+3], "tele"))
 }
 
 func pitchObject(w string) bool {
@@ -139,28 +160,50 @@ func lureObject(w string) bool {
 func supportHit(f Forms) bool {
 	t := f.Tokens
 	for i := range t {
-		switch t[i] {
-		case "support", "team", "staff", "partner":
-			if i == 0 || !supportWho(t[i-1]) {
-				continue
-			}
-			for _, w := range t[i+1:] {
-				if w == "dm" || w == "link" || w == "verify" || w == "verification" || w == "account" {
-					return true
-				}
-			}
-		case "your":
-			// your channel|account will be|has been banned|suspended|flagged
-			if i+4 < len(t) && (t[i+1] == "channel" || t[i+1] == "account") {
-				j := i + 2
-				if t[j] == "will" && t[j+1] == "be" || t[j] == "has" && t[j+1] == "been" {
-					switch t[j+2] {
-					case "banned", "suspended", "flagged":
-						return true
-					}
-				}
-			}
+		if supportAt(t, i) {
+			return true
 		}
+	}
+	return false
+}
+
+// supportAt reports fake platform support that starts at token i.
+func supportAt(t []string, i int) bool {
+	switch t[i] {
+	case "support", "team", "staff", "partner":
+		return supportAsk(t, i)
+	case "your":
+		return bannedNotice(t, i)
+	}
+	return false
+}
+
+// supportAsk matches an impersonated platform or role at token i followed by an
+// ask.
+func supportAsk(t []string, i int) bool {
+	if i == 0 || !supportWho(t[i-1]) {
+		return false
+	}
+	for _, w := range t[i+1:] {
+		if w == "dm" || w == "link" || w == "verify" || w == "verification" || w == "account" {
+			return true
+		}
+	}
+	return false
+}
+
+// bannedNotice matches "your channel|account will be|has been banned|suspended|flagged".
+func bannedNotice(t []string, i int) bool {
+	if !(i+4 < len(t) && (t[i+1] == "channel" || t[i+1] == "account")) {
+		return false
+	}
+	j := i + 2
+	if !(t[j] == "will" && t[j+1] == "be" || t[j] == "has" && t[j+1] == "been") {
+		return false
+	}
+	switch t[j+2] {
+	case "banned", "suspended", "flagged":
+		return true
 	}
 	return false
 }
