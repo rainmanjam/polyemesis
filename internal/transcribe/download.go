@@ -209,7 +209,8 @@ func (d *Downloader) Download(ctx context.Context, m Model, progress ProgressFun
 	}
 
 	res := DownloadResult{Path: final, Bytes: written, SHA1: hex.EncodeToString(sha1sum.Sum(nil))}
-	verified, err := verifyTransfer(tmp, m, written, total, linkedETag, resp.Header, sha1sum, sha256sum)
+	verified, err := verifyTransfer(transferProof{path: tmp, m: m, written: written, promised: total,
+		linkedETag: linkedETag, hdr: resp.Header, sha1sum: sha1sum, sha256sum: sha256sum})
 	if err != nil {
 		os.Remove(tmp)
 		return DownloadResult{}, err
@@ -223,8 +224,23 @@ func (d *Downloader) Download(ctx context.Context, m Model, progress ProgressFun
 	return res, nil
 }
 
+// transferProof is what a finished download is checked against: the file, the
+// model it should be, the bytes written and promised, and the digests.
+type transferProof struct {
+	path       string
+	m          Model
+	written    int64
+	promised   int64
+	linkedETag string
+	hdr        http.Header
+	sha1sum    hash.Hash
+	sha256sum  hash.Hash
+}
+
 // verifyTransfer runs the three checks and reports which one was strongest.
-func verifyTransfer(path string, m Model, written, promised int64, linkedETag string, hdr http.Header, sha1sum, sha256sum hash.Hash) (string, error) {
+func verifyTransfer(p transferProof) (string, error) {
+	path, m, written, promised := p.path, p.m, p.written, p.promised
+	linkedETag, hdr, sha1sum, sha256sum := p.linkedETag, p.hdr, p.sha1sum, p.sha256sum
 	if written < minModelBytes {
 		return "", fmt.Errorf("%w: %s is only %d bytes, which is not a model", ErrChecksum, m.Name, written)
 	}
