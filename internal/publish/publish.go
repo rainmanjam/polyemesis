@@ -183,7 +183,10 @@ func captionFor(m Meta) string {
 	return strings.Join(parts, "\n")
 }
 
-// xTextFor is the X post text: title, then hashtags.
+// xTextFor is the X post text: title, description, then hashtags, one per
+// line, the same parts as the TikTok caption (captionFor). Empty parts are
+// skipped. The whole text must fit X's 280-character limit, counted in UTF-16
+// units by Normalize; a longer post is refused with ErrInvalid, never truncated.
 func xTextFor(m Meta) string {
 	var parts []string
 	for _, p := range []string{m.Title, m.Description, hashtags(m.Tags)} {

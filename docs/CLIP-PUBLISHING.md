@@ -63,6 +63,10 @@ the worker refuses X, and no request is made. X's sign-in asks for the
 `tweet.write` and `media.write` scopes (sign-in scope version 2), so an X account
 connected before that has to reconnect once before it can publish clips.
 
+An X post is the title, the description and the hashtags, one per line. Together
+they must fit in 280 characters. A longer post is refused with a message, not
+shortened, so shorten the description for X.
+
 ## Never twice
 
 Each clip, platform and account has exactly one ledger row (a database unique
