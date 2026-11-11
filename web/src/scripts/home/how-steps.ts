@@ -69,7 +69,7 @@ export function initHowSteps(root: HTMLElement, gate: MotionGate): () => void {
       else el.removeAttribute("aria-current");
     });
     if (dg) {
-      dg.setAttribute("data-step", String(step));
+      dg.dataset.step = String(step);
       for (const el of parts) {
         el.classList.toggle("off", !(el.dataset.on ?? "").split(/\s+/).includes(String(step)));
       }

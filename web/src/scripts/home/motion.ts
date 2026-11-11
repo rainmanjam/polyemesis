@@ -95,7 +95,7 @@ export function whileVisible(
 
   const io = new IntersectionObserver(
     (entries) => {
-      const last = entries[entries.length - 1];
+      const last = entries.at(-1);
       if (last) intersecting = last.isIntersecting;
       update();
     },

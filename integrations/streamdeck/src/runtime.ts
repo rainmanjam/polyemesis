@@ -1,6 +1,6 @@
 import { ApiError, PolyemesisClient, type Transport } from "./api.js";
 import type { StreamDeckKey } from "./keys.js";
-import { ConfigError, dumpSecondsValid, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
+import { ConfigError, dumpSecondsValid, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
 import { destinationFace, failoverFace, retryable, type KeyFace } from "./keyFace.js";
 import { destinationImage } from "./keyImage.js";
@@ -54,7 +54,7 @@ export type SurfaceKind =
  * Kinds that confirm by a held press. A stop ends broadcasts for good; a preset can restart destinations;
  * a dump throws away programme the viewers will never see.
  */
-const HELD_KINDS: readonly SurfaceKind[] = ["stopAll", "stopOne", "preset", "poll", "dump"];
+const HELD_KINDS: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>(["stopAll", "stopOne", "preset", "poll", "dump"]);
 
 /** What an armed hold will act on, captured at key down. A later settings edit cannot retarget it. */
 interface Armed {
@@ -149,6 +149,14 @@ export async function destinationChoices(
 const ALL_SCOPE = "*";
 function scopeKey(sourceId: number | undefined): string {
   return sourceId === undefined ? ALL_SCOPE : String(sourceId);
+}
+
+/** Why a bound dump key is not ready: the delay's own state, worded the way the key shows it. */
+function dumpDelayLabel(delay: { dumping?: boolean; phase?: string }): StreamDeckKey {
+  if (delay.dumping === true) return "streamdeck.dump.dumping";
+  if (delay.phase === "buffering") return "streamdeck.state.buffering";
+  if (delay.phase === "draining") return "streamdeck.state.draining";
+  return "streamdeck.dump.notReady";
 }
 
 /** A hold is 1.5 s: long enough that a tap cannot trigger a stop by accident. */
@@ -345,7 +353,7 @@ export class Runtime {
 
   add(surface: Surface): void {
     this.surfaces.set(surface.id, surface);
-    if (HELD_KINDS.includes(surface.kind)) {
+    if (HELD_KINDS.has(surface.kind)) {
       this.holds.set(
         surface.id,
         new HoldToConfirm(HOLD_MS, this.schedule, () => void this.confirmHeld(surface)),
@@ -710,15 +718,7 @@ export class Runtime {
   private dumpFace(s: Surface, payload: StatusPayload): KeyFace {
     if (!dumpSecondsValid(s.settings.dumpSeconds)) return { tone: "unbound", label: "streamdeck.dump.badSeconds" };
     const id = s.settings.destinationId;
-    if (id === undefined) {
-      const gated = this.adminGated("streamdeck.dump.holdAll");
-      if (gated.tone !== "idle") return gated;
-      const delayed = this.dumpTargets(s, payload);
-      if (delayed.length === 0) return { tone: "unavailable", label: "streamdeck.dump.noDelay" };
-      const ready = delayed.filter((d) => d.delay?.dumpable === true).length;
-      if (ready === 0) return { tone: "unavailable", label: "streamdeck.dump.notReady" };
-      return { ...gated, detail: t(this.locale, "streamdeck.dump.count", { count: ready }) };
-    }
+    if (id === undefined) return this.dumpAllFace(s, payload);
     const dest = payload.destinations?.find((d) => d.id === id);
     if (!dest) return { tone: "unbound", label: "streamdeck.state.missing" };
     if (s.settings.sourceId !== undefined && dest.sourceId !== s.settings.sourceId) {
@@ -727,21 +727,26 @@ export class Runtime {
     const gated = this.adminGated("streamdeck.dump.hold");
     if (gated.tone !== "idle") return gated;
     const delay = dest.delay;
-    if (!delay || !(delay.seconds > 0)) return { tone: "unavailable", label: "streamdeck.dump.noDelay", detail: dest.name };
+    const hasDelay = !!delay && delay.seconds > 0;
+    if (!hasDelay) return { tone: "unavailable", label: "streamdeck.dump.noDelay", detail: dest.name };
     const marker = {
       delaySeconds: Math.round(delay.seconds),
       delayEffectiveSeconds: Math.round(delay.effectiveSeconds ?? delay.seconds),
     };
     if (delay.dumpable === true) return { ...gated, detail: dest.name, ...marker };
-    const label =
-      delay.dumping === true
-        ? "streamdeck.dump.dumping"
-        : delay.phase === "buffering"
-          ? "streamdeck.state.buffering"
-          : delay.phase === "draining"
-            ? "streamdeck.state.draining"
-            : "streamdeck.dump.notReady";
+    const label = dumpDelayLabel(delay);
     return { tone: "unavailable", label, detail: dest.name, ...marker };
+  }
+
+  /** The dump-all key's face: how many of the programme's delayed destinations a hold would dump. */
+  private dumpAllFace(s: Surface, payload: StatusPayload): KeyFace {
+    const gated = this.adminGated("streamdeck.dump.holdAll");
+    if (gated.tone !== "idle") return gated;
+    const delayed = this.dumpTargets(s, payload);
+    if (delayed.length === 0) return { tone: "unavailable", label: "streamdeck.dump.noDelay" };
+    const ready = delayed.filter((d) => d.delay?.dumpable === true).length;
+    if (ready === 0) return { tone: "unavailable", label: "streamdeck.dump.notReady" };
+    return { ...gated, detail: t(this.locale, "streamdeck.dump.count", { count: ready }) };
   }
 
   /** The Record key. Install-wide: the same answer on every programme, so the face says what the switch is. */
@@ -945,7 +950,7 @@ export class Runtime {
   /** Hands a destination key's inspector its issue list when the list has changed. */
   private async sendIssues(s: Surface, lines: string[]): Promise<void> {
     const last = this.lastIssues.get(s.id);
-    if (last && last.length === lines.length && last.every((l, i) => l === lines[i])) return;
+    if (last?.length === lines.length && last.every((l, i) => l === lines[i])) return;
     this.lastIssues.set(s.id, lines);
     await s.showIssues?.(lines);
   }
@@ -1115,32 +1120,39 @@ export class Runtime {
     const result = await hold.press(all ? () => this.countDumpAll(sourceId) : async () => NO_COUNT);
     if (result.superseded) return;
     if (result.phase === "refused") {
-      const title =
-        result.error instanceof DumpNeedsProgramme
-          ? t(this.locale, "streamdeck.dump.needsProgramme")
-          : result.error instanceof DumpNothingReady
-            ? t(this.locale, "streamdeck.dump.notReady")
-            : [t(this.locale, "streamdeck.dump.holdAll"), t(this.locale, "streamdeck.stop.countFailed")].join("\n");
-      await s.setTitle(title);
+      await s.setTitle(this.dumpRefusalTitle(result.error));
       await s.showAlert();
       return;
     }
     if (result.phase !== "arming") return;
+    const face = this.dumpHeldFace(all, dumpSeconds, result.impact?.destinations ?? 0);
+    await s.setState(KEY_STATE.held);
+    await s.setTitle(titleFor(face, this.locale));
+  }
+
+  /** The title a refused dump hold shows: why the dump cannot run, as the operator can act on it. */
+  private dumpRefusalTitle(error: unknown): string {
+    if (error instanceof DumpNeedsProgramme) return t(this.locale, "streamdeck.dump.needsProgramme");
+    if (error instanceof DumpNothingReady) return t(this.locale, "streamdeck.dump.notReady");
+    return [t(this.locale, "streamdeck.dump.holdAll"), t(this.locale, "streamdeck.stop.countFailed")].join("\n");
+  }
+
+  /** The face of an armed dump hold: the dump-all key counts the destinations it will dump. */
+  private dumpHeldFace(all: boolean, dumpSeconds: number | undefined, destinations: number): KeyFace {
     const what =
       dumpSeconds === undefined
         ? t(this.locale, "streamdeck.dump.sinceMark")
         : t(this.locale, "streamdeck.dump.lastSeconds", { seconds: dumpSeconds });
-    const face: KeyFace = all
-      ? {
-          tone: "held",
-          label: "streamdeck.dump.holdAll",
-          reason: "streamdeck.dump.count",
-          reasonVars: { count: result.impact?.destinations ?? 0 },
-          detail: what,
-        }
-      : { tone: "held", label: "streamdeck.dump.hold", detail: what };
-    await s.setState(KEY_STATE.held);
-    await s.setTitle(titleFor(face, this.locale));
+    if (all) {
+      return {
+        tone: "held",
+        label: "streamdeck.dump.holdAll",
+        reason: "streamdeck.dump.count",
+        reasonVars: { count: destinations },
+        detail: what,
+      };
+    }
+    return { tone: "held", label: "streamdeck.dump.hold", detail: what };
   }
 
   /**
@@ -1488,7 +1500,10 @@ export class Runtime {
 
   private turnFor(id: string): DialTurn {
     let turn = this.turns.get(id);
-    if (!turn) this.turns.set(id, (turn = { inFlight: false }));
+    if (!turn) {
+      turn = { inFlight: false };
+      this.turns.set(id, turn);
+    }
     return turn;
   }
 
@@ -1555,7 +1570,7 @@ export class Runtime {
   private async flushGain(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     const turn = this.turns.get(id);
-    if (!s || !turn || turn.targetDb === undefined || turn.inFlight) return;
+    if (!s || turn?.targetDb === undefined || turn.inFlight) return;
     const target = this.destLevels ? this.trackTarget(s, this.destLevels) : undefined;
     if (!target || "face" in target) {
       turn.targetDb = undefined;

@@ -37,7 +37,7 @@ export interface Line {
   /** Source index (0 is the video, 1-4 the tracks) or the hub. */
   from: number | "hub";
   /** "hub" or a destination id. */
-  to: string | "hub";
+  to: string;
   /** The how-it-works steps this line is visible on. */
   on: string;
 }

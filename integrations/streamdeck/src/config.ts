@@ -109,7 +109,9 @@ export function trackIndex(raw: unknown): number | undefined {
  * the server checks the count and lengths and says what is wrong.
  */
 export function pollOptions(raw: unknown): string[] | undefined {
-  const lines = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/\r?\n/) : [];
+  let lines: unknown[] = [];
+  if (Array.isArray(raw)) lines = raw;
+  else if (typeof raw === "string") lines = raw.split(/\r?\n/);
   const out = lines.filter((o): o is string => typeof o === "string").map((o) => o.trim()).filter((o) => o !== "");
   return out.length > 0 ? out : undefined;
 }

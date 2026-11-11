@@ -65,6 +65,30 @@ const minus = (a, b) => (x, y) => a(x, y) && !b(x, y);
 const SAMPLES = 4;
 
 /**
+ * Sums the covered sub-pixels of one pixel. Returns [r, g, b, a]: the colour sums and how many
+ * sub-pixels were covered (a is the count, not an alpha).
+ */
+function samplePixel(paint, size, px, py) {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let a = 0;
+  for (let sy = 0; sy < SAMPLES; sy++) {
+    for (let sx = 0; sx < SAMPLES; sx++) {
+      const x = (px + (sx + 0.5) / SAMPLES) / size;
+      const y = (py + (sy + 0.5) / SAMPLES) / size;
+      const c = paint(x, y);
+      if (!c) continue;
+      r += c[0];
+      g += c[1];
+      b += c[2];
+      a += 1;
+    }
+  }
+  return [r, g, b, a];
+}
+
+/**
  * Renders one icon. `paint(x, y)` returns the colour of a sub-pixel as [r, g, b], or null
  * for transparent. Each pixel averages its sub-pixels, so an edge is a blend, not a step.
  */
@@ -73,22 +97,7 @@ function render(size, paint) {
   const n = SAMPLES * SAMPLES;
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let a = 0;
-      for (let sy = 0; sy < SAMPLES; sy++) {
-        for (let sx = 0; sx < SAMPLES; sx++) {
-          const x = (px + (sx + 0.5) / SAMPLES) / size;
-          const y = (py + (sy + 0.5) / SAMPLES) / size;
-          const c = paint(x, y);
-          if (!c) continue;
-          r += c[0];
-          g += c[1];
-          b += c[2];
-          a += 1;
-        }
-      }
+      const [r, g, b, a] = samplePixel(paint, size, px, py);
       const o = (py * size + px) * 4;
       if (a > 0) {
         out[o] = Math.round(r / a);

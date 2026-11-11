@@ -49,7 +49,8 @@ export function stepDb(fromDb: number, ticks: number): number {
   const steps = fromDb / DB_STEP;
   // A value within a hair of a grid point is on it: 20*log10 of a stored float is rarely exact.
   const onGrid = Math.abs(steps - Math.round(steps)) < 1e-6;
-  const base = onGrid ? Math.round(steps) : ticks > 0 ? Math.floor(steps) : Math.ceil(steps);
+  let base = Math.round(steps);
+  if (!onGrid) base = ticks > 0 ? Math.floor(steps) : Math.ceil(steps);
   // The floor is the dial's, or the level itself when it is already below it: a track
   // stored at -60 dB (set in the UI, or over the API) moves 0.5 dB a tick from -60, not
   // 20 dB in one tick to -40. Minus infinity (a stored gain of 0) has nowhere to step

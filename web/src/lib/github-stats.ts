@@ -19,7 +19,7 @@ export interface RepoStats {
 
 const TIMEOUT_MS = 4000;
 
-async function getJson(fetchImpl: typeof fetch, url: string): Promise<unknown | null> {
+async function getJson(fetchImpl: typeof fetch, url: string): Promise<unknown> {
   try {
     const res = await fetchImpl(url, {
       headers: { accept: "application/vnd.github+json", "user-agent": "polyemesis-site-build" },

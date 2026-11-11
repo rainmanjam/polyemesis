@@ -4,7 +4,7 @@
  * the page reads without script. This upgrades it: it reveals the tablist and
  * Pause, swaps each destination div for a button, and wires the rest. Pause
  * itself is wired by boot() alone, so it is bound exactly once per page. */
-import { STORIES, STORY_ORDER, statusFor, type StoryKey } from "./stories";
+import { STORIES, STORY_ORDER, statusFor, type Dest, type StoryKey } from "./stories";
 import { whileVisible, type MotionGate } from "./motion";
 
 export interface HeroController {
@@ -16,6 +16,27 @@ export interface HeroController {
 
 const SWAP_MS = 150;
 
+/** Marks the destination buttons: the solo'd or previewed one, and the pinned one for aria-pressed. */
+function markDests(panel: HTMLElement, dest: Dest | undefined, pinned: string | null): void {
+  for (const el of panel.querySelectorAll<HTMLElement>(".dest")) {
+    const id2 = el.dataset.dest;
+    el.classList.toggle("is-solo", !!dest && id2 === dest.id);
+    el.classList.toggle("dim", !!dest && id2 !== dest.id);
+    el.setAttribute("aria-pressed", pinned !== null && id2 === pinned ? "true" : "false");
+  }
+}
+
+/** Dims the flow lines that do not carry the solo'd destination. */
+function dimLines(panel: HTMLElement, dest: Dest | undefined, silent: (src: number) => boolean): void {
+  for (const el of panel.querySelectorAll<SVGElement>(".ln")) {
+    const from = el.dataset.from ?? "";
+    const to = el.dataset.to ?? "";
+    let dim = false;
+    if (dest) dim = from === "hub" ? to !== dest.id : silent(Number(from));
+    el.classList.toggle("dim", dim);
+  }
+}
+
 /** A destination div becomes a button: same classes, children, data-* and box;
  * the accessible name moves from data-label to aria-label. */
 export function upgradeToButton(el: HTMLElement): HTMLButtonElement {
@@ -23,8 +44,8 @@ export function upgradeToButton(el: HTMLElement): HTMLButtonElement {
   for (const a of Array.from(el.attributes)) btn.setAttribute(a.name, a.value);
   btn.type = "button";
   btn.setAttribute("aria-pressed", "false");
-  const label = el.getAttribute("data-label");
-  if (label !== null) btn.setAttribute("aria-label", label);
+  const label = el.dataset.label;
+  if (label !== undefined) btn.setAttribute("aria-label", label);
   while (el.firstChild) btn.appendChild(el.firstChild);
   el.replaceWith(btn);
   return btn;
@@ -108,23 +129,12 @@ export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
     writeStatus(st.name, st.text);
     if (!panel) return;
 
-    for (const el of panel.querySelectorAll<HTMLElement>(".dest")) {
-      const id2 = el.dataset.dest;
-      el.classList.toggle("is-solo", !!dest && id2 === dest.id);
-      el.classList.toggle("dim", !!dest && id2 !== dest.id);
-      el.setAttribute("aria-pressed", pinned !== null && id2 === pinned ? "true" : "false");
-    }
+    markDests(panel, dest, pinned);
     const silent = (src: number) => !!dest && (src === 0 ? !dest.video : dest.mix[src - 1] === 0);
     for (const el of panel.querySelectorAll<HTMLElement>(".si")) {
       el.classList.toggle("dim", silent(Number(el.dataset.src)));
     }
-    for (const el of panel.querySelectorAll<SVGElement>(".ln")) {
-      const from = el.dataset.from ?? "";
-      const to = el.dataset.to ?? "";
-      let dim = false;
-      if (dest) dim = from === "hub" ? to !== dest.id : silent(Number(from));
-      el.classList.toggle("dim", dim);
-    }
+    dimLines(panel, dest, silent);
   }
 
   function solo(id: string | null) {
