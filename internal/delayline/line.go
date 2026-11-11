@@ -173,35 +173,20 @@ func (l *Line) Delay() time.Duration { return l.cfg.Delay }
 // sent to know that nothing is still on its way in.
 func (l *Line) Ingested() uint64 { return l.ingested.Load() }
 
+// dropReport is what the reader remembers between drop reports: how many drops
+// it has already reported, and when it last reported.
+type dropReport struct {
+	seen uint64
+	last time.Time
+}
+
 func (l *Line) read() {
 	defer l.wg.Done()
 	defer close(l.inputDone)
 	pkt := make([]byte, 2048)
-	var dropsSeen uint64
-	var lastDropReport time.Time
+	var drops dropReport
 	take := func(p []byte) {
-		err := l.buf.Push(time.Now(), p)
-		l.ingested.Add(1)
-		if err != nil {
-			return
-		}
-		// A dump resumes on a push: the one that brought its keyframe.
-		if t := l.buf.takeResumed(); t != nil && l.cfg.OnDumped != nil {
-			go l.cfg.OnDumped(t.Result())
-		}
-		// Drops happen here, on the push that seals a segment with nowhere to
-		// go -- including while the line is still filling and the pump is
-		// asleep -- so they are reported from here.
-		if l.cfg.OnDrop != nil {
-			if d := l.buf.Dropped(); d > dropsSeen && time.Since(lastDropReport) >= DropReportEvery {
-				dropsSeen, lastDropReport = d, time.Now()
-				l.cfg.OnDrop(l.buf.Err())
-			}
-		}
-		select {
-		case l.wake <- struct{}{}:
-		default:
-		}
+		l.takeDatagram(p, &drops)
 	}
 	for {
 		if l.cfg.beforeRead != nil {
@@ -209,12 +194,7 @@ func (l *Line) read() {
 		}
 		n, err := l.conn.Read(pkt)
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			if errors.Is(err, os.ErrDeadlineExceeded) && l.draining.Load() {
-				// Drain's cue: take what is already queued, then stop.
-				l.takeQueued(pkt, take)
+			if l.readStops(err, pkt, take) {
 				return
 			}
 			select {
@@ -229,6 +209,55 @@ func (l *Line) read() {
 			continue
 		}
 		take(pkt[:n])
+	}
+}
+
+// readStops reports whether a failed read ends the reader: the socket is
+// closed, or a drain is under way. In the drain case it takes what is already
+// queued before reporting true.
+func (l *Line) readStops(err error, pkt []byte, take func([]byte)) bool {
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) && l.draining.Load() {
+		// Drain's cue: take what is already queued, then stop.
+		l.takeQueued(pkt, take)
+		return true
+	}
+	return false
+}
+
+// takeDatagram pushes one datagram the reader has taken and reports what the
+// push changed.
+func (l *Line) takeDatagram(p []byte, drops *dropReport) {
+	err := l.buf.Push(time.Now(), p)
+	l.ingested.Add(1)
+	if err != nil {
+		return
+	}
+	// A dump resumes on a push: the one that brought its keyframe.
+	if t := l.buf.takeResumed(); t != nil && l.cfg.OnDumped != nil {
+		go l.cfg.OnDumped(t.Result())
+	}
+	// Drops happen here, on the push that seals a segment with nowhere to
+	// go -- including while the line is still filling and the pump is
+	// asleep -- so they are reported from here.
+	l.reportDrops(drops)
+	select {
+	case l.wake <- struct{}{}:
+	default:
+	}
+}
+
+// reportDrops calls OnDrop when the buffer has dropped more since the last
+// report, and no sooner than DropReportEvery after it.
+func (l *Line) reportDrops(r *dropReport) {
+	if l.cfg.OnDrop == nil {
+		return
+	}
+	if d := l.buf.Dropped(); d > r.seen && time.Since(r.last) >= DropReportEvery {
+		r.seen, r.last = d, time.Now()
+		l.cfg.OnDrop(l.buf.Err())
 	}
 }
 
@@ -309,7 +338,7 @@ func (l *Line) pump() {
 			// is set before the reader has taken what was already queued, so
 			// it alone is not the answer: an empty buffer in that instant is
 			// one the reader is about to push into.
-			if l.draining.Load() && l.inputClosed() {
+			if l.drainedAndReaderOut() {
 				l.drainOnce.Do(func() { close(l.drained) })
 				return
 			}
@@ -320,30 +349,49 @@ func (l *Line) pump() {
 				return
 			}
 		}
+		if !l.sleepUntil(l.wakeAt(due, fired)) {
+			return
+		}
 		if !fired {
-			if !l.sleepUntil(due.Add(-l.cfg.Lead)) {
-				return
-			}
 			fired = true
 			l.cfg.OnFirstDue()
 			continue
 		}
-		if !l.sleepUntil(due) {
-			return
-		}
-		// Everything due within the next millisecond goes in this wake. At
-		// 20 Mbit/s that is about two datagrams, and arming a timer for each
-		// one separately would be ~1,900 timers a second for nothing.
-		out = l.buf.Pop(time.Now().Add(releaseSlack), out[:0])
-		for i, p := range out {
-			l.cfg.Out(p)
-			out[i] = nil
-		}
-		if len(out) > 0 && !l.releasing.Load() {
-			l.releasing.Store(true)
-			l.log.Info("broadcast delay: first delayed datagram released", "delay", l.cfg.Delay)
-		}
+		out = l.releaseDue(out)
 	}
+}
+
+// drainedAndReaderOut reports whether a drain has been asked for and the reader
+// has stopped for good, so an empty buffer means nothing more will arrive.
+func (l *Line) drainedAndReaderOut() bool {
+	return l.draining.Load() && l.inputClosed()
+}
+
+// wakeAt is when the pump should wake for the next due datagram: the first one
+// fires OnFirstDue a Lead early, every later one fires on its due time.
+func (l *Line) wakeAt(due time.Time, fired bool) time.Time {
+	if fired {
+		return due
+	}
+	return due.Add(-l.cfg.Lead)
+}
+
+// releaseDue hands out everything due by now, reusing out's storage, and logs
+// the first release.
+func (l *Line) releaseDue(out [][]byte) [][]byte {
+	// Everything due within the next millisecond goes in this wake. At
+	// 20 Mbit/s that is about two datagrams, and arming a timer for each
+	// one separately would be ~1,900 timers a second for nothing.
+	out = l.buf.Pop(time.Now().Add(releaseSlack), out[:0])
+	for i, p := range out {
+		l.cfg.Out(p)
+		out[i] = nil
+	}
+	if len(out) > 0 && !l.releasing.Load() {
+		l.releasing.Store(true)
+		l.log.Info("broadcast delay: first delayed datagram released", "delay", l.cfg.Delay)
+	}
+	return out
 }
 
 // inputClosed reports whether the reader has stopped for good.
