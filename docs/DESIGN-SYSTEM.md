@@ -98,6 +98,16 @@ The rules that matter:
   else. As text it would be the on-air signal shrunk to a word, and at 3.47:1 on
   `--card` it fails AA besides. The lamp's L 56.5% is the lightest a white label
   survives: at L 63.5% white measures 3.67.
+- **Marketing exception, the home page only.** This is a deliberate exception
+  to the rule above. The owner decided it on 2026-11-10 ("Keep the red"). The
+  app's rule is unchanged, and the logo is unchanged.
+  - `.btn-onair` (a `--tally` fill under `--tally-foreground`, 4.97:1) is the
+    homepage's primary CTA, Install included. The on-air lamp, the how-it-works
+    rail and the step pips are tally fills too.
+  - Tally is still never ink. The Nav, the other pages and the console keep the
+    blue `--primary`.
+  - The upload meter's over-limit bar uses `--down`, because "over your upload"
+    is a failure state, not decoration.
 - **Blue is interaction only:** links, focus and the primary button. Blue is
   never a state, a chart series or decoration. `--primary` is **fill-only**
   (buttons, checked controls, a lit crosspoint); every blue that is text is
@@ -263,12 +273,16 @@ while the control is enabled.
 
 ### Typefaces
 
-Two families, and both halves of the product load the same two files.
+Two shared families, and both halves of the product load the same two files.
+The website adds Space Grotesk for display and IBM Plex Serif Italic for one
+emphasis word on the homepage. Both are website-only.
 
 | Token | Family | Served from |
 |---|---|---|
 | `--font-sans` | IBM Plex Sans | `ui/public/fonts/` and `web/public/fonts/` |
 | `--font-mono` | JetBrains Mono | `ui/public/fonts/` and `web/public/fonts/` |
+| `--font-display` | Space Grotesk | `web/public/fonts/` only |
+| `--font-accent` | IBM Plex Serif Italic, stack `"IBM Plex Serif", serif` | `web/public/fonts/` only, not preloaded |
 
 Self-hosted woff2, one variable file per family subset to latin, with
 `font-display: swap`. Not a CDN link: a font request to a third party is a
@@ -295,6 +309,11 @@ console on carries one.
 The website also carries **Space Grotesk** for marketing headlines. The console
 has no display type — its largest step is `--text-display`, a 28px page title —
 so it does not ship that third file.
+
+The website also carries **IBM Plex Serif Italic** for the one emphasis word in
+the homepage headline. It is the unmodified OFL release, about 45 KB, served
+from `web/public/fonts/` only and not preloaded. Its fallback is the generic
+`serif`.
 
 This was the loudest half of the gap between this document and the code. The
 website has loaded both families since it was written; the app declared
@@ -452,11 +471,15 @@ Structure, taken from the four sites above, which agree almost exactly:
 - Thin announcement bar, accent background, one sentence, one link
 - Near-black hero, headline at two lines maximum
 - One-line subhead that says what it *is*, not what it *enables*
-- Filled primary CTA plus an outlined secondary — never two filled
+- Filled primary CTA plus an outlined secondary — never two filled. On the home
+  page the filled CTA is the `.btn-onair` tally fill (see the Marketing exception
+  under Colour).
 - Below the fold: **the product**, either a live meter or a real screenshot
 
-The hero should be the meter. It is the one thing no competitor's landing page
-can show honestly, because none of them route audio per destination.
+The hero is the split diagram: one feed goes out as untouched video plus a mix
+per destination. It is the one thing no competitor's landing page can show
+honestly, because none of them route audio per destination. The meter proof
+lives on `/features`.
 
 ## What is deliberately absent
 
