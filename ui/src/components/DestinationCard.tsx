@@ -395,8 +395,8 @@ export function DestinationCard({
         labelKey="dest.speed"
         value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
         tone={speedTone(running, progress?.speed ?? 0)}
-        />
-      </div>
+      />
+    </div>
   );
 
   const renderProblems = () => (
