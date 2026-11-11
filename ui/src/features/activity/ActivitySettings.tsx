@@ -11,6 +11,7 @@ import { api, isSettingsConflict } from "@/lib/api";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { platformName } from "@/lib/platforms";
 import { useSaveModel } from "@/lib/saveModel";
+import { createRowKeys } from "@/lib/row-keys";
 import type {
   ActivityKindState,
   ActivitySettings as Block,
@@ -54,6 +55,10 @@ function reportedState(
   if (found.length === 0) return null;
   return found.find((k) => k.state === "on") ?? found[0];
 }
+
+/** Keys for the minimum-tip rows. Module level, so the keys outlive renders;
+ *  row-keys.ts says why they cannot ride on the rows themselves. */
+const minRowKeys = createRowKeys<MinAmount>("activity-min");
 
 /** minor units as the currency's major figure, for the hint beside the field. */
 function majorHint(m: MinAmount): string {
@@ -141,7 +146,10 @@ export function ActivitySettings({
 
   const problem = firstMinProblem(draft.minTip);
   const setMin = (i: number, patch: Partial<MinAmount>) =>
-    setDraft({ ...draft, minTip: (draft.minTip ?? []).map((m, j) => (j === i ? { ...m, ...patch } : m)) });
+    setDraft({
+      ...draft,
+      minTip: (draft.minTip ?? []).map((m, j) => (j === i ? minRowKeys.replace(m, { ...m, ...patch }) : m)),
+    });
 
   if (!settings) {
     return (
@@ -241,7 +249,7 @@ export function ActivitySettings({
           const money = m.currency !== undefined || m.minor !== undefined;
           const unit = m.unit !== undefined || m.units !== undefined;
           return (
-            <div key={i} className="flex flex-wrap items-end gap-2">
+            <div key={minRowKeys.keyOf(m)} className="flex flex-wrap items-end gap-2">
               {money && (
                 <>
                   <div className="flex flex-col gap-1">
