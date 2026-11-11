@@ -2,6 +2,8 @@ package pack
 
 import (
 	"bytes"
+	// Blank import: the //go:embed directive below needs package embed linked in,
+	// but the file itself never refers to it by name.
 	_ "embed"
 	"encoding/json"
 	"fmt"
