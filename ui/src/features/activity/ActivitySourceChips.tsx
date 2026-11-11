@@ -15,6 +15,11 @@ const TONE: Record<ActivitySource["state"], SignalTone> = {
   stopped: "idle",
 };
 
+function badgeVariantFor(state: ActivitySource["state"]): "live" | "down" | "warn" {
+  if (state === "live") return "live";
+  return state === "failed" ? "down" : "warn";
+}
+
 /** The health strip: one chip per source with its state, its kind counts and
  *  its own detail text, so "why is nothing arriving from Kick" has an answer on
  *  the page. State is a word and a dot -- never a colour alone.
@@ -55,7 +60,7 @@ export function ActivitySourceChips({
                   <Icon className={`h-3.5 w-3.5 ${accent.text}`} aria-hidden />
                   <span className="font-semibold">{platformName(s.platform)}</span>
                   {s.account && <span className="text-muted-foreground">{s.account}</span>}
-                  <Badge variant={s.state === "live" ? "live" : s.state === "failed" ? "down" : "warn"}>
+                  <Badge variant={badgeVariantFor(s.state)}>
                     {t(`activity.sourceState.${s.state}`)}
                   </Badge>
                   <span className="tnum font-mono text-muted-foreground">

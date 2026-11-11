@@ -37,7 +37,7 @@ const sameLine = (a: LogLine, b: LogLine) =>
 export function collapseRepeats(lines: LogLine[]): LogGroup[] {
   const groups: LogGroup[] = [];
   for (const l of lines) {
-    const last = groups[groups.length - 1];
+    const last = groups.at(-1);
     if (last && sameLine(last.line, l)) {
       last.count += 1;
     } else {
