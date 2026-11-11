@@ -185,38 +185,54 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 		}
 		counted++
 		if err == nil {
-			// The mirror is the FIRST counted occurrence's or nobody's. When that one's create failed or is still
-			// pending, the mirror is not moved to the next one: this week's show would then go live on next
-			// week's event.
-			if occ.State == scheduler.OccurrenceUpcoming && counted == 1 {
-				s.pointGoLiveAt(d, sc, at, occ.PlatformEventID, nil, now)
-			}
-			// Pending or stranded (the upcoming case above aside): another sweep is inside its create, or the
-			// cancel is being retried. It holds its slot and nothing is mirrored for it.
+			s.lookaheadExisting(d, sc, at, occ, counted, now)
 			continue
 		}
 		if !errors.Is(err, db.ErrNotFound) {
 			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", redactErr(err))
 			return
 		}
-
-		if s.templateCreateHeld(d.ID, sc.ID, now) {
-			// A recent refusal for this destination and schedule. The slot is counted, so the walk does
-			// not reach further ahead to fill it, and nothing calls the platform until the hold ends.
-			continue
-		}
-		b, ok := s.createTemplateEvent(ctx, ed, tpl, sc, d, at, now)
-		d = destinationWithMintedKey(d, b, ok)
-		if !ok {
-			// The failure is logged where it happened, and the claim is released or the event is
-			// cancelled, so the next sweep is free to try. Each occurrence stands alone, so one that
-			// failed does not hold back the ones after it. Nothing is mirrored for a failed create.
-			continue
-		}
-		if counted == 1 {
-			s.pointGoLiveAt(d, sc, at, b.ID, b, now)
-		}
+		d = s.lookaheadCreate(ctx, ed, tpl, sc, d, at, counted, now)
 	}
+}
+
+// lookaheadExisting handles a counted occurrence that already has a record. The
+// mirror is set only for an upcoming first occurrence; anything else holds its
+// slot and is left alone.
+func (s *Server) lookaheadExisting(d *db.Destination, sc scheduler.Schedule, at time.Time,
+	occ *scheduler.Occurrence, counted int, now time.Time) {
+	// The mirror is the FIRST counted occurrence's or nobody's. When that one's create failed or is still
+	// pending, the mirror is not moved to the next one: this week's show would then go live on next
+	// week's event.
+	if occ.State == scheduler.OccurrenceUpcoming && counted == 1 {
+		s.pointGoLiveAt(d, sc, at, occ.PlatformEventID, nil, now)
+	}
+	// Pending or stranded (the upcoming case above aside): another sweep is inside its create, or the
+	// cancel is being retried. It holds its slot and nothing is mirrored for it.
+}
+
+// lookaheadCreate creates the event for a counted occurrence that has no record
+// yet, unless a recent refusal holds it. It returns the destination the walk
+// carries forward, which may hold a stream key the create just minted.
+func (s *Server) lookaheadCreate(ctx context.Context, ed oauth.ScheduledEditor, tpl scheduler.BroadcastTemplate,
+	sc scheduler.Schedule, d *db.Destination, at time.Time, counted int, now time.Time) *db.Destination {
+	if s.templateCreateHeld(d.ID, sc.ID, now) {
+		// A recent refusal for this destination and schedule. The slot is counted, so the walk does
+		// not reach further ahead to fill it, and nothing calls the platform until the hold ends.
+		return d
+	}
+	b, ok := s.createTemplateEvent(ctx, ed, tpl, sc, d, at, now)
+	d = destinationWithMintedKey(d, b, ok)
+	if !ok {
+		// The failure is logged where it happened, and the claim is released or the event is
+		// cancelled, so the next sweep is free to try. Each occurrence stands alone, so one that
+		// failed does not hold back the ones after it. Nothing is mirrored for a failed create.
+		return d
+	}
+	if counted == 1 {
+		s.pointGoLiveAt(d, sc, at, b.ID, b, now)
+	}
+	return d
 }
 
 // destinationWithMintedKey returns d, or a copy of it holding the stream key the
