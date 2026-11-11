@@ -31,7 +31,7 @@ the summary is wrong.
 
 ## Core
 
-- [Home](https://polyemesis.com/): what it does, and the routing table
+- [Home](https://polyemesis.com/): what it does, one upload and a different mix per destination, shown as a diagram
 - [Features](https://polyemesis.com/features): mix matrix, renditions, meters, chat moderation
 - [Comparison](https://polyemesis.com/comparison): versus Restreamer, restream.io, obs-multi-rtmp, Aitum, MistServer
 - [Install](https://polyemesis.com/download): Docker, one-line installer, or a static binary
