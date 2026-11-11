@@ -2243,18 +2243,13 @@ func (w *feedWatch) advanced(gen uint64) feedKind {
 	seen := make(map[*relay.Hub]struct{}, 3)
 	ingestMoved, downMoved, receiving := false, false, false
 	visit := func(h *relay.Hub, isIngest bool) {
-		if h == nil {
-			return
-		}
-		if _, dup := seen[h]; dup {
+		if _, dup := seen[h]; h == nil || dup {
 			return
 		}
 		seen[h] = struct{}{}
 		rx := h.RxBytes()
-		moved := false
-		if prev, ok := w.last[h]; ok && rx > prev {
-			moved = true
-		}
+		prev, ok := w.last[h]
+		moved := ok && rx > prev
 		w.last[h] = rx
 		if isIngest {
 			ingestMoved = ingestMoved || moved
@@ -2267,11 +2262,23 @@ func (w *feedWatch) advanced(gen uint64) feedKind {
 		visit(h, true)
 	}
 	visit(down, false)
+	w.forgetUnseen(seen)
+	return feedFromMovement(ingestMoved, downMoved, receiving)
+}
+
+// forgetUnseen drops the hubs that were not sampled this round, so w.last
+// holds only the hubs still in use.
+func (w *feedWatch) forgetUnseen(seen map[*relay.Hub]struct{}) {
 	for h := range w.last {
 		if _, ok := seen[h]; !ok {
 			delete(w.last, h)
 		}
 	}
+}
+
+// feedFromMovement is what the sampled movement says the feed is: ingest bytes
+// moving is the ingest feed; downstream moving with nothing received is a slate.
+func feedFromMovement(ingestMoved, downMoved, receiving bool) feedKind {
 	switch {
 	case ingestMoved:
 		return feedIngest
@@ -5955,7 +5962,9 @@ func (a scheduleActuator) PrepareStarts(ids []int64) (release func()) {
 	if prep := a.m.startPrep.Load(); prep != nil {
 		return (*prep)(ids)
 	}
-	return func() {}
+	return func() {
+		// No prep hook is installed, so there is nothing to release.
+	}
 }
 
 func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {

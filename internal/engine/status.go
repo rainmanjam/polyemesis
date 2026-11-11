@@ -951,6 +951,36 @@ func (e *Engine) ScrubDestinationText(id int64, text string) string {
 	return redact.Redact(redact.NewSecretSet(nil, destSecrets(row, minted)...).Scrub(text))
 }
 
+// rendAndDestProcsLocked appends the rendition processes, then each destination
+// and its redundant output, to out. The caller holds e.mu.
+func (e *Engine) rendAndDestProcsLocked(out []*supervisor.Process) []*supervisor.Process {
+	for _, r := range e.rends {
+		if r.proc != nil {
+			out = append(out, r.proc)
+		}
+	}
+	for _, d := range e.dests {
+		if d.proc != nil {
+			out = append(out, d.proc)
+		}
+		// The REDUNDANT output, which is not e.backup in Processes -- that is the
+		// source-side backup-ingest tier, a different thing entirely.
+		//
+		// Both API consumers go through Processes, so without it
+		// GET /processes/dest:<id>:backup/logs answered "no such process". The
+		// card shows the backup's state, so an operator could see that
+		// redundancy was broken and had no way to find out why, at the one
+		// moment those logs exist for. destArgs' own justification for existing
+		// is that a drifted backup argv "would be invisible until somebody
+		// compared two argv strings on the monitoring page" -- and the backup's
+		// argv was never on that page.
+		if d.backup != nil {
+			out = append(out, d.backup)
+		}
+	}
+	return out
+}
+
 // Processes returns every supervised process, for the monitoring page.
 //
 // No engine supervises nothing, which is the truthful answer for an install
@@ -982,30 +1012,7 @@ func (e *Engine) Processes() []*supervisor.Process {
 			out = append(out, p)
 		}
 	}
-	for _, r := range e.rends {
-		if r.proc != nil {
-			out = append(out, r.proc)
-		}
-	}
-	for _, d := range e.dests {
-		if d.proc != nil {
-			out = append(out, d.proc)
-		}
-		// The REDUNDANT output, which is not e.backup above -- that is the
-		// source-side backup-ingest tier, a different thing entirely.
-		//
-		// Both API consumers go through this function, so without it
-		// GET /processes/dest:<id>:backup/logs answered "no such process". The
-		// card shows the backup's state, so an operator could see that
-		// redundancy was broken and had no way to find out why, at the one
-		// moment those logs exist for. destArgs' own justification for existing
-		// is that a drifted backup argv "would be invisible until somebody
-		// compared two argv strings on the monitoring page" -- and the backup's
-		// argv was never on that page.
-		if d.backup != nil {
-			out = append(out, d.backup)
-		}
-	}
+	out = e.rendAndDestProcsLocked(out)
 	// Sorted, because a map of analysers would otherwise reshuffle the
 	// monitoring page on every poll.
 	for _, k := range loudKeysSorted(e.loud) {

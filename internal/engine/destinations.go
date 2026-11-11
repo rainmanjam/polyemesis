@@ -1595,6 +1595,39 @@ const backupPending = "Facebook has not offered a backup ingest endpoint yet; " 
 // the lock, which is only safe while a published destination never changes
 // again." A replacement is built, filled in while nothing else can see it, and
 // swapped in by publishDest.
+// backupPlan decides what reconcileBackup does with the redundant output. done
+// is true when the current backup already stands and nothing changes. Otherwise
+// want is the backup spec to build (empty when none is wanted), and refused is
+// the backup a refused live level change is about to replace, if any.
+func (e *Engine) backupPlan(prev *destination, compiled routing.Result, upstream, reason string) (want string, refused *supervisor.Process, done bool) {
+	// want is computed ONLY on the branch that reads it. backupSpecOf renders a
+	// whole destination argv and takes a SHA-256 of it, and it used to run above
+	// this switch -- so every destination without redundancy, on every reconcile,
+	// paid for a hash of a command line that was then discarded by the early
+	// return below. That is the common case, not an edge one.
+	// refused is the backup a refused live level change is about to replace:
+	// the same redundant output restarting, so its successor carries its
+	// restart count on, as the primary's does (see restartCarry).
+	if wantsBackup(prev.row) {
+		want = backupSpecOf(prev.row, compiled, upstream)
+		if prev.backup != nil && prev.backupSpec == want {
+			if e.liveBackup(prev, compiled) {
+				return "", nil, true
+			}
+			// Refused live: fall through and restart the backup with the level
+			// it was given, so the new one takes effect.
+			refused = prev.backup
+		}
+	} else if prev.backup == nil && prev.backupSub == "" && prev.backupPort == 0 &&
+		prev.backupSpec == "" && prev.backupErr == reason {
+		// Already exactly right, which is the common case on every reconcile of
+		// every destination without redundancy. Returning here is what keeps
+		// this from republishing an identical destination each pass.
+		return "", nil, true
+	}
+	return want, refused, false
+}
+
 func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.Result, upstream string) {
 	if prev == nil || prev.row == nil {
 		return
@@ -1606,31 +1639,8 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if !wantsBackup(prev.row) && prev.row.BackupIngestWanted && prev.row.BackupURL == "" {
 		reason = backupPending
 	}
-	// want is computed ONLY on the branch that reads it. backupSpecOf renders a
-	// whole destination argv and takes a SHA-256 of it, and it used to run above
-	// this switch -- so every destination without redundancy, on every reconcile,
-	// paid for a hash of a command line that was then discarded by the early
-	// return below. That is the common case, not an edge one.
-	var want string
-	// refused is the backup a refused live level change is about to replace:
-	// the same redundant output restarting, so its successor carries its
-	// restart count on, as the primary's does (see restartCarry).
-	var refused *supervisor.Process
-	if wantsBackup(prev.row) {
-		want = backupSpecOf(prev.row, compiled, upstream)
-		if prev.backup != nil && prev.backupSpec == want {
-			if e.liveBackup(prev, compiled) {
-				return
-			}
-			// Refused live: fall through and restart the backup with the level
-			// it was given, so the new one takes effect.
-			refused = prev.backup
-		}
-	} else if prev.backup == nil && prev.backupSub == "" && prev.backupPort == 0 &&
-		prev.backupSpec == "" && prev.backupErr == reason {
-		// Already exactly right, which is the common case on every reconcile of
-		// every destination without redundancy. Returning here is what keeps
-		// this from republishing an identical destination each pass.
+	want, refused, done := e.backupPlan(prev, compiled, upstream, reason)
+	if done {
 		return
 	}
 

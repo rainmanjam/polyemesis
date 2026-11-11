@@ -336,25 +336,33 @@ func (e *Engine) multitrackClient() *multitrack.Client {
 //
 // A zero return means "not known", which negotiateDestination declines to ask
 // on. That is the honest answer before the ingest has been probed.
+// renditionOverride replaces each of w, h and fps that the destination's
+// rendition sets to a positive value, and leaves the rest as the source had them.
+func (e *Engine) renditionOverride(row *db.Destination, w, h, fps int) (int, int, int) {
+	if row.RenditionID == nil {
+		return w, h, fps
+	}
+	if r, err := e.store.GetRendition(*row.RenditionID); err == nil && r != nil {
+		if r.Width > 0 {
+			w = r.Width
+		}
+		if r.Height > 0 {
+			h = r.Height
+		}
+		if r.FPS > 0 {
+			fps = r.FPS
+		}
+	}
+	return w, h, fps
+}
+
 func (e *Engine) multitrackCanvas(row *db.Destination) multitrack.Canvas {
 	var w, h, fps int
 	if v := e.SourceInfo().Video; v != nil {
 		w, h = v.Width, v.Height
 		fps = int(v.FrameRate + 0.5)
 	}
-	if row.RenditionID != nil {
-		if r, err := e.store.GetRendition(*row.RenditionID); err == nil && r != nil {
-			if r.Width > 0 {
-				w = r.Width
-			}
-			if r.Height > 0 {
-				h = r.Height
-			}
-			if r.FPS > 0 {
-				fps = r.FPS
-			}
-		}
-	}
+	w, h, fps = e.renditionOverride(row, w, h, fps)
 	if w <= 0 || h <= 0 {
 		return multitrack.Canvas{}
 	}
